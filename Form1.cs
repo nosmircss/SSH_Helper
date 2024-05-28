@@ -10,8 +10,17 @@ using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace SSH_Helper
 {
+    
     public partial class Form1 : Form
     {
+        public class ConfigObject
+        {
+            public Dictionary<string, string> Presets { get; set; }
+            public string Username { get; set; }
+            public int Delay { get; set; }
+            public int Timeout { get; set; }
+        }
+
         private int rightClickedColumnIndex = -1; // Field to store the index of the right-clicked column
         private int rightClickedRowIndex = -1; // Field to store the index of the right-clicked row
         private string loadedFilePath;
@@ -37,11 +46,9 @@ namespace SSH_Helper
             dgv_variables.EditMode = DataGridViewEditMode.EditProgrammatically;
 
             //presets
-            this.lstPreset.SelectedIndexChanged += new System.EventHandler(this.lstPreset_SelectedIndexChanged);
             lstPreset.MouseDown += lstPreset_MouseDown;
-
-            lstPreset.AllowDrop = true; // Enable dropping for the ListBox
             txtDelay.KeyPress += txtDelay_KeyPress;
+
             txtTimeout.KeyPress += txtTimeout_KeyPress;
         }
 
@@ -91,7 +98,7 @@ namespace SSH_Helper
             {
                 // Load the current configuration from the file
                 var json = File.ReadAllText(configFilePath);
-                var config = JsonConvert.DeserializeObject<RootObject>(json) ?? new RootObject();
+                var config = JsonConvert.DeserializeObject<ConfigObject>(json) ?? new ConfigObject();
 
                 // Update the username in the configuration
                 config.Username = txtUsername.Text;
@@ -114,7 +121,7 @@ namespace SSH_Helper
             try
             {
                 string json = File.ReadAllText(configFilePath);
-                var rootObject = JsonConvert.DeserializeObject<RootObject>(json);
+                var rootObject = JsonConvert.DeserializeObject<ConfigObject>(json);
 
                 // Set the loaded presets
                 presets = rootObject.Presets;
@@ -148,15 +155,6 @@ namespace SSH_Helper
             }
         }
 
-        public class RootObject
-        {
-            public Dictionary<string, string> Presets { get; set; }
-            public string Username { get; set; }
-            public int Delay { get; set; }
-            public int Timeout { get; set; }
-
-
-        }
 
         private void lstPreset_SelectedIndexChanged(object sender, EventArgs e)
         {
@@ -413,7 +411,7 @@ namespace SSH_Helper
 
                 dgv_variables.AllowUserToAddRows = true;  // Re-enable the ability to add rows
 
-                
+
             }
         }
 
@@ -801,16 +799,15 @@ namespace SSH_Helper
         }
 
         //executeAll
-        private void btnExecuteAll_Click(object sender, EventArgs e)
+        private void ExecuteCommands(IEnumerable<DataGridViewRow> rows)
         {
-            bool isFirst = true;
             string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-
             txtOutput.Font = new Font("Consolas", 10);
             txtOutput.Multiline = true;
             txtOutput.Clear(); // Clear previous output
 
-            foreach (DataGridViewRow row in dgv_variables.Rows)
+            bool isFirst = true;
+            foreach (DataGridViewRow row in rows)
             {
                 if (row.IsNewRow) continue; // Skip new row placeholder
 
@@ -820,273 +817,130 @@ namespace SSH_Helper
                     continue; // Skip this row in execution phase too
                 }
 
-                foreach (string commandTemplate in commands)
+                ExecuteRowCommands(row, commands, ref isFirst);
+            }
+        }
+
+        private void ExecuteRowCommands(DataGridViewRow row, string[] commands, ref bool isFirst)
+        {
+            string ipAddressWithPort = row.Cells["Host_IP"].Value?.ToString();
+            string[] parts = ipAddressWithPort.Split(':');
+            string ipAddress = parts[0];
+            int port = parts.Length > 1 && int.TryParse(parts[1], out int customPort) ? customPort : 22;
+
+            string username = dgv_variables.Columns.Contains("username") && row.Cells["username"].Value != null && !string.IsNullOrWhiteSpace(row.Cells["username"].Value.ToString())
+                ? row.Cells["username"].Value.ToString() : txtUsername.Text;
+
+            string password = dgv_variables.Columns.Contains("password") && row.Cells["password"].Value != null && !string.IsNullOrWhiteSpace(row.Cells["password"].Value.ToString())
+                ? row.Cells["password"].Value.ToString() : txtPassword.Text;
+
+            try
+            {
+                using (var client = new SshClient(ipAddress, port, username, password))
                 {
-                    if (!string.IsNullOrWhiteSpace(commandTemplate))
+                    client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(int.Parse(txtTimeout.Text));
+                    client.Connect();
+                    using (var shellStream = client.CreateShellStream("xterm", 80, 24, 800, 600, 1024))
                     {
-                        foreach (Match match in Regex.Matches(commandTemplate, @"\$\{([^}]+)\}"))
-                        {
-                            string variableName = match.Groups[1].Value;
-                            if (!dgv_variables.Columns.Contains(variableName))
-                            {
-                                MessageBox.Show($"Column {variableName} does not exist.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                                return; // Stop execution if a variable is missing
-                            }
-                            else if (string.IsNullOrEmpty(row.Cells[variableName].Value as string))
-                            {
-                                int humanReadableRowIndex = row.Index + 1; // Convert zero-based index to a one-based index for display
-                                MessageBox.Show($"Value of ${variableName} is empty in row {humanReadableRowIndex}.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                                return; // Stop execution if a variable value is missing
-                            }
-                        }
+                        HandleCommandExecution(shellStream, commands, row, ref isFirst, ipAddress, port);
                     }
+                    client.Disconnect();
                 }
+            }
+            catch (SshAuthenticationException authEx)
+            {
+                HandleException(true, authEx, ipAddress, port);
+            }
+            catch (Exception ex)
+            {
+                HandleException(false, ex, ipAddress, port);
+            }
+        }
 
-                string[] parts = ipAddressWithPort.Split(':');
-                string ipAddress = parts[0];
-                int port = parts.Length > 1 && int.TryParse(parts[1], out int customPort) ? customPort : 22;
+        private void HandleCommandExecution(ShellStream shellStream, string[] commands, DataGridViewRow row, ref bool isFirst, string ipAddress, int port)
+        {
+            shellStream.WriteLine(""); // Send a carriage return to trigger the prompt
+            shellStream.Flush();
+            Thread.Sleep(int.Parse(txtDelay.Text));
+            var response = shellStream.Read();
+            response = Regex.Replace(response, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
+            response = response.Replace("\n", "\r\n");  // Make sure newlines are compatible with Windows
+            string[] lines = response.Split(new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+            string prompt = lines.LastOrDefault()?.Trim() ?? "";
 
-                string username = txtUsername.Text;
-                string password = txtPassword.Text;
+            string header = $"{new string('#', 20)} CONNECTED TO!!! {ipAddress}:{port} {prompt} {new string('#', 20)}";
+            string foo = new string('#', header.Length);
 
-                // Check if the 'username' and 'password' columns exist and have values
-                if (dgv_variables.Columns.Contains("username") && row.Cells["username"].Value != null && !string.IsNullOrWhiteSpace(row.Cells["username"].Value.ToString()))
+            if (!isFirst)
+            {
+                txtOutput.AppendText(Environment.NewLine);
+            }
+            isFirst = false;
+
+            txtOutput.AppendText(foo + Environment.NewLine + header + Environment.NewLine + foo + Environment.NewLine + prompt);
+
+            foreach (string commandTemplate in commands)
+            {
+                if (!string.IsNullOrWhiteSpace(commandTemplate))
                 {
-                    username = row.Cells["username"].Value.ToString();
-                }
-                if (dgv_variables.Columns.Contains("password") && row.Cells["password"].Value != null && !string.IsNullOrWhiteSpace(row.Cells["password"].Value.ToString()))
-                {
-                    password = row.Cells["password"].Value.ToString();
-                }
-
-
-                try
-                {
-                    using (var client = new SshClient(ipAddress, port, username, password))
+                    string commandToExecute = commandTemplate;
+                    foreach (Match match in Regex.Matches(commandTemplate, @"\$\{([^}]+)\}"))
                     {
-                        // Set the timeout for connection attempts (e.g., 10 seconds)
-                        client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(int.Parse(txtTimeout.Text));
-
-                        client.Connect();
-
-
-                        using (var shellStream = client.CreateShellStream("xterm", 80, 24, 800, 600, 1024))
-                        {
-                            // Send a carriage return to trigger the prompt
-                            shellStream.WriteLine("");
-                            shellStream.Flush();
-
-                            // Read the response and extract the prompt
-                            Thread.Sleep(int.Parse(txtDelay.Text));
-                            var response = shellStream.Read();
-                            response = Regex.Replace(response, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
-                            response = response.Replace("\n", "\r\n");  // Make sure newlines are compatible with Windows
-
-                            // Find the last line of the response, which should contain the prompt
-                            string[] lines = response.Split(new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-                            string prompt = lines.LastOrDefault()?.Trim() ?? "";
-
-                            //unless isFirst append a new line
-                            if (!isFirst)
-                            {
-                                txtOutput.AppendText(Environment.NewLine);
-
-                            }
-                            isFirst = false;
-                            string header = $"{new string('#', 20)} CONNECTED TO!!! {ipAddress}:{port} {prompt} {new string('#', 20)}";
-                            string foo = new string('#', header.Length);
-
-
-                            txtOutput.AppendText(foo + Environment.NewLine + header + Environment.NewLine + foo + Environment.NewLine + prompt);
-
-
-                            // If validation is successful, execute all commands
-                            foreach (string commandTemplate in commands)
-                            {
-                                string commandToExecute = commandTemplate; // Prepare the command by replacing variables
-                                foreach (Match match in Regex.Matches(commandTemplate, @"\$\{([^}]+)\}"))
-                                {
-                                    string variableName = match.Groups[1].Value;
-                                    string columnValue = row.Cells[variableName].Value?.ToString() ?? "";
-                                    commandToExecute = commandToExecute.Replace($"${{{variableName}}}", columnValue);
-                                }
-
-                                if (string.IsNullOrWhiteSpace(commandToExecute))
-                                {
-                                    continue;
-                                }
-
-                                shellStream.WriteLine(commandToExecute);
-                                shellStream.Flush();
-
-
-                                Thread.Sleep(int.Parse(txtDelay.Text));
-                                var output = shellStream.Read();
-                                output = Regex.Replace(output, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
-                                output = output.Replace("\n", "\r\n");  // Make sure newlines are compatible with Windows
-
-                                txtOutput.AppendText($"{output}");
-                            }
-                        }
-
-                        client.Disconnect();
+                        string variableName = match.Groups[1].Value;
+                        string columnValue = row.Cells[variableName].Value?.ToString() ?? "";
+                        commandToExecute = commandToExecute.Replace($"${{{variableName}}}", columnValue);
                     }
-                }
-                catch (SshAuthenticationException authEx)
-                {
-                    // Handle authentication failure
-                    string errorMessage = $"{new string('#', 20)} ERROR AUTHENTICATING TO!!! {ipAddress}:{port} {new string('#', 20)}";
-                    string preheader = new string('#', errorMessage.Length);
-                    txtOutput.AppendText(Environment.NewLine + preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine);
-                    continue; // Next firewall
-                }
-                catch (Exception ex)
-                {
-                    // Display an error message to txtoutput 
-                    string header = $"{new string('#', 20)} ERROR CONNECTING TO!!! {ipAddress}:{port} {new string('#', 20)}";
-                    string preheader = new string('#', header.Length);
-                    txtOutput.AppendText(Environment.NewLine + preheader + Environment.NewLine + header + Environment.NewLine + preheader + Environment.NewLine);
-                    continue; // Next firewall
+
+                    if (string.IsNullOrWhiteSpace(commandToExecute))
+                    {
+                        continue;
+                    }
+
+                    shellStream.WriteLine(commandToExecute);
+                    shellStream.Flush();
+
+                    Thread.Sleep(int.Parse(txtDelay.Text));
+                    var output = shellStream.Read();
+                    output = Regex.Replace(output, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
+                    output = output.Replace("\n", "\r\n");  // Make sure newlines are compatible with Windows
+
+                    txtOutput.AppendText($"{output}");
                 }
             }
         }
 
+        private void HandleException(bool AuthException, Exception ex, string ipAddress, int port)
+        {
+            // only add new line if there is not already text in txtOutput
+            if (!string.IsNullOrEmpty(txtOutput.Text))
+            {
+                txtOutput.AppendText(Environment.NewLine);
+            }
+            if (AuthException) {
+
+                string errorMessage = $"{new string('#', 20)} ERROR AUTHENTICATING TO!!! {ipAddress}:{port} {new string('#', 20)}";
+                string preheader = new string('#', errorMessage.Length);
+                txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine);
+            }
+            else
+            {
+                string errorMessage = $"{new string('#', 20)} ERROR CONNECTING TO!!! {ipAddress}:{port} {new string('#', 20)}";
+                string preheader = new string('#', errorMessage.Length);
+                txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine);
+            }
+        }
+
+        private void btnExecuteAll_Click(object sender, EventArgs e)
+        {
+            ExecuteCommands(dgv_variables.Rows.Cast<DataGridViewRow>());
+        }
 
         private void btnExecuteSelected_Click(object sender, EventArgs e)
         {
-            if (dgv_variables.CurrentCell != null) // Check if there is an active cell
+            if (dgv_variables.CurrentCell != null)
             {
-                txtOutput.Clear(); // Clear the output textbox  
-                DataGridViewRow row = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
-                if (!row.IsNewRow) // Check it's not the new row placeholder
-                {
-                    string ipAddressWithPort = row.Cells["Host_IP"].Value?.ToString();
-
-                    if (string.IsNullOrEmpty(ipAddressWithPort) || !IsValidIPAddress(ipAddressWithPort))
-                    {
-                        MessageBox.Show($"Invalid IP address or port found: {ipAddressWithPort}", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
-                    }
-
-                    // Check for a username and password override in the DataGridView
-                    string username = txtUsername.Text; // Default to global username
-                    string password = txtPassword.Text; // Default to global password
-
-                    // Check if the 'username' and 'password' columns exist and have values
-                    if (dgv_variables.Columns.Contains("username") && row.Cells["username"].Value != null && !string.IsNullOrWhiteSpace(row.Cells["username"].Value.ToString()))
-                    {
-                        username = row.Cells["username"].Value.ToString();
-                    }
-                    if (dgv_variables.Columns.Contains("password") && row.Cells["password"].Value != null && !string.IsNullOrWhiteSpace(row.Cells["password"].Value.ToString()))
-                    {
-                        password = row.Cells["password"].Value.ToString();
-                    }
-
-                    string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-
-                    string[] parts = ipAddressWithPort.Split(':');
-                    string ipAddress = parts[0];
-                    int port = parts.Length > 1 && int.TryParse(parts[1], out int customPort) ? customPort : 22;
-
-                    // First, validate all commands
-                    foreach (string commandTemplate in commands)
-                    {
-                        if (!string.IsNullOrWhiteSpace(commandTemplate))
-                        {
-                            foreach (Match match in Regex.Matches(commandTemplate, @"\$\{([^}]+)\}"))
-                            {
-                                string variableName = match.Groups[1].Value;
-                                if (!dgv_variables.Columns.Contains(variableName))
-                                {
-                                    MessageBox.Show($"Column {variableName} does not exist.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                                    return; // Stop execution if a variable is missing
-                                }
-                                else if (string.IsNullOrEmpty(row.Cells[variableName].Value as string))
-                                {
-                                    MessageBox.Show($"Value of ${variableName} is empty.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                                    return; // Stop execution if a variable is missing
-                                }
-                            }
-                        }
-                    }
-
-                    try
-                    {
-                        using (var client = new SshClient(ipAddress, port, username, password))
-                        {
-                            // Set the timeout for connection attempts (e.g., 10 seconds)
-                            client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(int.Parse(txtTimeout.Text));
-
-                            client.Connect();
-
-
-                            using (var shellStream = client.CreateShellStream("xterm", 80, 24, 800, 600, 1024))
-                            {
-                                // Send a carriage return to trigger the prompt
-                                shellStream.WriteLine("");
-                                shellStream.Flush();
-
-                                // Read the response and extract the prompt
-                                Thread.Sleep(int.Parse(txtDelay.Text));
-                                var response = shellStream.Read();
-                                response = Regex.Replace(response, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
-                                response = response.Replace("\n", "\r\n");  // Make sure newlines are compatible with Windows
-
-                                // Find the last line of the response, which should contain the prompt
-                                string[] lines = response.Split(new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-                                string prompt = lines.LastOrDefault()?.Trim() ?? "";
-
-
-                                string header = $"{new string('#', 20)} CONNECTED TO!!! {ipAddress}:{port} {prompt} {new string('#', 20)}";
-                                txtOutput.AppendText(header + Environment.NewLine + prompt);
-
-
-                                // If validation is successful, execute all commands
-                                foreach (string commandTemplate in commands)
-                                {
-                                    string commandToExecute = commandTemplate; // Prepare the command by replacing variables
-                                    foreach (Match match in Regex.Matches(commandTemplate, @"\$\{([^}]+)\}"))
-                                    {
-                                        string variableName = match.Groups[1].Value;
-                                        string columnValue = row.Cells[variableName].Value?.ToString() ?? "";
-                                        commandToExecute = commandToExecute.Replace($"${{{variableName}}}", columnValue);
-                                    }
-
-                                    // execute the command if command is not empty
-                                    if (string.IsNullOrWhiteSpace(commandToExecute))
-                                    {
-                                        continue;
-                                    }
-                                    shellStream.WriteLine(commandToExecute);
-                                    shellStream.Flush();
-
-                                    Thread.Sleep(int.Parse(txtDelay.Text));
-                                    var output = shellStream.Read();
-                                    output = Regex.Replace(output, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
-                                    output = output.Replace("\n", "\r\n");  // Make sure newlines are compatible with Windows
-
-                                    txtOutput.AppendText($"{output}");
-                                }
-                            }
-
-                            client.Disconnect();
-                        }
-                    }
-                    catch (SshAuthenticationException authEx)
-                    {
-                        // Handle authentication failure
-                        string errorMessage = $"{new string('#', 20)} ERROR AUTHENTICATING TO!!! {ipAddress}:{port} {new string('#', 20)}";
-                        txtOutput.AppendText(Environment.NewLine + errorMessage + Environment.NewLine);
-                        return;
-                    }
-                    catch (Exception ex)
-                    {
-                        // Display an error message to txtoutput 
-                        string header = $"{new string('#', 20)} ERROR CONNECTING TO!!! {ipAddress}:{port} {new string('#', 20)}";
-                        txtOutput.AppendText(Environment.NewLine + header + Environment.NewLine);
-                        return;
-                    }
-                }
+                DataGridViewRow selectedRow = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
+                ExecuteCommands(new[] { selectedRow });
             }
             else
             {
@@ -1291,5 +1145,6 @@ namespace SSH_Helper
                 e.Handled = true;
             }
         }
+
     }
 }

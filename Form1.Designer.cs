@@ -63,6 +63,7 @@
             label5 = new Label();
             txtTimeout = new TextBox();
             label7 = new Label();
+            lstOutput = new ListBox();
             ((System.ComponentModel.ISupportInitialize)dgv_variables).BeginInit();
             contextMenuStrip1.SuspendLayout();
             contextPresetLst.SuspendLayout();
@@ -161,19 +162,19 @@
             // txtOutput
             // 
             txtOutput.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            txtOutput.Location = new Point(18, 312);
+            txtOutput.Location = new Point(225, 312);
             txtOutput.Margin = new Padding(3, 4, 3, 4);
             txtOutput.MaxLength = 1000000;
             txtOutput.Multiline = true;
             txtOutput.Name = "txtOutput";
             txtOutput.ScrollBars = ScrollBars.Both;
-            txtOutput.Size = new Size(1566, 415);
+            txtOutput.Size = new Size(1359, 404);
             txtOutput.TabIndex = 4;
             // 
             // label1
             // 
             label1.AutoSize = true;
-            label1.Location = new Point(18, 288);
+            label1.Location = new Point(225, 288);
             label1.Name = "label1";
             label1.Size = new Size(55, 20);
             label1.TabIndex = 5;
@@ -211,12 +212,14 @@
             // lstPreset
             // 
             lstPreset.FormattingEnabled = true;
+            lstPreset.IntegralHeight = false;
             lstPreset.Location = new Point(746, 57);
             lstPreset.Margin = new Padding(3, 4, 3, 4);
             lstPreset.Name = "lstPreset";
             lstPreset.Size = new Size(306, 224);
             lstPreset.Sorted = true;
             lstPreset.TabIndex = 24;
+            lstPreset.SelectedIndexChanged += lstPreset_SelectedIndexChanged;
             // 
             // label4
             // 
@@ -373,11 +376,22 @@
             label7.TabIndex = 33;
             label7.Text = "Timeout:";
             // 
+            // lstOutput
+            // 
+            lstOutput.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
+            lstOutput.FormattingEnabled = true;
+            lstOutput.IntegralHeight = false;
+            lstOutput.Location = new Point(18, 312);
+            lstOutput.Name = "lstOutput";
+            lstOutput.Size = new Size(201, 405);
+            lstOutput.TabIndex = 34;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1598, 744);
+            ClientSize = new Size(1598, 736);
+            Controls.Add(lstOutput);
             Controls.Add(label7);
             Controls.Add(txtTimeout);
             Controls.Add(label5);
@@ -448,5 +462,6 @@
         private Label label5;
         private TextBox txtTimeout;
         private Label label7;
+        private ListBox lstOutput;
     }
 }
