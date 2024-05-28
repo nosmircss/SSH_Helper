@@ -95,6 +95,10 @@ namespace SSH_Helper
                 txtTimeout.Text = "10";
             }
             //if txtDelay is empty set to 250
+            if (string.IsNullOrEmpty(txtDelay.Text))
+            {
+                txtDelay.Text = "250";
+            }
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
