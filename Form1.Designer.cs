@@ -64,10 +64,17 @@
             txtTimeout = new TextBox();
             label7 = new Label();
             lstOutput = new ListBox();
+            contextHistoryLst = new ContextMenuStrip(components);
+            saveAsToolStripMenuItem = new ToolStripMenuItem();
+            deleteEntryToolStripMenuItem = new ToolStripMenuItem();
+            deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
+            label8 = new Label();
+            toolStripSeparator1 = new ToolStripSeparator();
             ((System.ComponentModel.ISupportInitialize)dgv_variables).BeginInit();
             contextMenuStrip1.SuspendLayout();
             contextPresetLst.SuspendLayout();
             contextPresetLstAdd.SuspendLayout();
+            contextHistoryLst.SuspendLayout();
             SuspendLayout();
             // 
             // openFileDialog1
@@ -162,19 +169,21 @@
             // txtOutput
             // 
             txtOutput.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            txtOutput.Location = new Point(225, 312);
+            txtOutput.BackColor = SystemColors.Window;
+            txtOutput.Location = new Point(489, 312);
             txtOutput.Margin = new Padding(3, 4, 3, 4);
             txtOutput.MaxLength = 1000000;
             txtOutput.Multiline = true;
             txtOutput.Name = "txtOutput";
+            txtOutput.ReadOnly = true;
             txtOutput.ScrollBars = ScrollBars.Both;
-            txtOutput.Size = new Size(1359, 404);
+            txtOutput.Size = new Size(1095, 404);
             txtOutput.TabIndex = 4;
             // 
             // label1
             // 
             label1.AutoSize = true;
-            label1.Location = new Point(225, 288);
+            label1.Location = new Point(489, 289);
             label1.Name = "label1";
             label1.Size = new Size(55, 20);
             label1.TabIndex = 5;
@@ -379,18 +388,63 @@
             // lstOutput
             // 
             lstOutput.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
+            lstOutput.ContextMenuStrip = contextHistoryLst;
             lstOutput.FormattingEnabled = true;
             lstOutput.IntegralHeight = false;
             lstOutput.Location = new Point(18, 312);
             lstOutput.Name = "lstOutput";
-            lstOutput.Size = new Size(201, 405);
+            lstOutput.Size = new Size(465, 405);
             lstOutput.TabIndex = 34;
+            lstOutput.SelectedIndexChanged += lstOutput_SelectedIndexChanged;
+            // 
+            // contextHistoryLst
+            // 
+            contextHistoryLst.ImageScalingSize = new Size(20, 20);
+            contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, toolStripSeparator1, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
+            contextHistoryLst.Name = "contextHistoryLst";
+            contextHistoryLst.Size = new Size(211, 110);
+            // 
+            // saveAsToolStripMenuItem
+            // 
+            saveAsToolStripMenuItem.Name = "saveAsToolStripMenuItem";
+            saveAsToolStripMenuItem.Size = new Size(210, 24);
+            saveAsToolStripMenuItem.Text = "Save As";
+            saveAsToolStripMenuItem.Click += saveAsToolStripMenuItem_Click;
+            // 
+            // deleteEntryToolStripMenuItem
+            // 
+            deleteEntryToolStripMenuItem.Name = "deleteEntryToolStripMenuItem";
+            deleteEntryToolStripMenuItem.Size = new Size(210, 24);
+            deleteEntryToolStripMenuItem.Text = "Delete Entry";
+            deleteEntryToolStripMenuItem.Click += deleteEntryToolStripMenuItem_Click;
+            // 
+            // deleteAllHistoryToolStripMenuItem
+            // 
+            deleteAllHistoryToolStripMenuItem.Name = "deleteAllHistoryToolStripMenuItem";
+            deleteAllHistoryToolStripMenuItem.Size = new Size(210, 24);
+            deleteAllHistoryToolStripMenuItem.Text = "Delete All History";
+            deleteAllHistoryToolStripMenuItem.Click += deleteAllHistoryToolStripMenuItem_Click;
+            // 
+            // label8
+            // 
+            label8.AutoSize = true;
+            label8.Location = new Point(18, 289);
+            label8.Name = "label8";
+            label8.Size = new Size(56, 20);
+            label8.TabIndex = 35;
+            label8.Text = "History";
+            // 
+            // toolStripSeparator1
+            // 
+            toolStripSeparator1.Name = "toolStripSeparator1";
+            toolStripSeparator1.Size = new Size(207, 6);
             // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1598, 736);
+            Controls.Add(label8);
             Controls.Add(lstOutput);
             Controls.Add(label7);
             Controls.Add(txtTimeout);
@@ -422,6 +476,7 @@
             contextMenuStrip1.ResumeLayout(false);
             contextPresetLst.ResumeLayout(false);
             contextPresetLstAdd.ResumeLayout(false);
+            contextHistoryLst.ResumeLayout(false);
             ResumeLayout(false);
             PerformLayout();
         }
@@ -463,5 +518,11 @@
         private TextBox txtTimeout;
         private Label label7;
         private ListBox lstOutput;
+        private Label label8;
+        private ContextMenuStrip contextHistoryLst;
+        private ToolStripMenuItem saveAsToolStripMenuItem;
+        private ToolStripMenuItem deleteEntryToolStripMenuItem;
+        private ToolStripMenuItem deleteAllHistoryToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparator1;
     }
 }

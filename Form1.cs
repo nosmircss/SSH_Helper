@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Configuration;
 using System.Data;
 using System.Net;
@@ -10,7 +11,7 @@ using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace SSH_Helper
 {
-    
+
     public partial class Form1 : Form
     {
         public class ConfigObject
@@ -25,6 +26,8 @@ namespace SSH_Helper
         private int rightClickedRowIndex = -1; // Field to store the index of the right-clicked row
         private string loadedFilePath;
         private Dictionary<string, string> presets = new Dictionary<string, string>();
+        private BindingList<KeyValuePair<string, string>> outputHistoryList = new BindingList<KeyValuePair<string, string>>();
+
         private string configFilePath;
 
         public Form1()
@@ -32,6 +35,10 @@ namespace SSH_Helper
             InitializeComponent();
             InitializeConfiguration();
             InitializeDataGridView();
+
+            lstOutput.DataSource = outputHistoryList;
+            lstOutput.DisplayMember = "Key";
+
             this.FormClosing += new FormClosingEventHandler(Form1_FormClosing);
             this.Click += Form_Click; // Handle clicks on the form area
             dgv_variables.ContextMenuStrip = contextMenuStrip1;
@@ -798,7 +805,7 @@ namespace SSH_Helper
             }
         }
 
-        //executeAll
+        //execute
         private void ExecuteCommands(IEnumerable<DataGridViewRow> rows)
         {
             string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
@@ -819,6 +826,15 @@ namespace SSH_Helper
 
                 ExecuteRowCommands(row, commands, ref isFirst);
             }
+
+            //store history
+            string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
+            var entry = new KeyValuePair<string, string>(key, txtOutput.Text);
+            outputHistoryList.Insert(0, entry);  // Insert at the start of the list
+            lstOutput.SelectedIndex = 0;  // Select the newest entry automatically
+
+            // Save the variables after each execution
+            Savevariables();
         }
 
         private void ExecuteRowCommands(DataGridViewRow row, string[] commands, ref bool isFirst)
@@ -855,6 +871,7 @@ namespace SSH_Helper
             {
                 HandleException(false, ex, ipAddress, port);
             }
+
         }
 
         private void HandleCommandExecution(ShellStream shellStream, string[] commands, DataGridViewRow row, ref bool isFirst, string ipAddress, int port)
@@ -881,7 +898,7 @@ namespace SSH_Helper
 
             foreach (string commandTemplate in commands)
             {
-                if (!string.IsNullOrWhiteSpace(commandTemplate))
+                if (!string.IsNullOrWhiteSpace(commandTemplate) && !commandTemplate.StartsWith("#"))
                 {
                     string commandToExecute = commandTemplate;
                     foreach (Match match in Regex.Matches(commandTemplate, @"\$\{([^}]+)\}"))
@@ -897,16 +914,22 @@ namespace SSH_Helper
                     }
 
                     shellStream.WriteLine(commandToExecute);
-                    shellStream.Flush();
-
                     Thread.Sleep(int.Parse(txtDelay.Text));
                     var output = shellStream.Read();
-                    output = Regex.Replace(output, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
-                    output = output.Replace("\n", "\r\n");  // Make sure newlines are compatible with Windows
+
+                    //if output starts with \r\n , remove it
+                    if (output.StartsWith(commandToExecute + "\r\r\n"))
+                    {
+                        output = Regex.Replace(output, commandToExecute + "\r\r\n", commandToExecute + "\r\n");
+                    }
+                    output = Regex.Replace(output, @"[^\u0020-\u007E\r\n\t]", "");
+                    //output = Regex.Replace(output, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
 
                     txtOutput.AppendText($"{output}");
+
                 }
             }
+
         }
 
         private void HandleException(bool AuthException, Exception ex, string ipAddress, int port)
@@ -916,17 +939,18 @@ namespace SSH_Helper
             {
                 txtOutput.AppendText(Environment.NewLine);
             }
-            if (AuthException) {
+            if (AuthException)
+            {
 
                 string errorMessage = $"{new string('#', 20)} ERROR AUTHENTICATING TO!!! {ipAddress}:{port} {new string('#', 20)}";
                 string preheader = new string('#', errorMessage.Length);
-                txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine);
+                txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine + Environment.NewLine);
             }
             else
             {
                 string errorMessage = $"{new string('#', 20)} ERROR CONNECTING TO!!! {ipAddress}:{port} {new string('#', 20)}";
                 string preheader = new string('#', errorMessage.Length);
-                txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine);
+                txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine + Environment.NewLine);
             }
         }
 
@@ -989,7 +1013,9 @@ namespace SSH_Helper
         {
             var defaultPresets = new Dictionary<string, string>
     {
+        {"Custom", "" },
         {"Get external-address-resource list", "dia sys external-address-resource list"}
+
     };
 
             // Set a default username
@@ -999,7 +1025,7 @@ namespace SSH_Helper
             var settings = new
             {
                 Timeout = 10,
-                Delay = 200,
+                Delay = 300,
                 Username = defaultUsername,
                 Presets = defaultPresets
             };
@@ -1146,5 +1172,99 @@ namespace SSH_Helper
             }
         }
 
+        private void lstOutput_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (lstOutput.SelectedItem != null)
+            {
+                var selectedEntry = (KeyValuePair<string, string>)lstOutput.SelectedItem;
+                txtOutput.Text = selectedEntry.Value;  // Load the associated output into txtOutput
+            }
+        }
+
+        private void saveAsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+
+            if (lstOutput.SelectedItem == null)
+            {
+                MessageBox.Show("Please select an item from the list to save.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            using (SaveFileDialog saveFileDialog = new SaveFileDialog())
+            {
+                // Retrieve the selected item's value
+                var selectedItem = (KeyValuePair<string, string>)lstOutput.SelectedItem;
+                string outputText = selectedItem.Value;
+
+                saveFileDialog.Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*";
+                saveFileDialog.DefaultExt = "txt";
+                saveFileDialog.AddExtension = true;
+                saveFileDialog.Title = "Save As";
+                var filename = selectedItem.Key;
+                filename = filename.Replace(":", "_");
+                saveFileDialog.FileName = filename;
+
+
+                if (saveFileDialog.ShowDialog() == DialogResult.OK)
+                {
+                    // Write the output to the selected file path
+                    try
+                    {
+                        File.WriteAllText(saveFileDialog.FileName, outputText);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Failed to save the file: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+
+        }
+
+        private void deleteEntryToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            //delete selected entry in lstOutput
+            if (lstOutput.SelectedItem == null)
+            {
+                MessageBox.Show("Please select an item from the list to delete.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            //get the key for the lstOutput.SelectedItem
+            var selectedEntry = (KeyValuePair<string, string>)lstOutput.SelectedItem;
+
+            //get confirmation they want to delete
+            DialogResult dialogResult = MessageBox.Show("Are you sure you want to delete " + selectedEntry.Key + "?", "Delete Entry", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (dialogResult == DialogResult.No)
+            {
+                return;
+            }
+            // Remove the selected entry from the list
+            outputHistoryList.Remove((KeyValuePair<string, string>)lstOutput.SelectedItem);
+            //select next history if available otherwise clear txtOutput
+            if (lstOutput.Items.Count > 0)
+            {
+                lstOutput.SelectedIndex = 0;
+            }
+            else
+            {
+                txtOutput.Clear();
+            }
+
+        }
+
+        private void deleteAllHistoryToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            //get confirmation they want to delete
+            DialogResult dialogResult = MessageBox.Show("Are you sure you want to delete all history?", "Delete History", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (dialogResult == DialogResult.No)
+            {
+                return;
+            }
+            //clear all entries in lstOutput and outputHistoryList
+            outputHistoryList.Clear();
+            txtOutput.Clear();
+
+        }
     }
 }
