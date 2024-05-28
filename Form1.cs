@@ -16,8 +16,8 @@ namespace SSH_Helper
     {
         public class ConfigObject
         {
-            public Dictionary<string, string> Presets { get; set; }
-            public string Username { get; set; }
+            public Dictionary<string, string>? Presets { get; set; }
+            public string? Username { get; set; }
             public int Delay { get; set; }
             public int Timeout { get; set; }
         }
@@ -92,6 +92,12 @@ namespace SSH_Helper
                 CreateDefaultConfigFile();
             }
             LoadConfiguration();
+            //if txtTimeout is empty set to 10
+            if (string.IsNullOrEmpty(txtTimeout.Text))
+            {
+                txtTimeout.Text = "10";
+            }
+            //if txtDelay is empty set to 250
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
@@ -1025,7 +1031,7 @@ namespace SSH_Helper
             var settings = new
             {
                 Timeout = 10,
-                Delay = 300,
+                Delay = 250,
                 Username = defaultUsername,
                 Presets = defaultPresets
             };

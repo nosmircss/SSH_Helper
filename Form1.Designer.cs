@@ -29,7 +29,6 @@
         private void InitializeComponent()
         {
             components = new System.ComponentModel.Container();
-            openFileDialog1 = new OpenFileDialog();
             btnOpenCSV = new Button();
             dgv_variables = new DataGridView();
             contextMenuStrip1 = new ContextMenuStrip(components);
@@ -66,20 +65,16 @@
             lstOutput = new ListBox();
             contextHistoryLst = new ContextMenuStrip(components);
             saveAsToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparator1 = new ToolStripSeparator();
             deleteEntryToolStripMenuItem = new ToolStripMenuItem();
             deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
             label8 = new Label();
-            toolStripSeparator1 = new ToolStripSeparator();
             ((System.ComponentModel.ISupportInitialize)dgv_variables).BeginInit();
             contextMenuStrip1.SuspendLayout();
             contextPresetLst.SuspendLayout();
             contextPresetLstAdd.SuspendLayout();
             contextHistoryLst.SuspendLayout();
             SuspendLayout();
-            // 
-            // openFileDialog1
-            // 
-            openFileDialog1.FileName = "openFileDialog1";
             // 
             // btnOpenCSV
             // 
@@ -402,26 +397,31 @@
             contextHistoryLst.ImageScalingSize = new Size(20, 20);
             contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, toolStripSeparator1, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
             contextHistoryLst.Name = "contextHistoryLst";
-            contextHistoryLst.Size = new Size(211, 110);
+            contextHistoryLst.Size = new Size(196, 82);
             // 
             // saveAsToolStripMenuItem
             // 
             saveAsToolStripMenuItem.Name = "saveAsToolStripMenuItem";
-            saveAsToolStripMenuItem.Size = new Size(210, 24);
+            saveAsToolStripMenuItem.Size = new Size(195, 24);
             saveAsToolStripMenuItem.Text = "Save As";
             saveAsToolStripMenuItem.Click += saveAsToolStripMenuItem_Click;
+            // 
+            // toolStripSeparator1
+            // 
+            toolStripSeparator1.Name = "toolStripSeparator1";
+            toolStripSeparator1.Size = new Size(192, 6);
             // 
             // deleteEntryToolStripMenuItem
             // 
             deleteEntryToolStripMenuItem.Name = "deleteEntryToolStripMenuItem";
-            deleteEntryToolStripMenuItem.Size = new Size(210, 24);
+            deleteEntryToolStripMenuItem.Size = new Size(195, 24);
             deleteEntryToolStripMenuItem.Text = "Delete Entry";
             deleteEntryToolStripMenuItem.Click += deleteEntryToolStripMenuItem_Click;
             // 
             // deleteAllHistoryToolStripMenuItem
             // 
             deleteAllHistoryToolStripMenuItem.Name = "deleteAllHistoryToolStripMenuItem";
-            deleteAllHistoryToolStripMenuItem.Size = new Size(210, 24);
+            deleteAllHistoryToolStripMenuItem.Size = new Size(195, 24);
             deleteAllHistoryToolStripMenuItem.Text = "Delete All History";
             deleteAllHistoryToolStripMenuItem.Click += deleteAllHistoryToolStripMenuItem_Click;
             // 
@@ -433,11 +433,6 @@
             label8.Size = new Size(56, 20);
             label8.TabIndex = 35;
             label8.Text = "History";
-            // 
-            // toolStripSeparator1
-            // 
-            toolStripSeparator1.Name = "toolStripSeparator1";
-            toolStripSeparator1.Size = new Size(207, 6);
             // 
             // Form1
             // 
@@ -482,8 +477,6 @@
         }
 
         #endregion
-
-        private OpenFileDialog openFileDialog1;
         private Button btnOpenCSV;
         private DataGridView dgv_variables;
         private ContextMenuStrip contextMenuStrip1;
