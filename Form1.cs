@@ -3,6 +3,7 @@ using System.Data;
 using System.Text;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Renci.SshNet;
 using Renci.SshNet.Common;
 
@@ -24,6 +25,8 @@ namespace SSH_Helper
         private string loadedFilePath;
         private Dictionary<string, string> presets = new Dictionary<string, string>();
         private BindingList<KeyValuePair<string, string>> outputHistoryList = new BindingList<KeyValuePair<string, string>>();
+        private bool isRunning = false;
+        CancellationTokenSource cts = new CancellationTokenSource();
 
         private string configFilePath;
 
@@ -741,7 +744,6 @@ namespace SSH_Helper
             }
         }
 
-
         private void dgv_variables_RowPostPaint(object sender, DataGridViewRowPostPaintEventArgs e)
         {
             // Use the RowIndex plus 1 to display a 1-based row number like in Excel
@@ -810,17 +812,19 @@ namespace SSH_Helper
         }
 
         //execute
-        private void ExecuteCommands(IEnumerable<DataGridViewRow> rows)
+        private void ExecuteCommands(IEnumerable<DataGridViewRow> rows, CancellationToken token)
         {
             string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-            txtOutput.Font = new Font("Consolas", 10);
-            txtOutput.Multiline = true;
-            txtOutput.Clear(); // Clear previous output
+            this.Invoke(new Action(() => {
+                txtOutput.Clear();  // Clear previous output
+            }));
 
             bool isFirst = true;
             foreach (DataGridViewRow row in rows)
             {
-                if (row.IsNewRow) continue; // Skip new row placeholder
+                if (token.IsCancellationRequested)
+                    break;
+                if (row.IsNewRow) continue;
 
                 string ipAddressWithPort = row.Cells["Host_IP"].Value?.ToString();
                 if (string.IsNullOrEmpty(ipAddressWithPort) || !IsValidIPAddress(ipAddressWithPort))
@@ -834,11 +838,12 @@ namespace SSH_Helper
             //store history
             string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
             var entry = new KeyValuePair<string, string>(key, txtOutput.Text);
-            outputHistoryList.Insert(0, entry);  // Insert at the start of the list
-            lstOutput.SelectedIndex = 0;  // Select the newest entry automatically
+            this.Invoke(new Action(() => {
+                outputHistoryList.Insert(0, entry);  // Insert at the start of the list
+                lstOutput.SelectedIndex = 0;  // Select the newest entry automatically              
+                Savevariables(); // Save the variables after each execution
+            }));
 
-            // Save the variables after each execution
-            Savevariables();
         }
 
         private void ExecuteRowCommands(DataGridViewRow row, string[] commands, ref bool isFirst)
@@ -882,6 +887,7 @@ namespace SSH_Helper
         {
             shellStream.WriteLine(""); // Send a carriage return to trigger the prompt
             shellStream.Flush();
+            if (!isRunning) return;
             Thread.Sleep(int.Parse(txtDelay.Text));
             var response = shellStream.Read();
             response = Regex.Replace(response, @"[^\u0020-\u007E\r\n\t]", "");
@@ -895,14 +901,22 @@ namespace SSH_Helper
 
             if (!isFirst)
             {
-                txtOutput.AppendText(Environment.NewLine);
+                this.Invoke(new Action(() => {
+                    txtOutput.AppendText(Environment.NewLine);
+                }));
             }
             isFirst = false;
 
-            txtOutput.AppendText(foo + Environment.NewLine + header + Environment.NewLine + foo + Environment.NewLine + prompt);
+            if (isRunning)
+            {
+                this.Invoke(new Action(() => {
+                    txtOutput.AppendText(foo + Environment.NewLine + header + Environment.NewLine + foo + Environment.NewLine + prompt);
+                }));
+            }
 
             foreach (string commandTemplate in commands)
             {
+                if (!isRunning) break;
                 if (!string.IsNullOrWhiteSpace(commandTemplate) && !commandTemplate.StartsWith("#"))
                 {
                     string commandToExecute = commandTemplate;
@@ -913,10 +927,7 @@ namespace SSH_Helper
                         commandToExecute = commandToExecute.Replace($"${{{variableName}}}", columnValue);
                     }
 
-                    if (string.IsNullOrWhiteSpace(commandToExecute))
-                    {
-                        continue;
-                    }
+                    if (string.IsNullOrWhiteSpace(commandToExecute)) continue;
 
                     shellStream.WriteLine(commandToExecute);
                     shellStream.Flush();
@@ -931,8 +942,12 @@ namespace SSH_Helper
                     output = Regex.Replace(output, @"[^\u0020-\u007E\r\n\t]", "");
                     //output = Regex.Replace(output, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
 
-                    txtOutput.AppendText($"{output}");
-
+                    if (isRunning)
+                    {
+                        this.Invoke(new Action(() => {
+                            txtOutput.AppendText($"{output}");
+                        }));
+                    }
                 }
             }
 
@@ -940,42 +955,97 @@ namespace SSH_Helper
 
         private void HandleException(bool AuthException, Exception ex, string ipAddress, int port)
         {
+            if (isRunning == false)
+            {
+                return;
+            }
             // only add new line if there is not already text in txtOutput
             if (!string.IsNullOrEmpty(txtOutput.Text))
             {
-                txtOutput.AppendText(Environment.NewLine);
+                this.Invoke(new Action(() => {
+                    txtOutput.AppendText(Environment.NewLine);
+                }));
+                
             }
             if (AuthException)
             {
-
+                
                 string errorMessage = $"{new string('#', 20)} ERROR AUTHENTICATING TO!!! {ipAddress}:{port} {new string('#', 20)}";
                 string preheader = new string('#', errorMessage.Length);
-                txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine + Environment.NewLine);
+                this.Invoke(new Action(() => {
+                    txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine + Environment.NewLine);
+                }));
             }
             else
             {
                 string errorMessage = $"{new string('#', 20)} ERROR CONNECTING TO!!! {ipAddress}:{port} {new string('#', 20)}";
                 string preheader = new string('#', errorMessage.Length);
-                txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine + Environment.NewLine);
+                this.Invoke(new Action(() => {
+                    txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine + Environment.NewLine);
+                }));
             }
         }
 
         private void btnExecuteAll_Click(object sender, EventArgs e)
         {
-            ExecuteCommands(dgv_variables.Rows.Cast<DataGridViewRow>());
+            if (!isRunning)
+            {
+                // Set the wait cursor for the entire form and each control individually
+                this.Cursor = Cursors.WaitCursor;
+                foreach (Control ctrl in this.Controls)
+                {
+                    ctrl.Cursor = Cursors.WaitCursor; // Ensure wait cursor is set for each control
+                }
+
+                lstOutput.Enabled = false;
+                isRunning = true;
+                btnStopAll.Visible = true;
+
+                Task.Run(() =>
+                {
+                    ExecuteCommands(dgv_variables.Rows.Cast<DataGridViewRow>(), cts.Token);
+                })
+                .ContinueWith(task =>
+                {
+                    this.Invoke(new Action(() =>
+                    {
+                        // Reset the cursor for the entire form and each control when the task completes
+                        this.Cursor = Cursors.Default;
+                        foreach (Control ctrl in this.Controls)
+                        {
+                            ctrl.Cursor = Cursors.Default; // Reset cursor for each control
+                        }
+
+                        btnStopAll.Visible = false;
+                        isRunning = false;
+                        lstOutput.Enabled = true;
+                        if (task.Exception != null)
+                            MessageBox.Show("An error occurred: " + task.Exception.InnerException.Message);
+                    }));
+                });
+            }
         }
+
 
         private void btnExecuteSelected_Click(object sender, EventArgs e)
         {
+            Cursor.Current = Cursors.WaitCursor;
+            isRunning = true;
+            lstOutput.Enabled = false;
+
             if (dgv_variables.CurrentCell != null)
             {
                 DataGridViewRow selectedRow = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
-                ExecuteCommands(new[] { selectedRow });
+                ExecuteCommands(new[] { selectedRow }, cts.Token);
             }
             else
             {
                 MessageBox.Show("No cell selected.");
             }
+
+            lstOutput.Enabled = true;
+            isRunning = false;
+            Cursor.Current = Cursors.Default;
         }
 
         private bool IsValidIPAddress(string ipAddressWithPort)
@@ -1019,7 +1089,7 @@ namespace SSH_Helper
         {
             var defaultPresets = new Dictionary<string, string>
     {
-        {"Custom", "" },
+        {"Custom", "get system status" },
         {"Get external-address-resource list", "dia sys external-address-resource list"}
 
     };
@@ -1031,7 +1101,7 @@ namespace SSH_Helper
             var settings = new
             {
                 Timeout = 10,
-                Delay = 250,
+                Delay = 500,
                 Username = defaultUsername,
                 Presets = defaultPresets
             };
@@ -1270,6 +1340,21 @@ namespace SSH_Helper
             //clear all entries in lstOutput and outputHistoryList
             outputHistoryList.Clear();
             txtOutput.Clear();
+
+        }
+
+        private void btnStopAll_Click(object sender, EventArgs e)
+        {
+            isRunning = false;
+            cts.Cancel();
+            this.Invoke(new Action(() => {
+                Thread.Sleep(300);
+                btnStopAll.Visible = false;
+                txtOutput.AppendText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
+            }));
+            //reset cancel token
+            cts.Dispose();
+            cts = new CancellationTokenSource();
 
         }
     }
