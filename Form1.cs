@@ -46,13 +46,10 @@ namespace SSH_Helper
             dgv_variables.CellLeave += dgv_variables_CellLeave;
             AttachClickEventHandlers();
 
-            // Set edit mode to programmatically only
-            dgv_variables.EditMode = DataGridViewEditMode.EditProgrammatically;
-
             //presets
             lstPreset.MouseDown += lstPreset_MouseDown;
-            txtDelay.KeyPress += txtDelay_KeyPress;
 
+            txtDelay.KeyPress += txtDelay_KeyPress;
             txtTimeout.KeyPress += txtTimeout_KeyPress;
         }
 
@@ -887,7 +884,8 @@ namespace SSH_Helper
             shellStream.Flush();
             Thread.Sleep(int.Parse(txtDelay.Text));
             var response = shellStream.Read();
-            response = Regex.Replace(response, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
+            response = Regex.Replace(response, @"[^\u0020-\u007E\r\n\t]", "");
+            //response = Regex.Replace(response, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
             response = response.Replace("\n", "\r\n");  // Make sure newlines are compatible with Windows
             string[] lines = response.Split(new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
             string prompt = lines.LastOrDefault()?.Trim() ?? "";
@@ -921,6 +919,7 @@ namespace SSH_Helper
                     }
 
                     shellStream.WriteLine(commandToExecute);
+                    shellStream.Flush();
                     Thread.Sleep(int.Parse(txtDelay.Text));
                     var output = shellStream.Read();
 

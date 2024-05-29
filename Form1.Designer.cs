@@ -95,6 +95,7 @@
             dgv_variables.ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableAlwaysIncludeHeaderText;
             dgv_variables.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
             dgv_variables.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            dgv_variables.EditMode = DataGridViewEditMode.EditProgrammatically;
             dgv_variables.Location = new Point(18, 57);
             dgv_variables.Margin = new Padding(3, 4, 3, 4);
             dgv_variables.Name = "dgv_variables";
