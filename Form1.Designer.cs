@@ -53,6 +53,7 @@
             txtUsername = new TextBox();
             contextPresetLst = new ContextMenuStrip(components);
             addPresetToolStripMenuItem = new ToolStripMenuItem();
+            duplicatePresetToolStripMenuItem = new ToolStripMenuItem();
             renameToolStripMenuItem = new ToolStripMenuItem();
             deleteToolStripMenuItem = new ToolStripMenuItem();
             btnExecuteSelected = new Button();
@@ -65,6 +66,7 @@
             lstOutput = new ListBox();
             contextHistoryLst = new ContextMenuStrip(components);
             saveAsToolStripMenuItem = new ToolStripMenuItem();
+            saveAllToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator1 = new ToolStripSeparator();
             deleteEntryToolStripMenuItem = new ToolStripMenuItem();
             deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
@@ -164,6 +166,7 @@
             txtOutput.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             txtOutput.BackColor = SystemColors.Window;
             txtOutput.Font = new Font("Courier New", 9F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            txtOutput.HideSelection = false;
             txtOutput.Location = new Point(428, 234);
             txtOutput.MaxLength = 1000000;
             txtOutput.Multiline = true;
@@ -285,28 +288,35 @@
             // contextPresetLst
             // 
             contextPresetLst.ImageScalingSize = new Size(20, 20);
-            contextPresetLst.Items.AddRange(new ToolStripItem[] { addPresetToolStripMenuItem, renameToolStripMenuItem, deleteToolStripMenuItem });
+            contextPresetLst.Items.AddRange(new ToolStripItem[] { addPresetToolStripMenuItem, duplicatePresetToolStripMenuItem, renameToolStripMenuItem, deleteToolStripMenuItem });
             contextPresetLst.Name = "contextPresetLst";
-            contextPresetLst.Size = new Size(153, 70);
+            contextPresetLst.Size = new Size(160, 92);
             // 
             // addPresetToolStripMenuItem
             // 
             addPresetToolStripMenuItem.Name = "addPresetToolStripMenuItem";
-            addPresetToolStripMenuItem.Size = new Size(152, 22);
+            addPresetToolStripMenuItem.Size = new Size(159, 22);
             addPresetToolStripMenuItem.Text = "Add Preset";
             addPresetToolStripMenuItem.Click += addPresetToolStripMenuItem_Click;
+            // 
+            // duplicatePresetToolStripMenuItem
+            // 
+            duplicatePresetToolStripMenuItem.Name = "duplicatePresetToolStripMenuItem";
+            duplicatePresetToolStripMenuItem.Size = new Size(159, 22);
+            duplicatePresetToolStripMenuItem.Text = "Duplicate Preset";
+            duplicatePresetToolStripMenuItem.Click += duplicatePresetToolStripMenuItem_Click;
             // 
             // renameToolStripMenuItem
             // 
             renameToolStripMenuItem.Name = "renameToolStripMenuItem";
-            renameToolStripMenuItem.Size = new Size(152, 22);
+            renameToolStripMenuItem.Size = new Size(159, 22);
             renameToolStripMenuItem.Text = "Rename Preset";
             renameToolStripMenuItem.Click += renameToolStripMenuItem_Click;
             // 
             // deleteToolStripMenuItem
             // 
             deleteToolStripMenuItem.Name = "deleteToolStripMenuItem";
-            deleteToolStripMenuItem.Size = new Size(152, 22);
+            deleteToolStripMenuItem.Size = new Size(159, 22);
             deleteToolStripMenuItem.Text = "Delete Preset";
             deleteToolStripMenuItem.Click += deleteToolStripMenuItem_Click;
             // 
@@ -369,7 +379,7 @@
             label7.AutoSize = true;
             label7.Location = new Point(1182, 14);
             label7.Name = "label7";
-            label7.Size = new Size(54, 15);
+            label7.Size = new Size(55, 15);
             label7.TabIndex = 33;
             label7.Text = "Timeout:";
             // 
@@ -390,33 +400,41 @@
             // contextHistoryLst
             // 
             contextHistoryLst.ImageScalingSize = new Size(20, 20);
-            contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, toolStripSeparator1, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
+            contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, saveAllToolStripMenuItem, toolStripSeparator1, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
             contextHistoryLst.Name = "contextHistoryLst";
-            contextHistoryLst.Size = new Size(166, 76);
+            contextHistoryLst.Size = new Size(226, 120);
+            contextHistoryLst.Opening += contextHistoryLst_Opening;
             // 
             // saveAsToolStripMenuItem
             // 
             saveAsToolStripMenuItem.Name = "saveAsToolStripMenuItem";
-            saveAsToolStripMenuItem.Size = new Size(165, 22);
+            saveAsToolStripMenuItem.Size = new Size(225, 22);
             saveAsToolStripMenuItem.Text = "Save As";
             saveAsToolStripMenuItem.Click += saveAsToolStripMenuItem_Click;
+            // 
+            // saveAllToolStripMenuItem
+            // 
+            saveAllToolStripMenuItem.Name = "saveAllToolStripMenuItem";
+            saveAllToolStripMenuItem.Size = new Size(225, 22);
+            saveAllToolStripMenuItem.Text = "Save All History In Single File";
+            saveAllToolStripMenuItem.Click += saveAllToolStripMenuItem_Click;
             // 
             // toolStripSeparator1
             // 
             toolStripSeparator1.Name = "toolStripSeparator1";
-            toolStripSeparator1.Size = new Size(162, 6);
+            toolStripSeparator1.Size = new Size(222, 6);
             // 
             // deleteEntryToolStripMenuItem
             // 
             deleteEntryToolStripMenuItem.Name = "deleteEntryToolStripMenuItem";
-            deleteEntryToolStripMenuItem.Size = new Size(165, 22);
+            deleteEntryToolStripMenuItem.Size = new Size(225, 22);
             deleteEntryToolStripMenuItem.Text = "Delete Entry";
             deleteEntryToolStripMenuItem.Click += deleteEntryToolStripMenuItem_Click;
             // 
             // deleteAllHistoryToolStripMenuItem
             // 
             deleteAllHistoryToolStripMenuItem.Name = "deleteAllHistoryToolStripMenuItem";
-            deleteAllHistoryToolStripMenuItem.Size = new Size(165, 22);
+            deleteAllHistoryToolStripMenuItem.Size = new Size(225, 22);
             deleteAllHistoryToolStripMenuItem.Text = "Delete All History";
             deleteAllHistoryToolStripMenuItem.Click += deleteAllHistoryToolStripMenuItem_Click;
             // 
@@ -471,8 +489,7 @@
             Controls.Add(btnStopAll);
             Controls.Add(btnExecuteAll);
             Name = "Form1";
-            Text = "Salihu_Helper";
-            WindowState = FormWindowState.Maximized;
+            Text = "SSH_Helper";
             ((System.ComponentModel.ISupportInitialize)dgv_variables).EndInit();
             contextMenuStrip1.ResumeLayout(false);
             contextPresetLst.ResumeLayout(false);
@@ -524,5 +541,7 @@
         private ToolStripMenuItem deleteAllHistoryToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator1;
         private Button btnStopAll;
+        private ToolStripMenuItem duplicatePresetToolStripMenuItem;
+        private ToolStripMenuItem saveAllToolStripMenuItem;
     }
 }
