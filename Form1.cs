@@ -118,6 +118,7 @@ namespace SSH_Helper
                 config.Username = txtUsername.Text;
                 config.Delay = int.Parse(txtDelay.Text);
                 config.Timeout = int.Parse(txtTimeout.Text);
+                config.Presets ??= presets; // preserve presets if present
 
                 // Serialize the updated configuration and write it back to the file
                 json = JsonConvert.SerializeObject(config, Formatting.Indented);
@@ -815,7 +816,8 @@ namespace SSH_Helper
         private void ExecuteCommands(IEnumerable<DataGridViewRow> rows, CancellationToken token)
         {
             string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-            this.Invoke(new Action(() => {
+            this.Invoke(new Action(() =>
+            {
                 txtOutput.Clear();  // Clear previous output
             }));
 
@@ -838,7 +840,8 @@ namespace SSH_Helper
             //store history
             string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
             var entry = new KeyValuePair<string, string>(key, txtOutput.Text);
-            this.Invoke(new Action(() => {
+            this.Invoke(new Action(() =>
+            {
                 outputHistoryList.Insert(0, entry);  // Insert at the start of the list
                 lstOutput.SelectedIndex = 0;  // Select the newest entry automatically              
                 Savevariables(); // Save the variables after each execution
@@ -901,7 +904,8 @@ namespace SSH_Helper
 
             if (!isFirst)
             {
-                this.Invoke(new Action(() => {
+                this.Invoke(new Action(() =>
+                {
                     txtOutput.AppendText(Environment.NewLine);
                 }));
             }
@@ -909,7 +913,8 @@ namespace SSH_Helper
 
             if (isRunning)
             {
-                this.Invoke(new Action(() => {
+                this.Invoke(new Action(() =>
+                {
                     txtOutput.AppendText(foo + Environment.NewLine + header + Environment.NewLine + foo + Environment.NewLine + prompt);
                 }));
             }
@@ -944,7 +949,8 @@ namespace SSH_Helper
 
                     if (isRunning)
                     {
-                        this.Invoke(new Action(() => {
+                        this.Invoke(new Action(() =>
+                        {
                             txtOutput.AppendText($"{output}");
                         }));
                     }
@@ -962,17 +968,19 @@ namespace SSH_Helper
             // only add new line if there is not already text in txtOutput
             if (!string.IsNullOrEmpty(txtOutput.Text))
             {
-                this.Invoke(new Action(() => {
+                this.Invoke(new Action(() =>
+                {
                     txtOutput.AppendText(Environment.NewLine);
                 }));
-                
+
             }
             if (AuthException)
             {
-                
+
                 string errorMessage = $"{new string('#', 20)} ERROR AUTHENTICATING TO!!! {ipAddress}:{port} {new string('#', 20)}";
                 string preheader = new string('#', errorMessage.Length);
-                this.Invoke(new Action(() => {
+                this.Invoke(new Action(() =>
+                {
                     txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine + Environment.NewLine);
                 }));
             }
@@ -980,7 +988,8 @@ namespace SSH_Helper
             {
                 string errorMessage = $"{new string('#', 20)} ERROR CONNECTING TO!!! {ipAddress}:{port} {new string('#', 20)}";
                 string preheader = new string('#', errorMessage.Length);
-                this.Invoke(new Action(() => {
+                this.Invoke(new Action(() =>
+                {
                     txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine + Environment.NewLine);
                 }));
             }
@@ -1080,8 +1089,18 @@ namespace SSH_Helper
 
         private void SavePresets()
         {
-            var wrapper = new { Presets = presets };
-            string json = JsonConvert.SerializeObject(wrapper, Formatting.Indented);
+            // Merge presets with existing file if possible
+            ConfigObject existing;
+            try
+            {
+                existing = JsonConvert.DeserializeObject<ConfigObject>(File.ReadAllText(configFilePath)) ?? new ConfigObject();
+            }
+            catch
+            {
+                existing = new ConfigObject();
+            }
+            existing.Presets = presets;
+            string json = JsonConvert.SerializeObject(existing, Formatting.Indented);
             File.WriteAllText(configFilePath, json);
         }
 
@@ -1157,6 +1176,7 @@ namespace SSH_Helper
         private void renameToolStripMenuItem_Click(object sender, EventArgs e)
         {
             //rename selected lstpreset
+            if (lstPreset.SelectedItem == null) return;
             string selectedPreset = lstPreset.SelectedItem.ToString();
             string newName = Microsoft.VisualBasic.Interaction.InputBox(
                                $"Enter a new name for the preset '{selectedPreset}':",
@@ -1182,6 +1202,8 @@ namespace SSH_Helper
                 SavePresets();
                 lstPreset.Items.Remove(selectedPreset);
                 lstPreset.Items.Add(newName);
+                lstPreset.SelectedItem = newName;
+                txtPreset.Text = newName;
             }
 
 
@@ -1347,7 +1369,8 @@ namespace SSH_Helper
         {
             isRunning = false;
             cts.Cancel();
-            this.Invoke(new Action(() => {
+            this.Invoke(new Action(() =>
+            {
                 Thread.Sleep(300);
                 btnStopAll.Visible = false;
                 txtOutput.AppendText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
@@ -1357,5 +1380,59 @@ namespace SSH_Helper
             cts = new CancellationTokenSource();
 
         }
+
+        private string GetUniquePresetName(string baseName)
+        {
+            string candidate = baseName;
+            int i = 1;
+            while (presets.ContainsKey(candidate))
+            {
+                candidate = $"{baseName}_{i++}";
+            }
+            return candidate;
+        }
+
+        private void duplicatePresetToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (lstPreset.SelectedItem == null) return;
+
+            string sourceName = lstPreset.SelectedItem.ToString();
+            if (!presets.TryGetValue(sourceName, out var commandText)) return;
+
+            string suggested = GetUniquePresetName(sourceName + "_Copy");
+
+            string newName = Microsoft.VisualBasic.Interaction.InputBox(
+                $"Enter name for the copied preset (from '{sourceName}'):",
+                "Copy Preset",
+                suggested
+            );
+
+            if (string.IsNullOrWhiteSpace(newName)) return;
+
+            if (presets.ContainsKey(newName))
+            {
+                MessageBox.Show("A preset with that name already exists.", "Copy Preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            presets.Add(newName, commandText);
+
+            if (lstPreset.Sorted)
+            {
+                lstPreset.Items.Add(newName);
+            }
+            else
+            {
+                int insertIndex = lstPreset.SelectedIndex + 1;
+                if (insertIndex > lstPreset.Items.Count) insertIndex = lstPreset.Items.Count;
+                lstPreset.Items.Insert(insertIndex, newName);
+            }
+
+            SavePresets();
+            lstPreset.SelectedItem = newName;
+            txtPreset.Text = newName;
+            txtCommand.Text = commandText;
+        }
+        // ============================================
     }
 }

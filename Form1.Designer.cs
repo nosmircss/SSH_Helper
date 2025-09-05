@@ -70,6 +70,7 @@
             deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
             label8 = new Label();
             btnStopAll = new Button();
+            duplicatePresetToolStripMenuItem = new ToolStripMenuItem();
             ((System.ComponentModel.ISupportInitialize)dgv_variables).BeginInit();
             contextMenuStrip1.SuspendLayout();
             contextPresetLst.SuspendLayout();
@@ -285,28 +286,28 @@
             // contextPresetLst
             // 
             contextPresetLst.ImageScalingSize = new Size(20, 20);
-            contextPresetLst.Items.AddRange(new ToolStripItem[] { addPresetToolStripMenuItem, renameToolStripMenuItem, deleteToolStripMenuItem });
+            contextPresetLst.Items.AddRange(new ToolStripItem[] { addPresetToolStripMenuItem, duplicatePresetToolStripMenuItem, renameToolStripMenuItem, deleteToolStripMenuItem });
             contextPresetLst.Name = "contextPresetLst";
-            contextPresetLst.Size = new Size(153, 70);
+            contextPresetLst.Size = new Size(181, 114);
             // 
             // addPresetToolStripMenuItem
             // 
             addPresetToolStripMenuItem.Name = "addPresetToolStripMenuItem";
-            addPresetToolStripMenuItem.Size = new Size(152, 22);
+            addPresetToolStripMenuItem.Size = new Size(180, 22);
             addPresetToolStripMenuItem.Text = "Add Preset";
             addPresetToolStripMenuItem.Click += addPresetToolStripMenuItem_Click;
             // 
             // renameToolStripMenuItem
             // 
             renameToolStripMenuItem.Name = "renameToolStripMenuItem";
-            renameToolStripMenuItem.Size = new Size(152, 22);
+            renameToolStripMenuItem.Size = new Size(180, 22);
             renameToolStripMenuItem.Text = "Rename Preset";
             renameToolStripMenuItem.Click += renameToolStripMenuItem_Click;
             // 
             // deleteToolStripMenuItem
             // 
             deleteToolStripMenuItem.Name = "deleteToolStripMenuItem";
-            deleteToolStripMenuItem.Size = new Size(152, 22);
+            deleteToolStripMenuItem.Size = new Size(180, 22);
             deleteToolStripMenuItem.Text = "Delete Preset";
             deleteToolStripMenuItem.Click += deleteToolStripMenuItem_Click;
             // 
@@ -369,7 +370,7 @@
             label7.AutoSize = true;
             label7.Location = new Point(1182, 14);
             label7.Name = "label7";
-            label7.Size = new Size(54, 15);
+            label7.Size = new Size(55, 15);
             label7.TabIndex = 33;
             label7.Text = "Timeout:";
             // 
@@ -440,6 +441,13 @@
             btnStopAll.Visible = false;
             btnStopAll.Click += btnStopAll_Click;
             // 
+            // duplicatePresetToolStripMenuItem
+            // 
+            duplicatePresetToolStripMenuItem.Name = "duplicatePresetToolStripMenuItem";
+            duplicatePresetToolStripMenuItem.Size = new Size(180, 22);
+            duplicatePresetToolStripMenuItem.Text = "Duplicate Preset";
+            duplicatePresetToolStripMenuItem.Click += duplicatePresetToolStripMenuItem_Click;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -471,7 +479,7 @@
             Controls.Add(btnStopAll);
             Controls.Add(btnExecuteAll);
             Name = "Form1";
-            Text = "Salihu_Helper";
+            Text = "SSH_Helper";
             WindowState = FormWindowState.Maximized;
             ((System.ComponentModel.ISupportInitialize)dgv_variables).EndInit();
             contextMenuStrip1.ResumeLayout(false);
@@ -524,5 +532,6 @@
         private ToolStripMenuItem deleteAllHistoryToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator1;
         private Button btnStopAll;
+        private ToolStripMenuItem duplicatePresetToolStripMenuItem;
     }
 }
