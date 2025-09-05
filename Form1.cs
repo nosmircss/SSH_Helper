@@ -1696,6 +1696,61 @@ namespace SSH_Helper
                 // Ignore UI race conditions
             }
         }
-        // === End Find Support ===
+
+        private void contextHistoryLst_Opening(object sender, CancelEventArgs e)
+        {
+
+        }
+
+        private void saveAllToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (outputHistoryList.Count == 0)
+            {
+                MessageBox.Show("There is no history to save.", "No History", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (SaveFileDialog saveFileDialog = new SaveFileDialog())
+            {
+                saveFileDialog.Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*";
+                saveFileDialog.DefaultExt = "txt";
+                saveFileDialog.AddExtension = true;
+                saveFileDialog.Title = "Save All History";
+                saveFileDialog.FileName = $"SSH_Helper_History_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.txt";
+
+                if (saveFileDialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        using (var sw = new StreamWriter(saveFileDialog.FileName, false, new UTF8Encoding(false)))
+                        {
+                            for (int i = 0; i < outputHistoryList.Count; i++)
+                            {
+                                var entry = outputHistoryList[i];
+
+                                string header = $"===== {entry.Key} =====";
+                                sw.WriteLine(header);
+                                sw.WriteLine();
+
+                                // Normalize newlines to Windows CRLF for consistency in the saved file
+                                string body = (entry.Value ?? string.Empty).Replace("\r\n", "\n").Replace("\n", "\r\n");
+                                if (!string.IsNullOrEmpty(body))
+                                    sw.WriteLine(body);
+
+                                // Separate entries with a blank line (add an extra line between blocks)
+                                if (i < outputHistoryList.Count - 1)
+                                {
+                                    sw.WriteLine();
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Failed to save the file: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
     }
 }

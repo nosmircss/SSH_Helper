@@ -66,6 +66,7 @@
             lstOutput = new ListBox();
             contextHistoryLst = new ContextMenuStrip(components);
             saveAsToolStripMenuItem = new ToolStripMenuItem();
+            saveAllToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator1 = new ToolStripSeparator();
             deleteEntryToolStripMenuItem = new ToolStripMenuItem();
             deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
@@ -399,33 +400,41 @@
             // contextHistoryLst
             // 
             contextHistoryLst.ImageScalingSize = new Size(20, 20);
-            contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, toolStripSeparator1, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
+            contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, saveAllToolStripMenuItem, toolStripSeparator1, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
             contextHistoryLst.Name = "contextHistoryLst";
-            contextHistoryLst.Size = new Size(166, 76);
+            contextHistoryLst.Size = new Size(226, 120);
+            contextHistoryLst.Opening += contextHistoryLst_Opening;
             // 
             // saveAsToolStripMenuItem
             // 
             saveAsToolStripMenuItem.Name = "saveAsToolStripMenuItem";
-            saveAsToolStripMenuItem.Size = new Size(165, 22);
+            saveAsToolStripMenuItem.Size = new Size(225, 22);
             saveAsToolStripMenuItem.Text = "Save As";
             saveAsToolStripMenuItem.Click += saveAsToolStripMenuItem_Click;
+            // 
+            // saveAllToolStripMenuItem
+            // 
+            saveAllToolStripMenuItem.Name = "saveAllToolStripMenuItem";
+            saveAllToolStripMenuItem.Size = new Size(225, 22);
+            saveAllToolStripMenuItem.Text = "Save All History In Single File";
+            saveAllToolStripMenuItem.Click += saveAllToolStripMenuItem_Click;
             // 
             // toolStripSeparator1
             // 
             toolStripSeparator1.Name = "toolStripSeparator1";
-            toolStripSeparator1.Size = new Size(162, 6);
+            toolStripSeparator1.Size = new Size(222, 6);
             // 
             // deleteEntryToolStripMenuItem
             // 
             deleteEntryToolStripMenuItem.Name = "deleteEntryToolStripMenuItem";
-            deleteEntryToolStripMenuItem.Size = new Size(165, 22);
+            deleteEntryToolStripMenuItem.Size = new Size(225, 22);
             deleteEntryToolStripMenuItem.Text = "Delete Entry";
             deleteEntryToolStripMenuItem.Click += deleteEntryToolStripMenuItem_Click;
             // 
             // deleteAllHistoryToolStripMenuItem
             // 
             deleteAllHistoryToolStripMenuItem.Name = "deleteAllHistoryToolStripMenuItem";
-            deleteAllHistoryToolStripMenuItem.Size = new Size(165, 22);
+            deleteAllHistoryToolStripMenuItem.Size = new Size(225, 22);
             deleteAllHistoryToolStripMenuItem.Text = "Delete All History";
             deleteAllHistoryToolStripMenuItem.Click += deleteAllHistoryToolStripMenuItem_Click;
             // 
@@ -533,5 +542,6 @@
         private ToolStripSeparator toolStripSeparator1;
         private Button btnStopAll;
         private ToolStripMenuItem duplicatePresetToolStripMenuItem;
+        private ToolStripMenuItem saveAllToolStripMenuItem;
     }
 }
