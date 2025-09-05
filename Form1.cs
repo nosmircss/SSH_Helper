@@ -1,11 +1,12 @@
-using System.ComponentModel;
-using System.Data;
-using System.Text;
-using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Renci.SshNet;
 using Renci.SshNet.Common;
+using System.ComponentModel;
+using System.Data;
+using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace SSH_Helper
 {
@@ -936,27 +937,109 @@ namespace SSH_Helper
 
                     shellStream.WriteLine(commandToExecute);
                     shellStream.Flush();
-                    Thread.Sleep(int.Parse(txtDelay.Text));
-                    var output = shellStream.Read();
 
-                    //if output starts with \r\n , remove it
+                    // NEW: read output with automatic pager handling
+                    int delayMs = int.Parse(txtDelay.Text);
+                    int idleTimeoutMs = Math.Max(1000, int.Parse(txtTimeout.Text) * 1000); // minimum 1s
+                    var output = ReadAllWithPager(shellStream, delayMs, idleTimeoutMs);
+
+                    // remove echoed command prefix artifact if present
                     if (output.StartsWith(commandToExecute + "\r\r\n"))
                     {
-                        output = Regex.Replace(output, commandToExecute + "\r\r\n", commandToExecute + "\r\n");
+                        output = Regex.Replace(output, Regex.Escape(commandToExecute) + "\r\r\n", commandToExecute + "\r\n");
                     }
+
+                    // final sanitize (defensive; ReadAllWithPager already sanitizes)
                     output = Regex.Replace(output, @"[^\u0020-\u007E\r\n\t]", "");
-                    //output = Regex.Replace(output, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
 
                     if (isRunning)
                     {
                         this.Invoke(new Action(() =>
                         {
-                            txtOutput.AppendText($"{output}");
+                            txtOutput.AppendText(output);
                         }));
                     }
                 }
             }
 
+        }
+
+        private string ReadAllWithPager(ShellStream shellStream, int pollIntervalMs, int maxDurationMs)
+        {
+            var sb = new StringBuilder();
+
+            var sw = Stopwatch.StartNew();
+            long lastDataMs = 0;
+
+            // Break on short idle (fast exit once output stops)
+            int idleCutoffMs = Math.Clamp(pollIntervalMs * 3, 150, 800); // 150–800ms
+            int pageCount = 0;
+            const int maxPages = 500;
+
+            while (isRunning && sw.ElapsedMilliseconds < maxDurationMs && pageCount < maxPages)
+            {
+                if (shellStream.DataAvailable)
+                {
+                    string chunk = shellStream.Read();
+
+                    if (!string.IsNullOrEmpty(chunk))
+                    {
+                        lastDataMs = sw.ElapsedMilliseconds;
+
+                        // Sanitize + normalize
+                        chunk = Regex.Replace(chunk, @"[^\u0020-\u007E\r\n\t]", "");
+                        chunk = chunk.Replace("\n", "\r\n");
+
+                        // Strip pager artifacts and detect if a pager was shown
+                        bool sawPager;
+                        chunk = StripPagerArtifacts(chunk, out sawPager);
+
+                        sb.Append(chunk);
+
+                        // Advance pager immediately so more data can arrive
+                        if (sawPager)
+                        {
+                            shellStream.Write(" ");   // or "\r" for line-step
+                            shellStream.Flush();
+                            pageCount++;
+                            // Continue loop; next iteration will read the next page
+                            continue;
+                        }
+                    }
+                }
+                else
+                {
+                    // No data now; if we've been idle long enough, we're done
+                    if (sw.ElapsedMilliseconds - lastDataMs >= idleCutoffMs)
+                        break;
+
+                    Thread.Sleep(Math.Min(50, Math.Max(10, pollIntervalMs / 2))); // small, responsive sleep
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        // Replace the lambda in StripPagerArtifacts with a regular expression match and manual replacement
+        private string StripPagerArtifacts(string chunk, out bool sawPager)
+        {
+            sawPager = false;
+
+            // Remove pager token (variants like "--More--", "-- More --")
+            var pagerRegex = new Regex(@"--\s*More\s*--", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (pagerRegex.IsMatch(chunk))
+            {
+                sawPager = true;
+                chunk = pagerRegex.Replace(chunk, string.Empty);
+            }
+
+            // Remove prompt-erase sequence: CR + spaces + CR
+            chunk = Regex.Replace(chunk, @"\r[ ]{2,}\r", "\r", RegexOptions.CultureInvariant);
+
+            // Optional: remove whitespace-only lines created by erase sequences
+            chunk = Regex.Replace(chunk, @"(?m)^[ \t]+$", "", RegexOptions.CultureInvariant);
+
+            return chunk;
         }
 
         private void HandleException(bool AuthException, Exception ex, string ipAddress, int port)
@@ -1433,6 +1516,186 @@ namespace SSH_Helper
             txtPreset.Text = newName;
             txtCommand.Text = commandText;
         }
-        // ============================================
+
+        // === Find Support ===
+        private FindDialog? _findDialog;
+        private string _lastFindTerm = "";
+        private bool _lastFindMatchCase = false;
+        private bool _lastFindWrap = true;
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            // Global shortcuts
+            if (keyData == (Keys.Control | Keys.F))
+            {
+                ShowFindDialog();
+                return true;
+            }
+            if (keyData == Keys.F3)
+            {
+                // Global F3 should move focus to the output area (so we pass initiatedFromFindDialog: false)
+                PerformFind(_lastFindTerm, _lastFindMatchCase, forward: true, _lastFindWrap, initiatedFromFindDialog: false);
+                return true;
+            }
+            if (keyData == (Keys.Shift | Keys.F3))
+            {
+                PerformFind(_lastFindTerm, _lastFindMatchCase, forward: false, _lastFindWrap, initiatedFromFindDialog: false);
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        private void ShowFindDialog()
+        {
+            string seed = txtOutput.SelectedText;
+            if (string.IsNullOrWhiteSpace(seed))
+            {
+                // If no selection, try last term
+                seed = string.IsNullOrWhiteSpace(_lastFindTerm) ? "" : _lastFindTerm;
+            }
+
+            if (_findDialog == null || _findDialog.IsDisposed)
+            {
+                _findDialog = new FindDialog(this, seed, _lastFindMatchCase, _lastFindWrap);
+                // Position near txtOutput (basic positioning)
+                var screenPoint = txtOutput.PointToScreen(Point.Empty);
+                _findDialog.StartPosition = FormStartPosition.Manual;
+                _findDialog.Left = screenPoint.X + 40;
+                _findDialog.Top = screenPoint.Y + 40;
+            }
+            else
+            {
+                _findDialog.Show();
+                _findDialog.BringToFront();
+            }
+
+            _findDialog.Show();
+        }
+
+        internal void FindNextFromDialog(string term, bool matchCase, bool wrap)
+        {
+            if (string.IsNullOrEmpty(term))
+            {
+                _findDialog?.SetStatus("Enter text to find.", true);
+                return;
+            }
+            _lastFindTerm = term;
+            _lastFindMatchCase = matchCase;
+            _lastFindWrap = wrap;
+
+            bool found = PerformFind(term, matchCase, forward: true, wrap, initiatedFromFindDialog: true);
+            if (!found)
+                _findDialog?.SetStatus("Not found.", true);
+            else
+                _findDialog?.SetStatus("Found.");
+        }
+
+        internal void FindPreviousFromDialog(string term, bool matchCase, bool wrap)
+        {
+            if (string.IsNullOrEmpty(term))
+            {
+                _findDialog?.SetStatus("Enter text to find.", true);
+                return;
+            }
+            _lastFindTerm = term;
+            _lastFindMatchCase = matchCase;
+            _lastFindWrap = wrap;
+
+            bool found = PerformFind(term, matchCase, forward: false, wrap, initiatedFromFindDialog: true);
+            if (!found)
+                _findDialog?.SetStatus("Not found.", true);
+            else
+                _findDialog?.SetStatus("Found.");
+        }
+
+        private bool PerformFind(string term, bool matchCase, bool forward, bool wrap, bool initiatedFromFindDialog)
+        {
+            if (string.IsNullOrEmpty(term) || string.IsNullOrEmpty(txtOutput.Text))
+                return false;
+
+            var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            string text = txtOutput.Text;
+            int startIndex;
+
+            if (forward)
+            {
+                startIndex = txtOutput.SelectionStart + txtOutput.SelectionLength;
+                if (startIndex > text.Length) startIndex = text.Length;
+
+                int idx = text.IndexOf(term, startIndex, comparison);
+                if (idx == -1 && wrap)
+                {
+                    idx = text.IndexOf(term, 0, comparison);
+                }
+                if (idx == -1)
+                    return false;
+
+                HighlightAndScroll(idx, term.Length, initiatedFromFindDialog);
+                return true;
+            }
+            else
+            {
+                startIndex = txtOutput.SelectionStart - 1;
+                if (startIndex < 0) startIndex = text.Length - 1;
+
+                int idx = LastIndexOf(text, term, startIndex, comparison);
+                if (idx == -1 && wrap)
+                {
+                    idx = LastIndexOf(text, term, text.Length - 1, comparison);
+                }
+                if (idx == -1)
+                    return false;
+
+                HighlightAndScroll(idx, term.Length, initiatedFromFindDialog);
+                return true;
+            }
+        }
+
+        private static int LastIndexOf(string source, string term, int startIndex, StringComparison comparison)
+        {
+            if (startIndex < 0) return -1;
+            if (string.IsNullOrEmpty(term)) return -1;
+            // Walk backwards manually (supports case-insensitive)
+            int lastPossible = startIndex - term.Length + 1;
+            for (int i = lastPossible; i >= 0; i--)
+            {
+                if (string.Compare(source, i, term, 0, term.Length, comparison) == 0)
+                    return i;
+            }
+            return -1;
+        }
+
+        private void HighlightAndScroll(int index, int length, bool initiatedFromFindDialog)
+        {
+            try
+            {
+                txtOutput.SelectionStart = index;
+                txtOutput.SelectionLength = length;
+                txtOutput.ScrollToCaret();
+
+                if (initiatedFromFindDialog)
+                {
+                    // Keep the Find dialog active & ready for another Enter
+                    if (_findDialog != null && !_findDialog.IsDisposed && _findDialog.Visible)
+                    {
+                        _findDialog.Activate();
+                        // Re-focus textbox for quick repeated Enter
+                        var findBox = _findDialog.ActiveControl as TextBox;
+                        // Fallback: explicitly focus the find textbox if we have a reference
+                        // (in this simple dialog ActiveControl will usually be txtFind already)
+                    }
+                }
+                else
+                {
+                    // Global F3 navigation puts focus in output
+                    txtOutput.Focus();
+                }
+            }
+            catch
+            {
+                // Ignore UI race conditions
+            }
+        }
+        // === End Find Support ===
     }
 }

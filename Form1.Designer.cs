@@ -53,6 +53,7 @@
             txtUsername = new TextBox();
             contextPresetLst = new ContextMenuStrip(components);
             addPresetToolStripMenuItem = new ToolStripMenuItem();
+            duplicatePresetToolStripMenuItem = new ToolStripMenuItem();
             renameToolStripMenuItem = new ToolStripMenuItem();
             deleteToolStripMenuItem = new ToolStripMenuItem();
             btnExecuteSelected = new Button();
@@ -70,7 +71,6 @@
             deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
             label8 = new Label();
             btnStopAll = new Button();
-            duplicatePresetToolStripMenuItem = new ToolStripMenuItem();
             ((System.ComponentModel.ISupportInitialize)dgv_variables).BeginInit();
             contextMenuStrip1.SuspendLayout();
             contextPresetLst.SuspendLayout();
@@ -165,6 +165,7 @@
             txtOutput.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             txtOutput.BackColor = SystemColors.Window;
             txtOutput.Font = new Font("Courier New", 9F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            txtOutput.HideSelection = false;
             txtOutput.Location = new Point(428, 234);
             txtOutput.MaxLength = 1000000;
             txtOutput.Multiline = true;
@@ -288,26 +289,33 @@
             contextPresetLst.ImageScalingSize = new Size(20, 20);
             contextPresetLst.Items.AddRange(new ToolStripItem[] { addPresetToolStripMenuItem, duplicatePresetToolStripMenuItem, renameToolStripMenuItem, deleteToolStripMenuItem });
             contextPresetLst.Name = "contextPresetLst";
-            contextPresetLst.Size = new Size(181, 114);
+            contextPresetLst.Size = new Size(160, 92);
             // 
             // addPresetToolStripMenuItem
             // 
             addPresetToolStripMenuItem.Name = "addPresetToolStripMenuItem";
-            addPresetToolStripMenuItem.Size = new Size(180, 22);
+            addPresetToolStripMenuItem.Size = new Size(159, 22);
             addPresetToolStripMenuItem.Text = "Add Preset";
             addPresetToolStripMenuItem.Click += addPresetToolStripMenuItem_Click;
+            // 
+            // duplicatePresetToolStripMenuItem
+            // 
+            duplicatePresetToolStripMenuItem.Name = "duplicatePresetToolStripMenuItem";
+            duplicatePresetToolStripMenuItem.Size = new Size(159, 22);
+            duplicatePresetToolStripMenuItem.Text = "Duplicate Preset";
+            duplicatePresetToolStripMenuItem.Click += duplicatePresetToolStripMenuItem_Click;
             // 
             // renameToolStripMenuItem
             // 
             renameToolStripMenuItem.Name = "renameToolStripMenuItem";
-            renameToolStripMenuItem.Size = new Size(180, 22);
+            renameToolStripMenuItem.Size = new Size(159, 22);
             renameToolStripMenuItem.Text = "Rename Preset";
             renameToolStripMenuItem.Click += renameToolStripMenuItem_Click;
             // 
             // deleteToolStripMenuItem
             // 
             deleteToolStripMenuItem.Name = "deleteToolStripMenuItem";
-            deleteToolStripMenuItem.Size = new Size(180, 22);
+            deleteToolStripMenuItem.Size = new Size(159, 22);
             deleteToolStripMenuItem.Text = "Delete Preset";
             deleteToolStripMenuItem.Click += deleteToolStripMenuItem_Click;
             // 
@@ -441,13 +449,6 @@
             btnStopAll.Visible = false;
             btnStopAll.Click += btnStopAll_Click;
             // 
-            // duplicatePresetToolStripMenuItem
-            // 
-            duplicatePresetToolStripMenuItem.Name = "duplicatePresetToolStripMenuItem";
-            duplicatePresetToolStripMenuItem.Size = new Size(180, 22);
-            duplicatePresetToolStripMenuItem.Text = "Duplicate Preset";
-            duplicatePresetToolStripMenuItem.Click += duplicatePresetToolStripMenuItem_Click;
-            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -480,7 +481,6 @@
             Controls.Add(btnExecuteAll);
             Name = "Form1";
             Text = "SSH_Helper";
-            WindowState = FormWindowState.Maximized;
             ((System.ComponentModel.ISupportInitialize)dgv_variables).EndInit();
             contextMenuStrip1.ResumeLayout(false);
             contextPresetLst.ResumeLayout(false);
