@@ -13,6 +13,9 @@ namespace SSH_Helper
 
     public partial class Form1 : Form
     {
+        private const string ApplicationVersion = "0.1-Beta";
+        private const string ApplicationName = "SSH_Helper";
+
         public class ConfigObject
         {
             public Dictionary<string, string>? Presets { get; set; }
@@ -34,6 +37,8 @@ namespace SSH_Helper
         public Form1()
         {
             InitializeComponent();
+            this.Text = $"{ApplicationName} {ApplicationVersion}";
+
             InitializeConfiguration();
             InitializeDataGridView();
 
