@@ -7,6 +7,7 @@ using System.Data;
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.IO.Compression;
 
 namespace SSH_Helper
 {
@@ -53,7 +54,7 @@ namespace SSH_Helper
             lstOutput.DisplayMember = "Key";
 
             this.FormClosing += new FormClosingEventHandler(Form1_FormClosing);
-            this.Click += Form_Click; // Handle clicks on the form area
+            this.Click += Form_Click;
             dgv_variables.ContextMenuStrip = contextMenuStrip1;
             dgv_variables.MouseDown += dgv_variables_MouseDown;
             dgv_variables.RowPostPaint += dgv_variables_RowPostPaint;
@@ -67,6 +68,8 @@ namespace SSH_Helper
 
             txtDelay.KeyPress += txtDelay_KeyPress;
             txtTimeout.KeyPress += txtTimeout_KeyPress;
+
+            InitializePresetExportImportMenuItems();
         }
 
         private void lstPreset_MouseDown(object sender, MouseEventArgs e)
@@ -1008,7 +1011,7 @@ namespace SSH_Helper
                     shellStream.WriteLine(commandToExecute);
                     shellStream.Flush();
 
-                    // NEW: read output with automatic pager handling
+                    // read output with automatic pager handling
                     int delayMs = int.Parse(txtDelay.Text);
                     int idleTimeoutMs = Math.Max(1000, int.Parse(txtTimeout.Text) * 1000); // minimum 1s
                     var output = ReadAllWithPager(shellStream, delayMs, idleTimeoutMs);
@@ -1019,7 +1022,7 @@ namespace SSH_Helper
                         output = Regex.Replace(output, Regex.Escape(commandToExecute) + "\r\r\n", commandToExecute + "\r\n");
                     }
 
-                    // final sanitize (defensive; ReadAllWithPager already sanitizes)
+                    // final sanitize
                     output = Regex.Replace(output, @"[^\u0020-\u007E\r\n\t]", "");
 
                     if (isRunning)
@@ -1100,7 +1103,7 @@ namespace SSH_Helper
             return sb.ToString();
         }
 
-        // (Unchanged) Removes pager artifacts and tells us if a pager token was present this chunk.
+        // Remove pager artifacts and tells us if a pager token was present this chunk.
         private string StripPagerArtifacts(string chunk, out bool sawPager)
         {
             sawPager = false;
@@ -1195,16 +1198,6 @@ namespace SSH_Helper
                 });
             }
         }
-
-
-        // Fix applied: replaced invalid conditional expression using non-existent 'selectedRow.Contains.("Host_IP")'
-        // with a proper check against the DataGridView's Columns collection.
-        // Added null-safe retrieval of the Host_IP cell value.
-        // Step-by-step (pseudocode):
-        // 1. Inside btnExecuteSelected_Click, locate faulty lines constructing 'host'.
-        // 2. Remove invalid syntax and use: dgv_variables.Columns.Contains("Host_IP").
-        // 3. If column exists, read cell value, else default to empty string.
-        // 4. Keep remaining validation logic unchanged.
 
         private void btnExecuteSelected_Click(object sender, EventArgs e)
         {
@@ -1820,6 +1813,208 @@ namespace SSH_Helper
         private void contextHistoryLst_Opening(object sender, CancelEventArgs e)
         {
 
+        }
+
+        private void InitializePresetExportImportMenuItems()
+        {
+            if (contextPresetLst != null)
+            {
+                // Avoid duplicates if called defensively
+                if (!contextPresetLst.Items.OfType<ToolStripMenuItem>().Any(i => i.Name == "importPresetToolStripMenuItem"))
+                {
+                    var importItem = new ToolStripMenuItem("Import Preset", null, importPresetToolStripMenuItem_Click)
+                    {
+                        Name = "importPresetToolStripMenuItem"
+                    };
+                    contextPresetLst.Items.Add(new ToolStripSeparator());
+                    contextPresetLst.Items.Add(importItem);
+                }
+                if (!contextPresetLst.Items.OfType<ToolStripMenuItem>().Any(i => i.Name == "exportPresetToolStripMenuItem"))
+                {
+                    var exportItem = new ToolStripMenuItem("Export Preset", null, exportPresetToolStripMenuItem_Click)
+                    {
+                        Name = "exportPresetToolStripMenuItem"
+                    };
+
+                    contextPresetLst.Items.Add(exportItem);
+                }
+                
+            }
+
+            if (contextPresetLstAdd != null)
+            {
+                if (!contextPresetLstAdd.Items.OfType<ToolStripMenuItem>().Any(i => i.Name == "importPresetToolStripMenuItem"))
+                {
+                    var importItem2 = new ToolStripMenuItem("Import Preset", null, importPresetToolStripMenuItem_Click)
+                    {
+                        Name = "importPresetToolStripMenuItem"
+                    };
+                    contextPresetLstAdd.Items.Add(new ToolStripSeparator());
+                    contextPresetLstAdd.Items.Add(importItem2);
+                }
+            }
+        }
+
+        private void exportPresetToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (lstPreset.SelectedItem == null)
+            {
+                MessageBox.Show("No preset selected to export.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string presetName = lstPreset.SelectedItem.ToString();
+            if (!presets.TryGetValue(presetName, out var info))
+            {
+                MessageBox.Show("Preset not found in memory.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            try
+            {
+                string exportString = CreatePresetExportString(presetName, info);
+                Clipboard.SetText(exportString);
+                MessageBox.Show("Preset exported to clipboard.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to export preset: " + ex.Message, "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void importPresetToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            string input = Microsoft.VisualBasic.Interaction.InputBox(
+                "Paste the encoded preset string:\r\nFormat: <name>_<encoded>",
+                "Import Preset",
+                ""
+            );
+
+            if (string.IsNullOrWhiteSpace(input))
+                return;
+
+            int lastUnderscore = input.LastIndexOf('_');
+            if (lastUnderscore <= 0 || lastUnderscore >= input.Length - 1)
+            {
+                MessageBox.Show("Invalid format. Expected <name>_<encoded>.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string importedName = input.Substring(0, lastUnderscore);
+            string encoded = input.Substring(lastUnderscore + 1);
+
+            try
+            {
+                var importedInfo = ParseImportedPresetPayload(encoded);
+
+                // Ensure unique name if collision
+                string finalName = importedName;
+                if (presets.ContainsKey(finalName))
+                {
+                    finalName = GetUniquePresetName(finalName);
+                }
+
+                presets[finalName] = importedInfo;
+
+                if (!lstPreset.Items.Contains(finalName))
+                {
+                    lstPreset.Items.Add(finalName);
+                }
+
+                lstPreset.SelectedItem = finalName;
+                txtPreset.Text = finalName;
+                txtCommand.Text = importedInfo.Commands;
+                if (importedInfo.Delay.HasValue) txtDelay.Text = importedInfo.Delay.Value.ToString();
+                if (importedInfo.Timeout.HasValue) txtTimeout.Text = importedInfo.Timeout.Value.ToString();
+
+                SavePresets();
+                MessageBox.Show($"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (FormatException)
+            {
+                MessageBox.Show("Encoded section is not valid Base64.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (InvalidDataException)
+            {
+                MessageBox.Show("Failed to decompress data. The string may be corrupted.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to import preset: " + ex.Message, "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private string CreatePresetExportString(string presetName, PresetInfo info)
+        {
+            var payload = new
+            {
+                v = 1,
+                commands = info.Commands ?? "",
+                delay = info.Delay,
+                timeout = info.Timeout
+            };
+            string json = JsonConvert.SerializeObject(payload);
+            string encoded = CompressAndEncode(json);
+            return $"{presetName}_{encoded}";
+        }
+
+        private PresetInfo ParseImportedPresetPayload(string encoded)
+        {
+            string decompressed = DecompressEncoded(encoded);
+
+            // If payload looks like JSON attempt to parse structured export
+            if (decompressed.Length > 0 && decompressed.TrimStart().StartsWith("{"))
+            {
+                try
+                {
+                    var obj = JObject.Parse(decompressed);
+                    // commands key (case-insensitive fallback)
+                    string commands =
+                        obj["commands"]?.ToString() ??
+                        obj["Commands"]?.ToString() ??
+                        "";
+                    int? delay = obj["delay"]?.Type == JTokenType.Null ? null : obj["delay"]?.Value<int?>();
+                    int? timeout = obj["timeout"]?.Type == JTokenType.Null ? null : obj["timeout"]?.Value<int?>();
+
+                    return new PresetInfo
+                    {
+                        Commands = commands,
+                        Delay = delay,
+                        Timeout = timeout
+                    };
+                }
+                catch
+                {
+                    // Fall back to treating decompressed text as raw commands
+                }
+            }
+
+            return new PresetInfo
+            {
+                Commands = decompressed,
+                Delay = int.TryParse(txtDelay.Text, out var dVal) ? dVal : null,
+                Timeout = int.TryParse(txtTimeout.Text, out var tVal) ? tVal : null
+            };
+        }
+        private string CompressAndEncode(string text)
+        {
+            byte[] raw = Encoding.UTF8.GetBytes(text);
+            using var ms = new MemoryStream();
+            using (var gzip = new GZipStream(ms, CompressionLevel.SmallestSize, leaveOpen: true))
+            {
+                gzip.Write(raw, 0, raw.Length);
+            }
+            return Convert.ToBase64String(ms.ToArray());
+        }
+
+        private string DecompressEncoded(string encoded)
+        {
+            byte[] compressed = Convert.FromBase64String(encoded);
+            using var input = new MemoryStream(compressed);
+            using var gzip = new GZipStream(input, CompressionMode.Decompress);
+            using var output = new MemoryStream();
+            gzip.CopyTo(output);
+            return Encoding.UTF8.GetString(output.ToArray());
         }
 
         private void saveAllToolStripMenuItem_Click(object sender, EventArgs e)
