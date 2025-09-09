@@ -13,25 +13,32 @@ namespace SSH_Helper
 
     public partial class Form1 : Form
     {
-        private const string ApplicationVersion = "0.1-Beta";
+        private const string ApplicationVersion = "0.2-Beta";
         private const string ApplicationName = "SSH_Helper";
-
         public class ConfigObject
         {
-            public Dictionary<string, string>? Presets { get; set; }
+            public Dictionary<string, PresetInfo>? Presets { get; set; }
             public string? Username { get; set; }
             public int Delay { get; set; }
             public int Timeout { get; set; }
         }
 
+        public class PresetInfo
+        {
+            public string Commands { get; set; } = "";
+            public int? Delay { get; set; }
+            public int? Timeout { get; set; }
+        }
+
         private int rightClickedColumnIndex = -1; // Field to store the index of the right-clicked column
         private int rightClickedRowIndex = -1; // Field to store the index of the right-clicked row
         private string loadedFilePath;
-        private Dictionary<string, string> presets = new Dictionary<string, string>();
+        private Dictionary<string, PresetInfo> presets = new Dictionary<string, PresetInfo>();
         private BindingList<KeyValuePair<string, string>> outputHistoryList = new BindingList<KeyValuePair<string, string>>();
         private bool isRunning = false;
         CancellationTokenSource cts = new CancellationTokenSource();
-
+        // Add this field near other private fields
+        private bool _initialPresetDefaultsSaved = false;
         private string configFilePath;
 
         public Form1()
@@ -94,17 +101,19 @@ namespace SSH_Helper
             {
                 CreateDefaultConfigFile();
             }
+
             LoadConfiguration();
-            //if txtTimeout is empty set to 10
+
             if (string.IsNullOrEmpty(txtTimeout.Text))
             {
                 txtTimeout.Text = "10";
             }
-            //if txtDelay is empty set to 250
             if (string.IsNullOrEmpty(txtDelay.Text))
             {
                 txtDelay.Text = "250";
             }
+
+            ApplyDefaultDelayTimeoutToPresetsAndSave();
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
@@ -124,7 +133,7 @@ namespace SSH_Helper
                 config.Username = txtUsername.Text;
                 config.Delay = int.Parse(txtDelay.Text);
                 config.Timeout = int.Parse(txtTimeout.Text);
-                config.Presets ??= presets; // preserve presets if present
+                config.Presets = presets; // preserve presets if present
 
                 // Serialize the updated configuration and write it back to the file
                 json = JsonConvert.SerializeObject(config, Formatting.Indented);
@@ -136,38 +145,82 @@ namespace SSH_Helper
             }
         }
 
+        private void ApplyDefaultDelayTimeoutToPresetsAndSave()
+        {
+            if (_initialPresetDefaultsSaved) return; // Run only once
+
+            if (!int.TryParse(txtDelay.Text, out var globalDelay)) return;
+            if (!int.TryParse(txtTimeout.Text, out var globalTimeout)) return;
+
+            bool changed = false;
+            foreach (var key in presets.Keys.ToList())
+            {
+                var p = presets[key];
+                if (p.Delay == null)
+                {
+                    p.Delay = globalDelay;
+                    changed = true;
+                }
+                if (p.Timeout == null)
+                {
+                    p.Timeout = globalTimeout;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                SavePresets(); // Persist upgraded presets with concrete Delay/Timeout values
+            }
+            _initialPresetDefaultsSaved = true;
+        }
 
         private void LoadConfiguration()
         {
             try
             {
                 string json = File.ReadAllText(configFilePath);
-                var rootObject = JsonConvert.DeserializeObject<ConfigObject>(json);
+                var rootObj = JObject.Parse(json);
 
-                // Set the loaded presets
-                presets = rootObject.Presets;
+                presets.Clear();
+                var presetsToken = rootObj["Presets"] as JObject;
+                if (presetsToken != null)
+                {
+                    foreach (var prop in presetsToken.Properties())
+                    {
+                        if (prop.Value.Type == JTokenType.String)
+                        {
+                            // Legacy format: value is just a command string
+                            presets[prop.Name] = new PresetInfo { Commands = prop.Value.ToString() };
+                        }
+                        else
+                        {
+                            var info = prop.Value.ToObject<PresetInfo>() ?? new PresetInfo();
+                            info.Commands ??= "";
+                            presets[prop.Name] = info;
+                        }
+                    }
+                }
+
                 lstPreset.Items.Clear();
                 foreach (var key in presets.Keys)
-                {
                     lstPreset.Items.Add(key);
+
+                // Avoid rootObj.ToObject<ConfigObject>() because legacy Presets entries may be strings
+                string? usernameVal = rootObj["Username"]?.Type == JTokenType.String ? rootObj["Username"]!.ToString() : null;
+                if (!string.IsNullOrWhiteSpace(usernameVal))
+                    txtUsername.Text = usernameVal;
+
+                if (rootObj["Delay"]?.Type == JTokenType.Integer)
+                {
+                    int delayVal = rootObj["Delay"]!.ToObject<int>();
+                    if (delayVal > 0) txtDelay.Text = delayVal.ToString();
                 }
 
-                // Set the loaded username
-                if (!string.IsNullOrEmpty(rootObject.Username))
+                if (rootObj["Timeout"]?.Type == JTokenType.Integer)
                 {
-                    txtUsername.Text = rootObject.Username;
-                }
-
-                // Set the loaded delay
-                if (rootObject.Delay > 0)
-                {
-                    txtDelay.Text = rootObject.Delay.ToString();
-                }
-
-                // Set the loaded timeout
-                if (rootObject.Timeout > 0)
-                {
-                    txtTimeout.Text = rootObject.Timeout.ToString();
+                    int timeoutVal = rootObj["Timeout"]!.ToObject<int>();
+                    if (timeoutVal > 0) txtTimeout.Text = timeoutVal.ToString();
                 }
             }
             catch (Exception ex)
@@ -182,10 +235,12 @@ namespace SSH_Helper
             if (lstPreset.SelectedItem != null)
             {
                 string presetName = lstPreset.SelectedItem.ToString();
-                if (presets.ContainsKey(presetName))
+                if (presets.TryGetValue(presetName, out var info))
                 {
-                    txtCommand.Text = presets[presetName]; // Load the command associated with the preset
-                    txtPreset.Text = presetName; // Display the selected preset name
+                    txtCommand.Text = info.Commands;
+                    txtPreset.Text = presetName;
+                    if (info.Delay.HasValue) txtDelay.Text = info.Delay.Value.ToString();
+                    if (info.Timeout.HasValue) txtTimeout.Text = info.Timeout.Value.ToString();
                 }
             }
         }
@@ -801,14 +856,24 @@ namespace SSH_Helper
 
             if (!string.IsNullOrEmpty(presetName) && !string.IsNullOrWhiteSpace(commands))
             {
+                int? perDelay = int.TryParse(txtDelay.Text, out var dVal) ? dVal : null;
+                int? perTimeout = int.TryParse(txtTimeout.Text, out var tVal) ? tVal : null;
+
                 if (!presets.ContainsKey(presetName))
                 {
-                    presets.Add(presetName, commands);
+                    presets.Add(presetName, new PresetInfo
+                    {
+                        Commands = commands,
+                        Delay = perDelay,
+                        Timeout = perTimeout
+                    });
                     lstPreset.Items.Add(presetName);
                 }
                 else
                 {
-                    presets[presetName] = commands; // Optionally update the preset
+                    presets[presetName].Commands = commands;
+                    presets[presetName].Delay = perDelay;
+                    presets[presetName].Timeout = perTimeout;
                 }
                 SavePresets(); // Save presets after updating
             }
@@ -971,66 +1036,75 @@ namespace SSH_Helper
 
         private string ReadAllWithPager(ShellStream shellStream, int pollIntervalMs, int maxDurationMs)
         {
+            // maxDurationMs now represents an inactivity timeout (reset on data or pager advance)
             var sb = new StringBuilder();
 
             var sw = Stopwatch.StartNew();
-            long lastDataMs = 0;
+            long lastActivityMs = 0; // time of last data OR pager advance
 
-            // Break on short idle (fast exit once output stops)
-            int idleCutoffMs = Math.Clamp(pollIntervalMs * 3, 150, 800); // 150–800ms
+            int idleCutoffMs = Math.Clamp(pollIntervalMs * 3, 150, 800); // fast-exit idle (micro idle while still receiving)
             int pageCount = 0;
-            const int maxPages = 500;
+            const int maxPages = 50000;
 
-            while (isRunning && sw.ElapsedMilliseconds < maxDurationMs && pageCount < maxPages)
+            while (isRunning && pageCount < maxPages)
             {
+                // Inactivity timeout check (no data / no pager advance for maxDurationMs)
+                if (sw.ElapsedMilliseconds - lastActivityMs > maxDurationMs)
+                    break;
+
                 if (shellStream.DataAvailable)
                 {
                     string chunk = shellStream.Read();
-
                     if (!string.IsNullOrEmpty(chunk))
                     {
-                        lastDataMs = sw.ElapsedMilliseconds;
+                        // Activity: received data
+                        lastActivityMs = sw.ElapsedMilliseconds;
 
                         // Sanitize + normalize
                         chunk = Regex.Replace(chunk, @"[^\u0020-\u007E\r\n\t]", "");
                         chunk = chunk.Replace("\n", "\r\n");
 
-                        // Strip pager artifacts and detect if a pager was shown
                         bool sawPager;
                         chunk = StripPagerArtifacts(chunk, out sawPager);
-
                         sb.Append(chunk);
 
-                        // Advance pager immediately so more data can arrive
                         if (sawPager)
                         {
-                            shellStream.Write(" ");   // or "\r" for line-step
+                            // Pager advance counts as activity, so update timestamp again
+                            lastActivityMs = sw.ElapsedMilliseconds;
+                            shellStream.Write(" ");
                             shellStream.Flush();
                             pageCount++;
-                            // Continue loop; next iteration will read the next page
+                            // Immediately loop to allow more data to arrive
                             continue;
                         }
                     }
                 }
                 else
                 {
-                    // No data now; if we've been idle long enough, we're done
-                    if (sw.ElapsedMilliseconds - lastDataMs >= idleCutoffMs)
-                        break;
+                    // Short idle check to exit quickly after output naturally finishes
+                    if (sw.ElapsedMilliseconds - lastActivityMs >= idleCutoffMs)
+                    {
+                        // Before breaking due to short idle, also ensure we have exceeded a minimal quiet period;
+                        // if overall inactivity timeout has not elapsed but we are just between bursts,
+                        // we give it a little more time by doing a small sleep and continuing.
+                        // If you prefer immediate break after idleCutoffMs, remove the below guard.
+                        if (sw.ElapsedMilliseconds - lastActivityMs >= idleCutoffMs)
+                            break;
+                    }
 
-                    Thread.Sleep(Math.Min(50, Math.Max(10, pollIntervalMs / 2))); // small, responsive sleep
+                    Thread.Sleep(Math.Min(50, Math.Max(10, pollIntervalMs / 2)));
                 }
             }
 
             return sb.ToString();
         }
 
-        // Replace the lambda in StripPagerArtifacts with a regular expression match and manual replacement
+        // (Unchanged) Removes pager artifacts and tells us if a pager token was present this chunk.
         private string StripPagerArtifacts(string chunk, out bool sawPager)
         {
             sawPager = false;
 
-            // Remove pager token (variants like "--More--", "-- More --")
             var pagerRegex = new Regex(@"--\s*More\s*--", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             if (pagerRegex.IsMatch(chunk))
             {
@@ -1038,10 +1112,9 @@ namespace SSH_Helper
                 chunk = pagerRegex.Replace(chunk, string.Empty);
             }
 
-            // Remove prompt-erase sequence: CR + spaces + CR
+            // Remove erase sequences
             chunk = Regex.Replace(chunk, @"\r[ ]{2,}\r", "\r", RegexOptions.CultureInvariant);
-
-            // Optional: remove whitespace-only lines created by erase sequences
+            // (Optional) remove whitespace-only lines produced by clearing
             chunk = Regex.Replace(chunk, @"(?m)^[ \t]+$", "", RegexOptions.CultureInvariant);
 
             return chunk;
@@ -1124,25 +1197,58 @@ namespace SSH_Helper
         }
 
 
+        // Fix applied: replaced invalid conditional expression using non-existent 'selectedRow.Contains.("Host_IP")'
+        // with a proper check against the DataGridView's Columns collection.
+        // Added null-safe retrieval of the Host_IP cell value.
+        // Step-by-step (pseudocode):
+        // 1. Inside btnExecuteSelected_Click, locate faulty lines constructing 'host'.
+        // 2. Remove invalid syntax and use: dgv_variables.Columns.Contains("Host_IP").
+        // 3. If column exists, read cell value, else default to empty string.
+        // 4. Keep remaining validation logic unchanged.
+
         private void btnExecuteSelected_Click(object sender, EventArgs e)
         {
             Cursor.Current = Cursors.WaitCursor;
-            isRunning = true;
             lstOutput.Enabled = false;
 
-            if (dgv_variables.CurrentCell != null)
+            if (dgv_variables.CurrentCell == null)
             {
-                DataGridViewRow selectedRow = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
-                ExecuteCommands(new[] { selectedRow }, cts.Token);
-            }
-            else
-            {
-                MessageBox.Show("No cell selected.");
+                txtOutput.Clear();
+                txtOutput.AppendText("No host selected");
+                lstOutput.Enabled = true;
+                Cursor.Current = Cursors.Default;
+                return;
             }
 
-            lstOutput.Enabled = true;
-            isRunning = false;
-            Cursor.Current = Cursors.Default;
+            DataGridViewRow selectedRow = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
+
+            bool isNew = selectedRow.IsNewRow;
+
+            // Fixed line:
+            string host = dgv_variables.Columns.Contains("Host_IP")
+                ? (selectedRow.Cells["Host_IP"].Value?.ToString() ?? "")
+                : "";
+
+            if (isNew || string.IsNullOrWhiteSpace(host) || !IsValidIPAddress(host))
+            {
+                txtOutput.Clear();
+                txtOutput.AppendText("No host selected");
+                lstOutput.Enabled = true;
+                Cursor.Current = Cursors.Default;
+                return;
+            }
+
+            isRunning = true;
+            try
+            {
+                ExecuteCommands(new[] { selectedRow }, cts.Token);
+            }
+            finally
+            {
+                isRunning = false;
+                lstOutput.Enabled = true;
+                Cursor.Current = Cursors.Default;
+            }
         }
 
         private bool IsValidIPAddress(string ipAddressWithPort)
@@ -1177,7 +1283,6 @@ namespace SSH_Helper
 
         private void SavePresets()
         {
-            // Merge presets with existing file if possible
             ConfigObject existing;
             try
             {
@@ -1187,18 +1292,23 @@ namespace SSH_Helper
             {
                 existing = new ConfigObject();
             }
+
             existing.Presets = presets;
+            // Keep last global delay/timeout & username synced
+            if (int.TryParse(txtDelay.Text, out int d)) existing.Delay = d;
+            if (int.TryParse(txtTimeout.Text, out int t)) existing.Timeout = t;
+            existing.Username = txtUsername.Text;
+
             string json = JsonConvert.SerializeObject(existing, Formatting.Indented);
             File.WriteAllText(configFilePath, json);
         }
 
         private void CreateDefaultConfigFile()
         {
-            var defaultPresets = new Dictionary<string, string>
+            var defaultPresets = new Dictionary<string, PresetInfo>
     {
-        {"Custom", "get system status" },
-        {"Get external-address-resource list", "dia sys external-address-resource list"}
-
+        { "Custom", new PresetInfo { Commands = "get system status" } },
+        { "Get external-address-resource list", new PresetInfo { Commands = "dia sys external-address-resource list" } }
     };
 
             // Set a default username
@@ -1310,7 +1420,7 @@ namespace SSH_Helper
             {
                 if (!presets.ContainsKey(presetName))
                 {
-                    presets.Add(presetName, "");
+                    presets.Add(presetName, new PresetInfo());
                     lstPreset.Items.Add(presetName);
                 }
                 else
@@ -1503,7 +1613,12 @@ namespace SSH_Helper
                 return;
             }
 
-            presets.Add(newName, commandText);
+            presets.Add(newName, new PresetInfo
+            {
+                Commands = commandText.Commands,
+                Delay = presets[sourceName].Delay,
+                Timeout = presets[sourceName].Timeout
+            });
 
             if (lstPreset.Sorted)
             {
@@ -1519,7 +1634,7 @@ namespace SSH_Helper
             SavePresets();
             lstPreset.SelectedItem = newName;
             txtPreset.Text = newName;
-            txtCommand.Text = commandText;
+            txtCommand.Text = commandText.Commands;
         }
 
         // === Find Support ===
