@@ -14,8 +14,11 @@ namespace SSH_Helper
 
     public partial class Form1 : Form
     {
-        private const string ApplicationVersion = "0.2-Beta";
+        private const string ApplicationVersion = "0.3-Beta";
         private const string ApplicationName = "SSH_Helper";
+
+        private const int DefaultPollIntervalMs = 60; 
+
         public class ConfigObject
         {
             public Dictionary<string, PresetInfo>? Presets { get; set; }
@@ -43,6 +46,10 @@ namespace SSH_Helper
         private bool _initialPresetDefaultsSaved = false;
         private bool _csvDirty = false;
         private string configFilePath;
+
+        // Add fields
+        private bool _debugCaptureRaw = false;
+        private StringBuilder? _rawBuffer;
 
         public Form1()
         {
@@ -119,10 +126,6 @@ namespace SSH_Helper
             if (string.IsNullOrEmpty(txtTimeout.Text))
             {
                 txtTimeout.Text = "10";
-            }
-            if (string.IsNullOrEmpty(txtDelay.Text))
-            {
-                txtDelay.Text = "500";
             }
 
             ApplyDefaultDelayTimeoutToPresetsAndSave();
@@ -1011,12 +1014,37 @@ namespace SSH_Helper
             {
                 using (var client = new SshClient(ipAddress, port, username, password))
                 {
-                    client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(int.Parse(txtTimeout.Text));
-                    client.Connect();
-                    using (var shellStream = client.CreateShellStream("xterm", 80, 24, 800, 600, 1024))
+                    client.ErrorOccurred += (s, a) =>
                     {
-                        HandleCommandExecution(shellStream, commands, row, ref isFirst, ipAddress, port);
+                        if (a.Exception != null && isRunning)
+                        {
+                            this.Invoke(new Action(() =>
+                            {
+                                txtOutput.AppendText(Environment.NewLine +
+                                                     $"[SSH.NET Error] {a.Exception.GetType().Name}: {a.Exception.Message}" +
+                                                     Environment.NewLine);
+                            }));
+                        }
+                    };
+
+                    if (!int.TryParse(txtTimeout.Text, out var timeoutSec)) timeoutSec = 10;
+                    client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(timeoutSec);
+
+                    client.Connect();
+
+                    using (var shellStream = client.CreateShellStream("xterm", 200, 48, 1200, 800, 16384))
+                    {
+                        try
+                        {
+                            HandleCommandExecution(shellStream, commands, row, ref isFirst, ipAddress, port);
+                        }
+                        catch (Exception ex)
+                        {
+                            // Execution/read-stage error (not an actual connect failure)
+                            HandleException(false, ex, ipAddress, port);
+                        }
                     }
+
                     client.Disconnect();
                 }
             }
@@ -1024,35 +1052,279 @@ namespace SSH_Helper
             {
                 HandleException(true, authEx, ipAddress, port);
             }
+            catch (Renci.SshNet.Common.SshConnectionException ex)
+            {
+                HandleException(false, ex, ipAddress, port);
+            }
+            catch (Renci.SshNet.Common.SshOperationTimeoutException ex)
+            {
+                HandleException(false, ex, ipAddress, port);
+            }
+            catch (System.Net.Sockets.SocketException ex)
+            {
+                HandleException(false, ex, ipAddress, port);
+            }
             catch (Exception ex)
             {
                 HandleException(false, ex, ipAddress, port);
             }
+        }
 
+        private static string NormalizeTerminalOutput(string input, int tabSize = 8)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+
+            var sbOut = new StringBuilder(input.Length + 64);
+            var line = new StringBuilder(256);
+            int cursor = 0;
+            int savedCursor = -1;
+
+            void EnsureLen(int len)
+            {
+                if (line.Length < len)
+                    line.Append(' ', len - line.Length);
+            }
+
+            void CommitLine()
+            {
+                // Trim trailing spaces (keeps leading indent intact)
+                int end = line.Length;
+                while (end > 0 && line[end - 1] == ' ') end--;
+                sbOut.Append(line.ToString(0, end));
+                sbOut.Append("\r\n");
+                line.Clear();
+                cursor = 0;
+            }
+
+            int ParseIntDefault(string s, int def)
+            {
+                return int.TryParse(s, out var v) && v > 0 ? v : def;
+            }
+
+            for (int i = 0; i < input.Length; i++)
+            {
+                char c = input[i];
+
+                if (c == '\r')
+                {
+                    cursor = 0; // CR: return to column 0
+                }
+                else if (c == '\n')
+                {
+                    CommitLine();
+                }
+                else if (c == '\t')
+                {
+                    int nextStop = ((cursor / tabSize) + 1) * tabSize;
+                    EnsureLen(nextStop);
+                    cursor = nextStop;
+                }
+                else if (c == '\b')
+                {
+                    if (cursor > 0) cursor--;
+                }
+                else if (c == (char)0x1B) // ESC
+                {
+                    // Support ESC[s (save), ESC[u (restore)
+                    if (i + 1 < input.Length && input[i + 1] == 's')
+                    {
+                        savedCursor = cursor; i += 1; continue;
+                    }
+                    if (i + 1 < input.Length && input[i + 1] == 'u')
+                    {
+                        if (savedCursor >= 0) cursor = Math.Min(savedCursor, line.Length);
+                        i += 1; continue;
+                    }
+
+                    // CSI: ESC[
+                    if (i + 1 < input.Length && input[i + 1] == '[')
+                    {
+                        i += 2;
+                        var param = new StringBuilder();
+                        while (i < input.Length)
+                        {
+                            char ch = input[i];
+                            if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))
+                            {
+                                char cmd = ch;
+                                string p = param.ToString(); // e.g. "2K", "10C", "12;34H"
+                                                             // Split params by ';'
+                                string[] parts = p.Split(';', StringSplitOptions.RemoveEmptyEntries);
+
+                                switch (cmd)
+                                {
+                                    case 'X': // ECH: erase n chars from cursor (replace with spaces, keep length)
+                                        {
+                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
+                                            if (cursor < line.Length)
+                                            {
+                                                int cnt = Math.Min(n, line.Length - cursor);
+                                                EnsureLen(cursor + cnt);
+                                                for (int j = 0; j < cnt; j++)
+                                                    line[cursor + j] = ' ';
+                                            }
+                                        }
+                                        break;
+
+                                    case 's': // CSI save cursor
+                                        savedCursor = cursor;
+                                        break;
+
+                                    case 'u': // CSI restore cursor
+                                        if (savedCursor >= 0) cursor = Math.Min(savedCursor, line.Length);
+                                        break;
+
+                                    case 'K':
+                                        {
+                                            int mode = parts.Length > 0 ? ParseIntDefault(parts[0], 0) : 0;
+                                            if (mode == 2)
+                                            {
+                                                line.Clear();
+                                                cursor = 0;
+                                            }
+                                            else if (mode == 0)
+                                            {
+                                                if (cursor < line.Length)
+                                                    line.Remove(cursor, line.Length - cursor);
+                                            }
+                                            else if (mode == 1)
+                                            {
+                                                // Erase from start to cursor (retain tail)
+                                                if (cursor > 0)
+                                                {
+                                                    int keep = line.Length - cursor;
+                                                    var tail = keep > 0 ? line.ToString(cursor, keep) : string.Empty;
+                                                    line.Clear();
+                                                    line.Append(new string(' ', cursor));
+                                                    if (keep > 0)
+                                                    {
+                                                        EnsureLen(cursor + keep);
+                                                        for (int j = 0; j < keep; j++)
+                                                            line[cursor + j] = tail[j];
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        break;
+                                    case 'C': // CUF: forward n
+                                        {
+                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
+                                            cursor += n;
+                                        }
+                                        break;
+                                    case 'D': // CUB: back n
+                                        {
+                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
+                                            cursor = Math.Max(0, cursor - n);
+                                        }
+                                        break;
+                                    case 'G': // CHA: to column n (1-based)
+                                        {
+                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
+                                            cursor = Math.Max(0, n - 1);
+                                        }
+                                        break;
+                                    case 'H': // CUP row;col (1-based) – honor col, ignore row
+                                    case 'f': // HVP row;col (1-based)
+                                        {
+                                            int col = 1;
+                                            if (parts.Length >= 2)
+                                                col = ParseIntDefault(parts[1], 1);
+                                            else if (parts.Length == 1)
+                                                col = ParseIntDefault(parts[0], 1);
+                                            cursor = Math.Max(0, col - 1);
+                                        }
+                                        break;
+                                    case '@': // ICH: insert n spaces at cursor
+                                        {
+                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
+                                            EnsureLen(cursor);
+                                            line.Insert(cursor, new string(' ', n));
+                                            // cursor stays
+                                        }
+                                        break;
+                                    case 'P': // DCH: delete n chars at cursor
+                                        {
+                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
+                                            if (cursor < line.Length)
+                                            {
+                                                int del = Math.Min(n, line.Length - cursor);
+                                                line.Remove(cursor, del);
+                                            }
+                                        }
+                                        break;
+                                    case 'm':
+                                        // SGR (colors/styles) – ignore for plain-text normalization
+                                        break;
+                                    default:
+                                        // Ignore other CSI commands
+                                        break;
+                                }
+                                break; // exit CSI loop
+                            }
+                            else
+                            {
+                                param.Append(ch);
+                                i++;
+                            }
+                        }
+                    }
+                    // else: unknown ESC sequence – ignore
+                }
+                else if (c >= ' ' && c <= '~')
+                {
+                    EnsureLen(cursor + 1);
+                    line[cursor] = c;
+                    cursor++;
+                }
+                else
+                {
+                    // Ignore other control chars
+                }
+            }
+
+            if (line.Length > 0)
+            {
+                // Keep last line without forcing a trailing CRLF
+                sbOut.Append(line);
+            }
+
+            return sbOut.ToString();
         }
 
         private void HandleCommandExecution(ShellStream shellStream, string[] commands, DataGridViewRow row, ref bool isFirst, string ipAddress, int port)
         {
-            shellStream.WriteLine(""); // Send a carriage return to trigger the prompt
-            shellStream.Flush();
             if (!isRunning) return;
-            Thread.Sleep(int.Parse(txtDelay.Text));
-            var response = shellStream.Read();
-            response = Regex.Replace(response, @"[^\u0020-\u007E\r\n\t]", "");
-            //response = Regex.Replace(response, @"\x1B\[[0-?]*[ -/]*[@-~]", "");  // Remove ANSI escape codes
-            response = response.Replace("\n", "\r\n");  // Make sure newlines are compatible with Windows
-            string[] lines = response.Split(new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-            string prompt = lines.LastOrDefault()?.Trim() ?? "";
 
-            string header = $"{new string('#', 20)} CONNECTED TO!!! {ipAddress}:{port} {prompt} {new string('#', 20)}";
+            if (_debugCaptureRaw) _rawBuffer = new StringBuilder(256 * 1024);
+
+            // Use fixed poll interval; keep Timeout user-configurable
+            int delayMs = DefaultPollIntervalMs;
+            if (!int.TryParse(txtTimeout.Text, out var timeoutSec)) timeoutSec = 10;
+            int idleTimeoutMs = Math.Max(1000, timeoutSec * 1000);
+
+            // Trigger prompt and read initial banner/prompt
+            shellStream.WriteLine("");
+            shellStream.Flush();
+
+            string banner = ReadAvailable(shellStream, delayMs, 800, maxOverallMs: 1500, stopOnLikelyPrompt: true);
+            banner = Regex.Replace(banner, @"[^\u0020-\u007E\r\n\t\b\u001B]", "");
+            banner = NormalizeTerminalOutput(banner);
+
+            if (!TryDetectPromptFromBuffer(banner, out var promptText))
+            {
+                var lines = banner.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+                promptText = lines.LastOrDefault()?.TrimEnd() ?? "";
+            }
+
+            var promptRegex = BuildPromptRegex(promptText);
+
+            string header = $"{new string('#', 20)} CONNECTED TO!!! {ipAddress}:{port} {promptText} {new string('#', 20)}";
             string foo = new string('#', header.Length);
 
             if (!isFirst)
             {
-                this.Invoke(new Action(() =>
-                {
-                    txtOutput.AppendText(Environment.NewLine);
-                }));
+                this.Invoke(new Action(() => txtOutput.AppendText(Environment.NewLine)));
             }
             isFirst = false;
 
@@ -1060,83 +1332,105 @@ namespace SSH_Helper
             {
                 this.Invoke(new Action(() =>
                 {
-                    txtOutput.AppendText(foo + Environment.NewLine + header + Environment.NewLine + foo + Environment.NewLine + prompt);
+                    txtOutput.AppendText(foo + Environment.NewLine + header + Environment.NewLine + foo + Environment.NewLine + promptText);
                 }));
             }
 
             foreach (string commandTemplate in commands)
             {
                 if (!isRunning) break;
-                if (!string.IsNullOrWhiteSpace(commandTemplate) && !commandTemplate.StartsWith("#"))
+                if (string.IsNullOrWhiteSpace(commandTemplate) || commandTemplate.StartsWith("#")) continue;
+
+                string commandToExecute = commandTemplate;
+
+                // Safe ${var} substitution (no exception if column missing)
+                foreach (Match match in Regex.Matches(commandTemplate, @"\$\{([^}]+)\}"))
                 {
-                    string commandToExecute = commandTemplate;
-                    foreach (Match match in Regex.Matches(commandTemplate, @"\$\{([^}]+)\}"))
+                    string variableName = match.Groups[1].Value;
+                    string columnValue = "";
+                    if (row?.DataGridView?.Columns.Contains(variableName) == true)
                     {
-                        string variableName = match.Groups[1].Value;
-                        string columnValue = row.Cells[variableName].Value?.ToString() ?? "";
-                        commandToExecute = commandToExecute.Replace($"${{{variableName}}}", columnValue);
+                        columnValue = row.Cells[variableName].Value?.ToString() ?? "";
                     }
+                    commandToExecute = commandToExecute.Replace($"${{{variableName}}}", columnValue);
+                }
 
-                    if (string.IsNullOrWhiteSpace(commandToExecute)) continue;
+                if (string.IsNullOrWhiteSpace(commandToExecute)) continue;
 
-                    shellStream.WriteLine(commandToExecute);
-                    shellStream.Flush();
+                shellStream.WriteLine(commandToExecute);
+                shellStream.Flush();
 
-                    // read output with automatic pager handling
-                    int delayMs = int.Parse(txtDelay.Text);
-                    int idleTimeoutMs = Math.Max(1000, int.Parse(txtTimeout.Text) * 1000); // minimum 1s
-                    var output = ReadAllWithPager(shellStream, delayMs, idleTimeoutMs);
+                bool matchedPrompt;
+                string? updatedPromptLiteral;
+                var output = ReadUntilPromptWithPager(shellStream, promptRegex, delayMs, idleTimeoutMs, out matchedPrompt, out updatedPromptLiteral);
 
-                    // remove echoed command prefix artifact if present
-                    if (output.StartsWith(commandToExecute + "\r\r\n"))
+                if (!string.IsNullOrEmpty(updatedPromptLiteral) && !string.Equals(updatedPromptLiteral, promptText, StringComparison.Ordinal))
+                {
+                    promptText = updatedPromptLiteral;
+                    promptRegex = BuildPromptRegex(promptText);
+                }
+
+                if (output.StartsWith(commandToExecute + "\r\r\n", StringComparison.Ordinal))
+                {
+                    output = Regex.Replace(output, Regex.Escape(commandToExecute) + "\r\r\n", commandToExecute + "\r\n");
+                }
+
+                if (isRunning)
+                {
+                    this.Invoke(new Action(() =>
                     {
-                        output = Regex.Replace(output, Regex.Escape(commandToExecute) + "\r\r\n", commandToExecute + "\r\n");
-                    }
-
-                    // final sanitize
-                    output = Regex.Replace(output, @"[^\u0020-\u007E\r\n\t]", "");
-
-                    if (isRunning)
-                    {
-                        this.Invoke(new Action(() =>
-                        {
-                            txtOutput.AppendText(output);
-                        }));
-                    }
+                        txtOutput.AppendText(output);
+                    }));
                 }
             }
 
+            // Add this here to capture raw input/output if enabled
+            if (_debugCaptureRaw && _rawBuffer is { Length: > 0 })
+            {
+                File.WriteAllText(Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                    $"ssh_raw_{DateTime.Now:yyyyMMdd_HHmmss}.txt"),
+                    _rawBuffer.ToString(), new UTF8Encoding(false));
+                _rawBuffer.Clear();
+            }
         }
 
-        private string ReadAllWithPager(ShellStream shellStream, int pollIntervalMs, int maxDurationMs)
+        private static string FlattenException(Exception ex)
         {
-            // maxDurationMs now represents an inactivity timeout (reset on data or pager advance)
             var sb = new StringBuilder();
-
-            var sw = Stopwatch.StartNew();
-            long lastActivityMs = 0; // time of last data OR pager advance
-
-            int idleCutoffMs = Math.Clamp(pollIntervalMs * 3, 150, 800); // fast-exit idle (micro idle while still receiving)
-            int pageCount = 0;
-            const int maxPages = 50000;
-
-            while (isRunning && pageCount < maxPages)
+            for (var e = ex; e != null; e = e.InnerException)
             {
-                // Inactivity timeout check (no data / no pager advance for maxDurationMs)
-                if (sw.ElapsedMilliseconds - lastActivityMs > maxDurationMs)
-                    break;
+                sb.AppendLine($"{e.GetType().Name}: {e.Message}");
+            }
+            return sb.ToString();
+        }
+
+        // Reads available data until inactivity (maxInactivityMs). Sanitizes and handles pager tokens.
+        private string ReadAvailable(ShellStream shellStream, int pollIntervalMs, int maxInactivityMs, int maxOverallMs = 2000, bool stopOnLikelyPrompt = true)
+        {
+            var sb = new StringBuilder();
+            var sw = Stopwatch.StartNew();
+            long lastDataMs = sw.ElapsedMilliseconds;
+            int idleQuietMs = Math.Clamp(pollIntervalMs * 3, 100, 400);
+
+            while (isRunning)
+            {
+                if (sw.ElapsedMilliseconds >= maxOverallMs) break;
+                if (sw.ElapsedMilliseconds - lastDataMs >= Math.Min(maxInactivityMs, maxOverallMs)) break;
 
                 if (shellStream.DataAvailable)
                 {
                     string chunk = shellStream.Read();
+
+                    // Capture raw before any processing
+                    if (_debugCaptureRaw) _rawBuffer?.Append(chunk);
+
                     if (!string.IsNullOrEmpty(chunk))
                     {
-                        // Activity: received data
-                        lastActivityMs = sw.ElapsedMilliseconds;
+                        lastDataMs = sw.ElapsedMilliseconds;
 
-                        // Sanitize + normalize
-                        chunk = Regex.Replace(chunk, @"[^\u0020-\u007E\r\n\t]", "");
-                        chunk = chunk.Replace("\n", "\r\n");
+                        // Sanitize
+                        chunk = Regex.Replace(chunk, @"[^\u0020-\u007E\r\n\t\b\u001B]", "");
 
                         bool sawPager;
                         chunk = StripPagerArtifacts(chunk, out sawPager);
@@ -1144,34 +1438,190 @@ namespace SSH_Helper
 
                         if (sawPager)
                         {
-                            // Pager advance counts as activity, so update timestamp again
-                            lastActivityMs = sw.ElapsedMilliseconds;
                             shellStream.Write(" ");
                             shellStream.Flush();
-                            pageCount++;
-                            // Immediately loop to allow more data to arrive
-                            continue;
+                        }
+
+                        if (stopOnLikelyPrompt)
+                        {
+                            if (TryDetectPromptFromBufferTail(sb.ToString(), out _))
+                            {
+                                if (sw.ElapsedMilliseconds - lastDataMs >= idleQuietMs)
+                                    break;
+                            }
                         }
                     }
                 }
                 else
                 {
-                    // Short idle check to exit quickly after output naturally finishes
-                    if (sw.ElapsedMilliseconds - lastActivityMs >= idleCutoffMs)
-                    {
-                        // Before breaking due to short idle, also ensure we have exceeded a minimal quiet period;
-                        // if overall inactivity timeout has not elapsed but we are just between bursts,
-                        // we give it a little more time by doing a small sleep and continuing.
-                        // If you prefer immediate break after idleCutoffMs, remove the below guard.
-                        if (sw.ElapsedMilliseconds - lastActivityMs >= idleCutoffMs)
-                            break;
-                    }
-
                     Thread.Sleep(Math.Min(50, Math.Max(10, pollIntervalMs / 2)));
                 }
             }
 
+            // Add this to capture raw input/output if enabled
+            if (_debugCaptureRaw)
+            {
+                _rawBuffer?.Append(sb.ToString());
+            }
+
             return sb.ToString();
+        }
+
+        // Read until the known prompt reappears (pager-aware). Will return earlier only if inactivity timeout elapses.
+        private string ReadUntilPromptWithPager(ShellStream shellStream, Regex promptRegex, int pollIntervalMs, int maxInactivityMs, out bool matchedPrompt, out string? updatedPromptLiteral)
+        {
+            matchedPrompt = false;
+            updatedPromptLiteral = null;
+
+            var sb = new StringBuilder();
+            var sw = Stopwatch.StartNew();
+            long lastActivityMs = 0;
+            int pageCount = 0;
+            const int maxPages = 50000;
+
+            while (isRunning && pageCount < maxPages)
+            {
+                if (sw.ElapsedMilliseconds - lastActivityMs > maxInactivityMs)
+                    break;
+
+                if (shellStream.DataAvailable)
+                {
+                    string chunk = shellStream.Read();
+
+                    // Capture raw before any processing
+                    if (_debugCaptureRaw) _rawBuffer?.Append(chunk);
+
+                    if (!string.IsNullOrEmpty(chunk))
+                    {
+                        lastActivityMs = sw.ElapsedMilliseconds;
+
+                        // Sanitize
+                        chunk = Regex.Replace(chunk, @"[^\u0020-\u007E\r\n\t\b\u001B]", "");
+
+                        bool sawPager;
+                        chunk = StripPagerArtifacts(chunk, out sawPager);
+                        sb.Append(chunk);
+
+                        if (sawPager)
+                        {
+                            lastActivityMs = sw.ElapsedMilliseconds;
+                            shellStream.Write(" ");
+                            shellStream.Flush();
+                            pageCount++;
+                            continue;
+                        }
+
+                        if (BufferEndsWithPrompt(sb, promptRegex))
+                        {
+                            matchedPrompt = true;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    Thread.Sleep(Math.Min(50, Math.Max(10, pollIntervalMs / 2)));
+                }
+            }
+
+            var resultRaw = sb.ToString();
+
+            // Update prompt if possible (tail heuristic)
+            if (!matchedPrompt && TryDetectPromptFromBufferTail(resultRaw, out var tailPrompt) && !string.IsNullOrWhiteSpace(tailPrompt))
+            {
+                updatedPromptLiteral = tailPrompt;
+            }
+
+            // Normalize CR/LF at the end (prevents overwrites like "set wifi-certificate" -> "ate ...")
+            var result = NormalizeTerminalOutput(resultRaw);
+            return result;
+        }
+
+        private static Regex BuildPromptRegex(string promptLiteral)
+        {
+            // Fallback if detection failed: match common prompt endings
+            if (string.IsNullOrWhiteSpace(promptLiteral))
+            {
+                return new Regex(@"^.*(?:[#>$%])[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
+            }
+
+            var escaped = Regex.Escape(promptLiteral);
+            // Match the prompt as a whole line, allow optional trailing whitespace
+            return new Regex($"^{escaped}[ \\t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        }
+
+        private static bool BufferEndsWithPrompt(StringBuilder sb, Regex promptRegex)
+        {
+            if (sb.Length == 0) return false;
+
+            // Look back only at the tail to reduce cost
+            int lookback = Math.Min(4096, sb.Length);
+            string tail = sb.ToString(sb.Length - lookback, lookback);
+
+            // Grab last non-empty line and test the prompt regex
+            var lines = tail.Split(new[] { "\r\n" }, StringSplitOptions.None);
+            for (int i = lines.Length - 1; i >= 0; i--)
+            {
+                var line = lines[i];
+                if (line.Length == 0) continue;
+                if (promptRegex.IsMatch(line))
+                    return true;
+                // Only test the last non-empty line
+                break;
+            }
+            return false;
+        }
+
+        private static bool IsLikelyPrompt(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return false;
+            line = line.TrimEnd();
+
+            // Heuristic: common CLI prompt endings
+            char last = line[^1];
+            if (last is '#' or '>' or '$' or '%')
+                return true;
+
+            return false;
+        }
+
+        private static bool TryDetectPromptFromBuffer(string buffer, out string prompt)
+        {
+            prompt = "";
+            if (string.IsNullOrEmpty(buffer)) return false;
+
+            var lines = buffer.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = lines.Length - 1; i >= 0; i--)
+            {
+                var candidate = lines[i].TrimEnd();
+                if (IsLikelyPrompt(candidate))
+                {
+                    prompt = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool TryDetectPromptFromBufferTail(string buffer, out string prompt)
+        {
+            // Similar to TryDetectPromptFromBuffer but optimized for tail-only checks
+            prompt = "";
+            if (string.IsNullOrEmpty(buffer)) return false;
+
+            int lookback = Math.Min(4096, buffer.Length);
+            string tail = buffer.Substring(buffer.Length - lookback);
+            var lines = tail.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = lines.Length - 1; i >= 0; i--)
+            {
+                string candidate = lines[i].TrimEnd();
+                if (IsLikelyPrompt(candidate))
+                {
+                    prompt = candidate;
+                    return true;
+                }
+            }
+            return false;
         }
 
         // Remove pager artifacts and tells us if a pager token was present this chunk.
@@ -1179,17 +1629,16 @@ namespace SSH_Helper
         {
             sawPager = false;
 
-            var pagerRegex = new Regex(@"--\s*More\s*--", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            // Match common pager prompts:
+            //  - "-- More --", "--More--", "----More----", etc. (case-insensitive)
+            var pagerRegex = new Regex(@"(?:(?:--\s*More\s*--)|(?:-+\s*More\s*-+))",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
             if (pagerRegex.IsMatch(chunk))
             {
                 sawPager = true;
                 chunk = pagerRegex.Replace(chunk, string.Empty);
             }
-
-            // Remove erase sequences
-            chunk = Regex.Replace(chunk, @"\r[ ]{2,}\r", "\r", RegexOptions.CultureInvariant);
-            // (Optional) remove whitespace-only lines produced by clearing
-            chunk = Regex.Replace(chunk, @"(?m)^[ \t]+$", "", RegexOptions.CultureInvariant);
 
             return chunk;
         }
@@ -1200,34 +1649,29 @@ namespace SSH_Helper
             {
                 return;
             }
-            // only add new line if there is not already text in txtOutput
             if (!string.IsNullOrEmpty(txtOutput.Text))
             {
                 this.Invoke(new Action(() =>
                 {
                     txtOutput.AppendText(Environment.NewLine);
                 }));
+            }
 
-            }
-            if (AuthException)
-            {
+            string title = AuthException
+                ? $"{new string('#', 20)} ERROR AUTHENTICATING TO!!! {ipAddress}:{port} {new string('#', 20)}"
+                : $"{new string('#', 20)} ERROR CONNECTING TO!!! {ipAddress}:{port} {new string('#', 20)}";
 
-                string errorMessage = $"{new string('#', 20)} ERROR AUTHENTICATING TO!!! {ipAddress}:{port} {new string('#', 20)}";
-                string preheader = new string('#', errorMessage.Length);
-                this.Invoke(new Action(() =>
-                {
-                    txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine + Environment.NewLine);
-                }));
-            }
-            else
+            string preheader = new string('#', title.Length);
+            string details = FlattenException(ex);
+
+            this.Invoke(new Action(() =>
             {
-                string errorMessage = $"{new string('#', 20)} ERROR CONNECTING TO!!! {ipAddress}:{port} {new string('#', 20)}";
-                string preheader = new string('#', errorMessage.Length);
-                this.Invoke(new Action(() =>
+                txtOutput.AppendText(preheader + Environment.NewLine + title + Environment.NewLine + preheader + Environment.NewLine);
+                if (!string.IsNullOrWhiteSpace(details))
                 {
-                    txtOutput.AppendText(preheader + Environment.NewLine + errorMessage + Environment.NewLine + preheader + Environment.NewLine + Environment.NewLine);
-                }));
-            }
+                    txtOutput.AppendText(details + Environment.NewLine);
+                }
+            }));
         }
 
         private void btnExecuteAll_Click(object sender, EventArgs e)

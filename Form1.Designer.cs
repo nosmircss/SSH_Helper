@@ -59,8 +59,6 @@
             btnExecuteSelected = new Button();
             contextPresetLstAdd = new ContextMenuStrip(components);
             toolStripMenuItem1 = new ToolStripMenuItem();
-            txtDelay = new TextBox();
-            label5 = new Label();
             txtTimeout = new TextBox();
             label7 = new Label();
             lstOutput = new ListBox();
@@ -80,6 +78,7 @@
             ExitMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             aboutToolStripMenuItem = new ToolStripMenuItem();
+            txtDelay = new TextBox();
             ((System.ComponentModel.ISupportInitialize)dgv_variables).BeginInit();
             contextMenuStrip1.SuspendLayout();
             contextPresetLst.SuspendLayout();
@@ -353,29 +352,10 @@
             toolStripMenuItem1.Text = "Add Preset";
             toolStripMenuItem1.Click += contextPresetLstAdd_Click;
             // 
-            // txtDelay
-            // 
-            txtDelay.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            txtDelay.Location = new Point(1341, 34);
-            txtDelay.Margin = new Padding(3, 2, 3, 2);
-            txtDelay.Name = "txtDelay";
-            txtDelay.Size = new Size(45, 23);
-            txtDelay.TabIndex = 30;
-            txtDelay.TextAlign = HorizontalAlignment.Right;
-            // 
-            // label5
-            // 
-            label5.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            label5.Location = new Point(1292, 37);
-            label5.Name = "label5";
-            label5.Size = new Size(44, 15);
-            label5.TabIndex = 31;
-            label5.Text = "Delay:";
-            // 
             // txtTimeout
             // 
             txtTimeout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            txtTimeout.Location = new Point(1242, 34);
+            txtTimeout.Location = new Point(1341, 34);
             txtTimeout.Margin = new Padding(3, 2, 3, 2);
             txtTimeout.Name = "txtTimeout";
             txtTimeout.Size = new Size(44, 23);
@@ -386,7 +366,7 @@
             // 
             label7.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             label7.AutoSize = true;
-            label7.Location = new Point(1182, 37);
+            label7.Location = new Point(1280, 39);
             label7.Name = "label7";
             label7.Size = new Size(55, 15);
             label7.TabIndex = 33;
@@ -530,6 +510,17 @@
             aboutToolStripMenuItem.Text = "About";
             aboutToolStripMenuItem.Click += aboutToolStripMenuItem_Click;
             // 
+            // txtDelay
+            // 
+            txtDelay.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            txtDelay.Location = new Point(1341, 34);
+            txtDelay.Margin = new Padding(3, 2, 3, 2);
+            txtDelay.Name = "txtDelay";
+            txtDelay.Size = new Size(45, 23);
+            txtDelay.TabIndex = 30;
+            txtDelay.TextAlign = HorizontalAlignment.Right;
+            txtDelay.Visible = false;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -541,8 +532,6 @@
             Controls.Add(lstOutput);
             Controls.Add(label7);
             Controls.Add(txtTimeout);
-            Controls.Add(label5);
-            Controls.Add(txtDelay);
             Controls.Add(btnExecuteSelected);
             Controls.Add(btnSave);
             Controls.Add(label6);
@@ -562,6 +551,7 @@
             Controls.Add(txtPreset);
             Controls.Add(btnStopAll);
             Controls.Add(btnExecuteAll);
+            Controls.Add(txtDelay);
             MainMenuStrip = menuStrip1;
             Name = "Form1";
             Text = "SSH_Helper";
@@ -606,8 +596,6 @@
         private Button btnExecuteSelected;
         private ContextMenuStrip contextPresetLstAdd;
         private ToolStripMenuItem toolStripMenuItem1;
-        private TextBox txtDelay;
-        private Label label5;
         private TextBox txtTimeout;
         private Label label7;
         private ListBox lstOutput;
@@ -628,5 +616,6 @@
         private ToolStripMenuItem helpToolStripMenuItem;
         private ToolStripMenuItem aboutToolStripMenuItem;
         private ToolStripMenuItem ExitMenuItem;
+        private TextBox txtDelay;
     }
 }
