@@ -14,7 +14,7 @@ namespace SSH_Helper
 
     public partial class Form1 : Form
     {
-        private const string ApplicationVersion = "0.3-Beta";
+        private const string ApplicationVersion = "0.32-Beta";
         private const string ApplicationName = "SSH_Helper";
 
         private const int DefaultPollIntervalMs = 60; 
@@ -35,6 +35,8 @@ namespace SSH_Helper
         }
 
         private bool _exitConfirmed = false;
+        private string? _activePresetName;                 // Currently loaded (saved) preset name
+        private bool _suppressPresetSelectionChange = false; // Prevent recursive prompting during programmatic selection changes
         private int rightClickedColumnIndex = -1; // Field to store the index of the right-clicked column
         private int rightClickedRowIndex = -1; // Field to store the index of the right-clicked row
         private string loadedFilePath;
@@ -262,17 +264,49 @@ namespace SSH_Helper
 
         private void lstPreset_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (lstPreset.SelectedItem != null)
+            if (_suppressPresetSelectionChange) return;
+            if (lstPreset.SelectedItem == null) return;
+
+            string newPresetName = lstPreset.SelectedItem.ToString();
+
+            // If switching away from the active preset and current edits are dirty, prompt
+            if (!string.IsNullOrEmpty(_activePresetName) &&
+                !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
+                IsPresetDirty())
             {
-                string presetName = lstPreset.SelectedItem.ToString();
-                if (presets.TryGetValue(presetName, out var info))
+                var result = MessageBox.Show(
+                    $"Save changes to preset '{_activePresetName}'?",
+                    "Unsaved Preset",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Cancel)
                 {
-                    txtCommand.Text = info.Commands;
-                    txtPreset.Text = presetName;
-                    if (info.Delay.HasValue) txtDelay.Text = info.Delay.Value.ToString();
-                    if (info.Timeout.HasValue) txtTimeout.Text = info.Timeout.Value.ToString();
+                    // Revert selection back to previously active preset
+                    _suppressPresetSelectionChange = true;
+                    int revertIndex = lstPreset.Items.IndexOf(_activePresetName);
+                    if (revertIndex >= 0)
+                        lstPreset.SelectedIndex = revertIndex;
+                    _suppressPresetSelectionChange = false;
+                    return;
                 }
+                if (result == DialogResult.Yes)
+                {
+                    // Save current edits before switching
+                    btnSave_Click(this, EventArgs.Empty);
+                }
+                // If No -> discard edits and continue loading the newly selected preset
             }
+
+            if (presets.TryGetValue(newPresetName, out var info))
+            {
+                txtCommand.Text = info.Commands;
+                txtPreset.Text = newPresetName;
+                if (info.Delay.HasValue) txtDelay.Text = info.Delay.Value.ToString();
+                if (info.Timeout.HasValue) txtTimeout.Text = info.Timeout.Value.ToString();
+            }
+
+            _activePresetName = newPresetName; // Now this is the active (clean) preset
         }
 
         private void dgv_variables_CellLeave(object sender, DataGridViewCellEventArgs e)
@@ -659,20 +693,10 @@ namespace SSH_Helper
 
         private void btnOpenCSV_Click(object sender, EventArgs e)
         {
-            using (OpenFileDialog ofd = new OpenFileDialog())
-            {
-                ofd.Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*";
-                ofd.Multiselect = false;
+            if (!EnsureCsvChangesSavedBeforeReplacing())
+                return;
 
-                if (ofd.ShowDialog() == DialogResult.OK)
-                {
-                    loadedFilePath = ofd.FileName;  // Store the loaded file path
-                    DataTable dataTable = LoadCsvIntoDataTable(ofd.FileName);
-                    dgv_variables.Columns.Clear();
-                    dgv_variables.DataSource = dataTable;
-                    _csvDirty = false; // Loaded from disk
-                }
-            }
+            OpenCsvInteractive();
         }
 
         private DataTable LoadCsvIntoDataTable(string filePath)
@@ -944,7 +968,8 @@ namespace SSH_Helper
                         Delay = perDelay,
                         Timeout = perTimeout
                     });
-                    lstPreset.Items.Add(presetName);
+                    if (!lstPreset.Items.Contains(presetName))
+                        lstPreset.Items.Add(presetName);
                 }
                 else
                 {
@@ -952,7 +977,9 @@ namespace SSH_Helper
                     presets[presetName].Delay = perDelay;
                     presets[presetName].Timeout = perTimeout;
                 }
-                SavePresets(); // Save presets after updating
+
+                SavePresets();
+                _activePresetName = presetName; // Mark as clean
             }
             else
             {
@@ -1516,6 +1543,17 @@ namespace SSH_Helper
                             matchedPrompt = true;
                             break;
                         }
+
+                        if (!matchedPrompt)
+                        {
+                            if (TryDetectDifferentPromptTail(sb, promptRegex, out var differentPrompt))
+                            {
+                                // We discovered a new prompt form (e.g. entered/exited a config mode).
+                                matchedPrompt = true;             // Treat as end of command output.
+                                updatedPromptLiteral = differentPrompt; // Signal caller to rebuild regex adaptively.
+                                break;
+                            }
+                        }
                     }
                 }
                 else
@@ -1539,15 +1577,64 @@ namespace SSH_Helper
 
         private static Regex BuildPromptRegex(string promptLiteral)
         {
-            // Fallback if detection failed: match common prompt endings
+            // Generic fallback if nothing known yet
             if (string.IsNullOrWhiteSpace(promptLiteral))
-            {
                 return new Regex(@"^.*(?:[#>$%])[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
-            }
 
-            var escaped = Regex.Escape(promptLiteral);
-            // Match the prompt as a whole line, allow optional trailing whitespace
-            return new Regex($"^{escaped}[ \\t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
+            // Trim trailing whitespace
+            var trimmed = Regex.Replace(promptLiteral, @"\s+$", "");
+
+            // Remove trailing ANSI (already mostly sanitized earlier, but be safe)
+            trimmed = Regex.Replace(trimmed, @"\x1B\[[0-9;]*[A-Za-z]", "");
+
+            // Ensure it ends with a typical prompt terminator; if not, fall back
+            if (!Regex.IsMatch(trimmed, @"[#>$%]\s*$"))
+                return new Regex(@"^.*(?:[#>$%])[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
+            // Strip final prompt char for base extraction
+            char terminator = trimmed[^1];
+            string body = trimmed[..^1].TrimEnd();
+
+            // Split off any mode/context portion (parenthetical) but allow it to vary
+            // e.g. "MSD903-DFWB (setting)" => baseHost = "MSD903-DFWB"
+            string baseHost;
+            int parenIdx = body.IndexOf('(');
+            if (parenIdx > 0)
+                baseHost = body[..parenIdx].TrimEnd();
+            else
+                baseHost = body;
+
+            if (string.IsNullOrWhiteSpace(baseHost))
+                baseHost = body; // fallback
+
+            string baseEsc = Regex.Escape(baseHost);
+
+            // Build adaptive pattern:
+            // ^<base>(\s*\([^)]+\))?\s*[#>$%]\s*$
+            string pattern = $"^{baseEsc}(?:\\s*\\([^)]+\\))?\\s*[{Regex.Escape(terminator.ToString())}#>$%]\\s*$";
+
+            return new Regex(pattern, RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        }
+
+        private static bool TryDetectDifferentPromptTail(StringBuilder sb, Regex currentPromptRegex, out string newPrompt)
+        {
+            newPrompt = "";
+            if (sb.Length == 0) return false;
+
+            int lookback = Math.Min(4096, sb.Length);
+            string tail = sb.ToString(sb.Length - lookback, lookback);
+            var lines = tail.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = lines.Length - 1; i >= 0; i--)
+            {
+                var line = lines[i].TrimEnd();
+                if (IsLikelyPrompt(line) && !currentPromptRegex.IsMatch(line))
+                {
+                    newPrompt = line;
+                    return true;
+                }
+                if (line.Length > 0) break;
+            }
+            return false;
         }
 
         private static bool BufferEndsWithPrompt(StringBuilder sb, Regex promptRegex)
@@ -1910,6 +1997,7 @@ namespace SSH_Helper
                 lstPreset.Items.Add(newName);
                 lstPreset.SelectedItem = newName;
                 txtPreset.Text = newName;
+                _activePresetName = newName;
             }
 
 
@@ -2143,6 +2231,7 @@ namespace SSH_Helper
             lstPreset.SelectedItem = newName;
             txtPreset.Text = newName;
             txtCommand.Text = commandText.Commands;
+            _activePresetName = newName;
         }
 
         // === Find Support ===
@@ -2591,20 +2680,10 @@ namespace SSH_Helper
 
         private void openCSVToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            using (OpenFileDialog ofd = new OpenFileDialog())
-            {
-                ofd.Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*";
-                ofd.Multiselect = false;
+            if (!EnsureCsvChangesSavedBeforeReplacing())
+                return;
 
-                if (ofd.ShowDialog() == DialogResult.OK)
-                {
-                    loadedFilePath = ofd.FileName;  // Store the loaded file path
-                    DataTable dataTable = LoadCsvIntoDataTable(ofd.FileName);
-                    dgv_variables.Columns.Clear();
-                    dgv_variables.DataSource = dataTable;
-                    _csvDirty = false; // Loaded from disk
-                }
-            }
+            OpenCsvInteractive();
         }
 
         private void saveAsToolStripMenuItem1_Click(object sender, EventArgs e)
@@ -2677,28 +2756,7 @@ namespace SSH_Helper
                 dgv_variables.EndEdit();
             }
 
-            // Determine if current preset text deviates from saved preset
-            bool presetDirty = false;
-            string presetName = txtPreset.Text?.Trim() ?? string.Empty;
-            if (!string.IsNullOrEmpty(presetName) && presets.TryGetValue(presetName, out var info))
-            {
-                bool delayDiffers = int.TryParse(txtDelay.Text, out var dVal)
-                    ? (info.Delay?.Equals(dVal) ?? false) == false
-                    : info.Delay.HasValue;
-                bool timeoutDiffers = int.TryParse(txtTimeout.Text, out var tVal)
-                    ? (info.Timeout?.Equals(tVal) ?? false) == false
-                    : info.Timeout.HasValue;
-
-                presetDirty =
-                    !string.Equals(txtCommand.Text ?? string.Empty, info.Commands ?? string.Empty, StringComparison.Ordinal) ||
-                    delayDiffers ||
-                    timeoutDiffers;
-            }
-            else
-            {
-                // New preset text present but not saved
-                presetDirty = !string.IsNullOrWhiteSpace(presetName) && !string.IsNullOrWhiteSpace(txtCommand.Text);
-            }
+            bool presetDirty = IsPresetDirty();
 
             // Offer to save CSV changes first
             if (_csvDirty)
@@ -2750,6 +2808,85 @@ namespace SSH_Helper
 
             _exitConfirmed = true;
             this.Close(); // FormClosing will persist variables
+        }
+
+        private bool EnsureCsvChangesSavedBeforeReplacing()
+        {
+            // Commit any active edit so dirty flag is accurate
+            if (dgv_variables.IsCurrentCellInEditMode)
+                dgv_variables.EndEdit();
+
+            if (!_csvDirty)
+                return true;
+
+            var result = MessageBox.Show(
+                "You have unsaved CSV changes. Save before opening another file?",
+                "Unsaved CSV",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Cancel)
+                return false;
+
+            if (result == DialogResult.Yes)
+            {
+                if (!SaveCurrentCsv(promptIfNoPath: true))
+                    return false; // Save failed or user cancelled Save As
+            }
+
+            // No = discard changes
+            return true;
+        }
+
+        private void OpenCsvInteractive()
+        {
+            using (OpenFileDialog ofd = new OpenFileDialog())
+            {
+                ofd.Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*";
+                ofd.Multiselect = false;
+
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    loadedFilePath = ofd.FileName;
+                    DataTable dataTable = LoadCsvIntoDataTable(ofd.FileName);
+                    dgv_variables.Columns.Clear();
+                    dgv_variables.DataSource = dataTable;
+                    _csvDirty = false; // Freshly loaded
+                }
+            }
+        }
+
+        private bool IsPresetDirty()
+        {
+            string active = _activePresetName ?? "";
+            string currentName = txtPreset.Text?.Trim() ?? "";
+            string currentCommands = txtCommand.Text ?? "";
+
+            bool anyFieldsEntered = !string.IsNullOrWhiteSpace(currentName) || !string.IsNullOrWhiteSpace(currentCommands);
+
+            // If nothing has been loaded yet, any entered data counts as dirty (unsaved new preset)
+            if (string.IsNullOrEmpty(active))
+                return anyFieldsEntered;
+
+            if (!presets.TryGetValue(active, out var info))
+                return anyFieldsEntered;
+
+            bool nameChanged = !string.Equals(currentName, active, StringComparison.Ordinal);
+            bool commandsChanged = !string.Equals(currentCommands, info.Commands ?? "", StringComparison.Ordinal);
+
+            bool delayDiffers;
+            if (int.TryParse(txtDelay.Text, out var dVal))
+                delayDiffers = info.Delay != dVal;
+            else
+                delayDiffers = info.Delay.HasValue;
+
+            bool timeoutDiffers;
+            if (int.TryParse(txtTimeout.Text, out var tVal))
+                timeoutDiffers = info.Timeout != tVal;
+            else
+                timeoutDiffers = info.Timeout.HasValue;
+
+            return nameChanged || commandsChanged || delayDiffers || timeoutDiffers;
         }
 
     }
