@@ -31,6 +31,7 @@ namespace SSH_Helper
             public int? Timeout { get; set; }
         }
 
+        private bool _exitConfirmed = false;
         private int rightClickedColumnIndex = -1; // Field to store the index of the right-clicked column
         private int rightClickedRowIndex = -1; // Field to store the index of the right-clicked row
         private string loadedFilePath;
@@ -40,6 +41,7 @@ namespace SSH_Helper
         CancellationTokenSource cts = new CancellationTokenSource();
         // Add this field near other private fields
         private bool _initialPresetDefaultsSaved = false;
+        private bool _csvDirty = false;
         private string configFilePath;
 
         public Form1()
@@ -61,6 +63,13 @@ namespace SSH_Helper
             dgv_variables.CellClick += dgv_variables_CellClick;
             dgv_variables.ColumnAdded += dgv_variables_ColumnAdded;
             dgv_variables.CellLeave += dgv_variables_CellLeave;
+
+            // Track edits to mark CSV as dirty
+            dgv_variables.CellValueChanged += dgv_variables_CellValueChanged;
+            dgv_variables.RowsAdded += dgv_variables_RowsAdded;
+            dgv_variables.RowsRemoved += dgv_variables_RowsRemoved;
+            dgv_variables.ColumnRemoved += dgv_variables_ColumnRemoved;
+
             AttachClickEventHandlers();
 
             //presets
@@ -113,7 +122,7 @@ namespace SSH_Helper
             }
             if (string.IsNullOrEmpty(txtDelay.Text))
             {
-                txtDelay.Text = "250";
+                txtDelay.Text = "500";
             }
 
             ApplyDefaultDelayTimeoutToPresetsAndSave();
@@ -121,7 +130,22 @@ namespace SSH_Helper
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            Savevariables();  // Call this to save settings when the form is closing
+            // If closing wasn’t initiated via Exit menu (or not yet confirmed), confirm now
+            if (!_exitConfirmed)
+            {
+                // Optionally skip prompts on system shutdown
+                if (e.CloseReason != CloseReason.WindowsShutDown &&
+                    e.CloseReason != CloseReason.TaskManagerClosing)
+                {
+                    if (!ConfirmExitWorkflow())
+                    {
+                        e.Cancel = true;
+                        return;
+                    }
+                }
+            }
+
+            Savevariables(); // persist settings on exit
         }
 
         private void Savevariables()
@@ -254,6 +278,23 @@ namespace SSH_Helper
             dgv_variables.CommitEdit(DataGridViewDataErrorContexts.Commit);
         }
 
+        private void dgv_variables_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            _csvDirty = true;
+        }
+        private void dgv_variables_RowsAdded(object sender, DataGridViewRowsAddedEventArgs e)
+        {
+            _csvDirty = true;
+        }
+        private void dgv_variables_RowsRemoved(object sender, DataGridViewRowsRemovedEventArgs e)
+        {
+            _csvDirty = true;
+        }
+        private void dgv_variables_ColumnRemoved(object sender, DataGridViewColumnEventArgs e)
+        {
+            _csvDirty = true;
+        }
+
         private void dgv_variables_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Control && e.KeyCode == Keys.A)
@@ -314,6 +355,7 @@ namespace SSH_Helper
                 }
             }
             dgv_variables.Refresh();  // Optionally refresh the DataGridView to update the UI immediately
+            _csvDirty = true;
         }
 
         private void CopyDataGridViewToClipboard()
@@ -489,7 +531,7 @@ namespace SSH_Helper
                 }
 
                 dgv_variables.AllowUserToAddRows = true;  // Re-enable the ability to add rows
-
+                _csvDirty = true;
 
             }
         }
@@ -558,7 +600,6 @@ namespace SSH_Helper
                 {
                     cell.Selected = true;  // Select each cell in the row to visually highlight the entire row
                 }
-
             }
 
             // Handling clicks outside of cell areas but not outside the grid itself.
@@ -584,6 +625,22 @@ namespace SSH_Helper
                         rightClickedRowIndex = -1; // There is no row index for header clicks
                     }
 
+                    // Enable/disable "Delete Column" based on Host_IP protection
+                    if (rightClickedColumnIndex >= 0 && rightClickedColumnIndex < dgv_variables.Columns.Count)
+                    {
+                        var col = dgv_variables.Columns[rightClickedColumnIndex];
+                        bool isHostIp =
+                            string.Equals(col.Name, "Host_IP", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(col.HeaderText, "Host_IP", StringComparison.OrdinalIgnoreCase);
+                        deleteColumnToolStripMenuItem.Enabled = !isHostIp;
+                        renameColumnToolStripMenuItem.Enabled = !isHostIp;
+                    }
+                    else
+                    {
+                        deleteColumnToolStripMenuItem.Enabled = true;
+                        renameColumnToolStripMenuItem.Enabled = true;
+                    }
+
                     dgv_variables.ContextMenuStrip = contextMenuStrip1; // Assign the custom context menu
                     contextMenuStrip1.Show(dgv_variables, e.Location); // Show the context menu at the cursor location
                 }
@@ -592,6 +649,7 @@ namespace SSH_Helper
                     rightClickedColumnIndex = -1;
                     rightClickedRowIndex = -1;
                     dgv_variables.ContextMenuStrip = contextMenuStrip1; // Ensure the custom menu is enabled elsewhere
+                    deleteColumnToolStripMenuItem.Enabled = true;       // Default to enabled when not on a column
                 }
             }
         }
@@ -609,6 +667,7 @@ namespace SSH_Helper
                     DataTable dataTable = LoadCsvIntoDataTable(ofd.FileName);
                     dgv_variables.Columns.Clear();
                     dgv_variables.DataSource = dataTable;
+                    _csvDirty = false; // Loaded from disk
                 }
             }
         }
@@ -679,16 +738,26 @@ namespace SSH_Helper
 
                 // Adding the new column
                 dgv_variables.Columns.Add(columnName, columnName);
+                _csvDirty = true;
             }
         }
-
 
         private void deleteColumnToolStripMenuItem_Click(object sender, EventArgs e)
         {
             // Check if the index is valid
             if (rightClickedColumnIndex >= 0 && rightClickedColumnIndex < dgv_variables.Columns.Count)
             {
+                var col = dgv_variables.Columns[rightClickedColumnIndex];
+
+                if (string.Equals(col.Name, "Host_IP", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(col.HeaderText, "Host_IP", StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show("The Host_IP column cannot be deleted.", "Delete Column", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
                 dgv_variables.Columns.RemoveAt(rightClickedColumnIndex);
+                _csvDirty = true;
             }
         }
 
@@ -700,9 +769,10 @@ namespace SSH_Helper
                 DataGridViewRow row = dgv_variables.Rows[rightClickedRowIndex];
                 if (!row.IsNewRow) // Ensure it's not the new row
                 {
-                    dgv_variables.Rows.RemoveAt(rightClickedRowIndex); // Remove the row
-                                                                       // Adjust the selection after deletion
-                    if (dgv_variables.Rows.Count > 0) // Check if there are any data rows left
+                    dgv_variables.Rows.RemoveAt(rightClickedRowIndex);
+                    _csvDirty = true;
+
+                    if (dgv_variables.Rows.Count > 0)
                     {
                         int newSelectedIndex = rightClickedRowIndex < dgv_variables.Rows.Count ? rightClickedRowIndex : dgv_variables.Rows.Count - 1;
                         dgv_variables.Rows[newSelectedIndex].Selected = true;
@@ -750,10 +820,10 @@ namespace SSH_Helper
                     // Update both the HeaderText and Name properties of the column
                     columnToRename.HeaderText = newName;
                     columnToRename.Name = newName; // Assuming you also use Name in your logic
+                    _csvDirty = true;
                 }
             }
         }
-
 
         private void btnSaveAs_Click(object sender, EventArgs e)
         {
@@ -762,13 +832,12 @@ namespace SSH_Helper
                 sfd.Filter = "CSV files (*.csv)|*.csv";
                 sfd.Title = "Save as CSV";
                 if (!string.IsNullOrEmpty(loadedFilePath))
-                {
-                    sfd.FileName = Path.GetFileName(loadedFilePath);  // Use the loaded file's name as the default
-                }
+                    sfd.FileName = Path.GetFileName(loadedFilePath);
 
                 if (sfd.ShowDialog() == DialogResult.OK)
                 {
                     SaveDataGridViewToCSV(sfd.FileName);
+                    loadedFilePath = sfd.FileName; // ensure future 'Save' works
                 }
             }
         }
@@ -807,6 +876,7 @@ namespace SSH_Helper
                     }
                 }
             }
+            _csvDirty = false; // Saved
         }
 
         private void dgv_variables_RowPostPaint(object sender, DataGridViewRowPostPaintEventArgs e)
@@ -850,6 +920,7 @@ namespace SSH_Helper
                 // Re-add the Host_IP column
                 dgv_variables.Columns.Add("Host_IP", "Host IP");
             }
+            _csvDirty = true;
         }
 
         private void btnSave_Click(object sender, EventArgs e)
@@ -1838,7 +1909,7 @@ namespace SSH_Helper
 
                     contextPresetLst.Items.Add(exportItem);
                 }
-                
+
             }
 
             if (contextPresetLstAdd != null)
@@ -2067,5 +2138,175 @@ namespace SSH_Helper
                 }
             }
         }
+
+        private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using var dlg = new AboutDialog(ApplicationName, ApplicationVersion);
+            dlg.ShowDialog(this);
+        }
+
+        private void openCSVToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using (OpenFileDialog ofd = new OpenFileDialog())
+            {
+                ofd.Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*";
+                ofd.Multiselect = false;
+
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    loadedFilePath = ofd.FileName;  // Store the loaded file path
+                    DataTable dataTable = LoadCsvIntoDataTable(ofd.FileName);
+                    dgv_variables.Columns.Clear();
+                    dgv_variables.DataSource = dataTable;
+                    _csvDirty = false; // Loaded from disk
+                }
+            }
+        }
+
+        private void saveAsToolStripMenuItem1_Click(object sender, EventArgs e)
+        {
+            using (SaveFileDialog sfd = new SaveFileDialog())
+            {
+                sfd.Filter = "CSV files (*.csv)|*.csv";
+                sfd.Title = "Save as CSV";
+                if (!string.IsNullOrEmpty(loadedFilePath))
+                    sfd.FileName = Path.GetFileName(loadedFilePath);
+
+                if (sfd.ShowDialog() == DialogResult.OK)
+                {
+                    SaveDataGridViewToCSV(sfd.FileName);
+                    loadedFilePath = sfd.FileName; // capture chosen path
+                }
+            }
+        }
+
+        private bool SaveCurrentCsv(bool promptIfNoPath = true)
+        {
+            // Commit any in-progress edit so the latest cell value is persisted
+            if (dgv_variables.IsCurrentCellInEditMode)
+                dgv_variables.EndEdit();
+
+            if (string.IsNullOrWhiteSpace(loadedFilePath))
+            {
+                if (!promptIfNoPath) return false;
+                saveAsToolStripMenuItem1_Click(this, EventArgs.Empty);
+                return !string.IsNullOrWhiteSpace(loadedFilePath);
+            }
+
+            try
+            {
+                SaveDataGridViewToCSV(loadedFilePath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to save file:\r\n{ex.Message}", "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
+        private void saveToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            SaveCurrentCsv(promptIfNoPath: true);
+        }
+
+        private bool ConfirmExitWorkflow()
+        {
+            // If commands are running, confirm stop before exiting
+            if (isRunning)
+            {
+                var result = MessageBox.Show(
+                    "Execution is currently running. Stop and exit?",
+                    "Exit",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.No)
+                    return false;
+
+                btnStopAll_Click(this, EventArgs.Empty);
+            }
+
+            // Commit any in-progress grid edit
+            if (dgv_variables.IsCurrentCellInEditMode)
+            {
+                dgv_variables.EndEdit();
+            }
+
+            // Determine if current preset text deviates from saved preset
+            bool presetDirty = false;
+            string presetName = txtPreset.Text?.Trim() ?? string.Empty;
+            if (!string.IsNullOrEmpty(presetName) && presets.TryGetValue(presetName, out var info))
+            {
+                bool delayDiffers = int.TryParse(txtDelay.Text, out var dVal)
+                    ? (info.Delay?.Equals(dVal) ?? false) == false
+                    : info.Delay.HasValue;
+                bool timeoutDiffers = int.TryParse(txtTimeout.Text, out var tVal)
+                    ? (info.Timeout?.Equals(tVal) ?? false) == false
+                    : info.Timeout.HasValue;
+
+                presetDirty =
+                    !string.Equals(txtCommand.Text ?? string.Empty, info.Commands ?? string.Empty, StringComparison.Ordinal) ||
+                    delayDiffers ||
+                    timeoutDiffers;
+            }
+            else
+            {
+                // New preset text present but not saved
+                presetDirty = !string.IsNullOrWhiteSpace(presetName) && !string.IsNullOrWhiteSpace(txtCommand.Text);
+            }
+
+            // Offer to save CSV changes first
+            if (_csvDirty)
+            {
+                var saveCsv = MessageBox.Show(
+                    "You have unsaved CSV changes. Do you want to save before exiting?",
+                    "Save Changes",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (saveCsv == DialogResult.Cancel)
+                    return false;
+
+                if (saveCsv == DialogResult.Yes)
+                {
+                    if (!SaveCurrentCsv(promptIfNoPath: true))
+                    {
+                        // Save failed or cancelled in Save As
+                        return false;
+                    }
+                }
+            }
+
+            // Offer to save preset changes
+            if (presetDirty)
+            {
+                var savePreset = MessageBox.Show(
+                    "You have unsaved preset changes. Do you want to save the preset before exiting?",
+                    "Save Preset",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (savePreset == DialogResult.Cancel)
+                    return false;
+
+                if (savePreset == DialogResult.Yes)
+                {
+                    btnSave_Click(this, EventArgs.Empty);
+                }
+            }
+
+            return true;
+        }
+
+        private void ExitMenuItem_Click(object sender, EventArgs e)
+        {
+            if (!ConfirmExitWorkflow())
+                return;
+
+            _exitConfirmed = true;
+            this.Close(); // FormClosing will persist variables
+        }
+
     }
 }

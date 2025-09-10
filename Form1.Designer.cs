@@ -72,16 +72,25 @@
             deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
             label8 = new Label();
             btnStopAll = new Button();
+            menuStrip1 = new MenuStrip();
+            fileToolStripMenuItem = new ToolStripMenuItem();
+            openCSVToolStripMenuItem = new ToolStripMenuItem();
+            saveToolStripMenuItem = new ToolStripMenuItem();
+            saveAsToolStripMenuItem1 = new ToolStripMenuItem();
+            ExitMenuItem = new ToolStripMenuItem();
+            helpToolStripMenuItem = new ToolStripMenuItem();
+            aboutToolStripMenuItem = new ToolStripMenuItem();
             ((System.ComponentModel.ISupportInitialize)dgv_variables).BeginInit();
             contextMenuStrip1.SuspendLayout();
             contextPresetLst.SuspendLayout();
             contextPresetLstAdd.SuspendLayout();
             contextHistoryLst.SuspendLayout();
+            menuStrip1.SuspendLayout();
             SuspendLayout();
             // 
             // btnOpenCSV
             // 
-            btnOpenCSV.Location = new Point(16, 12);
+            btnOpenCSV.Location = new Point(16, 35);
             btnOpenCSV.Name = "btnOpenCSV";
             btnOpenCSV.Size = new Size(75, 23);
             btnOpenCSV.TabIndex = 0;
@@ -98,7 +107,7 @@
             dgv_variables.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
             dgv_variables.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             dgv_variables.EditMode = DataGridViewEditMode.EditProgrammatically;
-            dgv_variables.Location = new Point(16, 43);
+            dgv_variables.Location = new Point(16, 66);
             dgv_variables.Name = "dgv_variables";
             dgv_variables.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.AutoSizeToAllHeaders;
             dgv_variables.SelectionMode = DataGridViewSelectionMode.CellSelect;
@@ -143,7 +152,7 @@
             // 
             // btnSaveAs
             // 
-            btnSaveAs.Location = new Point(106, 12);
+            btnSaveAs.Location = new Point(106, 35);
             btnSaveAs.Name = "btnSaveAs";
             btnSaveAs.Size = new Size(75, 23);
             btnSaveAs.TabIndex = 2;
@@ -153,7 +162,7 @@
             // 
             // btnClear
             // 
-            btnClear.Location = new Point(197, 12);
+            btnClear.Location = new Point(197, 35);
             btnClear.Name = "btnClear";
             btnClear.Size = new Size(75, 23);
             btnClear.TabIndex = 3;
@@ -167,19 +176,19 @@
             txtOutput.BackColor = SystemColors.Window;
             txtOutput.Font = new Font("Courier New", 9F, FontStyle.Regular, GraphicsUnit.Point, 0);
             txtOutput.HideSelection = false;
-            txtOutput.Location = new Point(428, 234);
+            txtOutput.Location = new Point(428, 258);
             txtOutput.MaxLength = 1000000;
             txtOutput.Multiline = true;
             txtOutput.Name = "txtOutput";
             txtOutput.ReadOnly = true;
             txtOutput.ScrollBars = ScrollBars.Both;
-            txtOutput.Size = new Size(959, 304);
+            txtOutput.Size = new Size(959, 313);
             txtOutput.TabIndex = 4;
             // 
             // label1
             // 
             label1.AutoSize = true;
-            label1.Location = new Point(428, 217);
+            label1.Location = new Point(428, 240);
             label1.Name = "label1";
             label1.Size = new Size(45, 15);
             label1.TabIndex = 5;
@@ -187,7 +196,7 @@
             // 
             // txtPreset
             // 
-            txtPreset.Location = new Point(1007, 10);
+            txtPreset.Location = new Point(1007, 33);
             txtPreset.Name = "txtPreset";
             txtPreset.Size = new Size(95, 23);
             txtPreset.TabIndex = 27;
@@ -195,7 +204,7 @@
             // 
             // btnSave
             // 
-            btnSave.Location = new Point(1006, 12);
+            btnSave.Location = new Point(1006, 35);
             btnSave.Name = "btnSave";
             btnSave.Size = new Size(96, 23);
             btnSave.TabIndex = 26;
@@ -206,7 +215,7 @@
             // label6
             // 
             label6.AutoSize = true;
-            label6.Location = new Point(743, 20);
+            label6.Location = new Point(743, 43);
             label6.Name = "label6";
             label6.Size = new Size(81, 15);
             label6.TabIndex = 25;
@@ -217,7 +226,7 @@
             lstPreset.FormattingEnabled = true;
             lstPreset.IntegralHeight = false;
             lstPreset.ItemHeight = 15;
-            lstPreset.Location = new Point(653, 43);
+            lstPreset.Location = new Point(653, 66);
             lstPreset.Name = "lstPreset";
             lstPreset.Size = new Size(268, 169);
             lstPreset.Sorted = true;
@@ -227,7 +236,7 @@
             // label4
             // 
             label4.AutoSize = true;
-            label4.Location = new Point(961, 41);
+            label4.Location = new Point(961, 64);
             label4.Name = "label4";
             label4.Size = new Size(40, 15);
             label4.TabIndex = 23;
@@ -236,7 +245,7 @@
             // label3
             // 
             label3.AutoSize = true;
-            label3.Location = new Point(474, 15);
+            label3.Location = new Point(474, 38);
             label3.Name = "label3";
             label3.Size = new Size(60, 15);
             label3.TabIndex = 22;
@@ -245,7 +254,7 @@
             // label2
             // 
             label2.AutoSize = true;
-            label2.Location = new Point(282, 16);
+            label2.Location = new Point(282, 39);
             label2.Name = "label2";
             label2.Size = new Size(63, 15);
             label2.TabIndex = 21;
@@ -253,7 +262,7 @@
             // 
             // btnExecuteAll
             // 
-            btnExecuteAll.Location = new Point(927, 172);
+            btnExecuteAll.Location = new Point(927, 195);
             btnExecuteAll.Name = "btnExecuteAll";
             btnExecuteAll.Size = new Size(75, 40);
             btnExecuteAll.TabIndex = 20;
@@ -264,7 +273,7 @@
             // txtCommand
             // 
             txtCommand.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            txtCommand.Location = new Point(1007, 43);
+            txtCommand.Location = new Point(1007, 66);
             txtCommand.Multiline = true;
             txtCommand.Name = "txtCommand";
             txtCommand.Size = new Size(379, 169);
@@ -272,7 +281,7 @@
             // 
             // txtPassword
             // 
-            txtPassword.Location = new Point(540, 11);
+            txtPassword.Location = new Point(540, 34);
             txtPassword.Name = "txtPassword";
             txtPassword.Size = new Size(152, 23);
             txtPassword.TabIndex = 18;
@@ -280,7 +289,7 @@
             // 
             // txtUsername
             // 
-            txtUsername.Location = new Point(351, 13);
+            txtUsername.Location = new Point(351, 36);
             txtUsername.Name = "txtUsername";
             txtUsername.Size = new Size(117, 23);
             txtUsername.TabIndex = 17;
@@ -322,7 +331,7 @@
             // 
             // btnExecuteSelected
             // 
-            btnExecuteSelected.Location = new Point(926, 104);
+            btnExecuteSelected.Location = new Point(926, 127);
             btnExecuteSelected.Name = "btnExecuteSelected";
             btnExecuteSelected.Size = new Size(75, 40);
             btnExecuteSelected.TabIndex = 29;
@@ -347,7 +356,7 @@
             // txtDelay
             // 
             txtDelay.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            txtDelay.Location = new Point(1341, 11);
+            txtDelay.Location = new Point(1341, 34);
             txtDelay.Margin = new Padding(3, 2, 3, 2);
             txtDelay.Name = "txtDelay";
             txtDelay.Size = new Size(45, 23);
@@ -357,7 +366,7 @@
             // label5
             // 
             label5.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            label5.Location = new Point(1292, 14);
+            label5.Location = new Point(1292, 37);
             label5.Name = "label5";
             label5.Size = new Size(44, 15);
             label5.TabIndex = 31;
@@ -366,7 +375,7 @@
             // txtTimeout
             // 
             txtTimeout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            txtTimeout.Location = new Point(1242, 11);
+            txtTimeout.Location = new Point(1242, 34);
             txtTimeout.Margin = new Padding(3, 2, 3, 2);
             txtTimeout.Name = "txtTimeout";
             txtTimeout.Size = new Size(44, 23);
@@ -377,7 +386,7 @@
             // 
             label7.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             label7.AutoSize = true;
-            label7.Location = new Point(1182, 14);
+            label7.Location = new Point(1182, 37);
             label7.Name = "label7";
             label7.Size = new Size(55, 15);
             label7.TabIndex = 33;
@@ -390,10 +399,10 @@
             lstOutput.FormattingEnabled = true;
             lstOutput.IntegralHeight = false;
             lstOutput.ItemHeight = 15;
-            lstOutput.Location = new Point(16, 234);
+            lstOutput.Location = new Point(16, 258);
             lstOutput.Margin = new Padding(3, 2, 3, 2);
             lstOutput.Name = "lstOutput";
-            lstOutput.Size = new Size(407, 305);
+            lstOutput.Size = new Size(407, 314);
             lstOutput.TabIndex = 34;
             lstOutput.SelectedIndexChanged += lstOutput_SelectedIndexChanged;
             // 
@@ -402,7 +411,7 @@
             contextHistoryLst.ImageScalingSize = new Size(20, 20);
             contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, saveAllToolStripMenuItem, toolStripSeparator1, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
             contextHistoryLst.Name = "contextHistoryLst";
-            contextHistoryLst.Size = new Size(226, 120);
+            contextHistoryLst.Size = new Size(226, 98);
             contextHistoryLst.Opening += contextHistoryLst_Opening;
             // 
             // saveAsToolStripMenuItem
@@ -441,7 +450,7 @@
             // label8
             // 
             label8.AutoSize = true;
-            label8.Location = new Point(16, 217);
+            label8.Location = new Point(16, 241);
             label8.Name = "label8";
             label8.Size = new Size(45, 15);
             label8.TabIndex = 35;
@@ -449,7 +458,7 @@
             // 
             // btnStopAll
             // 
-            btnStopAll.Location = new Point(927, 172);
+            btnStopAll.Location = new Point(927, 195);
             btnStopAll.Name = "btnStopAll";
             btnStopAll.Size = new Size(75, 40);
             btnStopAll.TabIndex = 36;
@@ -458,11 +467,76 @@
             btnStopAll.Visible = false;
             btnStopAll.Click += btnStopAll_Click;
             // 
+            // menuStrip1
+            // 
+            menuStrip1.BackColor = SystemColors.Control;
+            menuStrip1.Items.AddRange(new ToolStripItem[] { fileToolStripMenuItem, helpToolStripMenuItem });
+            menuStrip1.Location = new Point(0, 0);
+            menuStrip1.Name = "menuStrip1";
+            menuStrip1.Size = new Size(1398, 24);
+            menuStrip1.TabIndex = 37;
+            menuStrip1.Text = "menuStrip";
+            // 
+            // fileToolStripMenuItem
+            // 
+            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openCSVToolStripMenuItem, saveToolStripMenuItem, saveAsToolStripMenuItem1, ExitMenuItem });
+            fileToolStripMenuItem.Name = "fileToolStripMenuItem";
+            fileToolStripMenuItem.Size = new Size(37, 20);
+            fileToolStripMenuItem.Text = "File";
+            // 
+            // openCSVToolStripMenuItem
+            // 
+            openCSVToolStripMenuItem.Name = "openCSVToolStripMenuItem";
+            openCSVToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.O;
+            openCSVToolStripMenuItem.Size = new Size(186, 22);
+            openCSVToolStripMenuItem.Text = "Open CSV";
+            openCSVToolStripMenuItem.Click += openCSVToolStripMenuItem_Click;
+            // 
+            // saveToolStripMenuItem
+            // 
+            saveToolStripMenuItem.Name = "saveToolStripMenuItem";
+            saveToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.S;
+            saveToolStripMenuItem.Size = new Size(186, 22);
+            saveToolStripMenuItem.Text = "Save";
+            saveToolStripMenuItem.Click += saveToolStripMenuItem_Click;
+            // 
+            // saveAsToolStripMenuItem1
+            // 
+            saveAsToolStripMenuItem1.Name = "saveAsToolStripMenuItem1";
+            saveAsToolStripMenuItem1.ShortcutKeys = Keys.Control | Keys.Shift | Keys.S;
+            saveAsToolStripMenuItem1.Size = new Size(186, 22);
+            saveAsToolStripMenuItem1.Text = "Save As";
+            saveAsToolStripMenuItem1.Click += saveAsToolStripMenuItem1_Click;
+            // 
+            // ExitMenuItem
+            // 
+            ExitMenuItem.Name = "ExitMenuItem";
+            ExitMenuItem.ShortcutKeys = Keys.Alt | Keys.F4;
+            ExitMenuItem.Size = new Size(186, 22);
+            ExitMenuItem.Text = "Exit";
+            ExitMenuItem.Click += ExitMenuItem_Click;
+            // 
+            // helpToolStripMenuItem
+            // 
+            helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { aboutToolStripMenuItem });
+            helpToolStripMenuItem.Name = "helpToolStripMenuItem";
+            helpToolStripMenuItem.Size = new Size(44, 20);
+            helpToolStripMenuItem.Text = "Help";
+            // 
+            // aboutToolStripMenuItem
+            // 
+            aboutToolStripMenuItem.Name = "aboutToolStripMenuItem";
+            aboutToolStripMenuItem.Size = new Size(107, 22);
+            aboutToolStripMenuItem.Text = "About";
+            aboutToolStripMenuItem.Click += aboutToolStripMenuItem_Click;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1398, 552);
+            BackColor = SystemColors.Control;
+            ClientSize = new Size(1398, 585);
+            Controls.Add(menuStrip1);
             Controls.Add(label8);
             Controls.Add(lstOutput);
             Controls.Add(label7);
@@ -488,6 +562,7 @@
             Controls.Add(txtPreset);
             Controls.Add(btnStopAll);
             Controls.Add(btnExecuteAll);
+            MainMenuStrip = menuStrip1;
             Name = "Form1";
             Text = "SSH_Helper";
             ((System.ComponentModel.ISupportInitialize)dgv_variables).EndInit();
@@ -495,6 +570,8 @@
             contextPresetLst.ResumeLayout(false);
             contextPresetLstAdd.ResumeLayout(false);
             contextHistoryLst.ResumeLayout(false);
+            menuStrip1.ResumeLayout(false);
+            menuStrip1.PerformLayout();
             ResumeLayout(false);
             PerformLayout();
         }
@@ -543,5 +620,13 @@
         private Button btnStopAll;
         private ToolStripMenuItem duplicatePresetToolStripMenuItem;
         private ToolStripMenuItem saveAllToolStripMenuItem;
+        private MenuStrip menuStrip1;
+        private ToolStripMenuItem fileToolStripMenuItem;
+        private ToolStripMenuItem openCSVToolStripMenuItem;
+        private ToolStripMenuItem saveToolStripMenuItem;
+        private ToolStripMenuItem saveAsToolStripMenuItem1;
+        private ToolStripMenuItem helpToolStripMenuItem;
+        private ToolStripMenuItem aboutToolStripMenuItem;
+        private ToolStripMenuItem ExitMenuItem;
     }
 }
