@@ -42,12 +42,10 @@ namespace SSH_Helper
         private BindingList<KeyValuePair<string, string>> outputHistoryList = new BindingList<KeyValuePair<string, string>>();
         private bool isRunning = false;
         CancellationTokenSource cts = new CancellationTokenSource();
-        // Add this field near other private fields
         private bool _initialPresetDefaultsSaved = false;
         private bool _csvDirty = false;
         private string configFilePath;
 
-        // Add fields
         private bool _debugCaptureRaw = false;
         private StringBuilder? _rawBuffer;
 
