@@ -1,4 +1,4 @@
-﻿namespace SSH_Helper
+namespace SSH_Helper
 {
     partial class Form1
     {
@@ -29,593 +29,1278 @@
         private void InitializeComponent()
         {
             components = new System.ComponentModel.Container();
-            btnOpenCSV = new Button();
+            mainSplitContainer = new SplitContainer();
+            topSplitContainer = new SplitContainer();
+            hostsPanel = new Panel();
             dgv_variables = new DataGridView();
             contextMenuStrip1 = new ContextMenuStrip(components);
             addColumnToolStripMenuItem = new ToolStripMenuItem();
             renameColumnToolStripMenuItem = new ToolStripMenuItem();
             deleteColumnToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparator5 = new ToolStripSeparator();
             deleteRowToolStripMenuItem = new ToolStripMenuItem();
-            btnSaveAs = new Button();
-            btnClear = new Button();
-            txtOutput = new TextBox();
-            label1 = new Label();
-            txtPreset = new TextBox();
-            btnSave = new Button();
-            label6 = new Label();
+            hostsHeaderPanel = new Panel();
+            lblHostsTitle = new Label();
+            lblHostCount = new Label();
+            commandPanel = new Panel();
+            commandSplitContainer = new SplitContainer();
+            presetsPanel = new Panel();
             lstPreset = new ListBox();
-            label4 = new Label();
-            label3 = new Label();
-            label2 = new Label();
-            btnExecuteAll = new Button();
-            txtCommand = new TextBox();
-            txtPassword = new TextBox();
-            txtUsername = new TextBox();
             contextPresetLst = new ContextMenuStrip(components);
-            addPresetToolStripMenuItem = new ToolStripMenuItem();
-            duplicatePresetToolStripMenuItem = new ToolStripMenuItem();
-            renameToolStripMenuItem = new ToolStripMenuItem();
-            deleteToolStripMenuItem = new ToolStripMenuItem();
+            ctxAddPreset = new ToolStripMenuItem();
+            ctxDuplicatePreset = new ToolStripMenuItem();
+            ctxRenamePreset = new ToolStripMenuItem();
+            ctxDeletePreset = new ToolStripMenuItem();
+            toolStripSeparator6 = new ToolStripSeparator();
+            ctxToggleFavorite = new ToolStripMenuItem();
+            toolStripSeparator7 = new ToolStripSeparator();
+            ctxExportPreset = new ToolStripMenuItem();
+            ctxImportPreset = new ToolStripMenuItem();
+            ctxToggleSorting = new ToolStripMenuItem();
+            presetsToolStrip = new ToolStrip();
+            tsbAddPreset = new ToolStripButton();
+            tsbDeletePreset = new ToolStripButton();
+            tsbRenamePreset = new ToolStripButton();
+            tsbDuplicatePreset = new ToolStripButton();
+            tsbSortPresets = new ToolStripButton();
+            presetsHeaderPanel = new Panel();
+            lblPresetsTitle = new Label();
+            scriptPanel = new Panel();
+            txtCommand = new TextBox();
+            scriptHeaderPanel = new Panel();
+            lblScriptTitle = new Label();
+            btnSavePreset = new Button();
+            txtPreset = new TextBox();
+            executePanel = new Panel();
+            btnExecuteAll = new Button();
             btnExecuteSelected = new Button();
-            contextPresetLstAdd = new ContextMenuStrip(components);
-            toolStripMenuItem1 = new ToolStripMenuItem();
-            txtTimeout = new TextBox();
-            label7 = new Label();
+            btnStopAll = new Button();
+            outputPanel = new Panel();
+            outputSplitContainer = new SplitContainer();
+            historyPanel = new Panel();
             lstOutput = new ListBox();
             contextHistoryLst = new ContextMenuStrip(components);
             saveAsToolStripMenuItem = new ToolStripMenuItem();
             saveAllToolStripMenuItem = new ToolStripMenuItem();
-            toolStripSeparator1 = new ToolStripSeparator();
+            toolStripSeparator8 = new ToolStripSeparator();
             deleteEntryToolStripMenuItem = new ToolStripMenuItem();
             deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
-            label8 = new Label();
-            btnStopAll = new Button();
+            historyHeaderPanel = new Panel();
+            lblHistoryTitle = new Label();
+            txtOutput = new TextBox();
+            mainToolStrip = new ToolStrip();
+            tsbOpenCsv = new ToolStripButton();
+            tsbSaveCsv = new ToolStripButton();
+            tsbSaveCsvAs = new ToolStripButton();
+            toolStripSeparator1 = new ToolStripSeparator();
+            tsbClearGrid = new ToolStripButton();
+            toolStripSeparator2 = new ToolStripSeparator();
+            toolStripLabel1 = new ToolStripLabel();
+            tsbUsername = new ToolStripTextBox();
+            toolStripLabel2 = new ToolStripLabel();
+            tsbPassword = new ToolStripTextBox();
+            toolStripSeparator3 = new ToolStripSeparator();
+            toolStripLabel3 = new ToolStripLabel();
+            tsbTimeout = new ToolStripTextBox();
+            statusStrip = new StatusStrip();
+            statusLabel = new ToolStripStatusLabel();
+            statusProgress = new ToolStripProgressBar();
+            statusHostCount = new ToolStripStatusLabel();
             menuStrip1 = new MenuStrip();
             fileToolStripMenuItem = new ToolStripMenuItem();
             openCSVToolStripMenuItem = new ToolStripMenuItem();
             saveToolStripMenuItem = new ToolStripMenuItem();
             saveAsToolStripMenuItem1 = new ToolStripMenuItem();
+            toolStripSeparator4 = new ToolStripSeparator();
+            exportAllPresetsToolStripMenuItem = new ToolStripMenuItem();
+            importAllPresetsToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparator9 = new ToolStripSeparator();
             ExitMenuItem = new ToolStripMenuItem();
+            editToolStripMenuItem = new ToolStripMenuItem();
+            findToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             aboutToolStripMenuItem = new ToolStripMenuItem();
+            contextPresetLstAdd = new ContextMenuStrip(components);
+            ctxAddPreset2 = new ToolStripMenuItem();
+            ctxImportPreset2 = new ToolStripMenuItem();
             txtDelay = new TextBox();
+            txtUsername = new TextBox();
+            txtPassword = new TextBox();
+            txtTimeout = new TextBox();
+            ((System.ComponentModel.ISupportInitialize)mainSplitContainer).BeginInit();
+            mainSplitContainer.Panel1.SuspendLayout();
+            mainSplitContainer.Panel2.SuspendLayout();
+            mainSplitContainer.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)topSplitContainer).BeginInit();
+            topSplitContainer.Panel1.SuspendLayout();
+            topSplitContainer.Panel2.SuspendLayout();
+            topSplitContainer.SuspendLayout();
+            hostsPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)dgv_variables).BeginInit();
             contextMenuStrip1.SuspendLayout();
+            hostsHeaderPanel.SuspendLayout();
+            commandPanel.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)commandSplitContainer).BeginInit();
+            commandSplitContainer.Panel1.SuspendLayout();
+            commandSplitContainer.Panel2.SuspendLayout();
+            commandSplitContainer.SuspendLayout();
+            presetsPanel.SuspendLayout();
             contextPresetLst.SuspendLayout();
-            contextPresetLstAdd.SuspendLayout();
+            presetsToolStrip.SuspendLayout();
+            presetsHeaderPanel.SuspendLayout();
+            scriptPanel.SuspendLayout();
+            scriptHeaderPanel.SuspendLayout();
+            executePanel.SuspendLayout();
+            outputPanel.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)outputSplitContainer).BeginInit();
+            outputSplitContainer.Panel1.SuspendLayout();
+            outputSplitContainer.Panel2.SuspendLayout();
+            outputSplitContainer.SuspendLayout();
+            historyPanel.SuspendLayout();
             contextHistoryLst.SuspendLayout();
+            historyHeaderPanel.SuspendLayout();
+            mainToolStrip.SuspendLayout();
+            statusStrip.SuspendLayout();
             menuStrip1.SuspendLayout();
+            contextPresetLstAdd.SuspendLayout();
             SuspendLayout();
             // 
-            // btnOpenCSV
+            // mainSplitContainer
             // 
-            btnOpenCSV.Location = new Point(16, 35);
-            btnOpenCSV.Name = "btnOpenCSV";
-            btnOpenCSV.Size = new Size(75, 23);
-            btnOpenCSV.TabIndex = 0;
-            btnOpenCSV.Text = "Open CSV";
-            btnOpenCSV.UseVisualStyleBackColor = true;
-            btnOpenCSV.Click += btnOpenCSV_Click;
+            mainSplitContainer.Dock = DockStyle.Fill;
+            mainSplitContainer.Location = new Point(0, 49);
+            mainSplitContainer.Name = "mainSplitContainer";
+            mainSplitContainer.Orientation = Orientation.Horizontal;
+            // 
+            // mainSplitContainer.Panel1
+            // 
+            mainSplitContainer.Panel1.Controls.Add(topSplitContainer);
+            // 
+            // mainSplitContainer.Panel2
+            // 
+            mainSplitContainer.Panel2.Controls.Add(outputPanel);
+            mainSplitContainer.Size = new Size(1400, 671);
+            mainSplitContainer.SplitterDistance = 354;
+            mainSplitContainer.SplitterWidth = 6;
+            mainSplitContainer.TabIndex = 1;
+            // 
+            // topSplitContainer
+            // 
+            topSplitContainer.Dock = DockStyle.Fill;
+            topSplitContainer.Location = new Point(0, 0);
+            topSplitContainer.Name = "topSplitContainer";
+            // 
+            // topSplitContainer.Panel1
+            // 
+            topSplitContainer.Panel1.Controls.Add(hostsPanel);
+            // 
+            // topSplitContainer.Panel2
+            // 
+            topSplitContainer.Panel2.Controls.Add(commandPanel);
+            topSplitContainer.Size = new Size(1400, 354);
+            topSplitContainer.SplitterDistance = 550;
+            topSplitContainer.SplitterWidth = 6;
+            topSplitContainer.TabIndex = 0;
+            // 
+            // hostsPanel
+            // 
+            hostsPanel.BackColor = Color.White;
+            hostsPanel.Controls.Add(dgv_variables);
+            hostsPanel.Controls.Add(hostsHeaderPanel);
+            hostsPanel.Dock = DockStyle.Fill;
+            hostsPanel.Location = new Point(0, 0);
+            hostsPanel.Name = "hostsPanel";
+            hostsPanel.Padding = new Padding(8);
+            hostsPanel.Size = new Size(550, 354);
+            hostsPanel.TabIndex = 0;
             // 
             // dgv_variables
             // 
             dgv_variables.AllowUserToOrderColumns = true;
-            dgv_variables.BackgroundColor = SystemColors.Window;
-            dgv_variables.BorderStyle = BorderStyle.Fixed3D;
+            dgv_variables.BackgroundColor = Color.White;
+            dgv_variables.BorderStyle = BorderStyle.None;
             dgv_variables.ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableAlwaysIncludeHeaderText;
             dgv_variables.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
             dgv_variables.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            dgv_variables.ContextMenuStrip = contextMenuStrip1;
+            dgv_variables.Dock = DockStyle.Fill;
             dgv_variables.EditMode = DataGridViewEditMode.EditProgrammatically;
-            dgv_variables.Location = new Point(16, 66);
+            dgv_variables.GridColor = Color.FromArgb(222, 226, 230);
+            dgv_variables.Location = new Point(8, 44);
             dgv_variables.Name = "dgv_variables";
             dgv_variables.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.AutoSizeToAllHeaders;
             dgv_variables.SelectionMode = DataGridViewSelectionMode.CellSelect;
-            dgv_variables.Size = new Size(630, 169);
+            dgv_variables.Size = new Size(534, 302);
             dgv_variables.TabIndex = 1;
             dgv_variables.CellDoubleClick += dgv_variables_CellDoubleClick;
             // 
             // contextMenuStrip1
             // 
-            contextMenuStrip1.ImageScalingSize = new Size(20, 20);
-            contextMenuStrip1.Items.AddRange(new ToolStripItem[] { addColumnToolStripMenuItem, renameColumnToolStripMenuItem, deleteColumnToolStripMenuItem, deleteRowToolStripMenuItem });
+            contextMenuStrip1.Items.AddRange(new ToolStripItem[] { addColumnToolStripMenuItem, renameColumnToolStripMenuItem, deleteColumnToolStripMenuItem, toolStripSeparator5, deleteRowToolStripMenuItem });
             contextMenuStrip1.Name = "contextMenuStrip1";
-            contextMenuStrip1.Size = new Size(164, 92);
+            contextMenuStrip1.Size = new Size(164, 98);
             // 
             // addColumnToolStripMenuItem
             // 
             addColumnToolStripMenuItem.Name = "addColumnToolStripMenuItem";
             addColumnToolStripMenuItem.Size = new Size(163, 22);
-            addColumnToolStripMenuItem.Text = "Add Column";
+            addColumnToolStripMenuItem.Text = "&Add Column";
             addColumnToolStripMenuItem.Click += addColumnToolStripMenuItem_Click;
             // 
             // renameColumnToolStripMenuItem
             // 
             renameColumnToolStripMenuItem.Name = "renameColumnToolStripMenuItem";
             renameColumnToolStripMenuItem.Size = new Size(163, 22);
-            renameColumnToolStripMenuItem.Text = "Rename Column";
+            renameColumnToolStripMenuItem.Text = "&Rename Column";
             renameColumnToolStripMenuItem.Click += renameColumnToolStripMenuItem_Click;
             // 
             // deleteColumnToolStripMenuItem
             // 
             deleteColumnToolStripMenuItem.Name = "deleteColumnToolStripMenuItem";
             deleteColumnToolStripMenuItem.Size = new Size(163, 22);
-            deleteColumnToolStripMenuItem.Text = "Delete Column";
+            deleteColumnToolStripMenuItem.Text = "&Delete Column";
             deleteColumnToolStripMenuItem.Click += deleteColumnToolStripMenuItem_Click;
+            // 
+            // toolStripSeparator5
+            // 
+            toolStripSeparator5.Name = "toolStripSeparator5";
+            toolStripSeparator5.Size = new Size(160, 6);
             // 
             // deleteRowToolStripMenuItem
             // 
             deleteRowToolStripMenuItem.Name = "deleteRowToolStripMenuItem";
             deleteRowToolStripMenuItem.Size = new Size(163, 22);
-            deleteRowToolStripMenuItem.Text = "Delete Row";
+            deleteRowToolStripMenuItem.Text = "Delete &Row";
             deleteRowToolStripMenuItem.Click += deleteRowToolStripMenuItem_Click;
             // 
-            // btnSaveAs
+            // hostsHeaderPanel
             // 
-            btnSaveAs.Location = new Point(106, 35);
-            btnSaveAs.Name = "btnSaveAs";
-            btnSaveAs.Size = new Size(75, 23);
-            btnSaveAs.TabIndex = 2;
-            btnSaveAs.Text = "Save As";
-            btnSaveAs.UseVisualStyleBackColor = true;
-            btnSaveAs.Click += btnSaveAs_Click;
+            hostsHeaderPanel.BackColor = Color.FromArgb(248, 249, 250);
+            hostsHeaderPanel.Controls.Add(lblHostsTitle);
+            hostsHeaderPanel.Controls.Add(lblHostCount);
+            hostsHeaderPanel.Dock = DockStyle.Top;
+            hostsHeaderPanel.Location = new Point(8, 8);
+            hostsHeaderPanel.Name = "hostsHeaderPanel";
+            hostsHeaderPanel.Padding = new Padding(12, 8, 12, 8);
+            hostsHeaderPanel.Size = new Size(534, 36);
+            hostsHeaderPanel.TabIndex = 2;
             // 
-            // btnClear
+            // lblHostsTitle
             // 
-            btnClear.Location = new Point(197, 35);
-            btnClear.Name = "btnClear";
-            btnClear.Size = new Size(75, 23);
-            btnClear.TabIndex = 3;
-            btnClear.Text = "Clear";
-            btnClear.UseVisualStyleBackColor = true;
-            btnClear.Click += btnClear_Click;
+            lblHostsTitle.AutoSize = true;
+            lblHostsTitle.Dock = DockStyle.Left;
+            lblHostsTitle.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+            lblHostsTitle.ForeColor = Color.FromArgb(33, 37, 41);
+            lblHostsTitle.Location = new Point(12, 8);
+            lblHostsTitle.Name = "lblHostsTitle";
+            lblHostsTitle.Size = new Size(44, 19);
+            lblHostsTitle.TabIndex = 0;
+            lblHostsTitle.Text = "Hosts";
             // 
-            // txtOutput
+            // lblHostCount
             // 
-            txtOutput.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            txtOutput.BackColor = SystemColors.Window;
-            txtOutput.Font = new Font("Courier New", 9F, FontStyle.Regular, GraphicsUnit.Point, 0);
-            txtOutput.HideSelection = false;
-            txtOutput.Location = new Point(428, 258);
-            txtOutput.MaxLength = 1000000;
-            txtOutput.Multiline = true;
-            txtOutput.Name = "txtOutput";
-            txtOutput.ReadOnly = true;
-            txtOutput.ScrollBars = ScrollBars.Both;
-            txtOutput.Size = new Size(959, 313);
-            txtOutput.TabIndex = 4;
+            lblHostCount.AutoSize = true;
+            lblHostCount.Dock = DockStyle.Right;
+            lblHostCount.Font = new Font("Segoe UI", 9F);
+            lblHostCount.ForeColor = Color.FromArgb(108, 117, 125);
+            lblHostCount.Location = new Point(478, 8);
+            lblHostCount.Name = "lblHostCount";
+            lblHostCount.Size = new Size(44, 15);
+            lblHostCount.TabIndex = 1;
+            lblHostCount.Text = "0 hosts";
             // 
-            // label1
+            // commandPanel
             // 
-            label1.AutoSize = true;
-            label1.Location = new Point(428, 240);
-            label1.Name = "label1";
-            label1.Size = new Size(45, 15);
-            label1.TabIndex = 5;
-            label1.Text = "Output";
+            commandPanel.BackColor = Color.White;
+            commandPanel.Controls.Add(commandSplitContainer);
+            commandPanel.Dock = DockStyle.Fill;
+            commandPanel.Location = new Point(0, 0);
+            commandPanel.Name = "commandPanel";
+            commandPanel.Padding = new Padding(0, 0, 8, 8);
+            commandPanel.Size = new Size(844, 354);
+            commandPanel.TabIndex = 0;
             // 
-            // txtPreset
+            // commandSplitContainer
             // 
-            txtPreset.Location = new Point(1007, 33);
-            txtPreset.Name = "txtPreset";
-            txtPreset.Size = new Size(95, 23);
-            txtPreset.TabIndex = 27;
-            txtPreset.Visible = false;
+            commandSplitContainer.Dock = DockStyle.Fill;
+            commandSplitContainer.Location = new Point(0, 0);
+            commandSplitContainer.Name = "commandSplitContainer";
             // 
-            // btnSave
+            // commandSplitContainer.Panel1
             // 
-            btnSave.Location = new Point(1006, 35);
-            btnSave.Name = "btnSave";
-            btnSave.Size = new Size(96, 23);
-            btnSave.TabIndex = 26;
-            btnSave.Text = "Save Preset";
-            btnSave.UseVisualStyleBackColor = true;
-            btnSave.Click += btnSave_Click;
+            commandSplitContainer.Panel1.Controls.Add(presetsPanel);
             // 
-            // label6
+            // commandSplitContainer.Panel2
             // 
-            label6.AutoSize = true;
-            label6.Location = new Point(743, 43);
-            label6.Name = "label6";
-            label6.Size = new Size(81, 15);
-            label6.TabIndex = 25;
-            label6.Text = "Saved Presets:";
+            commandSplitContainer.Panel2.Controls.Add(scriptPanel);
+            commandSplitContainer.Panel2.Controls.Add(executePanel);
+            commandSplitContainer.Size = new Size(836, 346);
+            commandSplitContainer.SplitterDistance = 674;
+            commandSplitContainer.TabIndex = 0;
+            // 
+            // presetsPanel
+            // 
+            presetsPanel.BackColor = Color.FromArgb(248, 249, 250);
+            presetsPanel.Controls.Add(lstPreset);
+            presetsPanel.Controls.Add(presetsToolStrip);
+            presetsPanel.Controls.Add(presetsHeaderPanel);
+            presetsPanel.Dock = DockStyle.Fill;
+            presetsPanel.Location = new Point(0, 0);
+            presetsPanel.Name = "presetsPanel";
+            presetsPanel.Padding = new Padding(8);
+            presetsPanel.Size = new Size(674, 346);
+            presetsPanel.TabIndex = 0;
             // 
             // lstPreset
             // 
+            lstPreset.BackColor = Color.White;
+            lstPreset.BorderStyle = BorderStyle.None;
+            lstPreset.ContextMenuStrip = contextPresetLst;
+            lstPreset.Dock = DockStyle.Fill;
+            lstPreset.Font = new Font("Segoe UI", 9.5F);
             lstPreset.FormattingEnabled = true;
             lstPreset.IntegralHeight = false;
-            lstPreset.ItemHeight = 15;
-            lstPreset.Location = new Point(653, 66);
+            lstPreset.ItemHeight = 17;
+            lstPreset.Location = new Point(8, 65);
             lstPreset.Name = "lstPreset";
-            lstPreset.Size = new Size(268, 169);
+            lstPreset.Size = new Size(658, 273);
             lstPreset.Sorted = true;
-            lstPreset.TabIndex = 24;
+            lstPreset.TabIndex = 1;
             lstPreset.SelectedIndexChanged += lstPreset_SelectedIndexChanged;
-            // 
-            // label4
-            // 
-            label4.AutoSize = true;
-            label4.Location = new Point(961, 64);
-            label4.Name = "label4";
-            label4.Size = new Size(40, 15);
-            label4.TabIndex = 23;
-            label4.Text = "Script:";
-            // 
-            // label3
-            // 
-            label3.AutoSize = true;
-            label3.Location = new Point(474, 38);
-            label3.Name = "label3";
-            label3.Size = new Size(60, 15);
-            label3.TabIndex = 22;
-            label3.Text = "Password:";
-            // 
-            // label2
-            // 
-            label2.AutoSize = true;
-            label2.Location = new Point(282, 39);
-            label2.Name = "label2";
-            label2.Size = new Size(63, 15);
-            label2.TabIndex = 21;
-            label2.Text = "Username:";
-            // 
-            // btnExecuteAll
-            // 
-            btnExecuteAll.Location = new Point(927, 195);
-            btnExecuteAll.Name = "btnExecuteAll";
-            btnExecuteAll.Size = new Size(75, 40);
-            btnExecuteAll.TabIndex = 20;
-            btnExecuteAll.Text = "Execute All";
-            btnExecuteAll.UseVisualStyleBackColor = true;
-            btnExecuteAll.Click += btnExecuteAll_Click;
-            // 
-            // txtCommand
-            // 
-            txtCommand.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            txtCommand.Location = new Point(1007, 66);
-            txtCommand.Multiline = true;
-            txtCommand.Name = "txtCommand";
-            txtCommand.Size = new Size(379, 169);
-            txtCommand.TabIndex = 19;
-            // 
-            // txtPassword
-            // 
-            txtPassword.Location = new Point(540, 34);
-            txtPassword.Name = "txtPassword";
-            txtPassword.Size = new Size(152, 23);
-            txtPassword.TabIndex = 18;
-            txtPassword.UseSystemPasswordChar = true;
-            // 
-            // txtUsername
-            // 
-            txtUsername.Location = new Point(351, 36);
-            txtUsername.Name = "txtUsername";
-            txtUsername.Size = new Size(117, 23);
-            txtUsername.TabIndex = 17;
             // 
             // contextPresetLst
             // 
-            contextPresetLst.ImageScalingSize = new Size(20, 20);
-            contextPresetLst.Items.AddRange(new ToolStripItem[] { addPresetToolStripMenuItem, duplicatePresetToolStripMenuItem, renameToolStripMenuItem, deleteToolStripMenuItem });
+            contextPresetLst.Items.AddRange(new ToolStripItem[] { ctxAddPreset, ctxDuplicatePreset, ctxRenamePreset, ctxDeletePreset, toolStripSeparator6, ctxToggleFavorite, toolStripSeparator7, ctxExportPreset, ctxImportPreset, ctxToggleSorting });
             contextPresetLst.Name = "contextPresetLst";
-            contextPresetLst.Size = new Size(160, 92);
+            contextPresetLst.Size = new Size(160, 192);
             // 
-            // addPresetToolStripMenuItem
+            // ctxAddPreset
             // 
-            addPresetToolStripMenuItem.Name = "addPresetToolStripMenuItem";
-            addPresetToolStripMenuItem.Size = new Size(159, 22);
-            addPresetToolStripMenuItem.Text = "Add Preset";
-            addPresetToolStripMenuItem.Click += addPresetToolStripMenuItem_Click;
+            ctxAddPreset.Name = "ctxAddPreset";
+            ctxAddPreset.Size = new Size(159, 22);
+            ctxAddPreset.Text = "&Add Preset";
+            ctxAddPreset.Click += addPresetToolStripMenuItem_Click;
             // 
-            // duplicatePresetToolStripMenuItem
+            // ctxDuplicatePreset
             // 
-            duplicatePresetToolStripMenuItem.Name = "duplicatePresetToolStripMenuItem";
-            duplicatePresetToolStripMenuItem.Size = new Size(159, 22);
-            duplicatePresetToolStripMenuItem.Text = "Duplicate Preset";
-            duplicatePresetToolStripMenuItem.Click += duplicatePresetToolStripMenuItem_Click;
+            ctxDuplicatePreset.Name = "ctxDuplicatePreset";
+            ctxDuplicatePreset.Size = new Size(159, 22);
+            ctxDuplicatePreset.Text = "D&uplicate Preset";
+            ctxDuplicatePreset.Click += duplicatePresetToolStripMenuItem_Click;
             // 
-            // renameToolStripMenuItem
+            // ctxRenamePreset
             // 
-            renameToolStripMenuItem.Name = "renameToolStripMenuItem";
-            renameToolStripMenuItem.Size = new Size(159, 22);
-            renameToolStripMenuItem.Text = "Rename Preset";
-            renameToolStripMenuItem.Click += renameToolStripMenuItem_Click;
+            ctxRenamePreset.Name = "ctxRenamePreset";
+            ctxRenamePreset.Size = new Size(159, 22);
+            ctxRenamePreset.Text = "&Rename Preset";
+            ctxRenamePreset.Click += renameToolStripMenuItem_Click;
             // 
-            // deleteToolStripMenuItem
+            // ctxDeletePreset
             // 
-            deleteToolStripMenuItem.Name = "deleteToolStripMenuItem";
-            deleteToolStripMenuItem.Size = new Size(159, 22);
-            deleteToolStripMenuItem.Text = "Delete Preset";
-            deleteToolStripMenuItem.Click += deleteToolStripMenuItem_Click;
+            ctxDeletePreset.Name = "ctxDeletePreset";
+            ctxDeletePreset.Size = new Size(159, 22);
+            ctxDeletePreset.Text = "&Delete Preset";
+            ctxDeletePreset.Click += deleteToolStripMenuItem_Click;
+            // 
+            // toolStripSeparator6
+            // 
+            toolStripSeparator6.Name = "toolStripSeparator6";
+            toolStripSeparator6.Size = new Size(156, 6);
+            // 
+            // ctxToggleFavorite
+            // 
+            ctxToggleFavorite.Name = "ctxToggleFavorite";
+            ctxToggleFavorite.Size = new Size(159, 22);
+            ctxToggleFavorite.Text = "Toggle &Favorite";
+            ctxToggleFavorite.Click += ctxToggleFavorite_Click;
+            // 
+            // toolStripSeparator7
+            // 
+            toolStripSeparator7.Name = "toolStripSeparator7";
+            toolStripSeparator7.Size = new Size(156, 6);
+            // 
+            // ctxExportPreset
+            // 
+            ctxExportPreset.Name = "ctxExportPreset";
+            ctxExportPreset.Size = new Size(159, 22);
+            ctxExportPreset.Text = "&Export Preset";
+            ctxExportPreset.Click += ExportPreset_Click;
+            // 
+            // ctxImportPreset
+            // 
+            ctxImportPreset.Name = "ctxImportPreset";
+            ctxImportPreset.Size = new Size(159, 22);
+            ctxImportPreset.Text = "&Import Preset";
+            ctxImportPreset.Click += ImportPreset_Click;
+            // 
+            // ctxToggleSorting
+            // 
+            ctxToggleSorting.Name = "ctxToggleSorting";
+            ctxToggleSorting.Size = new Size(159, 22);
+            ctxToggleSorting.Text = "Toggle &Sorting";
+            ctxToggleSorting.Click += toggleSortingToolStripMenuItem_Click;
+            // 
+            // presetsToolStrip
+            // 
+            presetsToolStrip.BackColor = Color.FromArgb(248, 249, 250);
+            presetsToolStrip.GripStyle = ToolStripGripStyle.Hidden;
+            presetsToolStrip.Items.AddRange(new ToolStripItem[] { tsbAddPreset, tsbDeletePreset, tsbRenamePreset, tsbDuplicatePreset, tsbSortPresets });
+            presetsToolStrip.Location = new Point(8, 40);
+            presetsToolStrip.Name = "presetsToolStrip";
+            presetsToolStrip.Size = new Size(658, 25);
+            presetsToolStrip.TabIndex = 0;
+            // 
+            // tsbAddPreset
+            // 
+            tsbAddPreset.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbAddPreset.Name = "tsbAddPreset";
+            tsbAddPreset.Size = new Size(23, 22);
+            tsbAddPreset.Text = "+";
+            tsbAddPreset.ToolTipText = "Add new preset";
+            tsbAddPreset.Click += addPresetToolStripMenuItem_Click;
+            // 
+            // tsbDeletePreset
+            // 
+            tsbDeletePreset.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbDeletePreset.Name = "tsbDeletePreset";
+            tsbDeletePreset.Size = new Size(23, 22);
+            tsbDeletePreset.Text = "-";
+            tsbDeletePreset.ToolTipText = "Delete preset";
+            tsbDeletePreset.Click += deleteToolStripMenuItem_Click;
+            // 
+            // tsbRenamePreset
+            // 
+            tsbRenamePreset.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbRenamePreset.Name = "tsbRenamePreset";
+            tsbRenamePreset.Size = new Size(54, 22);
+            tsbRenamePreset.Text = "Rename";
+            tsbRenamePreset.ToolTipText = "Rename preset";
+            tsbRenamePreset.Click += renameToolStripMenuItem_Click;
+            // 
+            // tsbDuplicatePreset
+            // 
+            tsbDuplicatePreset.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbDuplicatePreset.Name = "tsbDuplicatePreset";
+            tsbDuplicatePreset.Size = new Size(39, 22);
+            tsbDuplicatePreset.Text = "Copy";
+            tsbDuplicatePreset.ToolTipText = "Duplicate preset";
+            tsbDuplicatePreset.Click += duplicatePresetToolStripMenuItem_Click;
+            // 
+            // tsbSortPresets
+            // 
+            tsbSortPresets.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbSortPresets.Name = "tsbSortPresets";
+            tsbSortPresets.Size = new Size(32, 22);
+            tsbSortPresets.Text = "Sort";
+            tsbSortPresets.ToolTipText = "Toggle sorting";
+            tsbSortPresets.Click += toggleSortingToolStripMenuItem_Click;
+            // 
+            // presetsHeaderPanel
+            // 
+            presetsHeaderPanel.BackColor = Color.FromArgb(248, 249, 250);
+            presetsHeaderPanel.Controls.Add(lblPresetsTitle);
+            presetsHeaderPanel.Dock = DockStyle.Top;
+            presetsHeaderPanel.Location = new Point(8, 8);
+            presetsHeaderPanel.Name = "presetsHeaderPanel";
+            presetsHeaderPanel.Padding = new Padding(4);
+            presetsHeaderPanel.Size = new Size(658, 32);
+            presetsHeaderPanel.TabIndex = 2;
+            // 
+            // lblPresetsTitle
+            // 
+            lblPresetsTitle.AutoSize = true;
+            lblPresetsTitle.Dock = DockStyle.Left;
+            lblPresetsTitle.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+            lblPresetsTitle.ForeColor = Color.FromArgb(33, 37, 41);
+            lblPresetsTitle.Location = new Point(4, 4);
+            lblPresetsTitle.Name = "lblPresetsTitle";
+            lblPresetsTitle.Size = new Size(53, 19);
+            lblPresetsTitle.TabIndex = 0;
+            lblPresetsTitle.Text = "Presets";
+            // 
+            // scriptPanel
+            // 
+            scriptPanel.BackColor = Color.White;
+            scriptPanel.Controls.Add(txtCommand);
+            scriptPanel.Controls.Add(scriptHeaderPanel);
+            scriptPanel.Dock = DockStyle.Fill;
+            scriptPanel.Location = new Point(0, 0);
+            scriptPanel.Name = "scriptPanel";
+            scriptPanel.Padding = new Padding(0, 0, 0, 8);
+            scriptPanel.Size = new Size(158, 296);
+            scriptPanel.TabIndex = 0;
+            // 
+            // txtCommand
+            // 
+            txtCommand.AcceptsTab = true;
+            txtCommand.BackColor = Color.FromArgb(253, 253, 253);
+            txtCommand.BorderStyle = BorderStyle.None;
+            txtCommand.Dock = DockStyle.Fill;
+            txtCommand.Font = new Font("Cascadia Code", 10F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            txtCommand.Location = new Point(0, 40);
+            txtCommand.Multiline = true;
+            txtCommand.Name = "txtCommand";
+            txtCommand.ScrollBars = ScrollBars.Both;
+            txtCommand.Size = new Size(158, 248);
+            txtCommand.TabIndex = 0;
+            txtCommand.WordWrap = false;
+            // 
+            // scriptHeaderPanel
+            // 
+            scriptHeaderPanel.BackColor = Color.FromArgb(248, 249, 250);
+            scriptHeaderPanel.Controls.Add(lblScriptTitle);
+            scriptHeaderPanel.Controls.Add(btnSavePreset);
+            scriptHeaderPanel.Controls.Add(txtPreset);
+            scriptHeaderPanel.Dock = DockStyle.Top;
+            scriptHeaderPanel.Location = new Point(0, 0);
+            scriptHeaderPanel.Name = "scriptHeaderPanel";
+            scriptHeaderPanel.Padding = new Padding(8, 4, 8, 4);
+            scriptHeaderPanel.Size = new Size(158, 40);
+            scriptHeaderPanel.TabIndex = 1;
+            // 
+            // lblScriptTitle
+            // 
+            lblScriptTitle.AutoSize = true;
+            lblScriptTitle.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+            lblScriptTitle.ForeColor = Color.FromArgb(33, 37, 41);
+            lblScriptTitle.Location = new Point(8, 10);
+            lblScriptTitle.Name = "lblScriptTitle";
+            lblScriptTitle.Size = new Size(79, 19);
+            lblScriptTitle.TabIndex = 0;
+            lblScriptTitle.Text = "Commands";
+            // 
+            // btnSavePreset
+            // 
+            btnSavePreset.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnSavePreset.BackColor = Color.FromArgb(13, 110, 253);
+            btnSavePreset.FlatAppearance.BorderSize = 0;
+            btnSavePreset.FlatStyle = FlatStyle.Flat;
+            btnSavePreset.Font = new Font("Segoe UI", 9F);
+            btnSavePreset.ForeColor = Color.White;
+            btnSavePreset.Location = new Point(466, 6);
+            btnSavePreset.Name = "btnSavePreset";
+            btnSavePreset.Size = new Size(80, 27);
+            btnSavePreset.TabIndex = 1;
+            btnSavePreset.Text = "Save";
+            btnSavePreset.UseVisualStyleBackColor = false;
+            btnSavePreset.Click += btnSave_Click;
+            // 
+            // txtPreset
+            // 
+            txtPreset.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            txtPreset.BorderStyle = BorderStyle.FixedSingle;
+            txtPreset.Font = new Font("Segoe UI", 9F);
+            txtPreset.Location = new Point(308, 8);
+            txtPreset.Name = "txtPreset";
+            txtPreset.PlaceholderText = "Preset name...";
+            txtPreset.Size = new Size(150, 23);
+            txtPreset.TabIndex = 2;
+            // 
+            // executePanel
+            // 
+            executePanel.BackColor = Color.FromArgb(248, 249, 250);
+            executePanel.Controls.Add(btnExecuteAll);
+            executePanel.Controls.Add(btnExecuteSelected);
+            executePanel.Controls.Add(btnStopAll);
+            executePanel.Dock = DockStyle.Bottom;
+            executePanel.Location = new Point(0, 296);
+            executePanel.Name = "executePanel";
+            executePanel.Padding = new Padding(8);
+            executePanel.Size = new Size(158, 50);
+            executePanel.TabIndex = 1;
+            // 
+            // btnExecuteAll
+            // 
+            btnExecuteAll.BackColor = Color.FromArgb(25, 135, 84);
+            btnExecuteAll.FlatAppearance.BorderSize = 0;
+            btnExecuteAll.FlatStyle = FlatStyle.Flat;
+            btnExecuteAll.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
+            btnExecuteAll.ForeColor = Color.White;
+            btnExecuteAll.Location = new Point(146, 8);
+            btnExecuteAll.Name = "btnExecuteAll";
+            btnExecuteAll.Size = new Size(130, 34);
+            btnExecuteAll.TabIndex = 1;
+            btnExecuteAll.Text = "Run All";
+            btnExecuteAll.UseVisualStyleBackColor = false;
+            btnExecuteAll.Click += btnExecuteAll_Click;
             // 
             // btnExecuteSelected
             // 
-            btnExecuteSelected.Location = new Point(926, 127);
+            btnExecuteSelected.BackColor = Color.FromArgb(108, 117, 125);
+            btnExecuteSelected.FlatAppearance.BorderSize = 0;
+            btnExecuteSelected.FlatStyle = FlatStyle.Flat;
+            btnExecuteSelected.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
+            btnExecuteSelected.ForeColor = Color.White;
+            btnExecuteSelected.Location = new Point(8, 8);
             btnExecuteSelected.Name = "btnExecuteSelected";
-            btnExecuteSelected.Size = new Size(75, 40);
-            btnExecuteSelected.TabIndex = 29;
-            btnExecuteSelected.Text = "Execute Selected";
-            btnExecuteSelected.UseVisualStyleBackColor = true;
+            btnExecuteSelected.Size = new Size(130, 34);
+            btnExecuteSelected.TabIndex = 0;
+            btnExecuteSelected.Text = "Run Selected";
+            btnExecuteSelected.UseVisualStyleBackColor = false;
             btnExecuteSelected.Click += btnExecuteSelected_Click;
             // 
-            // contextPresetLstAdd
+            // btnStopAll
             // 
-            contextPresetLstAdd.ImageScalingSize = new Size(20, 20);
-            contextPresetLstAdd.Items.AddRange(new ToolStripItem[] { toolStripMenuItem1 });
-            contextPresetLstAdd.Name = "contextPresetLst";
-            contextPresetLstAdd.Size = new Size(132, 26);
+            btnStopAll.BackColor = Color.FromArgb(220, 53, 69);
+            btnStopAll.FlatAppearance.BorderSize = 0;
+            btnStopAll.FlatStyle = FlatStyle.Flat;
+            btnStopAll.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
+            btnStopAll.ForeColor = Color.White;
+            btnStopAll.Location = new Point(284, 8);
+            btnStopAll.Name = "btnStopAll";
+            btnStopAll.Size = new Size(100, 34);
+            btnStopAll.TabIndex = 2;
+            btnStopAll.Text = "Stop";
+            btnStopAll.UseVisualStyleBackColor = false;
+            btnStopAll.Visible = false;
+            btnStopAll.Click += btnStopAll_Click;
             // 
-            // toolStripMenuItem1
+            // outputPanel
             // 
-            toolStripMenuItem1.Name = "toolStripMenuItem1";
-            toolStripMenuItem1.Size = new Size(131, 22);
-            toolStripMenuItem1.Text = "Add Preset";
-            toolStripMenuItem1.Click += contextPresetLstAdd_Click;
+            outputPanel.BackColor = Color.White;
+            outputPanel.Controls.Add(outputSplitContainer);
+            outputPanel.Dock = DockStyle.Fill;
+            outputPanel.Location = new Point(0, 0);
+            outputPanel.Name = "outputPanel";
+            outputPanel.Padding = new Padding(8, 0, 8, 8);
+            outputPanel.Size = new Size(1400, 311);
+            outputPanel.TabIndex = 0;
             // 
-            // txtTimeout
+            // outputSplitContainer
             // 
-            txtTimeout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            txtTimeout.Location = new Point(1341, 34);
-            txtTimeout.Margin = new Padding(3, 2, 3, 2);
-            txtTimeout.Name = "txtTimeout";
-            txtTimeout.Size = new Size(44, 23);
-            txtTimeout.TabIndex = 32;
-            txtTimeout.TextAlign = HorizontalAlignment.Right;
+            outputSplitContainer.Dock = DockStyle.Fill;
+            outputSplitContainer.Location = new Point(8, 0);
+            outputSplitContainer.Name = "outputSplitContainer";
             // 
-            // label7
+            // outputSplitContainer.Panel1
             // 
-            label7.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            label7.AutoSize = true;
-            label7.Location = new Point(1280, 39);
-            label7.Name = "label7";
-            label7.Size = new Size(55, 15);
-            label7.TabIndex = 33;
-            label7.Text = "Timeout:";
+            outputSplitContainer.Panel1.Controls.Add(historyPanel);
+            // 
+            // outputSplitContainer.Panel2
+            // 
+            outputSplitContainer.Panel2.Controls.Add(txtOutput);
+            outputSplitContainer.Size = new Size(1384, 303);
+            outputSplitContainer.SplitterDistance = 280;
+            outputSplitContainer.SplitterWidth = 6;
+            outputSplitContainer.TabIndex = 0;
+            // 
+            // historyPanel
+            // 
+            historyPanel.Controls.Add(lstOutput);
+            historyPanel.Controls.Add(historyHeaderPanel);
+            historyPanel.Dock = DockStyle.Fill;
+            historyPanel.Location = new Point(0, 0);
+            historyPanel.Name = "historyPanel";
+            historyPanel.Size = new Size(280, 303);
+            historyPanel.TabIndex = 0;
             // 
             // lstOutput
             // 
-            lstOutput.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
+            lstOutput.BackColor = Color.White;
+            lstOutput.BorderStyle = BorderStyle.None;
             lstOutput.ContextMenuStrip = contextHistoryLst;
+            lstOutput.Dock = DockStyle.Fill;
+            lstOutput.Font = new Font("Segoe UI", 9F);
             lstOutput.FormattingEnabled = true;
             lstOutput.IntegralHeight = false;
             lstOutput.ItemHeight = 15;
-            lstOutput.Location = new Point(16, 258);
-            lstOutput.Margin = new Padding(3, 2, 3, 2);
+            lstOutput.Location = new Point(0, 28);
             lstOutput.Name = "lstOutput";
-            lstOutput.Size = new Size(407, 314);
-            lstOutput.TabIndex = 34;
+            lstOutput.Size = new Size(280, 275);
+            lstOutput.TabIndex = 0;
             lstOutput.SelectedIndexChanged += lstOutput_SelectedIndexChanged;
             // 
             // contextHistoryLst
             // 
-            contextHistoryLst.ImageScalingSize = new Size(20, 20);
-            contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, saveAllToolStripMenuItem, toolStripSeparator1, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
+            contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, saveAllToolStripMenuItem, toolStripSeparator8, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
             contextHistoryLst.Name = "contextHistoryLst";
-            contextHistoryLst.Size = new Size(226, 98);
+            contextHistoryLst.Size = new Size(201, 98);
             contextHistoryLst.Opening += contextHistoryLst_Opening;
             // 
             // saveAsToolStripMenuItem
             // 
             saveAsToolStripMenuItem.Name = "saveAsToolStripMenuItem";
-            saveAsToolStripMenuItem.Size = new Size(225, 22);
-            saveAsToolStripMenuItem.Text = "Save As";
+            saveAsToolStripMenuItem.Size = new Size(200, 22);
+            saveAsToolStripMenuItem.Text = "Save &As...";
             saveAsToolStripMenuItem.Click += saveAsToolStripMenuItem_Click;
             // 
             // saveAllToolStripMenuItem
             // 
             saveAllToolStripMenuItem.Name = "saveAllToolStripMenuItem";
-            saveAllToolStripMenuItem.Size = new Size(225, 22);
-            saveAllToolStripMenuItem.Text = "Save All History In Single File";
+            saveAllToolStripMenuItem.Size = new Size(200, 22);
+            saveAllToolStripMenuItem.Text = "Save A&ll History to File...";
             saveAllToolStripMenuItem.Click += saveAllToolStripMenuItem_Click;
             // 
-            // toolStripSeparator1
+            // toolStripSeparator8
             // 
-            toolStripSeparator1.Name = "toolStripSeparator1";
-            toolStripSeparator1.Size = new Size(222, 6);
+            toolStripSeparator8.Name = "toolStripSeparator8";
+            toolStripSeparator8.Size = new Size(197, 6);
             // 
             // deleteEntryToolStripMenuItem
             // 
             deleteEntryToolStripMenuItem.Name = "deleteEntryToolStripMenuItem";
-            deleteEntryToolStripMenuItem.Size = new Size(225, 22);
-            deleteEntryToolStripMenuItem.Text = "Delete Entry";
+            deleteEntryToolStripMenuItem.Size = new Size(200, 22);
+            deleteEntryToolStripMenuItem.Text = "&Delete Entry";
             deleteEntryToolStripMenuItem.Click += deleteEntryToolStripMenuItem_Click;
             // 
             // deleteAllHistoryToolStripMenuItem
             // 
             deleteAllHistoryToolStripMenuItem.Name = "deleteAllHistoryToolStripMenuItem";
-            deleteAllHistoryToolStripMenuItem.Size = new Size(225, 22);
-            deleteAllHistoryToolStripMenuItem.Text = "Delete All History";
+            deleteAllHistoryToolStripMenuItem.Size = new Size(200, 22);
+            deleteAllHistoryToolStripMenuItem.Text = "Delete All &History";
             deleteAllHistoryToolStripMenuItem.Click += deleteAllHistoryToolStripMenuItem_Click;
             // 
-            // label8
+            // historyHeaderPanel
             // 
-            label8.AutoSize = true;
-            label8.Location = new Point(16, 241);
-            label8.Name = "label8";
-            label8.Size = new Size(45, 15);
-            label8.TabIndex = 35;
-            label8.Text = "History";
+            historyHeaderPanel.BackColor = Color.FromArgb(248, 249, 250);
+            historyHeaderPanel.Controls.Add(lblHistoryTitle);
+            historyHeaderPanel.Dock = DockStyle.Top;
+            historyHeaderPanel.Location = new Point(0, 0);
+            historyHeaderPanel.Name = "historyHeaderPanel";
+            historyHeaderPanel.Padding = new Padding(8, 6, 8, 6);
+            historyHeaderPanel.Size = new Size(280, 28);
+            historyHeaderPanel.TabIndex = 1;
             // 
-            // btnStopAll
+            // lblHistoryTitle
             // 
-            btnStopAll.Location = new Point(927, 195);
-            btnStopAll.Name = "btnStopAll";
-            btnStopAll.Size = new Size(75, 40);
-            btnStopAll.TabIndex = 36;
-            btnStopAll.Text = "Stop Execution";
-            btnStopAll.UseVisualStyleBackColor = true;
-            btnStopAll.Visible = false;
-            btnStopAll.Click += btnStopAll_Click;
+            lblHistoryTitle.AutoSize = true;
+            lblHistoryTitle.Dock = DockStyle.Left;
+            lblHistoryTitle.Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
+            lblHistoryTitle.ForeColor = Color.FromArgb(33, 37, 41);
+            lblHistoryTitle.Location = new Point(8, 6);
+            lblHistoryTitle.Name = "lblHistoryTitle";
+            lblHistoryTitle.Size = new Size(45, 15);
+            lblHistoryTitle.TabIndex = 0;
+            lblHistoryTitle.Text = "History";
+            // 
+            // txtOutput
+            // 
+            txtOutput.BackColor = Color.FromArgb(30, 30, 30);
+            txtOutput.BorderStyle = BorderStyle.None;
+            txtOutput.Dock = DockStyle.Fill;
+            txtOutput.Font = new Font("Cascadia Code", 9.5F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            txtOutput.ForeColor = Color.FromArgb(212, 212, 212);
+            txtOutput.HideSelection = false;
+            txtOutput.Location = new Point(0, 0);
+            txtOutput.MaxLength = 2000000;
+            txtOutput.Multiline = true;
+            txtOutput.Name = "txtOutput";
+            txtOutput.ReadOnly = true;
+            txtOutput.ScrollBars = ScrollBars.Both;
+            txtOutput.Size = new Size(1098, 303);
+            txtOutput.TabIndex = 0;
+            txtOutput.WordWrap = false;
+            // 
+            // mainToolStrip
+            // 
+            mainToolStrip.BackColor = Color.FromArgb(248, 249, 250);
+            mainToolStrip.GripStyle = ToolStripGripStyle.Hidden;
+            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword, toolStripSeparator3, toolStripLabel3, tsbTimeout });
+            mainToolStrip.Location = new Point(0, 24);
+            mainToolStrip.Name = "mainToolStrip";
+            mainToolStrip.Padding = new Padding(8, 0, 8, 0);
+            mainToolStrip.Size = new Size(1400, 25);
+            mainToolStrip.TabIndex = 0;
+            // 
+            // tsbOpenCsv
+            // 
+            tsbOpenCsv.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbOpenCsv.Name = "tsbOpenCsv";
+            tsbOpenCsv.Size = new Size(64, 22);
+            tsbOpenCsv.Text = "Open CSV";
+            tsbOpenCsv.ToolTipText = "Open CSV file (Ctrl+O)";
+            tsbOpenCsv.Click += btnOpenCSV_Click;
+            // 
+            // tsbSaveCsv
+            // 
+            tsbSaveCsv.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbSaveCsv.Name = "tsbSaveCsv";
+            tsbSaveCsv.Size = new Size(35, 22);
+            tsbSaveCsv.Text = "Save";
+            tsbSaveCsv.ToolTipText = "Save CSV (Ctrl+S)";
+            tsbSaveCsv.Click += saveToolStripMenuItem_Click;
+            // 
+            // tsbSaveCsvAs
+            // 
+            tsbSaveCsvAs.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbSaveCsvAs.Name = "tsbSaveCsvAs";
+            tsbSaveCsvAs.Size = new Size(51, 22);
+            tsbSaveCsvAs.Text = "Save As";
+            tsbSaveCsvAs.ToolTipText = "Save CSV As (Ctrl+Shift+S)";
+            tsbSaveCsvAs.Click += btnSaveAs_Click;
+            // 
+            // toolStripSeparator1
+            // 
+            toolStripSeparator1.Name = "toolStripSeparator1";
+            toolStripSeparator1.Size = new Size(6, 25);
+            // 
+            // tsbClearGrid
+            // 
+            tsbClearGrid.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbClearGrid.Name = "tsbClearGrid";
+            tsbClearGrid.Size = new Size(38, 22);
+            tsbClearGrid.Text = "Clear";
+            tsbClearGrid.ToolTipText = "Clear all hosts";
+            tsbClearGrid.Click += btnClear_Click;
+            // 
+            // toolStripSeparator2
+            // 
+            toolStripSeparator2.Name = "toolStripSeparator2";
+            toolStripSeparator2.Size = new Size(6, 25);
+            // 
+            // toolStripLabel1
+            // 
+            toolStripLabel1.Name = "toolStripLabel1";
+            toolStripLabel1.Size = new Size(63, 22);
+            toolStripLabel1.Text = "Username:";
+            // 
+            // tsbUsername
+            // 
+            tsbUsername.BorderStyle = BorderStyle.FixedSingle;
+            tsbUsername.Name = "tsbUsername";
+            tsbUsername.Size = new Size(120, 25);
+            // 
+            // toolStripLabel2
+            // 
+            toolStripLabel2.Name = "toolStripLabel2";
+            toolStripLabel2.Size = new Size(60, 22);
+            toolStripLabel2.Text = "Password:";
+            // 
+            // tsbPassword
+            // 
+            tsbPassword.BorderStyle = BorderStyle.FixedSingle;
+            tsbPassword.Name = "tsbPassword";
+            tsbPassword.Size = new Size(120, 25);
+            // 
+            // toolStripSeparator3
+            // 
+            toolStripSeparator3.Name = "toolStripSeparator3";
+            toolStripSeparator3.Size = new Size(6, 25);
+            // 
+            // toolStripLabel3
+            // 
+            toolStripLabel3.Name = "toolStripLabel3";
+            toolStripLabel3.Size = new Size(71, 22);
+            toolStripLabel3.Text = "Timeout (s):";
+            // 
+            // tsbTimeout
+            // 
+            tsbTimeout.BorderStyle = BorderStyle.FixedSingle;
+            tsbTimeout.Name = "tsbTimeout";
+            tsbTimeout.Size = new Size(50, 25);
+            tsbTimeout.Text = "10";
+            tsbTimeout.TextBoxTextAlign = HorizontalAlignment.Center;
+            // 
+            // statusStrip
+            // 
+            statusStrip.BackColor = Color.FromArgb(248, 249, 250);
+            statusStrip.Items.AddRange(new ToolStripItem[] { statusLabel, statusProgress, statusHostCount });
+            statusStrip.Location = new Point(0, 720);
+            statusStrip.Name = "statusStrip";
+            statusStrip.Size = new Size(1400, 22);
+            statusStrip.TabIndex = 2;
+            // 
+            // statusLabel
+            // 
+            statusLabel.Name = "statusLabel";
+            statusLabel.Size = new Size(1341, 17);
+            statusLabel.Spring = true;
+            statusLabel.Text = "Ready";
+            statusLabel.TextAlign = ContentAlignment.MiddleLeft;
+            // 
+            // statusProgress
+            // 
+            statusProgress.Name = "statusProgress";
+            statusProgress.Size = new Size(100, 18);
+            statusProgress.Visible = false;
+            // 
+            // statusHostCount
+            // 
+            statusHostCount.Name = "statusHostCount";
+            statusHostCount.Size = new Size(44, 17);
+            statusHostCount.Text = "0 hosts";
             // 
             // menuStrip1
             // 
-            menuStrip1.BackColor = SystemColors.Control;
-            menuStrip1.Items.AddRange(new ToolStripItem[] { fileToolStripMenuItem, helpToolStripMenuItem });
+            menuStrip1.BackColor = Color.FromArgb(248, 249, 250);
+            menuStrip1.Items.AddRange(new ToolStripItem[] { fileToolStripMenuItem, editToolStripMenuItem, helpToolStripMenuItem });
             menuStrip1.Location = new Point(0, 0);
             menuStrip1.Name = "menuStrip1";
-            menuStrip1.Size = new Size(1398, 24);
-            menuStrip1.TabIndex = 37;
-            menuStrip1.Text = "menuStrip";
+            menuStrip1.Size = new Size(1400, 24);
+            menuStrip1.TabIndex = 3;
             // 
             // fileToolStripMenuItem
             // 
-            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openCSVToolStripMenuItem, saveToolStripMenuItem, saveAsToolStripMenuItem1, ExitMenuItem });
+            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openCSVToolStripMenuItem, saveToolStripMenuItem, saveAsToolStripMenuItem1, toolStripSeparator4, exportAllPresetsToolStripMenuItem, importAllPresetsToolStripMenuItem, toolStripSeparator9, ExitMenuItem });
             fileToolStripMenuItem.Name = "fileToolStripMenuItem";
             fileToolStripMenuItem.Size = new Size(37, 20);
-            fileToolStripMenuItem.Text = "File";
+            fileToolStripMenuItem.Text = "&File";
             // 
             // openCSVToolStripMenuItem
             // 
             openCSVToolStripMenuItem.Name = "openCSVToolStripMenuItem";
             openCSVToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.O;
-            openCSVToolStripMenuItem.Size = new Size(186, 22);
-            openCSVToolStripMenuItem.Text = "Open CSV";
+            openCSVToolStripMenuItem.Size = new Size(195, 22);
+            openCSVToolStripMenuItem.Text = "&Open CSV...";
             openCSVToolStripMenuItem.Click += openCSVToolStripMenuItem_Click;
             // 
             // saveToolStripMenuItem
             // 
             saveToolStripMenuItem.Name = "saveToolStripMenuItem";
             saveToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.S;
-            saveToolStripMenuItem.Size = new Size(186, 22);
-            saveToolStripMenuItem.Text = "Save";
+            saveToolStripMenuItem.Size = new Size(195, 22);
+            saveToolStripMenuItem.Text = "&Save";
             saveToolStripMenuItem.Click += saveToolStripMenuItem_Click;
             // 
             // saveAsToolStripMenuItem1
             // 
             saveAsToolStripMenuItem1.Name = "saveAsToolStripMenuItem1";
             saveAsToolStripMenuItem1.ShortcutKeys = Keys.Control | Keys.Shift | Keys.S;
-            saveAsToolStripMenuItem1.Size = new Size(186, 22);
-            saveAsToolStripMenuItem1.Text = "Save As";
+            saveAsToolStripMenuItem1.Size = new Size(195, 22);
+            saveAsToolStripMenuItem1.Text = "Save &As...";
             saveAsToolStripMenuItem1.Click += saveAsToolStripMenuItem1_Click;
+            // 
+            // toolStripSeparator4
+            // 
+            toolStripSeparator4.Name = "toolStripSeparator4";
+            toolStripSeparator4.Size = new Size(192, 6);
+            // 
+            // exportAllPresetsToolStripMenuItem
+            // 
+            exportAllPresetsToolStripMenuItem.Name = "exportAllPresetsToolStripMenuItem";
+            exportAllPresetsToolStripMenuItem.Size = new Size(195, 22);
+            exportAllPresetsToolStripMenuItem.Text = "E&xport All Presets...";
+            exportAllPresetsToolStripMenuItem.Click += exportAllPresetsToolStripMenuItem_Click;
+            // 
+            // importAllPresetsToolStripMenuItem
+            // 
+            importAllPresetsToolStripMenuItem.Name = "importAllPresetsToolStripMenuItem";
+            importAllPresetsToolStripMenuItem.Size = new Size(195, 22);
+            importAllPresetsToolStripMenuItem.Text = "&Import All Presets...";
+            importAllPresetsToolStripMenuItem.Click += importAllPresetsToolStripMenuItem_Click;
+            // 
+            // toolStripSeparator9
+            // 
+            toolStripSeparator9.Name = "toolStripSeparator9";
+            toolStripSeparator9.Size = new Size(192, 6);
             // 
             // ExitMenuItem
             // 
             ExitMenuItem.Name = "ExitMenuItem";
             ExitMenuItem.ShortcutKeys = Keys.Alt | Keys.F4;
-            ExitMenuItem.Size = new Size(186, 22);
-            ExitMenuItem.Text = "Exit";
+            ExitMenuItem.Size = new Size(195, 22);
+            ExitMenuItem.Text = "E&xit";
             ExitMenuItem.Click += ExitMenuItem_Click;
+            // 
+            // editToolStripMenuItem
+            // 
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem });
+            editToolStripMenuItem.Name = "editToolStripMenuItem";
+            editToolStripMenuItem.Size = new Size(39, 20);
+            editToolStripMenuItem.Text = "&Edit";
+            // 
+            // findToolStripMenuItem
+            // 
+            findToolStripMenuItem.Name = "findToolStripMenuItem";
+            findToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.F;
+            findToolStripMenuItem.Size = new Size(146, 22);
+            findToolStripMenuItem.Text = "&Find...";
+            findToolStripMenuItem.Click += findToolStripMenuItem_Click;
             // 
             // helpToolStripMenuItem
             // 
             helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { aboutToolStripMenuItem });
             helpToolStripMenuItem.Name = "helpToolStripMenuItem";
             helpToolStripMenuItem.Size = new Size(44, 20);
-            helpToolStripMenuItem.Text = "Help";
+            helpToolStripMenuItem.Text = "&Help";
             // 
             // aboutToolStripMenuItem
             // 
             aboutToolStripMenuItem.Name = "aboutToolStripMenuItem";
             aboutToolStripMenuItem.Size = new Size(107, 22);
-            aboutToolStripMenuItem.Text = "About";
+            aboutToolStripMenuItem.Text = "&About";
             aboutToolStripMenuItem.Click += aboutToolStripMenuItem_Click;
+            // 
+            // contextPresetLstAdd
+            // 
+            contextPresetLstAdd.Items.AddRange(new ToolStripItem[] { ctxAddPreset2, ctxImportPreset2 });
+            contextPresetLstAdd.Name = "contextPresetLstAdd";
+            contextPresetLstAdd.Size = new Size(146, 48);
+            // 
+            // ctxAddPreset2
+            // 
+            ctxAddPreset2.Name = "ctxAddPreset2";
+            ctxAddPreset2.Size = new Size(145, 22);
+            ctxAddPreset2.Text = "&Add Preset";
+            ctxAddPreset2.Click += contextPresetLstAdd_Click;
+            // 
+            // ctxImportPreset2
+            // 
+            ctxImportPreset2.Name = "ctxImportPreset2";
+            ctxImportPreset2.Size = new Size(145, 22);
+            ctxImportPreset2.Text = "&Import Preset";
+            ctxImportPreset2.Click += ImportPreset_Click;
             // 
             // txtDelay
             // 
-            txtDelay.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            txtDelay.Location = new Point(1341, 34);
-            txtDelay.Margin = new Padding(3, 2, 3, 2);
+            txtDelay.Location = new Point(-100, -100);
             txtDelay.Name = "txtDelay";
-            txtDelay.Size = new Size(45, 23);
-            txtDelay.TabIndex = 30;
-            txtDelay.TextAlign = HorizontalAlignment.Right;
+            txtDelay.Size = new Size(50, 23);
+            txtDelay.TabIndex = 4;
             txtDelay.Visible = false;
+            // 
+            // txtUsername
+            // 
+            txtUsername.Location = new Point(-100, -100);
+            txtUsername.Name = "txtUsername";
+            txtUsername.Size = new Size(100, 23);
+            txtUsername.TabIndex = 5;
+            txtUsername.Visible = false;
+            // 
+            // txtPassword
+            // 
+            txtPassword.Location = new Point(-100, -100);
+            txtPassword.Name = "txtPassword";
+            txtPassword.Size = new Size(100, 23);
+            txtPassword.TabIndex = 6;
+            txtPassword.Visible = false;
+            // 
+            // txtTimeout
+            // 
+            txtTimeout.Location = new Point(-100, -100);
+            txtTimeout.Name = "txtTimeout";
+            txtTimeout.Size = new Size(50, 23);
+            txtTimeout.TabIndex = 7;
+            txtTimeout.Visible = false;
             // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
-            BackColor = SystemColors.Control;
-            ClientSize = new Size(1398, 585);
+            BackColor = Color.FromArgb(233, 236, 239);
+            ClientSize = new Size(1400, 742);
+            Controls.Add(mainSplitContainer);
+            Controls.Add(mainToolStrip);
+            Controls.Add(statusStrip);
             Controls.Add(menuStrip1);
-            Controls.Add(label8);
-            Controls.Add(lstOutput);
-            Controls.Add(label7);
-            Controls.Add(txtTimeout);
-            Controls.Add(btnExecuteSelected);
-            Controls.Add(btnSave);
-            Controls.Add(label6);
-            Controls.Add(lstPreset);
-            Controls.Add(label4);
-            Controls.Add(label3);
-            Controls.Add(label2);
-            Controls.Add(txtCommand);
-            Controls.Add(txtPassword);
-            Controls.Add(txtUsername);
-            Controls.Add(label1);
-            Controls.Add(txtOutput);
-            Controls.Add(btnClear);
-            Controls.Add(btnSaveAs);
-            Controls.Add(dgv_variables);
-            Controls.Add(btnOpenCSV);
-            Controls.Add(txtPreset);
-            Controls.Add(btnStopAll);
-            Controls.Add(btnExecuteAll);
             Controls.Add(txtDelay);
+            Controls.Add(txtUsername);
+            Controls.Add(txtPassword);
+            Controls.Add(txtTimeout);
             MainMenuStrip = menuStrip1;
+            MinimumSize = new Size(1024, 600);
             Name = "Form1";
-            Text = "SSH_Helper";
+            StartPosition = FormStartPosition.CenterScreen;
+            Text = "SSH Helper";
+            mainSplitContainer.Panel1.ResumeLayout(false);
+            mainSplitContainer.Panel2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)mainSplitContainer).EndInit();
+            mainSplitContainer.ResumeLayout(false);
+            topSplitContainer.Panel1.ResumeLayout(false);
+            topSplitContainer.Panel2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)topSplitContainer).EndInit();
+            topSplitContainer.ResumeLayout(false);
+            hostsPanel.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)dgv_variables).EndInit();
             contextMenuStrip1.ResumeLayout(false);
+            hostsHeaderPanel.ResumeLayout(false);
+            hostsHeaderPanel.PerformLayout();
+            commandPanel.ResumeLayout(false);
+            commandSplitContainer.Panel1.ResumeLayout(false);
+            commandSplitContainer.Panel2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)commandSplitContainer).EndInit();
+            commandSplitContainer.ResumeLayout(false);
+            presetsPanel.ResumeLayout(false);
+            presetsPanel.PerformLayout();
             contextPresetLst.ResumeLayout(false);
-            contextPresetLstAdd.ResumeLayout(false);
+            presetsToolStrip.ResumeLayout(false);
+            presetsToolStrip.PerformLayout();
+            presetsHeaderPanel.ResumeLayout(false);
+            presetsHeaderPanel.PerformLayout();
+            scriptPanel.ResumeLayout(false);
+            scriptPanel.PerformLayout();
+            scriptHeaderPanel.ResumeLayout(false);
+            scriptHeaderPanel.PerformLayout();
+            executePanel.ResumeLayout(false);
+            outputPanel.ResumeLayout(false);
+            outputSplitContainer.Panel1.ResumeLayout(false);
+            outputSplitContainer.Panel2.ResumeLayout(false);
+            outputSplitContainer.Panel2.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)outputSplitContainer).EndInit();
+            outputSplitContainer.ResumeLayout(false);
+            historyPanel.ResumeLayout(false);
             contextHistoryLst.ResumeLayout(false);
+            historyHeaderPanel.ResumeLayout(false);
+            historyHeaderPanel.PerformLayout();
+            mainToolStrip.ResumeLayout(false);
+            mainToolStrip.PerformLayout();
+            statusStrip.ResumeLayout(false);
+            statusStrip.PerformLayout();
             menuStrip1.ResumeLayout(false);
             menuStrip1.PerformLayout();
+            contextPresetLstAdd.ResumeLayout(false);
             ResumeLayout(false);
             PerformLayout();
         }
 
         #endregion
-        private Button btnOpenCSV;
-        private DataGridView dgv_variables;
-        private ContextMenuStrip contextMenuStrip1;
-        private ToolStripMenuItem addColumnToolStripMenuItem;
-        private ToolStripMenuItem deleteColumnToolStripMenuItem;
-        private ToolStripMenuItem deleteRowToolStripMenuItem;
-        private ToolStripMenuItem renameColumnToolStripMenuItem;
-        private Button btnSaveAs;
-        private Button btnClear;
-        private TextBox txtOutput;
-        private Label label1;
-        private TextBox txtPreset;
-        private Button btnSave;
-        private Label label6;
-        private ListBox lstPreset;
-        private Label label4;
-        private Label label3;
-        private Label label2;
-        private Button btnExecuteAll;
-        private TextBox txtCommand;
-        private TextBox txtPassword;
-        private TextBox txtUsername;
-        private ContextMenuStrip contextPresetLst;
-        private ToolStripMenuItem deleteToolStripMenuItem;
-        private ToolStripMenuItem renameToolStripMenuItem;
-        private ToolStripMenuItem addPresetToolStripMenuItem;
-        private Button btnExecuteSelected;
-        private ContextMenuStrip contextPresetLstAdd;
-        private ToolStripMenuItem toolStripMenuItem1;
-        private TextBox txtTimeout;
-        private Label label7;
-        private ListBox lstOutput;
-        private Label label8;
-        private ContextMenuStrip contextHistoryLst;
-        private ToolStripMenuItem saveAsToolStripMenuItem;
-        private ToolStripMenuItem deleteEntryToolStripMenuItem;
-        private ToolStripMenuItem deleteAllHistoryToolStripMenuItem;
+
+        // Main layout
+        private SplitContainer mainSplitContainer;
+        private SplitContainer topSplitContainer;
+        private SplitContainer commandSplitContainer;
+
+        // Toolbar
+        private ToolStrip mainToolStrip;
+        private ToolStripButton tsbOpenCsv;
+        private ToolStripButton tsbSaveCsv;
+        private ToolStripButton tsbSaveCsvAs;
         private ToolStripSeparator toolStripSeparator1;
+        private ToolStripButton tsbClearGrid;
+        private ToolStripSeparator toolStripSeparator2;
+        private ToolStripLabel toolStripLabel1;
+        private ToolStripTextBox tsbUsername;
+        private ToolStripLabel toolStripLabel2;
+        private ToolStripTextBox tsbPassword;
+        private ToolStripSeparator toolStripSeparator3;
+        private ToolStripLabel toolStripLabel3;
+        private ToolStripTextBox tsbTimeout;
+
+        // Hosts panel
+        private Panel hostsPanel;
+        private Panel hostsHeaderPanel;
+        private Label lblHostsTitle;
+        private Label lblHostCount;
+        private DataGridView dgv_variables;
+
+        // Command panel
+        private Panel commandPanel;
+
+        // Presets panel
+        private Panel presetsPanel;
+        private Panel presetsHeaderPanel;
+        private Label lblPresetsTitle;
+        private ListBox lstPreset;
+        private ToolStrip presetsToolStrip;
+        private ToolStripButton tsbAddPreset;
+        private ToolStripButton tsbDeletePreset;
+        private ToolStripButton tsbRenamePreset;
+        private ToolStripButton tsbDuplicatePreset;
+        private ToolStripButton tsbSortPresets;
+
+        // Script panel
+        private Panel scriptPanel;
+        private Panel scriptHeaderPanel;
+        private Label lblScriptTitle;
+        private TextBox txtPreset;
+        private Button btnSavePreset;
+        private TextBox txtCommand;
+
+        // Execute panel
+        private Panel executePanel;
+        private Button btnExecuteAll;
+        private Button btnExecuteSelected;
         private Button btnStopAll;
-        private ToolStripMenuItem duplicatePresetToolStripMenuItem;
-        private ToolStripMenuItem saveAllToolStripMenuItem;
+
+        // Output panel
+        private Panel outputPanel;
+        private SplitContainer outputSplitContainer;
+        private TextBox txtOutput;
+        private Panel historyPanel;
+        private Panel historyHeaderPanel;
+        private Label lblHistoryTitle;
+        private ListBox lstOutput;
+
+        // Status bar
+        private StatusStrip statusStrip;
+        private ToolStripStatusLabel statusLabel;
+        private ToolStripProgressBar statusProgress;
+        private ToolStripStatusLabel statusHostCount;
+
+        // Menu
         private MenuStrip menuStrip1;
         private ToolStripMenuItem fileToolStripMenuItem;
         private ToolStripMenuItem openCSVToolStripMenuItem;
         private ToolStripMenuItem saveToolStripMenuItem;
         private ToolStripMenuItem saveAsToolStripMenuItem1;
+        private ToolStripSeparator toolStripSeparator4;
+        private ToolStripMenuItem exportAllPresetsToolStripMenuItem;
+        private ToolStripMenuItem importAllPresetsToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparator9;
+        private ToolStripMenuItem ExitMenuItem;
+        private ToolStripMenuItem editToolStripMenuItem;
+        private ToolStripMenuItem findToolStripMenuItem;
         private ToolStripMenuItem helpToolStripMenuItem;
         private ToolStripMenuItem aboutToolStripMenuItem;
-        private ToolStripMenuItem ExitMenuItem;
+
+        // Context menus
+        private ContextMenuStrip contextMenuStrip1;
+        private ToolStripMenuItem addColumnToolStripMenuItem;
+        private ToolStripMenuItem renameColumnToolStripMenuItem;
+        private ToolStripMenuItem deleteColumnToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparator5;
+        private ToolStripMenuItem deleteRowToolStripMenuItem;
+
+        private ContextMenuStrip contextPresetLst;
+        private ToolStripMenuItem ctxAddPreset;
+        private ToolStripMenuItem ctxDuplicatePreset;
+        private ToolStripMenuItem ctxRenamePreset;
+        private ToolStripMenuItem ctxDeletePreset;
+        private ToolStripSeparator toolStripSeparator6;
+        private ToolStripMenuItem ctxExportPreset;
+        private ToolStripMenuItem ctxImportPreset;
+        private ToolStripSeparator toolStripSeparator7;
+        private ToolStripMenuItem ctxToggleFavorite;
+        private ToolStripMenuItem ctxToggleSorting;
+
+        private ContextMenuStrip contextPresetLstAdd;
+        private ToolStripMenuItem ctxAddPreset2;
+        private ToolStripMenuItem ctxImportPreset2;
+
+        private ContextMenuStrip contextHistoryLst;
+        private ToolStripMenuItem saveAsToolStripMenuItem;
+        private ToolStripMenuItem saveAllToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparator8;
+        private ToolStripMenuItem deleteEntryToolStripMenuItem;
+        private ToolStripMenuItem deleteAllHistoryToolStripMenuItem;
+
+        // Hidden controls (for compatibility)
         private TextBox txtDelay;
+        private TextBox txtUsername;
+        private TextBox txtPassword;
+        private TextBox txtTimeout;
+    }
+
+    /// <summary>
+    /// Modern flat-style ToolStrip renderer
+    /// </summary>
+    public class ModernToolStripRenderer : ToolStripProfessionalRenderer
+    {
+        public ModernToolStripRenderer() : base(new ModernColorTable()) { }
+
+        protected override void OnRenderButtonBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (e.Item.Selected || e.Item.Pressed)
+            {
+                using var brush = new SolidBrush(Color.FromArgb(229, 229, 229));
+                e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.Item.Size));
+            }
+        }
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            // No border
+        }
+    }
+
+    public class ModernColorTable : ProfessionalColorTable
+    {
+        public override Color ToolStripGradientBegin => Color.FromArgb(248, 249, 250);
+        public override Color ToolStripGradientMiddle => Color.FromArgb(248, 249, 250);
+        public override Color ToolStripGradientEnd => Color.FromArgb(248, 249, 250);
+        public override Color MenuStripGradientBegin => Color.FromArgb(248, 249, 250);
+        public override Color MenuStripGradientEnd => Color.FromArgb(248, 249, 250);
+        public override Color StatusStripGradientBegin => Color.FromArgb(248, 249, 250);
+        public override Color StatusStripGradientEnd => Color.FromArgb(248, 249, 250);
     }
 }

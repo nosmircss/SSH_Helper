@@ -11,8 +11,8 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.33-Beta";
-        private const string ApplicationName = "SSH_Helper";
+        private const string ApplicationVersion = "0.40-Beta";
+        private const string ApplicationName = "SSH Helper";
 
         #endregion
 
@@ -42,6 +42,14 @@ namespace SSH_Helper
         private bool _lastFindMatchCase;
         private bool _lastFindWrap = true;
 
+        // Preset sorting
+        private PresetSortMode _currentSortMode = PresetSortMode.Ascending;
+        private readonly List<string> _manualPresetOrder = new();
+
+        // Preset drag-drop state
+        private int _presetDragIndex = -1;
+        private Point _presetDragStartPoint;
+
         #endregion
 
         #region Constructor
@@ -64,7 +72,12 @@ namespace SSH_Helper
             InitializeDataGridView();
             InitializeOutputHistory();
             InitializeEventHandlers();
-            InitializePresetExportImportMenuItems();
+            InitializeToolbarSync();
+            InitializePasswordMasking();
+            RestoreWindowState();
+            UpdateHostCount();
+            UpdateSortModeIndicator();
+            UpdateStatusBar("Ready");
         }
 
         #endregion
@@ -77,16 +90,19 @@ namespace SSH_Helper
             _presetManager.Load();
 
             // Populate UI from config
+            tsbUsername.Text = config.Username;
             txtUsername.Text = config.Username;
             txtDelay.Text = config.Delay.ToString();
-            txtTimeout.Text = config.Timeout > 0 ? config.Timeout.ToString() : "10";
+            tsbTimeout.Text = config.Timeout > 0 ? config.Timeout.ToString() : "10";
+            txtTimeout.Text = tsbTimeout.Text;
 
-            // Populate preset list
-            lstPreset.Items.Clear();
-            foreach (var preset in _presetManager.Presets.Keys)
-            {
-                lstPreset.Items.Add(preset);
-            }
+            // Load sort mode and manual order
+            _currentSortMode = config.PresetSortMode;
+            _manualPresetOrder.Clear();
+            _manualPresetOrder.AddRange(config.ManualPresetOrder);
+
+            // Populate preset list with proper sorting
+            RefreshPresetList();
 
             // Apply defaults to presets that don't have them
             _presetManager.ApplyDefaults(config.Delay, config.Timeout);
@@ -96,33 +112,36 @@ namespace SSH_Helper
         {
             dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
 
-            // Styling
+            // Modern styling
             dgv_variables.EnableHeadersVisualStyles = false;
             dgv_variables.BackgroundColor = Color.White;
-            dgv_variables.GridColor = Color.Gainsboro;
+            dgv_variables.GridColor = Color.FromArgb(222, 226, 230);
 
             // Column headers
             dgv_variables.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
-            dgv_variables.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 242, 242);
-            dgv_variables.ColumnHeadersDefaultCellStyle.ForeColor = Color.Black;
-            dgv_variables.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9, FontStyle.Regular);
-            dgv_variables.ColumnHeadersHeight = 32;
+            dgv_variables.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+            dgv_variables.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(33, 37, 41);
+            dgv_variables.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
+            dgv_variables.ColumnHeadersDefaultCellStyle.Padding = new Padding(8, 4, 8, 4);
+            dgv_variables.ColumnHeadersHeight = 36;
             dgv_variables.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
 
             // Row headers
             dgv_variables.RowHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
-            dgv_variables.RowHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 242, 242);
-            dgv_variables.RowHeadersDefaultCellStyle.ForeColor = Color.Black;
-            dgv_variables.RowHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9, FontStyle.Regular);
-            dgv_variables.RowHeadersWidth = 60;
+            dgv_variables.RowHeadersDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+            dgv_variables.RowHeadersDefaultCellStyle.ForeColor = Color.FromArgb(108, 117, 125);
+            dgv_variables.RowHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9F);
+            dgv_variables.RowHeadersWidth = 50;
 
             // Cell styles
             dgv_variables.DefaultCellStyle.BackColor = Color.White;
-            dgv_variables.DefaultCellStyle.ForeColor = Color.Black;
-            dgv_variables.DefaultCellStyle.Font = new Font("Segoe UI", 9);
-            dgv_variables.DefaultCellStyle.SelectionBackColor = Color.LightBlue;
-            dgv_variables.DefaultCellStyle.SelectionForeColor = Color.Black;
-            dgv_variables.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(245, 245, 245);
+            dgv_variables.DefaultCellStyle.ForeColor = Color.FromArgb(33, 37, 41);
+            dgv_variables.DefaultCellStyle.Font = new Font("Segoe UI", 9.5F);
+            dgv_variables.DefaultCellStyle.SelectionBackColor = Color.FromArgb(13, 110, 253);
+            dgv_variables.DefaultCellStyle.SelectionForeColor = Color.White;
+            dgv_variables.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
+            dgv_variables.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+            dgv_variables.RowTemplate.Height = 28;
 
             dgv_variables.ColumnHeadersVisible = true;
             dgv_variables.RowHeadersVisible = true;
@@ -138,10 +157,8 @@ namespace SSH_Helper
         {
             // Form events
             FormClosing += Form1_FormClosing;
-            Click += Form_Click;
 
             // DataGridView events
-            dgv_variables.ContextMenuStrip = contextMenuStrip1;
             dgv_variables.MouseDown += Dgv_Variables_MouseDown;
             dgv_variables.RowPostPaint += Dgv_Variables_RowPostPaint;
             dgv_variables.CellClick += Dgv_Variables_CellClick;
@@ -156,37 +173,111 @@ namespace SSH_Helper
 
             // Preset events
             lstPreset.MouseDown += LstPreset_MouseDown;
+            lstPreset.MouseMove += LstPreset_MouseMove;
+            lstPreset.DragOver += LstPreset_DragOver;
+            lstPreset.DragDrop += LstPreset_DragDrop;
+            lstPreset.AllowDrop = true;
+        }
 
-            // Input validation
-            txtDelay.KeyPress += NumericTextBox_KeyPress;
-            txtTimeout.KeyPress += NumericTextBox_KeyPress;
+        private void InitializeToolbarSync()
+        {
+            // Sync toolbar username/password with hidden textboxes
+            tsbUsername.TextChanged += (s, e) => txtUsername.Text = tsbUsername.Text;
+            tsbPassword.TextChanged += (s, e) => txtPassword.Text = tsbPassword.Text;
+            tsbTimeout.TextChanged += (s, e) => txtTimeout.Text = tsbTimeout.Text;
 
-            // Attach click handlers to clear selection
-            foreach (Control control in Controls)
+            // Only allow numeric input in timeout
+            tsbTimeout.KeyPress += (s, e) =>
             {
-                if (control != dgv_variables)
+                if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
                 {
-                    control.Click += Control_Click;
+                    e.Handled = true;
                 }
+            };
+        }
+
+        private void InitializePasswordMasking()
+        {
+            // Access the internal TextBox of ToolStripTextBox to set password char
+            if (tsbPassword.TextBox != null)
+            {
+                tsbPassword.TextBox.UseSystemPasswordChar = true;
             }
         }
 
-        private void InitializePresetExportImportMenuItems()
+        private void RestoreWindowState()
         {
-            AddMenuItemIfNotExists(contextPresetLst, "importPresetToolStripMenuItem", "Import Preset", ImportPreset_Click, true);
-            AddMenuItemIfNotExists(contextPresetLst, "exportPresetToolStripMenuItem", "Export Preset", ExportPreset_Click, false);
-            AddMenuItemIfNotExists(contextPresetLstAdd, "importPresetToolStripMenuItem", "Import Preset", ImportPreset_Click, true);
+            var config = _configService.GetCurrent();
+            var ws = config.WindowState;
+
+            if (ws.Width.HasValue && ws.Height.HasValue && ws.Left.HasValue && ws.Top.HasValue)
+            {
+                // Ensure window is on screen
+                var screen = Screen.FromPoint(new Point(ws.Left.Value, ws.Top.Value));
+                if (screen != null)
+                {
+                    StartPosition = FormStartPosition.Manual;
+                    Left = Math.Max(screen.WorkingArea.Left, Math.Min(ws.Left.Value, screen.WorkingArea.Right - 100));
+                    Top = Math.Max(screen.WorkingArea.Top, Math.Min(ws.Top.Value, screen.WorkingArea.Bottom - 100));
+                    Width = Math.Min(ws.Width.Value, screen.WorkingArea.Width);
+                    Height = Math.Min(ws.Height.Value, screen.WorkingArea.Height);
+                }
+            }
+
+            if (ws.IsMaximized)
+            {
+                WindowState = FormWindowState.Maximized;
+            }
+
+            // Restore splitter positions after load
+            Load += (s, e) =>
+            {
+                if (ws.MainSplitterDistance.HasValue && ws.MainSplitterDistance.Value > 0)
+                {
+                    try { mainSplitContainer.SplitterDistance = Math.Min(ws.MainSplitterDistance.Value, mainSplitContainer.Height - mainSplitContainer.Panel2MinSize); }
+                    catch { /* Ignore invalid splitter distances */ }
+                }
+                if (ws.TopSplitterDistance.HasValue && ws.TopSplitterDistance.Value > 0)
+                {
+                    try { topSplitContainer.SplitterDistance = Math.Min(ws.TopSplitterDistance.Value, topSplitContainer.Width - topSplitContainer.Panel2MinSize); }
+                    catch { /* Ignore invalid splitter distances */ }
+                }
+                if (ws.CommandSplitterDistance.HasValue && ws.CommandSplitterDistance.Value > 0)
+                {
+                    try { commandSplitContainer.SplitterDistance = Math.Min(ws.CommandSplitterDistance.Value, commandSplitContainer.Width - commandSplitContainer.Panel2MinSize); }
+                    catch { /* Ignore invalid splitter distances */ }
+                }
+                if (ws.OutputSplitterDistance.HasValue && ws.OutputSplitterDistance.Value > 0)
+                {
+                    try { outputSplitContainer.SplitterDistance = Math.Min(ws.OutputSplitterDistance.Value, outputSplitContainer.Width - outputSplitContainer.Panel2MinSize); }
+                    catch { /* Ignore invalid splitter distances */ }
+                }
+            };
         }
 
-        private static void AddMenuItemIfNotExists(ContextMenuStrip menu, string name, string text, EventHandler handler, bool addSeparatorBefore)
+        #endregion
+
+        #region UI Helpers
+
+        private void UpdateHostCount()
         {
-            if (menu.Items.OfType<ToolStripMenuItem>().Any(i => i.Name == name))
-                return;
+            int count = dgv_variables.Rows.Cast<DataGridViewRow>()
+                .Count(r => !r.IsNewRow && !string.IsNullOrWhiteSpace(GetCellValue(r, CsvManager.HostColumnName)));
 
-            if (addSeparatorBefore)
-                menu.Items.Add(new ToolStripSeparator());
+            string text = count == 1 ? "1 host" : $"{count} hosts";
+            lblHostCount.Text = text;
+            statusHostCount.Text = text;
+        }
 
-            menu.Items.Add(new ToolStripMenuItem(text, null, handler) { Name = name });
+        private void UpdateStatusBar(string message, bool showProgress = false, int progress = 0, int total = 0)
+        {
+            statusLabel.Text = message;
+            statusProgress.Visible = showProgress;
+            if (showProgress && total > 0)
+            {
+                statusProgress.Maximum = total;
+                statusProgress.Value = Math.Min(progress, total);
+            }
         }
 
         #endregion
@@ -207,16 +298,6 @@ namespace SSH_Helper
             }
 
             SaveConfiguration();
-        }
-
-        private void Form_Click(object? sender, EventArgs e)
-        {
-            EndEditAndClearSelection();
-        }
-
-        private void Control_Click(object? sender, EventArgs e)
-        {
-            EndEditAndClearSelection();
         }
 
         #endregion
@@ -300,7 +381,8 @@ namespace SSH_Helper
                 LineAlignment = StringAlignment.Center
             };
             var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
-            e.Graphics.DrawString(rowIdx, grid.Font, SystemBrushes.ControlText, headerBounds, centerFormat);
+            using var brush = new SolidBrush(Color.FromArgb(108, 117, 125));
+            e.Graphics.DrawString(rowIdx, grid.Font, brush, headerBounds, centerFormat);
         }
 
         private void Dgv_Variables_CellClick(object? sender, DataGridViewCellEventArgs e)
@@ -325,9 +407,24 @@ namespace SSH_Helper
             dgv_variables.CommitEdit(DataGridViewDataErrorContexts.Commit);
         }
 
-        private void Dgv_Variables_CellValueChanged(object? sender, DataGridViewCellEventArgs e) => _csvDirty = true;
-        private void Dgv_Variables_RowsAdded(object? sender, DataGridViewRowsAddedEventArgs e) => _csvDirty = true;
-        private void Dgv_Variables_RowsRemoved(object? sender, DataGridViewRowsRemovedEventArgs e) => _csvDirty = true;
+        private void Dgv_Variables_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+        {
+            _csvDirty = true;
+            UpdateHostCount();
+        }
+
+        private void Dgv_Variables_RowsAdded(object? sender, DataGridViewRowsAddedEventArgs e)
+        {
+            _csvDirty = true;
+            UpdateHostCount();
+        }
+
+        private void Dgv_Variables_RowsRemoved(object? sender, DataGridViewRowsRemovedEventArgs e)
+        {
+            _csvDirty = true;
+            UpdateHostCount();
+        }
+
         private void Dgv_Variables_ColumnRemoved(object? sender, DataGridViewColumnEventArgs e) => _csvDirty = true;
 
         private void Dgv_Variables_KeyPress(object? sender, KeyPressEventArgs e)
@@ -395,6 +492,99 @@ namespace SSH_Helper
                     contextPresetLstAdd.Show(Cursor.Position);
                 }
             }
+            else if (e.Button == MouseButtons.Left && _currentSortMode == PresetSortMode.Manual)
+            {
+                _presetDragIndex = lstPreset.IndexFromPoint(e.Location);
+                _presetDragStartPoint = e.Location;
+            }
+        }
+
+        private void LstPreset_MouseMove(object? sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left || _presetDragIndex < 0 || _currentSortMode != PresetSortMode.Manual)
+                return;
+
+            // Check if mouse has moved enough to start drag
+            if (Math.Abs(e.X - _presetDragStartPoint.X) > SystemInformation.DragSize.Width ||
+                Math.Abs(e.Y - _presetDragStartPoint.Y) > SystemInformation.DragSize.Height)
+            {
+                if (_presetDragIndex < lstPreset.Items.Count)
+                {
+                    lstPreset.DoDragDrop(lstPreset.Items[_presetDragIndex], DragDropEffects.Move);
+                }
+            }
+        }
+
+        private void LstPreset_DragOver(object? sender, DragEventArgs e)
+        {
+            if (_currentSortMode != PresetSortMode.Manual || !e.Data?.GetDataPresent(typeof(string)) == true)
+            {
+                e.Effect = DragDropEffects.None;
+                return;
+            }
+
+            e.Effect = DragDropEffects.Move;
+
+            // Get the item under the cursor and highlight it
+            var point = lstPreset.PointToClient(new Point(e.X, e.Y));
+            int targetIndex = lstPreset.IndexFromPoint(point);
+            if (targetIndex >= 0 && targetIndex < lstPreset.Items.Count)
+            {
+                lstPreset.SelectedIndex = targetIndex;
+            }
+        }
+
+        private void LstPreset_DragDrop(object? sender, DragEventArgs e)
+        {
+            if (_currentSortMode != PresetSortMode.Manual || _presetDragIndex < 0)
+            {
+                _presetDragIndex = -1;
+                return;
+            }
+
+            var point = lstPreset.PointToClient(new Point(e.X, e.Y));
+            int targetIndex = lstPreset.IndexFromPoint(point);
+
+            if (targetIndex < 0 || targetIndex == _presetDragIndex)
+            {
+                _presetDragIndex = -1;
+                return;
+            }
+
+            // Get the preset name being moved (strip star if favorite)
+            string draggedDisplayName = lstPreset.Items[_presetDragIndex].ToString() ?? "";
+            string draggedPresetName = GetPresetNameFromDisplay(draggedDisplayName);
+
+            // Build a list from the current visual order
+            var currentOrder = new List<string>();
+            for (int i = 0; i < lstPreset.Items.Count; i++)
+            {
+                currentOrder.Add(GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? ""));
+            }
+
+            // Remove from current position and insert at new position
+            currentOrder.RemoveAt(_presetDragIndex);
+            currentOrder.Insert(targetIndex > _presetDragIndex ? targetIndex : targetIndex, draggedPresetName);
+
+            // Update manual order list
+            _manualPresetOrder.Clear();
+            _manualPresetOrder.AddRange(currentOrder);
+
+            _presetDragIndex = -1;
+            RefreshPresetList();
+
+            // Re-select the moved item
+            for (int i = 0; i < lstPreset.Items.Count; i++)
+            {
+                if (GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? "") == draggedPresetName)
+                {
+                    lstPreset.SelectedIndex = i;
+                    break;
+                }
+            }
+
+            // Save the new order
+            SaveConfiguration();
         }
 
         private void lstPreset_SelectedIndexChanged(object sender, EventArgs e)
@@ -402,7 +592,8 @@ namespace SSH_Helper
             if (_suppressPresetSelectionChange || lstPreset.SelectedItem == null)
                 return;
 
-            string newPresetName = lstPreset.SelectedItem.ToString() ?? "";
+            string displayName = lstPreset.SelectedItem.ToString() ?? "";
+            string newPresetName = GetPresetNameFromDisplay(displayName);
 
             if (!string.IsNullOrEmpty(_activePresetName) &&
                 !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
@@ -417,8 +608,15 @@ namespace SSH_Helper
                 if (result == DialogResult.Cancel)
                 {
                     _suppressPresetSelectionChange = true;
-                    int revertIndex = lstPreset.Items.IndexOf(_activePresetName);
-                    if (revertIndex >= 0) lstPreset.SelectedIndex = revertIndex;
+                    // Find the previous active preset in the list
+                    for (int i = 0; i < lstPreset.Items.Count; i++)
+                    {
+                        if (GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? "") == _activePresetName)
+                        {
+                            lstPreset.SelectedIndex = i;
+                            break;
+                        }
+                    }
                     _suppressPresetSelectionChange = false;
                     return;
                 }
@@ -435,7 +633,11 @@ namespace SSH_Helper
                 txtCommand.Text = preset.Commands;
                 txtPreset.Text = newPresetName;
                 if (preset.Delay.HasValue) txtDelay.Text = preset.Delay.Value.ToString();
-                if (preset.Timeout.HasValue) txtTimeout.Text = preset.Timeout.Value.ToString();
+                if (preset.Timeout.HasValue)
+                {
+                    txtTimeout.Text = preset.Timeout.Value.ToString();
+                    tsbTimeout.Text = preset.Timeout.Value.ToString();
+                }
             }
 
             _activePresetName = newPresetName;
@@ -508,6 +710,21 @@ namespace SSH_Helper
             Close();
         }
 
+        private void exportAllPresetsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ExportAllPresets();
+        }
+
+        private void importAllPresetsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ImportAllPresets();
+        }
+
+        private void findToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ShowFindDialog();
+        }
+
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
             using var dlg = new AboutDialog(ApplicationName, ApplicationVersion);
@@ -561,12 +778,45 @@ namespace SSH_Helper
 
         private void toggleSortingToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            lstPreset.Sorted = !lstPreset.Sorted;
+            // Cycle through sort modes: Ascending -> Descending -> Manual -> Ascending
+            var previousMode = _currentSortMode;
+            _currentSortMode = _currentSortMode switch
+            {
+                PresetSortMode.Ascending => PresetSortMode.Descending,
+                PresetSortMode.Descending => PresetSortMode.Manual,
+                PresetSortMode.Manual => PresetSortMode.Ascending,
+                _ => PresetSortMode.Ascending
+            };
+
+            // When switching to manual mode, initialize the order from current visual order
+            if (_currentSortMode == PresetSortMode.Manual && _manualPresetOrder.Count == 0)
+            {
+                // Build order from current list display
+                for (int i = 0; i < lstPreset.Items.Count; i++)
+                {
+                    string name = GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? "");
+                    if (!string.IsNullOrEmpty(name))
+                        _manualPresetOrder.Add(name);
+                }
+            }
+
+            RefreshPresetList();
+            UpdateSortModeIndicator();
+            UpdateStatusBar($"Sort mode: {_currentSortMode}");
         }
 
-        private void toggleSortingToolStripMenuItem1_Click(object sender, EventArgs e)
+        private void UpdateSortModeIndicator()
         {
-            lstPreset.Sorted = !lstPreset.Sorted;
+            string indicator = _currentSortMode switch
+            {
+                PresetSortMode.Ascending => "Sort \u2191",   // ↑
+                PresetSortMode.Descending => "Sort \u2193", // ↓
+                PresetSortMode.Manual => "Sort \u2195",     // ↕
+                _ => "Sort"
+            };
+            tsbSortPresets.Text = indicator;
+            tsbSortPresets.ToolTipText = $"Sort mode: {_currentSortMode}";
+            ctxToggleSorting.Text = $"Toggle Sorting ({_currentSortMode})";
         }
 
         private void ExportPreset_Click(object? sender, EventArgs e)
@@ -577,6 +827,11 @@ namespace SSH_Helper
         private void ImportPreset_Click(object? sender, EventArgs e)
         {
             ImportPreset();
+        }
+
+        private void ctxToggleFavorite_Click(object? sender, EventArgs e)
+        {
+            ToggleFavorite();
         }
 
         private void lstOutput_SelectedIndexChanged(object sender, EventArgs e)
@@ -614,18 +869,6 @@ namespace SSH_Helper
 
         #endregion
 
-        #region Input Validation
-
-        private void NumericTextBox_KeyPress(object? sender, KeyPressEventArgs e)
-        {
-            if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
-            {
-                e.Handled = true;
-            }
-        }
-
-        #endregion
-
         #region CSV Operations
 
         private void OpenCsvFile()
@@ -645,6 +888,8 @@ namespace SSH_Helper
                     dgv_variables.Columns.Clear();
                     dgv_variables.DataSource = dataTable;
                     _csvDirty = false;
+                    UpdateHostCount();
+                    UpdateStatusBar($"Loaded: {Path.GetFileName(ofd.FileName)}");
                 }
                 catch (Exception ex)
                 {
@@ -668,6 +913,7 @@ namespace SSH_Helper
             {
                 SaveCsvToFile(sfd.FileName);
                 _loadedFilePath = sfd.FileName;
+                UpdateStatusBar($"Saved: {Path.GetFileName(sfd.FileName)}");
             }
         }
 
@@ -686,6 +932,7 @@ namespace SSH_Helper
             try
             {
                 SaveCsvToFile(_loadedFilePath);
+                UpdateStatusBar($"Saved: {Path.GetFileName(_loadedFilePath)}");
                 return true;
             }
             catch (Exception ex)
@@ -726,6 +973,9 @@ namespace SSH_Helper
                 dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
             }
             _csvDirty = true;
+            _loadedFilePath = null;
+            UpdateHostCount();
+            UpdateStatusBar("Grid cleared");
         }
 
         private bool EnsureCsvChangesSaved()
@@ -841,6 +1091,7 @@ namespace SSH_Helper
             }
 
             _csvDirty = true;
+            UpdateHostCount();
         }
 
         #endregion
@@ -946,6 +1197,7 @@ namespace SSH_Helper
             dgv_variables.AllowUserToAddRows = true;
             dgv_variables.ClearSelection();
             _csvDirty = true;
+            UpdateHostCount();
         }
 
         private void DeleteSelectedCells()
@@ -967,27 +1219,37 @@ namespace SSH_Helper
             string presetName = txtPreset.Text.Trim();
             string commands = txtCommand.Text;
 
-            if (string.IsNullOrEmpty(presetName) || string.IsNullOrWhiteSpace(commands))
+            if (string.IsNullOrEmpty(presetName))
             {
-                MessageBox.Show("Preset name or command is empty.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Preset name is required.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
+            // Preserve existing IsFavorite status if updating
+            var existingPreset = _presetManager.Get(presetName);
             var preset = new PresetInfo
             {
                 Commands = commands,
                 Delay = int.TryParse(txtDelay.Text, out var d) ? d : null,
-                Timeout = int.TryParse(txtTimeout.Text, out var t) ? t : null
+                Timeout = int.TryParse(tsbTimeout.Text, out var t) ? t : null,
+                IsFavorite = existingPreset?.IsFavorite ?? false
             };
 
+            bool isNew = !_presetManager.Presets.ContainsKey(presetName);
             _presetManager.Save(presetName, preset);
 
-            if (!lstPreset.Items.Contains(presetName))
+            if (isNew)
             {
-                lstPreset.Items.Add(presetName);
+                // Add to manual order list for Manual sort mode
+                if (!_manualPresetOrder.Contains(presetName))
+                {
+                    _manualPresetOrder.Add(presetName);
+                }
+                RefreshPresetList();
             }
 
             _activePresetName = presetName;
+            UpdateStatusBar($"Preset '{presetName}' saved");
         }
 
         private void AddPreset()
@@ -1006,7 +1268,15 @@ namespace SSH_Helper
             }
 
             _presetManager.Save(presetName, new PresetInfo());
-            lstPreset.Items.Add(presetName);
+
+            // Add to manual order
+            if (!_manualPresetOrder.Contains(presetName))
+            {
+                _manualPresetOrder.Add(presetName);
+            }
+
+            RefreshPresetList();
+            lstPreset.SelectedItem = presetName;
         }
 
         private void DuplicatePreset()
@@ -1033,17 +1303,20 @@ namespace SSH_Helper
             {
                 string finalName = _presetManager.Duplicate(sourceName, newName);
 
-                if (lstPreset.Sorted)
+                // Add to manual order after the source
+                int sourceIndex = _manualPresetOrder.IndexOf(sourceName);
+                if (sourceIndex >= 0)
                 {
-                    lstPreset.Items.Add(finalName);
+                    _manualPresetOrder.Insert(sourceIndex + 1, finalName);
                 }
                 else
                 {
-                    int insertIndex = lstPreset.SelectedIndex + 1;
-                    lstPreset.Items.Insert(Math.Min(insertIndex, lstPreset.Items.Count), finalName);
+                    _manualPresetOrder.Add(finalName);
                 }
 
+                RefreshPresetList();
                 lstPreset.SelectedItem = finalName;
+
                 var preset = _presetManager.Get(finalName);
                 txtPreset.Text = finalName;
                 txtCommand.Text = preset?.Commands ?? "";
@@ -1073,8 +1346,14 @@ namespace SSH_Helper
                 return;
             }
 
-            lstPreset.Items.Remove(selectedPreset);
-            lstPreset.Items.Add(newName);
+            // Update manual order list
+            int orderIndex = _manualPresetOrder.IndexOf(selectedPreset);
+            if (orderIndex >= 0)
+            {
+                _manualPresetOrder[orderIndex] = newName;
+            }
+
+            RefreshPresetList();
             lstPreset.SelectedItem = newName;
             txtPreset.Text = newName;
             _activePresetName = newName;
@@ -1087,13 +1366,40 @@ namespace SSH_Helper
             int selectedIndex = lstPreset.SelectedIndex;
             string selectedPreset = lstPreset.SelectedItem.ToString() ?? "";
 
+            // Check if this is the currently active preset being deleted
+            bool isDeletingActivePreset = string.Equals(selectedPreset, _activePresetName, StringComparison.Ordinal);
+
             if (_presetManager.Delete(selectedPreset))
             {
                 lstPreset.Items.Remove(selectedPreset);
+                _manualPresetOrder.Remove(selectedPreset);
+
+                // Clear active preset if we deleted it (prevents "save changes?" prompt)
+                if (isDeletingActivePreset)
+                {
+                    _activePresetName = null;
+                    txtPreset.Clear();
+                    txtCommand.Clear();
+                }
 
                 if (lstPreset.Items.Count > 0)
                 {
+                    _suppressPresetSelectionChange = true;
                     lstPreset.SelectedIndex = selectedIndex > 0 ? selectedIndex - 1 : 0;
+                    _suppressPresetSelectionChange = false;
+
+                    // Load the newly selected preset
+                    var newSelection = lstPreset.SelectedItem?.ToString();
+                    if (!string.IsNullOrEmpty(newSelection))
+                    {
+                        var preset = _presetManager.Get(newSelection);
+                        if (preset != null)
+                        {
+                            txtPreset.Text = newSelection;
+                            txtCommand.Text = preset.Commands;
+                            _activePresetName = newSelection;
+                        }
+                    }
                 }
             }
         }
@@ -1131,7 +1437,7 @@ namespace SSH_Helper
             try
             {
                 int? defaultDelay = int.TryParse(txtDelay.Text, out var d) ? d : null;
-                int? defaultTimeout = int.TryParse(txtTimeout.Text, out var t) ? t : null;
+                int? defaultTimeout = int.TryParse(tsbTimeout.Text, out var t) ? t : null;
 
                 string finalName = _presetManager.Import(input, defaultDelay, defaultTimeout);
 
@@ -1144,7 +1450,7 @@ namespace SSH_Helper
                     txtPreset.Text = finalName;
                     txtCommand.Text = preset.Commands;
                     if (preset.Delay.HasValue) txtDelay.Text = preset.Delay.Value.ToString();
-                    if (preset.Timeout.HasValue) txtTimeout.Text = preset.Timeout.Value.ToString();
+                    if (preset.Timeout.HasValue) tsbTimeout.Text = preset.Timeout.Value.ToString();
                 }
 
                 MessageBox.Show($"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1157,6 +1463,186 @@ namespace SSH_Helper
             {
                 MessageBox.Show($"Failed to import preset: {ex.Message}", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private void ExportAllPresets()
+        {
+            if (_presetManager.Presets.Count == 0)
+            {
+                MessageBox.Show("No presets to export.", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using var dialog = new SaveFileDialog
+            {
+                Title = "Export All Presets",
+                Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                DefaultExt = "json",
+                FileName = "presets_export.json"
+            };
+
+            if (dialog.ShowDialog() != DialogResult.OK)
+                return;
+
+            try
+            {
+                _presetManager.ExportAllToFile(dialog.FileName);
+                MessageBox.Show($"Exported {_presetManager.Presets.Count} presets to:\n{dialog.FileName}",
+                    "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to export presets: {ex.Message}", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ImportAllPresets()
+        {
+            using var dialog = new OpenFileDialog
+            {
+                Title = "Import All Presets",
+                Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                DefaultExt = "json"
+            };
+
+            if (dialog.ShowDialog() != DialogResult.OK)
+                return;
+
+            try
+            {
+                int count = _presetManager.ImportAllFromFile(dialog.FileName);
+                RefreshPresetList();
+                MessageBox.Show($"Imported {count} presets.\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
+                    "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (FormatException ex)
+            {
+                MessageBox.Show($"Invalid preset file format: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to import presets: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void RefreshPresetList()
+        {
+            string? currentSelection = lstPreset.SelectedItem?.ToString();
+            _suppressPresetSelectionChange = true;
+
+            lstPreset.Sorted = false;
+            lstPreset.Items.Clear();
+
+            // Get all presets with their info
+            var presets = _presetManager.Presets.ToList();
+
+            // Sort presets based on current mode, always with favorites first
+            IEnumerable<string> sortedPresets;
+
+            // Separate favorites and non-favorites
+            var favorites = presets.Where(p => p.Value.IsFavorite).Select(p => p.Key);
+            var nonFavorites = presets.Where(p => !p.Value.IsFavorite).Select(p => p.Key);
+
+            switch (_currentSortMode)
+            {
+                case PresetSortMode.Ascending:
+                    sortedPresets = favorites.OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                        .Concat(nonFavorites.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+                    break;
+
+                case PresetSortMode.Descending:
+                    sortedPresets = favorites.OrderByDescending(n => n, StringComparer.OrdinalIgnoreCase)
+                        .Concat(nonFavorites.OrderByDescending(n => n, StringComparer.OrdinalIgnoreCase));
+                    break;
+
+                case PresetSortMode.Manual:
+                    // Use manual order exactly as specified (no favorites separation in manual mode)
+                    var orderedList = new List<string>();
+
+                    foreach (var name in _manualPresetOrder)
+                    {
+                        if (_presetManager.Presets.ContainsKey(name))
+                        {
+                            orderedList.Add(name);
+                        }
+                    }
+
+                    // Add any presets not in manual order at the end
+                    foreach (var kvp in presets)
+                    {
+                        if (!_manualPresetOrder.Contains(kvp.Key))
+                        {
+                            orderedList.Add(kvp.Key);
+                        }
+                    }
+
+                    sortedPresets = orderedList;
+                    break;
+
+                default:
+                    sortedPresets = presets.Select(p => p.Key);
+                    break;
+            }
+
+            foreach (var name in sortedPresets)
+            {
+                var preset = _presetManager.Get(name);
+                string displayName = preset?.IsFavorite == true ? $"★ {name}" : name;
+                lstPreset.Items.Add(displayName);
+            }
+
+            // Restore selection
+            if (!string.IsNullOrEmpty(currentSelection))
+            {
+                // Find the item (may have star prefix now)
+                for (int i = 0; i < lstPreset.Items.Count; i++)
+                {
+                    string item = lstPreset.Items[i].ToString() ?? "";
+                    string itemName = item.StartsWith("★ ") ? item.Substring(2) : item;
+                    if (itemName == currentSelection || item == currentSelection)
+                    {
+                        lstPreset.SelectedIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            _suppressPresetSelectionChange = false;
+        }
+
+        private void ToggleFavorite()
+        {
+            if (lstPreset.SelectedItem == null) return;
+
+            string displayName = lstPreset.SelectedItem.ToString() ?? "";
+            string presetName = displayName.StartsWith("★ ") ? displayName.Substring(2) : displayName;
+
+            var preset = _presetManager.Get(presetName);
+            if (preset == null) return;
+
+            preset.IsFavorite = !preset.IsFavorite;
+            _presetManager.Save(presetName, preset);
+
+            RefreshPresetList();
+
+            // Re-select the item
+            for (int i = 0; i < lstPreset.Items.Count; i++)
+            {
+                string item = lstPreset.Items[i].ToString() ?? "";
+                string itemName = item.StartsWith("★ ") ? item.Substring(2) : item;
+                if (itemName == presetName)
+                {
+                    lstPreset.SelectedIndex = i;
+                    break;
+                }
+            }
+
+            UpdateStatusBar(preset.IsFavorite ? $"'{presetName}' added to favorites" : $"'{presetName}' removed from favorites");
+        }
+
+        private string GetPresetNameFromDisplay(string displayName)
+        {
+            return displayName.StartsWith("★ ") ? displayName.Substring(2) : displayName;
         }
 
         private bool IsPresetDirty()
@@ -1173,7 +1659,7 @@ namespace SSH_Helper
                 ? preset.Delay != d
                 : preset.Delay.HasValue;
 
-            bool timeoutDiffers = int.TryParse(txtTimeout.Text, out var t)
+            bool timeoutDiffers = int.TryParse(tsbTimeout.Text, out var t)
                 ? preset.Timeout != t
                 : preset.Timeout.HasValue;
 
@@ -1191,18 +1677,22 @@ namespace SSH_Helper
             SetExecutionMode(true);
             txtOutput.Clear();
 
-            var hosts = GetHostConnections(dgv_variables.Rows.Cast<DataGridViewRow>());
+            var hosts = GetHostConnections(dgv_variables.Rows.Cast<DataGridViewRow>()).ToList();
             string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-            int timeout = InputValidator.ParseIntOrDefault(txtTimeout.Text, 10);
+            int timeout = InputValidator.ParseIntOrDefault(tsbTimeout.Text, 10);
+
+            UpdateStatusBar($"Executing on {hosts.Count} hosts...", true, 0, hosts.Count);
 
             try
             {
-                var results = await _sshService.ExecuteAsync(hosts, commands, txtUsername.Text, txtPassword.Text, timeout);
+                var results = await _sshService.ExecuteAsync(hosts, commands, tsbUsername.Text, tsbPassword.Text, timeout);
                 StoreExecutionHistory(results);
+                UpdateStatusBar($"Completed execution on {results.Count} hosts");
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"An error occurred: {ex.Message}");
+                UpdateStatusBar("Execution failed");
             }
             finally
             {
@@ -1225,21 +1715,24 @@ namespace SSH_Helper
             if (row.IsNewRow || string.IsNullOrWhiteSpace(host) || !InputValidator.IsValidIpAddress(host))
             {
                 txtOutput.Clear();
-                txtOutput.AppendText("No host selected");
+                txtOutput.AppendText("No valid host selected");
                 return;
             }
 
             SetExecutionMode(true);
             txtOutput.Clear();
 
-            var hosts = GetHostConnections(new[] { row });
+            var hosts = GetHostConnections(new[] { row }).ToList();
             string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-            int timeout = InputValidator.ParseIntOrDefault(txtTimeout.Text, 10);
+            int timeout = InputValidator.ParseIntOrDefault(tsbTimeout.Text, 10);
+
+            UpdateStatusBar($"Executing on {host}...", true, 0, 1);
 
             try
             {
-                var results = await _sshService.ExecuteAsync(hosts, commands, txtUsername.Text, txtPassword.Text, timeout);
+                var results = await _sshService.ExecuteAsync(hosts, commands, tsbUsername.Text, tsbPassword.Text, timeout);
                 StoreExecutionHistory(results);
+                UpdateStatusBar($"Completed execution on {host}");
             }
             finally
             {
@@ -1255,6 +1748,7 @@ namespace SSH_Helper
                 Thread.Sleep(300);
                 btnStopAll.Visible = false;
                 txtOutput.AppendText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
+                UpdateStatusBar("Execution stopped by user");
             });
         }
 
@@ -1292,13 +1786,19 @@ namespace SSH_Helper
         private void SetExecutionMode(bool executing)
         {
             Cursor = executing ? Cursors.WaitCursor : Cursors.Default;
-            foreach (Control ctrl in Controls)
-            {
-                ctrl.Cursor = executing ? Cursors.WaitCursor : Cursors.Default;
-            }
-
-            lstOutput.Enabled = !executing;
+            btnExecuteAll.Enabled = !executing;
+            btnExecuteSelected.Enabled = !executing;
             btnStopAll.Visible = executing;
+            lstOutput.Enabled = !executing;
+            tsbOpenCsv.Enabled = !executing;
+            tsbSaveCsv.Enabled = !executing;
+            tsbSaveCsvAs.Enabled = !executing;
+            tsbClearGrid.Enabled = !executing;
+
+            if (!executing)
+            {
+                statusProgress.Visible = false;
+            }
         }
 
         private void SshService_OutputReceived(object? sender, SshOutputEventArgs e)
@@ -1577,9 +2077,30 @@ namespace SSH_Helper
             {
                 _configService.Update(config =>
                 {
-                    config.Username = txtUsername.Text;
+                    config.Username = tsbUsername.Text;
                     config.Delay = InputValidator.ParseIntOrDefault(txtDelay.Text, 500);
-                    config.Timeout = InputValidator.ParseIntOrDefault(txtTimeout.Text, 10);
+                    config.Timeout = InputValidator.ParseIntOrDefault(tsbTimeout.Text, 10);
+
+                    // Save sort mode and manual order
+                    config.PresetSortMode = _currentSortMode;
+                    config.ManualPresetOrder = new List<string>(_manualPresetOrder);
+
+                    // Save window state
+                    config.WindowState.IsMaximized = WindowState == FormWindowState.Maximized;
+
+                    if (WindowState == FormWindowState.Normal)
+                    {
+                        config.WindowState.Left = Left;
+                        config.WindowState.Top = Top;
+                        config.WindowState.Width = Width;
+                        config.WindowState.Height = Height;
+                    }
+
+                    // Save splitter positions
+                    config.WindowState.MainSplitterDistance = mainSplitContainer.SplitterDistance;
+                    config.WindowState.TopSplitterDistance = topSplitContainer.SplitterDistance;
+                    config.WindowState.CommandSplitterDistance = commandSplitContainer.SplitterDistance;
+                    config.WindowState.OutputSplitterDistance = outputSplitContainer.SplitterDistance;
                 });
             }
             catch (Exception ex)

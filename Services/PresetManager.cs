@@ -177,6 +177,62 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Exports all presets to a JSON file.
+        /// </summary>
+        public void ExportAllToFile(string filePath)
+        {
+            var exportData = new Dictionary<string, object>();
+            exportData["version"] = 1;
+            exportData["exportDate"] = DateTime.Now.ToString("O");
+            exportData["presets"] = _presets;
+
+            string json = JsonConvert.SerializeObject(exportData, Formatting.Indented);
+            File.WriteAllText(filePath, json);
+        }
+
+        /// <summary>
+        /// Imports all presets from a JSON file.
+        /// If a preset exists, appends "_imported" to the name.
+        /// </summary>
+        /// <returns>The number of presets imported</returns>
+        public int ImportAllFromFile(string filePath)
+        {
+            string json = File.ReadAllText(filePath);
+            var importData = JObject.Parse(json);
+
+            var presetsToken = importData["presets"];
+            if (presetsToken == null)
+                throw new FormatException("Invalid preset file format: missing 'presets' key");
+
+            var importedPresets = presetsToken.ToObject<Dictionary<string, PresetInfo>>();
+            if (importedPresets == null)
+                throw new FormatException("Invalid preset file format: could not parse presets");
+
+            int count = 0;
+            foreach (var kvp in importedPresets)
+            {
+                string name = kvp.Key;
+
+                // If preset exists, append "_imported" and make unique
+                if (_presets.ContainsKey(name))
+                {
+                    name = GetUniqueName(name + "_imported");
+                }
+
+                _presets[name] = kvp.Value;
+                count++;
+            }
+
+            if (count > 0)
+            {
+                PersistToConfig();
+                OnPresetsChanged();
+            }
+
+            return count;
+        }
+
+        /// <summary>
         /// Applies default delay/timeout to presets that don't have them set.
         /// </summary>
         public void ApplyDefaults(int defaultDelay, int defaultTimeout)

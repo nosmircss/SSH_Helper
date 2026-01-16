@@ -8,6 +8,7 @@ namespace SSH_Helper.Models
         public string Commands { get; set; } = string.Empty;
         public int? Delay { get; set; }
         public int? Timeout { get; set; }
+        public bool IsFavorite { get; set; }
 
         public PresetInfo Clone()
         {
@@ -15,7 +16,8 @@ namespace SSH_Helper.Models
             {
                 Commands = Commands,
                 Delay = Delay,
-                Timeout = Timeout
+                Timeout = Timeout,
+                IsFavorite = IsFavorite
             };
         }
     }

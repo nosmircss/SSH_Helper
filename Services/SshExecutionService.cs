@@ -143,35 +143,45 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Authentication failed";
                 result.Exception = ex;
-                outputBuilder.AppendLine(FormatError("AUTHENTICATION ERROR", host, ex));
+                var errorOutput = FormatError("AUTHENTICATION ERROR", host, ex);
+                outputBuilder.AppendLine(errorOutput);
+                OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
             catch (Renci.SshNet.Common.SshConnectionException ex)
             {
                 result.Success = false;
                 result.ErrorMessage = "Connection failed";
                 result.Exception = ex;
-                outputBuilder.AppendLine(FormatError("CONNECTION ERROR", host, ex));
+                var errorOutput = FormatError("CONNECTION ERROR", host, ex);
+                outputBuilder.AppendLine(errorOutput);
+                OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
             catch (Renci.SshNet.Common.SshOperationTimeoutException ex)
             {
                 result.Success = false;
                 result.ErrorMessage = "Operation timed out";
                 result.Exception = ex;
-                outputBuilder.AppendLine(FormatError("TIMEOUT ERROR", host, ex));
+                var errorOutput = FormatError("TIMEOUT ERROR", host, ex);
+                outputBuilder.AppendLine(errorOutput);
+                OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
             catch (System.Net.Sockets.SocketException ex)
             {
                 result.Success = false;
                 result.ErrorMessage = "Network error";
                 result.Exception = ex;
-                outputBuilder.AppendLine(FormatError("NETWORK ERROR", host, ex));
+                var errorOutput = FormatError("NETWORK ERROR", host, ex);
+                outputBuilder.AppendLine(errorOutput);
+                OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
             catch (Exception ex)
             {
                 result.Success = false;
                 result.ErrorMessage = ex.Message;
                 result.Exception = ex;
-                outputBuilder.AppendLine(FormatError("ERROR", host, ex));
+                var errorOutput = FormatError("ERROR", host, ex);
+                outputBuilder.AppendLine(errorOutput);
+                OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
 
             result.Output = outputBuilder.ToString();
