@@ -687,6 +687,10 @@ namespace SSH_Helper
                 {
                     txtTimeoutHeader.Text = preset.Timeout.Value.ToString();
                 }
+                else
+                {
+                    txtTimeoutHeader.Text = string.Empty;
+                }
             }
 
             _activePresetName = newPresetName;
@@ -1461,6 +1465,9 @@ namespace SSH_Helper
                         {
                             txtPreset.Text = newSelection;
                             txtCommand.Text = preset.Commands;
+                            txtTimeoutHeader.Text = preset.Timeout.HasValue
+                                ? preset.Timeout.Value.ToString()
+                                : string.Empty;
                             _activePresetName = newSelection;
                         }
                     }
