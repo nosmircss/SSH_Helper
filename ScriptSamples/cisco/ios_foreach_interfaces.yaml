@@ -1,0 +1,33 @@
+---
+# Converted from: dudescript/conversation/cisco/ios/pb_foreach
+# Iterates through Cisco IOS interfaces
+
+name: Cisco IOS Interface Loop
+description: Gets interface brief, extracts interface names, loops through them
+
+steps:
+  # Disable paging
+  - send: terminal length 0
+
+  # Get interface summary
+  - send: sh ip int br
+    capture: output
+
+  # Extract interface names (captures text after "net" like "Ethernet0/0")
+  - extract:
+      from: output
+      pattern: 'net(\S+)\s+'
+      into: interfaces
+      match: all
+
+  # Loop through interfaces
+  - foreach: iface in interfaces
+    do:
+      - print: "found: ${iface}"
+
+  # Demonstrate wait command
+  - print: "start sleep"
+  - wait: 2
+  - print: "end sleep"
+
+  - exit: success "Completed interface iteration"

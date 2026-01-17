@@ -1,0 +1,14 @@
+---
+# Converted from: dudescript/conversation/fortigate/test
+# Simple script to show local users
+
+name: FortiGate Show Local Users
+description: Displays the local user accounts configured on the FortiGate
+
+steps:
+  - send: sh user local
+    capture: users
+
+  - print: "Local users displayed above"
+
+  - exit: success "User list retrieved"

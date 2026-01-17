@@ -1,0 +1,52 @@
+---
+# Cisco IOS interface status check with detailed reporting
+
+name: Cisco IOS Interface Status
+description: Checks all interfaces and reports their status (up/down)
+
+steps:
+  - send: terminal length 0
+
+  # Get interface brief
+  - send: show ip interface brief
+    capture: brief_output
+
+  - print: "========== Interface Status Report =========="
+  - print: ""
+
+  # Extract all interfaces with their status
+  # Pattern captures: interface name, IP, OK?, Method, Status, Protocol
+  - extract:
+      from: brief_output
+      pattern: '^(\S+)\s+(\S+)\s+\S+\s+\S+\s+(\S+)\s+(\S+)'
+      into: interfaces
+      match: all
+
+  # Count up and down interfaces
+  - set: up_count = 0
+  - set: down_count = 0
+
+  # Process each line from the brief output
+  - foreach: line in brief_output
+    when: line matches '^\S+\s+\d'
+    do:
+      # Check if line indicates interface is up
+      - if: line matches '\s+up\s+up'
+        then:
+          - set: up_count = up_count + 1
+        else:
+          - if: line matches 'administratively down'
+            then:
+              - set: down_count = down_count + 1
+            else:
+              - if: line matches '\s+down\s'
+                then:
+                  - set: down_count = down_count + 1
+
+  - print: ""
+  - print: "========== Summary =========="
+  - print: "Interfaces UP: ${up_count}"
+  - print: "Interfaces DOWN: ${down_count}"
+  - print: "============================="
+
+  - exit: success "Interface check complete"

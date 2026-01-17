@@ -1,0 +1,77 @@
+---
+# Generic Linux system information gathering script
+
+name: Linux System Info
+description: Gathers basic system information from a Linux host
+
+steps:
+  # Get hostname
+  - send: hostname
+    capture: hostname
+
+  - print: "========== System Info for ${hostname} =========="
+
+  # Get OS info
+  - send: cat /etc/os-release 2>/dev/null || cat /etc/redhat-release 2>/dev/null || uname -a
+    capture: os_info
+
+  - extract:
+      from: os_info
+      pattern: 'PRETTY_NAME="(.+?)"'
+      into: os_name
+
+  - if: os_name is not empty
+    then:
+      - print: "OS: ${os_name}"
+    else:
+      - print: "OS: ${os_info}"
+
+  # Get uptime
+  - send: uptime
+    capture: uptime_info
+
+  - print: "Uptime: ${uptime_info}"
+
+  # Get memory info
+  - send: free -h | head -2
+    capture: mem_info
+
+  - print: "Memory:"
+  - print: "${mem_info}"
+
+  # Get disk usage
+  - send: df -h / | tail -1
+    capture: disk_info
+
+  - extract:
+      from: disk_info
+      pattern: '(\d+%)'
+      into: disk_percent
+
+  - print: "Root disk usage: ${disk_percent}"
+
+  # Get CPU info
+  - send: grep "model name" /proc/cpuinfo | head -1
+    capture: cpu_info
+
+  - extract:
+      from: cpu_info
+      pattern: 'model name\s*:\s*(.+)$'
+      into: cpu_model
+
+  - print: "CPU: ${cpu_model}"
+
+  # Get load average
+  - send: cat /proc/loadavg
+    capture: load_info
+
+  - extract:
+      from: load_info
+      pattern: '^(\S+\s+\S+\s+\S+)'
+      into: load_avg
+
+  - print: "Load average: ${load_avg}"
+
+  - print: "=========================================="
+
+  - exit: success "System info gathered"

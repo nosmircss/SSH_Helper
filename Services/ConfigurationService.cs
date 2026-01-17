@@ -92,13 +92,15 @@ namespace SSH_Helper.Services
 
         private AppConfiguration ParseConfiguration(string json)
         {
-            var config = new AppConfiguration();
-            var rootObj = JObject.Parse(json);
+            // First, deserialize all fields using standard deserialization
+            var config = JsonConvert.DeserializeObject<AppConfiguration>(json) ?? new AppConfiguration();
 
-            // Parse presets (handle both legacy string format and new object format)
+            // Now handle legacy preset format (where value was just a string instead of PresetInfo object)
+            var rootObj = JObject.Parse(json);
             var presetsToken = rootObj["Presets"] as JObject;
             if (presetsToken != null)
             {
+                config.Presets.Clear();
                 foreach (var prop in presetsToken.Properties())
                 {
                     if (prop.Value.Type == JTokenType.String)
@@ -115,22 +117,6 @@ namespace SSH_Helper.Services
                 }
             }
 
-            // Parse other fields
-            if (rootObj["Username"]?.Type == JTokenType.String)
-            {
-                config.Username = rootObj["Username"]!.ToString();
-            }
-
-            if (rootObj["Delay"]?.Type == JTokenType.Integer)
-            {
-                config.Delay = rootObj["Delay"]!.ToObject<int>();
-            }
-
-            if (rootObj["Timeout"]?.Type == JTokenType.Integer)
-            {
-                config.Timeout = rootObj["Timeout"]!.ToObject<int>();
-            }
-
             return config;
         }
 
@@ -139,7 +125,6 @@ namespace SSH_Helper.Services
             return new AppConfiguration
             {
                 Username = "",
-                Delay = 500,
                 Timeout = 10,
                 Presets = new Dictionary<string, PresetInfo>
                 {

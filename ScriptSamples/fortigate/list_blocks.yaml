@@ -1,0 +1,36 @@
+---
+# Alternative to: dudescript/conversation/fortigate/listblocks
+# The original used local shell commands to format output.
+# This simplified version just displays the raw group membership.
+
+name: FortiGate List Blocks
+description: Shows all IPs currently in the FSM_BLOCK_GROUP
+
+steps:
+  # Check if block group exists and show members
+  - send: sh firewall addrgrp FSM_BLOCK_GROUP
+    capture: group_info
+
+  - if: group_info matches 'entry is not found'
+    then:
+      - print: "No blocks found - FSM_BLOCK_GROUP does not exist"
+      - exit: success "No current blocks"
+    else:
+      - print: "========== Current Blocks =========="
+      - print: "${group_info}"
+      - print: "===================================="
+
+      # Try to extract and count members
+      - extract:
+          from: group_info
+          pattern: 'GDGBLOCK_(\S+)'
+          into: blocks
+          match: all
+
+      - print: ""
+      - print: "Blocked IPs found:"
+      - foreach: ip in blocks
+        do:
+          - print: "  - ${ip}"
+
+      - exit: success "Block list retrieved"

@@ -1,0 +1,27 @@
+---
+# Converted from: dudescript/conversation/checkpoint/block
+# Blocks an IP address using Checkpoint's SAM (Suspicious Activity Monitoring)
+#
+# Required variables (from CSV grid):
+#   ${expire} - Block duration in seconds
+#   ${block}  - IP address to block
+
+name: Checkpoint SAM Block
+description: Blocks an IP address using fw sam command on Checkpoint firewall
+
+vars:
+  expire: "3600"  # Default 1 hour
+  block: ""
+
+steps:
+  # Execute the SAM block command
+  # -v = verbose, -t = timeout, -f = forward to, -J = any direction
+  - send: fw sam -v -t ${expire} -f localhost -J any ${block}
+    capture: result
+
+  # Check if the block was successful
+  - if: result matches 'successfully completed'
+    then:
+      - exit: success "Successfully blocked ${block}"
+    else:
+      - exit: failure "Failed to block ${block}"

@@ -1,0 +1,24 @@
+---
+# Converted from: dudescript/conversation/cisco/ios/pb_simple
+# Simple script to get and display Cisco IOS version
+
+name: Cisco IOS Version Check
+description: Retrieves and displays the IOS version from a Cisco device
+
+steps:
+  # Disable paging
+  - send: terminal length 0
+
+  # Get version info
+  - send: show ver
+    capture: output
+
+  # Extract the version line
+  - extract:
+      from: output
+      pattern: '(Version.+?)$'
+      into: version
+
+  - print: "version is ${version}"
+
+  - exit: success "Version check complete"

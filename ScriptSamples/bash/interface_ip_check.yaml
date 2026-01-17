@@ -1,0 +1,40 @@
+---
+# Converted from: dudescript/conversation/bash/pb_loop2
+# Iterates through network interfaces and shows their IP addresses
+
+name: Interface IP Address Check
+description: Lists all interfaces and shows their IP addresses (or "No IP" if none)
+
+steps:
+  # Get interface list
+  - send: ifconfig
+    capture: output
+
+  # Extract interface names (e.g., eth0, lo, wlan0)
+  - extract:
+      from: output
+      pattern: '(\w+)\s+Link'
+      into: interfaces
+      match: all
+
+  # Loop through each interface
+  - foreach: iface in interfaces
+    do:
+      - print: "Interface: ${iface}"
+
+      # Get details for this interface
+      - send: ifconfig ${iface}
+        capture: iface_details
+
+      # Check if it has an IP address
+      - if: iface_details matches 'inet addr:'
+        then:
+          - extract:
+              from: iface_details
+              pattern: 'inet addr:(.+?)\s'
+              into: ipaddr
+          - print: "  IP: ${ipaddr}"
+        else:
+          - print: "  No IP"
+
+  - exit: success "Interface check complete"

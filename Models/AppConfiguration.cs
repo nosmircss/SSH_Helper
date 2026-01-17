@@ -17,7 +17,6 @@ namespace SSH_Helper.Models
     {
         public Dictionary<string, PresetInfo> Presets { get; set; } = new();
         public string Username { get; set; } = string.Empty;
-        public int Delay { get; set; } = 500;
         public int Timeout { get; set; } = 10;
 
         // Window state
@@ -29,6 +28,58 @@ namespace SSH_Helper.Models
 
         // Update settings
         public UpdateSettings UpdateSettings { get; set; } = new();
+
+        // Remember state settings
+        public bool RememberState { get; set; } = true;
+        public ApplicationState? SavedState { get; set; }
+
+        // History settings
+        public int MaxHistoryEntries { get; set; } = 30;
+    }
+
+    /// <summary>
+    /// Saved application state for restore on startup.
+    /// </summary>
+    public class ApplicationState
+    {
+        /// <summary>
+        /// The hosts data (CSV content as list of rows).
+        /// </summary>
+        public List<Dictionary<string, string>> Hosts { get; set; } = new();
+
+        /// <summary>
+        /// Column names for the hosts grid.
+        /// </summary>
+        public List<string> HostColumns { get; set; } = new();
+
+        /// <summary>
+        /// The path to the last loaded CSV file (if any).
+        /// </summary>
+        public string? LastCsvPath { get; set; }
+
+        /// <summary>
+        /// The currently selected preset name.
+        /// </summary>
+        public string? SelectedPreset { get; set; }
+
+        /// <summary>
+        /// The saved username (not password for security).
+        /// </summary>
+        public string? Username { get; set; }
+
+        /// <summary>
+        /// Execution history entries (timestamp -> output).
+        /// </summary>
+        public List<HistoryEntry> History { get; set; } = new();
+    }
+
+    /// <summary>
+    /// A single history entry.
+    /// </summary>
+    public class HistoryEntry
+    {
+        public string Timestamp { get; set; } = string.Empty;
+        public string Output { get; set; } = string.Empty;
     }
 
     /// <summary>

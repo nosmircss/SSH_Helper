@@ -1,0 +1,99 @@
+---
+# Generic health check template - can be customized for any device
+# This is a template showing various scripting patterns
+
+name: Generic Health Check
+description: Template for device health checks - customize for your needs
+
+vars:
+  # Default thresholds (can be overridden via CSV columns)
+  cpu_threshold: 80
+  memory_threshold: 90
+
+steps:
+  - print: "=========================================="
+  - print: "Health Check for ${Host_IP}"
+  - print: "Timestamp: ${_timestamp}"
+  - print: "=========================================="
+
+  #
+  # SECTION 1: Basic Connectivity (already proven if we get here)
+  #
+  - print: "[OK] SSH Connection successful"
+
+  #
+  # SECTION 2: Example - Get and display a command
+  #
+  - send: uptime
+    capture: uptime_output
+
+  - print: "Uptime: ${uptime_output}"
+
+  #
+  # SECTION 3: Example - Extract and check a value
+  #
+  # Uncomment and customize for your device:
+  # - send: show system resources
+  #   capture: resources
+  #
+  # - extract:
+  #     from: resources
+  #     pattern: 'CPU usage:\s*(\d+)%'
+  #     into: cpu_usage
+  #
+  # - if: cpu_usage > cpu_threshold
+  #   then:
+  #     - print: "[WARNING] CPU usage ${cpu_usage}% exceeds threshold ${cpu_threshold}%"
+  #   else:
+  #     - print: "[OK] CPU usage: ${cpu_usage}%"
+
+  #
+  # SECTION 4: Example - Loop through items
+  #
+  # Uncomment and customize:
+  # - send: show interfaces
+  #   capture: interfaces_output
+  #
+  # - extract:
+  #     from: interfaces_output
+  #     pattern: '(eth\d+)'
+  #     into: interfaces
+  #     match: all
+  #
+  # - foreach: iface in interfaces
+  #   do:
+  #     - print: "Checking interface: ${iface}"
+  #     - send: show interface ${iface}
+  #       capture: iface_status
+  #     - if: iface_status matches 'up'
+  #       then:
+  #         - print: "  [OK] ${iface} is up"
+  #       else:
+  #         - print: "  [WARNING] ${iface} is down"
+
+  #
+  # SECTION 5: Example - Conditional with retry
+  #
+  # - set: retry = 0
+  # - set: max_retries = 3
+  # - while: retry < max_retries
+  #   do:
+  #     - send: ping -c 1 8.8.8.8
+  #       capture: ping_result
+  #     - if: ping_result matches '1 received'
+  #       then:
+  #         - print: "[OK] External connectivity verified"
+  #         - set: retry = max_retries  # Exit loop
+  #       else:
+  #         - set: retry = retry + 1
+  #         - if: retry < max_retries
+  #           then:
+  #             - print: "Ping failed, retrying..."
+  #             - wait: 2
+
+  - print: ""
+  - print: "=========================================="
+  - print: "Health check complete"
+  - print: "=========================================="
+
+  - exit: success "Health check passed"

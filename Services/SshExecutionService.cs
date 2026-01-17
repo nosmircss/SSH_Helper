@@ -1,6 +1,8 @@
 using System.Text;
 using Renci.SshNet;
 using SSH_Helper.Models;
+using SSH_Helper.Services.Scripting;
+using SSH_Helper.Services.Scripting.Models;
 using SSH_Helper.Utilities;
 
 namespace SSH_Helper.Services
@@ -187,6 +189,97 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Executes a preset on multiple hosts. Automatically detects script vs simple commands.
+        /// </summary>
+        public async Task<List<ExecutionResult>> ExecutePresetAsync(
+            IEnumerable<HostConnection> hosts,
+            PresetInfo preset,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts)
+        {
+            // Check if this is a YAML script
+            if (preset.IsScript)
+            {
+                return await ExecuteScriptAsync(hosts, preset.Commands, defaultUsername, defaultPassword, timeouts);
+            }
+            else
+            {
+                // Simple commands - use existing logic
+                var commands = preset.Commands.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                return await ExecuteAsync(hosts, commands, defaultUsername, defaultPassword, timeouts);
+            }
+        }
+
+        /// <summary>
+        /// Executes a YAML script on multiple hosts.
+        /// </summary>
+        public async Task<List<ExecutionResult>> ExecuteScriptAsync(
+            IEnumerable<HostConnection> hosts,
+            string scriptText,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts)
+        {
+            var results = new List<ExecutionResult>();
+            _cts = new CancellationTokenSource();
+            _isRunning = true;
+
+            // Parse the script once
+            var parser = new ScriptParser();
+            Script script;
+            try
+            {
+                script = parser.Parse(scriptText);
+                var validationErrors = parser.Validate(script, scriptText);
+                if (validationErrors.Count > 0)
+                {
+                    throw new ScriptParseException("Script validation failed:\n" + string.Join("\n", validationErrors));
+                }
+            }
+            catch (ScriptParseException ex)
+            {
+                // Return error result for all hosts
+                foreach (var host in hosts)
+                {
+                    results.Add(new ExecutionResult
+                    {
+                        Host = host,
+                        Success = false,
+                        ErrorMessage = ex.Message,
+                        Output = $"Script parse error: {ex.Message}",
+                        Timestamp = DateTime.Now
+                    });
+                }
+                _isRunning = false;
+                return results;
+            }
+
+            try
+            {
+                foreach (var host in hosts)
+                {
+                    if (_cts.Token.IsCancellationRequested)
+                        break;
+
+                    if (!host.IsValid())
+                        continue;
+
+                    var result = await Task.Run(() =>
+                        ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, _cts.Token));
+
+                    results.Add(result);
+                }
+            }
+            finally
+            {
+                _isRunning = false;
+            }
+
+            return results;
+        }
+
+        /// <summary>
         /// Stops the current execution.
         /// </summary>
         public void Stop()
@@ -281,6 +374,230 @@ namespace SSH_Helper.Services
 
             result.Output = outputBuilder.ToString();
             return result;
+        }
+
+        /// <summary>
+        /// Executes a script on a single host.
+        /// </summary>
+        private ExecutionResult ExecuteScriptOnHost(
+            HostConnection host,
+            Script script,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts,
+            CancellationToken cancellationToken)
+        {
+            var result = new ExecutionResult
+            {
+                Host = host,
+                Timestamp = DateTime.Now
+            };
+
+            var outputBuilder = new StringBuilder();
+            string username = !string.IsNullOrWhiteSpace(host.Username) ? host.Username : defaultUsername;
+            string password = !string.IsNullOrWhiteSpace(host.Password) ? host.Password : defaultPassword;
+
+            try
+            {
+                if (UseConnectionPooling && _connectionPool != null)
+                {
+                    ExecuteScriptWithPool(host, script, username, password, timeouts, outputBuilder, cancellationToken);
+                }
+                else
+                {
+                    ExecuteScriptWithoutPool(host, script, username, password, timeouts, outputBuilder, cancellationToken);
+                }
+
+                result.Success = true;
+            }
+            catch (Renci.SshNet.Common.SshAuthenticationException ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = "Authentication failed";
+                result.Exception = ex;
+                var errorOutput = FormatError("AUTHENTICATION ERROR", host, ex);
+                outputBuilder.AppendLine(errorOutput);
+                OnOutputReceived(host, errorOutput + Environment.NewLine);
+            }
+            catch (Renci.SshNet.Common.SshConnectionException ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = "Connection failed";
+                result.Exception = ex;
+                var errorOutput = FormatError("CONNECTION ERROR", host, ex);
+                outputBuilder.AppendLine(errorOutput);
+                OnOutputReceived(host, errorOutput + Environment.NewLine);
+            }
+            catch (Renci.SshNet.Common.SshOperationTimeoutException ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = "Operation timed out";
+                result.Exception = ex;
+                var errorOutput = FormatError("TIMEOUT ERROR", host, ex);
+                outputBuilder.AppendLine(errorOutput);
+                OnOutputReceived(host, errorOutput + Environment.NewLine);
+            }
+            catch (System.Net.Sockets.SocketException ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = "Network error";
+                result.Exception = ex;
+                var errorOutput = FormatError("NETWORK ERROR", host, ex);
+                outputBuilder.AppendLine(errorOutput);
+                OnOutputReceived(host, errorOutput + Environment.NewLine);
+            }
+            catch (OperationCanceledException)
+            {
+                result.Success = false;
+                result.ErrorMessage = "Operation cancelled";
+                var errorOutput = FormatError("CANCELLED", host, new Exception("Operation was cancelled by user"));
+                outputBuilder.AppendLine(errorOutput);
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = ex.Message;
+                result.Exception = ex;
+                var errorOutput = FormatError("ERROR", host, ex);
+                outputBuilder.AppendLine(errorOutput);
+                OnOutputReceived(host, errorOutput + Environment.NewLine);
+            }
+
+            result.Output = outputBuilder.ToString();
+            return result;
+        }
+
+        /// <summary>
+        /// Executes a script using connection pooling.
+        /// </summary>
+        private void ExecuteScriptWithPool(
+            HostConnection host,
+            Script script,
+            string username,
+            string password,
+            SshTimeoutOptions timeouts,
+            StringBuilder outputBuilder,
+            CancellationToken cancellationToken)
+        {
+            var (client, session) = _connectionPool!.CreateSessionAsync(host, username, password, timeouts, cancellationToken)
+                .GetAwaiter().GetResult();
+
+            try
+            {
+                OnProgressChanged(host, $"Connected to {host} (pooled, script mode)", false, true);
+                session.DebugMode = DebugMode;
+
+                // Build header with script name
+                var prompt = session.CurrentPrompt;
+                var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
+                string header = $"{new string('#', 20)} {host} {prompt} SCRIPT: {scriptName} {new string('#', 20)}";
+                string separator = new string('#', header.Length);
+
+                outputBuilder.AppendLine(separator);
+                outputBuilder.AppendLine(header);
+                outputBuilder.AppendLine(separator);
+
+                OnOutputReceived(host, outputBuilder.ToString());
+
+                // Create script context with host variables
+                var context = new ScriptContext(host.Variables);
+                context.Session = session;
+                context.DebugMode = DebugMode;
+
+                // Wire up context output to our events
+                context.OutputReceived += (s, e) =>
+                {
+                    var output = e.Message + Environment.NewLine;
+                    outputBuilder.Append(output);
+                    OnOutputReceived(host, output);
+                };
+
+                // Execute the script
+                var executor = new ScriptExecutor();
+                var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
+                    .GetAwaiter().GetResult();
+
+                // Report final status
+                var statusMsg = $"\n=== Script {scriptResult.Status}: {scriptResult.Message} ===\n";
+                outputBuilder.Append(statusMsg);
+                OnOutputReceived(host, statusMsg);
+            }
+            finally
+            {
+                session.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Executes a script without connection pooling.
+        /// </summary>
+        private void ExecuteScriptWithoutPool(
+            HostConnection host,
+            Script script,
+            string username,
+            string password,
+            SshTimeoutOptions timeouts,
+            StringBuilder outputBuilder,
+            CancellationToken cancellationToken)
+        {
+            using var client = new SshClient(host.IpAddress, host.Port, username, password);
+            client.ConnectionInfo.Timeout = timeouts.ConnectionTimeout;
+
+            client.ErrorOccurred += (s, e) =>
+            {
+                if (e.Exception != null && _isRunning)
+                {
+                    OnProgressChanged(host, $"SSH Error: {e.Exception.Message}", true, true);
+                }
+            };
+
+            client.Connect();
+            OnProgressChanged(host, $"Connected to {host} (script mode)", false, true);
+
+            using var shellStream = client.CreateShellStream("xterm", 200, 48, 1200, 800, 16384);
+            using var session = new SshShellSession(shellStream, timeouts);
+
+            session.DebugMode = DebugMode;
+
+            // Initialize session (detect prompt)
+            var banner = session.InitializeAsync(cancellationToken).GetAwaiter().GetResult();
+
+            // Build header with script name
+            var prompt = session.CurrentPrompt;
+            var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
+            string header = $"{new string('#', 20)} SCRIPT: {host} {prompt}{scriptName} {new string('#', 20)}";
+            string separator = new string('#', header.Length);
+
+            outputBuilder.AppendLine(separator);
+            outputBuilder.AppendLine(header);
+            outputBuilder.AppendLine(separator);
+
+            OnOutputReceived(host, outputBuilder.ToString());
+
+            // Create script context with host variables
+            var context = new ScriptContext(host.Variables);
+            context.Session = session;
+            context.DebugMode = DebugMode;
+
+            // Wire up context output to our events
+            context.OutputReceived += (s, e) =>
+            {
+                var output = e.Message + Environment.NewLine;
+                outputBuilder.Append(output);
+                OnOutputReceived(host, output);
+            };
+
+            // Execute the script
+            var executor = new ScriptExecutor();
+            var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
+                .GetAwaiter().GetResult();
+
+            // Report final status
+            var statusMsg = $"\n=== Script {scriptResult.Status}: {scriptResult.Message} ===\n";
+            outputBuilder.Append(statusMsg);
+            OnOutputReceived(host, statusMsg);
+
+            client.Disconnect();
         }
 
         /// <summary>

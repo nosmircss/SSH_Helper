@@ -1,0 +1,41 @@
+---
+# Converted from: dudescript/conversation/cisco/asa/pb_shun
+# Shuns (blocks) an IP address on a Cisco ASA firewall
+#
+# Required variables (from CSV grid):
+#   ${username} - ASA username
+#   ${password} - ASA password
+#   ${block}    - IP address to shun
+
+name: Cisco ASA Shun IP
+description: Blocks an IP address using the shun command on Cisco ASA
+
+vars:
+  # These can be overridden by CSV columns
+  block: ""
+
+steps:
+  # Login sequence (ASA may require explicit login)
+  - send: login
+    expect: '/[Uu]sername: ?$/'
+
+  - send: ${username}
+    expect: '/[Pp]assword: ?$/'
+
+  - send: ${password}
+    expect: '/# ?$/'
+
+  # Execute the shun command
+  - send: shun ${block}
+
+  # Verify the shun was applied
+  - send: sh shun | i ${block}
+    capture: result
+
+  - if: result matches '${block}'
+    then:
+      - print: "Successfully shunned ${block}"
+      - exit: success "IP ${block} shunned"
+    else:
+      - print: "Shun may have failed - IP not found in shun list"
+      - exit: failure "Could not verify shun for ${block}"

@@ -67,10 +67,15 @@ namespace SSH_Helper
             lblPresetsTitle = new Label();
             scriptPanel = new Panel();
             txtCommand = new TextBox();
+            scriptFooterPanel = new Panel();
+            lblLinePosition = new Label();
             scriptHeaderPanel = new Panel();
-            lblScriptTitle = new Label();
-            btnSavePreset = new Button();
+            lblPresetName = new Label();
             txtPreset = new TextBox();
+            lblTimeoutHeader = new Label();
+            txtTimeoutHeader = new TextBox();
+            btnSavePreset = new Button();
+            lblScriptTitle = new Label();
             executePanel = new Panel();
             btnExecuteAll = new Button();
             btnExecuteSelected = new Button();
@@ -99,9 +104,6 @@ namespace SSH_Helper
             tsbUsername = new ToolStripTextBox();
             toolStripLabel2 = new ToolStripLabel();
             tsbPassword = new ToolStripTextBox();
-            toolStripSeparator3 = new ToolStripSeparator();
-            toolStripLabel3 = new ToolStripLabel();
-            tsbTimeout = new ToolStripTextBox();
             statusStrip = new StatusStrip();
             statusLabel = new ToolStripStatusLabel();
             statusProgress = new ToolStripProgressBar();
@@ -129,10 +131,8 @@ namespace SSH_Helper
             contextPresetLstAdd = new ContextMenuStrip(components);
             ctxAddPreset2 = new ToolStripMenuItem();
             ctxImportPreset2 = new ToolStripMenuItem();
-            txtDelay = new TextBox();
             txtUsername = new TextBox();
             txtPassword = new TextBox();
-            txtTimeout = new TextBox();
             ((System.ComponentModel.ISupportInitialize)mainSplitContainer).BeginInit();
             mainSplitContainer.Panel1.SuspendLayout();
             mainSplitContainer.Panel2.SuspendLayout();
@@ -155,6 +155,7 @@ namespace SSH_Helper
             presetsToolStrip.SuspendLayout();
             presetsHeaderPanel.SuspendLayout();
             scriptPanel.SuspendLayout();
+            scriptFooterPanel.SuspendLayout();
             scriptHeaderPanel.SuspendLayout();
             executePanel.SuspendLayout();
             outputPanel.SuspendLayout();
@@ -528,6 +529,7 @@ namespace SSH_Helper
             // 
             scriptPanel.BackColor = Color.White;
             scriptPanel.Controls.Add(txtCommand);
+            scriptPanel.Controls.Add(scriptFooterPanel);
             scriptPanel.Controls.Add(scriptHeaderPanel);
             scriptPanel.Dock = DockStyle.Fill;
             scriptPanel.Location = new Point(0, 0);
@@ -543,37 +545,97 @@ namespace SSH_Helper
             txtCommand.BorderStyle = BorderStyle.None;
             txtCommand.Dock = DockStyle.Fill;
             txtCommand.Font = new Font("Cascadia Code", 10F, FontStyle.Regular, GraphicsUnit.Point, 0);
-            txtCommand.Location = new Point(0, 40);
+            txtCommand.Location = new Point(0, 60);
             txtCommand.Multiline = true;
             txtCommand.Name = "txtCommand";
             txtCommand.ScrollBars = ScrollBars.Both;
-            txtCommand.Size = new Size(258, 248);
+            txtCommand.Size = new Size(258, 208);
             txtCommand.TabIndex = 0;
             txtCommand.WordWrap = false;
+            // 
+            // scriptFooterPanel
+            // 
+            scriptFooterPanel.BackColor = Color.FromArgb(248, 249, 250);
+            scriptFooterPanel.Controls.Add(lblLinePosition);
+            scriptFooterPanel.Dock = DockStyle.Bottom;
+            scriptFooterPanel.Location = new Point(0, 268);
+            scriptFooterPanel.Name = "scriptFooterPanel";
+            scriptFooterPanel.Size = new Size(258, 20);
+            scriptFooterPanel.TabIndex = 2;
+            // 
+            // lblLinePosition
+            // 
+            lblLinePosition.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            lblLinePosition.Font = new Font("Segoe UI", 8F);
+            lblLinePosition.ForeColor = Color.FromArgb(108, 117, 125);
+            lblLinePosition.Location = new Point(216, 2);
+            lblLinePosition.Name = "lblLinePosition";
+            lblLinePosition.Size = new Size(96, 16);
+            lblLinePosition.TabIndex = 0;
+            lblLinePosition.Text = "Ln 1, Col 1";
+            lblLinePosition.TextAlign = ContentAlignment.MiddleRight;
             // 
             // scriptHeaderPanel
             // 
             scriptHeaderPanel.BackColor = Color.FromArgb(248, 249, 250);
-            scriptHeaderPanel.Controls.Add(lblScriptTitle);
-            scriptHeaderPanel.Controls.Add(btnSavePreset);
+            scriptHeaderPanel.Controls.Add(lblPresetName);
             scriptHeaderPanel.Controls.Add(txtPreset);
+            scriptHeaderPanel.Controls.Add(lblTimeoutHeader);
+            scriptHeaderPanel.Controls.Add(txtTimeoutHeader);
+            scriptHeaderPanel.Controls.Add(btnSavePreset);
+            scriptHeaderPanel.Controls.Add(lblScriptTitle);
             scriptHeaderPanel.Dock = DockStyle.Top;
             scriptHeaderPanel.Location = new Point(0, 0);
             scriptHeaderPanel.Name = "scriptHeaderPanel";
             scriptHeaderPanel.Padding = new Padding(8, 4, 8, 4);
-            scriptHeaderPanel.Size = new Size(258, 40);
+            scriptHeaderPanel.Size = new Size(258, 60);
             scriptHeaderPanel.TabIndex = 1;
             // 
-            // lblScriptTitle
+            // lblPresetName
             // 
-            lblScriptTitle.AutoSize = true;
-            lblScriptTitle.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
-            lblScriptTitle.ForeColor = Color.FromArgb(33, 37, 41);
-            lblScriptTitle.Location = new Point(8, 10);
-            lblScriptTitle.Name = "lblScriptTitle";
-            lblScriptTitle.Size = new Size(79, 19);
-            lblScriptTitle.TabIndex = 0;
-            lblScriptTitle.Text = "Commands";
+            lblPresetName.AutoSize = true;
+            lblPresetName.Font = new Font("Segoe UI", 9F);
+            lblPresetName.ForeColor = Color.FromArgb(108, 117, 125);
+            lblPresetName.Location = new Point(8, 10);
+            lblPresetName.Name = "lblPresetName";
+            lblPresetName.Size = new Size(42, 15);
+            lblPresetName.TabIndex = 0;
+            lblPresetName.Text = "Name:";
+            // 
+            // txtPreset
+            // 
+            txtPreset.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            txtPreset.BorderStyle = BorderStyle.FixedSingle;
+            txtPreset.Font = new Font("Segoe UI", 9F);
+            txtPreset.Location = new Point(55, 7);
+            txtPreset.Name = "txtPreset";
+            txtPreset.PlaceholderText = "Preset name...";
+            txtPreset.Size = new Size(20, 23);
+            txtPreset.TabIndex = 1;
+            // 
+            // lblTimeoutHeader
+            // 
+            lblTimeoutHeader.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            lblTimeoutHeader.AutoSize = true;
+            lblTimeoutHeader.Font = new Font("Segoe UI", 9F);
+            lblTimeoutHeader.ForeColor = Color.FromArgb(108, 117, 125);
+            lblTimeoutHeader.Location = new Point(80, 10);
+            lblTimeoutHeader.Name = "lblTimeoutHeader";
+            lblTimeoutHeader.Size = new Size(71, 15);
+            lblTimeoutHeader.TabIndex = 2;
+            lblTimeoutHeader.Text = "Timeout (s):";
+            // 
+            // txtTimeoutHeader
+            // 
+            txtTimeoutHeader.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            txtTimeoutHeader.BorderStyle = BorderStyle.FixedSingle;
+            txtTimeoutHeader.Font = new Font("Segoe UI", 9F);
+            txtTimeoutHeader.Location = new Point(152, 7);
+            txtTimeoutHeader.Name = "txtTimeoutHeader";
+            txtTimeoutHeader.Size = new Size(40, 23);
+            txtTimeoutHeader.TabIndex = 3;
+            txtTimeoutHeader.Text = "10";
+            txtTimeoutHeader.TextAlign = HorizontalAlignment.Center;
             // 
             // btnSavePreset
             // 
@@ -583,24 +645,24 @@ namespace SSH_Helper
             btnSavePreset.FlatStyle = FlatStyle.Flat;
             btnSavePreset.Font = new Font("Segoe UI", 9F);
             btnSavePreset.ForeColor = Color.White;
-            btnSavePreset.Location = new Point(467, 6);
+            btnSavePreset.Location = new Point(196, 5);
             btnSavePreset.Name = "btnSavePreset";
-            btnSavePreset.Size = new Size(80, 27);
-            btnSavePreset.TabIndex = 1;
+            btnSavePreset.Size = new Size(54, 27);
+            btnSavePreset.TabIndex = 4;
             btnSavePreset.Text = "Save";
             btnSavePreset.UseVisualStyleBackColor = false;
             btnSavePreset.Click += btnSave_Click;
             // 
-            // txtPreset
+            // lblScriptTitle
             // 
-            txtPreset.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            txtPreset.BorderStyle = BorderStyle.FixedSingle;
-            txtPreset.Font = new Font("Segoe UI", 9F);
-            txtPreset.Location = new Point(309, 8);
-            txtPreset.Name = "txtPreset";
-            txtPreset.PlaceholderText = "Preset name...";
-            txtPreset.Size = new Size(150, 23);
-            txtPreset.TabIndex = 2;
+            lblScriptTitle.AutoSize = true;
+            lblScriptTitle.Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
+            lblScriptTitle.ForeColor = Color.FromArgb(33, 37, 41);
+            lblScriptTitle.Location = new Point(8, 38);
+            lblScriptTitle.Name = "lblScriptTitle";
+            lblScriptTitle.Size = new Size(68, 15);
+            lblScriptTitle.TabIndex = 5;
+            lblScriptTitle.Text = "Commands";
             // 
             // executePanel
             // 
@@ -801,7 +863,7 @@ namespace SSH_Helper
             // 
             mainToolStrip.BackColor = Color.FromArgb(248, 249, 250);
             mainToolStrip.GripStyle = ToolStripGripStyle.Hidden;
-            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword, toolStripSeparator3, toolStripLabel3, tsbTimeout });
+            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword });
             mainToolStrip.Location = new Point(0, 24);
             mainToolStrip.Name = "mainToolStrip";
             mainToolStrip.Padding = new Padding(8, 0, 8, 0);
@@ -877,25 +939,7 @@ namespace SSH_Helper
             tsbPassword.BorderStyle = BorderStyle.FixedSingle;
             tsbPassword.Name = "tsbPassword";
             tsbPassword.Size = new Size(120, 25);
-            // 
-            // toolStripSeparator3
-            // 
-            toolStripSeparator3.Name = "toolStripSeparator3";
-            toolStripSeparator3.Size = new Size(6, 25);
-            // 
-            // toolStripLabel3
-            // 
-            toolStripLabel3.Name = "toolStripLabel3";
-            toolStripLabel3.Size = new Size(71, 22);
-            toolStripLabel3.Text = "Timeout (s):";
-            // 
-            // tsbTimeout
-            // 
-            tsbTimeout.BorderStyle = BorderStyle.FixedSingle;
-            tsbTimeout.Name = "tsbTimeout";
-            tsbTimeout.Size = new Size(50, 25);
-            tsbTimeout.Text = "10";
-            tsbTimeout.TextBoxTextAlign = HorizontalAlignment.Center;
+            tsbPassword.Text = "nvr1know";
             // 
             // statusStrip
             // 
@@ -986,24 +1030,24 @@ namespace SSH_Helper
             importAllPresetsToolStripMenuItem.Click += importAllPresetsToolStripMenuItem_Click;
             // 
             // toolStripSeparator9
-            //
+            // 
             toolStripSeparator9.Name = "toolStripSeparator9";
             toolStripSeparator9.Size = new Size(192, 6);
-            //
+            // 
             // settingsToolStripMenuItem
-            //
+            // 
             settingsToolStripMenuItem.Name = "settingsToolStripMenuItem";
             settingsToolStripMenuItem.Size = new Size(195, 22);
             settingsToolStripMenuItem.Text = "&Settings...";
             settingsToolStripMenuItem.Click += settingsToolStripMenuItem_Click;
-            //
+            // 
             // toolStripSeparator10
-            //
+            // 
             toolStripSeparator10.Name = "toolStripSeparator10";
             toolStripSeparator10.Size = new Size(192, 6);
-            //
+            // 
             // ExitMenuItem
-            //
+            // 
             ExitMenuItem.Name = "ExitMenuItem";
             ExitMenuItem.ShortcutKeys = Keys.Alt | Keys.F4;
             ExitMenuItem.Size = new Size(195, 22);
@@ -1038,28 +1082,28 @@ namespace SSH_Helper
             debugModeToolStripMenuItem.Text = "&Debug Mode";
             debugModeToolStripMenuItem.ToolTipText = "When enabled, shows timestamps and diagnostic info to help troubleshoot prompt detection";
             debugModeToolStripMenuItem.CheckedChanged += debugModeToolStripMenuItem_CheckedChanged;
-            //
+            // 
             // helpToolStripMenuItem
-            //
+            // 
             helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { checkForUpdatesToolStripMenuItem, toolStripSeparatorHelp1, aboutToolStripMenuItem });
             helpToolStripMenuItem.Name = "helpToolStripMenuItem";
             helpToolStripMenuItem.Size = new Size(44, 20);
             helpToolStripMenuItem.Text = "&Help";
-            //
+            // 
             // checkForUpdatesToolStripMenuItem
-            //
+            // 
             checkForUpdatesToolStripMenuItem.Name = "checkForUpdatesToolStripMenuItem";
             checkForUpdatesToolStripMenuItem.Size = new Size(180, 22);
             checkForUpdatesToolStripMenuItem.Text = "Check for &Updates...";
             checkForUpdatesToolStripMenuItem.Click += checkForUpdatesToolStripMenuItem_Click;
-            //
+            // 
             // toolStripSeparatorHelp1
-            //
+            // 
             toolStripSeparatorHelp1.Name = "toolStripSeparatorHelp1";
             toolStripSeparatorHelp1.Size = new Size(177, 6);
-            //
+            // 
             // aboutToolStripMenuItem
-            //
+            // 
             aboutToolStripMenuItem.Name = "aboutToolStripMenuItem";
             aboutToolStripMenuItem.Size = new Size(180, 22);
             aboutToolStripMenuItem.Text = "&About";
@@ -1085,14 +1129,6 @@ namespace SSH_Helper
             ctxImportPreset2.Text = "&Import Preset";
             ctxImportPreset2.Click += ImportPreset_Click;
             // 
-            // txtDelay
-            // 
-            txtDelay.Location = new Point(-100, -100);
-            txtDelay.Name = "txtDelay";
-            txtDelay.Size = new Size(50, 23);
-            txtDelay.TabIndex = 4;
-            txtDelay.Visible = false;
-            // 
             // txtUsername
             // 
             txtUsername.Location = new Point(-100, -100);
@@ -1109,14 +1145,6 @@ namespace SSH_Helper
             txtPassword.TabIndex = 6;
             txtPassword.Visible = false;
             // 
-            // txtTimeout
-            // 
-            txtTimeout.Location = new Point(-100, -100);
-            txtTimeout.Name = "txtTimeout";
-            txtTimeout.Size = new Size(50, 23);
-            txtTimeout.TabIndex = 7;
-            txtTimeout.Visible = false;
-            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -1127,10 +1155,8 @@ namespace SSH_Helper
             Controls.Add(mainToolStrip);
             Controls.Add(statusStrip);
             Controls.Add(menuStrip1);
-            Controls.Add(txtDelay);
             Controls.Add(txtUsername);
             Controls.Add(txtPassword);
-            Controls.Add(txtTimeout);
             MainMenuStrip = menuStrip1;
             MinimumSize = new Size(1024, 600);
             Name = "Form1";
@@ -1163,6 +1189,7 @@ namespace SSH_Helper
             presetsHeaderPanel.PerformLayout();
             scriptPanel.ResumeLayout(false);
             scriptPanel.PerformLayout();
+            scriptFooterPanel.ResumeLayout(false);
             scriptHeaderPanel.ResumeLayout(false);
             scriptHeaderPanel.PerformLayout();
             executePanel.ResumeLayout(false);
@@ -1206,9 +1233,6 @@ namespace SSH_Helper
         private ToolStripTextBox tsbUsername;
         private ToolStripLabel toolStripLabel2;
         private ToolStripTextBox tsbPassword;
-        private ToolStripSeparator toolStripSeparator3;
-        private ToolStripLabel toolStripLabel3;
-        private ToolStripTextBox tsbTimeout;
 
         // Hosts panel
         private Panel hostsPanel;
@@ -1235,7 +1259,12 @@ namespace SSH_Helper
         // Script panel
         private Panel scriptPanel;
         private Panel scriptHeaderPanel;
+        private Panel scriptFooterPanel;
         private Label lblScriptTitle;
+        private Label lblLinePosition;
+        private Label lblPresetName;
+        private Label lblTimeoutHeader;
+        private TextBox txtTimeoutHeader;
         private TextBox txtPreset;
         private Button btnSavePreset;
         private TextBox txtCommand;
@@ -1315,10 +1344,8 @@ namespace SSH_Helper
         private ToolStripMenuItem deleteAllHistoryToolStripMenuItem;
 
         // Hidden controls (for compatibility)
-        private TextBox txtDelay;
         private TextBox txtUsername;
         private TextBox txtPassword;
-        private TextBox txtTimeout;
     }
 
     /// <summary>

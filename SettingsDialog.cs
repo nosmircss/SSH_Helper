@@ -10,7 +10,15 @@ namespace SSH_Helper
         private readonly ConfigurationService _configService;
 
         private readonly TabControl _tabControl;
+
+        // General tab controls
+        private readonly CheckBox _chkRememberState;
+        private readonly NumericUpDown _numMaxHistory;
+        private readonly NumericUpDown _numDefaultTimeout;
+
+        // Updates tab controls
         private readonly CheckBox _chkCheckForUpdatesOnStartup;
+
         private readonly Button _btnSave;
         private readonly Button _btnCancel;
 
@@ -19,7 +27,7 @@ namespace SSH_Helper
             _configService = configService;
 
             Text = "Settings";
-            Size = new Size(450, 200);
+            Size = new Size(450, 320);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -29,11 +37,79 @@ namespace SSH_Helper
             _tabControl = new TabControl
             {
                 Location = new Point(12, 12),
-                Size = new Size(410, 100),
+                Size = new Size(410, 220),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
-            // Updates Tab
+            // === General Tab ===
+            var tabGeneral = new TabPage("General");
+
+            var lblStateSection = new Label
+            {
+                Text = "Application State",
+                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
+                Location = new Point(15, 15),
+                AutoSize = true
+            };
+
+            _chkRememberState = new CheckBox
+            {
+                Text = "Remember state on exit (hosts, preset, history)",
+                Location = new Point(15, 40),
+                AutoSize = true
+            };
+
+            var lblMaxHistory = new Label
+            {
+                Text = "Maximum history entries to keep:",
+                Location = new Point(15, 70),
+                AutoSize = true
+            };
+
+            _numMaxHistory = new NumericUpDown
+            {
+                Location = new Point(220, 68),
+                Size = new Size(80, 23),
+                Minimum = 1,
+                Maximum = 500,
+                Value = 30
+            };
+
+            var lblDefaultsSection = new Label
+            {
+                Text = "Default Values",
+                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
+                Location = new Point(15, 105),
+                AutoSize = true
+            };
+
+            var lblDefaultTimeout = new Label
+            {
+                Text = "Default command timeout (seconds):",
+                Location = new Point(15, 135),
+                AutoSize = true
+            };
+
+            _numDefaultTimeout = new NumericUpDown
+            {
+                Location = new Point(250, 133),
+                Size = new Size(80, 23),
+                Minimum = 1,
+                Maximum = 300,
+                Value = 10
+            };
+
+            tabGeneral.Controls.Add(lblStateSection);
+            tabGeneral.Controls.Add(_chkRememberState);
+            tabGeneral.Controls.Add(lblMaxHistory);
+            tabGeneral.Controls.Add(_numMaxHistory);
+            tabGeneral.Controls.Add(lblDefaultsSection);
+            tabGeneral.Controls.Add(lblDefaultTimeout);
+            tabGeneral.Controls.Add(_numDefaultTimeout);
+
+            _tabControl.TabPages.Add(tabGeneral);
+
+            // === Updates Tab ===
             var tabUpdates = new TabPage("Updates");
 
             var lblUpdateSection = new Label
@@ -61,7 +137,7 @@ namespace SSH_Helper
             {
                 Text = "Save",
                 Size = new Size(80, 28),
-                Location = new Point(261, 125),
+                Location = new Point(261, 245),
                 DialogResult = DialogResult.OK
             };
             _btnSave.Click += BtnSave_Click;
@@ -70,7 +146,7 @@ namespace SSH_Helper
             {
                 Text = "Cancel",
                 Size = new Size(80, 28),
-                Location = new Point(347, 125),
+                Location = new Point(347, 245),
                 DialogResult = DialogResult.Cancel
             };
 
@@ -87,14 +163,26 @@ namespace SSH_Helper
         private void LoadSettings()
         {
             var config = _configService.GetCurrent();
+
+            // General
+            _chkRememberState.Checked = config.RememberState;
+            _numMaxHistory.Value = Math.Clamp(config.MaxHistoryEntries, 1, 500);
+            _numDefaultTimeout.Value = Math.Clamp(config.Timeout, 1, 300);
+
+            // Updates
             _chkCheckForUpdatesOnStartup.Checked = config.UpdateSettings.CheckOnStartup;
         }
 
         private void BtnSave_Click(object? sender, EventArgs e)
         {
-            // Save settings
             _configService.Update(config =>
             {
+                // General
+                config.RememberState = _chkRememberState.Checked;
+                config.MaxHistoryEntries = (int)_numMaxHistory.Value;
+                config.Timeout = (int)_numDefaultTimeout.Value;
+
+                // Updates
                 config.UpdateSettings.CheckOnStartup = _chkCheckForUpdatesOnStartup.Checked;
             });
         }
