@@ -31,6 +31,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Readfile, new ReadFileCommand() },
                 { StepType.Writefile, new WriteFileCommand() },
                 { StepType.Input, new InputCommand() },
+                { StepType.UpdateColumn, new UpdateColumnCommand() },
             };
         }
 

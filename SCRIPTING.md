@@ -18,6 +18,7 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [readfile](#readfile---read-text-files)
    - [writefile](#writefile---write-text-files)
    - [input](#input---prompt-for-user-input)
+   - [updatecolumn](#updatecolumn---update-host-table-column)
 3. [Variables](#variables)
 4. [Expressions and Conditions](#expressions-and-conditions)
 5. [Error Handling](#error-handling)
@@ -51,7 +52,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Keywords: `name:`, `description:`, `vars:`, `steps:`, `version:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- foreach:`, `- while:`, `- readfile:`, `- writefile:`, `- input:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- foreach:`, `- while:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`
 
 Plain text (without YAML markers) is treated as simple commands to execute line by line.
 
@@ -721,6 +722,73 @@ Prompts the user for input during script execution with optional validation.
 
 ---
 
+### updatecolumn - Update Host Table Column
+
+Writes a value back to a column in the host table for the current host. This allows scripts to store extracted data directly in the grid for later reference or export.
+
+**Syntax:**
+```yaml
+- updatecolumn:
+    column: "column_name"
+    value: "value_or_${variable}"
+```
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `column` | Yes | The column name to update (created if it doesn't exist) |
+| `value` | Yes | The value to set (supports variable substitution) |
+
+**Features:**
+- Automatically creates the column if it doesn't exist
+- Updates happen in real-time during script execution
+- Matches the host by IP address and port
+- Supports variable substitution with `${variable}` syntax
+- Values are persisted when you save the configuration or export to CSV
+
+**Examples:**
+```yaml
+# Store a simple extracted value
+- extract:
+    from: version_output
+    pattern: 'Version: (.+?)$'
+    into: version
+- updatecolumn:
+    column: version
+    value: ${version}
+
+# Store the current timestamp
+- updatecolumn:
+    column: last_scanned
+    value: ${_timestamp}
+
+# Store a computed or formatted value
+- set: status_msg = "OK - ${interface_count} interfaces"
+- updatecolumn:
+    column: status
+    value: ${status_msg}
+
+# Store multiple values from one script
+- updatecolumn:
+    column: hostname
+    value: ${hostname}
+- updatecolumn:
+    column: model
+    value: ${model}
+- updatecolumn:
+    column: serial
+    value: ${serial_number}
+```
+
+**Use Cases:**
+- **Inventory collection**: Extract version, hostname, serial number, etc. and store in columns
+- **Compliance checking**: Store pass/fail status in a "compliance" column
+- **Audit trails**: Record when each host was last checked
+- **Network discovery**: Store discovered interface names, IP addresses, or neighbor info
+
+---
+
 ## Variables
 
 ### Variable Sources
@@ -1197,6 +1265,60 @@ steps:
   - send: end
 
   - print: "Interface ${interface} configured with ${ip_address}"
+```
+
+### Example 8: Extract and Store Data to Host Table
+
+```yaml
+---
+name: Extract Device Info to Columns
+description: Extracts device information and stores it back to the host table
+
+steps:
+  - print: "Collecting info from ${Host_IP}..."
+
+  # Get version info
+  - send: show version
+    capture: version_output
+
+  - extract:
+      from: version_output
+      pattern: 'Version (\S+)'
+      into: version
+
+  - extract:
+      from: version_output
+      pattern: 'uptime is (.+?)$'
+      into: uptime
+
+  # Get hostname
+  - send: show running-config | include hostname
+    capture: hostname_output
+
+  - extract:
+      from: hostname_output
+      pattern: 'hostname (\S+)'
+      into: hostname
+
+  # Store extracted values back to the host table columns
+  - updatecolumn:
+      column: version
+      value: ${version}
+
+  - updatecolumn:
+      column: hostname
+      value: ${hostname}
+
+  - updatecolumn:
+      column: uptime
+      value: ${uptime}
+
+  - updatecolumn:
+      column: last_checked
+      value: ${_timestamp}
+
+  - print: "Updated columns for ${Host_IP}: version=${version}, hostname=${hostname}"
+  - exit: success "Device info collected and stored"
 ```
 
 ---

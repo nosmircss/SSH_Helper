@@ -69,6 +69,7 @@ namespace SSH_Helper
 
             // Wire up SSH service events
             _sshService.OutputReceived += SshService_OutputReceived;
+            _sshService.ColumnUpdateRequested += SshService_ColumnUpdateRequested;
 
             // Initialize update service
             var config = _configService.Load();
@@ -1875,6 +1876,45 @@ namespace SSH_Helper
             else
             {
                 txtOutput.AppendText(e.Output);
+            }
+        }
+
+        private void SshService_ColumnUpdateRequested(object? sender, SshColumnUpdateEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(() => UpdateHostColumn(e.Host, e.ColumnName, e.Value));
+            }
+            else
+            {
+                UpdateHostColumn(e.Host, e.ColumnName, e.Value);
+            }
+        }
+
+        private void UpdateHostColumn(HostConnection host, string columnName, string value)
+        {
+            // Find the row for this host
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (row.IsNewRow) continue;
+
+                var hostIp = row.Cells[CsvManager.HostColumnName]?.Value?.ToString();
+                if (string.IsNullOrEmpty(hostIp)) continue;
+
+                // Match by IP address (with optional port)
+                var rowHost = HostConnection.Parse(hostIp);
+                if (rowHost.IpAddress == host.IpAddress && rowHost.Port == host.Port)
+                {
+                    // Check if column exists, create if it doesn't
+                    if (!dgv_variables.Columns.Contains(columnName))
+                    {
+                        dgv_variables.Columns.Add(columnName, columnName);
+                    }
+
+                    // Update the cell value
+                    row.Cells[columnName].Value = value;
+                    break;
+                }
             }
         }
 
