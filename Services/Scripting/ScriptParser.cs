@@ -64,7 +64,11 @@ namespace SSH_Helper.Services.Scripting
                     trimmedLine.StartsWith("- extract:") ||
                     trimmedLine.StartsWith("- if:") ||
                     trimmedLine.StartsWith("- foreach:") ||
-                    trimmedLine.StartsWith("- while:"))
+                    trimmedLine.StartsWith("- while:") ||
+                    trimmedLine.StartsWith("- updatecolumn:") ||
+                    trimmedLine.StartsWith("- readfile:") ||
+                    trimmedLine.StartsWith("- writefile:") ||
+                    trimmedLine.StartsWith("- input:"))
                 {
                     return true;
                 }
@@ -269,6 +273,18 @@ namespace SSH_Helper.Services.Scripting
                     case "extract":
                         step.Extract = ParseExtractOptions(parser);
                         break;
+                    case "readfile":
+                        step.Readfile = ParseReadfileOptions(parser);
+                        break;
+                    case "writefile":
+                        step.Writefile = ParseWritefileOptions(parser);
+                        break;
+                    case "input":
+                        step.Input = ParseInputOptions(parser);
+                        break;
+                    case "updatecolumn":
+                        step.UpdateColumn = ParseUpdateColumnOptions(parser);
+                        break;
                     case "then":
                         step.Then = ParseSteps(parser);
                         break;
@@ -314,6 +330,185 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         case "match":
                             options.Match = parser.Consume<Scalar>().Value;
+                            break;
+                        default:
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private UpdateColumnOptions ParseUpdateColumnOptions(IParser parser)
+        {
+            var options = new UpdateColumnOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "column":
+                            options.Column = parser.Consume<Scalar>().Value;
+                            break;
+                        case "value":
+                            options.Value = parser.Consume<Scalar>().Value;
+                            break;
+                        default:
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private ReadfileOptions ParseReadfileOptions(IParser parser)
+        {
+            var options = new ReadfileOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "path":
+                            options.Path = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "skip_empty_lines":
+                        case "skipemptylines":
+                            var skipValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                            options.SkipEmptyLines = skipValue == "true" || skipValue == "yes" || skipValue == "1";
+                            break;
+                        case "trim_lines":
+                        case "trimlines":
+                            var trimValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                            options.TrimLines = trimValue == "true" || trimValue == "yes" || trimValue == "1";
+                            break;
+                        case "max_lines":
+                        case "maxlines":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var maxLines))
+                                options.MaxLines = maxLines;
+                            break;
+                        case "encoding":
+                            options.Encoding = parser.Consume<Scalar>().Value;
+                            break;
+                        default:
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private WritefileOptions ParseWritefileOptions(IParser parser)
+        {
+            var options = new WritefileOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "path":
+                            options.Path = parser.Consume<Scalar>().Value;
+                            break;
+                        case "content":
+                            options.Content = parser.Consume<Scalar>().Value;
+                            break;
+                        case "mode":
+                            options.Mode = parser.Consume<Scalar>().Value;
+                            break;
+                        default:
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private InputOptions ParseInputOptions(IParser parser)
+        {
+            var options = new InputOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "prompt":
+                            options.Prompt = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "default":
+                            options.Default = parser.Consume<Scalar>().Value;
+                            break;
+                        case "password":
+                            var pwdValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                            options.Password = pwdValue == "true" || pwdValue == "yes" || pwdValue == "1";
+                            break;
+                        case "validate":
+                            options.Validate = parser.Consume<Scalar>().Value;
+                            break;
+                        case "validation_error":
+                        case "validationerror":
+                            options.ValidationError = parser.Consume<Scalar>().Value;
                             break;
                         default:
                             SkipValue(parser);
@@ -480,6 +675,51 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Set requires 'variable = value' format{lineContent}");
+                        }
+                        break;
+
+                    case StepType.UpdateColumn:
+                        if (step.UpdateColumn != null)
+                        {
+                            if (string.IsNullOrEmpty(step.UpdateColumn.Column))
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: UpdateColumn requires 'column' name{lineContent}");
+                            }
+                            if (step.UpdateColumn.Value == null)
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: UpdateColumn requires 'value'{lineContent}");
+                            }
+                        }
+                        break;
+
+                    case StepType.Readfile:
+                        if (step.Readfile == null || string.IsNullOrEmpty(step.Readfile.Path))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Readfile requires 'path'{lineContent}");
+                        }
+                        if (step.Readfile == null || string.IsNullOrEmpty(step.Readfile.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Readfile requires 'into' variable{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Writefile:
+                        if (step.Writefile == null || string.IsNullOrEmpty(step.Writefile.Path))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Writefile requires 'path'{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Input:
+                        if (step.Input == null || string.IsNullOrEmpty(step.Input.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Input requires 'into' variable{lineContent}");
                         }
                         break;
                 }

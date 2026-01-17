@@ -286,8 +286,9 @@ namespace SSH_Helper.Services.Scripting.Models
 
         /// <summary>
         /// The value to set. Can be a literal string or a variable reference like ${varname}.
+        /// Null means the value was not specified in the script.
         /// </summary>
-        public string Value { get; set; } = string.Empty;
+        public string? Value { get; set; }
     }
 
     /// <summary>

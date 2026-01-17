@@ -75,6 +75,7 @@ steps:
     [InlineData("- if: condition\n  then:")]
     [InlineData("- foreach: item in items\n  do:")]
     [InlineData("- while: condition\n  do:")]
+    [InlineData("- updatecolumn:\n    column: test")]
     public void IsYamlScript_StepSyntax_ReturnsTrue(string input)
     {
         var result = ScriptParser.IsYamlScript(input);
@@ -595,6 +596,108 @@ steps:
         var errors = _parser.Validate(script, yaml);
 
         errors.Should().Contain(e => e.Contains("into"));
+    }
+
+    #endregion
+
+    #region Parse UpdateColumn Tests
+
+    [Fact]
+    public void Parse_UpdateColumnStep_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - updatecolumn:
+      column: version
+      value: ""1.0.0""";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].UpdateColumn.Should().NotBeNull();
+        script.Steps[0].UpdateColumn!.Column.Should().Be("version");
+        script.Steps[0].UpdateColumn.Value.Should().Be("1.0.0");
+    }
+
+    [Fact]
+    public void Parse_UpdateColumnWithVariable_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - updatecolumn:
+      column: hostname
+      value: ""${extracted_hostname}""";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].UpdateColumn.Should().NotBeNull();
+        script.Steps[0].UpdateColumn!.Column.Should().Be("hostname");
+        script.Steps[0].UpdateColumn.Value.Should().Be("${extracted_hostname}");
+    }
+
+    [Fact]
+    public void Parse_MultipleUpdateColumns_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - updatecolumn:
+      column: version
+      value: ""${version}""
+  - updatecolumn:
+      column: hostname
+      value: ""${hostname}""
+  - updatecolumn:
+      column: last_checked
+      value: ""${_timestamp}""";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(3);
+        script.Steps[0].UpdateColumn!.Column.Should().Be("version");
+        script.Steps[1].UpdateColumn!.Column.Should().Be("hostname");
+        script.Steps[2].UpdateColumn!.Column.Should().Be("last_checked");
+    }
+
+    [Fact]
+    public void Validate_UpdateColumnMissingColumn_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - updatecolumn:
+      value: ""test""";
+        var script = _parser.Parse(yaml);
+
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(e => e.Contains("column"));
+    }
+
+    [Fact]
+    public void Validate_UpdateColumnMissingValue_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - updatecolumn:
+      column: test";
+        var script = _parser.Parse(yaml);
+
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(e => e.Contains("value"));
+    }
+
+    [Fact]
+    public void Validate_UpdateColumnValid_NoErrors()
+    {
+        var yaml = @"---
+steps:
+  - updatecolumn:
+      column: status
+      value: active";
+        var script = _parser.Parse(yaml);
+
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().BeEmpty();
     }
 
     #endregion
