@@ -2290,10 +2290,12 @@ namespace SSH_Helper
                     _outputHistory.Add(new KeyValuePair<string, string>(entry.Timestamp, entry.Output));
                 }
 
-                // Select first history entry to display its output
+                // Select first history entry and display its output
                 if (_outputHistory.Count > 0)
                 {
                     lstOutput.SelectedIndex = 0;
+                    // Explicitly set output text since SelectedIndexChanged may not fire during form load
+                    txtOutput.Text = _outputHistory[0].Value;
                 }
             }
 
