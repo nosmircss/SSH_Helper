@@ -583,12 +583,12 @@ namespace SSH_Helper
                     }
                 }
 
-                // Clear the editor and track selected folder
+                // Display folder summary and track selected folder
                 _activePresetName = null;
                 _selectedFolderName = tag.Name;
-                txtPreset.Clear();
-                txtCommand.Clear();
+                txtPreset.Text = $"📁 {tag.Name}";
                 txtTimeoutHeader.Clear();
+                DisplayFolderSummary(tag.Name);
                 return;
             }
 
@@ -624,6 +624,7 @@ namespace SSH_Helper
             var preset = _presetManager.Get(newPresetName);
             if (preset != null)
             {
+                txtCommand.ReadOnly = false;
                 txtCommand.Text = preset.Commands;
                 txtPreset.Text = newPresetName;
                 if (preset.Timeout.HasValue)
@@ -2157,6 +2158,40 @@ namespace SSH_Helper
                 }
             }
             return result;
+        }
+
+        private void DisplayFolderSummary(string folderName)
+        {
+            var config = _configService.Load();
+            var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"═══════════════════════════════════════════");
+            sb.AppendLine($"  FOLDER: {folderName}");
+            sb.AppendLine($"═══════════════════════════════════════════");
+            sb.AppendLine();
+            sb.AppendLine($"  Presets: {presetNames.Count}");
+            sb.AppendLine();
+
+            if (presetNames.Count > 0)
+            {
+                sb.AppendLine("  Contents:");
+                sb.AppendLine("  ─────────");
+                foreach (var name in presetNames)
+                {
+                    var preset = _presetManager.Get(name);
+                    var favorite = preset?.IsFavorite == true ? "★ " : "  ";
+                    var type = preset?.IsScript == true ? "[Script]" : "";
+                    sb.AppendLine($"  {favorite}{name} {type}");
+                }
+            }
+            else
+            {
+                sb.AppendLine("  (Empty folder)");
+            }
+
+            txtCommand.Text = sb.ToString();
+            txtCommand.ReadOnly = true;
         }
 
         private void SelectPresetByName(string? presetName)

@@ -49,6 +49,8 @@ A Windows Forms application for executing SSH commands across multiple hosts wit
   - Right-click to create/rename/delete folders
   - Drag presets into folders or use "Move to Folder" menu
   - Folders can be expanded/collapsed (state is remembered)
+  - Selecting a folder displays a summary showing preset count and contents
+  - Execute all presets in a folder at once via right-click menu
 
 ### YAML Scripts
 
