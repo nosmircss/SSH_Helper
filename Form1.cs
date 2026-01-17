@@ -22,6 +22,7 @@ namespace SSH_Helper
         private readonly PresetManager _presetManager;
         private readonly CsvManager _csvManager;
         private readonly SshExecutionService _sshService;
+        private readonly UpdateService _updateService;
 
         #endregion
 
@@ -68,6 +69,13 @@ namespace SSH_Helper
             // Wire up SSH service events
             _sshService.OutputReceived += SshService_OutputReceived;
 
+            // Initialize update service
+            var config = _configService.Load();
+            _updateService = new UpdateService(
+                config.UpdateSettings.GitHubOwner,
+                config.UpdateSettings.GitHubRepo,
+                ApplicationVersion);
+
             InitializeFromConfiguration();
             InitializeDataGridView();
             InitializeOutputHistory();
@@ -78,6 +86,21 @@ namespace SSH_Helper
             UpdateHostCount();
             UpdateSortModeIndicator();
             UpdateStatusBar("Ready");
+
+            // Check for updates on startup (after form is shown)
+            Shown += Form1_Shown;
+        }
+
+        private async void Form1_Shown(object? sender, EventArgs e)
+        {
+            // Remove handler to only run once
+            Shown -= Form1_Shown;
+
+            var config = _configService.GetCurrent();
+            if (config.UpdateSettings.CheckOnStartup)
+            {
+                await CheckForUpdatesAsync(silent: true);
+            }
         }
 
         #endregion
@@ -708,6 +731,12 @@ namespace SSH_Helper
             if (!ConfirmExitWorkflow()) return;
             _exitConfirmed = true;
             Close();
+        }
+
+        private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using var dialog = new SettingsDialog(_configService);
+            dialog.ShowDialog(this);
         }
 
         private void exportAllPresetsToolStripMenuItem_Click(object sender, EventArgs e)
@@ -2153,6 +2182,94 @@ namespace SSH_Helper
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
             dgv_variables.ClearSelection();
+        }
+
+        #endregion
+
+        #region Update Check
+
+        /// <summary>
+        /// Checks for application updates.
+        /// </summary>
+        /// <param name="silent">If true, only shows dialog when update is available. If false, shows result even when up-to-date.</param>
+        private async Task CheckForUpdatesAsync(bool silent)
+        {
+            if (_updateService == null) return;
+
+            var config = _configService.GetCurrent();
+
+            // Update status bar
+            if (!silent)
+            {
+                UpdateStatusBar("Checking for updates...");
+                checkForUpdatesToolStripMenuItem.Enabled = false;
+            }
+
+            try
+            {
+                var result = await _updateService.CheckForUpdatesAsync();
+
+                // Update last check time
+                _configService.Update(c => c.UpdateSettings.LastCheckTime = DateTime.UtcNow);
+
+                if (result.ErrorMessage != null)
+                {
+                    if (!silent)
+                    {
+                        using var errorDialog = new UpdateErrorDialog(result.ErrorMessage);
+                        errorDialog.ShowDialog(this);
+                    }
+                    UpdateStatusBar("Update check failed");
+                    return;
+                }
+
+                if (result.UpdateAvailable)
+                {
+                    // Check if user has skipped this version
+                    if (silent && config.UpdateSettings.SkippedVersion == result.LatestVersion)
+                    {
+                        UpdateStatusBar("Ready");
+                        return;
+                    }
+
+                    using var updateDialog = new UpdateDialog(result, _updateService, skippedVersion =>
+                    {
+                        _configService.Update(c => c.UpdateSettings.SkippedVersion = skippedVersion);
+                    });
+                    updateDialog.ShowDialog(this);
+                }
+                else
+                {
+                    if (!silent)
+                    {
+                        using var noUpdateDialog = new NoUpdateDialog(ApplicationVersion);
+                        noUpdateDialog.ShowDialog(this);
+                    }
+                }
+
+                UpdateStatusBar("Ready");
+            }
+            catch (Exception ex)
+            {
+                if (!silent)
+                {
+                    using var errorDialog = new UpdateErrorDialog(ex.Message);
+                    errorDialog.ShowDialog(this);
+                }
+                UpdateStatusBar("Update check failed");
+            }
+            finally
+            {
+                if (!silent)
+                {
+                    checkForUpdatesToolStripMenuItem.Enabled = true;
+                }
+            }
+        }
+
+        private async void checkForUpdatesToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            await CheckForUpdatesAsync(silent: false);
         }
 
         #endregion

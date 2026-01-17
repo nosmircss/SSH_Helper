@@ -26,6 +26,40 @@ namespace SSH_Helper.Models
         // Preset sorting
         public PresetSortMode PresetSortMode { get; set; } = PresetSortMode.Ascending;
         public List<string> ManualPresetOrder { get; set; } = new();
+
+        // Update settings
+        public UpdateSettings UpdateSettings { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Settings for auto-update functionality.
+    /// </summary>
+    public class UpdateSettings
+    {
+        /// <summary>
+        /// GitHub repository owner (username or organization).
+        /// </summary>
+        public string GitHubOwner { get; set; } = "nosmircss";
+
+        /// <summary>
+        /// GitHub repository name.
+        /// </summary>
+        public string GitHubRepo { get; set; } = "SSH_Helper";
+
+        /// <summary>
+        /// Whether to check for updates on application startup.
+        /// </summary>
+        public bool CheckOnStartup { get; set; } = true;
+
+        /// <summary>
+        /// Last time an update check was performed (UTC).
+        /// </summary>
+        public DateTime? LastCheckTime { get; set; }
+
+        /// <summary>
+        /// Version that the user chose to skip (won't be prompted again).
+        /// </summary>
+        public string? SkippedVersion { get; set; }
     }
 
     /// <summary>
@@ -37,7 +71,7 @@ namespace SSH_Helper.Models
         public int? Top { get; set; } = 50;
         public int? Width { get; set; } = 1850;
         public int? Height { get; set; } = 1050;
-        public bool IsMaximized { get; set; } 
+        public bool IsMaximized { get; set; }
 
         // Splitter positions
         public int? MainSplitterDistance { get; set; } = 400;

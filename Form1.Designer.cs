@@ -115,12 +115,16 @@ namespace SSH_Helper
             exportAllPresetsToolStripMenuItem = new ToolStripMenuItem();
             importAllPresetsToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator9 = new ToolStripSeparator();
+            settingsToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparator10 = new ToolStripSeparator();
             ExitMenuItem = new ToolStripMenuItem();
             editToolStripMenuItem = new ToolStripMenuItem();
             findToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparatorEdit1 = new ToolStripSeparator();
             debugModeToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
+            checkForUpdatesToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparatorHelp1 = new ToolStripSeparator();
             aboutToolStripMenuItem = new ToolStripMenuItem();
             contextPresetLstAdd = new ContextMenuStrip(components);
             ctxAddPreset2 = new ToolStripMenuItem();
@@ -933,7 +937,7 @@ namespace SSH_Helper
             // 
             // fileToolStripMenuItem
             // 
-            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openCSVToolStripMenuItem, saveToolStripMenuItem, saveAsToolStripMenuItem1, toolStripSeparator4, exportAllPresetsToolStripMenuItem, importAllPresetsToolStripMenuItem, toolStripSeparator9, ExitMenuItem });
+            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openCSVToolStripMenuItem, saveToolStripMenuItem, saveAsToolStripMenuItem1, toolStripSeparator4, exportAllPresetsToolStripMenuItem, importAllPresetsToolStripMenuItem, toolStripSeparator9, settingsToolStripMenuItem, toolStripSeparator10, ExitMenuItem });
             fileToolStripMenuItem.Name = "fileToolStripMenuItem";
             fileToolStripMenuItem.Size = new Size(37, 20);
             fileToolStripMenuItem.Text = "&File";
@@ -982,12 +986,24 @@ namespace SSH_Helper
             importAllPresetsToolStripMenuItem.Click += importAllPresetsToolStripMenuItem_Click;
             // 
             // toolStripSeparator9
-            // 
+            //
             toolStripSeparator9.Name = "toolStripSeparator9";
             toolStripSeparator9.Size = new Size(192, 6);
-            // 
+            //
+            // settingsToolStripMenuItem
+            //
+            settingsToolStripMenuItem.Name = "settingsToolStripMenuItem";
+            settingsToolStripMenuItem.Size = new Size(195, 22);
+            settingsToolStripMenuItem.Text = "&Settings...";
+            settingsToolStripMenuItem.Click += settingsToolStripMenuItem_Click;
+            //
+            // toolStripSeparator10
+            //
+            toolStripSeparator10.Name = "toolStripSeparator10";
+            toolStripSeparator10.Size = new Size(192, 6);
+            //
             // ExitMenuItem
-            // 
+            //
             ExitMenuItem.Name = "ExitMenuItem";
             ExitMenuItem.ShortcutKeys = Keys.Alt | Keys.F4;
             ExitMenuItem.Size = new Size(195, 22);
@@ -1022,18 +1038,30 @@ namespace SSH_Helper
             debugModeToolStripMenuItem.Text = "&Debug Mode";
             debugModeToolStripMenuItem.ToolTipText = "When enabled, shows timestamps and diagnostic info to help troubleshoot prompt detection";
             debugModeToolStripMenuItem.CheckedChanged += debugModeToolStripMenuItem_CheckedChanged;
-            // 
+            //
             // helpToolStripMenuItem
-            // 
-            helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { aboutToolStripMenuItem });
+            //
+            helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { checkForUpdatesToolStripMenuItem, toolStripSeparatorHelp1, aboutToolStripMenuItem });
             helpToolStripMenuItem.Name = "helpToolStripMenuItem";
             helpToolStripMenuItem.Size = new Size(44, 20);
             helpToolStripMenuItem.Text = "&Help";
-            // 
+            //
+            // checkForUpdatesToolStripMenuItem
+            //
+            checkForUpdatesToolStripMenuItem.Name = "checkForUpdatesToolStripMenuItem";
+            checkForUpdatesToolStripMenuItem.Size = new Size(180, 22);
+            checkForUpdatesToolStripMenuItem.Text = "Check for &Updates...";
+            checkForUpdatesToolStripMenuItem.Click += checkForUpdatesToolStripMenuItem_Click;
+            //
+            // toolStripSeparatorHelp1
+            //
+            toolStripSeparatorHelp1.Name = "toolStripSeparatorHelp1";
+            toolStripSeparatorHelp1.Size = new Size(177, 6);
+            //
             // aboutToolStripMenuItem
-            // 
+            //
             aboutToolStripMenuItem.Name = "aboutToolStripMenuItem";
-            aboutToolStripMenuItem.Size = new Size(107, 22);
+            aboutToolStripMenuItem.Size = new Size(180, 22);
             aboutToolStripMenuItem.Text = "&About";
             aboutToolStripMenuItem.Click += aboutToolStripMenuItem_Click;
             // 
@@ -1243,12 +1271,16 @@ namespace SSH_Helper
         private ToolStripMenuItem exportAllPresetsToolStripMenuItem;
         private ToolStripMenuItem importAllPresetsToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator9;
+        private ToolStripMenuItem settingsToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparator10;
         private ToolStripMenuItem ExitMenuItem;
         private ToolStripMenuItem editToolStripMenuItem;
         private ToolStripMenuItem findToolStripMenuItem;
         private ToolStripSeparator toolStripSeparatorEdit1;
         private ToolStripMenuItem debugModeToolStripMenuItem;
         private ToolStripMenuItem helpToolStripMenuItem;
+        private ToolStripMenuItem checkForUpdatesToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparatorHelp1;
         private ToolStripMenuItem aboutToolStripMenuItem;
 
         // Context menus
