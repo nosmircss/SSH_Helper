@@ -11,6 +11,7 @@ namespace SSH_Helper
         private readonly UpdateCheckResult _updateResult;
         private readonly UpdateService _updateService;
         private readonly Action<string?> _onSkipVersion;
+        private readonly bool _enableUpdateLog;
 
         private readonly Label _lblTitle;
         private readonly Label _lblVersionInfo;
@@ -24,11 +25,12 @@ namespace SSH_Helper
 
         private CancellationTokenSource? _downloadCts;
 
-        public UpdateDialog(UpdateCheckResult updateResult, UpdateService updateService, Action<string?> onSkipVersion)
+        public UpdateDialog(UpdateCheckResult updateResult, UpdateService updateService, Action<string?> onSkipVersion, bool enableUpdateLog = false)
         {
             _updateResult = updateResult;
             _updateService = updateService;
             _onSkipVersion = onSkipVersion;
+            _enableUpdateLog = enableUpdateLog;
 
             Text = "Update Available";
             Size = new Size(520, 450);
@@ -220,7 +222,7 @@ namespace SSH_Helper
                 await Task.Delay(500);
 
                 // Launch updater and exit
-                _updateService.LaunchUpdaterAndExit(downloadPath);
+                _updateService.LaunchUpdaterAndExit(downloadPath, null, _enableUpdateLog);
             }
             catch (OperationCanceledException)
             {

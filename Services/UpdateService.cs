@@ -219,7 +219,8 @@ namespace SSH_Helper.Services
         /// </summary>
         /// <param name="updatePackagePath">Path to the downloaded update package</param>
         /// <param name="currentExePath">Path to the current executable (optional, auto-detected if null)</param>
-        public void LaunchUpdaterAndExit(string updatePackagePath, string? currentExePath = null)
+        /// <param name="enableLogging">Whether to enable logging for troubleshooting</param>
+        public void LaunchUpdaterAndExit(string updatePackagePath, string? currentExePath = null, bool enableLogging = false)
         {
             currentExePath ??= Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
             if (string.IsNullOrEmpty(currentExePath))
@@ -234,13 +235,16 @@ namespace SSH_Helper.Services
             File.WriteAllText(scriptPath, GetUpdaterScript());
 
             // Run PowerShell with the script
+            // -NoProfile speeds up startup and avoids profile issues
             // -ExecutionPolicy Bypass allows running unsigned scripts
-            // -WindowStyle Hidden hides the PowerShell window (but we'll use a visible one for progress)
-            var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" " +
+            // EnableLog is a switch parameter - only include it if logging is enabled
+            var enableLogArg = enableLogging ? "-EnableLog" : "";
+            var arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" " +
                           $"-UpdatePackage \"{updatePackagePath}\" " +
                           $"-TargetDir \"{appDir}\" " +
                           $"-ExeToLaunch \"{currentExePath}\" " +
-                          $"-ProcessId {Environment.ProcessId}";
+                          $"-ProcessId {Environment.ProcessId} " +
+                          enableLogArg;
 
             var startInfo = new ProcessStartInfo
             {
@@ -264,80 +268,170 @@ param(
     [Parameter(Mandatory=$true)][string]$UpdatePackage,
     [Parameter(Mandatory=$true)][string]$TargetDir,
     [Parameter(Mandatory=$true)][string]$ExeToLaunch,
-    [Parameter(Mandatory=$true)][int]$ProcessId
+    [Parameter(Mandatory=$true)][int]$ProcessId,
+    [switch]$EnableLog
 )
 
-$ErrorActionPreference = 'Stop'
+# Setup logging FIRST before anything else
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$logFile = Join-Path $scriptDir 'update.log'
+
+# Always create log file to help debug issues
+""========================================"" | Out-File -FilePath $logFile -Encoding UTF8
+""SSH Helper Update Log"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""========================================"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""Parameters:"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""  UpdatePackage: $UpdatePackage"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""  TargetDir: $TargetDir"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""  ExeToLaunch: $ExeToLaunch"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""  ProcessId: $ProcessId"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""  EnableLog: $EnableLog"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""  ScriptDir: $scriptDir"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""  LogFile: $logFile"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+""  PowerShell Version: $($PSVersionTable.PSVersion)"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+"""" | Out-File -FilePath $logFile -Append -Encoding UTF8
+
 $host.UI.RawUI.WindowTitle = 'SSH Helper Updater'
 
-Write-Host 'SSH Helper Updater' -ForegroundColor Cyan
-Write-Host '==================' -ForegroundColor Cyan
-Write-Host ''
+function Write-Log {
+    param([string]$Message, [string]$Color = 'White')
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    Write-Host $Message -ForegroundColor $Color
+    ""[$timestamp] $Message"" | Out-File -FilePath $logFile -Append -Encoding UTF8
+}
+
+Write-Log 'SSH Helper Updater' 'Cyan'
+Write-Log '==================' 'Cyan'
+Write-Log ''
+
+# Check if update package exists
+if (-not (Test-Path $UpdatePackage)) {
+    Write-Log ""ERROR: Update package not found: $UpdatePackage"" 'Red'
+    Write-Log ""Log file saved to: $logFile"" 'Yellow'
+    pause
+    exit 1
+}
+Write-Log ""Update package found: $UpdatePackage ($('{0:N2}' -f ((Get-Item $UpdatePackage).Length / 1MB)) MB)"" 'Gray'
+
+# Check if target directory exists
+if (-not (Test-Path $TargetDir)) {
+    Write-Log ""ERROR: Target directory not found: $TargetDir"" 'Red'
+    Write-Log ""Log file saved to: $logFile"" 'Yellow'
+    pause
+    exit 1
+}
+Write-Log ""Target directory: $TargetDir"" 'Gray'
+
+# List files in target directory before update
+Write-Log 'Files in target directory before update:'
+Get-ChildItem $TargetDir -File | ForEach-Object { Write-Log ""  $($_.Name) - $($_.Length) bytes - $($_.LastWriteTime)"" 'Gray' }
 
 # Wait for the main process to exit
-Write-Host 'Waiting for SSH Helper to close...' -ForegroundColor Yellow
+Write-Log 'Waiting for SSH Helper to close...' 'Yellow'
 $maxWait = 30
 $waited = 0
 while ($waited -lt $maxWait) {
     try {
         $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
         if ($null -eq $proc) {
+            Write-Log ""Process $ProcessId has exited"" 'Gray'
             break
         }
+        Write-Log ""Process $ProcessId still running, waiting... ($waited s)"" 'Gray'
         Start-Sleep -Milliseconds 500
         $waited += 0.5
     } catch {
+        Write-Log ""Process check exception (process likely exited): $_"" 'Gray'
         break
     }
 }
 
 if ($waited -ge $maxWait) {
-    Write-Host 'Timed out waiting for SSH Helper to close.' -ForegroundColor Red
-    Write-Host 'Please close it manually and try again.' -ForegroundColor Red
+    Write-Log 'Timed out waiting for SSH Helper to close.' 'Red'
+    Write-Log 'Please close it manually and try again.' 'Red'
+    Write-Log ""Log file saved to: $logFile"" 'Yellow'
     pause
     exit 1
 }
 
-Start-Sleep -Seconds 1  # Extra delay for file handles to release
+Write-Log 'Waiting 2 seconds for file handles to release...' 'Gray'
+Start-Sleep -Seconds 2
 
-Write-Host 'Installing update...' -ForegroundColor Yellow
+# Check if exe is locked
+$exePath = $ExeToLaunch
+if (Test-Path $exePath) {
+    try {
+        $stream = [System.IO.File]::Open($exePath, 'Open', 'ReadWrite', 'None')
+        $stream.Close()
+        Write-Log ""Exe file is not locked: $exePath"" 'Gray'
+    } catch {
+        Write-Log ""WARNING: Exe file may be locked: $exePath"" 'Yellow'
+        Write-Log ""Lock error: $_"" 'Yellow'
+        Write-Log 'Waiting additional 3 seconds...' 'Yellow'
+        Start-Sleep -Seconds 3
+    }
+}
+
+Write-Log 'Installing update...' 'Yellow'
 
 try {
     if ($UpdatePackage -like '*.zip') {
         # Extract zip file
-        Write-Host ""Extracting: $UpdatePackage"" -ForegroundColor Gray
+        Write-Log ""Extracting: $UpdatePackage"" 'Gray'
+
+        # List contents of zip file
+        Write-Log 'Contents of zip file:'
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($UpdatePackage)
+        $zip.Entries | ForEach-Object { Write-Log ""  $($_.FullName) - $($_.Length) bytes"" 'Gray' }
+        $zip.Dispose()
+
+        Write-Log 'Extracting files...'
         Expand-Archive -Path $UpdatePackage -DestinationPath $TargetDir -Force
-        Write-Host 'Extraction complete.' -ForegroundColor Green
+        Write-Log 'Extraction complete.' 'Green'
     } else {
         # Just copy the exe
         $destPath = Join-Path $TargetDir (Split-Path $UpdatePackage -Leaf)
-        Write-Host ""Copying: $UpdatePackage -> $destPath"" -ForegroundColor Gray
+        Write-Log ""Copying: $UpdatePackage -> $destPath"" 'Gray'
         Copy-Item -Path $UpdatePackage -Destination $destPath -Force
-        Write-Host 'Copy complete.' -ForegroundColor Green
+        Write-Log 'Copy complete.' 'Green'
     }
 
+    # List files in target directory after update
+    Write-Log 'Files in target directory after update:'
+    Get-ChildItem $TargetDir -File | ForEach-Object { Write-Log ""  $($_.Name) - $($_.Length) bytes - $($_.LastWriteTime)"" 'Gray' }
+
     # Clean up the update package
-    Write-Host 'Cleaning up...' -ForegroundColor Yellow
+    Write-Log 'Cleaning up update package...' 'Yellow'
     Remove-Item -Path $UpdatePackage -Force -ErrorAction SilentlyContinue
 
-    Write-Host ''
-    Write-Host 'Update complete!' -ForegroundColor Green
-    Write-Host 'Launching SSH Helper...' -ForegroundColor Cyan
+    Write-Log ''
+    Write-Log 'Update complete!' 'Green'
+    Write-Log ""Launching SSH Helper: $ExeToLaunch"" 'Cyan'
+    Write-Log ""Log file saved to: $logFile"" 'Gray'
 
     Start-Sleep -Seconds 1
 
     # Launch the updated application
     Start-Process -FilePath $ExeToLaunch -WorkingDirectory $TargetDir
 
-    # Clean up this script and temp directory (delayed)
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-    Start-Process -FilePath 'cmd.exe' -ArgumentList ""/c ping localhost -n 3 >nul & rd /s /q `""$scriptDir`"""" -WindowStyle Hidden
+    # Clean up this script and temp directory (delayed) - but keep log file if logging enabled
+    if (-not $EnableLog) {
+        Start-Process -FilePath 'cmd.exe' -ArgumentList ""/c ping localhost -n 3 >nul & rd /s /q `""$scriptDir`"""" -WindowStyle Hidden
+    }
+
+    exit 0
 
 } catch {
-    Write-Host ''
-    Write-Host ""Update failed: $_"" -ForegroundColor Red
-    Write-Host ''
-    Write-Host 'Press any key to exit...' -ForegroundColor Yellow
+    Write-Log ''
+    Write-Log ""Update failed: $_"" 'Red'
+    Write-Log ""Exception details: $($_.Exception.GetType().FullName)"" 'Red'
+    Write-Log ""Stack trace: $($_.ScriptStackTrace)"" 'Red'
+    Write-Log ""Log file saved to: $logFile"" 'Yellow'
+    Write-Log 'Please share this log file when reporting the issue.' 'Yellow'
+    Write-Log ''
+    Write-Log 'Press any key to exit...' 'Yellow'
     $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
     exit 1
 }
