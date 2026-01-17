@@ -28,6 +28,9 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.If, new IfCommand(this) },
                 { StepType.Foreach, new ForeachCommand(this) },
                 { StepType.While, new WhileCommand(this) },
+                { StepType.Readfile, new ReadFileCommand() },
+                { StepType.Writefile, new WriteFileCommand() },
+                { StepType.Input, new InputCommand() },
             };
         }
 
