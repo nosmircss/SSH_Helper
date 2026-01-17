@@ -20,7 +20,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.49";
+        private const string ApplicationVersion = "0.50";
         private const string ApplicationName = "SSH Helper";
 
         #endregion
@@ -1643,12 +1643,24 @@ namespace SSH_Helper
 
         private void SaveCurrentPreset()
         {
+            // Don't save when a folder is selected (folder summary is displayed)
+            if (!string.IsNullOrEmpty(_selectedFolderName))
+            {
+                return;
+            }
+
             string presetName = txtPreset.Text.Trim();
             string commands = txtCommand.Text;
 
             if (string.IsNullOrEmpty(presetName))
             {
                 MessageBox.Show("Preset name is required.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // Prevent saving preset with folder icon prefix (safety check)
+            if (presetName.StartsWith("📁"))
+            {
                 return;
             }
 
