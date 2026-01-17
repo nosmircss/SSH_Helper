@@ -1,0 +1,490 @@
+using System.Collections.Concurrent;
+using Renci.SshNet;
+using SSH_Helper.Models;
+
+namespace SSH_Helper.Services
+{
+    /// <summary>
+    /// Manages a pool of SSH connections for efficient reuse.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Benefits of connection pooling:</b>
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>Reduced connection overhead:</b> SSH handshakes involve multiple round trips
+    ///     (key exchange, authentication). Reusing connections eliminates this overhead.
+    ///   </item>
+    ///   <item>
+    ///     <b>Better resource utilization:</b> Limits the number of concurrent connections
+    ///     to prevent overwhelming remote hosts or exhausting local resources.
+    ///   </item>
+    ///   <item>
+    ///     <b>Session state preservation:</b> When used with shell sessions, can maintain
+    ///     environment variables, working directory, and authentication context.
+    ///   </item>
+    ///   <item>
+    ///     <b>Faster repeated operations:</b> Executing multiple batches of commands against
+    ///     the same host is significantly faster when connections are reused.
+    ///   </item>
+    /// </list>
+    /// <para>
+    /// <b>Connection lifecycle:</b>
+    /// </para>
+    /// <list type="number">
+    ///   <item>GetOrCreateAsync - Retrieves existing connection or creates new one</item>
+    ///   <item>Connection is used for command execution</item>
+    ///   <item>Connection remains in pool for reuse</item>
+    ///   <item>Automatic health checks before reuse</item>
+    ///   <item>Automatic cleanup of stale/dead connections</item>
+    /// </list>
+    /// </remarks>
+    public class SshConnectionPool : IDisposable
+    {
+        private readonly ConcurrentDictionary<string, PooledConnection> _connections = new();
+        private readonly SemaphoreSlim _creationLock = new(1, 1);
+        private readonly SshTimeoutOptions _defaultTimeouts;
+        private readonly TimeSpan _maxConnectionAge;
+        private readonly TimeSpan _healthCheckInterval;
+        private bool _disposed;
+
+        /// <summary>
+        /// Event fired when a connection is created.
+        /// </summary>
+        public event EventHandler<ConnectionEventArgs>? ConnectionCreated;
+
+        /// <summary>
+        /// Event fired when a connection is reused from the pool.
+        /// </summary>
+        public event EventHandler<ConnectionEventArgs>? ConnectionReused;
+
+        /// <summary>
+        /// Event fired when a connection is removed from the pool.
+        /// </summary>
+        public event EventHandler<ConnectionEventArgs>? ConnectionRemoved;
+
+        /// <summary>
+        /// Event fired when an error occurs with a pooled connection.
+        /// </summary>
+        public event EventHandler<ConnectionErrorEventArgs>? ConnectionError;
+
+        /// <summary>
+        /// Gets the number of connections currently in the pool.
+        /// </summary>
+        public int Count => _connections.Count;
+
+        /// <summary>
+        /// Gets statistics about the connection pool.
+        /// </summary>
+        public PoolStatistics Statistics { get; } = new();
+
+        /// <summary>
+        /// Creates a new connection pool.
+        /// </summary>
+        /// <param name="defaultTimeouts">Default timeout settings for connections</param>
+        /// <param name="maxConnectionAge">Maximum age before a connection is considered stale (default 30 minutes)</param>
+        /// <param name="healthCheckInterval">Minimum interval between health checks (default 30 seconds)</param>
+        public SshConnectionPool(
+            SshTimeoutOptions? defaultTimeouts = null,
+            TimeSpan? maxConnectionAge = null,
+            TimeSpan? healthCheckInterval = null)
+        {
+            _defaultTimeouts = defaultTimeouts ?? SshTimeoutOptions.Default;
+            _maxConnectionAge = maxConnectionAge ?? TimeSpan.FromMinutes(30);
+            _healthCheckInterval = healthCheckInterval ?? TimeSpan.FromSeconds(30);
+        }
+
+        /// <summary>
+        /// Gets or creates a connection to the specified host.
+        /// </summary>
+        /// <param name="host">Host connection details</param>
+        /// <param name="username">Username for authentication</param>
+        /// <param name="password">Password for authentication</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>A connected SSH client</returns>
+        public async Task<SshClient> GetOrCreateAsync(
+            HostConnection host,
+            string username,
+            string password,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            var key = CreateConnectionKey(host, username);
+
+            // Try to get existing connection
+            if (_connections.TryGetValue(key, out var pooled))
+            {
+                if (await IsConnectionHealthyAsync(pooled, cancellationToken))
+                {
+                    pooled.LastUsed = DateTime.UtcNow;
+                    Statistics.IncrementReused();
+                    OnConnectionReused(host, username);
+                    return pooled.Client;
+                }
+                else
+                {
+                    // Connection is unhealthy, remove it
+                    await RemoveConnectionAsync(key);
+                }
+            }
+
+            // Create new connection
+            await _creationLock.WaitAsync(cancellationToken);
+            try
+            {
+                // Double-check after acquiring lock
+                if (_connections.TryGetValue(key, out pooled))
+                {
+                    if (await IsConnectionHealthyAsync(pooled, cancellationToken))
+                    {
+                        pooled.LastUsed = DateTime.UtcNow;
+                        Statistics.IncrementReused();
+                        OnConnectionReused(host, username);
+                        return pooled.Client;
+                    }
+                    else
+                    {
+                        await RemoveConnectionAsync(key);
+                    }
+                }
+
+                // Create new connection
+                var client = await CreateConnectionAsync(host, username, password, cancellationToken);
+
+                pooled = new PooledConnection
+                {
+                    Client = client,
+                    Key = key,
+                    Host = host,
+                    Username = username,
+                    Created = DateTime.UtcNow,
+                    LastUsed = DateTime.UtcNow,
+                    LastHealthCheck = DateTime.UtcNow
+                };
+
+                _connections[key] = pooled;
+                Statistics.IncrementCreated();
+                OnConnectionCreated(host, username);
+
+                return client;
+            }
+            finally
+            {
+                _creationLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Creates a shell session from a pooled connection.
+        /// </summary>
+        /// <param name="host">Host connection details</param>
+        /// <param name="username">Username for authentication</param>
+        /// <param name="password">Password for authentication</param>
+        /// <param name="timeouts">Optional timeout overrides</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>An initialized shell session</returns>
+        public async Task<(SshClient Client, SshShellSession Session)> CreateSessionAsync(
+            HostConnection host,
+            string username,
+            string password,
+            SshTimeoutOptions? timeouts = null,
+            CancellationToken cancellationToken = default)
+        {
+            var client = await GetOrCreateAsync(host, username, password, cancellationToken);
+            var effectiveTimeouts = timeouts ?? _defaultTimeouts;
+
+            var shellStream = client.CreateShellStream("xterm", 200, 48, 1200, 800, 16384);
+            var session = new SshShellSession(shellStream, effectiveTimeouts);
+
+            await session.InitializeAsync(cancellationToken);
+
+            return (client, session);
+        }
+
+        /// <summary>
+        /// Removes a connection from the pool.
+        /// </summary>
+        /// <param name="host">Host to disconnect from</param>
+        /// <param name="username">Username used for the connection</param>
+        public async Task RemoveAsync(HostConnection host, string username)
+        {
+            var key = CreateConnectionKey(host, username);
+            await RemoveConnectionAsync(key);
+        }
+
+        /// <summary>
+        /// Removes all connections from the pool.
+        /// </summary>
+        public async Task ClearAsync()
+        {
+            var keys = _connections.Keys.ToList();
+            foreach (var key in keys)
+            {
+                await RemoveConnectionAsync(key);
+            }
+        }
+
+        /// <summary>
+        /// Removes stale connections that have exceeded the maximum age.
+        /// </summary>
+        /// <returns>Number of connections removed</returns>
+        public async Task<int> CleanupStaleConnectionsAsync()
+        {
+            var now = DateTime.UtcNow;
+            var staleKeys = _connections
+                .Where(kvp => now - kvp.Value.Created > _maxConnectionAge)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in staleKeys)
+            {
+                await RemoveConnectionAsync(key);
+            }
+
+            return staleKeys.Count;
+        }
+
+        /// <summary>
+        /// Gets information about all connections in the pool.
+        /// </summary>
+        public IReadOnlyList<ConnectionInfo> GetConnectionInfo()
+        {
+            return _connections.Values
+                .Select(p => new ConnectionInfo
+                {
+                    Host = p.Host.ToString(),
+                    Username = p.Username,
+                    Created = p.Created,
+                    LastUsed = p.LastUsed,
+                    IsConnected = p.Client.IsConnected,
+                    Age = DateTime.UtcNow - p.Created
+                })
+                .ToList();
+        }
+
+        private async Task<SshClient> CreateConnectionAsync(
+            HostConnection host,
+            string username,
+            string password,
+            CancellationToken cancellationToken)
+        {
+            var client = new SshClient(host.IpAddress, host.Port, username, password);
+            client.ConnectionInfo.Timeout = _defaultTimeouts.ConnectionTimeout;
+
+            client.ErrorOccurred += (s, e) =>
+            {
+                if (e.Exception != null)
+                {
+                    OnConnectionError(host, username, e.Exception);
+                }
+            };
+
+            // Connect asynchronously with cancellation support
+            await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                client.Connect();
+            }, cancellationToken);
+
+            return client;
+        }
+
+        private async Task<bool> IsConnectionHealthyAsync(PooledConnection pooled, CancellationToken cancellationToken)
+        {
+            // Check if connection age exceeded
+            if (DateTime.UtcNow - pooled.Created > _maxConnectionAge)
+                return false;
+
+            // Check basic connection state
+            if (!pooled.Client.IsConnected)
+                return false;
+
+            // Only do active health check if enough time has passed
+            if (DateTime.UtcNow - pooled.LastHealthCheck < _healthCheckInterval)
+                return true;
+
+            // Perform active health check by sending a simple command
+            try
+            {
+                await Task.Run(() =>
+                {
+                    using var cmd = pooled.Client.CreateCommand("echo 1");
+                    cmd.CommandTimeout = TimeSpan.FromSeconds(5);
+                    cmd.Execute();
+                }, cancellationToken);
+
+                pooled.LastHealthCheck = DateTime.UtcNow;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async Task RemoveConnectionAsync(string key)
+        {
+            if (_connections.TryRemove(key, out var pooled))
+            {
+                try
+                {
+                    if (pooled.Client.IsConnected)
+                    {
+                        await Task.Run(() => pooled.Client.Disconnect());
+                    }
+                    pooled.Client.Dispose();
+                    Statistics.IncrementRemoved();
+                    OnConnectionRemoved(pooled.Host, pooled.Username);
+                }
+                catch
+                {
+                    // Ignore cleanup errors
+                }
+            }
+        }
+
+        private static string CreateConnectionKey(HostConnection host, string username)
+        {
+            return $"{host.IpAddress}:{host.Port}:{username}";
+        }
+
+        protected virtual void OnConnectionCreated(HostConnection host, string username)
+        {
+            ConnectionCreated?.Invoke(this, new ConnectionEventArgs { Host = host, Username = username });
+        }
+
+        protected virtual void OnConnectionReused(HostConnection host, string username)
+        {
+            ConnectionReused?.Invoke(this, new ConnectionEventArgs { Host = host, Username = username });
+        }
+
+        protected virtual void OnConnectionRemoved(HostConnection host, string username)
+        {
+            ConnectionRemoved?.Invoke(this, new ConnectionEventArgs { Host = host, Username = username });
+        }
+
+        protected virtual void OnConnectionError(HostConnection host, string username, Exception exception)
+        {
+            ConnectionError?.Invoke(this, new ConnectionErrorEventArgs
+            {
+                Host = host,
+                Username = username,
+                Exception = exception
+            });
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(SshConnectionPool));
+        }
+
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+
+                foreach (var pooled in _connections.Values)
+                {
+                    try
+                    {
+                        if (pooled.Client.IsConnected)
+                        {
+                            pooled.Client.Disconnect();
+                        }
+                        pooled.Client.Dispose();
+                    }
+                    catch
+                    {
+                        // Ignore cleanup errors
+                    }
+                }
+
+                _connections.Clear();
+                _creationLock.Dispose();
+            }
+        }
+
+        private class PooledConnection
+        {
+            public SshClient Client { get; set; } = null!;
+            public string Key { get; set; } = string.Empty;
+            public HostConnection Host { get; set; } = new();
+            public string Username { get; set; } = string.Empty;
+            public DateTime Created { get; set; }
+            public DateTime LastUsed { get; set; }
+            public DateTime LastHealthCheck { get; set; }
+        }
+    }
+
+    /// <summary>
+    /// Event arguments for connection pool events.
+    /// </summary>
+    public class ConnectionEventArgs : EventArgs
+    {
+        public HostConnection Host { get; set; } = new();
+        public string Username { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Event arguments for connection errors.
+    /// </summary>
+    public class ConnectionErrorEventArgs : ConnectionEventArgs
+    {
+        public Exception Exception { get; set; } = null!;
+    }
+
+    /// <summary>
+    /// Information about a pooled connection.
+    /// </summary>
+    public class ConnectionInfo
+    {
+        public string Host { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty;
+        public DateTime Created { get; set; }
+        public DateTime LastUsed { get; set; }
+        public bool IsConnected { get; set; }
+        public TimeSpan Age { get; set; }
+    }
+
+    /// <summary>
+    /// Statistics about connection pool usage.
+    /// </summary>
+    public class PoolStatistics
+    {
+        private long _connectionsCreated;
+        private long _connectionsReused;
+        private long _connectionsRemoved;
+
+        public long ConnectionsCreated => Interlocked.Read(ref _connectionsCreated);
+        public long ConnectionsReused => Interlocked.Read(ref _connectionsReused);
+        public long ConnectionsRemoved => Interlocked.Read(ref _connectionsRemoved);
+
+        /// <summary>
+        /// The ratio of reused connections to total connection requests.
+        /// Higher is better (more reuse, less overhead).
+        /// </summary>
+        public double ReuseRatio
+        {
+            get
+            {
+                var total = ConnectionsCreated + ConnectionsReused;
+                return total > 0 ? (double)ConnectionsReused / total : 0;
+            }
+        }
+
+        internal void IncrementCreated() => Interlocked.Increment(ref _connectionsCreated);
+        internal void IncrementReused() => Interlocked.Increment(ref _connectionsReused);
+        internal void IncrementRemoved() => Interlocked.Increment(ref _connectionsRemoved);
+
+        public void Reset()
+        {
+            Interlocked.Exchange(ref _connectionsCreated, 0);
+            Interlocked.Exchange(ref _connectionsReused, 0);
+            Interlocked.Exchange(ref _connectionsRemoved, 0);
+        }
+    }
+}

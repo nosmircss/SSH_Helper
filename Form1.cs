@@ -1,273 +1,623 @@
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using Renci.SshNet;
-using Renci.SshNet.Common;
 using System.ComponentModel;
 using System.Data;
-using System.Diagnostics;
 using System.Text;
-using System.Text.RegularExpressions;
-using System.IO.Compression;
+using SSH_Helper.Models;
+using SSH_Helper.Services;
+using SSH_Helper.Utilities;
 
 namespace SSH_Helper
 {
-
     public partial class Form1 : Form
     {
-        private const string ApplicationVersion = "0.32-Beta";
-        private const string ApplicationName = "SSH_Helper";
+        #region Constants
 
-        private const int DefaultPollIntervalMs = 60; 
+        private const string ApplicationVersion = "0.40-Beta";
+        private const string ApplicationName = "SSH Helper";
 
-        public class ConfigObject
-        {
-            public Dictionary<string, PresetInfo>? Presets { get; set; }
-            public string? Username { get; set; }
-            public int Delay { get; set; }
-            public int Timeout { get; set; }
-        }
+        #endregion
 
-        public class PresetInfo
-        {
-            public string Commands { get; set; } = "";
-            public int? Delay { get; set; }
-            public int? Timeout { get; set; }
-        }
+        #region Services
 
-        private bool _exitConfirmed = false;
-        private string? _activePresetName;                 // Currently loaded (saved) preset name
-        private bool _suppressPresetSelectionChange = false; // Prevent recursive prompting during programmatic selection changes
-        private int rightClickedColumnIndex = -1; // Field to store the index of the right-clicked column
-        private int rightClickedRowIndex = -1; // Field to store the index of the right-clicked row
-        private string loadedFilePath;
-        private Dictionary<string, PresetInfo> presets = new Dictionary<string, PresetInfo>();
-        private BindingList<KeyValuePair<string, string>> outputHistoryList = new BindingList<KeyValuePair<string, string>>();
-        private bool isRunning = false;
-        CancellationTokenSource cts = new CancellationTokenSource();
-        private bool _initialPresetDefaultsSaved = false;
-        private bool _csvDirty = false;
-        private string configFilePath;
+        private readonly ConfigurationService _configService;
+        private readonly PresetManager _presetManager;
+        private readonly CsvManager _csvManager;
+        private readonly SshExecutionService _sshService;
+        private readonly UpdateService _updateService;
 
-        private bool _debugCaptureRaw = false;
-        private StringBuilder? _rawBuffer;
+        #endregion
+
+        #region State
+
+        private string? _loadedFilePath;
+        private string? _activePresetName;
+        private bool _csvDirty;
+        private bool _exitConfirmed;
+        private bool _suppressPresetSelectionChange;
+        private int _rightClickedColumnIndex = -1;
+        private int _rightClickedRowIndex = -1;
+        private readonly BindingList<KeyValuePair<string, string>> _outputHistory = new();
+
+        // Find dialog state
+        private FindDialog? _findDialog;
+        private string _lastFindTerm = "";
+        private bool _lastFindMatchCase;
+        private bool _lastFindWrap = true;
+
+        // Preset sorting
+        private PresetSortMode _currentSortMode = PresetSortMode.Ascending;
+        private readonly List<string> _manualPresetOrder = new();
+
+        // Preset drag-drop state
+        private int _presetDragIndex = -1;
+        private Point _presetDragStartPoint;
+
+        #endregion
+
+        #region Constructor
 
         public Form1()
         {
             InitializeComponent();
-            this.Text = $"{ApplicationName} {ApplicationVersion}";
+            Text = $"{ApplicationName} {ApplicationVersion}";
 
-            InitializeConfiguration();
+            // Initialize services
+            _configService = new ConfigurationService();
+            _presetManager = new PresetManager(_configService);
+            _csvManager = new CsvManager();
+            _sshService = new SshExecutionService();
+
+            // Wire up SSH service events
+            _sshService.OutputReceived += SshService_OutputReceived;
+
+            // Initialize update service
+            var config = _configService.Load();
+            _updateService = new UpdateService(
+                config.UpdateSettings.GitHubOwner,
+                config.UpdateSettings.GitHubRepo,
+                ApplicationVersion);
+
+            InitializeFromConfiguration();
             InitializeDataGridView();
+            InitializeOutputHistory();
+            InitializeEventHandlers();
+            InitializeToolbarSync();
+            InitializePasswordMasking();
+            RestoreWindowState();
+            UpdateHostCount();
+            UpdateSortModeIndicator();
+            UpdateStatusBar("Ready");
 
-            lstOutput.DataSource = outputHistoryList;
-            lstOutput.DisplayMember = "Key";
-
-            this.FormClosing += new FormClosingEventHandler(Form1_FormClosing);
-            this.Click += Form_Click;
-            dgv_variables.ContextMenuStrip = contextMenuStrip1;
-            dgv_variables.MouseDown += dgv_variables_MouseDown;
-            dgv_variables.RowPostPaint += dgv_variables_RowPostPaint;
-            dgv_variables.CellClick += dgv_variables_CellClick;
-            dgv_variables.ColumnAdded += dgv_variables_ColumnAdded;
-            dgv_variables.CellLeave += dgv_variables_CellLeave;
-
-            // Track edits to mark CSV as dirty
-            dgv_variables.CellValueChanged += dgv_variables_CellValueChanged;
-            dgv_variables.RowsAdded += dgv_variables_RowsAdded;
-            dgv_variables.RowsRemoved += dgv_variables_RowsRemoved;
-            dgv_variables.ColumnRemoved += dgv_variables_ColumnRemoved;
-
-            AttachClickEventHandlers();
-
-            //presets
-            lstPreset.MouseDown += lstPreset_MouseDown;
-
-            txtDelay.KeyPress += txtDelay_KeyPress;
-            txtTimeout.KeyPress += txtTimeout_KeyPress;
-
-            InitializePresetExportImportMenuItems();
+            // Check for updates on startup (after form is shown)
+            Shown += Form1_Shown;
         }
 
-        private void lstPreset_MouseDown(object sender, MouseEventArgs e)
+        private async void Form1_Shown(object? sender, EventArgs e)
+        {
+            // Remove handler to only run once
+            Shown -= Form1_Shown;
+
+            var config = _configService.GetCurrent();
+            if (config.UpdateSettings.CheckOnStartup)
+            {
+                await CheckForUpdatesAsync(silent: true);
+            }
+        }
+
+        #endregion
+
+        #region Initialization
+
+        private void InitializeFromConfiguration()
+        {
+            var config = _configService.Load();
+            _presetManager.Load();
+
+            // Populate UI from config
+            tsbUsername.Text = config.Username;
+            txtUsername.Text = config.Username;
+            txtDelay.Text = config.Delay.ToString();
+            tsbTimeout.Text = config.Timeout > 0 ? config.Timeout.ToString() : "10";
+            txtTimeout.Text = tsbTimeout.Text;
+
+            // Load sort mode and manual order
+            _currentSortMode = config.PresetSortMode;
+            _manualPresetOrder.Clear();
+            _manualPresetOrder.AddRange(config.ManualPresetOrder);
+
+            // Populate preset list with proper sorting
+            RefreshPresetList();
+
+            // Apply defaults to presets that don't have them
+            _presetManager.ApplyDefaults(config.Delay, config.Timeout);
+        }
+
+        private void InitializeDataGridView()
+        {
+            dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
+
+            // Modern styling
+            dgv_variables.EnableHeadersVisualStyles = false;
+            dgv_variables.BackgroundColor = Color.White;
+            dgv_variables.GridColor = Color.FromArgb(222, 226, 230);
+
+            // Column headers
+            dgv_variables.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+            dgv_variables.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+            dgv_variables.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(33, 37, 41);
+            dgv_variables.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
+            dgv_variables.ColumnHeadersDefaultCellStyle.Padding = new Padding(8, 4, 8, 4);
+            dgv_variables.ColumnHeadersHeight = 36;
+            dgv_variables.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+
+            // Row headers
+            dgv_variables.RowHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+            dgv_variables.RowHeadersDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+            dgv_variables.RowHeadersDefaultCellStyle.ForeColor = Color.FromArgb(108, 117, 125);
+            dgv_variables.RowHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9F);
+            dgv_variables.RowHeadersWidth = 50;
+
+            // Cell styles
+            dgv_variables.DefaultCellStyle.BackColor = Color.White;
+            dgv_variables.DefaultCellStyle.ForeColor = Color.FromArgb(33, 37, 41);
+            dgv_variables.DefaultCellStyle.Font = new Font("Segoe UI", 9.5F);
+            dgv_variables.DefaultCellStyle.SelectionBackColor = Color.FromArgb(13, 110, 253);
+            dgv_variables.DefaultCellStyle.SelectionForeColor = Color.White;
+            dgv_variables.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
+            dgv_variables.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+            dgv_variables.RowTemplate.Height = 28;
+
+            dgv_variables.ColumnHeadersVisible = true;
+            dgv_variables.RowHeadersVisible = true;
+        }
+
+        private void InitializeOutputHistory()
+        {
+            lstOutput.DataSource = _outputHistory;
+            lstOutput.DisplayMember = "Key";
+        }
+
+        private void InitializeEventHandlers()
+        {
+            // Form events
+            FormClosing += Form1_FormClosing;
+
+            // DataGridView events
+            dgv_variables.MouseDown += Dgv_Variables_MouseDown;
+            dgv_variables.RowPostPaint += Dgv_Variables_RowPostPaint;
+            dgv_variables.CellClick += Dgv_Variables_CellClick;
+            dgv_variables.ColumnAdded += Dgv_Variables_ColumnAdded;
+            dgv_variables.CellLeave += Dgv_Variables_CellLeave;
+            dgv_variables.CellValueChanged += Dgv_Variables_CellValueChanged;
+            dgv_variables.RowsAdded += Dgv_Variables_RowsAdded;
+            dgv_variables.RowsRemoved += Dgv_Variables_RowsRemoved;
+            dgv_variables.ColumnRemoved += Dgv_Variables_ColumnRemoved;
+            dgv_variables.KeyPress += Dgv_Variables_KeyPress;
+            dgv_variables.KeyDown += Dgv_Variables_KeyDown;
+
+            // Preset events
+            lstPreset.MouseDown += LstPreset_MouseDown;
+            lstPreset.MouseMove += LstPreset_MouseMove;
+            lstPreset.DragOver += LstPreset_DragOver;
+            lstPreset.DragDrop += LstPreset_DragDrop;
+            lstPreset.AllowDrop = true;
+        }
+
+        private void InitializeToolbarSync()
+        {
+            // Sync toolbar username/password with hidden textboxes
+            tsbUsername.TextChanged += (s, e) => txtUsername.Text = tsbUsername.Text;
+            tsbPassword.TextChanged += (s, e) => txtPassword.Text = tsbPassword.Text;
+            tsbTimeout.TextChanged += (s, e) => txtTimeout.Text = tsbTimeout.Text;
+
+            // Only allow numeric input in timeout
+            tsbTimeout.KeyPress += (s, e) =>
+            {
+                if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
+                {
+                    e.Handled = true;
+                }
+            };
+        }
+
+        private void InitializePasswordMasking()
+        {
+            // Access the internal TextBox of ToolStripTextBox to set password char
+            if (tsbPassword.TextBox != null)
+            {
+                tsbPassword.TextBox.UseSystemPasswordChar = true;
+            }
+        }
+
+        private void RestoreWindowState()
+        {
+            var config = _configService.GetCurrent();
+            var ws = config.WindowState;
+
+            if (ws.Width.HasValue && ws.Height.HasValue && ws.Left.HasValue && ws.Top.HasValue)
+            {
+                // Ensure window is on screen
+                var screen = Screen.FromPoint(new Point(ws.Left.Value, ws.Top.Value));
+                if (screen != null)
+                {
+                    StartPosition = FormStartPosition.Manual;
+                    Left = Math.Max(screen.WorkingArea.Left, Math.Min(ws.Left.Value, screen.WorkingArea.Right - 100));
+                    Top = Math.Max(screen.WorkingArea.Top, Math.Min(ws.Top.Value, screen.WorkingArea.Bottom - 100));
+                    Width = Math.Min(ws.Width.Value, screen.WorkingArea.Width);
+                    Height = Math.Min(ws.Height.Value, screen.WorkingArea.Height);
+                }
+            }
+
+            if (ws.IsMaximized)
+            {
+                WindowState = FormWindowState.Maximized;
+            }
+
+            // Restore splitter positions after load
+            Load += (s, e) =>
+            {
+                if (ws.MainSplitterDistance.HasValue && ws.MainSplitterDistance.Value > 0)
+                {
+                    try { mainSplitContainer.SplitterDistance = Math.Min(ws.MainSplitterDistance.Value, mainSplitContainer.Height - mainSplitContainer.Panel2MinSize); }
+                    catch { /* Ignore invalid splitter distances */ }
+                }
+                if (ws.TopSplitterDistance.HasValue && ws.TopSplitterDistance.Value > 0)
+                {
+                    try { topSplitContainer.SplitterDistance = Math.Min(ws.TopSplitterDistance.Value, topSplitContainer.Width - topSplitContainer.Panel2MinSize); }
+                    catch { /* Ignore invalid splitter distances */ }
+                }
+                if (ws.CommandSplitterDistance.HasValue && ws.CommandSplitterDistance.Value > 0)
+                {
+                    try { commandSplitContainer.SplitterDistance = Math.Min(ws.CommandSplitterDistance.Value, commandSplitContainer.Width - commandSplitContainer.Panel2MinSize); }
+                    catch { /* Ignore invalid splitter distances */ }
+                }
+                if (ws.OutputSplitterDistance.HasValue && ws.OutputSplitterDistance.Value > 0)
+                {
+                    try { outputSplitContainer.SplitterDistance = Math.Min(ws.OutputSplitterDistance.Value, outputSplitContainer.Width - outputSplitContainer.Panel2MinSize); }
+                    catch { /* Ignore invalid splitter distances */ }
+                }
+            };
+        }
+
+        #endregion
+
+        #region UI Helpers
+
+        private void UpdateHostCount()
+        {
+            int count = dgv_variables.Rows.Cast<DataGridViewRow>()
+                .Count(r => !r.IsNewRow && !string.IsNullOrWhiteSpace(GetCellValue(r, CsvManager.HostColumnName)));
+
+            string text = count == 1 ? "1 host" : $"{count} hosts";
+            lblHostCount.Text = text;
+            statusHostCount.Text = text;
+        }
+
+        private void UpdateStatusBar(string message, bool showProgress = false, int progress = 0, int total = 0)
+        {
+            statusLabel.Text = message;
+            statusProgress.Visible = showProgress;
+            if (showProgress && total > 0)
+            {
+                statusProgress.Maximum = total;
+                statusProgress.Value = Math.Min(progress, total);
+            }
+        }
+
+        #endregion
+
+        #region Form Events
+
+        private void Form1_FormClosing(object? sender, FormClosingEventArgs e)
+        {
+            if (!_exitConfirmed &&
+                e.CloseReason != CloseReason.WindowsShutDown &&
+                e.CloseReason != CloseReason.TaskManagerClosing)
+            {
+                if (!ConfirmExitWorkflow())
+                {
+                    e.Cancel = true;
+                    return;
+                }
+            }
+
+            SaveConfiguration();
+        }
+
+        #endregion
+
+        #region DataGridView Events
+
+        private void Dgv_Variables_MouseDown(object? sender, MouseEventArgs e)
+        {
+            var hit = dgv_variables.HitTest(e.X, e.Y);
+
+            if (hit.Type == DataGridViewHitTestType.RowHeader)
+            {
+                dgv_variables.ClearSelection();
+                dgv_variables.CurrentCell = dgv_variables.Rows[hit.RowIndex].Cells[0];
+                foreach (DataGridViewCell cell in dgv_variables.Rows[hit.RowIndex].Cells)
+                {
+                    cell.Selected = true;
+                }
+            }
+
+            if (hit.Type != DataGridViewHitTestType.Cell &&
+                hit.Type != DataGridViewHitTestType.ColumnHeader &&
+                hit.Type != DataGridViewHitTestType.RowHeader)
+            {
+                EndEditAndClearSelection();
+            }
+
+            if (e.Button == MouseButtons.Right)
+            {
+                HandleRightClick(hit, e.Location);
+            }
+        }
+
+        private void HandleRightClick(DataGridView.HitTestInfo hit, Point location)
+        {
+            if (hit.Type == DataGridViewHitTestType.Cell || hit.Type == DataGridViewHitTestType.ColumnHeader)
+            {
+                _rightClickedColumnIndex = hit.ColumnIndex;
+                _rightClickedRowIndex = hit.Type == DataGridViewHitTestType.Cell ? hit.RowIndex : -1;
+
+                if (hit.Type == DataGridViewHitTestType.Cell)
+                {
+                    dgv_variables.CurrentCell = dgv_variables[hit.ColumnIndex, hit.RowIndex];
+                }
+
+                // Enable/disable delete/rename based on Host_IP protection
+                bool isProtected = IsHostIpColumn(_rightClickedColumnIndex);
+                deleteColumnToolStripMenuItem.Enabled = !isProtected;
+                renameColumnToolStripMenuItem.Enabled = !isProtected;
+
+                contextMenuStrip1.Show(dgv_variables, location);
+            }
+            else
+            {
+                _rightClickedColumnIndex = -1;
+                _rightClickedRowIndex = -1;
+                deleteColumnToolStripMenuItem.Enabled = true;
+                renameColumnToolStripMenuItem.Enabled = true;
+            }
+        }
+
+        private bool IsHostIpColumn(int columnIndex)
+        {
+            if (columnIndex < 0 || columnIndex >= dgv_variables.Columns.Count)
+                return false;
+
+            var col = dgv_variables.Columns[columnIndex];
+            return string.Equals(col.Name, CsvManager.HostColumnName, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(col.HeaderText, CsvManager.HostColumnName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void Dgv_Variables_RowPostPaint(object? sender, DataGridViewRowPostPaintEventArgs e)
+        {
+            var grid = sender as DataGridView;
+            if (grid == null) return;
+
+            var rowIdx = (e.RowIndex + 1).ToString();
+            var centerFormat = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center
+            };
+            var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
+            using var brush = new SolidBrush(Color.FromArgb(108, 117, 125));
+            e.Graphics.DrawString(rowIdx, grid.Font, brush, headerBounds, centerFormat);
+        }
+
+        private void Dgv_Variables_CellClick(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex == -1) // Column header click
+            {
+                dgv_variables.ClearSelection();
+                foreach (DataGridViewRow row in dgv_variables.Rows)
+                {
+                    row.Cells[e.ColumnIndex].Selected = true;
+                }
+            }
+        }
+
+        private void Dgv_Variables_ColumnAdded(object? sender, DataGridViewColumnEventArgs e)
+        {
+            e.Column.SortMode = DataGridViewColumnSortMode.NotSortable;
+        }
+
+        private void Dgv_Variables_CellLeave(object? sender, DataGridViewCellEventArgs e)
+        {
+            dgv_variables.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        }
+
+        private void Dgv_Variables_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+        {
+            _csvDirty = true;
+            UpdateHostCount();
+        }
+
+        private void Dgv_Variables_RowsAdded(object? sender, DataGridViewRowsAddedEventArgs e)
+        {
+            _csvDirty = true;
+            UpdateHostCount();
+        }
+
+        private void Dgv_Variables_RowsRemoved(object? sender, DataGridViewRowsRemovedEventArgs e)
+        {
+            _csvDirty = true;
+            UpdateHostCount();
+        }
+
+        private void Dgv_Variables_ColumnRemoved(object? sender, DataGridViewColumnEventArgs e) => _csvDirty = true;
+
+        private void Dgv_Variables_KeyPress(object? sender, KeyPressEventArgs e)
+        {
+            if (!dgv_variables.IsCurrentCellInEditMode && !char.IsControl(e.KeyChar))
+            {
+                dgv_variables.BeginEdit(true);
+                if (dgv_variables.EditingControl is TextBox editingTextBox)
+                {
+                    editingTextBox.Text = e.KeyChar.ToString();
+                    editingTextBox.SelectionStart = editingTextBox.Text.Length;
+                }
+                e.Handled = true;
+            }
+        }
+
+        private void Dgv_Variables_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.Control && e.KeyCode == Keys.A)
+            {
+                dgv_variables.SelectAll();
+                e.Handled = true;
+            }
+            else if (e.Control && e.KeyCode == Keys.C)
+            {
+                CopyToClipboard();
+                e.Handled = true;
+            }
+            else if (e.Control && e.KeyCode == Keys.V)
+            {
+                PasteFromClipboard();
+                e.Handled = true;
+            }
+            else if (e.KeyCode == Keys.Delete || e.KeyCode == Keys.Back)
+            {
+                DeleteSelectedCells();
+                e.Handled = true;
+            }
+        }
+
+        private void dgv_variables_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0)
+            {
+                dgv_variables.BeginEdit(true);
+            }
+        }
+
+        #endregion
+
+        #region Preset Events
+
+        private void LstPreset_MouseDown(object? sender, MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Right)
             {
                 int index = lstPreset.IndexFromPoint(e.Location);
                 if (index != ListBox.NoMatches)
                 {
-                    lstPreset.SelectedIndex = index; // Select the item under the mouse
-                    contextPresetLst.Show(Cursor.Position); // Show the context menu at the cursor position
+                    lstPreset.SelectedIndex = index;
+                    contextPresetLst.Show(Cursor.Position);
                 }
                 else
                 {
-                    contextPresetLstAdd.Show(Cursor.Position); // Show the context menu at the cursor position
+                    contextPresetLstAdd.Show(Cursor.Position);
                 }
+            }
+            else if (e.Button == MouseButtons.Left && _currentSortMode == PresetSortMode.Manual)
+            {
+                _presetDragIndex = lstPreset.IndexFromPoint(e.Location);
+                _presetDragStartPoint = e.Location;
             }
         }
 
-
-        private void InitializeConfiguration()
+        private void LstPreset_MouseMove(object? sender, MouseEventArgs e)
         {
-            string folder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string specificFolder = Path.Combine(folder, "SSH_Helper");
-            if (!Directory.Exists(specificFolder))
+            if (e.Button != MouseButtons.Left || _presetDragIndex < 0 || _currentSortMode != PresetSortMode.Manual)
+                return;
+
+            // Check if mouse has moved enough to start drag
+            if (Math.Abs(e.X - _presetDragStartPoint.X) > SystemInformation.DragSize.Width ||
+                Math.Abs(e.Y - _presetDragStartPoint.Y) > SystemInformation.DragSize.Height)
             {
-                Directory.CreateDirectory(specificFolder);
+                if (_presetDragIndex < lstPreset.Items.Count)
+                {
+                    lstPreset.DoDragDrop(lstPreset.Items[_presetDragIndex], DragDropEffects.Move);
+                }
             }
-
-            configFilePath = Path.Combine(specificFolder, "config.json");
-            if (!File.Exists(configFilePath))
-            {
-                CreateDefaultConfigFile();
-            }
-
-            LoadConfiguration();
-
-            if (string.IsNullOrEmpty(txtTimeout.Text))
-            {
-                txtTimeout.Text = "10";
-            }
-
-            ApplyDefaultDelayTimeoutToPresetsAndSave();
         }
 
-        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        private void LstPreset_DragOver(object? sender, DragEventArgs e)
         {
-            // If closing wasn�t initiated via Exit menu (or not yet confirmed), confirm now
-            if (!_exitConfirmed)
+            if (_currentSortMode != PresetSortMode.Manual || !e.Data?.GetDataPresent(typeof(string)) == true)
             {
-                // Optionally skip prompts on system shutdown
-                if (e.CloseReason != CloseReason.WindowsShutDown &&
-                    e.CloseReason != CloseReason.TaskManagerClosing)
-                {
-                    if (!ConfirmExitWorkflow())
-                    {
-                        e.Cancel = true;
-                        return;
-                    }
-                }
+                e.Effect = DragDropEffects.None;
+                return;
             }
 
-            Savevariables(); // persist settings on exit
+            e.Effect = DragDropEffects.Move;
+
+            // Get the item under the cursor and highlight it
+            var point = lstPreset.PointToClient(new Point(e.X, e.Y));
+            int targetIndex = lstPreset.IndexFromPoint(point);
+            if (targetIndex >= 0 && targetIndex < lstPreset.Items.Count)
+            {
+                lstPreset.SelectedIndex = targetIndex;
+            }
         }
 
-        private void Savevariables()
+        private void LstPreset_DragDrop(object? sender, DragEventArgs e)
         {
-            try
+            if (_currentSortMode != PresetSortMode.Manual || _presetDragIndex < 0)
             {
-                // Load the current configuration from the file
-                var json = File.ReadAllText(configFilePath);
-                var config = JsonConvert.DeserializeObject<ConfigObject>(json) ?? new ConfigObject();
-
-                // Update the username in the configuration
-                config.Username = txtUsername.Text;
-                config.Delay = int.Parse(txtDelay.Text);
-                config.Timeout = int.Parse(txtTimeout.Text);
-                config.Presets = presets; // preserve presets if present
-
-                // Serialize the updated configuration and write it back to the file
-                json = JsonConvert.SerializeObject(config, Formatting.Indented);
-                File.WriteAllText(configFilePath, json);
+                _presetDragIndex = -1;
+                return;
             }
-            catch (Exception ex)
+
+            var point = lstPreset.PointToClient(new Point(e.X, e.Y));
+            int targetIndex = lstPreset.IndexFromPoint(point);
+
+            if (targetIndex < 0 || targetIndex == _presetDragIndex)
             {
-                MessageBox.Show($"Failed to save variables: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _presetDragIndex = -1;
+                return;
             }
+
+            // Get the preset name being moved (strip star if favorite)
+            string draggedDisplayName = lstPreset.Items[_presetDragIndex].ToString() ?? "";
+            string draggedPresetName = GetPresetNameFromDisplay(draggedDisplayName);
+
+            // Build a list from the current visual order
+            var currentOrder = new List<string>();
+            for (int i = 0; i < lstPreset.Items.Count; i++)
+            {
+                currentOrder.Add(GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? ""));
+            }
+
+            // Remove from current position and insert at new position
+            currentOrder.RemoveAt(_presetDragIndex);
+            currentOrder.Insert(targetIndex > _presetDragIndex ? targetIndex : targetIndex, draggedPresetName);
+
+            // Update manual order list
+            _manualPresetOrder.Clear();
+            _manualPresetOrder.AddRange(currentOrder);
+
+            _presetDragIndex = -1;
+            RefreshPresetList();
+
+            // Re-select the moved item
+            for (int i = 0; i < lstPreset.Items.Count; i++)
+            {
+                if (GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? "") == draggedPresetName)
+                {
+                    lstPreset.SelectedIndex = i;
+                    break;
+                }
+            }
+
+            // Save the new order
+            SaveConfiguration();
         }
-
-        private void ApplyDefaultDelayTimeoutToPresetsAndSave()
-        {
-            if (_initialPresetDefaultsSaved) return; // Run only once
-
-            if (!int.TryParse(txtDelay.Text, out var globalDelay)) return;
-            if (!int.TryParse(txtTimeout.Text, out var globalTimeout)) return;
-
-            bool changed = false;
-            foreach (var key in presets.Keys.ToList())
-            {
-                var p = presets[key];
-                if (p.Delay == null)
-                {
-                    p.Delay = globalDelay;
-                    changed = true;
-                }
-                if (p.Timeout == null)
-                {
-                    p.Timeout = globalTimeout;
-                    changed = true;
-                }
-            }
-
-            if (changed)
-            {
-                SavePresets(); // Persist upgraded presets with concrete Delay/Timeout values
-            }
-            _initialPresetDefaultsSaved = true;
-        }
-
-        private void LoadConfiguration()
-        {
-            try
-            {
-                string json = File.ReadAllText(configFilePath);
-                var rootObj = JObject.Parse(json);
-
-                presets.Clear();
-                var presetsToken = rootObj["Presets"] as JObject;
-                if (presetsToken != null)
-                {
-                    foreach (var prop in presetsToken.Properties())
-                    {
-                        if (prop.Value.Type == JTokenType.String)
-                        {
-                            // Legacy format: value is just a command string
-                            presets[prop.Name] = new PresetInfo { Commands = prop.Value.ToString() };
-                        }
-                        else
-                        {
-                            var info = prop.Value.ToObject<PresetInfo>() ?? new PresetInfo();
-                            info.Commands ??= "";
-                            presets[prop.Name] = info;
-                        }
-                    }
-                }
-
-                lstPreset.Items.Clear();
-                foreach (var key in presets.Keys)
-                    lstPreset.Items.Add(key);
-
-                // Avoid rootObj.ToObject<ConfigObject>() because legacy Presets entries may be strings
-                string? usernameVal = rootObj["Username"]?.Type == JTokenType.String ? rootObj["Username"]!.ToString() : null;
-                if (!string.IsNullOrWhiteSpace(usernameVal))
-                    txtUsername.Text = usernameVal;
-
-                if (rootObj["Delay"]?.Type == JTokenType.Integer)
-                {
-                    int delayVal = rootObj["Delay"]!.ToObject<int>();
-                    if (delayVal > 0) txtDelay.Text = delayVal.ToString();
-                }
-
-                if (rootObj["Timeout"]?.Type == JTokenType.Integer)
-                {
-                    int timeoutVal = rootObj["Timeout"]!.ToObject<int>();
-                    if (timeoutVal > 0) txtTimeout.Text = timeoutVal.ToString();
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to load configuration: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
 
         private void lstPreset_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (_suppressPresetSelectionChange) return;
-            if (lstPreset.SelectedItem == null) return;
+            if (_suppressPresetSelectionChange || lstPreset.SelectedItem == null)
+                return;
 
-            string newPresetName = lstPreset.SelectedItem.ToString();
+            string displayName = lstPreset.SelectedItem.ToString() ?? "";
+            string newPresetName = GetPresetNameFromDisplay(displayName);
 
-            // If switching away from the active preset and current edits are dirty, prompt
             if (!string.IsNullOrEmpty(_activePresetName) &&
                 !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
                 IsPresetDirty())
@@ -280,1982 +630,1356 @@ namespace SSH_Helper
 
                 if (result == DialogResult.Cancel)
                 {
-                    // Revert selection back to previously active preset
                     _suppressPresetSelectionChange = true;
-                    int revertIndex = lstPreset.Items.IndexOf(_activePresetName);
-                    if (revertIndex >= 0)
-                        lstPreset.SelectedIndex = revertIndex;
+                    // Find the previous active preset in the list
+                    for (int i = 0; i < lstPreset.Items.Count; i++)
+                    {
+                        if (GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? "") == _activePresetName)
+                        {
+                            lstPreset.SelectedIndex = i;
+                            break;
+                        }
+                    }
                     _suppressPresetSelectionChange = false;
                     return;
                 }
+
                 if (result == DialogResult.Yes)
                 {
-                    // Save current edits before switching
-                    btnSave_Click(this, EventArgs.Empty);
+                    SaveCurrentPreset();
                 }
-                // If No -> discard edits and continue loading the newly selected preset
             }
 
-            if (presets.TryGetValue(newPresetName, out var info))
+            var preset = _presetManager.Get(newPresetName);
+            if (preset != null)
             {
-                txtCommand.Text = info.Commands;
+                txtCommand.Text = preset.Commands;
                 txtPreset.Text = newPresetName;
-                if (info.Delay.HasValue) txtDelay.Text = info.Delay.Value.ToString();
-                if (info.Timeout.HasValue) txtTimeout.Text = info.Timeout.Value.ToString();
-            }
-
-            _activePresetName = newPresetName; // Now this is the active (clean) preset
-        }
-
-        private void dgv_variables_CellLeave(object sender, DataGridViewCellEventArgs e)
-        {
-            // Commit the edit when the cell loses focus
-            dgv_variables.CommitEdit(DataGridViewDataErrorContexts.Commit);
-        }
-
-        private void dgv_variables_CellValueChanged(object sender, DataGridViewCellEventArgs e)
-        {
-            _csvDirty = true;
-        }
-        private void dgv_variables_RowsAdded(object sender, DataGridViewRowsAddedEventArgs e)
-        {
-            _csvDirty = true;
-        }
-        private void dgv_variables_RowsRemoved(object sender, DataGridViewRowsRemovedEventArgs e)
-        {
-            _csvDirty = true;
-        }
-        private void dgv_variables_ColumnRemoved(object sender, DataGridViewColumnEventArgs e)
-        {
-            _csvDirty = true;
-        }
-
-        private void dgv_variables_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (e.Control && e.KeyCode == Keys.A)
-            {
-                dgv_variables.SelectAll();
-                e.Handled = true;  // Prevent further processing of this key combination
-            }
-            else if (e.Control && e.KeyCode == Keys.C)
-            {
-                CopyDataGridViewToClipboard();
-                e.Handled = true;  // Prevent further processing of this key combination
-            }
-            else if (e.Control && e.KeyCode == Keys.V)
-            {
-                PasteClipboardData();
-                //increment selected cell
-                int rowIndex = dgv_variables.CurrentCell.RowIndex;
-                int colIndex = dgv_variables.CurrentCell.ColumnIndex;
-                if (rowIndex < dgv_variables.Rows.Count - 1)
+                if (preset.Delay.HasValue) txtDelay.Text = preset.Delay.Value.ToString();
+                if (preset.Timeout.HasValue)
                 {
-                    dgv_variables.CurrentCell = dgv_variables[colIndex, rowIndex + 1];
-                }
-                dgv_variables.ClearSelection();
-                e.Handled = true;  // Prevent further processing of this key combination
-            }
-            else if (e.KeyCode == Keys.Delete || e.KeyCode == Keys.Back)
-            {
-                // Handle Delete or Backspace key to clear the contents of selected cells
-                DeleteSelectedCellsContents();
-                e.Handled = true;  // Prevent further processing of this key combination
-            }
-        }
-
-        private void dgv_variables_CellClick(object sender, DataGridViewCellEventArgs e)
-        {
-            if (e.RowIndex == -1) // This checks if the click is on a column header
-            {
-                dgv_variables.ClearSelection();
-                foreach (DataGridViewRow row in dgv_variables.Rows)
-                {
-                    row.Cells[e.ColumnIndex].Selected = true;
+                    txtTimeout.Text = preset.Timeout.Value.ToString();
+                    tsbTimeout.Text = preset.Timeout.Value.ToString();
                 }
             }
+
+            _activePresetName = newPresetName;
         }
 
-        private void dgv_variables_ColumnAdded(object sender, DataGridViewColumnEventArgs e)
+        #endregion
+
+        #region Button Click Handlers
+
+        private void btnOpenCSV_Click(object sender, EventArgs e)
         {
-            e.Column.SortMode = DataGridViewColumnSortMode.NotSortable;  // Disable sorting for the added column
+            if (!EnsureCsvChangesSaved()) return;
+            OpenCsvFile();
         }
 
-        private void DeleteSelectedCellsContents()
+        private void btnSaveAs_Click(object sender, EventArgs e)
         {
-            foreach (DataGridViewCell cell in dgv_variables.SelectedCells)
+            SaveCsvAs();
+        }
+
+        private void btnClear_Click(object sender, EventArgs e)
+        {
+            ClearGrid();
+        }
+
+        private void btnSave_Click(object sender, EventArgs e)
+        {
+            SaveCurrentPreset();
+        }
+
+        private void btnExecuteAll_Click(object sender, EventArgs e)
+        {
+            ExecuteOnAllHosts();
+        }
+
+        private void btnExecuteSelected_Click(object sender, EventArgs e)
+        {
+            ExecuteOnSelectedHost();
+        }
+
+        private void btnStopAll_Click(object sender, EventArgs e)
+        {
+            StopExecution();
+        }
+
+        #endregion
+
+        #region Menu Item Handlers
+
+        private void openCSVToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (!EnsureCsvChangesSaved()) return;
+            OpenCsvFile();
+        }
+
+        private void saveToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            SaveCurrentCsv(promptIfNoPath: true);
+        }
+
+        private void saveAsToolStripMenuItem1_Click(object sender, EventArgs e)
+        {
+            SaveCsvAs();
+        }
+
+        private void ExitMenuItem_Click(object sender, EventArgs e)
+        {
+            if (!ConfirmExitWorkflow()) return;
+            _exitConfirmed = true;
+            Close();
+        }
+
+        private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using var dialog = new SettingsDialog(_configService);
+            dialog.ShowDialog(this);
+        }
+
+        private void exportAllPresetsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ExportAllPresets();
+        }
+
+        private void importAllPresetsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ImportAllPresets();
+        }
+
+        private void findToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ShowFindDialog();
+        }
+
+        private void debugModeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            _sshService.DebugMode = debugModeToolStripMenuItem.Checked;
+            UpdateStatusBar(debugModeToolStripMenuItem.Checked ? "Debug mode enabled" : "Debug mode disabled");
+        }
+
+        private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using var dlg = new AboutDialog(ApplicationName, ApplicationVersion);
+            dlg.ShowDialog(this);
+        }
+
+        private void addColumnToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            AddColumn();
+        }
+
+        private void renameColumnToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            RenameColumn(_rightClickedColumnIndex);
+        }
+
+        private void deleteColumnToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            DeleteColumn(_rightClickedColumnIndex);
+        }
+
+        private void deleteRowToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            DeleteRow(_rightClickedRowIndex);
+        }
+
+        private void addPresetToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            AddPreset();
+        }
+
+        private void contextPresetLstAdd_Click(object sender, EventArgs e)
+        {
+            AddPreset();
+        }
+
+        private void duplicatePresetToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            DuplicatePreset();
+        }
+
+        private void renameToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            RenamePreset();
+        }
+
+        private void deleteToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            DeletePreset();
+        }
+
+        private void toggleSortingToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            // Cycle through sort modes: Ascending -> Descending -> Manual -> Ascending
+            var previousMode = _currentSortMode;
+            _currentSortMode = _currentSortMode switch
             {
-                if (!cell.ReadOnly)  // Check if the cell is not read-only
+                PresetSortMode.Ascending => PresetSortMode.Descending,
+                PresetSortMode.Descending => PresetSortMode.Manual,
+                PresetSortMode.Manual => PresetSortMode.Ascending,
+                _ => PresetSortMode.Ascending
+            };
+
+            // When switching to manual mode, initialize the order from current visual order
+            if (_currentSortMode == PresetSortMode.Manual && _manualPresetOrder.Count == 0)
+            {
+                // Build order from current list display
+                for (int i = 0; i < lstPreset.Items.Count; i++)
                 {
-                    cell.Value = null;  // Clear the content of the cell
+                    string name = GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? "");
+                    if (!string.IsNullOrEmpty(name))
+                        _manualPresetOrder.Add(name);
                 }
             }
-            dgv_variables.Refresh();  // Optionally refresh the DataGridView to update the UI immediately
-            _csvDirty = true;
+
+            RefreshPresetList();
+            UpdateSortModeIndicator();
+            UpdateStatusBar($"Sort mode: {_currentSortMode}");
         }
 
-        private void CopyDataGridViewToClipboard()
+        private void UpdateSortModeIndicator()
         {
-            // Determine if the entire table is selected
-            bool allCellsSelected = (dgv_variables.SelectedCells.Count == dgv_variables.RowCount * dgv_variables.ColumnCount);
-
-            if (allCellsSelected)
+            string indicator = _currentSortMode switch
             {
-                // Manually construct the data for clipboard to exclude row headers and the new row
-                StringBuilder buffer = new StringBuilder();
-                // Add column headers first
-                for (int j = 0; j < dgv_variables.ColumnCount; j++)
+                PresetSortMode.Ascending => "Sort \u2191",   // ↑
+                PresetSortMode.Descending => "Sort \u2193", // ↓
+                PresetSortMode.Manual => "Sort \u2195",     // ↕
+                _ => "Sort"
+            };
+            tsbSortPresets.Text = indicator;
+            tsbSortPresets.ToolTipText = $"Sort mode: {_currentSortMode}";
+            ctxToggleSorting.Text = $"Toggle Sorting ({_currentSortMode})";
+        }
+
+        private void ExportPreset_Click(object? sender, EventArgs e)
+        {
+            ExportPreset();
+        }
+
+        private void ImportPreset_Click(object? sender, EventArgs e)
+        {
+            ImportPreset();
+        }
+
+        private void ctxToggleFavorite_Click(object? sender, EventArgs e)
+        {
+            ToggleFavorite();
+        }
+
+        private void lstOutput_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (lstOutput.SelectedItem is KeyValuePair<string, string> entry)
+            {
+                txtOutput.Text = entry.Value;
+            }
+        }
+
+        private void saveAsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            SaveHistoryEntry();
+        }
+
+        private void saveAllToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            SaveAllHistory();
+        }
+
+        private void deleteEntryToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            DeleteHistoryEntry();
+        }
+
+        private void deleteAllHistoryToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            DeleteAllHistory();
+        }
+
+        private void contextHistoryLst_Opening(object sender, CancelEventArgs e)
+        {
+            // Can be used for dynamic menu state
+        }
+
+        #endregion
+
+        #region CSV Operations
+
+        private void OpenCsvFile()
+        {
+            using var ofd = new OpenFileDialog
+            {
+                Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
+                Multiselect = false
+            };
+
+            if (ofd.ShowDialog() == DialogResult.OK)
+            {
+                try
                 {
-                    buffer.Append(dgv_variables.Columns[j].HeaderText);
-                    if (j < dgv_variables.ColumnCount - 1)
-                        buffer.Append("\t");
+                    var dataTable = _csvManager.LoadFromFile(ofd.FileName);
+                    _loadedFilePath = ofd.FileName;
+                    dgv_variables.Columns.Clear();
+                    dgv_variables.DataSource = dataTable;
+                    _csvDirty = false;
+                    UpdateHostCount();
+                    UpdateStatusBar($"Loaded: {Path.GetFileName(ofd.FileName)}");
                 }
-                buffer.AppendLine();
-
-                // Add rows of data, skipping the last row if it's the new row and skipping empty rows
-                int rowCount = dgv_variables.AllowUserToAddRows ? dgv_variables.Rows.Count - 1 : dgv_variables.Rows.Count;
-                for (int i = 0; i < rowCount; i++)
+                catch (Exception ex)
                 {
-                    bool isEmptyRow = true;
-                    StringBuilder rowBuffer = new StringBuilder();
-                    for (int j = 0; j < dgv_variables.Columns.Count; j++)
-                    {
-                        string cellValue = dgv_variables.Rows[i].Cells[j].Value?.ToString() ?? "";
-                        rowBuffer.Append(cellValue);
-                        if (j < dgv_variables.Columns.Count - 1)
-                            rowBuffer.Append("\t");
-
-                        if (!string.IsNullOrEmpty(cellValue))
-                            isEmptyRow = false;
-                    }
-
-                    // Only append the row if it is not empty
-                    if (!isEmptyRow)
-                    {
-                        buffer.AppendLine(rowBuffer.ToString());
-                    }
+                    MessageBox.Show($"Failed to load CSV: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
+            }
+        }
 
-                // Copy the constructed string to the clipboard
-                Clipboard.SetText(buffer.ToString());
+        private void SaveCsvAs()
+        {
+            using var sfd = new SaveFileDialog
+            {
+                Filter = "CSV files (*.csv)|*.csv",
+                Title = "Save as CSV"
+            };
+
+            if (!string.IsNullOrEmpty(_loadedFilePath))
+                sfd.FileName = Path.GetFileName(_loadedFilePath);
+
+            if (sfd.ShowDialog() == DialogResult.OK)
+            {
+                SaveCsvToFile(sfd.FileName);
+                _loadedFilePath = sfd.FileName;
+                UpdateStatusBar($"Saved: {Path.GetFileName(sfd.FileName)}");
+            }
+        }
+
+        private bool SaveCurrentCsv(bool promptIfNoPath)
+        {
+            if (dgv_variables.IsCurrentCellInEditMode)
+                dgv_variables.EndEdit();
+
+            if (string.IsNullOrWhiteSpace(_loadedFilePath))
+            {
+                if (!promptIfNoPath) return false;
+                SaveCsvAs();
+                return !string.IsNullOrWhiteSpace(_loadedFilePath);
+            }
+
+            try
+            {
+                SaveCsvToFile(_loadedFilePath);
+                UpdateStatusBar($"Saved: {Path.GetFileName(_loadedFilePath)}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to save file:\r\n{ex.Message}", "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
+        private void SaveCsvToFile(string filename)
+        {
+            var columns = dgv_variables.Columns
+                .Cast<DataGridViewColumn>()
+                .OrderBy(c => c.DisplayIndex)
+                .Select(c => (c.Name, c.HeaderText));
+
+            var rows = dgv_variables.Rows
+                .Cast<DataGridViewRow>()
+                .Where(r => !r.IsNewRow)
+                .Select(r => columns.Select(c => r.Cells[dgv_variables.Columns[c.Name].Index].Value?.ToString()));
+
+            _csvManager.SaveToFile(filename, columns, rows);
+            _csvDirty = false;
+        }
+
+        private void ClearGrid()
+        {
+            if (dgv_variables.DataSource is DataTable dt)
+            {
+                dt.Rows.Clear();
+                dt.Columns.Clear();
+                dt.Columns.Add(CsvManager.HostColumnName, typeof(string));
             }
             else
             {
-                // Manual copying for partial selection, ensuring new lines are formatted for Excel
-                StringBuilder buffer = new StringBuilder();
-                // Sort the selected cells by row index, then by column index to maintain order
-                var sortedCells = dgv_variables.SelectedCells.Cast<DataGridViewCell>()
-                                     .OrderBy(c => c.RowIndex)
-                                     .ThenBy(c => c.ColumnIndex)
-                                     .ToList();
+                dgv_variables.Rows.Clear();
+                dgv_variables.Columns.Clear();
+                dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
+            }
+            _csvDirty = true;
+            _loadedFilePath = null;
+            UpdateHostCount();
+            UpdateStatusBar("Grid cleared");
+        }
+
+        private bool EnsureCsvChangesSaved()
+        {
+            if (dgv_variables.IsCurrentCellInEditMode)
+                dgv_variables.EndEdit();
+
+            if (!_csvDirty) return true;
+
+            var result = MessageBox.Show(
+                "You have unsaved CSV changes. Save before opening another file?",
+                "Unsaved CSV",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Cancel) return false;
+            if (result == DialogResult.Yes && !SaveCurrentCsv(promptIfNoPath: true)) return false;
+            return true;
+        }
+
+        #endregion
+
+        #region Column Operations
+
+        private void AddColumn()
+        {
+            int nextNumber = dgv_variables.Columns.Count + 1;
+            string defaultName = $"Column{nextNumber}";
+
+            string columnName = Microsoft.VisualBasic.Interaction.InputBox(
+                "Enter the name of the new column:",
+                "Add Column",
+                defaultName);
+
+            columnName = InputValidator.SanitizeColumnName(columnName);
+
+            if (string.IsNullOrEmpty(columnName)) return;
+
+            if (dgv_variables.Columns.Contains(columnName))
+            {
+                MessageBox.Show("Column name already exists!");
+                return;
+            }
+
+            dgv_variables.Columns.Add(columnName, columnName);
+            _csvDirty = true;
+        }
+
+        private void RenameColumn(int columnIndex)
+        {
+            if (columnIndex < 0 || columnIndex >= dgv_variables.Columns.Count) return;
+
+            var column = dgv_variables.Columns[columnIndex];
+            string currentName = column.HeaderText;
+
+            string newName = Microsoft.VisualBasic.Interaction.InputBox(
+                $"Enter a new name for the column '{currentName}':",
+                "Rename Column",
+                currentName);
+
+            newName = InputValidator.SanitizeColumnName(newName);
+
+            if (string.IsNullOrEmpty(newName) || newName == currentName) return;
+
+            if (dgv_variables.Columns.Cast<DataGridViewColumn>()
+                .Any(c => c.HeaderText.Equals(newName, StringComparison.OrdinalIgnoreCase)))
+            {
+                MessageBox.Show("This column name already exists.", "Rename Column Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            column.HeaderText = newName;
+            column.Name = newName;
+            _csvDirty = true;
+        }
+
+        private void DeleteColumn(int columnIndex)
+        {
+            if (columnIndex < 0 || columnIndex >= dgv_variables.Columns.Count) return;
+
+            if (IsHostIpColumn(columnIndex))
+            {
+                MessageBox.Show("The Host_IP column cannot be deleted.", "Delete Column", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            dgv_variables.Columns.RemoveAt(columnIndex);
+            _csvDirty = true;
+        }
+
+        private void DeleteRow(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= dgv_variables.Rows.Count)
+            {
+                MessageBox.Show("No valid row selected.");
+                return;
+            }
+
+            var row = dgv_variables.Rows[rowIndex];
+            if (row.IsNewRow)
+            {
+                MessageBox.Show("Cannot delete the new row placeholder.");
+                return;
+            }
+
+            dgv_variables.Rows.RemoveAt(rowIndex);
+
+            if (dgv_variables.Rows.Count > 0)
+            {
+                int newIndex = rowIndex < dgv_variables.Rows.Count ? rowIndex : dgv_variables.Rows.Count - 1;
+                dgv_variables.Rows[newIndex].Selected = true;
+                dgv_variables.CurrentCell = dgv_variables.Rows[newIndex].Cells[0];
+            }
+
+            _csvDirty = true;
+            UpdateHostCount();
+        }
+
+        #endregion
+
+        #region Clipboard Operations
+
+        private void CopyToClipboard()
+        {
+            bool allSelected = dgv_variables.SelectedCells.Count == dgv_variables.RowCount * dgv_variables.ColumnCount;
+            var buffer = new StringBuilder();
+
+            if (allSelected)
+            {
+                // Copy with headers
+                for (int j = 0; j < dgv_variables.ColumnCount; j++)
+                {
+                    buffer.Append(dgv_variables.Columns[j].HeaderText);
+                    if (j < dgv_variables.ColumnCount - 1) buffer.Append("\t");
+                }
+                buffer.AppendLine();
+
+                int rowCount = dgv_variables.AllowUserToAddRows ? dgv_variables.Rows.Count - 1 : dgv_variables.Rows.Count;
+                for (int i = 0; i < rowCount; i++)
+                {
+                    bool isEmpty = true;
+                    var rowBuffer = new StringBuilder();
+
+                    for (int j = 0; j < dgv_variables.Columns.Count; j++)
+                    {
+                        string value = dgv_variables.Rows[i].Cells[j].Value?.ToString() ?? "";
+                        rowBuffer.Append(value);
+                        if (j < dgv_variables.Columns.Count - 1) rowBuffer.Append("\t");
+                        if (!string.IsNullOrEmpty(value)) isEmpty = false;
+                    }
+
+                    if (!isEmpty) buffer.AppendLine(rowBuffer.ToString());
+                }
+            }
+            else
+            {
+                var sortedCells = dgv_variables.SelectedCells
+                    .Cast<DataGridViewCell>()
+                    .OrderBy(c => c.RowIndex)
+                    .ThenBy(c => c.ColumnIndex)
+                    .ToList();
 
                 int lastRowIndex = -1;
                 foreach (var cell in sortedCells)
                 {
-                    // Add a newline when starting a new row
                     if (cell.RowIndex != lastRowIndex)
                     {
-                        if (lastRowIndex != -1)
-                            buffer.AppendLine();
+                        if (lastRowIndex != -1) buffer.AppendLine();
                         lastRowIndex = cell.RowIndex;
                     }
                     else
                     {
                         buffer.Append("\t");
                     }
-
-                    // Append the current cell's value
                     buffer.Append(cell.Value?.ToString() ?? "");
                 }
-
-                // Set the final string to the clipboard, ensuring to use Windows newline
-                Clipboard.SetText(buffer.ToString());
             }
+
+            Clipboard.SetText(buffer.ToString());
         }
 
-        private void dgv_variables_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        private void PasteFromClipboard()
         {
-            if (e.RowIndex >= 0 && e.ColumnIndex >= 0)
-            {
-                dgv_variables.BeginEdit(true);
-            }
-        }
+            if (!Clipboard.ContainsText()) return;
 
-        private void EndEditAndClearSelection()
-        {
-            if (dgv_variables.IsCurrentCellInEditMode)
-            {
-                dgv_variables.EndEdit(); // Commits any edits that are currently in progress
+            var startCell = dgv_variables.CurrentCell;
+            int startCol = startCell?.ColumnIndex ?? 0;
+            int startRow = startCell?.RowIndex ?? 0;
 
+            string[] rows = Clipboard.GetText().Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+            dgv_variables.AllowUserToAddRows = false;
+
+            for (int i = 0; i < rows.Length; i++)
+            {
+                string[] columns = rows[i].Split('\t');
+                for (int j = 0; j < columns.Length; j++)
+                {
+                    int rowIndex = startRow + i;
+                    while (rowIndex >= dgv_variables.Rows.Count)
+                    {
+                        dgv_variables.Rows.Add(new DataGridViewRow());
+                    }
+
+                    int columnIndex = startCol + j;
+                    while (columnIndex >= dgv_variables.Columns.Count)
+                    {
+                        int nextNum = dgv_variables.Columns.Count + 1;
+                        dgv_variables.Columns.Add($"Column{nextNum}", $"Column{nextNum}");
+                    }
+
+                    if (!dgv_variables.Columns[columnIndex].ReadOnly)
+                    {
+                        dgv_variables.Rows[rowIndex].Cells[columnIndex].Value = columns[j];
+                    }
+                }
             }
+
+            dgv_variables.AllowUserToAddRows = true;
             dgv_variables.ClearSelection();
+            _csvDirty = true;
+            UpdateHostCount();
         }
 
-        private void Form_Click(object sender, EventArgs e)
+        private void DeleteSelectedCells()
         {
-            EndEditAndClearSelection();
-        }
-
-        private void AttachClickEventHandlers()
-        {
-            foreach (Control control in this.Controls)
+            foreach (DataGridViewCell cell in dgv_variables.SelectedCells)
             {
-                if (control != dgv_variables) // Exclude the DataGridView itself
-                {
-                    control.Click += Control_Click;
-                }
+                if (!cell.ReadOnly) cell.Value = null;
             }
-        }
-
-        private void Control_Click(object sender, EventArgs e)
-        {
-            EndEditAndClearSelection();
-        }
-
-        private void dgv_variables_KeyPress(object sender, KeyPressEventArgs e)
-        {
-            // Check if the current cell is not in edit mode and the character is not a control character
-            if (!dgv_variables.IsCurrentCellInEditMode && !char.IsControl(e.KeyChar))
-            {
-                dgv_variables.BeginEdit(true);
-                // Send the character to the editing control, simulating user input
-                if (dgv_variables.EditingControl is System.Windows.Forms.TextBox editingTextBox)
-                {
-                    editingTextBox.Text = e.KeyChar.ToString();  // Set the text directly to handle first key
-                    editingTextBox.SelectionStart = editingTextBox.Text.Length;  // Move the caret to the end
-                }
-                e.Handled = true; // Indicate that the key press has been handled
-            }
-        }
-
-        private void PasteClipboardData()
-        {
-            if (Clipboard.ContainsText())
-            {
-                Point startCell = GetCurrentCellLocation();
-                string clipboardString = Clipboard.GetText();
-                string[] rows = clipboardString.Split(new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-
-                dgv_variables.AllowUserToAddRows = false;  // Temporarily disable to manage row addition manually
-
-                for (int i = 0; i < rows.Length; i++)
-                {
-                    string[] columns = rows[i].Split('\t');
-                    for (int j = 0; j < columns.Length; j++)
-                    {
-                        int rowIndex = startCell.Y + i;
-                        // Ensure the row exists or add new rows as necessary
-                        while (rowIndex >= dgv_variables.Rows.Count)
-                        {
-                            dgv_variables.Rows.Add(new DataGridViewRow());  // Add a new row if necessary
-                        }
-
-                        int columnIndex = startCell.X + j;
-                        // Ensure the column exists or add new columns as necessary
-                        while (columnIndex >= dgv_variables.Columns.Count)
-                        {
-                            int nextColumnNumber = dgv_variables.Columns.Count + 1;
-                            string defaultColumnName = $"Column{nextColumnNumber}";
-                            dgv_variables.Columns.Add(defaultColumnName, defaultColumnName);
-                        }
-
-                        if (!dgv_variables.Columns[columnIndex].ReadOnly)
-                        {
-                            dgv_variables.Rows[rowIndex].Cells[columnIndex].Value = columns[j];
-                        }
-                    }
-                }
-
-                dgv_variables.AllowUserToAddRows = true;  // Re-enable the ability to add rows
-                _csvDirty = true;
-
-            }
-        }
-
-        private Point GetCurrentCellLocation()
-        {
-            int column = dgv_variables.CurrentCell?.ColumnIndex ?? 0; // Fallback to 0 if no cell is selected
-            int row = dgv_variables.CurrentCell?.RowIndex ?? 0; // Fallback to 0 if no cell is selected
-            return new Point(column, row);
-        }
-
-        private void InitializeDataGridView()
-        {
-            dgv_variables.Columns.Add($"Host_IP", $"Host_IP");
-            dgv_variables.KeyPress += dgv_variables_KeyPress;
-            dgv_variables.KeyDown += dgv_variables_KeyDown;
-
-            // Basic DataGridView properties for better appearance
-            dgv_variables.EnableHeadersVisualStyles = false;
-            dgv_variables.BackgroundColor = Color.White;
-            dgv_variables.GridColor = Color.Gainsboro; // Soft gray lines, less pronounced than older styles
-
-            // Column header styles
-            dgv_variables.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
-            dgv_variables.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 242, 242); // Light gray background
-            dgv_variables.ColumnHeadersDefaultCellStyle.ForeColor = Color.Black;
-            dgv_variables.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9, FontStyle.Regular);
-            dgv_variables.ColumnHeadersHeight = 32; // Taller headers to match modern Excel
-            dgv_variables.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-
-            // Row header styles
-            dgv_variables.RowHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
-            dgv_variables.RowHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 242, 242);
-            dgv_variables.RowHeadersDefaultCellStyle.ForeColor = Color.Black;
-            dgv_variables.RowHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9, FontStyle.Regular);
-            dgv_variables.RowHeadersWidth = 60; // Ample width for row headers
-
-            // Cell default styles
-            dgv_variables.DefaultCellStyle.BackColor = Color.White;
-            dgv_variables.DefaultCellStyle.ForeColor = Color.Black;
-            dgv_variables.DefaultCellStyle.Font = new Font("Segoe UI", 9);
-            dgv_variables.DefaultCellStyle.SelectionBackColor = Color.LightBlue; // Excel-like selection color
-            dgv_variables.DefaultCellStyle.SelectionForeColor = Color.Black;
-
-            // Alternating row style for better readability
-            dgv_variables.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(245, 245, 245);
-
-            // Ensuring the grid lines are visible but unobtrusive
-
-            dgv_variables.ColumnHeadersVisible = true;
-            dgv_variables.RowHeadersVisible = true;
-
-        }
-
-        private void dgv_variables_MouseDown(object sender, MouseEventArgs e)
-        {
-            DataGridView.HitTestInfo hit = dgv_variables.HitTest(e.X, e.Y);
-
-            if (hit.Type == DataGridViewHitTestType.RowHeader)
-            {
-                // Ensure the row is selected when the row header is clicked
-                dgv_variables.ClearSelection();
-                dgv_variables.CurrentCell = dgv_variables.Rows[hit.RowIndex].Cells[0];
-
-                foreach (DataGridViewCell cell in dgv_variables.Rows[hit.RowIndex].Cells)
-                {
-                    cell.Selected = true;  // Select each cell in the row to visually highlight the entire row
-                }
-            }
-
-            // Handling clicks outside of cell areas but not outside the grid itself.
-            if (hit.Type != DataGridViewHitTestType.Cell && hit.Type != DataGridViewHitTestType.ColumnHeader && hit.Type != DataGridViewHitTestType.RowHeader)
-            {
-                EndEditAndClearSelection();
-            }
-
-            if (e.Button == MouseButtons.Right)
-            {
-                if (hit.Type == DataGridViewHitTestType.Cell || hit.Type == DataGridViewHitTestType.ColumnHeader)
-                {
-                    rightClickedColumnIndex = hit.ColumnIndex;  // Save the clicked column index
-
-                    // Check if the right-click is on a cell, and not on the header
-                    if (hit.Type == DataGridViewHitTestType.Cell)
-                    {
-                        rightClickedRowIndex = hit.RowIndex; // Save the row index only if it's a cell
-                        dgv_variables.CurrentCell = dgv_variables[hit.ColumnIndex, hit.RowIndex]; // Set the current cell
-                    }
-                    else
-                    {
-                        rightClickedRowIndex = -1; // There is no row index for header clicks
-                    }
-
-                    // Enable/disable "Delete Column" based on Host_IP protection
-                    if (rightClickedColumnIndex >= 0 && rightClickedColumnIndex < dgv_variables.Columns.Count)
-                    {
-                        var col = dgv_variables.Columns[rightClickedColumnIndex];
-                        bool isHostIp =
-                            string.Equals(col.Name, "Host_IP", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(col.HeaderText, "Host_IP", StringComparison.OrdinalIgnoreCase);
-                        deleteColumnToolStripMenuItem.Enabled = !isHostIp;
-                        renameColumnToolStripMenuItem.Enabled = !isHostIp;
-                    }
-                    else
-                    {
-                        deleteColumnToolStripMenuItem.Enabled = true;
-                        renameColumnToolStripMenuItem.Enabled = true;
-                    }
-
-                    dgv_variables.ContextMenuStrip = contextMenuStrip1; // Assign the custom context menu
-                    contextMenuStrip1.Show(dgv_variables, e.Location); // Show the context menu at the cursor location
-                }
-                else
-                {
-                    rightClickedColumnIndex = -1;
-                    rightClickedRowIndex = -1;
-                    dgv_variables.ContextMenuStrip = contextMenuStrip1; // Ensure the custom menu is enabled elsewhere
-                    deleteColumnToolStripMenuItem.Enabled = true;       // Default to enabled when not on a column
-                }
-            }
-        }
-
-        private void btnOpenCSV_Click(object sender, EventArgs e)
-        {
-            if (!EnsureCsvChangesSavedBeforeReplacing())
-                return;
-
-            OpenCsvInteractive();
-        }
-
-        private DataTable LoadCsvIntoDataTable(string filePath)
-        {
-            DataTable dt = new DataTable();
-
-            using (StreamReader sr = new StreamReader(filePath))
-            {
-                // Read the header line
-                string[] headers = sr.ReadLine().Split(',');
-
-                // Manually add the Host_IP column to match the first column of data
-                dt.Columns.Add("Host_IP");
-
-                // Process headers starting from the second CSV column
-                for (int i = 1; i < headers.Length; i++)
-                {
-                    string headerName = string.IsNullOrEmpty(headers[i].Trim()) ? $"column{i}" : headers[i].Trim().Replace(" ", "_");
-                    dt.Columns.Add(headerName);
-                }
-
-                // Read and add the data rows
-                while (!sr.EndOfStream)
-                {
-                    string[] rowValues = sr.ReadLine().Split(',');
-
-                    // Skip completely empty rows
-                    if (rowValues.All(string.IsNullOrWhiteSpace))
-                        continue;
-
-                    // Ensure the data array fits the DataTable's column structure
-                    if (rowValues.Length > headers.Length)
-                        Array.Resize(ref rowValues, headers.Length);
-
-                    // Add row to the DataTable
-                    dt.Rows.Add(rowValues);
-                }
-            }
-            return dt;
-        }
-
-        private void addColumnToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            // Calculate the next column number
-            int nextColumnNumber = dgv_variables.Columns.Count + 1;
-            string defaultColumnName = $"Column{nextColumnNumber}";
-
-            // Prompting the user to enter the name of the new column, using the calculated default name
-            string columnName = Microsoft.VisualBasic.Interaction.InputBox(
-                "Enter the name of the new column:",
-                "Add Column",
-                defaultColumnName
-            );
-
-            // Replace spaces with underscores in the column name entered by the user
-            columnName = columnName.Replace(" ", "_");
-
-            if (!string.IsNullOrEmpty(columnName))
-            {
-                // Check if the column already exists to avoid duplicates
-                if (dgv_variables.Columns.Contains(columnName))
-                {
-                    MessageBox.Show("Column name already exists!");
-                    return;
-                }
-
-                // Adding the new column
-                dgv_variables.Columns.Add(columnName, columnName);
-                _csvDirty = true;
-            }
-        }
-
-        private void deleteColumnToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            // Check if the index is valid
-            if (rightClickedColumnIndex >= 0 && rightClickedColumnIndex < dgv_variables.Columns.Count)
-            {
-                var col = dgv_variables.Columns[rightClickedColumnIndex];
-
-                if (string.Equals(col.Name, "Host_IP", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(col.HeaderText, "Host_IP", StringComparison.OrdinalIgnoreCase))
-                {
-                    MessageBox.Show("The Host_IP column cannot be deleted.", "Delete Column", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-
-                dgv_variables.Columns.RemoveAt(rightClickedColumnIndex);
-                _csvDirty = true;
-            }
-        }
-
-        private void deleteRowToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            // Check if the right-clicked row index is valid
-            if (rightClickedRowIndex >= 0 && rightClickedRowIndex < dgv_variables.Rows.Count)
-            {
-                DataGridViewRow row = dgv_variables.Rows[rightClickedRowIndex];
-                if (!row.IsNewRow) // Ensure it's not the new row
-                {
-                    dgv_variables.Rows.RemoveAt(rightClickedRowIndex);
-                    _csvDirty = true;
-
-                    if (dgv_variables.Rows.Count > 0)
-                    {
-                        int newSelectedIndex = rightClickedRowIndex < dgv_variables.Rows.Count ? rightClickedRowIndex : dgv_variables.Rows.Count - 1;
-                        dgv_variables.Rows[newSelectedIndex].Selected = true;
-                        dgv_variables.CurrentCell = dgv_variables.Rows[newSelectedIndex].Cells[0]; // Ensure the focus moves to the new row
-                    }
-                }
-                else
-                {
-                    MessageBox.Show("Cannot delete the new row placeholder.");
-                }
-            }
-            else
-            {
-                MessageBox.Show("No valid row selected.");
-            }
-        }
-
-        private void renameColumnToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            if (rightClickedColumnIndex >= 0 && rightClickedColumnIndex < dgv_variables.Columns.Count)
-            {
-                DataGridViewColumn columnToRename = dgv_variables.Columns[rightClickedColumnIndex];
-                string currentName = columnToRename.HeaderText;
-                string newName = Microsoft.VisualBasic.Interaction.InputBox(
-                    $"Enter a new name for the column '{currentName}':",
-                    "Rename Column",
-                    currentName
-                );
-
-                // Replace spaces with underscores in the new column name
-                newName = newName.Replace(" ", "_");
-
-                if (!string.IsNullOrEmpty(newName) && newName != currentName)
-                {
-                    // Ensure the new name doesn't already exist to avoid duplicates
-                    foreach (DataGridViewColumn column in dgv_variables.Columns)
-                    {
-                        if (column.HeaderText.Equals(newName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            MessageBox.Show("This column name already exists. Please choose a different name.", "Rename Column Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                            return;
-                        }
-                    }
-
-                    // Update both the HeaderText and Name properties of the column
-                    columnToRename.HeaderText = newName;
-                    columnToRename.Name = newName; // Assuming you also use Name in your logic
-                    _csvDirty = true;
-                }
-            }
-        }
-
-        private void btnSaveAs_Click(object sender, EventArgs e)
-        {
-            using (SaveFileDialog sfd = new SaveFileDialog())
-            {
-                sfd.Filter = "CSV files (*.csv)|*.csv";
-                sfd.Title = "Save as CSV";
-                if (!string.IsNullOrEmpty(loadedFilePath))
-                    sfd.FileName = Path.GetFileName(loadedFilePath);
-
-                if (sfd.ShowDialog() == DialogResult.OK)
-                {
-                    SaveDataGridViewToCSV(sfd.FileName);
-                    loadedFilePath = sfd.FileName; // ensure future 'Save' works
-                }
-            }
-        }
-
-        private void SaveDataGridViewToCSV(string filename)
-        {
-            using (StreamWriter sw = new StreamWriter(filename))
-            {
-                // Write column headers based on display order
-                var columnOrder = dgv_variables.Columns
-                    .Cast<DataGridViewColumn>()
-                    .OrderBy(c => c.DisplayIndex)
-                    .ToList();
-
-                for (int i = 0; i < columnOrder.Count; i++)
-                {
-                    sw.Write(columnOrder[i].HeaderText);
-                    if (i < columnOrder.Count - 1)
-                        sw.Write(",");
-                }
-                sw.WriteLine();
-
-                // Write data rows based on display order
-                foreach (DataGridViewRow row in dgv_variables.Rows)
-                {
-                    if (!row.IsNewRow) // Skip the new row placeholder
-                    {
-                        for (int i = 0; i < columnOrder.Count; i++)
-                        {
-                            // Retrieve cell value based on the column's display order
-                            sw.Write(row.Cells[columnOrder[i].Index].Value?.ToString());
-                            if (i < columnOrder.Count - 1)
-                                sw.Write(",");
-                        }
-                        sw.WriteLine();
-                    }
-                }
-            }
-            _csvDirty = false; // Saved
-        }
-
-        private void dgv_variables_RowPostPaint(object sender, DataGridViewRowPostPaintEventArgs e)
-        {
-            // Use the RowIndex plus 1 to display a 1-based row number like in Excel
-            var grid = sender as DataGridView;
-            var rowIdx = (e.RowIndex + 1).ToString();
-
-            // Get the center of the header cell to align the row number correctly
-            var centerFormat = new StringFormat()
-            {
-                Alignment = StringAlignment.Center,
-                LineAlignment = StringAlignment.Center
-            };
-
-            // Get the header bounds
-            var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
-
-            // Draw the row number
-            e.Graphics.DrawString(rowIdx, grid.Font, SystemBrushes.ControlText, headerBounds, centerFormat);
-        }
-
-        private void btnClear_Click(object sender, EventArgs e)
-        {
-            // Check if the DataGridView is bound to a DataTable
-            if (dgv_variables.DataSource is DataTable)
-            {
-                DataTable dt = (DataTable)dgv_variables.DataSource;
-                dt.Rows.Clear(); // Clears the rows
-                dt.Columns.Clear(); // Clears the columns, if needed
-
-                // Re-add the necessary column after clearing
-                dt.Columns.Add("Host_IP", typeof(string));
-            }
-            else
-            {
-                // Handle other types of data sources or unbound scenarios
-                dgv_variables.Rows.Clear();
-                dgv_variables.Columns.Clear();
-
-                // Re-add the Host_IP column
-                dgv_variables.Columns.Add("Host_IP", "Host IP");
-            }
+            dgv_variables.Refresh();
             _csvDirty = true;
         }
 
-        private void btnSave_Click(object sender, EventArgs e)
+        #endregion
+
+        #region Preset Operations
+
+        private void SaveCurrentPreset()
         {
             string presetName = txtPreset.Text.Trim();
             string commands = txtCommand.Text;
 
-            if (!string.IsNullOrEmpty(presetName) && !string.IsNullOrWhiteSpace(commands))
+            if (string.IsNullOrEmpty(presetName))
             {
-                int? perDelay = int.TryParse(txtDelay.Text, out var dVal) ? dVal : null;
-                int? perTimeout = int.TryParse(txtTimeout.Text, out var tVal) ? tVal : null;
-
-                if (!presets.ContainsKey(presetName))
-                {
-                    presets.Add(presetName, new PresetInfo
-                    {
-                        Commands = commands,
-                        Delay = perDelay,
-                        Timeout = perTimeout
-                    });
-                    if (!lstPreset.Items.Contains(presetName))
-                        lstPreset.Items.Add(presetName);
-                }
-                else
-                {
-                    presets[presetName].Commands = commands;
-                    presets[presetName].Delay = perDelay;
-                    presets[presetName].Timeout = perTimeout;
-                }
-
-                SavePresets();
-                _activePresetName = presetName; // Mark as clean
-            }
-            else
-            {
-                MessageBox.Show("Preset name or command is empty.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        //execute
-        private void ExecuteCommands(IEnumerable<DataGridViewRow> rows, CancellationToken token)
-        {
-            string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-            this.Invoke(new Action(() =>
-            {
-                txtOutput.Clear();  // Clear previous output
-            }));
-
-            bool isFirst = true;
-            foreach (DataGridViewRow row in rows)
-            {
-                if (token.IsCancellationRequested)
-                    break;
-                if (row.IsNewRow) continue;
-
-                string ipAddressWithPort = row.Cells["Host_IP"].Value?.ToString();
-                if (string.IsNullOrEmpty(ipAddressWithPort) || !IsValidIPAddress(ipAddressWithPort))
-                {
-                    continue; // Skip this row in execution phase too
-                }
-
-                ExecuteRowCommands(row, commands, ref isFirst);
-            }
-
-            //store history
-            string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
-            var entry = new KeyValuePair<string, string>(key, txtOutput.Text);
-            this.Invoke(new Action(() =>
-            {
-                outputHistoryList.Insert(0, entry);  // Insert at the start of the list
-                lstOutput.SelectedIndex = 0;  // Select the newest entry automatically              
-                Savevariables(); // Save the variables after each execution
-            }));
-
-        }
-
-        private void ExecuteRowCommands(DataGridViewRow row, string[] commands, ref bool isFirst)
-        {
-            string ipAddressWithPort = row.Cells["Host_IP"].Value?.ToString();
-            string[] parts = ipAddressWithPort.Split(':');
-            string ipAddress = parts[0];
-            int port = parts.Length > 1 && int.TryParse(parts[1], out int customPort) ? customPort : 22;
-
-            string username = dgv_variables.Columns.Contains("username") && row.Cells["username"].Value != null && !string.IsNullOrWhiteSpace(row.Cells["username"].Value.ToString())
-                ? row.Cells["username"].Value.ToString() : txtUsername.Text;
-
-            string password = dgv_variables.Columns.Contains("password") && row.Cells["password"].Value != null && !string.IsNullOrWhiteSpace(row.Cells["password"].Value.ToString())
-                ? row.Cells["password"].Value.ToString() : txtPassword.Text;
-
-            try
-            {
-                using (var client = new SshClient(ipAddress, port, username, password))
-                {
-                    client.ErrorOccurred += (s, a) =>
-                    {
-                        if (a.Exception != null && isRunning)
-                        {
-                            this.Invoke(new Action(() =>
-                            {
-                                txtOutput.AppendText(Environment.NewLine +
-                                                     $"[SSH.NET Error] {a.Exception.GetType().Name}: {a.Exception.Message}" +
-                                                     Environment.NewLine);
-                            }));
-                        }
-                    };
-
-                    if (!int.TryParse(txtTimeout.Text, out var timeoutSec)) timeoutSec = 10;
-                    client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(timeoutSec);
-
-                    client.Connect();
-
-                    using (var shellStream = client.CreateShellStream("xterm", 200, 48, 1200, 800, 16384))
-                    {
-                        try
-                        {
-                            HandleCommandExecution(shellStream, commands, row, ref isFirst, ipAddress, port);
-                        }
-                        catch (Exception ex)
-                        {
-                            // Execution/read-stage error (not an actual connect failure)
-                            HandleException(false, ex, ipAddress, port);
-                        }
-                    }
-
-                    client.Disconnect();
-                }
-            }
-            catch (SshAuthenticationException authEx)
-            {
-                HandleException(true, authEx, ipAddress, port);
-            }
-            catch (Renci.SshNet.Common.SshConnectionException ex)
-            {
-                HandleException(false, ex, ipAddress, port);
-            }
-            catch (Renci.SshNet.Common.SshOperationTimeoutException ex)
-            {
-                HandleException(false, ex, ipAddress, port);
-            }
-            catch (System.Net.Sockets.SocketException ex)
-            {
-                HandleException(false, ex, ipAddress, port);
-            }
-            catch (Exception ex)
-            {
-                HandleException(false, ex, ipAddress, port);
-            }
-        }
-
-        private static string NormalizeTerminalOutput(string input, int tabSize = 8)
-        {
-            if (string.IsNullOrEmpty(input)) return input;
-
-            var sbOut = new StringBuilder(input.Length + 64);
-            var line = new StringBuilder(256);
-            int cursor = 0;
-            int savedCursor = -1;
-
-            void EnsureLen(int len)
-            {
-                if (line.Length < len)
-                    line.Append(' ', len - line.Length);
-            }
-
-            void CommitLine()
-            {
-                // Trim trailing spaces (keeps leading indent intact)
-                int end = line.Length;
-                while (end > 0 && line[end - 1] == ' ') end--;
-                sbOut.Append(line.ToString(0, end));
-                sbOut.Append("\r\n");
-                line.Clear();
-                cursor = 0;
-            }
-
-            int ParseIntDefault(string s, int def)
-            {
-                return int.TryParse(s, out var v) && v > 0 ? v : def;
-            }
-
-            for (int i = 0; i < input.Length; i++)
-            {
-                char c = input[i];
-
-                if (c == '\r')
-                {
-                    cursor = 0; // CR: return to column 0
-                }
-                else if (c == '\n')
-                {
-                    CommitLine();
-                }
-                else if (c == '\t')
-                {
-                    int nextStop = ((cursor / tabSize) + 1) * tabSize;
-                    EnsureLen(nextStop);
-                    cursor = nextStop;
-                }
-                else if (c == '\b')
-                {
-                    if (cursor > 0) cursor--;
-                }
-                else if (c == (char)0x1B) // ESC
-                {
-                    // Support ESC[s (save), ESC[u (restore)
-                    if (i + 1 < input.Length && input[i + 1] == 's')
-                    {
-                        savedCursor = cursor; i += 1; continue;
-                    }
-                    if (i + 1 < input.Length && input[i + 1] == 'u')
-                    {
-                        if (savedCursor >= 0) cursor = Math.Min(savedCursor, line.Length);
-                        i += 1; continue;
-                    }
-
-                    // CSI: ESC[
-                    if (i + 1 < input.Length && input[i + 1] == '[')
-                    {
-                        i += 2;
-                        var param = new StringBuilder();
-                        while (i < input.Length)
-                        {
-                            char ch = input[i];
-                            if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))
-                            {
-                                char cmd = ch;
-                                string p = param.ToString(); // e.g. "2K", "10C", "12;34H"
-                                                             // Split params by ';'
-                                string[] parts = p.Split(';', StringSplitOptions.RemoveEmptyEntries);
-
-                                switch (cmd)
-                                {
-                                    case 'X': // ECH: erase n chars from cursor (replace with spaces, keep length)
-                                        {
-                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
-                                            if (cursor < line.Length)
-                                            {
-                                                int cnt = Math.Min(n, line.Length - cursor);
-                                                EnsureLen(cursor + cnt);
-                                                for (int j = 0; j < cnt; j++)
-                                                    line[cursor + j] = ' ';
-                                            }
-                                        }
-                                        break;
-
-                                    case 's': // CSI save cursor
-                                        savedCursor = cursor;
-                                        break;
-
-                                    case 'u': // CSI restore cursor
-                                        if (savedCursor >= 0) cursor = Math.Min(savedCursor, line.Length);
-                                        break;
-
-                                    case 'K':
-                                        {
-                                            int mode = parts.Length > 0 ? ParseIntDefault(parts[0], 0) : 0;
-                                            if (mode == 2)
-                                            {
-                                                line.Clear();
-                                                cursor = 0;
-                                            }
-                                            else if (mode == 0)
-                                            {
-                                                if (cursor < line.Length)
-                                                    line.Remove(cursor, line.Length - cursor);
-                                            }
-                                            else if (mode == 1)
-                                            {
-                                                // Erase from start to cursor (retain tail)
-                                                if (cursor > 0)
-                                                {
-                                                    int keep = line.Length - cursor;
-                                                    var tail = keep > 0 ? line.ToString(cursor, keep) : string.Empty;
-                                                    line.Clear();
-                                                    line.Append(new string(' ', cursor));
-                                                    if (keep > 0)
-                                                    {
-                                                        EnsureLen(cursor + keep);
-                                                        for (int j = 0; j < keep; j++)
-                                                            line[cursor + j] = tail[j];
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        break;
-                                    case 'C': // CUF: forward n
-                                        {
-                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
-                                            cursor += n;
-                                        }
-                                        break;
-                                    case 'D': // CUB: back n
-                                        {
-                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
-                                            cursor = Math.Max(0, cursor - n);
-                                        }
-                                        break;
-                                    case 'G': // CHA: to column n (1-based)
-                                        {
-                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
-                                            cursor = Math.Max(0, n - 1);
-                                        }
-                                        break;
-                                    case 'H': // CUP row;col (1-based) � honor col, ignore row
-                                    case 'f': // HVP row;col (1-based)
-                                        {
-                                            int col = 1;
-                                            if (parts.Length >= 2)
-                                                col = ParseIntDefault(parts[1], 1);
-                                            else if (parts.Length == 1)
-                                                col = ParseIntDefault(parts[0], 1);
-                                            cursor = Math.Max(0, col - 1);
-                                        }
-                                        break;
-                                    case '@': // ICH: insert n spaces at cursor
-                                        {
-                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
-                                            EnsureLen(cursor);
-                                            line.Insert(cursor, new string(' ', n));
-                                            // cursor stays
-                                        }
-                                        break;
-                                    case 'P': // DCH: delete n chars at cursor
-                                        {
-                                            int n = parts.Length > 0 ? ParseIntDefault(parts[0], 1) : 1;
-                                            if (cursor < line.Length)
-                                            {
-                                                int del = Math.Min(n, line.Length - cursor);
-                                                line.Remove(cursor, del);
-                                            }
-                                        }
-                                        break;
-                                    case 'm':
-                                        // SGR (colors/styles) � ignore for plain-text normalization
-                                        break;
-                                    default:
-                                        // Ignore other CSI commands
-                                        break;
-                                }
-                                break; // exit CSI loop
-                            }
-                            else
-                            {
-                                param.Append(ch);
-                                i++;
-                            }
-                        }
-                    }
-                    // else: unknown ESC sequence � ignore
-                }
-                else if (c >= ' ' && c <= '~')
-                {
-                    EnsureLen(cursor + 1);
-                    line[cursor] = c;
-                    cursor++;
-                }
-                else
-                {
-                    // Ignore other control chars
-                }
-            }
-
-            if (line.Length > 0)
-            {
-                // Keep last line without forcing a trailing CRLF
-                sbOut.Append(line);
-            }
-
-            return sbOut.ToString();
-        }
-
-        private void HandleCommandExecution(ShellStream shellStream, string[] commands, DataGridViewRow row, ref bool isFirst, string ipAddress, int port)
-        {
-            if (!isRunning) return;
-
-            if (_debugCaptureRaw) _rawBuffer = new StringBuilder(256 * 1024);
-
-            // Use fixed poll interval; keep Timeout user-configurable
-            int delayMs = DefaultPollIntervalMs;
-            if (!int.TryParse(txtTimeout.Text, out var timeoutSec)) timeoutSec = 10;
-            int idleTimeoutMs = Math.Max(1000, timeoutSec * 1000);
-
-            // Trigger prompt and read initial banner/prompt
-            shellStream.WriteLine("");
-            shellStream.Flush();
-
-            string banner = ReadAvailable(shellStream, delayMs, 800, maxOverallMs: 1500, stopOnLikelyPrompt: true);
-            banner = Regex.Replace(banner, @"[^\u0020-\u007E\r\n\t\b\u001B]", "");
-            banner = NormalizeTerminalOutput(banner);
-
-            if (!TryDetectPromptFromBuffer(banner, out var promptText))
-            {
-                var lines = banner.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-                promptText = lines.LastOrDefault()?.TrimEnd() ?? "";
-            }
-
-            var promptRegex = BuildPromptRegex(promptText);
-
-            string header = $"{new string('#', 20)} CONNECTED TO!!! {ipAddress}:{port} {promptText} {new string('#', 20)}";
-            string foo = new string('#', header.Length);
-
-            if (!isFirst)
-            {
-                this.Invoke(new Action(() => txtOutput.AppendText(Environment.NewLine)));
-            }
-            isFirst = false;
-
-            if (isRunning)
-            {
-                this.Invoke(new Action(() =>
-                {
-                    txtOutput.AppendText(foo + Environment.NewLine + header + Environment.NewLine + foo + Environment.NewLine + promptText);
-                }));
-            }
-
-            foreach (string commandTemplate in commands)
-            {
-                if (!isRunning) break;
-                if (string.IsNullOrWhiteSpace(commandTemplate) || commandTemplate.StartsWith("#")) continue;
-
-                string commandToExecute = commandTemplate;
-
-                // Safe ${var} substitution (no exception if column missing)
-                foreach (Match match in Regex.Matches(commandTemplate, @"\$\{([^}]+)\}"))
-                {
-                    string variableName = match.Groups[1].Value;
-                    string columnValue = "";
-                    if (row?.DataGridView?.Columns.Contains(variableName) == true)
-                    {
-                        columnValue = row.Cells[variableName].Value?.ToString() ?? "";
-                    }
-                    commandToExecute = commandToExecute.Replace($"${{{variableName}}}", columnValue);
-                }
-
-                if (string.IsNullOrWhiteSpace(commandToExecute)) continue;
-
-                shellStream.WriteLine(commandToExecute);
-                shellStream.Flush();
-
-                bool matchedPrompt;
-                string? updatedPromptLiteral;
-                var output = ReadUntilPromptWithPager(shellStream, promptRegex, delayMs, idleTimeoutMs, out matchedPrompt, out updatedPromptLiteral);
-
-                if (!string.IsNullOrEmpty(updatedPromptLiteral) && !string.Equals(updatedPromptLiteral, promptText, StringComparison.Ordinal))
-                {
-                    promptText = updatedPromptLiteral;
-                    promptRegex = BuildPromptRegex(promptText);
-                }
-
-                if (output.StartsWith(commandToExecute + "\r\r\n", StringComparison.Ordinal))
-                {
-                    output = Regex.Replace(output, Regex.Escape(commandToExecute) + "\r\r\n", commandToExecute + "\r\n");
-                }
-
-                if (isRunning)
-                {
-                    this.Invoke(new Action(() =>
-                    {
-                        txtOutput.AppendText(output);
-                    }));
-                }
-            }
-
-            // Add this here to capture raw input/output if enabled
-            if (_debugCaptureRaw && _rawBuffer is { Length: > 0 })
-            {
-                File.WriteAllText(Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                    $"ssh_raw_{DateTime.Now:yyyyMMdd_HHmmss}.txt"),
-                    _rawBuffer.ToString(), new UTF8Encoding(false));
-                _rawBuffer.Clear();
-            }
-        }
-
-        private static string FlattenException(Exception ex)
-        {
-            var sb = new StringBuilder();
-            for (var e = ex; e != null; e = e.InnerException)
-            {
-                sb.AppendLine($"{e.GetType().Name}: {e.Message}");
-            }
-            return sb.ToString();
-        }
-
-        // Reads available data until inactivity (maxInactivityMs). Sanitizes and handles pager tokens.
-        private string ReadAvailable(ShellStream shellStream, int pollIntervalMs, int maxInactivityMs, int maxOverallMs = 2000, bool stopOnLikelyPrompt = true)
-        {
-            var sb = new StringBuilder();
-            var sw = Stopwatch.StartNew();
-            long lastDataMs = sw.ElapsedMilliseconds;
-            int idleQuietMs = Math.Clamp(pollIntervalMs * 3, 100, 400);
-
-            while (isRunning)
-            {
-                if (sw.ElapsedMilliseconds >= maxOverallMs) break;
-                if (sw.ElapsedMilliseconds - lastDataMs >= Math.Min(maxInactivityMs, maxOverallMs)) break;
-
-                if (shellStream.DataAvailable)
-                {
-                    string chunk = shellStream.Read();
-
-                    // Capture raw before any processing
-                    if (_debugCaptureRaw) _rawBuffer?.Append(chunk);
-
-                    if (!string.IsNullOrEmpty(chunk))
-                    {
-                        lastDataMs = sw.ElapsedMilliseconds;
-
-                        // Sanitize
-                        chunk = Regex.Replace(chunk, @"[^\u0020-\u007E\r\n\t\b\u001B]", "");
-
-                        bool sawPager;
-                        chunk = StripPagerArtifacts(chunk, out sawPager);
-                        sb.Append(chunk);
-
-                        if (sawPager)
-                        {
-                            shellStream.Write(" ");
-                            shellStream.Flush();
-                        }
-
-                        if (stopOnLikelyPrompt)
-                        {
-                            if (TryDetectPromptFromBufferTail(sb.ToString(), out _))
-                            {
-                                if (sw.ElapsedMilliseconds - lastDataMs >= idleQuietMs)
-                                    break;
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    Thread.Sleep(Math.Min(50, Math.Max(10, pollIntervalMs / 2)));
-                }
-            }
-
-            // Add this to capture raw input/output if enabled
-            if (_debugCaptureRaw)
-            {
-                _rawBuffer?.Append(sb.ToString());
-            }
-
-            return sb.ToString();
-        }
-
-        // Read until the known prompt reappears (pager-aware). Will return earlier only if inactivity timeout elapses.
-        private string ReadUntilPromptWithPager(ShellStream shellStream, Regex promptRegex, int pollIntervalMs, int maxInactivityMs, out bool matchedPrompt, out string? updatedPromptLiteral)
-        {
-            matchedPrompt = false;
-            updatedPromptLiteral = null;
-
-            var sb = new StringBuilder();
-            var sw = Stopwatch.StartNew();
-            long lastActivityMs = 0;
-            int pageCount = 0;
-            const int maxPages = 50000;
-
-            while (isRunning && pageCount < maxPages)
-            {
-                if (sw.ElapsedMilliseconds - lastActivityMs > maxInactivityMs)
-                    break;
-
-                if (shellStream.DataAvailable)
-                {
-                    string chunk = shellStream.Read();
-
-                    // Capture raw before any processing
-                    if (_debugCaptureRaw) _rawBuffer?.Append(chunk);
-
-                    if (!string.IsNullOrEmpty(chunk))
-                    {
-                        lastActivityMs = sw.ElapsedMilliseconds;
-
-                        // Sanitize
-                        chunk = Regex.Replace(chunk, @"[^\u0020-\u007E\r\n\t\b\u001B]", "");
-
-                        bool sawPager;
-                        chunk = StripPagerArtifacts(chunk, out sawPager);
-                        sb.Append(chunk);
-
-                        if (sawPager)
-                        {
-                            lastActivityMs = sw.ElapsedMilliseconds;
-                            shellStream.Write(" ");
-                            shellStream.Flush();
-                            pageCount++;
-                            continue;
-                        }
-
-                        if (BufferEndsWithPrompt(sb, promptRegex))
-                        {
-                            matchedPrompt = true;
-                            break;
-                        }
-
-                        if (!matchedPrompt)
-                        {
-                            if (TryDetectDifferentPromptTail(sb, promptRegex, out var differentPrompt))
-                            {
-                                // We discovered a new prompt form (e.g. entered/exited a config mode).
-                                matchedPrompt = true;             // Treat as end of command output.
-                                updatedPromptLiteral = differentPrompt; // Signal caller to rebuild regex adaptively.
-                                break;
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    Thread.Sleep(Math.Min(50, Math.Max(10, pollIntervalMs / 2)));
-                }
-            }
-
-            var resultRaw = sb.ToString();
-
-            // Update prompt if possible (tail heuristic)
-            if (!matchedPrompt && TryDetectPromptFromBufferTail(resultRaw, out var tailPrompt) && !string.IsNullOrWhiteSpace(tailPrompt))
-            {
-                updatedPromptLiteral = tailPrompt;
-            }
-
-            // Normalize CR/LF at the end (prevents overwrites like "set wifi-certificate" -> "ate ...")
-            var result = NormalizeTerminalOutput(resultRaw);
-            return result;
-        }
-
-        private static Regex BuildPromptRegex(string promptLiteral)
-        {
-            // Generic fallback if nothing known yet
-            if (string.IsNullOrWhiteSpace(promptLiteral))
-                return new Regex(@"^.*(?:[#>$%])[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
-
-            // Trim trailing whitespace
-            var trimmed = Regex.Replace(promptLiteral, @"\s+$", "");
-
-            // Remove trailing ANSI (already mostly sanitized earlier, but be safe)
-            trimmed = Regex.Replace(trimmed, @"\x1B\[[0-9;]*[A-Za-z]", "");
-
-            // Ensure it ends with a typical prompt terminator; if not, fall back
-            if (!Regex.IsMatch(trimmed, @"[#>$%]\s*$"))
-                return new Regex(@"^.*(?:[#>$%])[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
-
-            // Strip final prompt char for base extraction
-            char terminator = trimmed[^1];
-            string body = trimmed[..^1].TrimEnd();
-
-            // Split off any mode/context portion (parenthetical) but allow it to vary
-            // e.g. "MSD903-DFWB (setting)" => baseHost = "MSD903-DFWB"
-            string baseHost;
-            int parenIdx = body.IndexOf('(');
-            if (parenIdx > 0)
-                baseHost = body[..parenIdx].TrimEnd();
-            else
-                baseHost = body;
-
-            if (string.IsNullOrWhiteSpace(baseHost))
-                baseHost = body; // fallback
-
-            string baseEsc = Regex.Escape(baseHost);
-
-            // Build adaptive pattern:
-            // ^<base>(\s*\([^)]+\))?\s*[#>$%]\s*$
-            string pattern = $"^{baseEsc}(?:\\s*\\([^)]+\\))?\\s*[{Regex.Escape(terminator.ToString())}#>$%]\\s*$";
-
-            return new Regex(pattern, RegexOptions.Multiline | RegexOptions.CultureInvariant);
-        }
-
-        private static bool TryDetectDifferentPromptTail(StringBuilder sb, Regex currentPromptRegex, out string newPrompt)
-        {
-            newPrompt = "";
-            if (sb.Length == 0) return false;
-
-            int lookback = Math.Min(4096, sb.Length);
-            string tail = sb.ToString(sb.Length - lookback, lookback);
-            var lines = tail.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-            for (int i = lines.Length - 1; i >= 0; i--)
-            {
-                var line = lines[i].TrimEnd();
-                if (IsLikelyPrompt(line) && !currentPromptRegex.IsMatch(line))
-                {
-                    newPrompt = line;
-                    return true;
-                }
-                if (line.Length > 0) break;
-            }
-            return false;
-        }
-
-        private static bool BufferEndsWithPrompt(StringBuilder sb, Regex promptRegex)
-        {
-            if (sb.Length == 0) return false;
-
-            // Look back only at the tail to reduce cost
-            int lookback = Math.Min(4096, sb.Length);
-            string tail = sb.ToString(sb.Length - lookback, lookback);
-
-            // Grab last non-empty line and test the prompt regex
-            var lines = tail.Split(new[] { "\r\n" }, StringSplitOptions.None);
-            for (int i = lines.Length - 1; i >= 0; i--)
-            {
-                var line = lines[i];
-                if (line.Length == 0) continue;
-                if (promptRegex.IsMatch(line))
-                    return true;
-                // Only test the last non-empty line
-                break;
-            }
-            return false;
-        }
-
-        private static bool IsLikelyPrompt(string line)
-        {
-            if (string.IsNullOrWhiteSpace(line)) return false;
-            line = line.TrimEnd();
-
-            // Heuristic: common CLI prompt endings
-            char last = line[^1];
-            if (last is '#' or '>' or '$' or '%')
-                return true;
-
-            return false;
-        }
-
-        private static bool TryDetectPromptFromBuffer(string buffer, out string prompt)
-        {
-            prompt = "";
-            if (string.IsNullOrEmpty(buffer)) return false;
-
-            var lines = buffer.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-            for (int i = lines.Length - 1; i >= 0; i--)
-            {
-                var candidate = lines[i].TrimEnd();
-                if (IsLikelyPrompt(candidate))
-                {
-                    prompt = candidate;
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private static bool TryDetectPromptFromBufferTail(string buffer, out string prompt)
-        {
-            // Similar to TryDetectPromptFromBuffer but optimized for tail-only checks
-            prompt = "";
-            if (string.IsNullOrEmpty(buffer)) return false;
-
-            int lookback = Math.Min(4096, buffer.Length);
-            string tail = buffer.Substring(buffer.Length - lookback);
-            var lines = tail.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-            for (int i = lines.Length - 1; i >= 0; i--)
-            {
-                string candidate = lines[i].TrimEnd();
-                if (IsLikelyPrompt(candidate))
-                {
-                    prompt = candidate;
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        // Remove pager artifacts and tells us if a pager token was present this chunk.
-        private string StripPagerArtifacts(string chunk, out bool sawPager)
-        {
-            sawPager = false;
-
-            // Match common pager prompts:
-            //  - "-- More --", "--More--", "----More----", etc. (case-insensitive)
-            var pagerRegex = new Regex(@"(?:(?:--\s*More\s*--)|(?:-+\s*More\s*-+))",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
-            if (pagerRegex.IsMatch(chunk))
-            {
-                sawPager = true;
-                chunk = pagerRegex.Replace(chunk, string.Empty);
-            }
-
-            return chunk;
-        }
-
-        private void HandleException(bool AuthException, Exception ex, string ipAddress, int port)
-        {
-            if (isRunning == false)
-            {
-                return;
-            }
-            if (!string.IsNullOrEmpty(txtOutput.Text))
-            {
-                this.Invoke(new Action(() =>
-                {
-                    txtOutput.AppendText(Environment.NewLine);
-                }));
-            }
-
-            string title = AuthException
-                ? $"{new string('#', 20)} ERROR AUTHENTICATING TO!!! {ipAddress}:{port} {new string('#', 20)}"
-                : $"{new string('#', 20)} ERROR CONNECTING TO!!! {ipAddress}:{port} {new string('#', 20)}";
-
-            string preheader = new string('#', title.Length);
-            string details = FlattenException(ex);
-
-            this.Invoke(new Action(() =>
-            {
-                txtOutput.AppendText(preheader + Environment.NewLine + title + Environment.NewLine + preheader + Environment.NewLine);
-                if (!string.IsNullOrWhiteSpace(details))
-                {
-                    txtOutput.AppendText(details + Environment.NewLine);
-                }
-            }));
-        }
-
-        private void btnExecuteAll_Click(object sender, EventArgs e)
-        {
-            if (!isRunning)
-            {
-                // Set the wait cursor for the entire form and each control individually
-                this.Cursor = Cursors.WaitCursor;
-                foreach (Control ctrl in this.Controls)
-                {
-                    ctrl.Cursor = Cursors.WaitCursor; // Ensure wait cursor is set for each control
-                }
-
-                lstOutput.Enabled = false;
-                isRunning = true;
-                btnStopAll.Visible = true;
-
-                Task.Run(() =>
-                {
-                    ExecuteCommands(dgv_variables.Rows.Cast<DataGridViewRow>(), cts.Token);
-                })
-                .ContinueWith(task =>
-                {
-                    this.Invoke(new Action(() =>
-                    {
-                        // Reset the cursor for the entire form and each control when the task completes
-                        this.Cursor = Cursors.Default;
-                        foreach (Control ctrl in this.Controls)
-                        {
-                            ctrl.Cursor = Cursors.Default; // Reset cursor for each control
-                        }
-
-                        btnStopAll.Visible = false;
-                        isRunning = false;
-                        lstOutput.Enabled = true;
-                        if (task.Exception != null)
-                            MessageBox.Show("An error occurred: " + task.Exception.InnerException.Message);
-                    }));
-                });
-            }
-        }
-
-        private void btnExecuteSelected_Click(object sender, EventArgs e)
-        {
-            Cursor.Current = Cursors.WaitCursor;
-            lstOutput.Enabled = false;
-
-            if (dgv_variables.CurrentCell == null)
-            {
-                txtOutput.Clear();
-                txtOutput.AppendText("No host selected");
-                lstOutput.Enabled = true;
-                Cursor.Current = Cursors.Default;
+                MessageBox.Show("Preset name is required.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
-            DataGridViewRow selectedRow = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
-
-            bool isNew = selectedRow.IsNewRow;
-
-            // Fixed line:
-            string host = dgv_variables.Columns.Contains("Host_IP")
-                ? (selectedRow.Cells["Host_IP"].Value?.ToString() ?? "")
-                : "";
-
-            if (isNew || string.IsNullOrWhiteSpace(host) || !IsValidIPAddress(host))
+            // Preserve existing IsFavorite status if updating
+            var existingPreset = _presetManager.Get(presetName);
+            var preset = new PresetInfo
             {
-                txtOutput.Clear();
-                txtOutput.AppendText("No host selected");
-                lstOutput.Enabled = true;
-                Cursor.Current = Cursors.Default;
-                return;
-            }
-
-            isRunning = true;
-            try
-            {
-                ExecuteCommands(new[] { selectedRow }, cts.Token);
-            }
-            finally
-            {
-                isRunning = false;
-                lstOutput.Enabled = true;
-                Cursor.Current = Cursors.Default;
-            }
-        }
-
-        private bool IsValidIPAddress(string ipAddressWithPort)
-        {
-            string[] parts = ipAddressWithPort.Split(':');
-            string ipAddress = parts[0];
-            string[] octets = ipAddress.Split('.');
-
-            if (octets.Length != 4)
-            {
-                return false;
-            }
-
-            foreach (string octet in octets)
-            {
-                if (!int.TryParse(octet, out int value) || value < 0 || value > 255)
-                {
-                    return false;
-                }
-            }
-
-            if (parts.Length > 1) // Check if port is specified and valid
-            {
-                if (!int.TryParse(parts[1], out int port) || port <= 0 || port > 65535)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private void SavePresets()
-        {
-            ConfigObject existing;
-            try
-            {
-                existing = JsonConvert.DeserializeObject<ConfigObject>(File.ReadAllText(configFilePath)) ?? new ConfigObject();
-            }
-            catch
-            {
-                existing = new ConfigObject();
-            }
-
-            existing.Presets = presets;
-            // Keep last global delay/timeout & username synced
-            if (int.TryParse(txtDelay.Text, out int d)) existing.Delay = d;
-            if (int.TryParse(txtTimeout.Text, out int t)) existing.Timeout = t;
-            existing.Username = txtUsername.Text;
-
-            string json = JsonConvert.SerializeObject(existing, Formatting.Indented);
-            File.WriteAllText(configFilePath, json);
-        }
-
-        private void CreateDefaultConfigFile()
-        {
-            var defaultPresets = new Dictionary<string, PresetInfo>
-    {
-        { "Custom", new PresetInfo { Commands = "get system status" } },
-        { "Get external-address-resource list", new PresetInfo { Commands = "dia sys external-address-resource list" } }
-    };
-
-            // Set a default username
-            var defaultUsername = "";
-
-            // Combine both username and presets into a single object for serialization
-            var settings = new
-            {
-                Timeout = 10,
-                Delay = 500,
-                Username = defaultUsername,
-                Presets = defaultPresets
+                Commands = commands,
+                Delay = int.TryParse(txtDelay.Text, out var d) ? d : null,
+                Timeout = int.TryParse(tsbTimeout.Text, out var t) ? t : null,
+                IsFavorite = existingPreset?.IsFavorite ?? false
             };
 
-            // Serialize the settings object to JSON
-            string json = JsonConvert.SerializeObject(settings, Formatting.Indented);
-            // Write to the configuration file
-            File.WriteAllText(configFilePath, json);
+            bool isNew = !_presetManager.Presets.ContainsKey(presetName);
+            _presetManager.Save(presetName, preset);
 
-            // Assign the default presets to the global presets variable
-            presets = defaultPresets;
-
-            // Load presets into the list box
-            foreach (var preset in defaultPresets)
+            if (isNew)
             {
-                lstPreset.Items.Add(preset.Key);
-            }
-
-        }
-        private void deleteToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            // Check if there is a selected item to delete
-            if (lstPreset.SelectedItem == null) return;
-
-            // Get the current index of the selected item
-            int selectedIndex = lstPreset.SelectedIndex;
-            string selectedPreset = lstPreset.SelectedItem.ToString();
-
-            if (presets.ContainsKey(selectedPreset))
-            {
-                // Remove the item from the dictionary and save the changes
-                presets.Remove(selectedPreset);
-                SavePresets();
-
-                // Remove the item from the ListBox
-                lstPreset.Items.Remove(selectedPreset);
-
-                // Determine the new index to select after deletion
-                if (lstPreset.Items.Count > 0)  // Check if there are any items left
+                // Add to manual order list for Manual sort mode
+                if (!_manualPresetOrder.Contains(presetName))
                 {
-                    if (selectedIndex > 0) // If not the first item was deleted
-                    {
-                        lstPreset.SelectedIndex = selectedIndex - 1; // Select the previous item
-                    }
-                    else
-                    {
-                        lstPreset.SelectedIndex = 0; // Select the new first item if the first item was deleted
-                    }
+                    _manualPresetOrder.Add(presetName);
                 }
-            }
-        }
-
-        private void renameToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            //rename selected lstpreset
-            if (lstPreset.SelectedItem == null) return;
-            string selectedPreset = lstPreset.SelectedItem.ToString();
-            string newName = Microsoft.VisualBasic.Interaction.InputBox(
-                               $"Enter a new name for the preset '{selectedPreset}':",
-                                              "Rename Preset",
-                                                             selectedPreset
-                                                                        );
-
-            if (!string.IsNullOrEmpty(newName) && newName != selectedPreset)
-            {
-                // Ensure the new name doesn't already exist to avoid duplicates
-                foreach (var preset in presets)
-                {
-                    if (preset.Key.Equals(newName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        MessageBox.Show("This preset name already exists. Please choose a different name.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
-                    }
-                }
-
-                // Set the new header text
-                presets[newName] = presets[selectedPreset];
-                presets.Remove(selectedPreset);
-                SavePresets();
-                lstPreset.Items.Remove(selectedPreset);
-                lstPreset.Items.Add(newName);
-                lstPreset.SelectedItem = newName;
-                txtPreset.Text = newName;
-                _activePresetName = newName;
+                RefreshPresetList();
             }
 
-
+            _activePresetName = presetName;
+            UpdateStatusBar($"Preset '{presetName}' saved");
         }
 
-        private void addPresetToolStripMenuItem_Click(object sender, EventArgs e)
+        private void AddPreset()
         {
-            // Add new preset
             string presetName = Microsoft.VisualBasic.Interaction.InputBox(
-                               "Enter the name of the new preset:",
-                                              "Add Preset",
-                                                             "New Preset"
-                                                                        );
+                "Enter the name of the new preset:",
+                "Add Preset",
+                "New Preset");
 
-            if (!string.IsNullOrEmpty(presetName))
+            if (string.IsNullOrEmpty(presetName)) return;
+
+            if (_presetManager.Presets.ContainsKey(presetName))
             {
-                if (!presets.ContainsKey(presetName))
-                {
-                    presets.Add(presetName, new PresetInfo());
-                    lstPreset.Items.Add(presetName);
-                }
-                else
-                {
-                    MessageBox.Show("Preset name already exists!");
-                }
-            }
-
-            // Save presets
-            SavePresets();
-        }
-
-        private void contextPresetLstAdd_Click(object sender, EventArgs e)
-        {
-            // call addPresetToolStripMenuItem_Click
-            addPresetToolStripMenuItem_Click(sender, e);
-        }
-
-        private void toggleSortingToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            // Toggle the Sorted property
-            lstPreset.Sorted = !lstPreset.Sorted;
-        }
-
-        private void toggleSortingToolStripMenuItem1_Click(object sender, EventArgs e)
-        {
-            toggleSortingToolStripMenuItem_Click(sender, e);
-        }
-
-        private void txtDelay_KeyPress(object sender, KeyPressEventArgs e)
-        {
-            // Allow only digits and control characters
-            if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
-            {
-                e.Handled = true;
-            }
-        }
-
-        private void txtTimeout_KeyPress(object sender, KeyPressEventArgs e)
-        {
-            // Allow only digits and control characters
-            if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
-            {
-                e.Handled = true;
-            }
-        }
-
-        private void lstOutput_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (lstOutput.SelectedItem != null)
-            {
-                var selectedEntry = (KeyValuePair<string, string>)lstOutput.SelectedItem;
-                txtOutput.Text = selectedEntry.Value;  // Load the associated output into txtOutput
-            }
-        }
-
-        private void saveAsToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-
-            if (lstOutput.SelectedItem == null)
-            {
-                MessageBox.Show("Please select an item from the list to save.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Preset name already exists!");
                 return;
             }
 
-            using (SaveFileDialog saveFileDialog = new SaveFileDialog())
+            _presetManager.Save(presetName, new PresetInfo());
+
+            // Add to manual order
+            if (!_manualPresetOrder.Contains(presetName))
             {
-                // Retrieve the selected item's value
-                var selectedItem = (KeyValuePair<string, string>)lstOutput.SelectedItem;
-                string outputText = selectedItem.Value;
-
-                saveFileDialog.Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*";
-                saveFileDialog.DefaultExt = "txt";
-                saveFileDialog.AddExtension = true;
-                saveFileDialog.Title = "Save As";
-                var filename = selectedItem.Key;
-                filename = filename.Replace(":", "_");
-                saveFileDialog.FileName = filename;
-
-
-                if (saveFileDialog.ShowDialog() == DialogResult.OK)
-                {
-                    // Write the output to the selected file path
-                    try
-                    {
-                        File.WriteAllText(saveFileDialog.FileName, outputText);
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show("Failed to save the file: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                }
+                _manualPresetOrder.Add(presetName);
             }
 
+            RefreshPresetList();
+            lstPreset.SelectedItem = presetName;
         }
 
-        private void deleteEntryToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            //delete selected entry in lstOutput
-            if (lstOutput.SelectedItem == null)
-            {
-                MessageBox.Show("Please select an item from the list to delete.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            //get the key for the lstOutput.SelectedItem
-            var selectedEntry = (KeyValuePair<string, string>)lstOutput.SelectedItem;
-
-            //get confirmation they want to delete
-            DialogResult dialogResult = MessageBox.Show("Are you sure you want to delete " + selectedEntry.Key + "?", "Delete Entry", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (dialogResult == DialogResult.No)
-            {
-                return;
-            }
-            // Remove the selected entry from the list
-            outputHistoryList.Remove((KeyValuePair<string, string>)lstOutput.SelectedItem);
-            //select next history if available otherwise clear txtOutput
-            if (lstOutput.Items.Count > 0)
-            {
-                lstOutput.SelectedIndex = 0;
-            }
-            else
-            {
-                txtOutput.Clear();
-            }
-
-        }
-
-        private void deleteAllHistoryToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            //get confirmation they want to delete
-            DialogResult dialogResult = MessageBox.Show("Are you sure you want to delete all history?", "Delete History", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (dialogResult == DialogResult.No)
-            {
-                return;
-            }
-            //clear all entries in lstOutput and outputHistoryList
-            outputHistoryList.Clear();
-            txtOutput.Clear();
-
-        }
-
-        private void btnStopAll_Click(object sender, EventArgs e)
-        {
-            isRunning = false;
-            cts.Cancel();
-            this.Invoke(new Action(() =>
-            {
-                Thread.Sleep(300);
-                btnStopAll.Visible = false;
-                txtOutput.AppendText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
-            }));
-            //reset cancel token
-            cts.Dispose();
-            cts = new CancellationTokenSource();
-
-        }
-
-        private string GetUniquePresetName(string baseName)
-        {
-            string candidate = baseName;
-            int i = 1;
-            while (presets.ContainsKey(candidate))
-            {
-                candidate = $"{baseName}_{i++}";
-            }
-            return candidate;
-        }
-
-        private void duplicatePresetToolStripMenuItem_Click(object sender, EventArgs e)
+        private void DuplicatePreset()
         {
             if (lstPreset.SelectedItem == null) return;
 
-            string sourceName = lstPreset.SelectedItem.ToString();
-            if (!presets.TryGetValue(sourceName, out var commandText)) return;
-
-            string suggested = GetUniquePresetName(sourceName + "_Copy");
+            string sourceName = lstPreset.SelectedItem.ToString() ?? "";
+            string suggested = _presetManager.GetUniqueName(sourceName + "_Copy");
 
             string newName = Microsoft.VisualBasic.Interaction.InputBox(
                 $"Enter name for the copied preset (from '{sourceName}'):",
                 "Copy Preset",
-                suggested
-            );
+                suggested);
 
             if (string.IsNullOrWhiteSpace(newName)) return;
 
-            if (presets.ContainsKey(newName))
+            if (_presetManager.Presets.ContainsKey(newName))
             {
                 MessageBox.Show("A preset with that name already exists.", "Copy Preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            presets.Add(newName, new PresetInfo
+            try
             {
-                Commands = commandText.Commands,
-                Delay = presets[sourceName].Delay,
-                Timeout = presets[sourceName].Timeout
-            });
+                string finalName = _presetManager.Duplicate(sourceName, newName);
 
-            if (lstPreset.Sorted)
-            {
-                lstPreset.Items.Add(newName);
+                // Add to manual order after the source
+                int sourceIndex = _manualPresetOrder.IndexOf(sourceName);
+                if (sourceIndex >= 0)
+                {
+                    _manualPresetOrder.Insert(sourceIndex + 1, finalName);
+                }
+                else
+                {
+                    _manualPresetOrder.Add(finalName);
+                }
+
+                RefreshPresetList();
+                lstPreset.SelectedItem = finalName;
+
+                var preset = _presetManager.Get(finalName);
+                txtPreset.Text = finalName;
+                txtCommand.Text = preset?.Commands ?? "";
+                _activePresetName = finalName;
             }
-            else
+            catch (Exception ex)
             {
-                int insertIndex = lstPreset.SelectedIndex + 1;
-                if (insertIndex > lstPreset.Items.Count) insertIndex = lstPreset.Items.Count;
-                lstPreset.Items.Insert(insertIndex, newName);
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void RenamePreset()
+        {
+            if (lstPreset.SelectedItem == null) return;
+
+            string selectedPreset = lstPreset.SelectedItem.ToString() ?? "";
+            string newName = Microsoft.VisualBasic.Interaction.InputBox(
+                $"Enter a new name for the preset '{selectedPreset}':",
+                "Rename Preset",
+                selectedPreset);
+
+            if (string.IsNullOrEmpty(newName) || newName == selectedPreset) return;
+
+            if (!_presetManager.Rename(selectedPreset, newName))
+            {
+                MessageBox.Show("This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
 
-            SavePresets();
+            // Update manual order list
+            int orderIndex = _manualPresetOrder.IndexOf(selectedPreset);
+            if (orderIndex >= 0)
+            {
+                _manualPresetOrder[orderIndex] = newName;
+            }
+
+            RefreshPresetList();
             lstPreset.SelectedItem = newName;
             txtPreset.Text = newName;
-            txtCommand.Text = commandText.Commands;
             _activePresetName = newName;
         }
 
-        // === Find Support ===
-        private FindDialog? _findDialog;
-        private string _lastFindTerm = "";
-        private bool _lastFindMatchCase = false;
-        private bool _lastFindWrap = true;
+        private void DeletePreset()
+        {
+            if (lstPreset.SelectedItem == null) return;
+
+            int selectedIndex = lstPreset.SelectedIndex;
+            string selectedPreset = lstPreset.SelectedItem.ToString() ?? "";
+
+            // Check if this is the currently active preset being deleted
+            bool isDeletingActivePreset = string.Equals(selectedPreset, _activePresetName, StringComparison.Ordinal);
+
+            if (_presetManager.Delete(selectedPreset))
+            {
+                lstPreset.Items.Remove(selectedPreset);
+                _manualPresetOrder.Remove(selectedPreset);
+
+                // Clear active preset if we deleted it (prevents "save changes?" prompt)
+                if (isDeletingActivePreset)
+                {
+                    _activePresetName = null;
+                    txtPreset.Clear();
+                    txtCommand.Clear();
+                }
+
+                if (lstPreset.Items.Count > 0)
+                {
+                    _suppressPresetSelectionChange = true;
+                    lstPreset.SelectedIndex = selectedIndex > 0 ? selectedIndex - 1 : 0;
+                    _suppressPresetSelectionChange = false;
+
+                    // Load the newly selected preset
+                    var newSelection = lstPreset.SelectedItem?.ToString();
+                    if (!string.IsNullOrEmpty(newSelection))
+                    {
+                        var preset = _presetManager.Get(newSelection);
+                        if (preset != null)
+                        {
+                            txtPreset.Text = newSelection;
+                            txtCommand.Text = preset.Commands;
+                            _activePresetName = newSelection;
+                        }
+                    }
+                }
+            }
+        }
+
+        private void ExportPreset()
+        {
+            if (lstPreset.SelectedItem == null)
+            {
+                MessageBox.Show("No preset selected to export.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                string presetName = lstPreset.SelectedItem.ToString() ?? "";
+                string exportString = _presetManager.Export(presetName);
+                Clipboard.SetText(exportString);
+                MessageBox.Show("Preset exported to clipboard.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to export preset: {ex.Message}", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ImportPreset()
+        {
+            string input = Microsoft.VisualBasic.Interaction.InputBox(
+                "Paste the encoded preset string:\r\nFormat: <name>_<encoded>",
+                "Import Preset",
+                "");
+
+            if (string.IsNullOrWhiteSpace(input)) return;
+
+            try
+            {
+                int? defaultDelay = int.TryParse(txtDelay.Text, out var d) ? d : null;
+                int? defaultTimeout = int.TryParse(tsbTimeout.Text, out var t) ? t : null;
+
+                string finalName = _presetManager.Import(input, defaultDelay, defaultTimeout);
+
+                lstPreset.Items.Add(finalName);
+                lstPreset.SelectedItem = finalName;
+
+                var preset = _presetManager.Get(finalName);
+                if (preset != null)
+                {
+                    txtPreset.Text = finalName;
+                    txtCommand.Text = preset.Commands;
+                    if (preset.Delay.HasValue) txtDelay.Text = preset.Delay.Value.ToString();
+                    if (preset.Timeout.HasValue) tsbTimeout.Text = preset.Timeout.Value.ToString();
+                }
+
+                MessageBox.Show($"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (FormatException)
+            {
+                MessageBox.Show("Invalid format or Base64 encoding.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to import preset: {ex.Message}", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ExportAllPresets()
+        {
+            if (_presetManager.Presets.Count == 0)
+            {
+                MessageBox.Show("No presets to export.", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using var dialog = new SaveFileDialog
+            {
+                Title = "Export All Presets",
+                Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                DefaultExt = "json",
+                FileName = "presets_export.json"
+            };
+
+            if (dialog.ShowDialog() != DialogResult.OK)
+                return;
+
+            try
+            {
+                _presetManager.ExportAllToFile(dialog.FileName);
+                MessageBox.Show($"Exported {_presetManager.Presets.Count} presets to:\n{dialog.FileName}",
+                    "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to export presets: {ex.Message}", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ImportAllPresets()
+        {
+            using var dialog = new OpenFileDialog
+            {
+                Title = "Import All Presets",
+                Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                DefaultExt = "json"
+            };
+
+            if (dialog.ShowDialog() != DialogResult.OK)
+                return;
+
+            try
+            {
+                int count = _presetManager.ImportAllFromFile(dialog.FileName);
+                RefreshPresetList();
+                MessageBox.Show($"Imported {count} presets.\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
+                    "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (FormatException ex)
+            {
+                MessageBox.Show($"Invalid preset file format: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to import presets: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void RefreshPresetList()
+        {
+            string? currentSelection = lstPreset.SelectedItem?.ToString();
+            _suppressPresetSelectionChange = true;
+
+            lstPreset.Sorted = false;
+            lstPreset.Items.Clear();
+
+            // Get all presets with their info
+            var presets = _presetManager.Presets.ToList();
+
+            // Sort presets based on current mode, always with favorites first
+            IEnumerable<string> sortedPresets;
+
+            // Separate favorites and non-favorites
+            var favorites = presets.Where(p => p.Value.IsFavorite).Select(p => p.Key);
+            var nonFavorites = presets.Where(p => !p.Value.IsFavorite).Select(p => p.Key);
+
+            switch (_currentSortMode)
+            {
+                case PresetSortMode.Ascending:
+                    sortedPresets = favorites.OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                        .Concat(nonFavorites.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+                    break;
+
+                case PresetSortMode.Descending:
+                    sortedPresets = favorites.OrderByDescending(n => n, StringComparer.OrdinalIgnoreCase)
+                        .Concat(nonFavorites.OrderByDescending(n => n, StringComparer.OrdinalIgnoreCase));
+                    break;
+
+                case PresetSortMode.Manual:
+                    // Use manual order exactly as specified (no favorites separation in manual mode)
+                    var orderedList = new List<string>();
+
+                    foreach (var name in _manualPresetOrder)
+                    {
+                        if (_presetManager.Presets.ContainsKey(name))
+                        {
+                            orderedList.Add(name);
+                        }
+                    }
+
+                    // Add any presets not in manual order at the end
+                    foreach (var kvp in presets)
+                    {
+                        if (!_manualPresetOrder.Contains(kvp.Key))
+                        {
+                            orderedList.Add(kvp.Key);
+                        }
+                    }
+
+                    sortedPresets = orderedList;
+                    break;
+
+                default:
+                    sortedPresets = presets.Select(p => p.Key);
+                    break;
+            }
+
+            foreach (var name in sortedPresets)
+            {
+                var preset = _presetManager.Get(name);
+                string displayName = preset?.IsFavorite == true ? $"★ {name}" : name;
+                lstPreset.Items.Add(displayName);
+            }
+
+            // Restore selection
+            if (!string.IsNullOrEmpty(currentSelection))
+            {
+                // Find the item (may have star prefix now)
+                for (int i = 0; i < lstPreset.Items.Count; i++)
+                {
+                    string item = lstPreset.Items[i].ToString() ?? "";
+                    string itemName = item.StartsWith("★ ") ? item.Substring(2) : item;
+                    if (itemName == currentSelection || item == currentSelection)
+                    {
+                        lstPreset.SelectedIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            _suppressPresetSelectionChange = false;
+        }
+
+        private void ToggleFavorite()
+        {
+            if (lstPreset.SelectedItem == null) return;
+
+            string displayName = lstPreset.SelectedItem.ToString() ?? "";
+            string presetName = displayName.StartsWith("★ ") ? displayName.Substring(2) : displayName;
+
+            var preset = _presetManager.Get(presetName);
+            if (preset == null) return;
+
+            preset.IsFavorite = !preset.IsFavorite;
+            _presetManager.Save(presetName, preset);
+
+            RefreshPresetList();
+
+            // Re-select the item
+            for (int i = 0; i < lstPreset.Items.Count; i++)
+            {
+                string item = lstPreset.Items[i].ToString() ?? "";
+                string itemName = item.StartsWith("★ ") ? item.Substring(2) : item;
+                if (itemName == presetName)
+                {
+                    lstPreset.SelectedIndex = i;
+                    break;
+                }
+            }
+
+            UpdateStatusBar(preset.IsFavorite ? $"'{presetName}' added to favorites" : $"'{presetName}' removed from favorites");
+        }
+
+        private string GetPresetNameFromDisplay(string displayName)
+        {
+            return displayName.StartsWith("★ ") ? displayName.Substring(2) : displayName;
+        }
+
+        private bool IsPresetDirty()
+        {
+            if (string.IsNullOrEmpty(_activePresetName)) return InputValidator.IsNotEmpty(txtPreset.Text) || InputValidator.IsNotEmpty(txtCommand.Text);
+
+            var preset = _presetManager.Get(_activePresetName);
+            if (preset == null) return InputValidator.IsNotEmpty(txtPreset.Text) || InputValidator.IsNotEmpty(txtCommand.Text);
+
+            bool nameChanged = !string.Equals(txtPreset.Text?.Trim(), _activePresetName, StringComparison.Ordinal);
+            bool commandsChanged = !string.Equals(txtCommand.Text, preset.Commands ?? "", StringComparison.Ordinal);
+
+            bool delayDiffers = int.TryParse(txtDelay.Text, out var d)
+                ? preset.Delay != d
+                : preset.Delay.HasValue;
+
+            bool timeoutDiffers = int.TryParse(tsbTimeout.Text, out var t)
+                ? preset.Timeout != t
+                : preset.Timeout.HasValue;
+
+            return nameChanged || commandsChanged || delayDiffers || timeoutDiffers;
+        }
+
+        #endregion
+
+        #region SSH Execution
+
+        private async void ExecuteOnAllHosts()
+        {
+            if (_sshService.IsRunning) return;
+
+            SetExecutionMode(true);
+            txtOutput.Clear();
+
+            var hosts = GetHostConnections(dgv_variables.Rows.Cast<DataGridViewRow>()).ToList();
+            string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
+            int timeout = InputValidator.ParseIntOrDefault(tsbTimeout.Text, 10);
+
+            UpdateStatusBar($"Executing on {hosts.Count} hosts...", true, 0, hosts.Count);
+
+            try
+            {
+                var results = await _sshService.ExecuteAsync(hosts, commands, tsbUsername.Text, tsbPassword.Text, timeout);
+                StoreExecutionHistory(results);
+                UpdateStatusBar($"Completed execution on {results.Count} hosts");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"An error occurred: {ex.Message}");
+                UpdateStatusBar("Execution failed");
+            }
+            finally
+            {
+                SetExecutionMode(false);
+            }
+        }
+
+        private async void ExecuteOnSelectedHost()
+        {
+            if (dgv_variables.CurrentCell == null)
+            {
+                txtOutput.Clear();
+                txtOutput.AppendText("No host selected");
+                return;
+            }
+
+            var row = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
+            string host = GetCellValue(row, CsvManager.HostColumnName);
+
+            if (row.IsNewRow || string.IsNullOrWhiteSpace(host) || !InputValidator.IsValidIpAddress(host))
+            {
+                txtOutput.Clear();
+                txtOutput.AppendText("No valid host selected");
+                return;
+            }
+
+            SetExecutionMode(true);
+            txtOutput.Clear();
+
+            var hosts = GetHostConnections(new[] { row }).ToList();
+            string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
+            int timeout = InputValidator.ParseIntOrDefault(tsbTimeout.Text, 10);
+
+            UpdateStatusBar($"Executing on {host}...", true, 0, 1);
+
+            try
+            {
+                var results = await _sshService.ExecuteAsync(hosts, commands, tsbUsername.Text, tsbPassword.Text, timeout);
+                StoreExecutionHistory(results);
+                UpdateStatusBar($"Completed execution on {host}");
+            }
+            finally
+            {
+                SetExecutionMode(false);
+            }
+        }
+
+        private void StopExecution()
+        {
+            _sshService.Stop();
+            Invoke(() =>
+            {
+                Thread.Sleep(300);
+                btnStopAll.Visible = false;
+                txtOutput.AppendText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
+                UpdateStatusBar("Execution stopped by user");
+            });
+        }
+
+        private IEnumerable<HostConnection> GetHostConnections(IEnumerable<DataGridViewRow> rows)
+        {
+            foreach (var row in rows)
+            {
+                if (row.IsNewRow) continue;
+
+                string hostIp = GetCellValue(row, CsvManager.HostColumnName);
+                if (string.IsNullOrWhiteSpace(hostIp) || !InputValidator.IsValidIpAddress(hostIp))
+                    continue;
+
+                var host = HostConnection.Parse(hostIp);
+                host.Username = GetCellValue(row, "username");
+                host.Password = GetCellValue(row, "password");
+
+                // Collect all variables from the row
+                foreach (DataGridViewColumn col in dgv_variables.Columns)
+                {
+                    host.Variables[col.Name] = row.Cells[col.Index].Value?.ToString() ?? "";
+                }
+
+                yield return host;
+            }
+        }
+
+        private string GetCellValue(DataGridViewRow row, string columnName)
+        {
+            if (!dgv_variables.Columns.Contains(columnName))
+                return "";
+            return row.Cells[columnName].Value?.ToString() ?? "";
+        }
+
+        private void SetExecutionMode(bool executing)
+        {
+            Cursor = executing ? Cursors.WaitCursor : Cursors.Default;
+            btnExecuteAll.Enabled = !executing;
+            btnExecuteSelected.Enabled = !executing;
+            btnStopAll.Visible = executing;
+            lstOutput.Enabled = !executing;
+            tsbOpenCsv.Enabled = !executing;
+            tsbSaveCsv.Enabled = !executing;
+            tsbSaveCsvAs.Enabled = !executing;
+            tsbClearGrid.Enabled = !executing;
+
+            if (!executing)
+            {
+                statusProgress.Visible = false;
+            }
+        }
+
+        private void SshService_OutputReceived(object? sender, SshOutputEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(() => txtOutput.AppendText(e.Output));
+            }
+            else
+            {
+                txtOutput.AppendText(e.Output);
+            }
+        }
+
+        private void StoreExecutionHistory(List<ExecutionResult> results)
+        {
+            var combinedOutput = new StringBuilder();
+            foreach (var result in results)
+            {
+                combinedOutput.Append(result.Output);
+            }
+
+            string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
+            var entry = new KeyValuePair<string, string>(key, combinedOutput.ToString());
+
+            Invoke(() =>
+            {
+                _outputHistory.Insert(0, entry);
+                lstOutput.SelectedIndex = 0;
+                SaveConfiguration();
+            });
+        }
+
+        #endregion
+
+        #region History Operations
+
+        private void SaveHistoryEntry()
+        {
+            if (lstOutput.SelectedItem is not KeyValuePair<string, string> entry)
+            {
+                MessageBox.Show("Please select an item from the list to save.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            using var sfd = new SaveFileDialog
+            {
+                Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*",
+                DefaultExt = "txt",
+                FileName = entry.Key.Replace(":", "_")
+            };
+
+            if (sfd.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    File.WriteAllText(sfd.FileName, entry.Value);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to save the file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void SaveAllHistory()
+        {
+            if (_outputHistory.Count == 0)
+            {
+                MessageBox.Show("There is no history to save.", "No History", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using var sfd = new SaveFileDialog
+            {
+                Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*",
+                DefaultExt = "txt",
+                FileName = $"SSH_Helper_History_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.txt"
+            };
+
+            if (sfd.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    using var sw = new StreamWriter(sfd.FileName, false, new UTF8Encoding(false));
+                    for (int i = 0; i < _outputHistory.Count; i++)
+                    {
+                        var entry = _outputHistory[i];
+                        sw.WriteLine($"===== {entry.Key} =====");
+                        sw.WriteLine();
+                        string body = (entry.Value ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n");
+                        if (!string.IsNullOrEmpty(body)) sw.WriteLine(body);
+                        if (i < _outputHistory.Count - 1) sw.WriteLine();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to save the file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void DeleteHistoryEntry()
+        {
+            if (lstOutput.SelectedItem is not KeyValuePair<string, string> entry)
+            {
+                MessageBox.Show("Please select an item from the list to delete.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (MessageBox.Show($"Are you sure you want to delete {entry.Key}?", "Delete Entry", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+                return;
+
+            _outputHistory.Remove(entry);
+            if (lstOutput.Items.Count > 0)
+                lstOutput.SelectedIndex = 0;
+            else
+                txtOutput.Clear();
+        }
+
+        private void DeleteAllHistory()
+        {
+            if (MessageBox.Show("Are you sure you want to delete all history?", "Delete History", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+                return;
+
+            _outputHistory.Clear();
+            txtOutput.Clear();
+        }
+
+        #endregion
+
+        #region Find Support
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            // Global shortcuts
-            if (keyData == (Keys.Control | Keys.F))
+            switch (keyData)
             {
-                ShowFindDialog();
-                return true;
-            }
-            if (keyData == Keys.F3)
-            {
-                // Global F3 should move focus to the output area (so we pass initiatedFromFindDialog: false)
-                PerformFind(_lastFindTerm, _lastFindMatchCase, forward: true, _lastFindWrap, initiatedFromFindDialog: false);
-                return true;
-            }
-            if (keyData == (Keys.Shift | Keys.F3))
-            {
-                PerformFind(_lastFindTerm, _lastFindMatchCase, forward: false, _lastFindWrap, initiatedFromFindDialog: false);
-                return true;
+                case Keys.Control | Keys.F:
+                    ShowFindDialog();
+                    return true;
+                case Keys.F3:
+                    PerformFind(_lastFindTerm, _lastFindMatchCase, true, _lastFindWrap, false);
+                    return true;
+                case Keys.Shift | Keys.F3:
+                    PerformFind(_lastFindTerm, _lastFindMatchCase, false, _lastFindWrap, false);
+                    return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);
         }
@@ -2264,27 +1988,19 @@ namespace SSH_Helper
         {
             string seed = txtOutput.SelectedText;
             if (string.IsNullOrWhiteSpace(seed))
-            {
-                // If no selection, try last term
-                seed = string.IsNullOrWhiteSpace(_lastFindTerm) ? "" : _lastFindTerm;
-            }
+                seed = _lastFindTerm ?? "";
 
             if (_findDialog == null || _findDialog.IsDisposed)
             {
                 _findDialog = new FindDialog(this, seed, _lastFindMatchCase, _lastFindWrap);
-                // Position near txtOutput (basic positioning)
                 var screenPoint = txtOutput.PointToScreen(Point.Empty);
                 _findDialog.StartPosition = FormStartPosition.Manual;
                 _findDialog.Left = screenPoint.X + 40;
                 _findDialog.Top = screenPoint.Y + 40;
             }
-            else
-            {
-                _findDialog.Show();
-                _findDialog.BringToFront();
-            }
 
             _findDialog.Show();
+            _findDialog.BringToFront();
         }
 
         internal void FindNextFromDialog(string term, bool matchCase, bool wrap)
@@ -2298,11 +2014,8 @@ namespace SSH_Helper
             _lastFindMatchCase = matchCase;
             _lastFindWrap = wrap;
 
-            bool found = PerformFind(term, matchCase, forward: true, wrap, initiatedFromFindDialog: true);
-            if (!found)
-                _findDialog?.SetStatus("Not found.", true);
-            else
-                _findDialog?.SetStatus("Found.");
+            bool found = PerformFind(term, matchCase, true, wrap, true);
+            _findDialog?.SetStatus(found ? "Found." : "Not found.", !found);
         }
 
         internal void FindPreviousFromDialog(string term, bool matchCase, bool wrap)
@@ -2316,61 +2029,47 @@ namespace SSH_Helper
             _lastFindMatchCase = matchCase;
             _lastFindWrap = wrap;
 
-            bool found = PerformFind(term, matchCase, forward: false, wrap, initiatedFromFindDialog: true);
-            if (!found)
-                _findDialog?.SetStatus("Not found.", true);
-            else
-                _findDialog?.SetStatus("Found.");
+            bool found = PerformFind(term, matchCase, false, wrap, true);
+            _findDialog?.SetStatus(found ? "Found." : "Not found.", !found);
         }
 
-        private bool PerformFind(string term, bool matchCase, bool forward, bool wrap, bool initiatedFromFindDialog)
+        private bool PerformFind(string term, bool matchCase, bool forward, bool wrap, bool fromDialog)
         {
             if (string.IsNullOrEmpty(term) || string.IsNullOrEmpty(txtOutput.Text))
                 return false;
 
             var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
             string text = txtOutput.Text;
-            int startIndex;
 
+            int idx;
             if (forward)
             {
-                startIndex = txtOutput.SelectionStart + txtOutput.SelectionLength;
-                if (startIndex > text.Length) startIndex = text.Length;
+                int start = txtOutput.SelectionStart + txtOutput.SelectionLength;
+                if (start > text.Length) start = text.Length;
 
-                int idx = text.IndexOf(term, startIndex, comparison);
+                idx = text.IndexOf(term, start, comparison);
                 if (idx == -1 && wrap)
-                {
                     idx = text.IndexOf(term, 0, comparison);
-                }
-                if (idx == -1)
-                    return false;
-
-                HighlightAndScroll(idx, term.Length, initiatedFromFindDialog);
-                return true;
             }
             else
             {
-                startIndex = txtOutput.SelectionStart - 1;
-                if (startIndex < 0) startIndex = text.Length - 1;
+                int start = txtOutput.SelectionStart - 1;
+                if (start < 0) start = text.Length - 1;
 
-                int idx = LastIndexOf(text, term, startIndex, comparison);
+                idx = LastIndexOf(text, term, start, comparison);
                 if (idx == -1 && wrap)
-                {
                     idx = LastIndexOf(text, term, text.Length - 1, comparison);
-                }
-                if (idx == -1)
-                    return false;
-
-                HighlightAndScroll(idx, term.Length, initiatedFromFindDialog);
-                return true;
             }
+
+            if (idx == -1) return false;
+
+            HighlightAndScroll(idx, term.Length, fromDialog);
+            return true;
         }
 
         private static int LastIndexOf(string source, string term, int startIndex, StringComparison comparison)
         {
-            if (startIndex < 0) return -1;
-            if (string.IsNullOrEmpty(term)) return -1;
-            // Walk backwards manually (supports case-insensitive)
+            if (startIndex < 0 || string.IsNullOrEmpty(term)) return -1;
             int lastPossible = startIndex - term.Length + 1;
             for (int i = lastPossible; i >= 0; i--)
             {
@@ -2380,7 +2079,7 @@ namespace SSH_Helper
             return -1;
         }
 
-        private void HighlightAndScroll(int index, int length, bool initiatedFromFindDialog)
+        private void HighlightAndScroll(int index, int length, bool fromDialog)
         {
             try
             {
@@ -2388,21 +2087,12 @@ namespace SSH_Helper
                 txtOutput.SelectionLength = length;
                 txtOutput.ScrollToCaret();
 
-                if (initiatedFromFindDialog)
+                if (fromDialog && _findDialog is { IsDisposed: false, Visible: true })
                 {
-                    // Keep the Find dialog active & ready for another Enter
-                    if (_findDialog != null && !_findDialog.IsDisposed && _findDialog.Visible)
-                    {
-                        _findDialog.Activate();
-                        // Re-focus textbox for quick repeated Enter
-                        var findBox = _findDialog.ActiveControl as TextBox;
-                        // Fallback: explicitly focus the find textbox if we have a reference
-                        // (in this simple dialog ActiveControl will usually be txtFind already)
-                    }
+                    _findDialog.Activate();
                 }
                 else
                 {
-                    // Global F3 navigation puts focus in output
                     txtOutput.Focus();
                 }
             }
@@ -2412,480 +2102,176 @@ namespace SSH_Helper
             }
         }
 
-        private void contextHistoryLst_Opening(object sender, CancelEventArgs e)
+        #endregion
+
+        #region Configuration
+
+        private void SaveConfiguration()
         {
-
-        }
-
-        private void InitializePresetExportImportMenuItems()
-        {
-            if (contextPresetLst != null)
-            {
-                // Avoid duplicates if called defensively
-                if (!contextPresetLst.Items.OfType<ToolStripMenuItem>().Any(i => i.Name == "importPresetToolStripMenuItem"))
-                {
-                    var importItem = new ToolStripMenuItem("Import Preset", null, importPresetToolStripMenuItem_Click)
-                    {
-                        Name = "importPresetToolStripMenuItem"
-                    };
-                    contextPresetLst.Items.Add(new ToolStripSeparator());
-                    contextPresetLst.Items.Add(importItem);
-                }
-                if (!contextPresetLst.Items.OfType<ToolStripMenuItem>().Any(i => i.Name == "exportPresetToolStripMenuItem"))
-                {
-                    var exportItem = new ToolStripMenuItem("Export Preset", null, exportPresetToolStripMenuItem_Click)
-                    {
-                        Name = "exportPresetToolStripMenuItem"
-                    };
-
-                    contextPresetLst.Items.Add(exportItem);
-                }
-
-            }
-
-            if (contextPresetLstAdd != null)
-            {
-                if (!contextPresetLstAdd.Items.OfType<ToolStripMenuItem>().Any(i => i.Name == "importPresetToolStripMenuItem"))
-                {
-                    var importItem2 = new ToolStripMenuItem("Import Preset", null, importPresetToolStripMenuItem_Click)
-                    {
-                        Name = "importPresetToolStripMenuItem"
-                    };
-                    contextPresetLstAdd.Items.Add(new ToolStripSeparator());
-                    contextPresetLstAdd.Items.Add(importItem2);
-                }
-            }
-        }
-
-        private void exportPresetToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            if (lstPreset.SelectedItem == null)
-            {
-                MessageBox.Show("No preset selected to export.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            string presetName = lstPreset.SelectedItem.ToString();
-            if (!presets.TryGetValue(presetName, out var info))
-            {
-                MessageBox.Show("Preset not found in memory.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
             try
             {
-                string exportString = CreatePresetExportString(presetName, info);
-                Clipboard.SetText(exportString);
-                MessageBox.Show("Preset exported to clipboard.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Failed to export preset: " + ex.Message, "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        private void importPresetToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            string input = Microsoft.VisualBasic.Interaction.InputBox(
-                "Paste the encoded preset string:\r\nFormat: <name>_<encoded>",
-                "Import Preset",
-                ""
-            );
-
-            if (string.IsNullOrWhiteSpace(input))
-                return;
-
-            int lastUnderscore = input.LastIndexOf('_');
-            if (lastUnderscore <= 0 || lastUnderscore >= input.Length - 1)
-            {
-                MessageBox.Show("Invalid format. Expected <name>_<encoded>.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            string importedName = input.Substring(0, lastUnderscore);
-            string encoded = input.Substring(lastUnderscore + 1);
-
-            try
-            {
-                var importedInfo = ParseImportedPresetPayload(encoded);
-
-                // Ensure unique name if collision
-                string finalName = importedName;
-                if (presets.ContainsKey(finalName))
+                _configService.Update(config =>
                 {
-                    finalName = GetUniquePresetName(finalName);
-                }
+                    config.Username = tsbUsername.Text;
+                    config.Delay = InputValidator.ParseIntOrDefault(txtDelay.Text, 500);
+                    config.Timeout = InputValidator.ParseIntOrDefault(tsbTimeout.Text, 10);
 
-                presets[finalName] = importedInfo;
+                    // Save sort mode and manual order
+                    config.PresetSortMode = _currentSortMode;
+                    config.ManualPresetOrder = new List<string>(_manualPresetOrder);
 
-                if (!lstPreset.Items.Contains(finalName))
-                {
-                    lstPreset.Items.Add(finalName);
-                }
+                    // Save window state
+                    config.WindowState.IsMaximized = WindowState == FormWindowState.Maximized;
 
-                lstPreset.SelectedItem = finalName;
-                txtPreset.Text = finalName;
-                txtCommand.Text = importedInfo.Commands;
-                if (importedInfo.Delay.HasValue) txtDelay.Text = importedInfo.Delay.Value.ToString();
-                if (importedInfo.Timeout.HasValue) txtTimeout.Text = importedInfo.Timeout.Value.ToString();
-
-                SavePresets();
-                MessageBox.Show($"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (FormatException)
-            {
-                MessageBox.Show("Encoded section is not valid Base64.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            catch (InvalidDataException)
-            {
-                MessageBox.Show("Failed to decompress data. The string may be corrupted.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Failed to import preset: " + ex.Message, "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        private string CreatePresetExportString(string presetName, PresetInfo info)
-        {
-            var payload = new
-            {
-                v = 1,
-                commands = info.Commands ?? "",
-                delay = info.Delay,
-                timeout = info.Timeout
-            };
-            string json = JsonConvert.SerializeObject(payload);
-            string encoded = CompressAndEncode(json);
-            return $"{presetName}_{encoded}";
-        }
-
-        private PresetInfo ParseImportedPresetPayload(string encoded)
-        {
-            string decompressed = DecompressEncoded(encoded);
-
-            // If payload looks like JSON attempt to parse structured export
-            if (decompressed.Length > 0 && decompressed.TrimStart().StartsWith("{"))
-            {
-                try
-                {
-                    var obj = JObject.Parse(decompressed);
-                    // commands key (case-insensitive fallback)
-                    string commands =
-                        obj["commands"]?.ToString() ??
-                        obj["Commands"]?.ToString() ??
-                        "";
-                    int? delay = obj["delay"]?.Type == JTokenType.Null ? null : obj["delay"]?.Value<int?>();
-                    int? timeout = obj["timeout"]?.Type == JTokenType.Null ? null : obj["timeout"]?.Value<int?>();
-
-                    return new PresetInfo
+                    if (WindowState == FormWindowState.Normal)
                     {
-                        Commands = commands,
-                        Delay = delay,
-                        Timeout = timeout
-                    };
-                }
-                catch
-                {
-                    // Fall back to treating decompressed text as raw commands
-                }
-            }
-
-            return new PresetInfo
-            {
-                Commands = decompressed,
-                Delay = int.TryParse(txtDelay.Text, out var dVal) ? dVal : null,
-                Timeout = int.TryParse(txtTimeout.Text, out var tVal) ? tVal : null
-            };
-        }
-        private string CompressAndEncode(string text)
-        {
-            byte[] raw = Encoding.UTF8.GetBytes(text);
-            using var ms = new MemoryStream();
-            using (var gzip = new GZipStream(ms, CompressionLevel.SmallestSize, leaveOpen: true))
-            {
-                gzip.Write(raw, 0, raw.Length);
-            }
-            return Convert.ToBase64String(ms.ToArray());
-        }
-
-        private string DecompressEncoded(string encoded)
-        {
-            byte[] compressed = Convert.FromBase64String(encoded);
-            using var input = new MemoryStream(compressed);
-            using var gzip = new GZipStream(input, CompressionMode.Decompress);
-            using var output = new MemoryStream();
-            gzip.CopyTo(output);
-            return Encoding.UTF8.GetString(output.ToArray());
-        }
-
-        private void saveAllToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            if (outputHistoryList.Count == 0)
-            {
-                MessageBox.Show("There is no history to save.", "No History", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            using (SaveFileDialog saveFileDialog = new SaveFileDialog())
-            {
-                saveFileDialog.Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*";
-                saveFileDialog.DefaultExt = "txt";
-                saveFileDialog.AddExtension = true;
-                saveFileDialog.Title = "Save All History";
-                saveFileDialog.FileName = $"SSH_Helper_History_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.txt";
-
-                if (saveFileDialog.ShowDialog() == DialogResult.OK)
-                {
-                    try
-                    {
-                        using (var sw = new StreamWriter(saveFileDialog.FileName, false, new UTF8Encoding(false)))
-                        {
-                            for (int i = 0; i < outputHistoryList.Count; i++)
-                            {
-                                var entry = outputHistoryList[i];
-
-                                string header = $"===== {entry.Key} =====";
-                                sw.WriteLine(header);
-                                sw.WriteLine();
-
-                                // Normalize newlines to Windows CRLF for consistency in the saved file
-                                string body = (entry.Value ?? string.Empty).Replace("\r\n", "\n").Replace("\n", "\r\n");
-                                if (!string.IsNullOrEmpty(body))
-                                    sw.WriteLine(body);
-
-                                // Separate entries with a blank line (add an extra line between blocks)
-                                if (i < outputHistoryList.Count - 1)
-                                {
-                                    sw.WriteLine();
-                                }
-                            }
-                        }
+                        config.WindowState.Left = Left;
+                        config.WindowState.Top = Top;
+                        config.WindowState.Width = Width;
+                        config.WindowState.Height = Height;
                     }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show("Failed to save the file: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                }
-            }
-        }
 
-        private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            using var dlg = new AboutDialog(ApplicationName, ApplicationVersion);
-            dlg.ShowDialog(this);
-        }
-
-        private void openCSVToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            if (!EnsureCsvChangesSavedBeforeReplacing())
-                return;
-
-            OpenCsvInteractive();
-        }
-
-        private void saveAsToolStripMenuItem1_Click(object sender, EventArgs e)
-        {
-            using (SaveFileDialog sfd = new SaveFileDialog())
-            {
-                sfd.Filter = "CSV files (*.csv)|*.csv";
-                sfd.Title = "Save as CSV";
-                if (!string.IsNullOrEmpty(loadedFilePath))
-                    sfd.FileName = Path.GetFileName(loadedFilePath);
-
-                if (sfd.ShowDialog() == DialogResult.OK)
-                {
-                    SaveDataGridViewToCSV(sfd.FileName);
-                    loadedFilePath = sfd.FileName; // capture chosen path
-                }
-            }
-        }
-
-        private bool SaveCurrentCsv(bool promptIfNoPath = true)
-        {
-            // Commit any in-progress edit so the latest cell value is persisted
-            if (dgv_variables.IsCurrentCellInEditMode)
-                dgv_variables.EndEdit();
-
-            if (string.IsNullOrWhiteSpace(loadedFilePath))
-            {
-                if (!promptIfNoPath) return false;
-                saveAsToolStripMenuItem1_Click(this, EventArgs.Empty);
-                return !string.IsNullOrWhiteSpace(loadedFilePath);
-            }
-
-            try
-            {
-                SaveDataGridViewToCSV(loadedFilePath);
-                return true;
+                    // Save splitter positions
+                    config.WindowState.MainSplitterDistance = mainSplitContainer.SplitterDistance;
+                    config.WindowState.TopSplitterDistance = topSplitContainer.SplitterDistance;
+                    config.WindowState.CommandSplitterDistance = commandSplitContainer.SplitterDistance;
+                    config.WindowState.OutputSplitterDistance = outputSplitContainer.SplitterDistance;
+                });
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to save file:\r\n{ex.Message}", "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return false;
+                MessageBox.Show($"Failed to save configuration: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-        }
-
-        private void saveToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            SaveCurrentCsv(promptIfNoPath: true);
         }
 
         private bool ConfirmExitWorkflow()
         {
-            // If commands are running, confirm stop before exiting
-            if (isRunning)
+            if (_sshService.IsRunning)
             {
-                var result = MessageBox.Show(
-                    "Execution is currently running. Stop and exit?",
-                    "Exit",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-
-                if (result == DialogResult.No)
+                if (MessageBox.Show("Execution is currently running. Stop and exit?", "Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                     return false;
-
-                btnStopAll_Click(this, EventArgs.Empty);
+                StopExecution();
             }
 
-            // Commit any in-progress grid edit
             if (dgv_variables.IsCurrentCellInEditMode)
-            {
                 dgv_variables.EndEdit();
-            }
 
-            bool presetDirty = IsPresetDirty();
-
-            // Offer to save CSV changes first
             if (_csvDirty)
             {
-                var saveCsv = MessageBox.Show(
-                    "You have unsaved CSV changes. Do you want to save before exiting?",
-                    "Save Changes",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (saveCsv == DialogResult.Cancel)
-                    return false;
-
-                if (saveCsv == DialogResult.Yes)
-                {
-                    if (!SaveCurrentCsv(promptIfNoPath: true))
-                    {
-                        // Save failed or cancelled in Save As
-                        return false;
-                    }
-                }
+                var result = MessageBox.Show("You have unsaved CSV changes. Save before exiting?", "Save Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (result == DialogResult.Cancel) return false;
+                if (result == DialogResult.Yes && !SaveCurrentCsv(promptIfNoPath: true)) return false;
             }
 
-            // Offer to save preset changes
-            if (presetDirty)
+            if (IsPresetDirty())
             {
-                var savePreset = MessageBox.Show(
-                    "You have unsaved preset changes. Do you want to save the preset before exiting?",
-                    "Save Preset",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (savePreset == DialogResult.Cancel)
-                    return false;
-
-                if (savePreset == DialogResult.Yes)
-                {
-                    btnSave_Click(this, EventArgs.Empty);
-                }
+                var result = MessageBox.Show("You have unsaved preset changes. Save before exiting?", "Save Preset", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (result == DialogResult.Cancel) return false;
+                if (result == DialogResult.Yes) SaveCurrentPreset();
             }
 
             return true;
         }
 
-        private void ExitMenuItem_Click(object sender, EventArgs e)
-        {
-            if (!ConfirmExitWorkflow())
-                return;
+        #endregion
 
-            _exitConfirmed = true;
-            this.Close(); // FormClosing will persist variables
-        }
+        #region Helpers
 
-        private bool EnsureCsvChangesSavedBeforeReplacing()
+        private void EndEditAndClearSelection()
         {
-            // Commit any active edit so dirty flag is accurate
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
-
-            if (!_csvDirty)
-                return true;
-
-            var result = MessageBox.Show(
-                "You have unsaved CSV changes. Save before opening another file?",
-                "Unsaved CSV",
-                MessageBoxButtons.YesNoCancel,
-                MessageBoxIcon.Question);
-
-            if (result == DialogResult.Cancel)
-                return false;
-
-            if (result == DialogResult.Yes)
-            {
-                if (!SaveCurrentCsv(promptIfNoPath: true))
-                    return false; // Save failed or user cancelled Save As
-            }
-
-            // No = discard changes
-            return true;
+            dgv_variables.ClearSelection();
         }
 
-        private void OpenCsvInteractive()
-        {
-            using (OpenFileDialog ofd = new OpenFileDialog())
-            {
-                ofd.Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*";
-                ofd.Multiselect = false;
+        #endregion
 
-                if (ofd.ShowDialog() == DialogResult.OK)
+        #region Update Check
+
+        /// <summary>
+        /// Checks for application updates.
+        /// </summary>
+        /// <param name="silent">If true, only shows dialog when update is available. If false, shows result even when up-to-date.</param>
+        private async Task CheckForUpdatesAsync(bool silent)
+        {
+            if (_updateService == null) return;
+
+            var config = _configService.GetCurrent();
+
+            // Update status bar
+            if (!silent)
+            {
+                UpdateStatusBar("Checking for updates...");
+                checkForUpdatesToolStripMenuItem.Enabled = false;
+            }
+
+            try
+            {
+                var result = await _updateService.CheckForUpdatesAsync();
+
+                // Update last check time
+                _configService.Update(c => c.UpdateSettings.LastCheckTime = DateTime.UtcNow);
+
+                if (result.ErrorMessage != null)
                 {
-                    loadedFilePath = ofd.FileName;
-                    DataTable dataTable = LoadCsvIntoDataTable(ofd.FileName);
-                    dgv_variables.Columns.Clear();
-                    dgv_variables.DataSource = dataTable;
-                    _csvDirty = false; // Freshly loaded
+                    if (!silent)
+                    {
+                        using var errorDialog = new UpdateErrorDialog(result.ErrorMessage);
+                        errorDialog.ShowDialog(this);
+                    }
+                    UpdateStatusBar("Update check failed");
+                    return;
+                }
+
+                if (result.UpdateAvailable)
+                {
+                    // Check if user has skipped this version
+                    if (silent && config.UpdateSettings.SkippedVersion == result.LatestVersion)
+                    {
+                        UpdateStatusBar("Ready");
+                        return;
+                    }
+
+                    using var updateDialog = new UpdateDialog(result, _updateService, skippedVersion =>
+                    {
+                        _configService.Update(c => c.UpdateSettings.SkippedVersion = skippedVersion);
+                    });
+                    updateDialog.ShowDialog(this);
+                }
+                else
+                {
+                    if (!silent)
+                    {
+                        using var noUpdateDialog = new NoUpdateDialog(ApplicationVersion);
+                        noUpdateDialog.ShowDialog(this);
+                    }
+                }
+
+                UpdateStatusBar("Ready");
+            }
+            catch (Exception ex)
+            {
+                if (!silent)
+                {
+                    using var errorDialog = new UpdateErrorDialog(ex.Message);
+                    errorDialog.ShowDialog(this);
+                }
+                UpdateStatusBar("Update check failed");
+            }
+            finally
+            {
+                if (!silent)
+                {
+                    checkForUpdatesToolStripMenuItem.Enabled = true;
                 }
             }
         }
 
-        private bool IsPresetDirty()
+        private async void checkForUpdatesToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            string active = _activePresetName ?? "";
-            string currentName = txtPreset.Text?.Trim() ?? "";
-            string currentCommands = txtCommand.Text ?? "";
-
-            bool anyFieldsEntered = !string.IsNullOrWhiteSpace(currentName) || !string.IsNullOrWhiteSpace(currentCommands);
-
-            // If nothing has been loaded yet, any entered data counts as dirty (unsaved new preset)
-            if (string.IsNullOrEmpty(active))
-                return anyFieldsEntered;
-
-            if (!presets.TryGetValue(active, out var info))
-                return anyFieldsEntered;
-
-            bool nameChanged = !string.Equals(currentName, active, StringComparison.Ordinal);
-            bool commandsChanged = !string.Equals(currentCommands, info.Commands ?? "", StringComparison.Ordinal);
-
-            bool delayDiffers;
-            if (int.TryParse(txtDelay.Text, out var dVal))
-                delayDiffers = info.Delay != dVal;
-            else
-                delayDiffers = info.Delay.HasValue;
-
-            bool timeoutDiffers;
-            if (int.TryParse(txtTimeout.Text, out var tVal))
-                timeoutDiffers = info.Timeout != tVal;
-            else
-                timeoutDiffers = info.Timeout.HasValue;
-
-            return nameChanged || commandsChanged || delayDiffers || timeoutDiffers;
+            await CheckForUpdatesAsync(silent: false);
         }
 
+        #endregion
     }
 }
