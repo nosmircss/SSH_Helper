@@ -38,7 +38,7 @@ namespace SSH_Helper
             {
                 try
                 {
-                    var url = "https://example.com";
+                    var url = "https://github.com/nosmircss/SSH_Helper";
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = url,
@@ -64,7 +64,7 @@ namespace SSH_Helper
 $@"Application : {appName}
 Version     : {appVersion}
 Build Time  : {buildTime}
-Author      : Chris Dudek (chris_dudek@comcast.com)
+Author      : Chris Dudek (chris_dudek@nwcd.net)
 Runtime     : {runtime}
 
 This tool executes preset CLI commands over SSH
