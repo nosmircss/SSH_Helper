@@ -47,5 +47,20 @@ namespace SSH_Helper.Services
                 IdleTimeout = TimeSpan.FromSeconds(Math.Max(10, seconds / 3))
             };
         }
+
+        /// <summary>
+        /// Creates timeout options with separate command and connection timeouts.
+        /// </summary>
+        /// <param name="commandTimeoutSeconds">Command timeout in seconds</param>
+        /// <param name="connectionTimeoutSeconds">Connection timeout in seconds</param>
+        public static SshTimeoutOptions Create(int commandTimeoutSeconds, int connectionTimeoutSeconds)
+        {
+            return new SshTimeoutOptions
+            {
+                ConnectionTimeout = TimeSpan.FromSeconds(connectionTimeoutSeconds),
+                CommandTimeout = TimeSpan.FromSeconds(commandTimeoutSeconds),
+                IdleTimeout = TimeSpan.FromSeconds(Math.Max(10, commandTimeoutSeconds / 3))
+            };
+        }
     }
 }
