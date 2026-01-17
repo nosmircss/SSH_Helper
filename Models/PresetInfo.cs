@@ -29,6 +29,12 @@ namespace SSH_Helper.Models
         public bool IsFavorite { get; set; }
 
         /// <summary>
+        /// The folder this preset belongs to (null or empty = root level).
+        /// Single-level folders only, no nesting.
+        /// </summary>
+        public string? Folder { get; set; }
+
+        /// <summary>
         /// Gets the type of this preset (auto-detected from content).
         /// </summary>
         [JsonIgnore]
@@ -48,7 +54,8 @@ namespace SSH_Helper.Models
             {
                 Commands = Commands,
                 Timeout = Timeout,
-                IsFavorite = IsFavorite
+                IsFavorite = IsFavorite,
+                Folder = Folder
             };
         }
     }

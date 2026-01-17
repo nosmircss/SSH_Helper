@@ -358,4 +358,299 @@ public class PresetManagerTests
     }
 
     #endregion
+
+    #region Folder Tests
+
+    [Fact]
+    public void CreateFolder_NewFolder_ReturnsTrue()
+    {
+        _presetManager.Load();
+        var folderName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+        try
+        {
+            var result = _presetManager.CreateFolder(folderName);
+
+            result.Should().BeTrue();
+            _presetManager.Folders.Should().ContainKey(folderName);
+        }
+        finally
+        {
+            _presetManager.DeleteFolder(folderName, deletePresets: true);
+        }
+    }
+
+    [Fact]
+    public void CreateFolder_DuplicateName_ReturnsFalse()
+    {
+        _presetManager.Load();
+        var folderName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        _presetManager.CreateFolder(folderName);
+
+        try
+        {
+            var result = _presetManager.CreateFolder(folderName);
+
+            result.Should().BeFalse();
+        }
+        finally
+        {
+            _presetManager.DeleteFolder(folderName, deletePresets: true);
+        }
+    }
+
+    [Fact]
+    public void CreateFolder_EmptyName_ThrowsArgumentException()
+    {
+        _presetManager.Load();
+
+        var action = () => _presetManager.CreateFolder("");
+
+        action.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void RenameFolder_ValidRename_ReturnsTrue()
+    {
+        _presetManager.Load();
+        var oldName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var newName = "RenamedFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        _presetManager.CreateFolder(oldName);
+
+        try
+        {
+            var result = _presetManager.RenameFolder(oldName, newName);
+
+            result.Should().BeTrue();
+            _presetManager.Folders.Should().ContainKey(newName);
+            _presetManager.Folders.Should().NotContainKey(oldName);
+        }
+        finally
+        {
+            _presetManager.DeleteFolder(newName, deletePresets: true);
+        }
+    }
+
+    [Fact]
+    public void RenameFolder_UpdatesPresetsInFolder()
+    {
+        _presetManager.Load();
+        var folderName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var newFolderName = "RenamedFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var presetName = "TestPreset_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        _presetManager.CreateFolder(folderName);
+        _presetManager.Save(presetName, new PresetInfo { Commands = "test", Folder = folderName });
+
+        try
+        {
+            _presetManager.RenameFolder(folderName, newFolderName);
+
+            var preset = _presetManager.Get(presetName);
+            preset!.Folder.Should().Be(newFolderName);
+        }
+        finally
+        {
+            _presetManager.Delete(presetName);
+            _presetManager.DeleteFolder(newFolderName, deletePresets: true);
+        }
+    }
+
+    [Fact]
+    public void DeleteFolder_MovesPresetsToRoot()
+    {
+        _presetManager.Load();
+        var folderName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var presetName = "TestPreset_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        _presetManager.CreateFolder(folderName);
+        _presetManager.Save(presetName, new PresetInfo { Commands = "test", Folder = folderName });
+
+        try
+        {
+            _presetManager.DeleteFolder(folderName, deletePresets: false);
+
+            _presetManager.Folders.Should().NotContainKey(folderName);
+            _presetManager.Presets.Should().ContainKey(presetName);
+            var preset = _presetManager.Get(presetName);
+            preset!.Folder.Should().BeNull();
+        }
+        finally
+        {
+            _presetManager.Delete(presetName);
+        }
+    }
+
+    [Fact]
+    public void DeleteFolder_WithDeletePresets_DeletesPresets()
+    {
+        _presetManager.Load();
+        var folderName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var presetName = "TestPreset_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        _presetManager.CreateFolder(folderName);
+        _presetManager.Save(presetName, new PresetInfo { Commands = "test", Folder = folderName });
+
+        _presetManager.DeleteFolder(folderName, deletePresets: true);
+
+        _presetManager.Folders.Should().NotContainKey(folderName);
+        _presetManager.Presets.Should().NotContainKey(presetName);
+    }
+
+    [Fact]
+    public void MovePresetToFolder_MovesToFolder()
+    {
+        _presetManager.Load();
+        var folderName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var presetName = "TestPreset_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        _presetManager.CreateFolder(folderName);
+        _presetManager.Save(presetName, new PresetInfo { Commands = "test" });
+
+        try
+        {
+            var result = _presetManager.MovePresetToFolder(presetName, folderName);
+
+            result.Should().BeTrue();
+            var preset = _presetManager.Get(presetName);
+            preset!.Folder.Should().Be(folderName);
+        }
+        finally
+        {
+            _presetManager.Delete(presetName);
+            _presetManager.DeleteFolder(folderName, deletePresets: true);
+        }
+    }
+
+    [Fact]
+    public void MovePresetToFolder_NullFolder_MovesToRoot()
+    {
+        _presetManager.Load();
+        var folderName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var presetName = "TestPreset_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        _presetManager.CreateFolder(folderName);
+        _presetManager.Save(presetName, new PresetInfo { Commands = "test", Folder = folderName });
+
+        try
+        {
+            var result = _presetManager.MovePresetToFolder(presetName, null);
+
+            result.Should().BeTrue();
+            var preset = _presetManager.Get(presetName);
+            preset!.Folder.Should().BeNull();
+        }
+        finally
+        {
+            _presetManager.Delete(presetName);
+            _presetManager.DeleteFolder(folderName, deletePresets: true);
+        }
+    }
+
+    [Fact]
+    public void GetPresetsInFolder_ReturnsCorrectPresets()
+    {
+        _presetManager.Load();
+        var folderName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var preset1 = "TestPreset1_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var preset2 = "TestPreset2_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var rootPreset = "RootPreset_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+        _presetManager.CreateFolder(folderName);
+        _presetManager.Save(preset1, new PresetInfo { Commands = "test1", Folder = folderName });
+        _presetManager.Save(preset2, new PresetInfo { Commands = "test2", Folder = folderName });
+        _presetManager.Save(rootPreset, new PresetInfo { Commands = "root" });
+
+        try
+        {
+            var presetsInFolder = _presetManager.GetPresetsInFolder(folderName).ToList();
+
+            presetsInFolder.Should().Contain(preset1);
+            presetsInFolder.Should().Contain(preset2);
+            presetsInFolder.Should().NotContain(rootPreset);
+        }
+        finally
+        {
+            _presetManager.Delete(preset1);
+            _presetManager.Delete(preset2);
+            _presetManager.Delete(rootPreset);
+            _presetManager.DeleteFolder(folderName, deletePresets: true);
+        }
+    }
+
+    [Fact]
+    public void Export_IncludesFolder()
+    {
+        _presetManager.Load();
+        var folderName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var presetName = "TestPreset_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        _presetManager.CreateFolder(folderName);
+        _presetManager.Save(presetName, new PresetInfo { Commands = "test", Folder = folderName });
+
+        try
+        {
+            var exported = _presetManager.Export(presetName);
+            _presetManager.Delete(presetName);
+
+            var importedName = _presetManager.Import(exported);
+            var importedPreset = _presetManager.Get(importedName);
+
+            importedPreset!.Folder.Should().Be(folderName);
+        }
+        finally
+        {
+            _presetManager.Delete(presetName);
+            _presetManager.DeleteFolder(folderName, deletePresets: true);
+        }
+    }
+
+    [Fact]
+    public void Import_CreatesFolder_IfMissing()
+    {
+        _presetManager.Load();
+        var folderName = "ImportedFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        var presetName = "TestPreset_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        _presetManager.CreateFolder(folderName);
+        _presetManager.Save(presetName, new PresetInfo { Commands = "test", Folder = folderName });
+
+        try
+        {
+            var exported = _presetManager.Export(presetName);
+            _presetManager.Delete(presetName);
+            _presetManager.DeleteFolder(folderName, deletePresets: true);
+
+            // Now import - folder should be recreated
+            var importedName = _presetManager.Import(exported);
+
+            _presetManager.Folders.Should().ContainKey(folderName);
+            var preset = _presetManager.Get(importedName);
+            preset!.Folder.Should().Be(folderName);
+        }
+        finally
+        {
+            _presetManager.Delete(presetName);
+            _presetManager.DeleteFolder(folderName, deletePresets: true);
+        }
+    }
+
+    [Fact]
+    public void SetFolderExpanded_PersistsState()
+    {
+        _presetManager.Load();
+        var folderName = "TestFolder_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        _presetManager.CreateFolder(folderName);
+
+        try
+        {
+            _presetManager.SetFolderExpanded(folderName, false);
+
+            var folderInfo = _presetManager.Folders[folderName];
+            folderInfo.IsExpanded.Should().BeFalse();
+
+            _presetManager.SetFolderExpanded(folderName, true);
+            folderInfo = _presetManager.Folders[folderName];
+            folderInfo.IsExpanded.Should().BeTrue();
+        }
+        finally
+        {
+            _presetManager.DeleteFolder(folderName, deletePresets: true);
+        }
+    }
+
+    #endregion
 }

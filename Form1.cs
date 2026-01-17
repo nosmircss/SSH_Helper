@@ -7,6 +7,15 @@ using SSH_Helper.Utilities;
 
 namespace SSH_Helper
 {
+    /// <summary>
+    /// Tag object for TreeView nodes to identify presets vs folders.
+    /// </summary>
+    internal class PresetNodeTag
+    {
+        public bool IsFolder { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+
     public partial class Form1 : Form
     {
         #region Constants
@@ -45,12 +54,15 @@ namespace SSH_Helper
         private int _currentMatchIndex = -1;
 
         // Preset sorting
-        private PresetSortMode _currentSortMode = PresetSortMode.Ascending;
+        private PresetSortMode _currentSortMode = PresetSortMode.Manual;
         private readonly List<string> _manualPresetOrder = new();
 
-        // Preset drag-drop state
-        private int _presetDragIndex = -1;
-        private Point _presetDragStartPoint;
+        // Preset TreeView drag-drop state
+        private TreeNode? _draggedNode;
+        private TreeNode? _lastHighlightedNode;
+
+        // Track selected folder for Run button (TreeView selection can be unreliable on button click)
+        private string? _selectedFolderName;
 
         #endregion
 
@@ -193,12 +205,9 @@ namespace SSH_Helper
             dgv_variables.KeyPress += Dgv_Variables_KeyPress;
             dgv_variables.KeyDown += Dgv_Variables_KeyDown;
 
-            // Preset events
-            lstPreset.MouseDown += LstPreset_MouseDown;
-            lstPreset.MouseMove += LstPreset_MouseMove;
-            lstPreset.DragOver += LstPreset_DragOver;
-            lstPreset.DragDrop += LstPreset_DragDrop;
-            lstPreset.AllowDrop = true;
+            // Preset TreeView events are wired up in Designer
+            trvPresets.NodeMouseClick += TrvPresets_NodeMouseClick;
+            contextPresetLst.Opening += ContextPresetLst_Opening;
 
             // Script editor cursor position tracking
             txtCommand.Click += TxtCommand_CursorPositionChanged;
@@ -528,123 +537,65 @@ namespace SSH_Helper
 
         #region Preset Events
 
-        private void LstPreset_MouseDown(object? sender, MouseEventArgs e)
+        #region TreeView Preset Handlers
+
+        private void TrvPresets_NodeMouseClick(object? sender, TreeNodeMouseClickEventArgs e)
         {
+            // Select the node on right-click so context menu shows for correct node
             if (e.Button == MouseButtons.Right)
             {
-                int index = lstPreset.IndexFromPoint(e.Location);
-                if (index != ListBox.NoMatches)
-                {
-                    lstPreset.SelectedIndex = index;
-                    contextPresetLst.Show(Cursor.Position);
-                }
-                else
-                {
-                    contextPresetLstAdd.Show(Cursor.Position);
-                }
-            }
-            else if (e.Button == MouseButtons.Left && _currentSortMode == PresetSortMode.Manual)
-            {
-                _presetDragIndex = lstPreset.IndexFromPoint(e.Location);
-                _presetDragStartPoint = e.Location;
+                trvPresets.SelectedNode = e.Node;
             }
         }
 
-        private void LstPreset_MouseMove(object? sender, MouseEventArgs e)
+        private void trvPresets_AfterSelect(object? sender, TreeViewEventArgs e)
         {
-            if (e.Button != MouseButtons.Left || _presetDragIndex < 0 || _currentSortMode != PresetSortMode.Manual)
+            if (_suppressPresetSelectionChange || e.Node == null)
                 return;
 
-            // Check if mouse has moved enough to start drag
-            if (Math.Abs(e.X - _presetDragStartPoint.X) > SystemInformation.DragSize.Width ||
-                Math.Abs(e.Y - _presetDragStartPoint.Y) > SystemInformation.DragSize.Height)
+            var tag = e.Node.Tag as PresetNodeTag;
+            if (tag == null)
+                return;
+
+            // If a folder is selected, clear the editor to avoid confusion
+            if (tag.IsFolder)
             {
-                if (_presetDragIndex < lstPreset.Items.Count)
+                // Check for unsaved changes first
+                if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
                 {
-                    lstPreset.DoDragDrop(lstPreset.Items[_presetDragIndex], DragDropEffects.Move);
+                    var result = MessageBox.Show(
+                        $"Save changes to preset '{_activePresetName}'?",
+                        "Unsaved Preset",
+                        MessageBoxButtons.YesNoCancel,
+                        MessageBoxIcon.Question);
+
+                    if (result == DialogResult.Cancel)
+                    {
+                        _suppressPresetSelectionChange = true;
+                        SelectPresetByName(_activePresetName);
+                        _suppressPresetSelectionChange = false;
+                        return;
+                    }
+
+                    if (result == DialogResult.Yes)
+                    {
+                        SaveCurrentPreset();
+                    }
                 }
-            }
-        }
 
-        private void LstPreset_DragOver(object? sender, DragEventArgs e)
-        {
-            if (_currentSortMode != PresetSortMode.Manual || !e.Data?.GetDataPresent(typeof(string)) == true)
-            {
-                e.Effect = DragDropEffects.None;
+                // Clear the editor and track selected folder
+                _activePresetName = null;
+                _selectedFolderName = tag.Name;
+                txtPreset.Clear();
+                txtCommand.Clear();
+                txtTimeoutHeader.Clear();
                 return;
             }
 
-            e.Effect = DragDropEffects.Move;
+            // Clear folder selection when a preset is selected
+            _selectedFolderName = null;
 
-            // Get the item under the cursor and highlight it
-            var point = lstPreset.PointToClient(new Point(e.X, e.Y));
-            int targetIndex = lstPreset.IndexFromPoint(point);
-            if (targetIndex >= 0 && targetIndex < lstPreset.Items.Count)
-            {
-                lstPreset.SelectedIndex = targetIndex;
-            }
-        }
-
-        private void LstPreset_DragDrop(object? sender, DragEventArgs e)
-        {
-            if (_currentSortMode != PresetSortMode.Manual || _presetDragIndex < 0)
-            {
-                _presetDragIndex = -1;
-                return;
-            }
-
-            var point = lstPreset.PointToClient(new Point(e.X, e.Y));
-            int targetIndex = lstPreset.IndexFromPoint(point);
-
-            if (targetIndex < 0 || targetIndex == _presetDragIndex)
-            {
-                _presetDragIndex = -1;
-                return;
-            }
-
-            // Get the preset name being moved (strip star if favorite)
-            string draggedDisplayName = lstPreset.Items[_presetDragIndex].ToString() ?? "";
-            string draggedPresetName = GetPresetNameFromDisplay(draggedDisplayName);
-
-            // Build a list from the current visual order
-            var currentOrder = new List<string>();
-            for (int i = 0; i < lstPreset.Items.Count; i++)
-            {
-                currentOrder.Add(GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? ""));
-            }
-
-            // Remove from current position and insert at new position
-            currentOrder.RemoveAt(_presetDragIndex);
-            currentOrder.Insert(targetIndex > _presetDragIndex ? targetIndex : targetIndex, draggedPresetName);
-
-            // Update manual order list
-            _manualPresetOrder.Clear();
-            _manualPresetOrder.AddRange(currentOrder);
-
-            _presetDragIndex = -1;
-            RefreshPresetList();
-
-            // Re-select the moved item
-            for (int i = 0; i < lstPreset.Items.Count; i++)
-            {
-                if (GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? "") == draggedPresetName)
-                {
-                    lstPreset.SelectedIndex = i;
-                    break;
-                }
-            }
-
-            // Save the new order
-            SaveConfiguration();
-        }
-
-        private void lstPreset_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_suppressPresetSelectionChange || lstPreset.SelectedItem == null)
-                return;
-
-            string displayName = lstPreset.SelectedItem.ToString() ?? "";
-            string newPresetName = GetPresetNameFromDisplay(displayName);
+            string newPresetName = tag.Name;
 
             if (!string.IsNullOrEmpty(_activePresetName) &&
                 !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
@@ -659,15 +610,7 @@ namespace SSH_Helper
                 if (result == DialogResult.Cancel)
                 {
                     _suppressPresetSelectionChange = true;
-                    // Find the previous active preset in the list
-                    for (int i = 0; i < lstPreset.Items.Count; i++)
-                    {
-                        if (GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? "") == _activePresetName)
-                        {
-                            lstPreset.SelectedIndex = i;
-                            break;
-                        }
-                    }
+                    SelectPresetByName(_activePresetName);
                     _suppressPresetSelectionChange = false;
                     return;
                 }
@@ -696,6 +639,205 @@ namespace SSH_Helper
             _activePresetName = newPresetName;
         }
 
+        private void trvPresets_AfterCollapse(object? sender, TreeViewEventArgs e)
+        {
+            if (e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                _presetManager.SetFolderExpanded(tag.Name, false);
+            }
+        }
+
+        private void trvPresets_AfterExpand(object? sender, TreeViewEventArgs e)
+        {
+            if (e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                _presetManager.SetFolderExpanded(tag.Name, true);
+            }
+        }
+
+        private void trvPresets_ItemDrag(object? sender, ItemDragEventArgs e)
+        {
+            if (e.Item is TreeNode node)
+            {
+                _draggedNode = node;
+                DoDragDrop(node, DragDropEffects.Move);
+            }
+        }
+
+        private void trvPresets_DragOver(object? sender, DragEventArgs e)
+        {
+            if (_draggedNode == null)
+            {
+                e.Effect = DragDropEffects.None;
+                return;
+            }
+
+            var pt = trvPresets.PointToClient(new Point(e.X, e.Y));
+            var targetNode = trvPresets.GetNodeAt(pt);
+
+            // Reset previous highlight
+            if (_lastHighlightedNode != null && _lastHighlightedNode != targetNode)
+            {
+                _lastHighlightedNode.BackColor = trvPresets.BackColor;
+            }
+
+            if (targetNode != null && CanDropOn(_draggedNode, targetNode))
+            {
+                e.Effect = DragDropEffects.Move;
+                targetNode.BackColor = Color.LightBlue;
+                _lastHighlightedNode = targetNode;
+            }
+            else if (targetNode == null)
+            {
+                // Dropping on empty area = move to root
+                e.Effect = DragDropEffects.Move;
+            }
+            else
+            {
+                e.Effect = DragDropEffects.None;
+            }
+        }
+
+        private void trvPresets_DragDrop(object? sender, DragEventArgs e)
+        {
+            // Reset highlight
+            if (_lastHighlightedNode != null)
+            {
+                _lastHighlightedNode.BackColor = trvPresets.BackColor;
+                _lastHighlightedNode = null;
+            }
+
+            if (_draggedNode == null)
+                return;
+
+            var pt = trvPresets.PointToClient(new Point(e.X, e.Y));
+            var targetNode = trvPresets.GetNodeAt(pt);
+            var draggedTag = _draggedNode.Tag as PresetNodeTag;
+
+            if (draggedTag == null)
+            {
+                _draggedNode = null;
+                return;
+            }
+
+            try
+            {
+                if (draggedTag.IsFolder)
+                {
+                    // Folder reordering in Manual mode (folders can't be nested)
+                    if (_currentSortMode == PresetSortMode.Manual && targetNode?.Tag is PresetNodeTag targetTag && targetTag.IsFolder)
+                    {
+                        ReorderFolders(draggedTag.Name, targetTag.Name);
+                    }
+                }
+                else
+                {
+                    // Preset being dragged
+                    if (targetNode == null)
+                    {
+                        // Drop on empty area = move to root
+                        _presetManager.MovePresetToFolder(draggedTag.Name, null);
+                    }
+                    else if (targetNode.Tag is PresetNodeTag targetTag)
+                    {
+                        if (targetTag.IsFolder)
+                        {
+                            // Drop on folder = move into folder
+                            _presetManager.MovePresetToFolder(draggedTag.Name, targetTag.Name);
+                        }
+                        else if (_currentSortMode == PresetSortMode.Manual)
+                        {
+                            // Drop on preset = reorder within same folder
+                            var sourcePreset = _presetManager.Get(draggedTag.Name);
+                            var targetPreset = _presetManager.Get(targetTag.Name);
+                            if (sourcePreset?.Folder == targetPreset?.Folder)
+                            {
+                                ReorderPresetsInFolder(draggedTag.Name, targetTag.Name, sourcePreset?.Folder);
+                            }
+                        }
+                    }
+                }
+
+                RefreshPresetList();
+                SelectPresetByName(draggedTag.IsFolder ? null : draggedTag.Name);
+            }
+            finally
+            {
+                _draggedNode = null;
+            }
+        }
+
+        private bool CanDropOn(TreeNode draggedNode, TreeNode targetNode)
+        {
+            if (draggedNode == targetNode)
+                return false;
+
+            var draggedTag = draggedNode.Tag as PresetNodeTag;
+            var targetTag = targetNode.Tag as PresetNodeTag;
+
+            if (draggedTag == null || targetTag == null)
+                return false;
+
+            if (draggedTag.IsFolder)
+            {
+                // Folders can only be reordered with other folders in Manual mode
+                return _currentSortMode == PresetSortMode.Manual && targetTag.IsFolder;
+            }
+            else
+            {
+                // Presets can drop on folders or other presets (for reordering)
+                return targetTag.IsFolder || _currentSortMode == PresetSortMode.Manual;
+            }
+        }
+
+        private void ReorderFolders(string sourceFolderName, string targetFolderName)
+        {
+            var config = _configService.Load();
+            var folderOrder = config.ManualFolderOrder;
+
+            if (!folderOrder.Contains(sourceFolderName))
+                folderOrder.Add(sourceFolderName);
+            if (!folderOrder.Contains(targetFolderName))
+                folderOrder.Add(targetFolderName);
+
+            int sourceIndex = folderOrder.IndexOf(sourceFolderName);
+            int targetIndex = folderOrder.IndexOf(targetFolderName);
+
+            folderOrder.RemoveAt(sourceIndex);
+            folderOrder.Insert(targetIndex, sourceFolderName);
+
+            config.ManualFolderOrder = folderOrder;
+            _configService.Save(config);
+        }
+
+        private void ReorderPresetsInFolder(string sourcePresetName, string targetPresetName, string? folder)
+        {
+            var config = _configService.Load();
+            string folderKey = folder ?? "";
+
+            if (!config.ManualPresetOrderByFolder.TryGetValue(folderKey, out var presetOrder))
+            {
+                presetOrder = _presetManager.GetPresetsInFolder(folder).ToList();
+                config.ManualPresetOrderByFolder[folderKey] = presetOrder;
+            }
+
+            if (!presetOrder.Contains(sourcePresetName))
+                presetOrder.Add(sourcePresetName);
+            if (!presetOrder.Contains(targetPresetName))
+                presetOrder.Add(targetPresetName);
+
+            int sourceIndex = presetOrder.IndexOf(sourcePresetName);
+            int targetIndex = presetOrder.IndexOf(targetPresetName);
+
+            presetOrder.RemoveAt(sourceIndex);
+            presetOrder.Insert(targetIndex, sourcePresetName);
+
+            config.ManualPresetOrderByFolder[folderKey] = presetOrder;
+            _configService.Save(config);
+        }
+
+        #endregion
+
         #endregion
 
         #region Button Click Handlers
@@ -723,12 +865,50 @@ namespace SSH_Helper
 
         private void btnExecuteAll_Click(object sender, EventArgs e)
         {
-            ExecuteOnAllHosts();
+            // Check if a folder is selected - use tracked folder name as fallback
+            // (TreeView selection can be unreliable when clicking buttons)
+            string? folderName = null;
+            if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                folderName = tag.Name;
+            }
+            else if (!string.IsNullOrEmpty(_selectedFolderName))
+            {
+                folderName = _selectedFolderName;
+            }
+
+            if (folderName != null)
+            {
+                ExecuteFolderPresetsOnAllHosts(folderName);
+            }
+            else
+            {
+                ExecuteOnAllHosts();
+            }
         }
 
         private void btnExecuteSelected_Click(object sender, EventArgs e)
         {
-            ExecuteOnSelectedHost();
+            // Check if a folder is selected - use tracked folder name as fallback
+            // (TreeView selection can be unreliable when clicking buttons)
+            string? folderName = null;
+            if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                folderName = tag.Name;
+            }
+            else if (!string.IsNullOrEmpty(_selectedFolderName))
+            {
+                folderName = _selectedFolderName;
+            }
+
+            if (folderName != null)
+            {
+                ExecuteFolderPresetsOnSelectedHost(folderName);
+            }
+            else
+            {
+                ExecuteOnSelectedHost();
+            }
         }
 
         private void btnStopAll_Click(object sender, EventArgs e)
@@ -857,15 +1037,14 @@ namespace SSH_Helper
                 _ => PresetSortMode.Ascending
             };
 
-            // When switching to manual mode, initialize the order from current visual order
+            // When switching to manual mode, initialize the order from current presets
             if (_currentSortMode == PresetSortMode.Manual && _manualPresetOrder.Count == 0)
             {
-                // Build order from current list display
-                for (int i = 0; i < lstPreset.Items.Count; i++)
+                // Build order from current presets
+                foreach (var presetName in _presetManager.Presets.Keys)
                 {
-                    string name = GetPresetNameFromDisplay(lstPreset.Items[i].ToString() ?? "");
-                    if (!string.IsNullOrEmpty(name))
-                        _manualPresetOrder.Add(name);
+                    if (!string.IsNullOrEmpty(presetName))
+                        _manualPresetOrder.Add(presetName);
                 }
             }
 
@@ -901,6 +1080,184 @@ namespace SSH_Helper
         private void ctxToggleFavorite_Click(object? sender, EventArgs e)
         {
             ToggleFavorite();
+        }
+
+        private void ContextPresetLst_Opening(object? sender, CancelEventArgs e)
+        {
+            var tag = trvPresets.SelectedNode?.Tag as PresetNodeTag;
+            bool isFolder = tag?.IsFolder == true;
+            bool isPreset = tag != null && !tag.IsFolder;
+            bool hasSelection = tag != null;
+
+            // Preset-specific items
+            ctxAddPreset.Visible = true;
+            ctxDuplicatePreset.Visible = isPreset;
+            ctxRenamePreset.Visible = isPreset;
+            ctxDeletePreset.Visible = isPreset;
+            ctxToggleFavorite.Visible = isPreset;
+            ctxExportPreset.Visible = isPreset;
+            ctxImportPreset.Visible = true;
+            ctxToggleSorting.Visible = true;
+
+            // Folder-specific items
+            ctxAddFolder.Visible = true;
+            ctxRenameFolder.Visible = isFolder;
+            ctxDeleteFolder.Visible = isFolder;
+
+            // Move to folder - only for presets
+            ctxMoveToFolder.Visible = isPreset;
+            if (isPreset)
+            {
+                BuildMoveToFolderSubmenu(tag!.Name);
+            }
+
+            // Show separators appropriately
+            toolStripSeparator6.Visible = isPreset;
+            toolStripSeparator7.Visible = true;
+            toolStripSeparatorFolders.Visible = true;
+        }
+
+        private void BuildMoveToFolderSubmenu(string presetName)
+        {
+            ctxMoveToFolder.DropDownItems.Clear();
+
+            var preset = _presetManager.Get(presetName);
+            string? currentFolder = preset?.Folder;
+
+            // Add "Root" option
+            var rootItem = new ToolStripMenuItem("(Root Level)")
+            {
+                Checked = string.IsNullOrEmpty(currentFolder),
+                Tag = (string?)null
+            };
+            rootItem.Click += (s, e) =>
+            {
+                _presetManager.MovePresetToFolder(presetName, null);
+                RefreshPresetList();
+                SelectPresetByName(presetName);
+            };
+            ctxMoveToFolder.DropDownItems.Add(rootItem);
+
+            // Add separator if there are folders
+            var folders = _presetManager.GetFolders().ToList();
+            if (folders.Count > 0)
+            {
+                ctxMoveToFolder.DropDownItems.Add(new ToolStripSeparator());
+            }
+
+            // Add folder options
+            foreach (var folderName in folders.OrderBy(f => f))
+            {
+                var folderItem = new ToolStripMenuItem(folderName)
+                {
+                    Checked = string.Equals(currentFolder, folderName, StringComparison.Ordinal),
+                    Tag = folderName
+                };
+                folderItem.Click += (s, e) =>
+                {
+                    _presetManager.MovePresetToFolder(presetName, folderName);
+                    RefreshPresetList();
+                    SelectPresetByName(presetName);
+                };
+                ctxMoveToFolder.DropDownItems.Add(folderItem);
+            }
+        }
+
+        private void ctxAddFolder_Click(object? sender, EventArgs e)
+        {
+            string folderName = Microsoft.VisualBasic.Interaction.InputBox(
+                "Enter a name for the new folder:",
+                "New Folder",
+                "New Folder");
+
+            if (string.IsNullOrWhiteSpace(folderName)) return;
+
+            folderName = _presetManager.GetUniqueFolderName(folderName);
+
+            if (_presetManager.CreateFolder(folderName))
+            {
+                RefreshPresetList();
+                UpdateStatusBar($"Folder '{folderName}' created");
+            }
+        }
+
+        private void ctxRenameFolder_Click(object? sender, EventArgs e)
+        {
+            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || !tag.IsFolder)
+                return;
+
+            string oldName = tag.Name;
+            string newName = Microsoft.VisualBasic.Interaction.InputBox(
+                $"Enter a new name for the folder '{oldName}':",
+                "Rename Folder",
+                oldName);
+
+            if (string.IsNullOrWhiteSpace(newName) || newName == oldName) return;
+
+            if (_presetManager.RenameFolder(oldName, newName))
+            {
+                RefreshPresetList();
+                UpdateStatusBar($"Folder renamed to '{newName}'");
+            }
+            else
+            {
+                MessageBox.Show("A folder with that name already exists.", "Rename Folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ctxDeleteFolder_Click(object? sender, EventArgs e)
+        {
+            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || !tag.IsFolder)
+                return;
+
+            string folderName = tag.Name;
+            var presetsInFolder = _presetManager.GetPresetsInFolder(folderName).ToList();
+
+            string message = presetsInFolder.Count > 0
+                ? $"Delete folder '{folderName}' and move its {presetsInFolder.Count} preset(s) to root level?"
+                : $"Delete empty folder '{folderName}'?";
+
+            if (MessageBox.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                _presetManager.DeleteFolder(folderName, deletePresets: false);
+                RefreshPresetList();
+                UpdateStatusBar($"Folder '{folderName}' deleted");
+            }
+        }
+
+        private void tsbAddFolder_Click(object? sender, EventArgs e)
+        {
+            // Reuse the context menu handler
+            ctxAddFolder_Click(sender, e);
+        }
+
+        private void tsbDeleteFolder_Click(object? sender, EventArgs e)
+        {
+            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || !tag.IsFolder)
+            {
+                MessageBox.Show("Please select a folder to delete.", "Delete Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string folderName = tag.Name;
+            var presetsInFolder = _presetManager.GetPresetsInFolder(folderName).ToList();
+
+            string message = presetsInFolder.Count > 0
+                ? $"Are you sure you want to delete the folder '{folderName}' and ALL {presetsInFolder.Count} preset(s) inside it?\n\nThis action cannot be undone."
+                : $"Delete empty folder '{folderName}'?";
+
+            if (MessageBox.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            {
+                // Clear editor before deleting to avoid "save changes?" prompt for deleted presets
+                _activePresetName = null;
+                txtPreset.Clear();
+                txtCommand.Clear();
+                txtTimeoutHeader.Clear();
+
+                _presetManager.DeleteFolder(folderName, deletePresets: true);
+                RefreshPresetList();
+                UpdateStatusBar($"Folder '{folderName}' and its presets deleted");
+            }
         }
 
         private void lstOutput_SelectedIndexChanged(object sender, EventArgs e)
@@ -1294,13 +1651,14 @@ namespace SSH_Helper
                 return;
             }
 
-            // Preserve existing IsFavorite status if updating
+            // Preserve existing IsFavorite and Folder status if updating
             var existingPreset = _presetManager.Get(presetName);
             var preset = new PresetInfo
             {
                 Commands = commands,
                 Timeout = int.TryParse(txtTimeoutHeader.Text, out var t) ? t : null,
-                IsFavorite = existingPreset?.IsFavorite ?? false
+                IsFavorite = existingPreset?.IsFavorite ?? false,
+                Folder = existingPreset?.Folder
             };
 
             bool isNew = !_presetManager.Presets.ContainsKey(presetName);
@@ -1322,6 +1680,24 @@ namespace SSH_Helper
 
         private void AddPreset()
         {
+            // Check for unsaved changes first
+            if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
+            {
+                var saveResult = MessageBox.Show(
+                    $"Save changes to preset '{_activePresetName}'?",
+                    "Unsaved Preset",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (saveResult == DialogResult.Cancel)
+                    return;
+
+                if (saveResult == DialogResult.Yes)
+                {
+                    SaveCurrentPreset();
+                }
+            }
+
             string presetName = Microsoft.VisualBasic.Interaction.InputBox(
                 "Enter the name of the new preset:",
                 "Add Preset",
@@ -1335,7 +1711,32 @@ namespace SSH_Helper
                 return;
             }
 
-            _presetManager.Save(presetName, new PresetInfo());
+            // Determine folder: if a folder is selected, create preset in it
+            // If a preset inside a folder is selected, create in that folder
+            string? targetFolder = null;
+            if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag)
+            {
+                if (tag.IsFolder)
+                {
+                    targetFolder = tag.Name;
+                }
+                else
+                {
+                    // Selected a preset - check if it's in a folder
+                    var selectedPreset = _presetManager.Get(tag.Name);
+                    targetFolder = selectedPreset?.Folder;
+                }
+            }
+
+            // Get default timeout from config
+            var config = _configService.Load();
+            var newPreset = new PresetInfo
+            {
+                Timeout = config.Timeout,
+                Folder = targetFolder
+            };
+
+            _presetManager.Save(presetName, newPreset);
 
             // Add to manual order
             if (!_manualPresetOrder.Contains(presetName))
@@ -1344,14 +1745,21 @@ namespace SSH_Helper
             }
 
             RefreshPresetList();
-            lstPreset.SelectedItem = presetName;
+            SelectPresetByName(presetName);
+
+            // Load the new preset into the editor
+            txtPreset.Text = presetName;
+            txtCommand.Clear();
+            txtTimeoutHeader.Text = config.Timeout.ToString();
+            _activePresetName = presetName;
         }
 
         private void DuplicatePreset()
         {
-            if (lstPreset.SelectedItem == null) return;
+            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+                return;
 
-            string sourceName = lstPreset.SelectedItem.ToString() ?? "";
+            string sourceName = tag.Name;
             string suggested = _presetManager.GetUniqueName(sourceName + "_Copy");
 
             string newName = Microsoft.VisualBasic.Interaction.InputBox(
@@ -1383,7 +1791,7 @@ namespace SSH_Helper
                 }
 
                 RefreshPresetList();
-                lstPreset.SelectedItem = finalName;
+                SelectPresetByName(finalName);
 
                 var preset = _presetManager.Get(finalName);
                 txtPreset.Text = finalName;
@@ -1398,9 +1806,10 @@ namespace SSH_Helper
 
         private void RenamePreset()
         {
-            if (lstPreset.SelectedItem == null) return;
+            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+                return;
 
-            string selectedPreset = lstPreset.SelectedItem.ToString() ?? "";
+            string selectedPreset = tag.Name;
             string newName = Microsoft.VisualBasic.Interaction.InputBox(
                 $"Enter a new name for the preset '{selectedPreset}':",
                 "Rename Preset",
@@ -1422,24 +1831,23 @@ namespace SSH_Helper
             }
 
             RefreshPresetList();
-            lstPreset.SelectedItem = newName;
+            SelectPresetByName(newName);
             txtPreset.Text = newName;
             _activePresetName = newName;
         }
 
         private void DeletePreset()
         {
-            if (lstPreset.SelectedItem == null) return;
+            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+                return;
 
-            int selectedIndex = lstPreset.SelectedIndex;
-            string selectedPreset = lstPreset.SelectedItem.ToString() ?? "";
+            string selectedPreset = tag.Name;
 
             // Check if this is the currently active preset being deleted
             bool isDeletingActivePreset = string.Equals(selectedPreset, _activePresetName, StringComparison.Ordinal);
 
             if (_presetManager.Delete(selectedPreset))
             {
-                lstPreset.Items.Remove(selectedPreset);
                 _manualPresetOrder.Remove(selectedPreset);
 
                 // Clear active preset if we deleted it (prevents "save changes?" prompt)
@@ -1448,27 +1856,27 @@ namespace SSH_Helper
                     _activePresetName = null;
                     txtPreset.Clear();
                     txtCommand.Clear();
+                    txtTimeoutHeader.Clear();
                 }
 
-                if (lstPreset.Items.Count > 0)
-                {
-                    _suppressPresetSelectionChange = true;
-                    lstPreset.SelectedIndex = selectedIndex > 0 ? selectedIndex - 1 : 0;
-                    _suppressPresetSelectionChange = false;
+                RefreshPresetList();
 
-                    // Load the newly selected preset
-                    var newSelection = lstPreset.SelectedItem?.ToString();
-                    if (!string.IsNullOrEmpty(newSelection))
+                // Select another preset if any exist
+                if (_presetManager.Presets.Count > 0)
+                {
+                    var firstPreset = _presetManager.Presets.Keys.FirstOrDefault();
+                    if (!string.IsNullOrEmpty(firstPreset))
                     {
-                        var preset = _presetManager.Get(newSelection);
+                        SelectPresetByName(firstPreset);
+                        var preset = _presetManager.Get(firstPreset);
                         if (preset != null)
                         {
-                            txtPreset.Text = newSelection;
+                            txtPreset.Text = firstPreset;
                             txtCommand.Text = preset.Commands;
                             txtTimeoutHeader.Text = preset.Timeout.HasValue
                                 ? preset.Timeout.Value.ToString()
                                 : string.Empty;
-                            _activePresetName = newSelection;
+                            _activePresetName = firstPreset;
                         }
                     }
                 }
@@ -1477,7 +1885,7 @@ namespace SSH_Helper
 
         private void ExportPreset()
         {
-            if (lstPreset.SelectedItem == null)
+            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
             {
                 MessageBox.Show("No preset selected to export.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
@@ -1485,7 +1893,7 @@ namespace SSH_Helper
 
             try
             {
-                string presetName = lstPreset.SelectedItem.ToString() ?? "";
+                string presetName = tag.Name;
                 string exportString = _presetManager.Export(presetName);
                 Clipboard.SetText(exportString);
                 MessageBox.Show("Preset exported to clipboard.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1511,8 +1919,8 @@ namespace SSH_Helper
 
                 string finalName = _presetManager.Import(input, defaultTimeout);
 
-                lstPreset.Items.Add(finalName);
-                lstPreset.SelectedItem = finalName;
+                RefreshPresetList();
+                SelectPresetByName(finalName);
 
                 var preset = _presetManager.Get(finalName);
                 if (preset != null)
@@ -1521,6 +1929,7 @@ namespace SSH_Helper
                     txtCommand.Text = preset.Commands;
                     if (preset.Timeout.HasValue) txtTimeoutHeader.Text = preset.Timeout.Value.ToString();
                 }
+                _activePresetName = finalName;
 
                 MessageBox.Show($"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -1596,95 +2005,193 @@ namespace SSH_Helper
 
         private void RefreshPresetList()
         {
-            string? currentSelection = lstPreset.SelectedItem?.ToString();
+            string? currentSelection = null;
+            if (trvPresets.SelectedNode?.Tag is PresetNodeTag selectedTag && !selectedTag.IsFolder)
+            {
+                currentSelection = selectedTag.Name;
+            }
+
             _suppressPresetSelectionChange = true;
+            trvPresets.BeginUpdate();
+            trvPresets.Nodes.Clear();
 
-            lstPreset.Sorted = false;
-            lstPreset.Items.Clear();
+            var config = _configService.Load();
 
-            // Get all presets with their info
-            var presets = _presetManager.Presets.ToList();
+            // Get sorted folders
+            var folders = GetSortedFolders(config);
 
-            // Sort presets based on current mode, always with favorites first
-            IEnumerable<string> sortedPresets;
-
-            // Separate favorites and non-favorites
-            var favorites = presets.Where(p => p.Value.IsFavorite).Select(p => p.Key);
-            var nonFavorites = presets.Where(p => !p.Value.IsFavorite).Select(p => p.Key);
-
-            switch (_currentSortMode)
+            // Add folder nodes
+            var folderNodes = new Dictionary<string, TreeNode>();
+            foreach (var folderName in folders)
             {
-                case PresetSortMode.Ascending:
-                    sortedPresets = favorites.OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-                        .Concat(nonFavorites.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
-                    break;
+                var folderNode = new TreeNode($"📁 {folderName}")
+                {
+                    Tag = new PresetNodeTag { IsFolder = true, Name = folderName }
+                };
+                trvPresets.Nodes.Add(folderNode);
+                folderNodes[folderName] = folderNode;
 
-                case PresetSortMode.Descending:
-                    sortedPresets = favorites.OrderByDescending(n => n, StringComparer.OrdinalIgnoreCase)
-                        .Concat(nonFavorites.OrderByDescending(n => n, StringComparer.OrdinalIgnoreCase));
-                    break;
-
-                case PresetSortMode.Manual:
-                    // Use manual order exactly as specified (no favorites separation in manual mode)
-                    var orderedList = new List<string>();
-
-                    foreach (var name in _manualPresetOrder)
+                // Add presets in this folder
+                var presetsInFolder = GetSortedPresetsInFolder(folderName, config);
+                foreach (var presetName in presetsInFolder)
+                {
+                    var preset = _presetManager.Get(presetName);
+                    string displayName = preset?.IsFavorite == true ? $"★ {presetName}" : presetName;
+                    var presetNode = new TreeNode(displayName)
                     {
-                        if (_presetManager.Presets.ContainsKey(name))
-                        {
-                            orderedList.Add(name);
-                        }
-                    }
+                        Tag = new PresetNodeTag { IsFolder = false, Name = presetName }
+                    };
+                    folderNode.Nodes.Add(presetNode);
+                }
 
-                    // Add any presets not in manual order at the end
-                    foreach (var kvp in presets)
-                    {
-                        if (!_manualPresetOrder.Contains(kvp.Key))
-                        {
-                            orderedList.Add(kvp.Key);
-                        }
-                    }
-
-                    sortedPresets = orderedList;
-                    break;
-
-                default:
-                    sortedPresets = presets.Select(p => p.Key);
-                    break;
+                // Restore expand/collapse state
+                var folderInfo = _presetManager.Folders.GetValueOrDefault(folderName);
+                if (folderInfo?.IsExpanded != false)
+                    folderNode.Expand();
             }
 
-            foreach (var name in sortedPresets)
+            // Add root-level presets (no folder)
+            var rootPresets = GetSortedPresetsInFolder(null, config);
+            foreach (var presetName in rootPresets)
             {
-                var preset = _presetManager.Get(name);
-                string displayName = preset?.IsFavorite == true ? $"★ {name}" : name;
-                lstPreset.Items.Add(displayName);
+                var preset = _presetManager.Get(presetName);
+                string displayName = preset?.IsFavorite == true ? $"★ {presetName}" : presetName;
+                var presetNode = new TreeNode(displayName)
+                {
+                    Tag = new PresetNodeTag { IsFolder = false, Name = presetName }
+                };
+                trvPresets.Nodes.Add(presetNode);
             }
+
+            trvPresets.EndUpdate();
 
             // Restore selection
             if (!string.IsNullOrEmpty(currentSelection))
             {
-                // Find the item (may have star prefix now)
-                for (int i = 0; i < lstPreset.Items.Count; i++)
-                {
-                    string item = lstPreset.Items[i].ToString() ?? "";
-                    string itemName = item.StartsWith("★ ") ? item.Substring(2) : item;
-                    if (itemName == currentSelection || item == currentSelection)
-                    {
-                        lstPreset.SelectedIndex = i;
-                        break;
-                    }
-                }
+                SelectPresetByName(currentSelection);
             }
 
             _suppressPresetSelectionChange = false;
         }
 
+        private IEnumerable<string> GetSortedFolders(AppConfiguration config)
+        {
+            var folders = _presetManager.GetFolders().ToList();
+
+            return _currentSortMode switch
+            {
+                PresetSortMode.Ascending => folders.OrderBy(f => f, StringComparer.OrdinalIgnoreCase),
+                PresetSortMode.Descending => folders.OrderByDescending(f => f, StringComparer.OrdinalIgnoreCase),
+                PresetSortMode.Manual => GetManualOrderedFolders(folders, config),
+                _ => folders
+            };
+        }
+
+        private IEnumerable<string> GetManualOrderedFolders(List<string> folders, AppConfiguration config)
+        {
+            var result = new List<string>();
+            foreach (var name in config.ManualFolderOrder)
+            {
+                if (folders.Contains(name))
+                {
+                    result.Add(name);
+                }
+            }
+            // Add any folders not in manual order
+            foreach (var name in folders)
+            {
+                if (!result.Contains(name))
+                {
+                    result.Add(name);
+                }
+            }
+            return result;
+        }
+
+        private IEnumerable<string> GetSortedPresetsInFolder(string? folder, AppConfiguration config)
+        {
+            var presets = _presetManager.GetPresetsInFolder(folder).ToList();
+
+            if (_currentSortMode == PresetSortMode.Manual)
+            {
+                return GetManualOrderedPresets(presets, folder, config);
+            }
+
+            // Separate favorites and non-favorites
+            var favorites = presets.Where(p => _presetManager.Get(p)?.IsFavorite == true);
+            var nonFavorites = presets.Where(p => _presetManager.Get(p)?.IsFavorite != true);
+
+            return _currentSortMode switch
+            {
+                PresetSortMode.Ascending =>
+                    favorites.OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                        .Concat(nonFavorites.OrderBy(n => n, StringComparer.OrdinalIgnoreCase)),
+                PresetSortMode.Descending =>
+                    favorites.OrderByDescending(n => n, StringComparer.OrdinalIgnoreCase)
+                        .Concat(nonFavorites.OrderByDescending(n => n, StringComparer.OrdinalIgnoreCase)),
+                _ => favorites.Concat(nonFavorites)
+            };
+        }
+
+        private IEnumerable<string> GetManualOrderedPresets(List<string> presets, string? folder, AppConfiguration config)
+        {
+            string folderKey = folder ?? "";
+            var result = new List<string>();
+
+            if (config.ManualPresetOrderByFolder.TryGetValue(folderKey, out var manualOrder))
+            {
+                foreach (var name in manualOrder)
+                {
+                    if (presets.Contains(name))
+                    {
+                        result.Add(name);
+                    }
+                }
+            }
+            // Add any presets not in manual order
+            foreach (var name in presets)
+            {
+                if (!result.Contains(name))
+                {
+                    result.Add(name);
+                }
+            }
+            return result;
+        }
+
+        private void SelectPresetByName(string? presetName)
+        {
+            if (string.IsNullOrEmpty(presetName))
+                return;
+
+            TreeNode? FindNode(TreeNodeCollection nodes)
+            {
+                foreach (TreeNode node in nodes)
+                {
+                    if (node.Tag is PresetNodeTag tag && !tag.IsFolder && tag.Name == presetName)
+                        return node;
+
+                    var found = FindNode(node.Nodes);
+                    if (found != null)
+                        return found;
+                }
+                return null;
+            }
+
+            var targetNode = FindNode(trvPresets.Nodes);
+            if (targetNode != null)
+            {
+                trvPresets.SelectedNode = targetNode;
+                targetNode.EnsureVisible();
+            }
+        }
+
         private void ToggleFavorite()
         {
-            if (lstPreset.SelectedItem == null) return;
+            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+                return;
 
-            string displayName = lstPreset.SelectedItem.ToString() ?? "";
-            string presetName = displayName.StartsWith("★ ") ? displayName.Substring(2) : displayName;
+            string presetName = tag.Name;
 
             var preset = _presetManager.Get(presetName);
             if (preset == null) return;
@@ -1693,18 +2200,7 @@ namespace SSH_Helper
             _presetManager.Save(presetName, preset);
 
             RefreshPresetList();
-
-            // Re-select the item
-            for (int i = 0; i < lstPreset.Items.Count; i++)
-            {
-                string item = lstPreset.Items[i].ToString() ?? "";
-                string itemName = item.StartsWith("★ ") ? item.Substring(2) : item;
-                if (itemName == presetName)
-                {
-                    lstPreset.SelectedIndex = i;
-                    break;
-                }
-            }
+            SelectPresetByName(presetName);
 
             UpdateStatusBar(preset.IsFavorite ? $"'{presetName}' added to favorites" : $"'{presetName}' removed from favorites");
         }
@@ -1811,6 +2307,202 @@ namespace SSH_Helper
             {
                 SetExecutionMode(false);
             }
+        }
+
+        private async void ExecuteFolderPresetsOnAllHosts(string folderName)
+        {
+            var config = _configService.Load();
+            var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
+            if (presetNames.Count == 0)
+            {
+                MessageBox.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var hostRows = dgv_variables.Rows.Cast<DataGridViewRow>()
+                .Where(r => !r.IsNewRow && !string.IsNullOrWhiteSpace(GetCellValue(r, CsvManager.HostColumnName)))
+                .ToList();
+
+            if (hostRows.Count == 0)
+            {
+                MessageBox.Show("No hosts available.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var result = MessageBox.Show(
+                $"Run all {presetNames.Count} preset(s) in folder '{folderName}' on {hostRows.Count} host(s)?\n\nFor each host, presets will be executed in order:\n• {string.Join("\n• ", presetNames.Take(5))}{(presetNames.Count > 5 ? $"\n  ... and {presetNames.Count - 5} more" : "")}",
+                "Run Folder Presets",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes) return;
+
+            if (_sshService.IsRunning) return;
+
+            SetExecutionMode(true);
+            txtOutput.Clear();
+
+            int connectionTimeout = config.ConnectionTimeout;
+            int totalOperations = hostRows.Count * presetNames.Count;
+            int completedOperations = 0;
+
+            UpdateStatusBar($"Executing folder '{folderName}' on {hostRows.Count} hosts...", true, 0, totalOperations);
+
+            var allResults = new List<ExecutionResult>();
+
+            try
+            {
+                // Host-first order: for each host, run all presets in sequence
+                foreach (var row in hostRows)
+                {
+                    string hostIp = GetCellValue(row, CsvManager.HostColumnName);
+                    if (string.IsNullOrWhiteSpace(hostIp) || !InputValidator.IsValidIpAddress(hostIp))
+                        continue;
+
+                    var singleHost = GetHostConnections(new[] { row }).ToList();
+                    if (singleHost.Count == 0) continue;
+
+                    txtOutput.AppendText($"\n{'='.ToString().PadRight(60, '=')}\n");
+                    txtOutput.AppendText($"HOST: {hostIp}\n");
+                    txtOutput.AppendText($"{'='.ToString().PadRight(60, '=')}\n");
+
+                    bool isFirstPreset = true;
+                    foreach (var presetName in presetNames)
+                    {
+                        var preset = _presetManager.Get(presetName);
+                        if (preset == null) continue;
+
+                        int commandTimeout = preset.Timeout ?? config.Timeout;
+                        var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
+
+                        txtOutput.AppendText($"\n--- Preset: {presetName} ---\n");
+
+                        // Only show "CONNECTED TO" header for first preset per host
+                        var results = await _sshService.ExecutePresetAsync(singleHost, preset, tsbUsername.Text, tsbPassword.Text, timeouts, showHeader: isFirstPreset);
+                        allResults.AddRange(results);
+                        isFirstPreset = false;
+
+                        completedOperations++;
+                        UpdateStatusBar($"Host {hostIp}: {presetName}", true, completedOperations, totalOperations);
+                    }
+                }
+
+                // Store single history entry for the entire folder execution
+                StoreFolderExecutionHistory(folderName, allResults);
+                UpdateStatusBar($"Completed folder '{folderName}' on {hostRows.Count} hosts");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"An error occurred: {ex.Message}");
+                UpdateStatusBar("Execution failed");
+            }
+            finally
+            {
+                SetExecutionMode(false);
+            }
+        }
+
+        private async void ExecuteFolderPresetsOnSelectedHost(string folderName)
+        {
+            if (dgv_variables.CurrentCell == null)
+            {
+                txtOutput.Clear();
+                txtOutput.AppendText("No host selected");
+                return;
+            }
+
+            var row = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
+            string host = GetCellValue(row, CsvManager.HostColumnName);
+
+            if (row.IsNewRow || string.IsNullOrWhiteSpace(host) || !InputValidator.IsValidIpAddress(host))
+            {
+                txtOutput.Clear();
+                txtOutput.AppendText("No valid host selected");
+                return;
+            }
+
+            var config = _configService.Load();
+            var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
+            if (presetNames.Count == 0)
+            {
+                MessageBox.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var result = MessageBox.Show(
+                $"Run all {presetNames.Count} preset(s) in folder '{folderName}' on {host}?\n\nPresets will be executed in order:\n• {string.Join("\n• ", presetNames.Take(5))}{(presetNames.Count > 5 ? $"\n  ... and {presetNames.Count - 5} more" : "")}",
+                "Run Folder Presets",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes) return;
+
+            if (_sshService.IsRunning) return;
+
+            SetExecutionMode(true);
+            txtOutput.Clear();
+
+            var hosts = GetHostConnections(new[] { row }).ToList();
+            int connectionTimeout = config.ConnectionTimeout;
+
+            UpdateStatusBar($"Executing folder '{folderName}' on {host}...", true, 0, presetNames.Count);
+
+            var allResults = new List<ExecutionResult>();
+
+            try
+            {
+                txtOutput.AppendText($"{'='.ToString().PadRight(60, '=')}\n");
+                txtOutput.AppendText($"HOST: {host}\n");
+                txtOutput.AppendText($"{'='.ToString().PadRight(60, '=')}\n");
+
+                int completedPresets = 0;
+                bool isFirstPreset = true;
+                foreach (var presetName in presetNames)
+                {
+                    var preset = _presetManager.Get(presetName);
+                    if (preset == null) continue;
+
+                    int commandTimeout = preset.Timeout ?? config.Timeout;
+                    var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
+
+                    txtOutput.AppendText($"\n--- Preset: {presetName} ---\n");
+
+                    // Only show "CONNECTED TO" header for first preset
+                    var results = await _sshService.ExecutePresetAsync(hosts, preset, tsbUsername.Text, tsbPassword.Text, timeouts, showHeader: isFirstPreset);
+                    allResults.AddRange(results);
+                    isFirstPreset = false;
+
+                    completedPresets++;
+                    UpdateStatusBar($"Completed {completedPresets}/{presetNames.Count} presets", true, completedPresets, presetNames.Count);
+                }
+
+                // Store single history entry for the entire folder execution
+                StoreFolderExecutionHistory(folderName, allResults);
+                UpdateStatusBar($"Completed folder '{folderName}' on {host}");
+            }
+            finally
+            {
+                SetExecutionMode(false);
+            }
+        }
+
+        private void StoreFolderExecutionHistory(string folderName, List<ExecutionResult> results)
+        {
+            var combinedOutput = new StringBuilder();
+            foreach (var result in results)
+            {
+                combinedOutput.Append(result.Output);
+            }
+
+            string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - 📁 {folderName}";
+            var entry = new KeyValuePair<string, string>(key, combinedOutput.ToString());
+
+            Invoke(() =>
+            {
+                _outputHistory.Insert(0, entry);
+                lstOutput.SelectedIndex = 0;
+                SaveConfiguration();
+            });
         }
 
         private void StopExecution()
@@ -2370,17 +3062,7 @@ namespace SSH_Helper
             // Restore selected preset (do this last so the preset loads properly)
             if (!string.IsNullOrEmpty(state.SelectedPreset))
             {
-                // Find and select the preset in the list
-                for (int i = 0; i < lstPreset.Items.Count; i++)
-                {
-                    var displayName = lstPreset.Items[i].ToString() ?? "";
-                    var presetName = GetPresetNameFromDisplay(displayName);
-                    if (presetName == state.SelectedPreset)
-                    {
-                        lstPreset.SelectedIndex = i;
-                        break;
-                    }
-                }
+                SelectPresetByName(state.SelectedPreset);
             }
 
             UpdateHostCount();

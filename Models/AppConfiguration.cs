@@ -24,8 +24,25 @@ namespace SSH_Helper.Models
         public WindowState WindowState { get; set; } = new();
 
         // Preset sorting
-        public PresetSortMode PresetSortMode { get; set; } = PresetSortMode.Ascending;
+        public PresetSortMode PresetSortMode { get; set; } = PresetSortMode.Manual;
         public List<string> ManualPresetOrder { get; set; } = new();
+
+        // Preset folders
+        /// <summary>
+        /// Folder metadata keyed by folder name.
+        /// </summary>
+        public Dictionary<string, FolderInfo> PresetFolders { get; set; } = new();
+
+        /// <summary>
+        /// Manual ordering for presets within each folder.
+        /// Key: folder name (empty string for root level), Value: ordered preset names.
+        /// </summary>
+        public Dictionary<string, List<string>> ManualPresetOrderByFolder { get; set; } = new();
+
+        /// <summary>
+        /// Manual ordering for folders.
+        /// </summary>
+        public List<string> ManualFolderOrder { get; set; } = new();
 
         // Update settings
         public UpdateSettings UpdateSettings { get; set; } = new();

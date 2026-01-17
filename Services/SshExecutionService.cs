@@ -164,12 +164,14 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Executes commands on multiple hosts with custom timeout options.
         /// </summary>
+        /// <param name="showHeader">If false, suppresses the "CONNECTED TO" header output.</param>
         public async Task<List<ExecutionResult>> ExecuteAsync(
             IEnumerable<HostConnection> hosts,
             string[] commands,
             string defaultUsername,
             string defaultPassword,
-            SshTimeoutOptions timeouts)
+            SshTimeoutOptions timeouts,
+            bool showHeader = true)
         {
             var results = new List<ExecutionResult>();
             _cts = new CancellationTokenSource();
@@ -186,7 +188,7 @@ namespace SSH_Helper.Services
                         continue;
 
                     var result = await Task.Run(() =>
-                        ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, _cts.Token));
+                        ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, _cts.Token, showHeader));
 
                     results.Add(result);
                 }
@@ -202,35 +204,39 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Executes a preset on multiple hosts. Automatically detects script vs simple commands.
         /// </summary>
+        /// <param name="showHeader">If false, suppresses the "CONNECTED TO" header output.</param>
         public async Task<List<ExecutionResult>> ExecutePresetAsync(
             IEnumerable<HostConnection> hosts,
             PresetInfo preset,
             string defaultUsername,
             string defaultPassword,
-            SshTimeoutOptions timeouts)
+            SshTimeoutOptions timeouts,
+            bool showHeader = true)
         {
             // Check if this is a YAML script
             if (preset.IsScript)
             {
-                return await ExecuteScriptAsync(hosts, preset.Commands, defaultUsername, defaultPassword, timeouts);
+                return await ExecuteScriptAsync(hosts, preset.Commands, defaultUsername, defaultPassword, timeouts, showHeader);
             }
             else
             {
                 // Simple commands - use existing logic
                 var commands = preset.Commands.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                return await ExecuteAsync(hosts, commands, defaultUsername, defaultPassword, timeouts);
+                return await ExecuteAsync(hosts, commands, defaultUsername, defaultPassword, timeouts, showHeader);
             }
         }
 
         /// <summary>
         /// Executes a YAML script on multiple hosts.
         /// </summary>
+        /// <param name="showHeader">If false, suppresses the "CONNECTED TO" header output.</param>
         public async Task<List<ExecutionResult>> ExecuteScriptAsync(
             IEnumerable<HostConnection> hosts,
             string scriptText,
             string defaultUsername,
             string defaultPassword,
-            SshTimeoutOptions timeouts)
+            SshTimeoutOptions timeouts,
+            bool showHeader = true)
         {
             var results = new List<ExecutionResult>();
             _cts = new CancellationTokenSource();
@@ -277,7 +283,7 @@ namespace SSH_Helper.Services
                         continue;
 
                     var result = await Task.Run(() =>
-                        ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, _cts.Token));
+                        ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, _cts.Token, showHeader));
 
                     results.Add(result);
                 }
@@ -305,7 +311,8 @@ namespace SSH_Helper.Services
             string defaultUsername,
             string defaultPassword,
             SshTimeoutOptions timeouts,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool showHeader = true)
         {
             var result = new ExecutionResult
             {
@@ -321,11 +328,11 @@ namespace SSH_Helper.Services
             {
                 if (UseConnectionPooling && _connectionPool != null)
                 {
-                    ExecuteWithPool(host, commands, username, password, timeouts, outputBuilder, cancellationToken);
+                    ExecuteWithPool(host, commands, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
                 }
                 else
                 {
-                    ExecuteWithoutPool(host, commands, username, password, timeouts, outputBuilder, cancellationToken);
+                    ExecuteWithoutPool(host, commands, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
                 }
 
                 result.Success = true;
@@ -396,7 +403,8 @@ namespace SSH_Helper.Services
             string defaultUsername,
             string defaultPassword,
             SshTimeoutOptions timeouts,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool showHeader = true)
         {
             var result = new ExecutionResult
             {
@@ -412,11 +420,11 @@ namespace SSH_Helper.Services
             {
                 if (UseConnectionPooling && _connectionPool != null)
                 {
-                    ExecuteScriptWithPool(host, script, username, password, timeouts, outputBuilder, cancellationToken);
+                    ExecuteScriptWithPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
                 }
                 else
                 {
-                    ExecuteScriptWithoutPool(host, script, username, password, timeouts, outputBuilder, cancellationToken);
+                    ExecuteScriptWithoutPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
                 }
 
                 result.Success = true;
@@ -481,6 +489,7 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Executes a script using connection pooling.
         /// </summary>
+        /// <param name="showHeader">If false, suppresses the header output.</param>
         private void ExecuteScriptWithPool(
             HostConnection host,
             Script script,
@@ -488,7 +497,8 @@ namespace SSH_Helper.Services
             string password,
             SshTimeoutOptions timeouts,
             StringBuilder outputBuilder,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool showHeader = true)
         {
             var (client, session) = _connectionPool!.CreateSessionAsync(host, username, password, timeouts, cancellationToken)
                 .GetAwaiter().GetResult();
@@ -498,17 +508,20 @@ namespace SSH_Helper.Services
                 OnProgressChanged(host, $"Connected to {host} (pooled, script mode)", false, true);
                 session.DebugMode = DebugMode;
 
-                // Build header with script name
-                var prompt = session.CurrentPrompt;
-                var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
-                string header = $"{new string('#', 20)} {host} {prompt} SCRIPT: {scriptName} {new string('#', 20)}";
-                string separator = new string('#', header.Length);
+                // Build header with script name (only if showHeader is true)
+                if (showHeader)
+                {
+                    var prompt = session.CurrentPrompt;
+                    var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
+                    string header = $"{new string('#', 20)} {host} {prompt} SCRIPT: {scriptName} {new string('#', 20)}";
+                    string separator = new string('#', header.Length);
 
-                outputBuilder.AppendLine(separator);
-                outputBuilder.AppendLine(header);
-                outputBuilder.AppendLine(separator);
+                    outputBuilder.AppendLine(separator);
+                    outputBuilder.AppendLine(header);
+                    outputBuilder.AppendLine(separator);
 
-                OnOutputReceived(host, outputBuilder.ToString());
+                    OnOutputReceived(host, outputBuilder.ToString());
+                }
 
                 // Create script context with host variables
                 var context = new ScriptContext(host.Variables);
@@ -548,6 +561,7 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Executes a script without connection pooling.
         /// </summary>
+        /// <param name="showHeader">If false, suppresses the header output.</param>
         private void ExecuteScriptWithoutPool(
             HostConnection host,
             Script script,
@@ -555,7 +569,8 @@ namespace SSH_Helper.Services
             string password,
             SshTimeoutOptions timeouts,
             StringBuilder outputBuilder,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool showHeader = true)
         {
             using var client = new SshClient(host.IpAddress, host.Port, username, password);
             client.ConnectionInfo.Timeout = timeouts.ConnectionTimeout;
@@ -579,17 +594,20 @@ namespace SSH_Helper.Services
             // Initialize session (detect prompt)
             var banner = session.InitializeAsync(cancellationToken).GetAwaiter().GetResult();
 
-            // Build header with script name
-            var prompt = session.CurrentPrompt;
-            var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
-            string header = $"{new string('#', 20)} SCRIPT: {host} {prompt}{scriptName} {new string('#', 20)}";
-            string separator = new string('#', header.Length);
+            // Build header with script name (only if showHeader is true)
+            if (showHeader)
+            {
+                var prompt = session.CurrentPrompt;
+                var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
+                string header = $"{new string('#', 20)} SCRIPT: {host} {prompt}{scriptName} {new string('#', 20)}";
+                string separator = new string('#', header.Length);
 
-            outputBuilder.AppendLine(separator);
-            outputBuilder.AppendLine(header);
-            outputBuilder.AppendLine(separator);
+                outputBuilder.AppendLine(separator);
+                outputBuilder.AppendLine(header);
+                outputBuilder.AppendLine(separator);
 
-            OnOutputReceived(host, outputBuilder.ToString());
+                OnOutputReceived(host, outputBuilder.ToString());
+            }
 
             // Create script context with host variables
             var context = new ScriptContext(host.Variables);
@@ -626,6 +644,7 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Executes commands using connection pooling and the new SshShellSession.
         /// </summary>
+        /// <param name="showHeader">If false, suppresses the "CONNECTED TO" header output.</param>
         private void ExecuteWithPool(
             HostConnection host,
             string[] commands,
@@ -633,7 +652,8 @@ namespace SSH_Helper.Services
             string password,
             SshTimeoutOptions timeouts,
             StringBuilder outputBuilder,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool showHeader = true)
         {
             // Get or create connection from pool
             var (client, session) = _connectionPool!.CreateSessionAsync(host, username, password, timeouts, cancellationToken)
@@ -647,7 +667,7 @@ namespace SSH_Helper.Services
                 session.DebugMode = DebugMode;
 
                 // Track if we've sent the header yet (to avoid duplicating in outputBuilder)
-                bool headerSent = false;
+                bool headerSent = !showHeader; // If not showing header, pretend it's already sent
 
                 // Subscribe to real-time output - capture ALL output to outputBuilder for history
                 session.OutputReceived += (s, e) =>
@@ -673,18 +693,21 @@ namespace SSH_Helper.Services
                     OnOutputReceived(host, debugMsg);
                 }
 
-                // Build header
-                var prompt = session.CurrentPrompt;
-                string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
-                string separator = new string('#', header.Length);
+                // Build header (only if showHeader is true)
+                if (showHeader)
+                {
+                    var prompt = session.CurrentPrompt;
+                    string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
+                    string separator = new string('#', header.Length);
 
-                outputBuilder.AppendLine(separator);
-                outputBuilder.AppendLine(header);
-                outputBuilder.AppendLine(separator);
-                outputBuilder.Append(prompt);
+                    outputBuilder.AppendLine(separator);
+                    outputBuilder.AppendLine(header);
+                    outputBuilder.AppendLine(separator);
+                    outputBuilder.Append(prompt + " ");
 
-                OnOutputReceived(host, outputBuilder.ToString());
-                headerSent = true;
+                    OnOutputReceived(host, outputBuilder.ToString());
+                    headerSent = true;
+                }
 
                 // Execute commands using the session
                 // Output is captured via OutputReceived event above, no need to append return value
@@ -701,6 +724,7 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Executes commands without pooling (original behavior, but using SshShellSession).
         /// </summary>
+        /// <param name="showHeader">If false, suppresses the "CONNECTED TO" header output.</param>
         private void ExecuteWithoutPool(
             HostConnection host,
             string[] commands,
@@ -708,7 +732,8 @@ namespace SSH_Helper.Services
             string password,
             SshTimeoutOptions timeouts,
             StringBuilder outputBuilder,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool showHeader = true)
         {
             using var client = new SshClient(host.IpAddress, host.Port, username, password);
             client.ConnectionInfo.Timeout = timeouts.ConnectionTimeout;
@@ -732,7 +757,7 @@ namespace SSH_Helper.Services
             session.DebugMode = DebugMode;
 
             // Track if we've sent the header yet (to avoid duplicating in outputBuilder)
-            bool headerSent = false;
+            bool headerSent = !showHeader; // If not showing header, pretend it's already sent
 
             // Subscribe to real-time output - capture ALL output to outputBuilder for history
             session.OutputReceived += (s, e) =>
@@ -761,18 +786,21 @@ namespace SSH_Helper.Services
             // Initialize session (detect prompt)
             var banner = session.InitializeAsync(cancellationToken).GetAwaiter().GetResult();
 
-            // Build header
-            var prompt = session.CurrentPrompt;
-            string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
-            string separator = new string('#', header.Length);
+            // Build header (only if showHeader is true)
+            if (showHeader)
+            {
+                var prompt = session.CurrentPrompt;
+                string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
+                string separator = new string('#', header.Length);
 
-            outputBuilder.AppendLine(separator);
-            outputBuilder.AppendLine(header);
-            outputBuilder.AppendLine(separator);
-            outputBuilder.Append(prompt);
+                outputBuilder.AppendLine(separator);
+                outputBuilder.AppendLine(header);
+                outputBuilder.AppendLine(separator);
+                outputBuilder.Append(prompt + " ");
 
-            OnOutputReceived(host, outputBuilder.ToString());
-            headerSent = true;
+                OnOutputReceived(host, outputBuilder.ToString());
+                headerSent = true;
+            }
 
             // Execute commands using the session
             // Output is captured via OutputReceived event above, no need to append return value

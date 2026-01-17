@@ -45,6 +45,10 @@ A Windows Forms application for executing SSH commands across multiple hosts wit
 - **Save**: Enter a name and click Save to store the current commands
 - **Favorites**: Right-click a preset to mark as favorite (shown with star)
 - **Sort**: Use the sort button to organize alphabetically or manually
+- **Folders**: Organize presets into folders for better management
+  - Right-click to create/rename/delete folders
+  - Drag presets into folders or use "Move to Folder" menu
+  - Folders can be expanded/collapsed (state is remembered)
 
 ### YAML Scripts
 

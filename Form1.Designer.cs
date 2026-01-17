@@ -45,7 +45,7 @@ namespace SSH_Helper
             commandPanel = new Panel();
             commandSplitContainer = new SplitContainer();
             presetsPanel = new Panel();
-            lstPreset = new ListBox();
+            trvPresets = new TreeView();
             contextPresetLst = new ContextMenuStrip(components);
             ctxAddPreset = new ToolStripMenuItem();
             ctxDuplicatePreset = new ToolStripMenuItem();
@@ -57,12 +57,20 @@ namespace SSH_Helper
             ctxExportPreset = new ToolStripMenuItem();
             ctxImportPreset = new ToolStripMenuItem();
             ctxToggleSorting = new ToolStripMenuItem();
+            toolStripSeparatorFolders = new ToolStripSeparator();
+            ctxAddFolder = new ToolStripMenuItem();
+            ctxRenameFolder = new ToolStripMenuItem();
+            ctxDeleteFolder = new ToolStripMenuItem();
+            ctxMoveToFolder = new ToolStripMenuItem();
             presetsToolStrip = new ToolStrip();
             tsbAddPreset = new ToolStripButton();
             tsbDeletePreset = new ToolStripButton();
             tsbRenamePreset = new ToolStripButton();
             tsbDuplicatePreset = new ToolStripButton();
             tsbSortPresets = new ToolStripButton();
+            tsbSeparatorFolders = new ToolStripSeparator();
+            tsbAddFolder = new ToolStripButton();
+            tsbDeleteFolder = new ToolStripButton();
             presetsHeaderPanel = new Panel();
             lblPresetsTitle = new Label();
             scriptPanel = new Panel();
@@ -88,6 +96,7 @@ namespace SSH_Helper
             saveAsToolStripMenuItem = new ToolStripMenuItem();
             saveAllToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator8 = new ToolStripSeparator();
+            toolStripSeparator9 = new ToolStripSeparator();
             deleteEntryToolStripMenuItem = new ToolStripMenuItem();
             deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
             historyHeaderPanel = new Panel();
@@ -348,7 +357,7 @@ namespace SSH_Helper
             // presetsPanel
             // 
             presetsPanel.BackColor = Color.FromArgb(248, 249, 250);
-            presetsPanel.Controls.Add(lstPreset);
+            presetsPanel.Controls.Add(trvPresets);
             presetsPanel.Controls.Add(presetsToolStrip);
             presetsPanel.Controls.Add(presetsHeaderPanel);
             presetsPanel.Dock = DockStyle.Fill;
@@ -357,27 +366,35 @@ namespace SSH_Helper
             presetsPanel.Padding = new Padding(8);
             presetsPanel.Size = new Size(639, 346);
             presetsPanel.TabIndex = 0;
-            // 
-            // lstPreset
-            // 
-            lstPreset.BackColor = Color.White;
-            lstPreset.BorderStyle = BorderStyle.None;
-            lstPreset.ContextMenuStrip = contextPresetLst;
-            lstPreset.Dock = DockStyle.Fill;
-            lstPreset.Font = new Font("Segoe UI", 9.5F);
-            lstPreset.FormattingEnabled = true;
-            lstPreset.IntegralHeight = false;
-            lstPreset.ItemHeight = 17;
-            lstPreset.Location = new Point(8, 65);
-            lstPreset.Name = "lstPreset";
-            lstPreset.Size = new Size(623, 273);
-            lstPreset.Sorted = true;
-            lstPreset.TabIndex = 1;
-            lstPreset.SelectedIndexChanged += lstPreset_SelectedIndexChanged;
+            //
+            // trvPresets
+            //
+            trvPresets.BackColor = Color.White;
+            trvPresets.BorderStyle = BorderStyle.None;
+            trvPresets.ContextMenuStrip = contextPresetLst;
+            trvPresets.Dock = DockStyle.Fill;
+            trvPresets.Font = new Font("Segoe UI", 9.5F);
+            trvPresets.FullRowSelect = true;
+            trvPresets.HideSelection = false;
+            trvPresets.ItemHeight = 20;
+            trvPresets.Location = new Point(8, 65);
+            trvPresets.Name = "trvPresets";
+            trvPresets.ShowLines = true;
+            trvPresets.ShowPlusMinus = true;
+            trvPresets.ShowRootLines = true;
+            trvPresets.Size = new Size(623, 273);
+            trvPresets.TabIndex = 1;
+            trvPresets.AfterSelect += trvPresets_AfterSelect;
+            trvPresets.AfterCollapse += trvPresets_AfterCollapse;
+            trvPresets.AfterExpand += trvPresets_AfterExpand;
+            trvPresets.ItemDrag += trvPresets_ItemDrag;
+            trvPresets.DragOver += trvPresets_DragOver;
+            trvPresets.DragDrop += trvPresets_DragDrop;
+            trvPresets.AllowDrop = true;
             // 
             // contextPresetLst
             // 
-            contextPresetLst.Items.AddRange(new ToolStripItem[] { ctxAddPreset, ctxDuplicatePreset, ctxRenamePreset, ctxDeletePreset, toolStripSeparator6, ctxToggleFavorite, toolStripSeparator7, ctxExportPreset, ctxImportPreset, ctxToggleSorting });
+            contextPresetLst.Items.AddRange(new ToolStripItem[] { ctxAddPreset, ctxDuplicatePreset, ctxRenamePreset, ctxDeletePreset, toolStripSeparator6, ctxToggleFavorite, ctxMoveToFolder, toolStripSeparator7, ctxExportPreset, ctxImportPreset, ctxToggleSorting, toolStripSeparatorFolders, ctxAddFolder, ctxRenameFolder, ctxDeleteFolder });
             contextPresetLst.Name = "contextPresetLst";
             contextPresetLst.Size = new Size(160, 192);
             // 
@@ -439,21 +456,58 @@ namespace SSH_Helper
             ctxImportPreset.Size = new Size(159, 22);
             ctxImportPreset.Text = "&Import Preset";
             ctxImportPreset.Click += ImportPreset_Click;
-            // 
+            //
             // ctxToggleSorting
-            // 
+            //
             ctxToggleSorting.Name = "ctxToggleSorting";
             ctxToggleSorting.Size = new Size(159, 22);
             ctxToggleSorting.Text = "Toggle &Sorting";
             ctxToggleSorting.Click += toggleSortingToolStripMenuItem_Click;
-            // 
+            //
+            // toolStripSeparatorFolders
+            //
+            toolStripSeparatorFolders.Name = "toolStripSeparatorFolders";
+            toolStripSeparatorFolders.Size = new Size(156, 6);
+            //
+            // ctxAddFolder
+            //
+            ctxAddFolder.Name = "ctxAddFolder";
+            ctxAddFolder.Size = new Size(159, 22);
+            ctxAddFolder.Text = "New &Folder";
+            ctxAddFolder.Click += ctxAddFolder_Click;
+            //
+            // ctxRenameFolder
+            //
+            ctxRenameFolder.Name = "ctxRenameFolder";
+            ctxRenameFolder.Size = new Size(159, 22);
+            ctxRenameFolder.Text = "Rename Fol&der";
+            ctxRenameFolder.Click += ctxRenameFolder_Click;
+            //
+            // ctxDeleteFolder
+            //
+            ctxDeleteFolder.Name = "ctxDeleteFolder";
+            ctxDeleteFolder.Size = new Size(159, 22);
+            ctxDeleteFolder.Text = "Delete Folde&r";
+            ctxDeleteFolder.Click += ctxDeleteFolder_Click;
+            //
+            // ctxMoveToFolder
+            //
+            ctxMoveToFolder.Name = "ctxMoveToFolder";
+            ctxMoveToFolder.Size = new Size(159, 22);
+            ctxMoveToFolder.Text = "&Move to Folder";
+            //
             // presetsToolStrip
-            // 
+            //
+            presetsToolStrip.AutoSize = false;
             presetsToolStrip.BackColor = Color.FromArgb(248, 249, 250);
+            presetsToolStrip.Dock = DockStyle.Top;
             presetsToolStrip.GripStyle = ToolStripGripStyle.Hidden;
-            presetsToolStrip.Items.AddRange(new ToolStripItem[] { tsbAddPreset, tsbDeletePreset, tsbRenamePreset, tsbDuplicatePreset, tsbSortPresets });
+            presetsToolStrip.Items.AddRange(new ToolStripItem[] { tsbAddPreset, tsbDeletePreset, tsbRenamePreset, tsbDuplicatePreset, tsbSortPresets, tsbSeparatorFolders, tsbAddFolder, tsbDeleteFolder });
+            presetsToolStrip.LayoutStyle = ToolStripLayoutStyle.Flow;
             presetsToolStrip.Location = new Point(8, 40);
             presetsToolStrip.Name = "presetsToolStrip";
+            presetsToolStrip.Padding = new Padding(0);
+            presetsToolStrip.RenderMode = ToolStripRenderMode.System;
             presetsToolStrip.Size = new Size(623, 25);
             presetsToolStrip.TabIndex = 0;
             // 
@@ -501,7 +555,30 @@ namespace SSH_Helper
             tsbSortPresets.Text = "Sort";
             tsbSortPresets.ToolTipText = "Toggle sorting";
             tsbSortPresets.Click += toggleSortingToolStripMenuItem_Click;
-            // 
+            //
+            // tsbSeparatorFolders
+            //
+            tsbSeparatorFolders.Name = "tsbSeparatorFolders";
+            tsbSeparatorFolders.Size = new Size(6, 25);
+            //
+            // tsbAddFolder
+            //
+            tsbAddFolder.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbAddFolder.Name = "tsbAddFolder";
+            tsbAddFolder.Size = new Size(23, 22);
+            tsbAddFolder.Text = "📁+";
+            tsbAddFolder.ToolTipText = "Add new folder";
+            tsbAddFolder.Click += tsbAddFolder_Click;
+            //
+            // tsbDeleteFolder
+            //
+            tsbDeleteFolder.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbDeleteFolder.Name = "tsbDeleteFolder";
+            tsbDeleteFolder.Size = new Size(23, 22);
+            tsbDeleteFolder.Text = "📁-";
+            tsbDeleteFolder.ToolTipText = "Delete folder and all presets";
+            tsbDeleteFolder.Click += tsbDeleteFolder_Click;
+            //
             // presetsHeaderPanel
             // 
             presetsHeaderPanel.BackColor = Color.FromArgb(248, 249, 250);
@@ -1247,13 +1324,16 @@ namespace SSH_Helper
         private Panel presetsPanel;
         private Panel presetsHeaderPanel;
         private Label lblPresetsTitle;
-        private ListBox lstPreset;
+        private TreeView trvPresets;
         private ToolStrip presetsToolStrip;
         private ToolStripButton tsbAddPreset;
         private ToolStripButton tsbDeletePreset;
         private ToolStripButton tsbRenamePreset;
         private ToolStripButton tsbDuplicatePreset;
         private ToolStripButton tsbSortPresets;
+        private ToolStripSeparator tsbSeparatorFolders;
+        private ToolStripButton tsbAddFolder;
+        private ToolStripButton tsbDeleteFolder;
 
         // Script panel
         private Panel scriptPanel;
@@ -1330,6 +1410,11 @@ namespace SSH_Helper
         private ToolStripSeparator toolStripSeparator7;
         private ToolStripMenuItem ctxToggleFavorite;
         private ToolStripMenuItem ctxToggleSorting;
+        private ToolStripSeparator toolStripSeparatorFolders;
+        private ToolStripMenuItem ctxAddFolder;
+        private ToolStripMenuItem ctxRenameFolder;
+        private ToolStripMenuItem ctxDeleteFolder;
+        private ToolStripMenuItem ctxMoveToFolder;
 
         private ContextMenuStrip contextPresetLstAdd;
         private ToolStripMenuItem ctxAddPreset2;
