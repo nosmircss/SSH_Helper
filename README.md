@@ -1,1 +1,140 @@
-# SSH_Helper
+# SSH Helper
+
+A Windows Forms application for executing SSH commands across multiple hosts with support for YAML-based scripting automation.
+
+## Features
+
+- **Multi-Host Execution**: Run commands on multiple hosts simultaneously
+- **CSV Host Import**: Load host lists from CSV files with custom columns
+- **Command Presets**: Save and organize frequently used commands
+- **YAML Scripting**: Powerful scripting language for complex automation workflows
+- **History Management**: Track execution history with output preservation
+- **State Persistence**: Remember hosts, presets, and history between sessions
+- **Auto-Updates**: Check for updates from GitHub releases
+
+## Getting Started
+
+### Prerequisites
+
+- Windows 10 or later
+- .NET 8.0 Runtime
+
+### Installation
+
+1. Download the latest release from the [Releases](https://github.com/nosmircss/SSH_Helper/releases) page
+2. Extract to your preferred location
+3. Run `SSH_Helper.exe`
+
+## Usage
+
+### Loading Hosts
+
+1. **From CSV**: File > Open CSV or drag-and-drop a CSV file
+   - CSV must contain a `Host_IP` column
+   - Additional columns become variables for scripts
+2. **Manual Entry**: Add hosts directly in the grid
+
+### Running Commands
+
+1. Enter credentials in the toolbar (Username/Password)
+2. Select a preset or type commands in the editor
+3. Click **Execute All** to run on all hosts, or **Execute Selected** for selected hosts
+
+### Command Presets
+
+- **Save**: Enter a name and click Save to store the current commands
+- **Favorites**: Right-click a preset to mark as favorite (shown with star)
+- **Sort**: Use the sort button to organize alphabetically or manually
+
+### YAML Scripts
+
+For complex automation, use YAML scripts. Scripts support:
+- Variables and expressions
+- Conditional logic (if/else)
+- Loops (foreach, while)
+- Output capture and regex extraction
+- Error handling
+
+See [Scripting Documentation](SCRIPTING.md) for full details.
+
+**Example Script:**
+```yaml
+---
+name: Quick Status Check
+steps:
+  - send: show version
+    capture: output
+  - extract:
+      from: output
+      pattern: 'Version (.+?)$'
+      into: version
+  - print: "Device version: ${version}"
+```
+
+## Settings
+
+Access via Edit > Settings:
+
+- **Remember State**: Save hosts, presets, and history on exit
+- **Max History Entries**: Limit stored history items
+- **Default Timeout**: Command timeout in seconds
+- **Connection Timeout**: SSH connection timeout
+- **Check for Updates**: Automatic update checks on startup
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+O | Open CSV file |
+| Ctrl+S | Save CSV file |
+| Ctrl+F | Find in output |
+| F5 | Execute on all hosts |
+| F6 | Execute on selected hosts |
+| Escape | Stop execution |
+
+## Configuration
+
+Settings are stored in `config.json` in the application directory:
+- Window position and size
+- Splitter positions
+- Presets and their commands
+- Update settings
+
+## Building from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/nosmircss/SSH_Helper.git
+
+# Navigate to project
+cd SSH_Helper
+
+# Build
+dotnet build
+
+# Run
+dotnet run
+```
+
+### Requirements
+
+- Visual Studio 2022 or later (recommended)
+- .NET 8.0 SDK
+- NuGet packages:
+  - SSH.NET
+  - Newtonsoft.Json
+  - YamlDotNet
+
+## License
+
+This project is provided as-is for personal and internal use.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Submit a pull request
+
+## Support
+
+For issues and feature requests, please use the [GitHub Issues](https://github.com/nosmircss/SSH_Helper/issues) page.
