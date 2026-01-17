@@ -19,6 +19,7 @@ namespace SSH_Helper
         private readonly TextBox _txtReleaseNotes;
         private readonly Button _btnYes;
         private readonly Button _btnNo;
+        private readonly Button _btnSkip;
         private readonly LinkLabel _lnkViewOnGitHub;
         private readonly ProgressBar _progressBar;
         private readonly Label _lblProgress;
@@ -126,8 +127,8 @@ namespace SSH_Helper
             _btnYes = new Button
             {
                 Text = "Yes, Update Now",
-                Size = new Size(130, 34),
-                Location = new Point(245, 370),
+                Size = new Size(120, 34),
+                Location = new Point(130, 370),
                 Font = new Font("Segoe UI", 9f),
                 BackColor = Color.FromArgb(0, 120, 212),
                 ForeColor = Color.White,
@@ -139,13 +140,23 @@ namespace SSH_Helper
 
             _btnNo = new Button
             {
-                Text = "No, Not Now",
-                Size = new Size(110, 34),
-                Location = new Point(385, 370),
+                Text = "Not Now",
+                Size = new Size(85, 34),
+                Location = new Point(258, 370),
                 Font = new Font("Segoe UI", 9f),
                 DialogResult = DialogResult.Cancel
             };
             _btnNo.Click += BtnNo_Click;
+
+            _btnSkip = new Button
+            {
+                Text = "Skip This Version",
+                Size = new Size(120, 34),
+                Location = new Point(351, 370),
+                Font = new Font("Segoe UI", 9f),
+                DialogResult = DialogResult.Ignore
+            };
+            _btnSkip.Click += BtnSkip_Click;
 
             Controls.Add(_lblTitle);
             Controls.Add(_lblVersionInfo);
@@ -157,11 +168,21 @@ namespace SSH_Helper
             Controls.Add(_lblProgress);
             Controls.Add(_btnYes);
             Controls.Add(_btnNo);
+            Controls.Add(_btnSkip);
 
             AcceptButton = _btnYes;
             CancelButton = _btnNo;
 
             FormClosing += UpdateDialog_FormClosing;
+            Load += UpdateDialog_Load;
+        }
+
+        private void UpdateDialog_Load(object? sender, EventArgs e)
+        {
+            // Deselect text in release notes and set focus to Yes button
+            _txtReleaseNotes.SelectionStart = 0;
+            _txtReleaseNotes.SelectionLength = 0;
+            _btnYes.Focus();
         }
 
         private void UpdateDialog_FormClosing(object? sender, FormClosingEventArgs e)
@@ -171,9 +192,16 @@ namespace SSH_Helper
 
         private void BtnNo_Click(object? sender, EventArgs e)
         {
+            // Just close - user will be prompted again next time
+            DialogResult = DialogResult.No;
+            Close();
+        }
+
+        private void BtnSkip_Click(object? sender, EventArgs e)
+        {
             // Skip this version so user won't be prompted again until a newer version is available
             _onSkipVersion(_updateResult.LatestVersion);
-            DialogResult = DialogResult.No;
+            DialogResult = DialogResult.Ignore;
             Close();
         }
 
@@ -201,6 +229,7 @@ namespace SSH_Helper
             // Show progress UI
             _btnYes.Visible = false;
             _btnNo.Visible = false;
+            _btnSkip.Visible = false;
             _lblQuestion.Visible = false;
             _progressBar.Visible = true;
             _lblProgress.Visible = true;
@@ -271,6 +300,7 @@ namespace SSH_Helper
             _lblQuestion.Visible = true;
             _btnYes.Visible = true;
             _btnNo.Visible = true;
+            _btnSkip.Visible = true;
         }
 
         private void UpdateService_DownloadProgressChanged(object? sender, UpdateDownloadProgressEventArgs e)
