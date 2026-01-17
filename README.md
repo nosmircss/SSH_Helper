@@ -53,6 +53,8 @@ For complex automation, use YAML scripts. Scripts support:
 - Conditional logic (if/else)
 - Loops (foreach, while)
 - Output capture and regex extraction
+- File operations (read/write text files)
+- User input prompts with validation
 - Error handling
 
 See [Scripting Documentation](SCRIPTING.md) for full details.
@@ -69,6 +71,20 @@ steps:
       pattern: 'Version (.+?)$'
       into: version
   - print: "Device version: ${version}"
+```
+
+**Example: Block IPs from File:**
+```yaml
+---
+name: Block IPs from File
+steps:
+  - readfile:
+      path: "C:\\blocklist.txt"
+      into: blocked_ips
+  - foreach: ip in blocked_ips
+    do:
+      - send: iptables -A INPUT -s ${ip} -j DROP
+      - print: "Blocked ${ip}"
 ```
 
 ## Settings

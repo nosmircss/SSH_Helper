@@ -15,6 +15,9 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [foreach](#foreach---loop-over-collections)
    - [while](#while---conditional-loop)
    - [exit](#exit---terminate-script)
+   - [readfile](#readfile---read-text-files)
+   - [writefile](#writefile---write-text-files)
+   - [input](#input---prompt-for-user-input)
 3. [Variables](#variables)
 4. [Expressions and Conditions](#expressions-and-conditions)
 5. [Error Handling](#error-handling)
@@ -48,7 +51,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Keywords: `name:`, `description:`, `vars:`, `steps:`, `version:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- foreach:`, `- while:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- foreach:`, `- while:`, `- readfile:`, `- writefile:`, `- input:`
 
 Plain text (without YAML markers) is treated as simple commands to execute line by line.
 
@@ -526,6 +529,198 @@ Ends script execution with a status and message.
 
 ---
 
+### readfile - Read Text Files
+
+Reads a text file line by line into a list variable. Useful for processing IP lists, configuration data, or any line-based input.
+
+**Syntax:**
+```yaml
+- readfile:
+    path: "C:\\path\\to\\file.txt"
+    into: variable_name
+    skip_empty_lines: true     # Optional (default: true)
+    trim_lines: true           # Optional (default: true)
+    max_lines: 10000           # Optional (default: 10000, 0 = unlimited)
+    encoding: utf-8            # Optional (default: utf-8)
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `path` | Yes | - | Path to the file (supports variable substitution) |
+| `into` | Yes | - | Variable name to store the lines as a list |
+| `skip_empty_lines` | No | `true` | Skip blank lines |
+| `trim_lines` | No | `true` | Remove leading/trailing whitespace from each line |
+| `max_lines` | No | `10000` | Maximum lines to read (0 = unlimited) |
+| `encoding` | No | `utf-8` | File encoding: `utf-8`, `ascii`, `utf-16`, `utf-32`, `latin1` |
+
+**Security:**
+- **Blocked paths**: Cannot read from `C:\Windows`, `C:\Program Files`, `C:\ProgramData`, or other users' directories
+- **Allowed paths**: User profile, Documents, Desktop, AppData, Temp, and other non-system locations
+
+**Examples:**
+```yaml
+# Read IP addresses from a file
+- readfile:
+    path: "C:\\Users\\me\\blocklist.txt"
+    into: blocked_ips
+
+- print: "Found ${blocked_ips.length} IPs to process"
+
+- foreach: ip in blocked_ips
+  do:
+    - print: "Processing: ${ip}"
+
+# Read with variable in path
+- readfile:
+    path: "${config_dir}\\hosts.txt"
+    into: hosts
+    max_lines: 1000
+
+# Read ASCII file with all lines (including empty)
+- readfile:
+    path: "C:\\data\\log.txt"
+    into: log_lines
+    skip_empty_lines: false
+    trim_lines: false
+    encoding: ascii
+```
+
+---
+
+### writefile - Write Text Files
+
+Writes content to a text file. Supports append and overwrite modes.
+
+**Syntax:**
+```yaml
+- writefile:
+    path: "C:\\path\\to\\file.txt"
+    content: "text to write"
+    mode: append               # Optional: append (default) or overwrite
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `path` | Yes | - | Path to the file (supports variable substitution) |
+| `content` | No | `""` | Content to write (supports variable substitution) |
+| `mode` | No | `append` | Write mode: `append` or `overwrite` |
+
+**Security:**
+- **Blocked paths**: Cannot write to system directories or Program Files
+- **Blocked extensions**: Cannot write executable files (`.exe`, `.dll`, `.bat`, `.ps1`, `.cmd`, etc.)
+- **Allowed paths**: User profile, Documents, Desktop, AppData, Temp only
+
+**Examples:**
+```yaml
+# Log results to a file
+- writefile:
+    path: "C:\\Users\\me\\output.log"
+    content: "${_timestamp} - Processed ${Host_IP}: ${status}"
+
+# Overwrite a file
+- writefile:
+    path: "C:\\Users\\me\\report.txt"
+    content: "Report generated at ${_timestamp}"
+    mode: overwrite
+
+# Append multiple lines in a loop
+- foreach: ip in processed_ips
+  do:
+    - writefile:
+        path: "C:\\logs\\processed.txt"
+        content: "${ip} - completed"
+
+# Create file with path from variable
+- writefile:
+    path: "${output_dir}\\results.csv"
+    content: "${Host_IP},${status},${version}"
+```
+
+---
+
+### input - Prompt for User Input
+
+Prompts the user for input during script execution with optional validation.
+
+**Syntax:**
+```yaml
+- input:
+    prompt: "Enter value:"
+    into: variable_name
+    default: "default_value"   # Optional
+    password: false            # Optional (default: false)
+    validate: "^regex$"        # Optional regex validation
+    validation_error: "Error"  # Optional custom error message
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `prompt` | No | `"Enter value:"` | Text to display to the user |
+| `into` | Yes | - | Variable name to store the input |
+| `default` | No | `""` | Default value pre-filled in the input |
+| `password` | No | `false` | Mask input for sensitive data |
+| `validate` | No | - | Regex pattern to validate input |
+| `validation_error` | No | `"Input does not match required format."` | Error message when validation fails |
+
+**Features:**
+- Dialog appears during script execution
+- User can cancel (script will fail unless `on_error: continue`)
+- Validation prevents submission until input matches pattern
+- Variables can be used in `prompt` and `default`
+
+**Examples:**
+```yaml
+# Simple input
+- input:
+    prompt: "Enter the target IP address:"
+    into: target_ip
+
+# Input with default value
+- input:
+    prompt: "Enter timeout (seconds):"
+    into: timeout
+    default: "30"
+
+# Password input (masked)
+- input:
+    prompt: "Enter enable password:"
+    into: enable_pass
+    password: true
+
+# Input with validation
+- input:
+    prompt: "Enter port number (1-65535):"
+    into: port
+    validate: "^[0-9]+$"
+    validation_error: "Port must be a number"
+
+# IP address validation
+- input:
+    prompt: "Enter IP address:"
+    into: ip_address
+    validate: "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"
+    validation_error: "Please enter a valid IP address (e.g., 192.168.1.1)"
+
+# Confirm action
+- input:
+    prompt: "Type 'yes' to confirm deletion:"
+    into: confirm
+    validate: "^yes$"
+    validation_error: "You must type 'yes' to proceed"
+
+- if: confirm != "yes"
+  then:
+    - exit: "Operation cancelled"
+```
+
+---
+
 ## Variables
 
 ### Variable Sources
@@ -907,6 +1102,101 @@ steps:
       - print: "Version: ${version}"
     else:
       - print: "Could not determine version"
+```
+
+### Example 6: Block IPs from File
+
+```yaml
+---
+name: Block IPs from File
+description: Reads IP addresses from a file and blocks each one
+
+steps:
+  # Prompt for the blocklist file path
+  - input:
+      prompt: "Enter path to IP blocklist file:"
+      into: blocklist_path
+      default: "C:\\Users\\me\\blocklist.txt"
+
+  # Read the file
+  - readfile:
+      path: "${blocklist_path}"
+      into: blocked_ips
+
+  - if: blocked_ips is empty
+    then:
+      - exit: failure "No IPs found in file"
+
+  - print: "Found ${blocked_ips.length} IPs to block"
+
+  # Process each IP
+  - foreach: ip in blocked_ips
+    do:
+      - print: "Blocking: ${ip}"
+      - send: config firewall address
+      - send: edit "BLOCK_${ip}"
+      - send: set subnet ${ip} 255.255.255.255
+      - send: next
+      - send: end
+
+      # Log result
+      - writefile:
+          path: "C:\\logs\\blocked_ips.log"
+          content: "${_timestamp} - Blocked ${ip} on ${Host_IP}"
+
+  - exit: success "Blocked ${blocked_ips.length} IPs"
+```
+
+### Example 7: Interactive Configuration with Validation
+
+```yaml
+---
+name: Configure Interface
+description: Interactive interface configuration with input validation
+
+steps:
+  # Get interface name with validation
+  - input:
+      prompt: "Enter interface name (e.g., eth0, GigabitEthernet0/1):"
+      into: interface
+      validate: "^[a-zA-Z][a-zA-Z0-9/]+$"
+      validation_error: "Invalid interface name format"
+
+  # Get IP address with validation
+  - input:
+      prompt: "Enter IP address:"
+      into: ip_address
+      validate: "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"
+      validation_error: "Please enter a valid IPv4 address"
+
+  # Get subnet mask
+  - input:
+      prompt: "Enter subnet mask:"
+      into: subnet_mask
+      default: "255.255.255.0"
+      validate: "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"
+      validation_error: "Please enter a valid subnet mask"
+
+  # Confirm before applying
+  - input:
+      prompt: "Configure ${interface} with ${ip_address}/${subnet_mask}? Type 'yes' to confirm:"
+      into: confirm
+      validate: "^(yes|no)$"
+      validation_error: "Please type 'yes' or 'no'"
+
+  - if: confirm != "yes"
+    then:
+      - exit: "Configuration cancelled by user"
+
+  # Apply configuration
+  - print: "Configuring ${interface}..."
+  - send: configure terminal
+  - send: interface ${interface}
+  - send: ip address ${ip_address} ${subnet_mask}
+  - send: no shutdown
+  - send: end
+
+  - print: "Interface ${interface} configured with ${ip_address}"
 ```
 
 ---

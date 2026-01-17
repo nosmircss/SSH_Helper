@@ -64,6 +64,21 @@ namespace SSH_Helper.Services.Scripting.Models
         /// </summary>
         public string? While { get; set; }
 
+        /// <summary>
+        /// Readfile command - reads a text file into a variable.
+        /// </summary>
+        public ReadfileOptions? Readfile { get; set; }
+
+        /// <summary>
+        /// Writefile command - writes content to a text file.
+        /// </summary>
+        public WritefileOptions? Writefile { get; set; }
+
+        /// <summary>
+        /// Input command - prompts user for input during script execution.
+        /// </summary>
+        public InputOptions? Input { get; set; }
+
         // ===== Command Options =====
 
         /// <summary>
@@ -126,6 +141,9 @@ namespace SSH_Helper.Services.Scripting.Models
             if (!string.IsNullOrEmpty(If)) return StepType.If;
             if (!string.IsNullOrEmpty(Foreach)) return StepType.Foreach;
             if (!string.IsNullOrEmpty(While)) return StepType.While;
+            if (Readfile != null) return StepType.Readfile;
+            if (Writefile != null) return StepType.Writefile;
+            if (Input != null) return StepType.Input;
             return StepType.Unknown;
         }
     }
@@ -158,6 +176,99 @@ namespace SSH_Helper.Services.Scripting.Models
     }
 
     /// <summary>
+    /// Options for the readfile command.
+    /// </summary>
+    public class ReadfileOptions
+    {
+        /// <summary>
+        /// Path to the file to read.
+        /// </summary>
+        public string Path { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Variable name to store the lines into.
+        /// </summary>
+        public string Into { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Whether to skip empty lines (default: true).
+        /// </summary>
+        public bool SkipEmptyLines { get; set; } = true;
+
+        /// <summary>
+        /// Whether to trim whitespace from each line (default: true).
+        /// </summary>
+        public bool TrimLines { get; set; } = true;
+
+        /// <summary>
+        /// Maximum number of lines to read (default: 10000, 0 = unlimited).
+        /// </summary>
+        public int MaxLines { get; set; } = 10000;
+
+        /// <summary>
+        /// File encoding: "utf-8" (default), "ascii", "utf-16", "utf-32".
+        /// </summary>
+        public string Encoding { get; set; } = "utf-8";
+    }
+
+    /// <summary>
+    /// Options for the writefile command.
+    /// </summary>
+    public class WritefileOptions
+    {
+        /// <summary>
+        /// Path to the file to write.
+        /// </summary>
+        public string Path { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Content to write to the file.
+        /// </summary>
+        public string Content { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Write mode: "append" or "overwrite" (default: append).
+        /// </summary>
+        public string Mode { get; set; } = "append";
+    }
+
+    /// <summary>
+    /// Options for the input command.
+    /// </summary>
+    public class InputOptions
+    {
+        /// <summary>
+        /// Prompt text to display to the user.
+        /// </summary>
+        public string Prompt { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Variable name to store the user's input.
+        /// </summary>
+        public string Into { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Default value if user provides no input.
+        /// </summary>
+        public string? Default { get; set; }
+
+        /// <summary>
+        /// Whether to mask input (for passwords).
+        /// </summary>
+        public bool Password { get; set; }
+
+        /// <summary>
+        /// Optional regex pattern to validate input against.
+        /// </summary>
+        public string? Validate { get; set; }
+
+        /// <summary>
+        /// Error message to show when validation fails.
+        /// </summary>
+        public string? ValidationError { get; set; }
+    }
+
+    /// <summary>
     /// Enumeration of step types.
     /// </summary>
     public enum StepType
@@ -171,6 +282,9 @@ namespace SSH_Helper.Services.Scripting.Models
         Extract,
         If,
         Foreach,
-        While
+        While,
+        Readfile,
+        Writefile,
+        Input
     }
 }
