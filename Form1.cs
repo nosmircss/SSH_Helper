@@ -11,7 +11,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.43";
+        private const string ApplicationVersion = "0.45";
         private const string ApplicationName = "SSH Helper";
 
         #endregion
@@ -2412,7 +2412,7 @@ namespace SSH_Helper
                     using var updateDialog = new UpdateDialog(result, _updateService, skippedVersion =>
                     {
                         _configService.Update(c => c.UpdateSettings.SkippedVersion = skippedVersion);
-                    });
+                    }, config.UpdateSettings.EnableUpdateLog);
                     updateDialog.ShowDialog(this);
                 }
                 else

@@ -19,6 +19,7 @@ namespace SSH_Helper
 
         // Updates tab controls
         private readonly CheckBox _chkCheckForUpdatesOnStartup;
+        private readonly CheckBox _chkEnableUpdateLog;
 
         private readonly Button _btnSave;
         private readonly Button _btnCancel;
@@ -146,8 +147,35 @@ namespace SSH_Helper
                 AutoSize = true
             };
 
+            var lblTroubleshooting = new Label
+            {
+                Text = "Troubleshooting",
+                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
+                Location = new Point(15, 80),
+                AutoSize = true
+            };
+
+            _chkEnableUpdateLog = new CheckBox
+            {
+                Text = "Enable update log file (for troubleshooting update failures)",
+                Location = new Point(15, 105),
+                AutoSize = true
+            };
+
+            var lblLogPath = new Label
+            {
+                Text = "Log file: %TEMP%\\SSH_Helper_Update\\update.log",
+                Location = new Point(32, 128),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 8f)
+            };
+
             tabUpdates.Controls.Add(lblUpdateSection);
             tabUpdates.Controls.Add(_chkCheckForUpdatesOnStartup);
+            tabUpdates.Controls.Add(lblTroubleshooting);
+            tabUpdates.Controls.Add(_chkEnableUpdateLog);
+            tabUpdates.Controls.Add(lblLogPath);
 
             _tabControl.TabPages.Add(tabUpdates);
 
@@ -191,6 +219,7 @@ namespace SSH_Helper
 
             // Updates
             _chkCheckForUpdatesOnStartup.Checked = config.UpdateSettings.CheckOnStartup;
+            _chkEnableUpdateLog.Checked = config.UpdateSettings.EnableUpdateLog;
         }
 
         private void BtnSave_Click(object? sender, EventArgs e)
@@ -205,6 +234,7 @@ namespace SSH_Helper
 
                 // Updates
                 config.UpdateSettings.CheckOnStartup = _chkCheckForUpdatesOnStartup.Checked;
+                config.UpdateSettings.EnableUpdateLog = _chkEnableUpdateLog.Checked;
             });
         }
     }

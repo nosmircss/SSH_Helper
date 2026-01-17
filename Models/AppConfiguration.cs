@@ -112,6 +112,11 @@ namespace SSH_Helper.Models
         /// Version that the user chose to skip (won't be prompted again).
         /// </summary>
         public string? SkippedVersion { get; set; }
+
+        /// <summary>
+        /// Enable logging for the update process to help troubleshoot failures.
+        /// </summary>
+        public bool EnableUpdateLog { get; set; } = false;
     }
 
     /// <summary>
