@@ -91,6 +91,8 @@ namespace SSH_Helper.Utilities
 
         /// <summary>
         /// Strips common pager artifacts (e.g., "-- More --") from terminal output.
+        /// Also handles the space character echo and cursor repositioning that occurs
+        /// after dismissing a pager prompt.
         /// </summary>
         /// <param name="chunk">Input text chunk</param>
         /// <param name="sawPager">True if a pager prompt was detected and removed</param>
@@ -99,8 +101,16 @@ namespace SSH_Helper.Utilities
         {
             sawPager = false;
 
+            // Match pager prompts with optional surrounding whitespace and control sequences
+            // This handles: "--More--", "-- More --", and variations
+            // The pager prompt is typically followed by the echoed space character and a carriage return
+            // Pattern breakdown:
+            //   \r? - optional carriage return before pager
+            //   (?:--\s*More\s*--|(?:-+\s*More\s*-+)) - the pager prompt itself
+            //   [ ]? - optional literal space (the echoed space from pressing space to continue)
+            //   \r? - optional carriage return after (cursor repositioning)
             var pagerRegex = new Regex(
-                @"(?:(?:--\s*More\s*--)|(?:-+\s*More\s*-+))",
+                @"\r?(?:--\s*More\s*--|(?:-+\s*More\s*-+))[ ]?\r?",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
             if (pagerRegex.IsMatch(chunk))
@@ -110,6 +120,28 @@ namespace SSH_Helper.Utilities
             }
 
             return chunk;
+        }
+
+        /// <summary>
+        /// Strips the echoed space character and line-clearing sequences that appear after dismissing a pager.
+        /// This should be called on chunks received immediately after a pager was dismissed.
+        /// </summary>
+        /// <param name="chunk">Input text chunk</param>
+        /// <returns>Text with leading pager dismissal artifacts removed</returns>
+        public static string StripPagerDismissalArtifacts(string chunk)
+        {
+            if (string.IsNullOrEmpty(chunk))
+                return chunk;
+
+            // After sending space to dismiss pager, FortiGate (and similar devices) send:
+            // 1. \r (carriage return to go to column 0)
+            // 2. Spaces to overwrite the "--More--" prompt
+            // 3. \r (carriage return again to go back to column 0)
+            // 4. Then the actual content continues with proper indentation
+            //
+            // Pattern: \r followed by spaces followed by \r
+            // We strip this entire clearing sequence, leaving just the actual content
+            return Regex.Replace(chunk, @"^\r[ ]+\r", string.Empty);
         }
 
         private static int ProcessEscapeSequence(string input, int startIndex, StringBuilder line, ref int cursor, ref int savedCursor)

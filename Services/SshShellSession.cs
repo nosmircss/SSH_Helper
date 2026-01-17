@@ -269,6 +269,9 @@ namespace SSH_Helper.Services
             bool potentialPromptDetected = false;
             DateTime? potentialPromptTime = null;
 
+            // Track when we just dismissed a pager so we can clean up echo artifacts in the next chunk
+            bool justDismissedPager = false;
+
             EmitDebug($"ReadUntilPrompt started. Prompt pattern: {_promptPattern}");
             EmitDebug($"IdleTimeout: {idleTimeout.TotalSeconds}s, CommandTimeout: {commandTimeout.TotalSeconds}s");
 
@@ -292,6 +295,14 @@ namespace SSH_Helper.Services
 
                         // Process the chunk
                         chunk = TerminalOutputProcessor.Sanitize(chunk);
+
+                        // If we just dismissed a pager, clean up any echo artifacts from the space key
+                        if (justDismissedPager)
+                        {
+                            chunk = TerminalOutputProcessor.StripPagerDismissalArtifacts(chunk);
+                            justDismissedPager = false;
+                        }
+
                         chunk = TerminalOutputProcessor.StripPagerArtifacts(chunk, out bool sawPager);
 
                         output.Append(chunk);
@@ -305,6 +316,7 @@ namespace SSH_Helper.Services
                             _stream.Write(" ");
                             _stream.Flush();
                             pageCount++;
+                            justDismissedPager = true;
                             continue;
                         }
 
