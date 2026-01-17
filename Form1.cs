@@ -725,6 +725,12 @@ namespace SSH_Helper
             ShowFindDialog();
         }
 
+        private void debugModeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            _sshService.DebugMode = debugModeToolStripMenuItem.Checked;
+            UpdateStatusBar(debugModeToolStripMenuItem.Checked ? "Debug mode enabled" : "Debug mode disabled");
+        }
+
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
             using var dlg = new AboutDialog(ApplicationName, ApplicationVersion);

@@ -118,6 +118,8 @@ namespace SSH_Helper
             ExitMenuItem = new ToolStripMenuItem();
             editToolStripMenuItem = new ToolStripMenuItem();
             findToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparatorEdit1 = new ToolStripSeparator();
+            debugModeToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             aboutToolStripMenuItem = new ToolStripMenuItem();
             contextPresetLstAdd = new ContextMenuStrip(components);
@@ -198,7 +200,7 @@ namespace SSH_Helper
             // 
             topSplitContainer.Panel2.Controls.Add(commandPanel);
             topSplitContainer.Size = new Size(1400, 354);
-            topSplitContainer.SplitterDistance = 550;
+            topSplitContainer.SplitterDistance = 485;
             topSplitContainer.SplitterWidth = 6;
             topSplitContainer.TabIndex = 0;
             // 
@@ -211,7 +213,7 @@ namespace SSH_Helper
             hostsPanel.Location = new Point(0, 0);
             hostsPanel.Name = "hostsPanel";
             hostsPanel.Padding = new Padding(8);
-            hostsPanel.Size = new Size(550, 354);
+            hostsPanel.Size = new Size(485, 354);
             hostsPanel.TabIndex = 0;
             // 
             // dgv_variables
@@ -230,7 +232,7 @@ namespace SSH_Helper
             dgv_variables.Name = "dgv_variables";
             dgv_variables.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.AutoSizeToAllHeaders;
             dgv_variables.SelectionMode = DataGridViewSelectionMode.CellSelect;
-            dgv_variables.Size = new Size(534, 302);
+            dgv_variables.Size = new Size(469, 302);
             dgv_variables.TabIndex = 1;
             dgv_variables.CellDoubleClick += dgv_variables_CellDoubleClick;
             // 
@@ -282,7 +284,7 @@ namespace SSH_Helper
             hostsHeaderPanel.Location = new Point(8, 8);
             hostsHeaderPanel.Name = "hostsHeaderPanel";
             hostsHeaderPanel.Padding = new Padding(12, 8, 12, 8);
-            hostsHeaderPanel.Size = new Size(534, 36);
+            hostsHeaderPanel.Size = new Size(469, 36);
             hostsHeaderPanel.TabIndex = 2;
             // 
             // lblHostsTitle
@@ -303,7 +305,7 @@ namespace SSH_Helper
             lblHostCount.Dock = DockStyle.Right;
             lblHostCount.Font = new Font("Segoe UI", 9F);
             lblHostCount.ForeColor = Color.FromArgb(108, 117, 125);
-            lblHostCount.Location = new Point(478, 8);
+            lblHostCount.Location = new Point(413, 8);
             lblHostCount.Name = "lblHostCount";
             lblHostCount.Size = new Size(44, 15);
             lblHostCount.TabIndex = 1;
@@ -317,7 +319,7 @@ namespace SSH_Helper
             commandPanel.Location = new Point(0, 0);
             commandPanel.Name = "commandPanel";
             commandPanel.Padding = new Padding(0, 0, 8, 8);
-            commandPanel.Size = new Size(844, 354);
+            commandPanel.Size = new Size(909, 354);
             commandPanel.TabIndex = 0;
             // 
             // commandSplitContainer
@@ -334,8 +336,8 @@ namespace SSH_Helper
             // 
             commandSplitContainer.Panel2.Controls.Add(scriptPanel);
             commandSplitContainer.Panel2.Controls.Add(executePanel);
-            commandSplitContainer.Size = new Size(836, 346);
-            commandSplitContainer.SplitterDistance = 674;
+            commandSplitContainer.Size = new Size(901, 346);
+            commandSplitContainer.SplitterDistance = 639;
             commandSplitContainer.TabIndex = 0;
             // 
             // presetsPanel
@@ -348,7 +350,7 @@ namespace SSH_Helper
             presetsPanel.Location = new Point(0, 0);
             presetsPanel.Name = "presetsPanel";
             presetsPanel.Padding = new Padding(8);
-            presetsPanel.Size = new Size(674, 346);
+            presetsPanel.Size = new Size(639, 346);
             presetsPanel.TabIndex = 0;
             // 
             // lstPreset
@@ -363,7 +365,7 @@ namespace SSH_Helper
             lstPreset.ItemHeight = 17;
             lstPreset.Location = new Point(8, 65);
             lstPreset.Name = "lstPreset";
-            lstPreset.Size = new Size(658, 273);
+            lstPreset.Size = new Size(623, 273);
             lstPreset.Sorted = true;
             lstPreset.TabIndex = 1;
             lstPreset.SelectedIndexChanged += lstPreset_SelectedIndexChanged;
@@ -447,7 +449,7 @@ namespace SSH_Helper
             presetsToolStrip.Items.AddRange(new ToolStripItem[] { tsbAddPreset, tsbDeletePreset, tsbRenamePreset, tsbDuplicatePreset, tsbSortPresets });
             presetsToolStrip.Location = new Point(8, 40);
             presetsToolStrip.Name = "presetsToolStrip";
-            presetsToolStrip.Size = new Size(658, 25);
+            presetsToolStrip.Size = new Size(623, 25);
             presetsToolStrip.TabIndex = 0;
             // 
             // tsbAddPreset
@@ -503,7 +505,7 @@ namespace SSH_Helper
             presetsHeaderPanel.Location = new Point(8, 8);
             presetsHeaderPanel.Name = "presetsHeaderPanel";
             presetsHeaderPanel.Padding = new Padding(4);
-            presetsHeaderPanel.Size = new Size(658, 32);
+            presetsHeaderPanel.Size = new Size(623, 32);
             presetsHeaderPanel.TabIndex = 2;
             // 
             // lblPresetsTitle
@@ -527,7 +529,7 @@ namespace SSH_Helper
             scriptPanel.Location = new Point(0, 0);
             scriptPanel.Name = "scriptPanel";
             scriptPanel.Padding = new Padding(0, 0, 0, 8);
-            scriptPanel.Size = new Size(158, 296);
+            scriptPanel.Size = new Size(258, 296);
             scriptPanel.TabIndex = 0;
             // 
             // txtCommand
@@ -541,7 +543,7 @@ namespace SSH_Helper
             txtCommand.Multiline = true;
             txtCommand.Name = "txtCommand";
             txtCommand.ScrollBars = ScrollBars.Both;
-            txtCommand.Size = new Size(158, 248);
+            txtCommand.Size = new Size(258, 248);
             txtCommand.TabIndex = 0;
             txtCommand.WordWrap = false;
             // 
@@ -555,7 +557,7 @@ namespace SSH_Helper
             scriptHeaderPanel.Location = new Point(0, 0);
             scriptHeaderPanel.Name = "scriptHeaderPanel";
             scriptHeaderPanel.Padding = new Padding(8, 4, 8, 4);
-            scriptHeaderPanel.Size = new Size(158, 40);
+            scriptHeaderPanel.Size = new Size(258, 40);
             scriptHeaderPanel.TabIndex = 1;
             // 
             // lblScriptTitle
@@ -577,7 +579,7 @@ namespace SSH_Helper
             btnSavePreset.FlatStyle = FlatStyle.Flat;
             btnSavePreset.Font = new Font("Segoe UI", 9F);
             btnSavePreset.ForeColor = Color.White;
-            btnSavePreset.Location = new Point(466, 6);
+            btnSavePreset.Location = new Point(467, 6);
             btnSavePreset.Name = "btnSavePreset";
             btnSavePreset.Size = new Size(80, 27);
             btnSavePreset.TabIndex = 1;
@@ -590,7 +592,7 @@ namespace SSH_Helper
             txtPreset.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             txtPreset.BorderStyle = BorderStyle.FixedSingle;
             txtPreset.Font = new Font("Segoe UI", 9F);
-            txtPreset.Location = new Point(308, 8);
+            txtPreset.Location = new Point(309, 8);
             txtPreset.Name = "txtPreset";
             txtPreset.PlaceholderText = "Preset name...";
             txtPreset.Size = new Size(150, 23);
@@ -606,7 +608,7 @@ namespace SSH_Helper
             executePanel.Location = new Point(0, 296);
             executePanel.Name = "executePanel";
             executePanel.Padding = new Padding(8);
-            executePanel.Size = new Size(158, 50);
+            executePanel.Size = new Size(258, 50);
             executePanel.TabIndex = 1;
             // 
             // btnExecuteAll
@@ -680,7 +682,7 @@ namespace SSH_Helper
             // 
             outputSplitContainer.Panel2.Controls.Add(txtOutput);
             outputSplitContainer.Size = new Size(1384, 303);
-            outputSplitContainer.SplitterDistance = 280;
+            outputSplitContainer.SplitterDistance = 257;
             outputSplitContainer.SplitterWidth = 6;
             outputSplitContainer.TabIndex = 0;
             // 
@@ -691,7 +693,7 @@ namespace SSH_Helper
             historyPanel.Dock = DockStyle.Fill;
             historyPanel.Location = new Point(0, 0);
             historyPanel.Name = "historyPanel";
-            historyPanel.Size = new Size(280, 303);
+            historyPanel.Size = new Size(257, 303);
             historyPanel.TabIndex = 0;
             // 
             // lstOutput
@@ -706,7 +708,7 @@ namespace SSH_Helper
             lstOutput.ItemHeight = 15;
             lstOutput.Location = new Point(0, 28);
             lstOutput.Name = "lstOutput";
-            lstOutput.Size = new Size(280, 275);
+            lstOutput.Size = new Size(257, 275);
             lstOutput.TabIndex = 0;
             lstOutput.SelectedIndexChanged += lstOutput_SelectedIndexChanged;
             // 
@@ -758,7 +760,7 @@ namespace SSH_Helper
             historyHeaderPanel.Location = new Point(0, 0);
             historyHeaderPanel.Name = "historyHeaderPanel";
             historyHeaderPanel.Padding = new Padding(8, 6, 8, 6);
-            historyHeaderPanel.Size = new Size(280, 28);
+            historyHeaderPanel.Size = new Size(257, 28);
             historyHeaderPanel.TabIndex = 1;
             // 
             // lblHistoryTitle
@@ -787,7 +789,7 @@ namespace SSH_Helper
             txtOutput.Name = "txtOutput";
             txtOutput.ReadOnly = true;
             txtOutput.ScrollBars = ScrollBars.Both;
-            txtOutput.Size = new Size(1098, 303);
+            txtOutput.Size = new Size(1121, 303);
             txtOutput.TabIndex = 0;
             txtOutput.WordWrap = false;
             // 
@@ -994,7 +996,7 @@ namespace SSH_Helper
             // 
             // editToolStripMenuItem
             // 
-            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem });
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, toolStripSeparatorEdit1, debugModeToolStripMenuItem });
             editToolStripMenuItem.Name = "editToolStripMenuItem";
             editToolStripMenuItem.Size = new Size(39, 20);
             editToolStripMenuItem.Text = "&Edit";
@@ -1006,6 +1008,20 @@ namespace SSH_Helper
             findToolStripMenuItem.Size = new Size(146, 22);
             findToolStripMenuItem.Text = "&Find...";
             findToolStripMenuItem.Click += findToolStripMenuItem_Click;
+            // 
+            // toolStripSeparatorEdit1
+            // 
+            toolStripSeparatorEdit1.Name = "toolStripSeparatorEdit1";
+            toolStripSeparatorEdit1.Size = new Size(143, 6);
+            // 
+            // debugModeToolStripMenuItem
+            // 
+            debugModeToolStripMenuItem.CheckOnClick = true;
+            debugModeToolStripMenuItem.Name = "debugModeToolStripMenuItem";
+            debugModeToolStripMenuItem.Size = new Size(146, 22);
+            debugModeToolStripMenuItem.Text = "&Debug Mode";
+            debugModeToolStripMenuItem.ToolTipText = "When enabled, shows timestamps and diagnostic info to help troubleshoot prompt detection";
+            debugModeToolStripMenuItem.CheckedChanged += debugModeToolStripMenuItem_CheckedChanged;
             // 
             // helpToolStripMenuItem
             // 
@@ -1230,6 +1246,8 @@ namespace SSH_Helper
         private ToolStripMenuItem ExitMenuItem;
         private ToolStripMenuItem editToolStripMenuItem;
         private ToolStripMenuItem findToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparatorEdit1;
+        private ToolStripMenuItem debugModeToolStripMenuItem;
         private ToolStripMenuItem helpToolStripMenuItem;
         private ToolStripMenuItem aboutToolStripMenuItem;
 

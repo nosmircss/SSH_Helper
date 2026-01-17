@@ -1,6 +1,4 @@
-using System.Diagnostics;
 using System.Text;
-using System.Text.RegularExpressions;
 using Renci.SshNet;
 using SSH_Helper.Models;
 using SSH_Helper.Utilities;
@@ -29,19 +27,80 @@ namespace SSH_Helper.Services
 
     /// <summary>
     /// Handles SSH command execution against remote hosts.
+    /// Now uses connection pooling and the Expect API for improved reliability.
     /// </summary>
-    public class SshExecutionService
+    public class SshExecutionService : IDisposable
     {
-        private const int DefaultPollIntervalMs = 60;
-        private const int MaxPages = 50000;
+        private readonly SshConnectionPool? _connectionPool;
+        private readonly bool _ownsPool;
 
         public event EventHandler<SshProgressEventArgs>? ProgressChanged;
         public event EventHandler<SshOutputEventArgs>? OutputReceived;
 
         private volatile bool _isRunning;
         private CancellationTokenSource? _cts;
+        private bool _disposed;
 
         public bool IsRunning => _isRunning;
+
+        /// <summary>
+        /// Gets the connection pool (if pooling is enabled).
+        /// </summary>
+        public SshConnectionPool? ConnectionPool => _connectionPool;
+
+        /// <summary>
+        /// Gets or sets whether to use connection pooling.
+        /// When enabled, connections are reused for subsequent executions.
+        /// </summary>
+        public bool UseConnectionPooling { get; set; }
+
+        /// <summary>
+        /// When enabled, emits debug timestamps and diagnostic info to help troubleshoot prompt detection.
+        /// Debug output is sent via the OutputReceived event with [DEBUG] prefix.
+        /// </summary>
+        public bool DebugMode { get; set; }
+
+        /// <summary>
+        /// Creates a new SSH execution service without connection pooling.
+        /// </summary>
+        public SshExecutionService()
+        {
+            _connectionPool = null;
+            _ownsPool = false;
+            UseConnectionPooling = false;
+        }
+
+        /// <summary>
+        /// Creates a new SSH execution service with an internal connection pool.
+        /// </summary>
+        /// <param name="enablePooling">Whether to enable connection pooling</param>
+        /// <param name="poolTimeouts">Default timeouts for pooled connections</param>
+        public SshExecutionService(bool enablePooling, SshTimeoutOptions? poolTimeouts = null)
+        {
+            if (enablePooling)
+            {
+                _connectionPool = new SshConnectionPool(poolTimeouts);
+                _ownsPool = true;
+                UseConnectionPooling = true;
+            }
+            else
+            {
+                _connectionPool = null;
+                _ownsPool = false;
+                UseConnectionPooling = false;
+            }
+        }
+
+        /// <summary>
+        /// Creates a new SSH execution service with a shared connection pool.
+        /// </summary>
+        /// <param name="sharedPool">Shared connection pool instance</param>
+        public SshExecutionService(SshConnectionPool sharedPool)
+        {
+            _connectionPool = sharedPool ?? throw new ArgumentNullException(nameof(sharedPool));
+            _ownsPool = false;
+            UseConnectionPooling = true;
+        }
 
         /// <summary>
         /// Executes commands on multiple hosts.
@@ -63,6 +122,8 @@ namespace SSH_Helper.Services
             _cts = new CancellationTokenSource();
             _isRunning = true;
 
+            var timeouts = SshTimeoutOptions.FromSeconds(timeoutSeconds);
+
             try
             {
                 foreach (var host in hosts)
@@ -74,7 +135,45 @@ namespace SSH_Helper.Services
                         continue;
 
                     var result = await Task.Run(() =>
-                        ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeoutSeconds, _cts.Token));
+                        ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, _cts.Token));
+
+                    results.Add(result);
+                }
+            }
+            finally
+            {
+                _isRunning = false;
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Executes commands on multiple hosts with custom timeout options.
+        /// </summary>
+        public async Task<List<ExecutionResult>> ExecuteAsync(
+            IEnumerable<HostConnection> hosts,
+            string[] commands,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts)
+        {
+            var results = new List<ExecutionResult>();
+            _cts = new CancellationTokenSource();
+            _isRunning = true;
+
+            try
+            {
+                foreach (var host in hosts)
+                {
+                    if (_cts.Token.IsCancellationRequested)
+                        break;
+
+                    if (!host.IsValid())
+                        continue;
+
+                    var result = await Task.Run(() =>
+                        ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, _cts.Token));
 
                     results.Add(result);
                 }
@@ -101,7 +200,7 @@ namespace SSH_Helper.Services
             string[] commands,
             string defaultUsername,
             string defaultPassword,
-            int timeoutSeconds,
+            SshTimeoutOptions timeouts,
             CancellationToken cancellationToken)
         {
             var result = new ExecutionResult
@@ -116,26 +215,15 @@ namespace SSH_Helper.Services
 
             try
             {
-                using var client = new SshClient(host.IpAddress, host.Port, username, password);
-                client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-
-                client.ErrorOccurred += (s, e) =>
+                if (UseConnectionPooling && _connectionPool != null)
                 {
-                    if (e.Exception != null && _isRunning)
-                    {
-                        OnProgressChanged(host, $"SSH Error: {e.Exception.Message}", true, true);
-                    }
-                };
+                    ExecuteWithPool(host, commands, username, password, timeouts, outputBuilder, cancellationToken);
+                }
+                else
+                {
+                    ExecuteWithoutPool(host, commands, username, password, timeouts, outputBuilder, cancellationToken);
+                }
 
-                client.Connect();
-
-                OnProgressChanged(host, $"Connected to {host}", false, true);
-
-                using var shellStream = client.CreateShellStream("xterm", 200, 48, 1200, 800, 16384);
-                var commandOutput = ExecuteCommandsOnStream(shellStream, commands, host, timeoutSeconds, cancellationToken);
-                outputBuilder.Append(commandOutput);
-
-                client.Disconnect();
                 result.Success = true;
             }
             catch (Renci.SshNet.Common.SshAuthenticationException ex)
@@ -174,6 +262,13 @@ namespace SSH_Helper.Services
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
+            catch (OperationCanceledException)
+            {
+                result.Success = false;
+                result.ErrorMessage = "Operation cancelled";
+                var errorOutput = FormatError("CANCELLED", host, new Exception("Operation was cancelled by user"));
+                outputBuilder.AppendLine(errorOutput);
+            }
             catch (Exception ex)
             {
                 result.Success = false;
@@ -188,226 +283,163 @@ namespace SSH_Helper.Services
             return result;
         }
 
-        private string ExecuteCommandsOnStream(
-            ShellStream shellStream,
-            string[] commands,
+        /// <summary>
+        /// Executes commands using connection pooling and the new SshShellSession.
+        /// </summary>
+        private void ExecuteWithPool(
             HostConnection host,
-            int timeoutSeconds,
+            string[] commands,
+            string username,
+            string password,
+            SshTimeoutOptions timeouts,
+            StringBuilder outputBuilder,
             CancellationToken cancellationToken)
         {
-            var output = new StringBuilder();
-            int idleTimeoutMs = Math.Max(1000, timeoutSeconds * 1000);
+            // Get or create connection from pool
+            var (client, session) = _connectionPool!.CreateSessionAsync(host, username, password, timeouts, cancellationToken)
+                .GetAwaiter().GetResult();
 
-            // Trigger prompt and read initial banner/prompt
-            shellStream.WriteLine("");
-            shellStream.Flush();
-
-            string banner = ReadAvailable(shellStream, DefaultPollIntervalMs, 800, 1500, true, cancellationToken);
-            banner = TerminalOutputProcessor.Sanitize(banner);
-            banner = TerminalOutputProcessor.Normalize(banner);
-
-            if (!PromptDetector.TryDetectPrompt(banner, out var promptText))
+            try
             {
-                var lines = banner.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-                promptText = lines.LastOrDefault()?.TrimEnd() ?? "";
+                OnProgressChanged(host, $"Connected to {host} (pooled)", false, true);
+
+                // Configure debug mode BEFORE subscribing to events
+                session.DebugMode = DebugMode;
+
+                // Track if we've sent the header yet (to avoid duplicating in outputBuilder)
+                bool headerSent = false;
+
+                // Subscribe to real-time output - capture ALL output to outputBuilder for history
+                session.OutputReceived += (s, e) =>
+                {
+                    if (headerSent) // Only capture command output after header is sent
+                    {
+                        outputBuilder.Append(e.Output);
+                    }
+                    OnOutputReceived(host, e.Output);
+                };
+                session.DebugOutput += (s, e) =>
+                {
+                    outputBuilder.Append(e.Output); // Include debug in history
+                    OnOutputReceived(host, e.Output);
+                };
+
+                // Emit debug state for troubleshooting
+                if (DebugMode)
+                {
+                    var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+                    var debugMsg = $"[DEBUG {timestamp}] SshExecutionService.DebugMode = {DebugMode}, session.DebugMode = {session.DebugMode} (pooled)\r\n";
+                    outputBuilder.Append(debugMsg);
+                    OnOutputReceived(host, debugMsg);
+                }
+
+                // Build header
+                var prompt = session.CurrentPrompt;
+                string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
+                string separator = new string('#', header.Length);
+
+                outputBuilder.AppendLine(separator);
+                outputBuilder.AppendLine(header);
+                outputBuilder.AppendLine(separator);
+                outputBuilder.Append(prompt);
+
+                OnOutputReceived(host, outputBuilder.ToString());
+                headerSent = true;
+
+                // Execute commands using the session
+                // Output is captured via OutputReceived event above, no need to append return value
+                session.ExecuteBatchAsync(commands, host.Variables, cancellationToken)
+                    .GetAwaiter().GetResult();
+            }
+            finally
+            {
+                session.Dispose();
+                // Note: Connection stays in pool for reuse
+            }
+        }
+
+        /// <summary>
+        /// Executes commands without pooling (original behavior, but using SshShellSession).
+        /// </summary>
+        private void ExecuteWithoutPool(
+            HostConnection host,
+            string[] commands,
+            string username,
+            string password,
+            SshTimeoutOptions timeouts,
+            StringBuilder outputBuilder,
+            CancellationToken cancellationToken)
+        {
+            using var client = new SshClient(host.IpAddress, host.Port, username, password);
+            client.ConnectionInfo.Timeout = timeouts.ConnectionTimeout;
+
+            client.ErrorOccurred += (s, e) =>
+            {
+                if (e.Exception != null && _isRunning)
+                {
+                    OnProgressChanged(host, $"SSH Error: {e.Exception.Message}", true, true);
+                }
+            };
+
+            client.Connect();
+
+            OnProgressChanged(host, $"Connected to {host}", false, true);
+
+            using var shellStream = client.CreateShellStream("xterm", 200, 48, 1200, 800, 16384);
+            using var session = new SshShellSession(shellStream, timeouts);
+
+            // Configure debug mode BEFORE subscribing to events
+            session.DebugMode = DebugMode;
+
+            // Track if we've sent the header yet (to avoid duplicating in outputBuilder)
+            bool headerSent = false;
+
+            // Subscribe to real-time output - capture ALL output to outputBuilder for history
+            session.OutputReceived += (s, e) =>
+            {
+                if (headerSent) // Only capture command output after header is sent
+                {
+                    outputBuilder.Append(e.Output);
+                }
+                OnOutputReceived(host, e.Output);
+            };
+            session.DebugOutput += (s, e) =>
+            {
+                outputBuilder.Append(e.Output); // Include debug in history
+                OnOutputReceived(host, e.Output);
+            };
+
+            // Emit debug state for troubleshooting
+            if (DebugMode)
+            {
+                var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+                var debugMsg = $"[DEBUG {timestamp}] SshExecutionService.DebugMode = {DebugMode}, session.DebugMode = {session.DebugMode}\r\n";
+                outputBuilder.Append(debugMsg);
+                OnOutputReceived(host, debugMsg);
             }
 
-            var promptRegex = PromptDetector.BuildPromptRegex(promptText);
+            // Initialize session (detect prompt)
+            var banner = session.InitializeAsync(cancellationToken).GetAwaiter().GetResult();
 
             // Build header
-            string header = $"{new string('#', 20)} CONNECTED TO {host} {promptText} {new string('#', 20)}";
+            var prompt = session.CurrentPrompt;
+            string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
             string separator = new string('#', header.Length);
 
-            output.AppendLine(separator);
-            output.AppendLine(header);
-            output.AppendLine(separator);
-            output.Append(promptText);
+            outputBuilder.AppendLine(separator);
+            outputBuilder.AppendLine(header);
+            outputBuilder.AppendLine(separator);
+            outputBuilder.Append(prompt);
 
-            OnOutputReceived(host, output.ToString());
+            OnOutputReceived(host, outputBuilder.ToString());
+            headerSent = true;
 
-            foreach (string commandTemplate in commands)
-            {
-                if (cancellationToken.IsCancellationRequested || !_isRunning)
-                    break;
+            // Execute commands using the session
+            // Output is captured via OutputReceived event above, no need to append return value
+            session.ExecuteBatchAsync(commands, host.Variables, cancellationToken)
+                .GetAwaiter().GetResult();
 
-                if (string.IsNullOrWhiteSpace(commandTemplate) || commandTemplate.StartsWith("#"))
-                    continue;
-
-                string commandToExecute = SubstituteVariables(commandTemplate, host.Variables);
-
-                if (string.IsNullOrWhiteSpace(commandToExecute))
-                    continue;
-
-                shellStream.WriteLine(commandToExecute);
-                shellStream.Flush();
-
-                var commandOutput = ReadUntilPromptWithPager(
-                    shellStream, promptRegex, DefaultPollIntervalMs, idleTimeoutMs,
-                    out bool matchedPrompt, out string? updatedPromptLiteral, cancellationToken);
-
-                if (!string.IsNullOrEmpty(updatedPromptLiteral) &&
-                    !string.Equals(updatedPromptLiteral, promptText, StringComparison.Ordinal))
-                {
-                    promptText = updatedPromptLiteral;
-                    promptRegex = PromptDetector.BuildPromptRegex(promptText);
-                }
-
-                // Clean up double carriage returns
-                if (commandOutput.StartsWith(commandToExecute + "\r\r\n", StringComparison.Ordinal))
-                {
-                    commandOutput = Regex.Replace(commandOutput,
-                        Regex.Escape(commandToExecute) + "\r\r\n",
-                        commandToExecute + "\r\n");
-                }
-
-                output.Append(commandOutput);
-                OnOutputReceived(host, commandOutput);
-            }
-
-            return output.ToString();
-        }
-
-        private string SubstituteVariables(string commandTemplate, Dictionary<string, string> variables)
-        {
-            string result = commandTemplate;
-
-            foreach (Match match in Regex.Matches(commandTemplate, @"\$\{([^}]+)\}"))
-            {
-                string variableName = match.Groups[1].Value;
-                string value = variables.TryGetValue(variableName, out var v) ? v : "";
-                result = result.Replace($"${{{variableName}}}", value);
-            }
-
-            return result;
-        }
-
-        private string ReadAvailable(
-            ShellStream shellStream,
-            int pollIntervalMs,
-            int maxInactivityMs,
-            int maxOverallMs,
-            bool stopOnLikelyPrompt,
-            CancellationToken cancellationToken)
-        {
-            var sb = new StringBuilder();
-            var sw = Stopwatch.StartNew();
-            long lastDataMs = sw.ElapsedMilliseconds;
-            int idleQuietMs = Math.Clamp(pollIntervalMs * 3, 100, 400);
-
-            while (_isRunning && !cancellationToken.IsCancellationRequested)
-            {
-                if (sw.ElapsedMilliseconds >= maxOverallMs)
-                    break;
-                if (sw.ElapsedMilliseconds - lastDataMs >= Math.Min(maxInactivityMs, maxOverallMs))
-                    break;
-
-                if (shellStream.DataAvailable)
-                {
-                    string chunk = shellStream.Read();
-
-                    if (!string.IsNullOrEmpty(chunk))
-                    {
-                        lastDataMs = sw.ElapsedMilliseconds;
-                        chunk = TerminalOutputProcessor.Sanitize(chunk);
-                        chunk = TerminalOutputProcessor.StripPagerArtifacts(chunk, out bool sawPager);
-                        sb.Append(chunk);
-
-                        if (sawPager)
-                        {
-                            shellStream.Write(" ");
-                            shellStream.Flush();
-                        }
-
-                        if (stopOnLikelyPrompt &&
-                            PromptDetector.TryDetectPromptFromTail(sb.ToString(), out _) &&
-                            sw.ElapsedMilliseconds - lastDataMs >= idleQuietMs)
-                        {
-                            break;
-                        }
-                    }
-                }
-                else
-                {
-                    Thread.Sleep(Math.Min(50, Math.Max(10, pollIntervalMs / 2)));
-                }
-            }
-
-            return sb.ToString();
-        }
-
-        private string ReadUntilPromptWithPager(
-            ShellStream shellStream,
-            Regex promptRegex,
-            int pollIntervalMs,
-            int maxInactivityMs,
-            out bool matchedPrompt,
-            out string? updatedPromptLiteral,
-            CancellationToken cancellationToken)
-        {
-            matchedPrompt = false;
-            updatedPromptLiteral = null;
-
-            var sb = new StringBuilder();
-            var sw = Stopwatch.StartNew();
-            long lastActivityMs = 0;
-            int pageCount = 0;
-
-            while (_isRunning && !cancellationToken.IsCancellationRequested && pageCount < MaxPages)
-            {
-                if (sw.ElapsedMilliseconds - lastActivityMs > maxInactivityMs)
-                    break;
-
-                if (shellStream.DataAvailable)
-                {
-                    string chunk = shellStream.Read();
-
-                    if (!string.IsNullOrEmpty(chunk))
-                    {
-                        lastActivityMs = sw.ElapsedMilliseconds;
-                        chunk = TerminalOutputProcessor.Sanitize(chunk);
-                        chunk = TerminalOutputProcessor.StripPagerArtifacts(chunk, out bool sawPager);
-                        sb.Append(chunk);
-
-                        if (sawPager)
-                        {
-                            lastActivityMs = sw.ElapsedMilliseconds;
-                            shellStream.Write(" ");
-                            shellStream.Flush();
-                            pageCount++;
-                            continue;
-                        }
-
-                        if (PromptDetector.BufferEndsWithPrompt(sb, promptRegex))
-                        {
-                            matchedPrompt = true;
-                            break;
-                        }
-
-                        if (!matchedPrompt &&
-                            PromptDetector.TryDetectDifferentPrompt(sb, promptRegex, out var differentPrompt))
-                        {
-                            matchedPrompt = true;
-                            updatedPromptLiteral = differentPrompt;
-                            break;
-                        }
-                    }
-                }
-                else
-                {
-                    Thread.Sleep(Math.Min(50, Math.Max(10, pollIntervalMs / 2)));
-                }
-            }
-
-            var resultRaw = sb.ToString();
-
-            if (!matchedPrompt &&
-                PromptDetector.TryDetectPromptFromTail(resultRaw, out var tailPrompt) &&
-                !string.IsNullOrWhiteSpace(tailPrompt))
-            {
-                updatedPromptLiteral = tailPrompt;
-            }
-
-            return TerminalOutputProcessor.Normalize(resultRaw);
+            client.Disconnect();
         }
 
         private string FormatError(string errorType, HostConnection host, Exception ex)
@@ -446,6 +478,22 @@ namespace SSH_Helper.Services
                 Host = host,
                 Output = output
             });
+        }
+
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+
+                _cts?.Cancel();
+                _cts?.Dispose();
+
+                if (_ownsPool && _connectionPool != null)
+                {
+                    _connectionPool.Dispose();
+                }
+            }
         }
     }
 }
