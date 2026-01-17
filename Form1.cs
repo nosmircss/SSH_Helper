@@ -1734,8 +1734,9 @@ namespace SSH_Helper
             txtOutput.Clear();
 
             var hosts = GetHostConnections(dgv_variables.Rows.Cast<DataGridViewRow>()).ToList();
-            int timeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
-            var timeouts = SshTimeoutOptions.FromSeconds(timeout);
+            int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
+            int connectionTimeout = _configService.GetCurrent().ConnectionTimeout;
+            var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
 
             // Create a preset from the current command text (supports both simple commands and YAML scripts)
             var preset = new PresetInfo { Commands = txtCommand.Text };
@@ -1782,8 +1783,9 @@ namespace SSH_Helper
             txtOutput.Clear();
 
             var hosts = GetHostConnections(new[] { row }).ToList();
-            int timeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
-            var timeouts = SshTimeoutOptions.FromSeconds(timeout);
+            int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
+            int connectionTimeout = _configService.GetCurrent().ConnectionTimeout;
+            var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
 
             // Create a preset from the current command text (supports both simple commands and YAML scripts)
             var preset = new PresetInfo { Commands = txtCommand.Text };
@@ -2225,7 +2227,7 @@ namespace SSH_Helper
 
             // Save history (limited to maxHistoryEntries, keeping most recent)
             state.History = new List<HistoryEntry>();
-            var historyToSave = _outputHistory.Skip(Math.Max(0, _outputHistory.Count - maxHistoryEntries));
+            var historyToSave = _outputHistory.Take(maxHistoryEntries);
             foreach (var kvp in historyToSave)
             {
                 state.History.Add(new HistoryEntry
@@ -2286,6 +2288,12 @@ namespace SSH_Helper
                 foreach (var entry in state.History)
                 {
                     _outputHistory.Add(new KeyValuePair<string, string>(entry.Timestamp, entry.Output));
+                }
+
+                // Select first history entry to display its output
+                if (_outputHistory.Count > 0)
+                {
+                    lstOutput.SelectedIndex = 0;
                 }
             }
 
@@ -2440,5 +2448,10 @@ namespace SSH_Helper
         }
 
         #endregion
+
+        private void tsbPassword_Click(object sender, EventArgs e)
+        {
+
+        }
     }
 }

@@ -15,6 +15,7 @@ namespace SSH_Helper
         private readonly CheckBox _chkRememberState;
         private readonly NumericUpDown _numMaxHistory;
         private readonly NumericUpDown _numDefaultTimeout;
+        private readonly NumericUpDown _numConnectionTimeout;
 
         // Updates tab controls
         private readonly CheckBox _chkCheckForUpdatesOnStartup;
@@ -27,7 +28,7 @@ namespace SSH_Helper
             _configService = configService;
 
             Text = "Settings";
-            Size = new Size(450, 320);
+            Size = new Size(450, 350);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -37,7 +38,7 @@ namespace SSH_Helper
             _tabControl = new TabControl
             {
                 Location = new Point(12, 12),
-                Size = new Size(410, 220),
+                Size = new Size(410, 250),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
@@ -99,6 +100,22 @@ namespace SSH_Helper
                 Value = 10
             };
 
+            var lblConnectionTimeout = new Label
+            {
+                Text = "Connection timeout (seconds):",
+                Location = new Point(15, 165),
+                AutoSize = true
+            };
+
+            _numConnectionTimeout = new NumericUpDown
+            {
+                Location = new Point(250, 163),
+                Size = new Size(80, 23),
+                Minimum = 5,
+                Maximum = 120,
+                Value = 30
+            };
+
             tabGeneral.Controls.Add(lblStateSection);
             tabGeneral.Controls.Add(_chkRememberState);
             tabGeneral.Controls.Add(lblMaxHistory);
@@ -106,6 +123,8 @@ namespace SSH_Helper
             tabGeneral.Controls.Add(lblDefaultsSection);
             tabGeneral.Controls.Add(lblDefaultTimeout);
             tabGeneral.Controls.Add(_numDefaultTimeout);
+            tabGeneral.Controls.Add(lblConnectionTimeout);
+            tabGeneral.Controls.Add(_numConnectionTimeout);
 
             _tabControl.TabPages.Add(tabGeneral);
 
@@ -137,7 +156,7 @@ namespace SSH_Helper
             {
                 Text = "Save",
                 Size = new Size(80, 28),
-                Location = new Point(261, 245),
+                Location = new Point(261, 275),
                 DialogResult = DialogResult.OK
             };
             _btnSave.Click += BtnSave_Click;
@@ -146,7 +165,7 @@ namespace SSH_Helper
             {
                 Text = "Cancel",
                 Size = new Size(80, 28),
-                Location = new Point(347, 245),
+                Location = new Point(347, 275),
                 DialogResult = DialogResult.Cancel
             };
 
@@ -168,6 +187,7 @@ namespace SSH_Helper
             _chkRememberState.Checked = config.RememberState;
             _numMaxHistory.Value = Math.Clamp(config.MaxHistoryEntries, 1, 500);
             _numDefaultTimeout.Value = Math.Clamp(config.Timeout, 1, 300);
+            _numConnectionTimeout.Value = Math.Clamp(config.ConnectionTimeout, 5, 120);
 
             // Updates
             _chkCheckForUpdatesOnStartup.Checked = config.UpdateSettings.CheckOnStartup;
@@ -181,6 +201,7 @@ namespace SSH_Helper
                 config.RememberState = _chkRememberState.Checked;
                 config.MaxHistoryEntries = (int)_numMaxHistory.Value;
                 config.Timeout = (int)_numDefaultTimeout.Value;
+                config.ConnectionTimeout = (int)_numConnectionTimeout.Value;
 
                 // Updates
                 config.UpdateSettings.CheckOnStartup = _chkCheckForUpdatesOnStartup.Checked;

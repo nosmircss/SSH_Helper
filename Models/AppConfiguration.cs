@@ -18,6 +18,7 @@ namespace SSH_Helper.Models
         public Dictionary<string, PresetInfo> Presets { get; set; } = new();
         public string Username { get; set; } = string.Empty;
         public int Timeout { get; set; } = 10;
+        public int ConnectionTimeout { get; set; } = 30;
 
         // Window state
         public WindowState WindowState { get; set; } = new();

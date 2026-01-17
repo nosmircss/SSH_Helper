@@ -114,7 +114,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.SetVariable(varName, value);
                 context.EmitOutput($"Extract: {varName} = '{TruncateForDisplay(value)}'", ScriptOutputType.Debug);
             }
-            else if (into is List<object> varList)
+            else if (into is System.Collections.IList varList)
             {
                 // Multiple variables for multiple capture groups
                 for (int i = 0; i < varList.Count; i++)
@@ -142,7 +142,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.SetVariable(varName, values);
                 context.EmitOutput($"Extract: {varName} = [{values.Count} items]", ScriptOutputType.Debug);
             }
-            else if (into is List<object> varList && varList.Count > 0)
+            else if (into is System.Collections.IList varList && varList.Count > 0)
             {
                 // For multiple variables with "all", each variable gets a list of that group's captures
                 var groupLists = new Dictionary<string, List<string>>();
@@ -182,7 +182,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 context.SetVariable(varName, "");
             }
-            else if (into is List<object> varList)
+            else if (into is System.Collections.IList varList)
             {
                 foreach (var varObj in varList)
                 {

@@ -939,7 +939,6 @@ namespace SSH_Helper
             tsbPassword.BorderStyle = BorderStyle.FixedSingle;
             tsbPassword.Name = "tsbPassword";
             tsbPassword.Size = new Size(120, 25);
-            tsbPassword.Text = "nvr1know";
             // 
             // statusStrip
             // 
