@@ -79,6 +79,11 @@ namespace SSH_Helper.Services.Scripting.Models
         /// </summary>
         public InputOptions? Input { get; set; }
 
+        /// <summary>
+        /// UpdateColumn command - updates a column in the host table with a value.
+        /// </summary>
+        public UpdateColumnOptions? UpdateColumn { get; set; }
+
         // ===== Command Options =====
 
         /// <summary>
@@ -144,6 +149,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Readfile != null) return StepType.Readfile;
             if (Writefile != null) return StepType.Writefile;
             if (Input != null) return StepType.Input;
+            if (UpdateColumn != null) return StepType.UpdateColumn;
             return StepType.Unknown;
         }
     }
@@ -269,6 +275,22 @@ namespace SSH_Helper.Services.Scripting.Models
     }
 
     /// <summary>
+    /// Options for the updatecolumn command.
+    /// </summary>
+    public class UpdateColumnOptions
+    {
+        /// <summary>
+        /// The column name to update in the host table.
+        /// </summary>
+        public string Column { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The value to set. Can be a literal string or a variable reference like ${varname}.
+        /// </summary>
+        public string Value { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Enumeration of step types.
     /// </summary>
     public enum StepType
@@ -285,6 +307,7 @@ namespace SSH_Helper.Services.Scripting.Models
         While,
         Readfile,
         Writefile,
-        Input
+        Input,
+        UpdateColumn
     }
 }

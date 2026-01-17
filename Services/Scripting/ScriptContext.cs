@@ -16,6 +16,22 @@ namespace SSH_Helper.Services.Scripting
     }
 
     /// <summary>
+    /// Event arguments for column update requests from scripts.
+    /// </summary>
+    public class ColumnUpdateEventArgs : EventArgs
+    {
+        /// <summary>
+        /// The column name to update.
+        /// </summary>
+        public string ColumnName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The value to set in the column.
+        /// </summary>
+        public string Value { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Types of script output.
     /// </summary>
     public enum ScriptOutputType
@@ -80,6 +96,11 @@ namespace SSH_Helper.Services.Scripting
         /// Fired when script produces output.
         /// </summary>
         public event EventHandler<ScriptOutputEventArgs>? OutputReceived;
+
+        /// <summary>
+        /// Fired when script requests a column update for the current host.
+        /// </summary>
+        public event EventHandler<ColumnUpdateEventArgs>? ColumnUpdateRequested;
 
         /// <summary>
         /// Gets the last command output.
@@ -258,6 +279,20 @@ namespace SSH_Helper.Services.Scripting
         public void ClearOutput()
         {
             _output.Clear();
+        }
+
+        /// <summary>
+        /// Requests an update to a column in the host table.
+        /// </summary>
+        /// <param name="columnName">The column name to update.</param>
+        /// <param name="value">The value to set.</param>
+        public void RequestColumnUpdate(string columnName, string value)
+        {
+            ColumnUpdateRequested?.Invoke(this, new ColumnUpdateEventArgs
+            {
+                ColumnName = columnName,
+                Value = value
+            });
         }
 
         /// <summary>

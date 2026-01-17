@@ -11,7 +11,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.47";
+        private const string ApplicationVersion = "0.48";
         private const string ApplicationName = "SSH Helper";
 
         #endregion
@@ -41,7 +41,8 @@ namespace SSH_Helper
         private FindDialog? _findDialog;
         private string _lastFindTerm = "";
         private bool _lastFindMatchCase;
-        private bool _lastFindWrap = true;
+        private List<int> _findMatches = new();
+        private int _currentMatchIndex = -1;
 
         // Preset sorting
         private PresetSortMode _currentSortMode = PresetSortMode.Ascending;
@@ -68,6 +69,7 @@ namespace SSH_Helper
 
             // Wire up SSH service events
             _sshService.OutputReceived += SshService_OutputReceived;
+            _sshService.ColumnUpdateRequested += SshService_ColumnUpdateRequested;
 
             // Initialize update service
             var config = _configService.Load();
@@ -1877,6 +1879,45 @@ namespace SSH_Helper
             }
         }
 
+        private void SshService_ColumnUpdateRequested(object? sender, SshColumnUpdateEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(() => UpdateHostColumn(e.Host, e.ColumnName, e.Value));
+            }
+            else
+            {
+                UpdateHostColumn(e.Host, e.ColumnName, e.Value);
+            }
+        }
+
+        private void UpdateHostColumn(HostConnection host, string columnName, string value)
+        {
+            // Find the row for this host
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (row.IsNewRow) continue;
+
+                var hostIp = row.Cells[CsvManager.HostColumnName]?.Value?.ToString();
+                if (string.IsNullOrEmpty(hostIp)) continue;
+
+                // Match by IP address (with optional port)
+                var rowHost = HostConnection.Parse(hostIp);
+                if (rowHost.IpAddress == host.IpAddress && rowHost.Port == host.Port)
+                {
+                    // Check if column exists, create if it doesn't
+                    if (!dgv_variables.Columns.Contains(columnName))
+                    {
+                        dgv_variables.Columns.Add(columnName, columnName);
+                    }
+
+                    // Update the cell value
+                    row.Cells[columnName].Value = value;
+                    break;
+                }
+            }
+        }
+
         private void StoreExecutionHistory(List<ExecutionResult> results)
         {
             var combinedOutput = new StringBuilder();
@@ -2012,10 +2053,10 @@ namespace SSH_Helper
                     ShowFindDialog();
                     return true;
                 case Keys.F3:
-                    PerformFind(_lastFindTerm, _lastFindMatchCase, true, _lastFindWrap, false);
+                    NavigateToMatch(forward: true);
                     return true;
                 case Keys.Shift | Keys.F3:
-                    PerformFind(_lastFindTerm, _lastFindMatchCase, false, _lastFindWrap, false);
+                    NavigateToMatch(forward: false);
                     return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);
@@ -2029,109 +2070,129 @@ namespace SSH_Helper
 
             if (_findDialog == null || _findDialog.IsDisposed)
             {
-                _findDialog = new FindDialog(this, seed, _lastFindMatchCase, _lastFindWrap);
-                var screenPoint = txtOutput.PointToScreen(Point.Empty);
-                _findDialog.StartPosition = FormStartPosition.Manual;
-                _findDialog.Left = screenPoint.X + 40;
-                _findDialog.Top = screenPoint.Y + 40;
+                _findDialog = new FindDialog(this, seed, _lastFindMatchCase);
+                _findDialog.AnchorTo(txtOutput);
             }
 
             _findDialog.Show();
             _findDialog.BringToFront();
         }
 
-        internal void FindNextFromDialog(string term, bool matchCase, bool wrap)
+        internal void FindFromDialog(string term, bool matchCase, bool forward, bool highlightFirst)
         {
-            if (string.IsNullOrEmpty(term))
-            {
-                _findDialog?.SetStatus("Enter text to find.", true);
-                return;
-            }
             _lastFindTerm = term;
             _lastFindMatchCase = matchCase;
-            _lastFindWrap = wrap;
 
-            bool found = PerformFind(term, matchCase, true, wrap, true);
-            _findDialog?.SetStatus(found ? "Found." : "Not found.", !found);
-        }
+            BuildMatchList(term, matchCase);
 
-        internal void FindPreviousFromDialog(string term, bool matchCase, bool wrap)
-        {
-            if (string.IsNullOrEmpty(term))
+            if (_findMatches.Count == 0)
             {
-                _findDialog?.SetStatus("Enter text to find.", true);
+                _currentMatchIndex = -1;
+                _findDialog?.SetMatchInfo(0, 0);
                 return;
             }
-            _lastFindTerm = term;
-            _lastFindMatchCase = matchCase;
-            _lastFindWrap = wrap;
 
-            bool found = PerformFind(term, matchCase, false, wrap, true);
-            _findDialog?.SetStatus(found ? "Found." : "Not found.", !found);
-        }
-
-        private bool PerformFind(string term, bool matchCase, bool forward, bool wrap, bool fromDialog)
-        {
-            if (string.IsNullOrEmpty(term) || string.IsNullOrEmpty(txtOutput.Text))
-                return false;
-
-            var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-            string text = txtOutput.Text;
-
-            int idx;
-            if (forward)
+            if (highlightFirst)
             {
-                int start = txtOutput.SelectionStart + txtOutput.SelectionLength;
-                if (start > text.Length) start = text.Length;
-
-                idx = text.IndexOf(term, start, comparison);
-                if (idx == -1 && wrap)
-                    idx = text.IndexOf(term, 0, comparison);
+                // Find match at or after current cursor position
+                int cursorPos = txtOutput.SelectionStart;
+                _currentMatchIndex = _findMatches.FindIndex(m => m >= cursorPos);
+                if (_currentMatchIndex == -1)
+                    _currentMatchIndex = 0;
+            }
+            else if (forward)
+            {
+                _currentMatchIndex = (_currentMatchIndex + 1) % _findMatches.Count;
             }
             else
             {
-                int start = txtOutput.SelectionStart - 1;
-                if (start < 0) start = text.Length - 1;
-
-                idx = LastIndexOf(text, term, start, comparison);
-                if (idx == -1 && wrap)
-                    idx = LastIndexOf(text, term, text.Length - 1, comparison);
+                _currentMatchIndex = (_currentMatchIndex - 1 + _findMatches.Count) % _findMatches.Count;
             }
 
-            if (idx == -1) return false;
-
-            HighlightAndScroll(idx, term.Length, fromDialog);
-            return true;
+            HighlightCurrentMatch(term.Length);
+            _findDialog?.SetMatchInfo(_currentMatchIndex + 1, _findMatches.Count);
         }
 
-        private static int LastIndexOf(string source, string term, int startIndex, StringComparison comparison)
+        internal void UpdateFindStatus(string term, bool matchCase)
         {
-            if (startIndex < 0 || string.IsNullOrEmpty(term)) return -1;
-            int lastPossible = startIndex - term.Length + 1;
-            for (int i = lastPossible; i >= 0; i--)
+            _lastFindTerm = term;
+            _lastFindMatchCase = matchCase;
+
+            BuildMatchList(term, matchCase);
+
+            if (_findMatches.Count == 0)
             {
-                if (string.Compare(source, i, term, 0, term.Length, comparison) == 0)
-                    return i;
+                _currentMatchIndex = -1;
+                _findDialog?.SetMatchInfo(0, 0);
             }
-            return -1;
+            else
+            {
+                // Find which match contains the current selection
+                int cursorPos = txtOutput.SelectionStart;
+                _currentMatchIndex = _findMatches.FindIndex(m => m >= cursorPos);
+                if (_currentMatchIndex == -1)
+                    _currentMatchIndex = 0;
+
+                _findDialog?.SetMatchInfo(_currentMatchIndex + 1, _findMatches.Count);
+            }
         }
 
-        private void HighlightAndScroll(int index, int length, bool fromDialog)
+        private void NavigateToMatch(bool forward)
         {
+            if (string.IsNullOrEmpty(_lastFindTerm))
+                return;
+
+            if (_findMatches.Count == 0)
+            {
+                BuildMatchList(_lastFindTerm, _lastFindMatchCase);
+                if (_findMatches.Count == 0)
+                    return;
+                _currentMatchIndex = 0;
+            }
+            else if (forward)
+            {
+                _currentMatchIndex = (_currentMatchIndex + 1) % _findMatches.Count;
+            }
+            else
+            {
+                _currentMatchIndex = (_currentMatchIndex - 1 + _findMatches.Count) % _findMatches.Count;
+            }
+
+            HighlightCurrentMatch(_lastFindTerm.Length);
+            _findDialog?.SetMatchInfo(_currentMatchIndex + 1, _findMatches.Count);
+        }
+
+        private void BuildMatchList(string term, bool matchCase)
+        {
+            _findMatches.Clear();
+
+            if (string.IsNullOrEmpty(term) || string.IsNullOrEmpty(txtOutput.Text))
+                return;
+
+            var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            string text = txtOutput.Text;
+            int index = 0;
+
+            while ((index = text.IndexOf(term, index, comparison)) != -1)
+            {
+                _findMatches.Add(index);
+                index += term.Length;
+            }
+        }
+
+        private void HighlightCurrentMatch(int length)
+        {
+            if (_currentMatchIndex < 0 || _currentMatchIndex >= _findMatches.Count)
+                return;
+
             try
             {
-                txtOutput.SelectionStart = index;
+                txtOutput.SelectionStart = _findMatches[_currentMatchIndex];
                 txtOutput.SelectionLength = length;
                 txtOutput.ScrollToCaret();
 
-                if (fromDialog && _findDialog is { IsDisposed: false, Visible: true })
-                {
+                if (_findDialog is { IsDisposed: false, Visible: true })
                     _findDialog.Activate();
-                }
-                else
-                {
-                    txtOutput.Focus();
-                }
             }
             catch
             {

@@ -28,6 +28,16 @@ namespace SSH_Helper.Services
     }
 
     /// <summary>
+    /// Event arguments for column update requests from scripts.
+    /// </summary>
+    public class SshColumnUpdateEventArgs : EventArgs
+    {
+        public HostConnection Host { get; set; } = new();
+        public string ColumnName { get; set; } = string.Empty;
+        public string Value { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Handles SSH command execution against remote hosts.
     /// Now uses connection pooling and the Expect API for improved reliability.
     /// </summary>
@@ -38,6 +48,7 @@ namespace SSH_Helper.Services
 
         public event EventHandler<SshProgressEventArgs>? ProgressChanged;
         public event EventHandler<SshOutputEventArgs>? OutputReceived;
+        public event EventHandler<SshColumnUpdateEventArgs>? ColumnUpdateRequested;
 
         private volatile bool _isRunning;
         private CancellationTokenSource? _cts;
@@ -512,6 +523,12 @@ namespace SSH_Helper.Services
                     OnOutputReceived(host, output);
                 };
 
+                // Wire up column update requests
+                context.ColumnUpdateRequested += (s, e) =>
+                {
+                    OnColumnUpdateRequested(host, e.ColumnName, e.Value);
+                };
+
                 // Execute the script
                 var executor = new ScriptExecutor();
                 var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
@@ -585,6 +602,12 @@ namespace SSH_Helper.Services
                 var output = e.Message + Environment.NewLine;
                 outputBuilder.Append(output);
                 OnOutputReceived(host, output);
+            };
+
+            // Wire up column update requests
+            context.ColumnUpdateRequested += (s, e) =>
+            {
+                OnColumnUpdateRequested(host, e.ColumnName, e.Value);
             };
 
             // Execute the script
@@ -794,6 +817,16 @@ namespace SSH_Helper.Services
             {
                 Host = host,
                 Output = output
+            });
+        }
+
+        protected virtual void OnColumnUpdateRequested(HostConnection host, string columnName, string value)
+        {
+            ColumnUpdateRequested?.Invoke(this, new SshColumnUpdateEventArgs
+            {
+                Host = host,
+                ColumnName = columnName,
+                Value = value
             });
         }
 
