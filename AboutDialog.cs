@@ -1,4 +1,3 @@
-using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -94,7 +93,6 @@ Use responsibly.";
 
         private void FitToContent()
         {
-            int horizontalPadding = 32; // left+right padding total
             int maxLinePixelWidth = 0;
             int lineHeight = TextRenderer.MeasureText("X", _txtInfo.Font).Height;
             string[] lines = _txtInfo.Text.Replace("\r\n", "\n").Split('\n');
