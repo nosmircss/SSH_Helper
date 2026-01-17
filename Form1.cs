@@ -2031,10 +2031,7 @@ namespace SSH_Helper
             if (_findDialog == null || _findDialog.IsDisposed)
             {
                 _findDialog = new FindDialog(this, seed, _lastFindMatchCase);
-                var screenPoint = txtOutput.PointToScreen(Point.Empty);
-                _findDialog.StartPosition = FormStartPosition.Manual;
-                _findDialog.Left = screenPoint.X + 40;
-                _findDialog.Top = screenPoint.Y + 40;
+                _findDialog.AnchorTo(txtOutput);
             }
 
             _findDialog.Show();
