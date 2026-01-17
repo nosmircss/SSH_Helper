@@ -1,0 +1,76 @@
+---
+# Converted from: dudescript/conversation/fortigate/unblock
+# Removes a blocked IP from FortiGate firewall
+# Handles both cases: removing last block (deletes group) and removing one of many
+#
+# NOTE: The original dudescript used local Perl scripts to compute policy IDs.
+#       This simplified version works with a single FSM_BLOCK_GROUP.
+#       For the advanced interface-based version, you would need to provide
+#       the policy_id as a CSV column or use a fixed policy ID.
+#
+# Required variables (from CSV grid):
+#   ${block}     - IP address to unblock
+#   ${policy_id} - (Optional) Policy ID to delete if this is the last block
+
+name: FortiGate Unblock IP (Simple)
+description: Removes an IP from the blocking group (handles last-block cleanup)
+
+vars:
+  block: ""
+  policy_id: "1000000"  # Default policy ID - adjust as needed
+
+steps:
+  # Check current state of the blocking group
+  - send: sh firewall addrgrp FSM_BLOCK_GROUP
+    capture: group_info
+
+  # Check if group exists
+  - if: group_info matches 'entry is not found'
+    then:
+      - exit: failure "Block group FSM_BLOCK_GROUP not found - no blocks to remove"
+
+  # Check if this is the ONLY block in the group (last one)
+  # Pattern: if member ends with just this block (no other members after it)
+  - if: group_info matches 'set member "GDGBLOCK_${block}"$'
+    then:
+      # This is the last block - need to remove policy, group, and address
+      - print: "Last block detected - removing policy and cleaning up"
+
+      # Remove the firewall policy
+      - send: config firewall policy
+      - send: delete ${policy_id}
+      - send: end
+
+      # Remove the address group
+      - send: config firewall addrgrp
+      - send: delete FSM_BLOCK_GROUP
+      - send: end
+
+      # Remove the address object
+      - send: config firewall address
+      - send: delete GDGBLOCK_${block}
+      - send: end
+
+      - exit: success "Deleted block - no blocks remaining (policy deleted)"
+
+    else:
+      # Check if block exists in the group at all
+      - if: group_info matches 'GDGBLOCK_${block}'
+        then:
+          # Not the last block - just remove this member from the group
+          - print: "Other blocks exist - removing only this member"
+
+          # Remove from address group
+          - send: config firewall addrgrp
+          - send: edit FSM_BLOCK_GROUP
+          - send: unselect member GDGBLOCK_${block}
+          - send: end
+
+          # Remove the address object
+          - send: config firewall address
+          - send: delete GDGBLOCK_${block}
+          - send: end
+
+          - exit: success "Deleted block - other blocks remaining"
+        else:
+          - exit: failure "Block ${block} not found in FSM_BLOCK_GROUP"

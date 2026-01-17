@@ -1,0 +1,46 @@
+---
+# Converted from: dudescript/conversation/cisco/asa/pb_unshun
+# Removes a shun (unblocks) an IP address on a Cisco ASA firewall
+#
+# Required variables (from CSV grid):
+#   ${username} - ASA username
+#   ${password} - ASA password
+#   ${block}    - IP address to unshun
+
+name: Cisco ASA Unshun IP
+description: Removes shun (unblocks) an IP address on Cisco ASA
+
+vars:
+  block: ""
+
+steps:
+  # Login sequence
+  - send: login
+    expect: '/[Uu]sername:/'
+
+  - send: ${username}
+    expect: '/[Pp]assword: ?$/'
+
+  - send: ${password}
+    expect: '/# ?$/'
+
+  # Check current shuns
+  - send: sh shun
+    capture: shun_list
+
+  # Check if the IP is currently shunned
+  - if: shun_list matches 'shun.+?${block}'
+    then:
+      - print: "Found shun for ${block}, removing..."
+      - send: no shun ${block}
+      - print: "Unblocked ${block}"
+    else:
+      - print: "Shun not found for ${block}"
+
+  # Show final state
+  - send: sh shun
+    capture: final_list
+
+  - print: "Final shun list displayed above"
+
+  - exit: success "Unshun operation complete"

@@ -1,0 +1,83 @@
+---
+# FortiGate system status gathering script
+
+name: FortiGate System Status
+description: Gathers system status, resource usage, and license info
+
+steps:
+  # Get system status
+  - send: get system status
+    capture: status
+    suppress: true
+
+  # Extract version info
+  - extract:
+      from: status
+      pattern: 'Version:\s*(.+?)$'
+      into: version
+
+  - extract:
+      from: status
+      pattern: 'Hostname:\s*(\S+)'
+      into: hostname
+
+  - extract:
+      from: status
+      pattern: 'Serial-Number:\s*(\S+)'
+      into: serial
+
+  - print: "========== FortiGate Status =========="
+  - print: "Hostname: ${hostname}"
+  - print: "Serial: ${serial}"
+  - print: "Version: ${version}"
+
+  # Get system performance
+  - send: get system performance status
+    capture: perf
+
+  # Extract CPU and memory
+  - extract:
+      from: perf
+      pattern: 'CPU states:\s*(\d+)%'
+      into: cpu_usage
+
+  - extract:
+      from: perf
+      pattern: 'Memory:\s*(\d+)%'
+      into: mem_usage
+
+  - print: " "
+  - print: "=== Resource Usage ==="
+  - print: "CPU: ${cpu_usage}%"
+  - print: "Memory: ${mem_usage}%"
+
+  # Get session count
+  - send: get system session status
+    capture: sessions
+
+  - extract:
+      from: sessions
+      pattern: 'active\s+(\d+)'
+      into: active_sessions
+
+  - print: "Active Sessions: ${active_sessions}"
+
+  # Check HA status
+  - send: get system ha status
+    capture: ha_status
+
+  - if: ha_status matches 'standalone'
+    then:
+      - print: "HA Mode: Standalone"
+    else:
+      - if: ha_status matches 'master'
+        then:
+          - print: "HA Mode: Master"
+        else:
+          - if: ha_status matches 'slave'
+            then:
+              - print: "HA Mode: Slave"
+
+  - print: "======================================"
+
+  - exit: success "Status check complete for ${hostname}"

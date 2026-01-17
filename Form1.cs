@@ -115,9 +115,6 @@ namespace SSH_Helper
             // Populate UI from config
             tsbUsername.Text = config.Username;
             txtUsername.Text = config.Username;
-            txtDelay.Text = config.Delay.ToString();
-            tsbTimeout.Text = config.Timeout > 0 ? config.Timeout.ToString() : "10";
-            txtTimeout.Text = tsbTimeout.Text;
 
             // Load sort mode and manual order
             _currentSortMode = config.PresetSortMode;
@@ -128,7 +125,7 @@ namespace SSH_Helper
             RefreshPresetList();
 
             // Apply defaults to presets that don't have them
-            _presetManager.ApplyDefaults(config.Delay, config.Timeout);
+            _presetManager.ApplyDefaults(config.Timeout);
         }
 
         private void InitializeDataGridView()
@@ -200,6 +197,12 @@ namespace SSH_Helper
             lstPreset.DragOver += LstPreset_DragOver;
             lstPreset.DragDrop += LstPreset_DragDrop;
             lstPreset.AllowDrop = true;
+
+            // Script editor cursor position tracking
+            txtCommand.Click += TxtCommand_CursorPositionChanged;
+            txtCommand.KeyUp += TxtCommand_CursorPositionChanged;
+            txtCommand.MouseUp += TxtCommand_CursorPositionChanged;
+            UpdateLinePosition();
         }
 
         private void InitializeToolbarSync()
@@ -207,10 +210,9 @@ namespace SSH_Helper
             // Sync toolbar username/password with hidden textboxes
             tsbUsername.TextChanged += (s, e) => txtUsername.Text = tsbUsername.Text;
             tsbPassword.TextChanged += (s, e) => txtPassword.Text = tsbPassword.Text;
-            tsbTimeout.TextChanged += (s, e) => txtTimeout.Text = tsbTimeout.Text;
 
             // Only allow numeric input in timeout
-            tsbTimeout.KeyPress += (s, e) =>
+            txtTimeoutHeader.KeyPress += (s, e) =>
             {
                 if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
                 {
@@ -274,6 +276,12 @@ namespace SSH_Helper
                 {
                     try { outputSplitContainer.SplitterDistance = Math.Min(ws.OutputSplitterDistance.Value, outputSplitContainer.Width - outputSplitContainer.Panel2MinSize); }
                     catch { /* Ignore invalid splitter distances */ }
+                }
+
+                // Restore application state if enabled
+                if (config.RememberState && config.SavedState != null)
+                {
+                    RestoreApplicationState(config.SavedState);
                 }
             };
         }
@@ -356,10 +364,10 @@ namespace SSH_Helper
 
         private void HandleRightClick(DataGridView.HitTestInfo hit, Point location)
         {
-            if (hit.Type == DataGridViewHitTestType.Cell || hit.Type == DataGridViewHitTestType.ColumnHeader)
+            if (hit.Type == DataGridViewHitTestType.Cell || hit.Type == DataGridViewHitTestType.ColumnHeader || hit.Type == DataGridViewHitTestType.RowHeader)
             {
                 _rightClickedColumnIndex = hit.ColumnIndex;
-                _rightClickedRowIndex = hit.Type == DataGridViewHitTestType.Cell ? hit.RowIndex : -1;
+                _rightClickedRowIndex = (hit.Type == DataGridViewHitTestType.Cell || hit.Type == DataGridViewHitTestType.RowHeader) ? hit.RowIndex : -1;
 
                 if (hit.Type == DataGridViewHitTestType.Cell)
                 {
@@ -494,6 +502,24 @@ namespace SSH_Helper
             {
                 dgv_variables.BeginEdit(true);
             }
+        }
+
+        #endregion
+
+        #region Script Editor Events
+
+        private void TxtCommand_CursorPositionChanged(object? sender, EventArgs e)
+        {
+            UpdateLinePosition();
+        }
+
+        private void UpdateLinePosition()
+        {
+            int selectionStart = txtCommand.SelectionStart;
+            int line = txtCommand.GetLineFromCharIndex(selectionStart) + 1;
+            int firstCharIndex = txtCommand.GetFirstCharIndexOfCurrentLine();
+            int col = selectionStart - firstCharIndex + 1;
+            lblLinePosition.Text = $"Ln {line}, Col {col}";
         }
 
         #endregion
@@ -655,11 +681,9 @@ namespace SSH_Helper
             {
                 txtCommand.Text = preset.Commands;
                 txtPreset.Text = newPresetName;
-                if (preset.Delay.HasValue) txtDelay.Text = preset.Delay.Value.ToString();
                 if (preset.Timeout.HasValue)
                 {
-                    txtTimeout.Text = preset.Timeout.Value.ToString();
-                    tsbTimeout.Text = preset.Timeout.Value.ToString();
+                    txtTimeoutHeader.Text = preset.Timeout.Value.ToString();
                 }
             }
 
@@ -736,7 +760,11 @@ namespace SSH_Helper
         private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             using var dialog = new SettingsDialog(_configService);
-            dialog.ShowDialog(this);
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                // Settings saved - default timeout only applies to new presets
+                // Don't update the current timeout field as it's preset-specific
+            }
         }
 
         private void exportAllPresetsToolStripMenuItem_Click(object sender, EventArgs e)
@@ -1265,8 +1293,7 @@ namespace SSH_Helper
             var preset = new PresetInfo
             {
                 Commands = commands,
-                Delay = int.TryParse(txtDelay.Text, out var d) ? d : null,
-                Timeout = int.TryParse(tsbTimeout.Text, out var t) ? t : null,
+                Timeout = int.TryParse(txtTimeoutHeader.Text, out var t) ? t : null,
                 IsFavorite = existingPreset?.IsFavorite ?? false
             };
 
@@ -1471,10 +1498,9 @@ namespace SSH_Helper
 
             try
             {
-                int? defaultDelay = int.TryParse(txtDelay.Text, out var d) ? d : null;
-                int? defaultTimeout = int.TryParse(tsbTimeout.Text, out var t) ? t : null;
+                int? defaultTimeout = int.TryParse(txtTimeoutHeader.Text, out var t) ? t : null;
 
-                string finalName = _presetManager.Import(input, defaultDelay, defaultTimeout);
+                string finalName = _presetManager.Import(input, defaultTimeout);
 
                 lstPreset.Items.Add(finalName);
                 lstPreset.SelectedItem = finalName;
@@ -1484,8 +1510,7 @@ namespace SSH_Helper
                 {
                     txtPreset.Text = finalName;
                     txtCommand.Text = preset.Commands;
-                    if (preset.Delay.HasValue) txtDelay.Text = preset.Delay.Value.ToString();
-                    if (preset.Timeout.HasValue) tsbTimeout.Text = preset.Timeout.Value.ToString();
+                    if (preset.Timeout.HasValue) txtTimeoutHeader.Text = preset.Timeout.Value.ToString();
                 }
 
                 MessageBox.Show($"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1690,15 +1715,11 @@ namespace SSH_Helper
             bool nameChanged = !string.Equals(txtPreset.Text?.Trim(), _activePresetName, StringComparison.Ordinal);
             bool commandsChanged = !string.Equals(txtCommand.Text, preset.Commands ?? "", StringComparison.Ordinal);
 
-            bool delayDiffers = int.TryParse(txtDelay.Text, out var d)
-                ? preset.Delay != d
-                : preset.Delay.HasValue;
-
-            bool timeoutDiffers = int.TryParse(tsbTimeout.Text, out var t)
+            bool timeoutDiffers = int.TryParse(txtTimeoutHeader.Text, out var t)
                 ? preset.Timeout != t
                 : preset.Timeout.HasValue;
 
-            return nameChanged || commandsChanged || delayDiffers || timeoutDiffers;
+            return nameChanged || commandsChanged || timeoutDiffers;
         }
 
         #endregion
@@ -1713,14 +1734,17 @@ namespace SSH_Helper
             txtOutput.Clear();
 
             var hosts = GetHostConnections(dgv_variables.Rows.Cast<DataGridViewRow>()).ToList();
-            string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-            int timeout = InputValidator.ParseIntOrDefault(tsbTimeout.Text, 10);
+            int timeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
+            var timeouts = SshTimeoutOptions.FromSeconds(timeout);
+
+            // Create a preset from the current command text (supports both simple commands and YAML scripts)
+            var preset = new PresetInfo { Commands = txtCommand.Text };
 
             UpdateStatusBar($"Executing on {hosts.Count} hosts...", true, 0, hosts.Count);
 
             try
             {
-                var results = await _sshService.ExecuteAsync(hosts, commands, tsbUsername.Text, tsbPassword.Text, timeout);
+                var results = await _sshService.ExecutePresetAsync(hosts, preset, tsbUsername.Text, tsbPassword.Text, timeouts);
                 StoreExecutionHistory(results);
                 UpdateStatusBar($"Completed execution on {results.Count} hosts");
             }
@@ -1758,14 +1782,17 @@ namespace SSH_Helper
             txtOutput.Clear();
 
             var hosts = GetHostConnections(new[] { row }).ToList();
-            string[] commands = txtCommand.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-            int timeout = InputValidator.ParseIntOrDefault(tsbTimeout.Text, 10);
+            int timeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
+            var timeouts = SshTimeoutOptions.FromSeconds(timeout);
+
+            // Create a preset from the current command text (supports both simple commands and YAML scripts)
+            var preset = new PresetInfo { Commands = txtCommand.Text };
 
             UpdateStatusBar($"Executing on {host}...", true, 0, 1);
 
             try
             {
-                var results = await _sshService.ExecuteAsync(hosts, commands, tsbUsername.Text, tsbPassword.Text, timeout);
+                var results = await _sshService.ExecutePresetAsync(hosts, preset, tsbUsername.Text, tsbPassword.Text, timeouts);
                 StoreExecutionHistory(results);
                 UpdateStatusBar($"Completed execution on {host}");
             }
@@ -1971,6 +1998,14 @@ namespace SSH_Helper
         {
             switch (keyData)
             {
+                case Keys.Control | Keys.S:
+                    // Save preset when Ctrl+S is pressed and script editor has focus
+                    if (txtCommand.Focused || txtPreset.Focused)
+                    {
+                        SaveCurrentPreset();
+                        return true;
+                    }
+                    break;
                 case Keys.Control | Keys.F:
                     ShowFindDialog();
                     return true;
@@ -2113,8 +2148,7 @@ namespace SSH_Helper
                 _configService.Update(config =>
                 {
                     config.Username = tsbUsername.Text;
-                    config.Delay = InputValidator.ParseIntOrDefault(txtDelay.Text, 500);
-                    config.Timeout = InputValidator.ParseIntOrDefault(tsbTimeout.Text, 10);
+                    config.Timeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
 
                     // Save sort mode and manual order
                     config.PresetSortMode = _currentSortMode;
@@ -2136,12 +2170,145 @@ namespace SSH_Helper
                     config.WindowState.TopSplitterDistance = topSplitContainer.SplitterDistance;
                     config.WindowState.CommandSplitterDistance = commandSplitContainer.SplitterDistance;
                     config.WindowState.OutputSplitterDistance = outputSplitContainer.SplitterDistance;
+
+                    // Save application state if enabled
+                    if (config.RememberState)
+                    {
+                        config.SavedState = BuildApplicationState(config.MaxHistoryEntries);
+                    }
+                    else
+                    {
+                        config.SavedState = null;
+                    }
                 });
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Failed to save configuration: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private ApplicationState BuildApplicationState(int maxHistoryEntries = 30)
+        {
+            var state = new ApplicationState();
+
+            // Save hosts data
+            state.HostColumns = new List<string>();
+            for (int i = 0; i < dgv_variables.Columns.Count; i++)
+            {
+                state.HostColumns.Add(dgv_variables.Columns[i].Name);
+            }
+
+            state.Hosts = new List<Dictionary<string, string>>();
+            for (int row = 0; row < dgv_variables.Rows.Count; row++)
+            {
+                if (dgv_variables.Rows[row].IsNewRow) continue;
+
+                var rowData = new Dictionary<string, string>();
+                for (int col = 0; col < dgv_variables.Columns.Count; col++)
+                {
+                    var colName = dgv_variables.Columns[col].Name;
+                    var value = dgv_variables.Rows[row].Cells[col].Value?.ToString() ?? "";
+                    rowData[colName] = value;
+                }
+                state.Hosts.Add(rowData);
+            }
+
+            // Save CSV path
+            state.LastCsvPath = _loadedFilePath;
+
+            // Save selected preset
+            state.SelectedPreset = _activePresetName;
+
+            // Save username (not password)
+            state.Username = tsbUsername.Text;
+
+            // Save history (limited to maxHistoryEntries, keeping most recent)
+            state.History = new List<HistoryEntry>();
+            var historyToSave = _outputHistory.Skip(Math.Max(0, _outputHistory.Count - maxHistoryEntries));
+            foreach (var kvp in historyToSave)
+            {
+                state.History.Add(new HistoryEntry
+                {
+                    Timestamp = kvp.Key,
+                    Output = kvp.Value
+                });
+            }
+
+            return state;
+        }
+
+        private void RestoreApplicationState(ApplicationState state)
+        {
+            if (state == null) return;
+
+            // Restore hosts data
+            dgv_variables.Rows.Clear();
+            dgv_variables.Columns.Clear();
+
+            if (state.HostColumns != null && state.HostColumns.Count > 0)
+            {
+                foreach (var colName in state.HostColumns)
+                {
+                    dgv_variables.Columns.Add(colName, colName);
+                }
+
+                if (state.Hosts != null)
+                {
+                    foreach (var rowData in state.Hosts)
+                    {
+                        var rowIndex = dgv_variables.Rows.Add();
+                        foreach (var kvp in rowData)
+                        {
+                            if (dgv_variables.Columns.Contains(kvp.Key))
+                            {
+                                dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Restore CSV path
+            _loadedFilePath = state.LastCsvPath;
+
+            // Restore username (not password)
+            if (!string.IsNullOrEmpty(state.Username))
+            {
+                tsbUsername.Text = state.Username;
+                txtUsername.Text = state.Username;
+            }
+
+            // Restore history
+            if (state.History != null && state.History.Count > 0)
+            {
+                _outputHistory.Clear();
+                foreach (var entry in state.History)
+                {
+                    _outputHistory.Add(new KeyValuePair<string, string>(entry.Timestamp, entry.Output));
+                }
+            }
+
+            // Restore selected preset (do this last so the preset loads properly)
+            if (!string.IsNullOrEmpty(state.SelectedPreset))
+            {
+                // Find and select the preset in the list
+                for (int i = 0; i < lstPreset.Items.Count; i++)
+                {
+                    var displayName = lstPreset.Items[i].ToString() ?? "";
+                    var presetName = GetPresetNameFromDisplay(displayName);
+                    if (presetName == state.SelectedPreset)
+                    {
+                        lstPreset.SelectedIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            UpdateHostCount();
+
+            // Reset dirty flag since we're restoring saved state, not making new changes
+            _csvDirty = false;
         }
 
         private bool ConfirmExitWorkflow()

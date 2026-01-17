@@ -1,0 +1,29 @@
+---
+# Cisco IOS configuration backup script
+
+name: Cisco IOS Config Backup
+description: Displays the running configuration (can be captured to history/export)
+
+steps:
+  # Disable paging to get full output
+  - send: terminal length 0
+
+  # Show running config
+  - send: show running-config
+    capture: config
+
+  # Extract hostname from config
+  - extract:
+      from: config
+      pattern: 'hostname (\S+)'
+      into: device_hostname
+
+  - print: "=========================================="
+  - print: "Configuration backup for: ${device_hostname}"
+  - print: "Host IP: ${Host_IP}"
+  - print: "Timestamp: ${_timestamp}"
+  - print: "=========================================="
+
+  # The full config is in the output - can be exported from history
+
+  - exit: success "Config displayed for ${device_hostname}"

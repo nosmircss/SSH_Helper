@@ -138,7 +138,6 @@ namespace SSH_Helper.Services
             {
                 v = 1,
                 commands = preset.Commands ?? "",
-                delay = preset.Delay,
                 timeout = preset.Timeout
             };
 
@@ -151,10 +150,9 @@ namespace SSH_Helper.Services
         /// Imports a preset from an encoded string.
         /// </summary>
         /// <param name="encodedString">The encoded preset string</param>
-        /// <param name="defaultDelay">Default delay if not specified in preset</param>
         /// <param name="defaultTimeout">Default timeout if not specified in preset</param>
         /// <returns>The name of the imported preset</returns>
-        public string Import(string encodedString, int? defaultDelay = null, int? defaultTimeout = null)
+        public string Import(string encodedString, int? defaultTimeout = null)
         {
             if (string.IsNullOrWhiteSpace(encodedString))
                 throw new ArgumentException("Import string cannot be empty", nameof(encodedString));
@@ -166,7 +164,7 @@ namespace SSH_Helper.Services
             string importedName = encodedString.Substring(0, lastUnderscore);
             string encoded = encodedString.Substring(lastUnderscore + 1);
 
-            var preset = ParseImportedPayload(encoded, defaultDelay, defaultTimeout);
+            var preset = ParseImportedPayload(encoded, defaultTimeout);
             string finalName = GetUniqueName(importedName);
 
             _presets[finalName] = preset;
@@ -233,19 +231,14 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Applies default delay/timeout to presets that don't have them set.
+        /// Applies default timeout to presets that don't have it set.
         /// </summary>
-        public void ApplyDefaults(int defaultDelay, int defaultTimeout)
+        public void ApplyDefaults(int defaultTimeout)
         {
             bool changed = false;
 
             foreach (var preset in _presets.Values)
             {
-                if (!preset.Delay.HasValue)
-                {
-                    preset.Delay = defaultDelay;
-                    changed = true;
-                }
                 if (!preset.Timeout.HasValue)
                 {
                     preset.Timeout = defaultTimeout;
@@ -259,7 +252,7 @@ namespace SSH_Helper.Services
             }
         }
 
-        private PresetInfo ParseImportedPayload(string encoded, int? defaultDelay, int? defaultTimeout)
+        private PresetInfo ParseImportedPayload(string encoded, int? defaultTimeout)
         {
             string decompressed = DecompressEncoded(encoded);
 
@@ -269,13 +262,11 @@ namespace SSH_Helper.Services
                 {
                     var obj = JObject.Parse(decompressed);
                     string commands = obj["commands"]?.ToString() ?? obj["Commands"]?.ToString() ?? "";
-                    int? delay = obj["delay"]?.Type == JTokenType.Null ? null : obj["delay"]?.Value<int?>();
                     int? timeout = obj["timeout"]?.Type == JTokenType.Null ? null : obj["timeout"]?.Value<int?>();
 
                     return new PresetInfo
                     {
                         Commands = commands,
-                        Delay = delay,
                         Timeout = timeout
                     };
                 }
@@ -288,7 +279,6 @@ namespace SSH_Helper.Services
             return new PresetInfo
             {
                 Commands = decompressed,
-                Delay = defaultDelay,
                 Timeout = defaultTimeout
             };
         }

@@ -1,0 +1,28 @@
+---
+# Converted from: dudescript/conversation/bash/pb_loop
+# Reads a file and extracts interface names, then loops through them
+
+name: Loop Through Interfaces
+description: Reads /tmp/test file, extracts interface names, and prints each one
+
+steps:
+  # Read the test file
+  - send: cat /tmp/test
+    capture: output
+
+  # Extract all interface names using regex
+  - extract:
+      from: output
+      pattern: '[Ii]nterface (.+?)\s+'
+      into: interfaces
+      match: all
+
+  # Initialize counter
+  - set: i = 0
+
+  # Loop through all interfaces
+  - foreach: iface in interfaces
+    do:
+      - print: "found: ${iface}"
+
+  - exit: success "Finished processing interfaces"

@@ -1,0 +1,41 @@
+---
+# Converted from: dudescript/conversation/fortigate/block
+# Creates a firewall address object and adds it to a blocking group on FortiGate
+#
+# Required variables (from CSV grid):
+#   ${block}         - IP address to block
+#   ${src_interface} - Source interface name
+#   ${dst_interface} - Destination interface name
+
+name: FortiGate Block IP
+description: Creates address object and adds to blocking group with firewall policy
+
+vars:
+  block: ""
+  src_interface: "any"
+  dst_interface: "any"
+
+steps:
+  # Create address object for the blocked IP
+  - send: config firewall address
+  - send: edit GDGBLOCK_${block}
+  - send: set subnet ${block} 255.255.255.255
+  - send: set comment GDG_FSM_BLOCK
+  - send: end
+
+  # Add to address group
+  - send: config firewall addrgrp
+  - send: edit FSM_BLOCK_GROUP
+  - send: append member GDGBLOCK_${block}
+  - send: set comment GDG_BLOCKING_GROUP
+  - send: end
+
+  # Verify block was added to the group
+  - send: sh firewall addrgrp FSM_BLOCK_GROUP
+    capture: verify_output
+
+  - if: verify_output matches 'GDGBLOCK_${block}'
+    then:
+      - exit: success "Block set (${block}/32)"
+    else:
+      - exit: failure "Block NOT set (${block}/32)"
