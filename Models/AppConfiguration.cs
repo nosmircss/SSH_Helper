@@ -44,6 +44,12 @@ namespace SSH_Helper.Models
         /// </summary>
         public List<string> ManualFolderOrder { get; set; } = new();
 
+        /// <summary>
+        /// Manual ordering for root-level items on the Favorites tab.
+        /// Contains preset names (prefixed with "preset:") and folder names (prefixed with "folder:").
+        /// </summary>
+        public List<string> ManualFavoriteOrder { get; set; } = new();
+
         // Update settings
         public UpdateSettings UpdateSettings { get; set; } = new();
 

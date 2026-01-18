@@ -832,12 +832,16 @@ Writes a value back to a column in the host table for the current host. This all
 
 ### Built-in Variables
 
-| Variable | Description |
-|----------|-------------|
-| `${_output}` | Last command output |
-| `${_timestamp}` | Script start time (yyyy-MM-dd HH:mm:ss) |
-| `${_iteration}` | Current iteration in while loop |
-| `${item_index}` | Current index in foreach loop |
+| Variable | Description | Available |
+|----------|-------------|-----------|
+| `${_output}` | Last command output | After any `send` command |
+| `${_timestamp}` | Script start time (yyyy-MM-dd HH:mm:ss) | Always |
+| `${_iteration}` | Current iteration count (0-based) | Inside `while` loops |
+| `${item_index}` | Current item index (0-based) | Inside `foreach` loops |
+| `${Host_IP}` | Current host IP address | Always (from grid) |
+| `${port}` | SSH port for current host | Always (from grid, default 22) |
+
+**Note:** Any column in the host grid becomes available as a variable. For example, if you have a column named `location`, you can use `${location}` in your scripts.
 
 ### Variable Substitution Syntax
 
@@ -849,9 +853,9 @@ Variables are substituted using `${variable_name}`:
 - set: message = "Status: ${status}"
 ```
 
-### Array Access
+### Array Access and Properties
 
-Lists support index-based access:
+Lists support index-based access and properties:
 
 ```yaml
 - extract:
@@ -860,9 +864,30 @@ Lists support index-based access:
     into: numbers
     match: all
 
+# Access by index
 - print: "First: ${numbers[0]}"
 - print: "Second: ${numbers[1]}"
+
+# Get list length
+- print: "Total count: ${numbers.length}"
+
+# Use length in conditions
+- if: numbers.length > 0
+  then:
+    - print: "Found ${numbers.length} items"
+
+# Dynamic index access
+- set: i = 0
+- print: "Item at index ${i}: ${numbers[i]}"
 ```
+
+**Array Properties:**
+
+| Property | Description | Example |
+|----------|-------------|---------|
+| `.length` | Number of items in list | `${my_list.length}` |
+
+**Note:** The `.length` property works on lists created by `extract` (with `match: all`) or `readfile`.
 
 ---
 
@@ -972,7 +997,11 @@ Use parentheses for complex expressions:
 
 ## Debug Mode
 
-Enable debug mode to see detailed execution information:
+Enable debug mode to see detailed execution information. There are two ways to enable debugging:
+
+### Per-Script Debug Mode
+
+Add `debug: true` to your script header:
 
 ```yaml
 ---
@@ -990,11 +1019,18 @@ steps:
   - print: "${msg}"
 ```
 
+### Global Debug Mode
+
+Enable via menu: **Edit > Debug Mode**. This affects all script executions until disabled.
+
 **Debug Output Includes:**
-- Variable assignments from `set`
-- Extracted values from `extract`
-- Condition evaluation results in `if`
+- Variable assignments from `set` (shows variable name and value)
+- Extracted values from `extract` (shows pattern matches)
+- Condition evaluation results in `if` (shows true/false)
 - Loop iteration counts in `foreach` and `while`
+- File operation results from `readfile` and `writefile`
+
+Debug messages are prefixed with `[DEBUG]` for easy identification.
 
 ---
 
@@ -1323,6 +1359,57 @@ steps:
 
 ---
 
+### Example 9: Process List with Array Properties
+
+```yaml
+---
+name: Interface Inventory
+description: Collects all interfaces and stores count in host table
+
+steps:
+  - send: show ip interface brief
+    capture: output
+
+  # Extract all interface names
+  - extract:
+      from: output
+      pattern: '^(\S+)\s+\d'
+      into: interfaces
+      match: all
+
+  # Check if we found any interfaces
+  - if: interfaces.length == 0
+    then:
+      - exit: failure "No interfaces found"
+
+  - print: "Found ${interfaces.length} interfaces"
+
+  # Store count back to host table
+  - updatecolumn:
+      column: interface_count
+      value: ${interfaces.length}
+
+  # Process each interface
+  - set: up_count = 0
+  - foreach: iface in interfaces
+    do:
+      - send: show interface ${iface} | include line protocol
+        capture: status
+      - if: status contains "up"
+        then:
+          - set: up_count = up_count + 1
+          - print: "${iface}: UP"
+
+  - print: "${up_count} of ${interfaces.length} interfaces are up"
+
+  # Store results
+  - updatecolumn:
+      column: interfaces_up
+      value: ${up_count}
+```
+
+---
+
 ## Tips and Best Practices
 
 1. **Use `capture` and `extract` together**: Capture output first, then extract specific data
@@ -1333,3 +1420,6 @@ steps:
 6. **Initialize variables in `vars:`**: Provides default values and documents expected variables
 7. **Use meaningful variable names**: Makes scripts easier to read and maintain
 8. **Test with single host first**: Verify script works before running on multiple hosts
+9. **Use `updatecolumn` for inventory**: Store extracted data back to the host grid for export
+10. **Check list length before processing**: Use `${list.length}` to validate data before loops
+11. **Use array indexing for specific items**: Access `${list[0]}` for first item, `${list[1]}` for second, etc.

@@ -44,13 +44,28 @@ A Windows Forms application for executing SSH commands across multiple hosts wit
 
 - **Save**: Enter a name and click Save to store the current commands
 - **Favorites**: Right-click a preset to mark as favorite (shown with star)
-- **Sort**: Use the sort button to organize alphabetically or manually
+  - Access all favorites quickly via the Favorites tab
+  - Both presets and folders can be marked as favorites
+- **Sort**: Use the sort button to organize presets
+  - Ascending (A-Z), Descending (Z-A), or Manual order
+  - Manual order allows drag-and-drop reordering
+  - Sort order is saved per folder
 - **Folders**: Organize presets into folders for better management
   - Right-click to create/rename/delete folders
   - Drag presets into folders or use "Move to Folder" menu
   - Folders can be expanded/collapsed (state is remembered)
   - Selecting a folder displays a summary showing preset count and contents
   - Execute all presets in a folder at once via right-click menu
+
+### Folder Execution
+
+Execute multiple presets from a folder with advanced options:
+- **Preset Selection**: Choose which presets to run from a checklist
+- **Execution Mode**: Run presets sequentially or in parallel
+- **Stop on Error**: Optionally stop execution if any preset fails
+- **Parallel Hosts**: Configure how many hosts to run simultaneously (1-N)
+- **Suppress Separators**: Hide preset name separators from output
+- Per-host results are tracked in history for later review
 
 ### YAML Scripts
 
@@ -108,19 +123,34 @@ Access via Edit > Settings:
 | Shortcut | Action |
 |----------|--------|
 | Ctrl+O | Open CSV file |
-| Ctrl+S | Save CSV file |
+| Ctrl+S | Save CSV file / Save preset |
 | Ctrl+F | Find in output |
+| F3 | Find next match |
+| Shift+F3 | Find previous match |
 | F5 | Execute on all hosts |
 | F6 | Execute on selected hosts |
 | Escape | Stop execution |
+| Ctrl+A | Select all cells |
+| Ctrl+C | Copy selected cells |
+| Ctrl+V | Paste to cells |
+| Delete | Clear selected cells |
 
 ## Configuration
 
-Settings are stored in `config.json` in the application directory:
+Settings are stored in `config.json` in the application directory (`%LocalAppData%\SSH_Helper\`):
 - Window position and size
 - Splitter positions
-- Presets and their commands
+- Presets, folders, and favorites
+- Manual sort order for presets and folders
+- Folder expand/collapse states
 - Update settings
+
+### Custom Columns
+
+Right-click column headers to add, rename, or delete custom columns. Custom columns:
+- Become available as variables in scripts using `${column_name}` syntax
+- Can be updated by scripts using the `updatecolumn` command
+- Are saved when exporting to CSV
 
 ## Building from Source
 

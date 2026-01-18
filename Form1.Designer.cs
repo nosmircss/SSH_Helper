@@ -45,7 +45,11 @@ namespace SSH_Helper
             commandPanel = new Panel();
             commandSplitContainer = new SplitContainer();
             presetsPanel = new Panel();
+            presetsTabControl = new TabControl();
+            tabPresets = new TabPage();
+            tabFavorites = new TabPage();
             trvPresets = new TreeView();
+            trvFavorites = new TreeView();
             contextPresetLst = new ContextMenuStrip(components);
             ctxAddPreset = new ToolStripMenuItem();
             ctxDuplicatePreset = new ToolStripMenuItem();
@@ -72,6 +76,7 @@ namespace SSH_Helper
             tsbDeleteFolder = new ToolStripButton();
             presetsHeaderPanel = new Panel();
             lblPresetsTitle = new Label();
+            lblFavoritesEmpty = new Label();
             scriptPanel = new Panel();
             txtCommand = new TextBox();
             scriptFooterPanel = new Panel();
@@ -166,6 +171,9 @@ namespace SSH_Helper
             commandSplitContainer.Panel2.SuspendLayout();
             commandSplitContainer.SuspendLayout();
             presetsPanel.SuspendLayout();
+            presetsTabControl.SuspendLayout();
+            tabPresets.SuspendLayout();
+            tabFavorites.SuspendLayout();
             contextPresetLst.SuspendLayout();
             presetsToolStrip.SuspendLayout();
             presetsHeaderPanel.SuspendLayout();
@@ -368,17 +376,51 @@ namespace SSH_Helper
             commandSplitContainer.TabIndex = 0;
             // 
             // presetsPanel
-            // 
+            //
             presetsPanel.BackColor = Color.FromArgb(248, 249, 250);
-            presetsPanel.Controls.Add(trvPresets);
+            presetsPanel.Controls.Add(presetsTabControl);
             presetsPanel.Controls.Add(presetsToolStrip);
-            presetsPanel.Controls.Add(presetsHeaderPanel);
             presetsPanel.Dock = DockStyle.Fill;
             presetsPanel.Location = new Point(0, 0);
             presetsPanel.Name = "presetsPanel";
             presetsPanel.Padding = new Padding(8);
             presetsPanel.Size = new Size(639, 346);
             presetsPanel.TabIndex = 0;
+            //
+            // presetsTabControl
+            //
+            presetsTabControl.Controls.Add(tabPresets);
+            presetsTabControl.Controls.Add(tabFavorites);
+            presetsTabControl.Dock = DockStyle.Fill;
+            presetsTabControl.Location = new Point(8, 33);
+            presetsTabControl.Name = "presetsTabControl";
+            presetsTabControl.SelectedIndex = 0;
+            presetsTabControl.Size = new Size(623, 305);
+            presetsTabControl.TabIndex = 3;
+            presetsTabControl.SelectedIndexChanged += presetsTabControl_SelectedIndexChanged;
+            //
+            // tabPresets
+            //
+            tabPresets.Controls.Add(trvPresets);
+            tabPresets.Location = new Point(4, 24);
+            tabPresets.Name = "tabPresets";
+            tabPresets.Padding = new Padding(3);
+            tabPresets.Size = new Size(615, 277);
+            tabPresets.TabIndex = 0;
+            tabPresets.Text = "Presets";
+            tabPresets.UseVisualStyleBackColor = true;
+            //
+            // tabFavorites
+            //
+            tabFavorites.Controls.Add(trvFavorites);
+            tabFavorites.Controls.Add(lblFavoritesEmpty);
+            tabFavorites.Location = new Point(4, 24);
+            tabFavorites.Name = "tabFavorites";
+            tabFavorites.Padding = new Padding(3);
+            tabFavorites.Size = new Size(615, 277);
+            tabFavorites.TabIndex = 1;
+            tabFavorites.Text = "Favorites";
+            tabFavorites.UseVisualStyleBackColor = true;
             //
             // trvPresets
             //
@@ -390,13 +432,13 @@ namespace SSH_Helper
             trvPresets.FullRowSelect = true;
             trvPresets.HideSelection = false;
             trvPresets.ItemHeight = 20;
-            trvPresets.Location = new Point(8, 65);
+            trvPresets.Location = new Point(3, 3);
             trvPresets.Name = "trvPresets";
             trvPresets.ShowLines = true;
             trvPresets.ShowPlusMinus = true;
             trvPresets.ShowRootLines = true;
-            trvPresets.Size = new Size(623, 273);
-            trvPresets.TabIndex = 1;
+            trvPresets.Size = new Size(609, 271);
+            trvPresets.TabIndex = 0;
             trvPresets.AfterSelect += trvPresets_AfterSelect;
             trvPresets.AfterCollapse += trvPresets_AfterCollapse;
             trvPresets.AfterExpand += trvPresets_AfterExpand;
@@ -409,10 +451,49 @@ namespace SSH_Helper
             trvPresets.DragOver += trvPresets_DragOver;
             trvPresets.DragDrop += trvPresets_DragDrop;
             trvPresets.AllowDrop = true;
+            //
+            // trvFavorites
+            //
+            trvFavorites.BackColor = Color.White;
+            trvFavorites.BorderStyle = BorderStyle.None;
+            trvFavorites.ContextMenuStrip = contextPresetLst;
+            trvFavorites.Dock = DockStyle.Fill;
+            trvFavorites.Font = new Font("Segoe UI", 9.5F);
+            trvFavorites.FullRowSelect = true;
+            trvFavorites.HideSelection = false;
+            trvFavorites.ItemHeight = 20;
+            trvFavorites.Location = new Point(3, 3);
+            trvFavorites.Name = "trvFavorites";
+            trvFavorites.ShowLines = true;
+            trvFavorites.ShowPlusMinus = true;
+            trvFavorites.ShowRootLines = true;
+            trvFavorites.Size = new Size(609, 271);
+            trvFavorites.TabIndex = 0;
+            trvFavorites.AllowDrop = true;
+            trvFavorites.AfterSelect += trvFavorites_AfterSelect;
+            trvFavorites.ItemDrag += trvFavorites_ItemDrag;
+            trvFavorites.DragOver += trvFavorites_DragOver;
+            trvFavorites.DragDrop += trvFavorites_DragDrop;
+            trvFavorites.MouseDown += trvFavorites_MouseDown;
+            trvFavorites.NodeMouseClick += trvFavorites_NodeMouseClick;
+            trvFavorites.NodeMouseDoubleClick += trvFavorites_NodeMouseDoubleClick;
+            //
+            // lblFavoritesEmpty
+            //
+            lblFavoritesEmpty.Dock = DockStyle.Fill;
+            lblFavoritesEmpty.Font = new Font("Segoe UI", 9.5F);
+            lblFavoritesEmpty.ForeColor = Color.FromArgb(108, 117, 125);
+            lblFavoritesEmpty.Location = new Point(3, 3);
+            lblFavoritesEmpty.Name = "lblFavoritesEmpty";
+            lblFavoritesEmpty.Size = new Size(609, 271);
+            lblFavoritesEmpty.TabIndex = 1;
+            lblFavoritesEmpty.Text = "No favorites yet.\r\nRight-click a preset and select \"Toggle Favorite\" to add one.";
+            lblFavoritesEmpty.TextAlign = ContentAlignment.MiddleCenter;
+            lblFavoritesEmpty.Visible = false;
             // 
             // contextPresetLst
             // 
-            contextPresetLst.Items.AddRange(new ToolStripItem[] { ctxAddPreset, ctxDuplicatePreset, ctxRenamePreset, ctxDeletePreset, toolStripSeparator6, ctxToggleFavorite, ctxMoveToFolder, toolStripSeparator7, ctxExportPreset, ctxImportPreset, ctxToggleSorting, toolStripSeparatorFolders, ctxAddFolder, ctxRenameFolder, ctxDeleteFolder });
+            contextPresetLst.Items.AddRange(new ToolStripItem[] { ctxAddPreset, ctxDuplicatePreset, ctxRenamePreset, ctxDeletePreset, toolStripSeparator6, ctxToggleFavorite, ctxMoveToFolder, toolStripSeparator7, ctxExportPreset, ctxImportPreset, toolStripSeparatorFolders, ctxAddFolder, ctxRenameFolder, ctxDeleteFolder });
             contextPresetLst.Name = "contextPresetLst";
             contextPresetLst.Size = new Size(160, 192);
             // 
@@ -1359,7 +1440,9 @@ namespace SSH_Helper
             ((System.ComponentModel.ISupportInitialize)commandSplitContainer).EndInit();
             commandSplitContainer.ResumeLayout(false);
             presetsPanel.ResumeLayout(false);
-            presetsPanel.PerformLayout();
+            presetsTabControl.ResumeLayout(false);
+            tabPresets.ResumeLayout(false);
+            tabFavorites.ResumeLayout(false);
             contextPresetLst.ResumeLayout(false);
             presetsToolStrip.ResumeLayout(false);
             presetsToolStrip.PerformLayout();
@@ -1432,9 +1515,14 @@ namespace SSH_Helper
 
         // Presets panel
         private Panel presetsPanel;
+        private TabControl presetsTabControl;
+        private TabPage tabPresets;
+        private TabPage tabFavorites;
         private Panel presetsHeaderPanel;
         private Label lblPresetsTitle;
         private TreeView trvPresets;
+        private TreeView trvFavorites;
+        private Label lblFavoritesEmpty;
         private ToolStrip presetsToolStrip;
         private ToolStripButton tsbAddPreset;
         private ToolStripButton tsbDeletePreset;

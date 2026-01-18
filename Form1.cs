@@ -20,7 +20,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.49.1";
+        private const string ApplicationVersion = "0.50.0";
         private const string ApplicationName = "SSH Helper";
 
         #endregion
@@ -67,6 +67,9 @@ namespace SSH_Helper
 
         // Per-host history data for the currently selected folder history entry
         private List<HostHistoryEntry>? _currentHostResults;
+
+        // Track which TreeView triggered the context menu
+        private TreeView? _contextMenuSourceTreeView;
 
         #endregion
 
@@ -880,6 +883,7 @@ namespace SSH_Helper
                 }
 
                 RefreshPresetList();
+                RestoreFolderExpandState();
                 SelectPresetByName(draggedTag.IsFolder ? null : draggedTag.Name);
             }
             finally
@@ -959,6 +963,464 @@ namespace SSH_Helper
 
         #endregion
 
+        #region Favorites TreeView Handlers
+
+        private void presetsTabControl_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            if (presetsTabControl.SelectedTab == tabFavorites)
+            {
+                RefreshFavoritesList();
+            }
+        }
+
+        private void RefreshFavoritesList()
+        {
+            trvFavorites.Nodes.Clear();
+
+            // Get favorite folders
+            var favoriteFolders = _presetManager.Folders
+                .Where(kvp => kvp.Value.IsFavorite)
+                .Select(kvp => kvp.Key)
+                .ToHashSet();
+
+            // Get favorite presets
+            var favoritePresets = _presetManager.Presets
+                .Where(kvp => kvp.Value.IsFavorite)
+                .Select(kvp => kvp.Key)
+                .ToHashSet();
+
+            if (favoriteFolders.Count == 0 && favoritePresets.Count == 0)
+            {
+                lblFavoritesEmpty.Visible = true;
+                trvFavorites.Visible = false;
+                return;
+            }
+
+            lblFavoritesEmpty.Visible = false;
+            trvFavorites.Visible = true;
+
+            var config = _configService.Load();
+
+            // Build ordered list of root-level favorite items
+            var orderedItems = GetOrderedFavoriteItems(favoriteFolders, favoritePresets, config);
+
+            // Add items in order
+            foreach (var item in orderedItems)
+            {
+                if (item.StartsWith("folder:"))
+                {
+                    var folderName = item.Substring(7);
+                    var folderNode = new TreeNode($"📁 {folderName}")
+                    {
+                        Tag = new PresetNodeTag { IsFolder = true, Name = folderName }
+                    };
+                    trvFavorites.Nodes.Add(folderNode);
+
+                    // Add presets in this folder
+                    var presetsInFolder = GetSortedPresetsInFolder(folderName, config);
+                    foreach (var presetName in presetsInFolder)
+                    {
+                        var presetNode = new TreeNode(presetName)
+                        {
+                            Tag = new PresetNodeTag { IsFolder = false, Name = presetName }
+                        };
+                        folderNode.Nodes.Add(presetNode);
+                    }
+
+                    // Expand folder by default
+                    folderNode.Expand();
+                }
+                else if (item.StartsWith("preset:"))
+                {
+                    var presetName = item.Substring(7);
+                    var node = new TreeNode(presetName)
+                    {
+                        Tag = new PresetNodeTag { IsFolder = false, Name = presetName }
+                    };
+                    trvFavorites.Nodes.Add(node);
+                }
+            }
+        }
+
+        private List<string> GetOrderedFavoriteItems(HashSet<string> favoriteFolders, HashSet<string> favoritePresets, AppConfiguration config)
+        {
+            var result = new List<string>();
+            var remainingFolders = new HashSet<string>(favoriteFolders);
+            var remainingPresets = new HashSet<string>(favoritePresets);
+
+            // First, add items in the saved manual order
+            foreach (var item in config.ManualFavoriteOrder)
+            {
+                if (item.StartsWith("folder:"))
+                {
+                    var folderName = item.Substring(7);
+                    if (remainingFolders.Contains(folderName))
+                    {
+                        result.Add(item);
+                        remainingFolders.Remove(folderName);
+                    }
+                }
+                else if (item.StartsWith("preset:"))
+                {
+                    var presetName = item.Substring(7);
+                    if (remainingPresets.Contains(presetName))
+                    {
+                        result.Add(item);
+                        remainingPresets.Remove(presetName);
+                    }
+                }
+            }
+
+            // Add any remaining folders (new favorites not yet in the order)
+            foreach (var folder in remainingFolders.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            {
+                result.Add($"folder:{folder}");
+            }
+
+            // Add any remaining presets (new favorites not yet in the order)
+            foreach (var preset in remainingPresets.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+            {
+                result.Add($"preset:{preset}");
+            }
+
+            return result;
+        }
+
+        private void trvFavorites_AfterSelect(object? sender, TreeViewEventArgs e)
+        {
+            if (_suppressPresetSelectionChange || e.Node == null)
+                return;
+
+            var tag = e.Node.Tag as PresetNodeTag;
+            if (tag == null)
+                return;
+
+            // Handle folder selection
+            if (tag.IsFolder)
+            {
+                // Check for unsaved changes first
+                if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
+                {
+                    var result = MessageBox.Show(
+                        $"Save changes to preset '{_activePresetName}'?",
+                        "Unsaved Preset",
+                        MessageBoxButtons.YesNoCancel,
+                        MessageBoxIcon.Question);
+
+                    if (result == DialogResult.Cancel)
+                    {
+                        return;
+                    }
+
+                    if (result == DialogResult.Yes)
+                    {
+                        SaveCurrentPreset();
+                    }
+                }
+
+                // Display folder summary
+                _activePresetName = null;
+                _selectedFolderName = tag.Name;
+                txtPreset.Text = $"📁 {tag.Name}";
+                txtTimeoutHeader.Clear();
+                DisplayFolderSummary(tag.Name);
+                UpdateRunButtonText();
+                return;
+            }
+
+            string newPresetName = tag.Name;
+
+            // Check for unsaved changes
+            if (!string.IsNullOrEmpty(_activePresetName) &&
+                !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
+                IsPresetDirty())
+            {
+                var result = MessageBox.Show(
+                    $"Save changes to preset '{_activePresetName}'?",
+                    "Unsaved Preset",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Cancel)
+                {
+                    return;
+                }
+
+                if (result == DialogResult.Yes)
+                {
+                    SaveCurrentPreset();
+                }
+            }
+
+            var preset = _presetManager.Get(newPresetName);
+            if (preset != null)
+            {
+                txtCommand.ReadOnly = false;
+                txtCommand.Text = preset.Commands;
+                txtPreset.Text = newPresetName;
+                if (preset.Timeout.HasValue)
+                {
+                    txtTimeoutHeader.Text = preset.Timeout.Value.ToString();
+                }
+                else
+                {
+                    txtTimeoutHeader.Text = string.Empty;
+                }
+            }
+
+            _activePresetName = newPresetName;
+            _selectedFolderName = null;
+            UpdateRunButtonText();
+        }
+
+        private void trvFavorites_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                var hitInfo = trvFavorites.HitTest(e.Location);
+                if (hitInfo.Node != null)
+                {
+                    trvFavorites.SelectedNode = hitInfo.Node;
+                }
+            }
+        }
+
+        private void trvFavorites_NodeMouseClick(object? sender, TreeNodeMouseClickEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right && e.Node != null)
+            {
+                trvFavorites.SelectedNode = e.Node;
+            }
+        }
+
+        private void trvFavorites_NodeMouseDoubleClick(object? sender, TreeNodeMouseClickEventArgs e)
+        {
+            // Double-click loads the preset (same as select, but confirms action)
+            if (e.Node?.Tag is PresetNodeTag tag && !tag.IsFolder)
+            {
+                UpdateStatusBar($"Loaded favorite preset: {tag.Name}");
+            }
+        }
+
+        private void trvFavorites_ItemDrag(object? sender, ItemDragEventArgs e)
+        {
+            if (e.Item is TreeNode node)
+            {
+                _draggedNode = node;
+                DoDragDrop(node, DragDropEffects.Move);
+            }
+        }
+
+        private void trvFavorites_DragOver(object? sender, DragEventArgs e)
+        {
+            if (_draggedNode == null)
+            {
+                e.Effect = DragDropEffects.None;
+                return;
+            }
+
+            var pt = trvFavorites.PointToClient(new Point(e.X, e.Y));
+            var targetNode = trvFavorites.GetNodeAt(pt);
+
+            // Reset previous highlight
+            if (_lastHighlightedNode != null && _lastHighlightedNode != targetNode)
+            {
+                _lastHighlightedNode.BackColor = trvFavorites.BackColor;
+            }
+
+            if (targetNode != null && CanDropOnFavorites(_draggedNode, targetNode))
+            {
+                e.Effect = DragDropEffects.Move;
+                targetNode.BackColor = Color.LightBlue;
+                _lastHighlightedNode = targetNode;
+            }
+            else
+            {
+                e.Effect = DragDropEffects.None;
+            }
+        }
+
+        private void trvFavorites_DragDrop(object? sender, DragEventArgs e)
+        {
+            // Reset highlight
+            if (_lastHighlightedNode != null)
+            {
+                _lastHighlightedNode.BackColor = trvFavorites.BackColor;
+                _lastHighlightedNode = null;
+            }
+
+            if (_draggedNode == null)
+                return;
+
+            var pt = trvFavorites.PointToClient(new Point(e.X, e.Y));
+            var targetNode = trvFavorites.GetNodeAt(pt);
+            var draggedTag = _draggedNode.Tag as PresetNodeTag;
+
+            if (draggedTag == null || targetNode == null)
+            {
+                _draggedNode = null;
+                return;
+            }
+
+            var targetTag = targetNode.Tag as PresetNodeTag;
+            if (targetTag == null)
+            {
+                _draggedNode = null;
+                return;
+            }
+
+            try
+            {
+                // Check if both nodes are at root level of the favorites tree
+                bool draggedIsRootLevel = _draggedNode.Parent == null;
+                bool targetIsRootLevel = targetNode.Parent == null;
+
+                if (draggedIsRootLevel && targetIsRootLevel)
+                {
+                    // Reorder root-level favorites (folders and presets)
+                    ReorderFavoriteItems(draggedTag, targetTag);
+                    RefreshFavoritesList();
+                    SelectItemInFavoritesTree(draggedTag);
+                    UpdateStatusBar($"Reordered favorite '{draggedTag.Name}'");
+                }
+                else if (!draggedIsRootLevel && !targetIsRootLevel &&
+                         _draggedNode.Parent == targetNode.Parent &&
+                         !draggedTag.IsFolder && !targetTag.IsFolder)
+                {
+                    // Reorder presets within the same folder
+                    var sourcePreset = _presetManager.Get(draggedTag.Name);
+                    var targetPreset = _presetManager.Get(targetTag.Name);
+
+                    if (sourcePreset?.Folder == targetPreset?.Folder)
+                    {
+                        ReorderPresetsInFolder(draggedTag.Name, targetTag.Name, sourcePreset?.Folder);
+
+                        // Refresh both tabs since they share the same folder data
+                        RefreshPresetList();
+                        RestoreFolderExpandState();
+                        RefreshFavoritesList();
+                        SelectPresetInFavoritesTree(draggedTag.Name);
+
+                        UpdateStatusBar($"Reordered preset '{draggedTag.Name}'");
+                    }
+                }
+            }
+            finally
+            {
+                _draggedNode = null;
+            }
+        }
+
+        private void ReorderFavoriteItems(PresetNodeTag sourceTag, PresetNodeTag targetTag)
+        {
+            var config = _configService.Load();
+
+            string sourceKey = sourceTag.IsFolder ? $"folder:{sourceTag.Name}" : $"preset:{sourceTag.Name}";
+            string targetKey = targetTag.IsFolder ? $"folder:{targetTag.Name}" : $"preset:{targetTag.Name}";
+
+            // Get current favorite items
+            var favoriteFolders = _presetManager.Folders
+                .Where(kvp => kvp.Value.IsFavorite)
+                .Select(kvp => kvp.Key)
+                .ToHashSet();
+
+            var favoritePresets = _presetManager.Presets
+                .Where(kvp => kvp.Value.IsFavorite)
+                .Select(kvp => kvp.Key)
+                .ToHashSet();
+
+            // Build current order
+            var currentOrder = GetOrderedFavoriteItems(favoriteFolders, favoritePresets, config);
+
+            // Remove source from current position
+            currentOrder.Remove(sourceKey);
+
+            // Find target position and insert before it
+            int targetIndex = currentOrder.IndexOf(targetKey);
+            if (targetIndex >= 0)
+            {
+                currentOrder.Insert(targetIndex, sourceKey);
+            }
+            else
+            {
+                currentOrder.Add(sourceKey);
+            }
+
+            // Save new order
+            config.ManualFavoriteOrder = currentOrder;
+            _configService.Save(config);
+        }
+
+        private bool CanDropOnFavorites(TreeNode draggedNode, TreeNode targetNode)
+        {
+            if (draggedNode == targetNode)
+                return false;
+
+            var draggedTag = draggedNode.Tag as PresetNodeTag;
+            var targetTag = targetNode.Tag as PresetNodeTag;
+
+            if (draggedTag == null || targetTag == null)
+                return false;
+
+            // Check if both nodes are at root level of the favorites tree
+            bool draggedIsRootLevel = draggedNode.Parent == null;
+            bool targetIsRootLevel = targetNode.Parent == null;
+
+            // Allow reordering root-level items with each other
+            if (draggedIsRootLevel && targetIsRootLevel)
+            {
+                return true;
+            }
+
+            // Allow reordering presets within the same folder (non-root level)
+            if (!draggedIsRootLevel && !targetIsRootLevel &&
+                draggedNode.Parent == targetNode.Parent &&
+                !draggedTag.IsFolder && !targetTag.IsFolder)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private void SelectItemInFavoritesTree(PresetNodeTag tag)
+        {
+            foreach (TreeNode node in trvFavorites.Nodes)
+            {
+                if (node.Tag is PresetNodeTag nodeTag &&
+                    nodeTag.IsFolder == tag.IsFolder &&
+                    nodeTag.Name == tag.Name)
+                {
+                    trvFavorites.SelectedNode = node;
+                    return;
+                }
+            }
+        }
+
+        private void SelectPresetInFavoritesTree(string presetName)
+        {
+            foreach (TreeNode node in trvFavorites.Nodes)
+            {
+                if (node.Tag is PresetNodeTag tag && !tag.IsFolder && tag.Name == presetName)
+                {
+                    trvFavorites.SelectedNode = node;
+                    return;
+                }
+
+                // Check child nodes (presets in folders)
+                foreach (TreeNode childNode in node.Nodes)
+                {
+                    if (childNode.Tag is PresetNodeTag childTag && !childTag.IsFolder && childTag.Name == presetName)
+                    {
+                        trvFavorites.SelectedNode = childNode;
+                        return;
+                    }
+                }
+            }
+        }
+
+        #endregion
+
         #endregion
 
         #region Button Click Handlers
@@ -989,13 +1451,29 @@ namespace SSH_Helper
             // Check if a folder is selected - use tracked folder name as fallback
             // (TreeView selection can be unreliable when clicking buttons)
             string? folderName = null;
-            if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag && tag.IsFolder)
+
+            // Check both trvPresets and trvFavorites based on current tab
+            if (presetsTabControl.SelectedTab == tabFavorites)
             {
-                folderName = tag.Name;
+                if (trvFavorites.SelectedNode?.Tag is PresetNodeTag favTag && favTag.IsFolder)
+                {
+                    folderName = favTag.Name;
+                }
+                else if (!string.IsNullOrEmpty(_selectedFolderName))
+                {
+                    folderName = _selectedFolderName;
+                }
             }
-            else if (!string.IsNullOrEmpty(_selectedFolderName))
+            else
             {
-                folderName = _selectedFolderName;
+                if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag && tag.IsFolder)
+                {
+                    folderName = tag.Name;
+                }
+                else if (!string.IsNullOrEmpty(_selectedFolderName))
+                {
+                    folderName = _selectedFolderName;
+                }
             }
 
             if (folderName != null)
@@ -1013,13 +1491,29 @@ namespace SSH_Helper
             // Check if a folder is selected - use tracked folder name as fallback
             // (TreeView selection can be unreliable when clicking buttons)
             string? folderName = null;
-            if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag && tag.IsFolder)
+
+            // Check both trvPresets and trvFavorites based on current tab
+            if (presetsTabControl.SelectedTab == tabFavorites)
             {
-                folderName = tag.Name;
+                if (trvFavorites.SelectedNode?.Tag is PresetNodeTag favTag && favTag.IsFolder)
+                {
+                    folderName = favTag.Name;
+                }
+                else if (!string.IsNullOrEmpty(_selectedFolderName))
+                {
+                    folderName = _selectedFolderName;
+                }
             }
-            else if (!string.IsNullOrEmpty(_selectedFolderName))
+            else
             {
-                folderName = _selectedFolderName;
+                if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag && tag.IsFolder)
+                {
+                    folderName = tag.Name;
+                }
+                else if (!string.IsNullOrEmpty(_selectedFolderName))
+                {
+                    folderName = _selectedFolderName;
+                }
             }
 
             if (folderName != null)
@@ -1170,6 +1664,7 @@ namespace SSH_Helper
             }
 
             RefreshPresetList();
+            RestoreFolderExpandState();
             UpdateSortModeIndicator();
             UpdateStatusBar($"Sort mode: {_currentSortMode}");
         }
@@ -1196,17 +1691,67 @@ namespace SSH_Helper
 
         private void ContextPresetLst_Opening(object? sender, CancelEventArgs e)
         {
-            var tag = trvPresets.SelectedNode?.Tag as PresetNodeTag;
+            // Determine which TreeView triggered the context menu
+            if (sender is ContextMenuStrip cms && cms.SourceControl is TreeView sourceTreeView)
+            {
+                _contextMenuSourceTreeView = sourceTreeView;
+            }
+            else
+            {
+                // Fallback: check which TreeView has focus or was most recently clicked
+                _contextMenuSourceTreeView = trvFavorites.Focused ? trvFavorites : trvPresets;
+            }
+
+            var tag = _contextMenuSourceTreeView.SelectedNode?.Tag as PresetNodeTag;
             bool isFolder = tag?.IsFolder == true;
             bool isPreset = tag != null && !tag.IsFolder;
             bool hasSelection = tag != null;
+            bool isFavoritesTab = _contextMenuSourceTreeView == trvFavorites;
 
+            // On Favorites tab, only show limited options: Rename and Toggle Favorite
+            if (isFavoritesTab)
+            {
+                // Determine if Toggle Favorite should be shown
+                // Only show for folders (which are directly favorited) or presets that are themselves favorited
+                bool showToggleFavorite = false;
+                if (isFolder)
+                {
+                    showToggleFavorite = true;
+                }
+                else if (isPreset)
+                {
+                    var preset = _presetManager.Get(tag!.Name);
+                    showToggleFavorite = preset?.IsFavorite == true;
+                }
+
+                // Hide most items on Favorites tab
+                ctxAddPreset.Visible = false;
+                ctxDuplicatePreset.Visible = false;
+                ctxRenamePreset.Visible = isPreset;
+                ctxDeletePreset.Visible = false;
+                ctxToggleFavorite.Visible = showToggleFavorite;
+                ctxExportPreset.Visible = false;
+                ctxImportPreset.Visible = false;
+                ctxToggleSorting.Visible = false;
+                ctxAddFolder.Visible = false;
+                ctxRenameFolder.Visible = isFolder;
+                ctxDeleteFolder.Visible = false;
+                ctxMoveToFolder.Visible = false;
+
+                // Hide all separators on Favorites tab
+                toolStripSeparator6.Visible = false;
+                toolStripSeparator7.Visible = false;
+                toolStripSeparatorFolders.Visible = false;
+                return;
+            }
+
+            // Presets tab - show full context menu
             // Preset-specific items
             ctxAddPreset.Visible = true;
             ctxDuplicatePreset.Visible = isPreset;
             ctxRenamePreset.Visible = isPreset;
             ctxDeletePreset.Visible = isPreset;
-            ctxToggleFavorite.Visible = isPreset;
+            ctxToggleFavorite.Visible = hasSelection;
             ctxExportPreset.Visible = isPreset;
             ctxImportPreset.Visible = true;
             ctxToggleSorting.Visible = true;
@@ -1920,6 +2465,7 @@ namespace SSH_Helper
                     _manualPresetOrder.Add(presetName);
                 }
                 RefreshPresetList();
+                RestoreFolderExpandState();
             }
 
             _activePresetName = presetName;
@@ -1993,6 +2539,7 @@ namespace SSH_Helper
             }
 
             RefreshPresetList();
+            RestoreFolderExpandState();
             SelectPresetByName(presetName);
 
             // Load the new preset into the editor
@@ -2039,6 +2586,7 @@ namespace SSH_Helper
                 }
 
                 RefreshPresetList();
+                RestoreFolderExpandState();
                 SelectPresetByName(finalName);
 
                 var preset = _presetManager.Get(finalName);
@@ -2079,6 +2627,7 @@ namespace SSH_Helper
             }
 
             RefreshPresetList();
+            RestoreFolderExpandState();
             SelectPresetByName(newName);
             txtPreset.Text = newName;
             _activePresetName = newName;
@@ -2108,6 +2657,7 @@ namespace SSH_Helper
                 }
 
                 RefreshPresetList();
+                RestoreFolderExpandState();
 
                 // Select another preset if any exist
                 if (_presetManager.Presets.Count > 0)
@@ -2168,6 +2718,7 @@ namespace SSH_Helper
                 string finalName = _presetManager.Import(input, defaultTimeout);
 
                 RefreshPresetList();
+                RestoreFolderExpandState();
                 SelectPresetByName(finalName);
 
                 var preset = _presetManager.Get(finalName);
@@ -2238,6 +2789,7 @@ namespace SSH_Helper
             {
                 int count = _presetManager.ImportAllFromFile(dialog.FileName);
                 RefreshPresetList();
+                RestoreFolderExpandState();
                 MessageBox.Show($"Imported {count} presets.\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
                     "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -2273,7 +2825,9 @@ namespace SSH_Helper
             var folderNodes = new Dictionary<string, TreeNode>();
             foreach (var folderName in folders)
             {
-                var folderNode = new TreeNode($"📁 {folderName}")
+                var folderInfo = _presetManager.Folders.GetValueOrDefault(folderName);
+                string folderDisplay = folderInfo?.IsFavorite == true ? $"★ 📁 {folderName}" : $"📁 {folderName}";
+                var folderNode = new TreeNode(folderDisplay)
                 {
                     Tag = new PresetNodeTag { IsFolder = true, Name = folderName }
                 };
@@ -2518,11 +3072,38 @@ namespace SSH_Helper
 
         private void ToggleFavorite()
         {
-            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+            // Use the TreeView that triggered the context menu, or fall back to checking both
+            PresetNodeTag? tag = null;
+            if (_contextMenuSourceTreeView?.SelectedNode?.Tag is PresetNodeTag sourceTag)
+            {
+                tag = sourceTag;
+            }
+            else if (trvPresets.SelectedNode?.Tag is PresetNodeTag presetsTag)
+            {
+                tag = presetsTag;
+            }
+            else if (trvFavorites.SelectedNode?.Tag is PresetNodeTag favoritesTag)
+            {
+                tag = favoritesTag;
+            }
+
+            if (tag == null)
                 return;
 
-            string presetName = tag.Name;
+            if (tag.IsFolder)
+            {
+                // Toggle folder favorite
+                ToggleFolderFavorite(tag.Name);
+            }
+            else
+            {
+                // Toggle preset favorite
+                TogglePresetFavorite(tag.Name);
+            }
+        }
 
+        private void TogglePresetFavorite(string presetName)
+        {
             var preset = _presetManager.Get(presetName);
             if (preset == null) return;
 
@@ -2530,9 +3111,27 @@ namespace SSH_Helper
             _presetManager.Save(presetName, preset);
 
             RefreshPresetList();
+            RestoreFolderExpandState();
+            RefreshFavoritesList();
             SelectPresetByName(presetName);
 
             UpdateStatusBar(preset.IsFavorite ? $"'{presetName}' added to favorites" : $"'{presetName}' removed from favorites");
+        }
+
+        private void ToggleFolderFavorite(string folderName)
+        {
+            if (!_presetManager.Folders.TryGetValue(folderName, out var folderInfo))
+                return;
+
+            bool newFavoriteState = !folderInfo.IsFavorite;
+            _presetManager.SetFolderFavorite(folderName, newFavoriteState);
+
+            RefreshPresetList();
+            RestoreFolderExpandState();
+            RefreshFavoritesList();
+            SelectFolderByName(folderName);
+
+            UpdateStatusBar(newFavoriteState ? $"Folder '{folderName}' added to favorites" : $"Folder '{folderName}' removed from favorites");
         }
 
         private string GetPresetNameFromDisplay(string displayName)

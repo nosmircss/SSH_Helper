@@ -15,12 +15,18 @@ namespace SSH_Helper.Models
         /// </summary>
         public int SortOrder { get; set; }
 
+        /// <summary>
+        /// Whether the folder is marked as a favorite.
+        /// </summary>
+        public bool IsFavorite { get; set; }
+
         public FolderInfo Clone()
         {
             return new FolderInfo
             {
                 IsExpanded = IsExpanded,
-                SortOrder = SortOrder
+                SortOrder = SortOrder,
+                IsFavorite = IsFavorite
             };
         }
     }

@@ -459,6 +459,18 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Sets the favorite state of a folder.
+        /// </summary>
+        public void SetFolderFavorite(string name, bool isFavorite)
+        {
+            if (_folders.TryGetValue(name, out var folderInfo))
+            {
+                folderInfo.IsFavorite = isFavorite;
+                PersistToConfig();
+            }
+        }
+
+        /// <summary>
         /// Gets a unique folder name by appending _1, _2, etc. if needed.
         /// </summary>
         public string GetUniqueFolderName(string baseName)
