@@ -51,6 +51,23 @@ namespace SSH_Helper.Services
                 _folders[kvp.Key] = kvp.Value;
             }
 
+            // Ensure all folders referenced by presets have entries in _folders
+            // This handles legacy configs or manual edits where PresetFolders might be missing entries
+            bool needsPersist = false;
+            foreach (var preset in _presets.Values)
+            {
+                if (!string.IsNullOrEmpty(preset.Folder) && !_folders.ContainsKey(preset.Folder))
+                {
+                    _folders[preset.Folder] = new FolderInfo { IsExpanded = true };
+                    needsPersist = true;
+                }
+            }
+
+            if (needsPersist)
+            {
+                PersistToConfig();
+            }
+
             OnPresetsChanged();
             OnFoldersChanged();
         }
@@ -432,7 +449,12 @@ namespace SSH_Helper.Services
             if (_folders.TryGetValue(name, out var folderInfo))
             {
                 folderInfo.IsExpanded = expanded;
+                System.Diagnostics.Debug.WriteLine($"SetFolderExpanded: {name} = {expanded}, object hash = {folderInfo.GetHashCode()}");
                 PersistToConfig();
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"SetFolderExpanded: Folder '{name}' NOT FOUND in _folders. Available: {string.Join(", ", _folders.Keys)}");
             }
         }
 

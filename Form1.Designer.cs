@@ -67,7 +67,6 @@ namespace SSH_Helper
             tsbDeletePreset = new ToolStripButton();
             tsbRenamePreset = new ToolStripButton();
             tsbDuplicatePreset = new ToolStripButton();
-            tsbSortPresets = new ToolStripButton();
             tsbSeparatorFolders = new ToolStripSeparator();
             tsbAddFolder = new ToolStripButton();
             tsbDeleteFolder = new ToolStripButton();
@@ -91,6 +90,7 @@ namespace SSH_Helper
             outputPanel = new Panel();
             outputSplitContainer = new SplitContainer();
             historyPanel = new Panel();
+            historySplitContainer = new SplitContainer();
             lstOutput = new ListBox();
             contextHistoryLst = new ContextMenuStrip(components);
             saveAsToolStripMenuItem = new ToolStripMenuItem();
@@ -99,6 +99,12 @@ namespace SSH_Helper
             toolStripSeparator9 = new ToolStripSeparator();
             deleteEntryToolStripMenuItem = new ToolStripMenuItem();
             deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
+            hostListPanel = new Panel();
+            lstHosts = new ListBox();
+            contextHostLst = new ContextMenuStrip(components);
+            exportHostOutputToolStripMenuItem = new ToolStripMenuItem();
+            hostHeaderPanel = new Panel();
+            lblHostsListTitle = new Label();
             historyHeaderPanel = new Panel();
             lblHistoryTitle = new Label();
             txtOutput = new TextBox();
@@ -173,7 +179,14 @@ namespace SSH_Helper
             outputSplitContainer.Panel2.SuspendLayout();
             outputSplitContainer.SuspendLayout();
             historyPanel.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)historySplitContainer).BeginInit();
+            historySplitContainer.Panel1.SuspendLayout();
+            historySplitContainer.Panel2.SuspendLayout();
+            historySplitContainer.SuspendLayout();
             contextHistoryLst.SuspendLayout();
+            hostListPanel.SuspendLayout();
+            contextHostLst.SuspendLayout();
+            hostHeaderPanel.SuspendLayout();
             historyHeaderPanel.SuspendLayout();
             mainToolStrip.SuspendLayout();
             statusStrip.SuspendLayout();
@@ -387,6 +400,11 @@ namespace SSH_Helper
             trvPresets.AfterSelect += trvPresets_AfterSelect;
             trvPresets.AfterCollapse += trvPresets_AfterCollapse;
             trvPresets.AfterExpand += trvPresets_AfterExpand;
+            trvPresets.BeforeCollapse += trvPresets_BeforeCollapse;
+            trvPresets.BeforeExpand += trvPresets_BeforeExpand;
+            trvPresets.MouseDown += trvPresets_MouseDown;
+            trvPresets.NodeMouseClick += trvPresets_NodeMouseClick;
+            trvPresets.NodeMouseDoubleClick += trvPresets_NodeMouseDoubleClick;
             trvPresets.ItemDrag += trvPresets_ItemDrag;
             trvPresets.DragOver += trvPresets_DragOver;
             trvPresets.DragDrop += trvPresets_DragDrop;
@@ -502,7 +520,7 @@ namespace SSH_Helper
             presetsToolStrip.BackColor = Color.FromArgb(248, 249, 250);
             presetsToolStrip.Dock = DockStyle.Top;
             presetsToolStrip.GripStyle = ToolStripGripStyle.Hidden;
-            presetsToolStrip.Items.AddRange(new ToolStripItem[] { tsbAddPreset, tsbDeletePreset, tsbRenamePreset, tsbDuplicatePreset, tsbSortPresets, tsbSeparatorFolders, tsbAddFolder, tsbDeleteFolder });
+            presetsToolStrip.Items.AddRange(new ToolStripItem[] { tsbAddPreset, tsbDeletePreset, tsbRenamePreset, tsbDuplicatePreset, tsbSeparatorFolders, tsbAddFolder, tsbDeleteFolder });
             presetsToolStrip.LayoutStyle = ToolStripLayoutStyle.Flow;
             presetsToolStrip.Location = new Point(8, 40);
             presetsToolStrip.Name = "presetsToolStrip";
@@ -546,15 +564,6 @@ namespace SSH_Helper
             tsbDuplicatePreset.Text = "Copy";
             tsbDuplicatePreset.ToolTipText = "Duplicate preset";
             tsbDuplicatePreset.Click += duplicatePresetToolStripMenuItem_Click;
-            // 
-            // tsbSortPresets
-            // 
-            tsbSortPresets.DisplayStyle = ToolStripItemDisplayStyle.Text;
-            tsbSortPresets.Name = "tsbSortPresets";
-            tsbSortPresets.Size = new Size(32, 22);
-            tsbSortPresets.Text = "Sort";
-            tsbSortPresets.ToolTipText = "Toggle sorting";
-            tsbSortPresets.Click += toggleSortingToolStripMenuItem_Click;
             //
             // tsbSeparatorFolders
             //
@@ -753,47 +762,56 @@ namespace SSH_Helper
             executePanel.Padding = new Padding(8);
             executePanel.Size = new Size(258, 50);
             executePanel.TabIndex = 1;
-            // 
+            //
             // btnExecuteAll
-            // 
+            //
             btnExecuteAll.BackColor = Color.FromArgb(25, 135, 84);
+            btnExecuteAll.Cursor = Cursors.Hand;
             btnExecuteAll.FlatAppearance.BorderSize = 0;
+            btnExecuteAll.FlatAppearance.MouseDownBackColor = Color.FromArgb(20, 108, 67);
+            btnExecuteAll.FlatAppearance.MouseOverBackColor = Color.FromArgb(21, 117, 73);
             btnExecuteAll.FlatStyle = FlatStyle.Flat;
             btnExecuteAll.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             btnExecuteAll.ForeColor = Color.White;
-            btnExecuteAll.Location = new Point(146, 8);
+            btnExecuteAll.Location = new Point(138, 8);
             btnExecuteAll.Name = "btnExecuteAll";
-            btnExecuteAll.Size = new Size(130, 34);
+            btnExecuteAll.Size = new Size(120, 34);
             btnExecuteAll.TabIndex = 1;
             btnExecuteAll.Text = "Run All";
             btnExecuteAll.UseVisualStyleBackColor = false;
             btnExecuteAll.Click += btnExecuteAll_Click;
-            // 
+            //
             // btnExecuteSelected
-            // 
+            //
             btnExecuteSelected.BackColor = Color.FromArgb(108, 117, 125);
+            btnExecuteSelected.Cursor = Cursors.Hand;
             btnExecuteSelected.FlatAppearance.BorderSize = 0;
+            btnExecuteSelected.FlatAppearance.MouseDownBackColor = Color.FromArgb(86, 94, 100);
+            btnExecuteSelected.FlatAppearance.MouseOverBackColor = Color.FromArgb(95, 103, 110);
             btnExecuteSelected.FlatStyle = FlatStyle.Flat;
             btnExecuteSelected.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             btnExecuteSelected.ForeColor = Color.White;
             btnExecuteSelected.Location = new Point(8, 8);
             btnExecuteSelected.Name = "btnExecuteSelected";
-            btnExecuteSelected.Size = new Size(130, 34);
+            btnExecuteSelected.Size = new Size(122, 34);
             btnExecuteSelected.TabIndex = 0;
             btnExecuteSelected.Text = "Run Selected";
             btnExecuteSelected.UseVisualStyleBackColor = false;
             btnExecuteSelected.Click += btnExecuteSelected_Click;
-            // 
+            //
             // btnStopAll
-            // 
+            //
             btnStopAll.BackColor = Color.FromArgb(220, 53, 69);
+            btnStopAll.Cursor = Cursors.Hand;
             btnStopAll.FlatAppearance.BorderSize = 0;
+            btnStopAll.FlatAppearance.MouseDownBackColor = Color.FromArgb(176, 42, 55);
+            btnStopAll.FlatAppearance.MouseOverBackColor = Color.FromArgb(200, 48, 63);
             btnStopAll.FlatStyle = FlatStyle.Flat;
             btnStopAll.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             btnStopAll.ForeColor = Color.White;
-            btnStopAll.Location = new Point(284, 8);
+            btnStopAll.Location = new Point(266, 8);
             btnStopAll.Name = "btnStopAll";
-            btnStopAll.Size = new Size(100, 34);
+            btnStopAll.Size = new Size(80, 34);
             btnStopAll.TabIndex = 2;
             btnStopAll.Text = "Stop";
             btnStopAll.UseVisualStyleBackColor = false;
@@ -828,19 +846,39 @@ namespace SSH_Helper
             outputSplitContainer.SplitterDistance = 257;
             outputSplitContainer.SplitterWidth = 6;
             outputSplitContainer.TabIndex = 0;
-            // 
+            //
             // historyPanel
-            // 
-            historyPanel.Controls.Add(lstOutput);
+            //
+            historyPanel.Controls.Add(historySplitContainer);
             historyPanel.Controls.Add(historyHeaderPanel);
             historyPanel.Dock = DockStyle.Fill;
             historyPanel.Location = new Point(0, 0);
             historyPanel.Name = "historyPanel";
             historyPanel.Size = new Size(257, 303);
             historyPanel.TabIndex = 0;
-            // 
+            //
+            // historySplitContainer
+            //
+            historySplitContainer.Dock = DockStyle.Fill;
+            historySplitContainer.Location = new Point(0, 28);
+            historySplitContainer.Name = "historySplitContainer";
+            historySplitContainer.Orientation = Orientation.Horizontal;
+            //
+            // historySplitContainer.Panel1
+            //
+            historySplitContainer.Panel1.Controls.Add(lstOutput);
+            //
+            // historySplitContainer.Panel2
+            //
+            historySplitContainer.Panel2.Controls.Add(hostListPanel);
+            historySplitContainer.Panel2Collapsed = true;
+            historySplitContainer.Size = new Size(257, 275);
+            historySplitContainer.SplitterDistance = 137;
+            historySplitContainer.SplitterWidth = 4;
+            historySplitContainer.TabIndex = 2;
+            //
             // lstOutput
-            // 
+            //
             lstOutput.BackColor = Color.White;
             lstOutput.BorderStyle = BorderStyle.None;
             lstOutput.ContextMenuStrip = contextHistoryLst;
@@ -849,7 +887,7 @@ namespace SSH_Helper
             lstOutput.FormattingEnabled = true;
             lstOutput.IntegralHeight = false;
             lstOutput.ItemHeight = 15;
-            lstOutput.Location = new Point(0, 28);
+            lstOutput.Location = new Point(0, 0);
             lstOutput.Name = "lstOutput";
             lstOutput.Size = new Size(257, 275);
             lstOutput.TabIndex = 0;
@@ -887,14 +925,78 @@ namespace SSH_Helper
             deleteEntryToolStripMenuItem.Size = new Size(200, 22);
             deleteEntryToolStripMenuItem.Text = "&Delete Entry";
             deleteEntryToolStripMenuItem.Click += deleteEntryToolStripMenuItem_Click;
-            // 
+            //
             // deleteAllHistoryToolStripMenuItem
-            // 
+            //
             deleteAllHistoryToolStripMenuItem.Name = "deleteAllHistoryToolStripMenuItem";
             deleteAllHistoryToolStripMenuItem.Size = new Size(200, 22);
             deleteAllHistoryToolStripMenuItem.Text = "Delete All &History";
             deleteAllHistoryToolStripMenuItem.Click += deleteAllHistoryToolStripMenuItem_Click;
-            // 
+            //
+            // hostListPanel
+            //
+            hostListPanel.Controls.Add(lstHosts);
+            hostListPanel.Controls.Add(hostHeaderPanel);
+            hostListPanel.Dock = DockStyle.Fill;
+            hostListPanel.Location = new Point(0, 0);
+            hostListPanel.Name = "hostListPanel";
+            hostListPanel.Size = new Size(257, 134);
+            hostListPanel.TabIndex = 0;
+            //
+            // lstHosts
+            //
+            lstHosts.BackColor = Color.White;
+            lstHosts.BorderStyle = BorderStyle.None;
+            lstHosts.ContextMenuStrip = contextHostLst;
+            lstHosts.Dock = DockStyle.Fill;
+            lstHosts.DrawMode = DrawMode.OwnerDrawFixed;
+            lstHosts.Font = new Font("Segoe UI", 9F);
+            lstHosts.FormattingEnabled = true;
+            lstHosts.IntegralHeight = false;
+            lstHosts.ItemHeight = 20;
+            lstHosts.Location = new Point(0, 28);
+            lstHosts.Name = "lstHosts";
+            lstHosts.Size = new Size(257, 106);
+            lstHosts.TabIndex = 0;
+            lstHosts.DrawItem += lstHosts_DrawItem;
+            lstHosts.SelectedIndexChanged += lstHosts_SelectedIndexChanged;
+            //
+            // contextHostLst
+            //
+            contextHostLst.Items.AddRange(new ToolStripItem[] { exportHostOutputToolStripMenuItem });
+            contextHostLst.Name = "contextHostLst";
+            contextHostLst.Size = new Size(181, 48);
+            //
+            // exportHostOutputToolStripMenuItem
+            //
+            exportHostOutputToolStripMenuItem.Name = "exportHostOutputToolStripMenuItem";
+            exportHostOutputToolStripMenuItem.Size = new Size(180, 22);
+            exportHostOutputToolStripMenuItem.Text = "Export to File...";
+            exportHostOutputToolStripMenuItem.Click += exportHostOutputToolStripMenuItem_Click;
+            //
+            // hostHeaderPanel
+            //
+            hostHeaderPanel.BackColor = Color.FromArgb(248, 249, 250);
+            hostHeaderPanel.Controls.Add(lblHostsListTitle);
+            hostHeaderPanel.Dock = DockStyle.Top;
+            hostHeaderPanel.Location = new Point(0, 0);
+            hostHeaderPanel.Name = "hostHeaderPanel";
+            hostHeaderPanel.Padding = new Padding(8, 6, 8, 6);
+            hostHeaderPanel.Size = new Size(257, 28);
+            hostHeaderPanel.TabIndex = 1;
+            //
+            // lblHostsListTitle
+            //
+            lblHostsListTitle.AutoSize = true;
+            lblHostsListTitle.Dock = DockStyle.Left;
+            lblHostsListTitle.Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
+            lblHostsListTitle.ForeColor = Color.FromArgb(33, 37, 41);
+            lblHostsListTitle.Location = new Point(8, 6);
+            lblHostsListTitle.Name = "lblHostsListTitle";
+            lblHostsListTitle.Size = new Size(37, 15);
+            lblHostsListTitle.TabIndex = 0;
+            lblHostsListTitle.Text = "Hosts";
+            //
             // historyHeaderPanel
             // 
             historyHeaderPanel.BackColor = Color.FromArgb(248, 249, 250);
@@ -1276,7 +1378,15 @@ namespace SSH_Helper
             ((System.ComponentModel.ISupportInitialize)outputSplitContainer).EndInit();
             outputSplitContainer.ResumeLayout(false);
             historyPanel.ResumeLayout(false);
+            historySplitContainer.Panel1.ResumeLayout(false);
+            historySplitContainer.Panel2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)historySplitContainer).EndInit();
+            historySplitContainer.ResumeLayout(false);
             contextHistoryLst.ResumeLayout(false);
+            hostListPanel.ResumeLayout(false);
+            contextHostLst.ResumeLayout(false);
+            hostHeaderPanel.ResumeLayout(false);
+            hostHeaderPanel.PerformLayout();
             historyHeaderPanel.ResumeLayout(false);
             historyHeaderPanel.PerformLayout();
             mainToolStrip.ResumeLayout(false);
@@ -1330,7 +1440,6 @@ namespace SSH_Helper
         private ToolStripButton tsbDeletePreset;
         private ToolStripButton tsbRenamePreset;
         private ToolStripButton tsbDuplicatePreset;
-        private ToolStripButton tsbSortPresets;
         private ToolStripSeparator tsbSeparatorFolders;
         private ToolStripButton tsbAddFolder;
         private ToolStripButton tsbDeleteFolder;
@@ -1359,9 +1468,18 @@ namespace SSH_Helper
         private SplitContainer outputSplitContainer;
         private TextBox txtOutput;
         private Panel historyPanel;
+        private SplitContainer historySplitContainer;
         private Panel historyHeaderPanel;
         private Label lblHistoryTitle;
         private ListBox lstOutput;
+
+        // Host list panel (for folder history)
+        private Panel hostListPanel;
+        private Panel hostHeaderPanel;
+        private Label lblHostsListTitle;
+        private ListBox lstHosts;
+        private ContextMenuStrip contextHostLst;
+        private ToolStripMenuItem exportHostOutputToolStripMenuItem;
 
         // Status bar
         private StatusStrip statusStrip;

@@ -42,6 +42,7 @@ namespace SSH_Helper
         private bool _csvDirty;
         private bool _exitConfirmed;
         private bool _suppressPresetSelectionChange;
+        private bool _suppressExpandCollapseEvents;
         private int _rightClickedColumnIndex = -1;
         private int _rightClickedRowIndex = -1;
         private readonly BindingList<KeyValuePair<string, string>> _outputHistory = new();
@@ -63,6 +64,9 @@ namespace SSH_Helper
 
         // Track selected folder for Run button (TreeView selection can be unreliable on button click)
         private string? _selectedFolderName;
+
+        // Per-host history data for the currently selected folder history entry
+        private List<HostHistoryEntry>? _currentHostResults;
 
         #endregion
 
@@ -110,11 +114,33 @@ namespace SSH_Helper
             // Remove handler to only run once
             Shown -= Form1_Shown;
 
+            // Restore folder expand/collapse state after form is fully shown
+            RestoreFolderExpandState();
+
             var config = _configService.GetCurrent();
             if (config.UpdateSettings.CheckOnStartup)
             {
                 await CheckForUpdatesAsync(silent: true);
             }
+        }
+
+        private void RestoreFolderExpandState()
+        {
+            _suppressExpandCollapseEvents = true;
+            foreach (TreeNode node in trvPresets.Nodes)
+            {
+                if (node.Tag is PresetNodeTag tag && tag.IsFolder)
+                {
+                    if (_presetManager.Folders.TryGetValue(tag.Name, out var folderInfo))
+                    {
+                        if (folderInfo.IsExpanded)
+                            node.Expand();
+                        else
+                            node.Collapse();
+                    }
+                }
+            }
+            _suppressExpandCollapseEvents = false;
         }
 
         #endregion
@@ -209,6 +235,10 @@ namespace SSH_Helper
             trvPresets.NodeMouseClick += TrvPresets_NodeMouseClick;
             contextPresetLst.Opening += ContextPresetLst_Opening;
 
+            // History and host list right-click selection
+            lstOutput.MouseDown += LstOutput_MouseDown;
+            lstHosts.MouseDown += LstHosts_MouseDown;
+
             // Script editor cursor position tracking
             txtCommand.Click += TxtCommand_CursorPositionChanged;
             txtCommand.KeyUp += TxtCommand_CursorPositionChanged;
@@ -286,6 +316,11 @@ namespace SSH_Helper
                 if (ws.OutputSplitterDistance.HasValue && ws.OutputSplitterDistance.Value > 0)
                 {
                     try { outputSplitContainer.SplitterDistance = Math.Min(ws.OutputSplitterDistance.Value, outputSplitContainer.Width - outputSplitContainer.Panel2MinSize); }
+                    catch { /* Ignore invalid splitter distances */ }
+                }
+                if (ws.HistorySplitterDistance.HasValue && ws.HistorySplitterDistance.Value > 0)
+                {
+                    try { historySplitContainer.SplitterDistance = Math.Min(ws.HistorySplitterDistance.Value, historySplitContainer.Height - historySplitContainer.Panel2MinSize); }
                     catch { /* Ignore invalid splitter distances */ }
                 }
 
@@ -589,11 +624,13 @@ namespace SSH_Helper
                 txtPreset.Text = $"📁 {tag.Name}";
                 txtTimeoutHeader.Clear();
                 DisplayFolderSummary(tag.Name);
+                UpdateRunButtonText();
                 return;
             }
 
             // Clear folder selection when a preset is selected
             _selectedFolderName = null;
+            UpdateRunButtonText();
 
             string newPresetName = tag.Name;
 
@@ -642,17 +679,100 @@ namespace SSH_Helper
 
         private void trvPresets_AfterCollapse(object? sender, TreeViewEventArgs e)
         {
+            if (_suppressExpandCollapseEvents) return;
             if (e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
             {
                 _presetManager.SetFolderExpanded(tag.Name, false);
+                if (debugModeToolStripMenuItem.Checked)
+                {
+                    // Verify the state was actually saved
+                    var currentState = _presetManager.Folders.TryGetValue(tag.Name, out var info) ? info.IsExpanded : (bool?)null;
+                    UpdateStatusBar($"Folder '{tag.Name}' collapsed. Verified state: {currentState}");
+                }
             }
         }
 
         private void trvPresets_AfterExpand(object? sender, TreeViewEventArgs e)
         {
+            if (_suppressExpandCollapseEvents) return;
             if (e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
             {
                 _presetManager.SetFolderExpanded(tag.Name, true);
+                if (debugModeToolStripMenuItem.Checked)
+                {
+                    // Verify the state was actually saved
+                    var currentState = _presetManager.Folders.TryGetValue(tag.Name, out var info) ? info.IsExpanded : (bool?)null;
+                    UpdateStatusBar($"Folder '{tag.Name}' expanded. Verified state: {currentState}");
+                }
+            }
+        }
+
+        // Track if click was on +/- glyph to allow expand/collapse
+        private bool _clickedOnPlusMinus;
+
+        private void trvPresets_MouseDown(object? sender, MouseEventArgs e)
+        {
+            // Use HitTest to determine what was clicked
+            var hitInfo = trvPresets.HitTest(e.Location);
+            _clickedOnPlusMinus = hitInfo.Location == TreeViewHitTestLocations.PlusMinus;
+
+            // If clicked on +/- for a folder, manually toggle expand/collapse
+            if (_clickedOnPlusMinus && hitInfo.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                if (hitInfo.Node.IsExpanded)
+                    hitInfo.Node.Collapse();
+                else
+                    hitInfo.Node.Expand();
+            }
+        }
+
+        private void trvPresets_BeforeCollapse(object? sender, TreeViewCancelEventArgs e)
+        {
+            // Allow collapse during programmatic restoration
+            if (_suppressExpandCollapseEvents) return;
+
+            // Only allow collapse if clicked on +/- glyph
+            if (!_clickedOnPlusMinus && e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                e.Cancel = true;
+            }
+        }
+
+        private void trvPresets_BeforeExpand(object? sender, TreeViewCancelEventArgs e)
+        {
+            // Allow expand during programmatic restoration
+            if (_suppressExpandCollapseEvents) return;
+
+            // Only allow expand if clicked on +/- glyph
+            if (!_clickedOnPlusMinus && e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                e.Cancel = true;
+            }
+        }
+
+        private void trvPresets_NodeMouseClick(object? sender, TreeNodeMouseClickEventArgs e)
+        {
+            // Single-click on folder label (not +/-): select it
+            if (!_clickedOnPlusMinus && e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                trvPresets.SelectedNode = e.Node;
+            }
+            // Reset flag after click is processed
+            _clickedOnPlusMinus = false;
+        }
+
+        private void trvPresets_NodeMouseDoubleClick(object? sender, TreeNodeMouseClickEventArgs e)
+        {
+            // Double-click on folder label: toggle expand/collapse
+            if (e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                // Set flag to allow the expand/collapse in Before handlers
+                _clickedOnPlusMinus = true;
+                if (e.Node.IsExpanded)
+                    e.Node.Collapse();
+                else
+                    e.Node.Expand();
+                _clickedOnPlusMinus = false;
             }
         }
 
@@ -1056,15 +1176,6 @@ namespace SSH_Helper
 
         private void UpdateSortModeIndicator()
         {
-            string indicator = _currentSortMode switch
-            {
-                PresetSortMode.Ascending => "Sort \u2191",   // ↑
-                PresetSortMode.Descending => "Sort \u2193", // ↓
-                PresetSortMode.Manual => "Sort \u2195",     // ↕
-                _ => "Sort"
-            };
-            tsbSortPresets.Text = indicator;
-            tsbSortPresets.ToolTipText = $"Sort mode: {_currentSortMode}";
             ctxToggleSorting.Text = $"Toggle Sorting ({_currentSortMode})";
         }
 
@@ -1265,6 +1376,40 @@ namespace SSH_Helper
         {
             if (lstOutput.SelectedItem is KeyValuePair<string, string> entry)
             {
+                // Check if this is a folder history entry (contains folder emoji)
+                bool isFolderEntry = entry.Key.Contains("📁");
+
+                if (isFolderEntry)
+                {
+                    // Try to get per-host results from in-memory cache or from saved state
+                    _currentHostResults = GetHostResultsForEntry(entry.Key);
+
+                    if (_currentHostResults != null && _currentHostResults.Count > 0)
+                    {
+                        // Populate and show the host list
+                        lstHosts.Items.Clear();
+                        foreach (var hostResult in _currentHostResults)
+                        {
+                            lstHosts.Items.Add(hostResult);
+                        }
+
+                        // Show the host list panel
+                        historySplitContainer.Panel2Collapsed = false;
+
+                        // Select the first host to show its output
+                        if (lstHosts.Items.Count > 0)
+                        {
+                            lstHosts.SelectedIndex = 0;
+                        }
+                        return;
+                    }
+                }
+
+                // For non-folder entries or folder entries without per-host data,
+                // hide the host list and show combined output
+                historySplitContainer.Panel2Collapsed = true;
+                lstHosts.Items.Clear();
+                _currentHostResults = null;
                 txtOutput.Text = entry.Value;
             }
         }
@@ -1292,6 +1437,96 @@ namespace SSH_Helper
         private void contextHistoryLst_Opening(object sender, CancelEventArgs e)
         {
             // Can be used for dynamic menu state
+        }
+
+        private void LstOutput_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                int index = lstOutput.IndexFromPoint(e.Location);
+                if (index >= 0 && index < lstOutput.Items.Count)
+                {
+                    lstOutput.SelectedIndex = index;
+                }
+            }
+        }
+
+        private void LstHosts_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                int index = lstHosts.IndexFromPoint(e.Location);
+                if (index >= 0 && index < lstHosts.Items.Count)
+                {
+                    lstHosts.SelectedIndex = index;
+                }
+            }
+        }
+
+        private void lstHosts_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            if (lstHosts.SelectedItem is HostHistoryEntry hostEntry)
+            {
+                txtOutput.Text = hostEntry.Output;
+            }
+        }
+
+        private void lstHosts_DrawItem(object? sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+
+            e.DrawBackground();
+
+            var item = lstHosts.Items[e.Index];
+            if (item is HostHistoryEntry hostEntry)
+            {
+                // Draw status icon
+                var iconRect = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top + 2, 16, 16);
+                var iconColor = hostEntry.Success ? Color.FromArgb(40, 167, 69) : Color.FromArgb(220, 53, 69);
+                var iconText = hostEntry.Success ? "✓" : "✗";
+
+                using var iconFont = new Font("Segoe UI", 10F, FontStyle.Bold);
+                using var iconBrush = new SolidBrush(iconColor);
+                e.Graphics.DrawString(iconText, iconFont, iconBrush, iconRect.Left, iconRect.Top - 1);
+
+                // Draw host address
+                var textRect = new Rectangle(e.Bounds.Left + 24, e.Bounds.Top, e.Bounds.Width - 28, e.Bounds.Height);
+                var textColor = (e.State & DrawItemState.Selected) == DrawItemState.Selected
+                    ? SystemColors.HighlightText
+                    : e.ForeColor;
+                using var textBrush = new SolidBrush(textColor);
+                e.Graphics.DrawString(hostEntry.HostAddress, e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
+            }
+
+            e.DrawFocusRectangle();
+        }
+
+        private void exportHostOutputToolStripMenuItem_Click(object? sender, EventArgs e)
+        {
+            if (lstHosts.SelectedItem is not HostHistoryEntry hostEntry)
+            {
+                MessageBox.Show("Please select a host to export.", "No Host Selected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using var sfd = new SaveFileDialog
+            {
+                Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*",
+                FileName = $"{hostEntry.HostAddress.Replace(":", "_")}_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
+            };
+
+            if (sfd.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    File.WriteAllText(sfd.FileName, hostEntry.Output);
+                    UpdateStatusBar($"Output exported to {Path.GetFileName(sfd.FileName)}");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to export: {ex.Message}", "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
         }
 
         #endregion
@@ -2025,6 +2260,7 @@ namespace SSH_Helper
             }
 
             _suppressPresetSelectionChange = true;
+            _suppressExpandCollapseEvents = true;
             trvPresets.BeginUpdate();
             trvPresets.Nodes.Clear();
 
@@ -2056,11 +2292,6 @@ namespace SSH_Helper
                     };
                     folderNode.Nodes.Add(presetNode);
                 }
-
-                // Restore expand/collapse state
-                var folderInfo = _presetManager.Folders.GetValueOrDefault(folderName);
-                if (folderInfo?.IsExpanded != false)
-                    folderNode.Expand();
             }
 
             // Add root-level presets (no folder)
@@ -2078,6 +2309,9 @@ namespace SSH_Helper
 
             trvPresets.EndUpdate();
 
+            // Note: Folder expand/collapse state is restored in Form1_Shown -> RestoreFolderExpandState()
+            // because expanding nodes before the form is visible doesn't work reliably in WinForms
+
             // Restore selection
             if (!string.IsNullOrEmpty(currentSelection))
             {
@@ -2085,6 +2319,7 @@ namespace SSH_Helper
             }
 
             _suppressPresetSelectionChange = false;
+            _suppressExpandCollapseEvents = false;
         }
 
         private IEnumerable<string> GetSortedFolders(AppConfiguration config)
@@ -2206,6 +2441,32 @@ namespace SSH_Helper
             txtCommand.ReadOnly = true;
         }
 
+        private void UpdateRunButtonText()
+        {
+            if (!string.IsNullOrEmpty(_selectedFolderName))
+            {
+                int count = _presetManager.GetPresetsInFolder(_selectedFolderName).Count();
+                btnExecuteAll.Text = $"Run 📁 {_selectedFolderName} ({count})";
+                btnExecuteSelected.Text = $"Run Selected 📁";
+            }
+            else
+            {
+                btnExecuteAll.Text = "Run All";
+                btnExecuteSelected.Text = "Run Selected";
+            }
+
+            // Reposition buttons based on text width
+            using (var g = btnExecuteSelected.CreateGraphics())
+            {
+                var selectedSize = g.MeasureString(btnExecuteSelected.Text, btnExecuteSelected.Font);
+                btnExecuteSelected.Width = (int)selectedSize.Width + 40;
+
+                var allSize = g.MeasureString(btnExecuteAll.Text, btnExecuteAll.Font);
+                btnExecuteAll.Width = (int)allSize.Width + 40;
+                btnExecuteAll.Left = btnExecuteSelected.Right + 8;
+            }
+        }
+
         private void SelectPresetByName(string? presetName)
         {
             if (string.IsNullOrEmpty(presetName))
@@ -2228,8 +2489,30 @@ namespace SSH_Helper
             var targetNode = FindNode(trvPresets.Nodes);
             if (targetNode != null)
             {
+                // Suppress expand events while making the node visible
+                // to avoid overwriting saved expand/collapse state
+                _suppressExpandCollapseEvents = true;
                 trvPresets.SelectedNode = targetNode;
                 targetNode.EnsureVisible();
+                _suppressExpandCollapseEvents = false;
+            }
+        }
+
+        private void SelectFolderByName(string? folderName)
+        {
+            if (string.IsNullOrEmpty(folderName))
+                return;
+
+            foreach (TreeNode node in trvPresets.Nodes)
+            {
+                if (node.Tag is PresetNodeTag tag && tag.IsFolder && tag.Name == folderName)
+                {
+                    _suppressExpandCollapseEvents = true;
+                    trvPresets.SelectedNode = node;
+                    node.EnsureVisible();
+                    _suppressExpandCollapseEvents = false;
+                    return;
+                }
             }
         }
 
@@ -2259,6 +2542,9 @@ namespace SSH_Helper
 
         private bool IsPresetDirty()
         {
+            // When viewing a folder (not a preset), there's nothing to save
+            if (!string.IsNullOrEmpty(_selectedFolderName)) return false;
+
             if (string.IsNullOrEmpty(_activePresetName)) return InputValidator.IsNotEmpty(txtPreset.Text) || InputValidator.IsNotEmpty(txtCommand.Text);
 
             var preset = _presetManager.Get(_activePresetName);
@@ -2272,6 +2558,70 @@ namespace SSH_Helper
                 : preset.Timeout.HasValue;
 
             return nameChanged || commandsChanged || timeoutDiffers;
+        }
+
+        private string GetPresetDirtyDebugInfo()
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Unsaved preset changes detected. Save before exiting?");
+            sb.AppendLine();
+            sb.AppendLine("=== Debug Info ===");
+            sb.AppendLine($"Selected folder: \"{_selectedFolderName ?? "(none)"}\"");
+
+            if (string.IsNullOrEmpty(_activePresetName))
+            {
+                sb.AppendLine($"No active preset loaded.");
+                sb.AppendLine($"Preset name field: \"{txtPreset.Text}\"");
+                sb.AppendLine($"Command field has content: {InputValidator.IsNotEmpty(txtCommand.Text)}");
+                return sb.ToString();
+            }
+
+            var preset = _presetManager.Get(_activePresetName);
+            if (preset == null)
+            {
+                sb.AppendLine($"Active preset \"{_activePresetName}\" not found in preset manager.");
+                sb.AppendLine($"Preset name field: \"{txtPreset.Text}\"");
+                sb.AppendLine($"Command field has content: {InputValidator.IsNotEmpty(txtCommand.Text)}");
+                return sb.ToString();
+            }
+
+            sb.AppendLine($"Active preset: \"{_activePresetName}\"");
+            sb.AppendLine();
+
+            bool nameChanged = !string.Equals(txtPreset.Text?.Trim(), _activePresetName, StringComparison.Ordinal);
+            sb.AppendLine($"[{(nameChanged ? "X" : " ")}] Name changed:");
+            if (nameChanged)
+            {
+                sb.AppendLine($"    Saved: \"{_activePresetName}\"");
+                sb.AppendLine($"    Current: \"{txtPreset.Text?.Trim()}\"");
+            }
+
+            bool commandsChanged = !string.Equals(txtCommand.Text, preset.Commands ?? "", StringComparison.Ordinal);
+            sb.AppendLine($"[{(commandsChanged ? "X" : " ")}] Commands changed:");
+            if (commandsChanged)
+            {
+                var savedCmd = preset.Commands ?? "";
+                var currentCmd = txtCommand.Text ?? "";
+                sb.AppendLine($"    Saved length: {savedCmd.Length} chars");
+                sb.AppendLine($"    Current length: {currentCmd.Length} chars");
+                if (savedCmd.Length < 100 && currentCmd.Length < 100)
+                {
+                    sb.AppendLine($"    Saved: \"{savedCmd.Replace("\r\n", "\\n").Replace("\n", "\\n")}\"");
+                    sb.AppendLine($"    Current: \"{currentCmd.Replace("\r\n", "\\n").Replace("\n", "\\n")}\"");
+                }
+            }
+
+            bool timeoutDiffers = int.TryParse(txtTimeoutHeader.Text, out var t)
+                ? preset.Timeout != t
+                : preset.Timeout.HasValue;
+            sb.AppendLine($"[{(timeoutDiffers ? "X" : " ")}] Timeout changed:");
+            if (timeoutDiffers)
+            {
+                sb.AppendLine($"    Saved: {preset.Timeout?.ToString() ?? "(null)"}");
+                sb.AppendLine($"    Current: \"{txtTimeoutHeader.Text}\"");
+            }
+
+            return sb.ToString();
         }
 
         #endregion
@@ -2376,77 +2726,22 @@ namespace SSH_Helper
                 return;
             }
 
-            var result = MessageBox.Show(
-                $"Run all {presetNames.Count} preset(s) in folder '{folderName}' on {hostRows.Count} host(s)?\n\nFor each host, presets will be executed in order:\n• {string.Join("\n• ", presetNames.Take(5))}{(presetNames.Count > 5 ? $"\n  ... and {presetNames.Count - 5} more" : "")}",
-                "Run Folder Presets",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question);
+            // Show folder execution dialog
+            var hostAddresses = hostRows
+                .Select(r => GetCellValue(r, CsvManager.HostColumnName))
+                .Where(h => !string.IsNullOrWhiteSpace(h))
+                .ToList();
+            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
 
-            if (result != DialogResult.Yes) return;
+            var options = dialog.Options;
+            if (options.SelectedPresets.Count == 0)
+                return;
 
             if (_sshService.IsRunning) return;
 
-            SetExecutionMode(true);
-            txtOutput.Clear();
-
-            int connectionTimeout = config.ConnectionTimeout;
-            int totalOperations = hostRows.Count * presetNames.Count;
-            int completedOperations = 0;
-
-            UpdateStatusBar($"Executing folder '{folderName}' on {hostRows.Count} hosts...", true, 0, totalOperations);
-
-            var allResults = new List<ExecutionResult>();
-
-            try
-            {
-                // Host-first order: for each host, run all presets in sequence
-                foreach (var row in hostRows)
-                {
-                    string hostIp = GetCellValue(row, CsvManager.HostColumnName);
-                    if (string.IsNullOrWhiteSpace(hostIp) || !InputValidator.IsValidIpAddress(hostIp))
-                        continue;
-
-                    var singleHost = GetHostConnections(new[] { row }).ToList();
-                    if (singleHost.Count == 0) continue;
-
-                    txtOutput.AppendText($"\n{'='.ToString().PadRight(60, '=')}\n");
-                    txtOutput.AppendText($"HOST: {hostIp}\n");
-                    txtOutput.AppendText($"{'='.ToString().PadRight(60, '=')}\n");
-
-                    bool isFirstPreset = true;
-                    foreach (var presetName in presetNames)
-                    {
-                        var preset = _presetManager.Get(presetName);
-                        if (preset == null) continue;
-
-                        int commandTimeout = preset.Timeout ?? config.Timeout;
-                        var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
-
-                        txtOutput.AppendText($"\n--- Preset: {presetName} ---\n");
-
-                        // Only show "CONNECTED TO" header for first preset per host
-                        var results = await _sshService.ExecutePresetAsync(singleHost, preset, tsbUsername.Text, tsbPassword.Text, timeouts, showHeader: isFirstPreset);
-                        allResults.AddRange(results);
-                        isFirstPreset = false;
-
-                        completedOperations++;
-                        UpdateStatusBar($"Host {hostIp}: {presetName}", true, completedOperations, totalOperations);
-                    }
-                }
-
-                // Store single history entry for the entire folder execution
-                StoreFolderExecutionHistory(folderName, allResults);
-                UpdateStatusBar($"Completed folder '{folderName}' on {hostRows.Count} hosts");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"An error occurred: {ex.Message}");
-                UpdateStatusBar("Execution failed");
-            }
-            finally
-            {
-                SetExecutionMode(false);
-            }
+            await ExecuteFolderWithOptionsAsync(folderName, options, hostRows);
         }
 
         private async void ExecuteFolderPresetsOnSelectedHost(string folderName)
@@ -2476,56 +2771,86 @@ namespace SSH_Helper
                 return;
             }
 
-            var result = MessageBox.Show(
-                $"Run all {presetNames.Count} preset(s) in folder '{folderName}' on {host}?\n\nPresets will be executed in order:\n• {string.Join("\n• ", presetNames.Take(5))}{(presetNames.Count > 5 ? $"\n  ... and {presetNames.Count - 5} more" : "")}",
-                "Run Folder Presets",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question);
+            // Show folder execution dialog (single host selected)
+            using var dialog = new FolderExecutionDialog(folderName, presetNames, new List<string> { host });
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
 
-            if (result != DialogResult.Yes) return;
+            var options = dialog.Options;
+            if (options.SelectedPresets.Count == 0)
+                return;
 
             if (_sshService.IsRunning) return;
+
+            await ExecuteFolderWithOptionsAsync(folderName, options, new List<DataGridViewRow> { row });
+        }
+
+        private async Task ExecuteFolderWithOptionsAsync(string folderName, FolderExecutionOptions options, List<DataGridViewRow> hostRows)
+        {
+            var config = _configService.Load();
+            int connectionTimeout = config.ConnectionTimeout;
+
+            // Build preset dictionary
+            var presets = new Dictionary<string, PresetInfo>();
+            foreach (var presetName in options.SelectedPresets)
+            {
+                var preset = _presetManager.Get(presetName);
+                if (preset != null)
+                    presets[presetName] = preset;
+            }
+
+            if (presets.Count == 0)
+                return;
+
+            var hosts = GetHostConnections(hostRows).ToList();
+            if (hosts.Count == 0)
+                return;
 
             SetExecutionMode(true);
             txtOutput.Clear();
 
-            var hosts = GetHostConnections(new[] { row }).ToList();
-            int connectionTimeout = config.ConnectionTimeout;
+            int totalOperations = hosts.Count * presets.Count;
+            UpdateStatusBar($"Executing folder '{folderName}' on {hosts.Count} hosts...", true, 0, totalOperations);
 
-            UpdateStatusBar($"Executing folder '{folderName}' on {host}...", true, 0, presetNames.Count);
+            // Use default timeout from first preset or config
+            int commandTimeout = presets.Values.FirstOrDefault()?.Timeout ?? config.Timeout;
+            var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
 
-            var allResults = new List<ExecutionResult>();
+            // Progress reporter
+            var progress = new Progress<FolderExecutionProgress>(p =>
+            {
+                if (!string.IsNullOrEmpty(p.CurrentHost) && !string.IsNullOrEmpty(p.CurrentPreset))
+                {
+                    int completed = p.CompletedHosts * presets.Count + p.CompletedPresets;
+                    UpdateStatusBar($"Running {folderName}: {p.CurrentPreset} ({p.CompletedPresets + 1}/{p.TotalPresets}) on {p.CurrentHost}", true, completed, totalOperations);
+                }
+            });
 
             try
             {
-                txtOutput.AppendText($"{'='.ToString().PadRight(60, '=')}\n");
-                txtOutput.AppendText($"HOST: {host}\n");
-                txtOutput.AppendText($"{'='.ToString().PadRight(60, '=')}\n");
-
-                int completedPresets = 0;
-                bool isFirstPreset = true;
-                foreach (var presetName in presetNames)
-                {
-                    var preset = _presetManager.Get(presetName);
-                    if (preset == null) continue;
-
-                    int commandTimeout = preset.Timeout ?? config.Timeout;
-                    var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
-
-                    txtOutput.AppendText($"\n--- Preset: {presetName} ---\n");
-
-                    // Only show "CONNECTED TO" header for first preset
-                    var results = await _sshService.ExecutePresetAsync(hosts, preset, tsbUsername.Text, tsbPassword.Text, timeouts, showHeader: isFirstPreset);
-                    allResults.AddRange(results);
-                    isFirstPreset = false;
-
-                    completedPresets++;
-                    UpdateStatusBar($"Completed {completedPresets}/{presetNames.Count} presets", true, completedPresets, presetNames.Count);
-                }
+                var results = await _sshService.ExecuteFolderAsync(
+                    hosts,
+                    presets,
+                    tsbUsername.Text,
+                    tsbPassword.Text,
+                    timeouts,
+                    options,
+                    progress);
 
                 // Store single history entry for the entire folder execution
-                StoreFolderExecutionHistory(folderName, allResults);
-                UpdateStatusBar($"Completed folder '{folderName}' on {host}");
+                StoreFolderExecutionHistory(folderName, results);
+
+                int successCount = results.Count(r => r.Success);
+                int failCount = results.Count - successCount;
+                string status = failCount > 0
+                    ? $"Completed folder '{folderName}': {successCount} succeeded, {failCount} failed"
+                    : $"Completed folder '{folderName}' on {hosts.Count} hosts";
+                UpdateStatusBar(status);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UpdateStatusBar("Execution failed");
             }
             finally
             {
@@ -2535,9 +2860,19 @@ namespace SSH_Helper
 
         private void StoreFolderExecutionHistory(string folderName, List<ExecutionResult> results)
         {
+            // Build per-host history entries
+            var hostResults = new List<HostHistoryEntry>();
             var combinedOutput = new StringBuilder();
+
             foreach (var result in results)
             {
+                hostResults.Add(new HostHistoryEntry
+                {
+                    HostAddress = result.Host.ToString(),
+                    Output = result.Output,
+                    Success = result.Success,
+                    Timestamp = result.Timestamp
+                });
                 combinedOutput.Append(result.Output);
             }
 
@@ -2547,9 +2882,31 @@ namespace SSH_Helper
             Invoke(() =>
             {
                 _outputHistory.Insert(0, entry);
+
+                // Store host results in a way that can be retrieved when this entry is selected
+                // We'll use a parallel list that matches _outputHistory indices
+                StoreHostResultsForEntry(0, hostResults);
+
                 lstOutput.SelectedIndex = 0;
                 SaveConfiguration();
             });
+        }
+
+        // Dictionary to store host results by history entry key
+        private readonly Dictionary<string, List<HostHistoryEntry>> _hostResultsByHistoryKey = [];
+
+        private void StoreHostResultsForEntry(int index, List<HostHistoryEntry> hostResults)
+        {
+            if (index >= 0 && index < _outputHistory.Count)
+            {
+                var key = _outputHistory[index].Key;
+                _hostResultsByHistoryKey[key] = hostResults;
+            }
+        }
+
+        private List<HostHistoryEntry>? GetHostResultsForEntry(string key)
+        {
+            return _hostResultsByHistoryKey.TryGetValue(key, out var results) ? results : null;
         }
 
         private void StopExecution()
@@ -2963,6 +3320,20 @@ namespace SSH_Helper
                     config.PresetSortMode = _currentSortMode;
                     config.ManualPresetOrder = new List<string>(_manualPresetOrder);
 
+                    // Ensure preset folders state is saved (includes expand/collapse state)
+                    config.PresetFolders = new Dictionary<string, FolderInfo>();
+                    foreach (var kvp in _presetManager.Folders)
+                    {
+                        config.PresetFolders[kvp.Key] = kvp.Value;
+                    }
+
+                    // DEBUG: Show what we're about to save
+                    if (debugModeToolStripMenuItem.Checked)
+                    {
+                        var folderStates = string.Join(", ", _presetManager.Folders.Select(f => $"{f.Key}={f.Value.IsExpanded}"));
+                        MessageBox.Show($"Saving folder states: {folderStates}", "Debug - SaveConfiguration");
+                    }
+
                     // Save window state
                     config.WindowState.IsMaximized = WindowState == FormWindowState.Maximized;
 
@@ -2979,6 +3350,7 @@ namespace SSH_Helper
                     config.WindowState.TopSplitterDistance = topSplitContainer.SplitterDistance;
                     config.WindowState.CommandSplitterDistance = commandSplitContainer.SplitterDistance;
                     config.WindowState.OutputSplitterDistance = outputSplitContainer.SplitterDistance;
+                    config.WindowState.HistorySplitterDistance = historySplitContainer.SplitterDistance;
 
                     // Save application state if enabled
                     if (config.RememberState)
@@ -3026,8 +3398,9 @@ namespace SSH_Helper
             // Save CSV path
             state.LastCsvPath = _loadedFilePath;
 
-            // Save selected preset
+            // Save selected preset or folder
             state.SelectedPreset = _activePresetName;
+            state.SelectedFolder = _selectedFolderName;
 
             // Save username (not password)
             state.Username = tsbUsername.Text;
@@ -3037,11 +3410,19 @@ namespace SSH_Helper
             var historyToSave = _outputHistory.Take(maxHistoryEntries);
             foreach (var kvp in historyToSave)
             {
-                state.History.Add(new HistoryEntry
+                var historyEntry = new HistoryEntry
                 {
                     Timestamp = kvp.Key,
                     Output = kvp.Value
-                });
+                };
+
+                // Include per-host results if this is a folder entry
+                if (_hostResultsByHistoryKey.TryGetValue(kvp.Key, out var hostResults))
+                {
+                    historyEntry.HostResults = hostResults;
+                }
+
+                state.History.Add(historyEntry);
             }
 
             return state;
@@ -3092,24 +3473,36 @@ namespace SSH_Helper
             if (state.History != null && state.History.Count > 0)
             {
                 _outputHistory.Clear();
+                _hostResultsByHistoryKey.Clear();
+
                 foreach (var entry in state.History)
                 {
                     _outputHistory.Add(new KeyValuePair<string, string>(entry.Timestamp, entry.Output));
+
+                    // Restore per-host results if available
+                    if (entry.HostResults != null && entry.HostResults.Count > 0)
+                    {
+                        _hostResultsByHistoryKey[entry.Timestamp] = entry.HostResults;
+                    }
                 }
 
                 // Select first history entry and display its output
                 if (_outputHistory.Count > 0)
                 {
                     lstOutput.SelectedIndex = 0;
-                    // Explicitly set output text since SelectedIndexChanged may not fire during form load
-                    txtOutput.Text = _outputHistory[0].Value;
+                    // The SelectedIndexChanged handler will take care of showing output
+                    // and showing the host list if applicable
                 }
             }
 
-            // Restore selected preset (do this last so the preset loads properly)
+            // Restore selected preset or folder (do this last so it loads properly)
             if (!string.IsNullOrEmpty(state.SelectedPreset))
             {
                 SelectPresetByName(state.SelectedPreset);
+            }
+            else if (!string.IsNullOrEmpty(state.SelectedFolder))
+            {
+                SelectFolderByName(state.SelectedFolder);
             }
 
             UpdateHostCount();
@@ -3139,7 +3532,14 @@ namespace SSH_Helper
 
             if (IsPresetDirty())
             {
-                var result = MessageBox.Show("You have unsaved preset changes. Save before exiting?", "Save Preset", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                var message = "You have unsaved preset changes. Save before exiting?";
+
+                if (debugModeToolStripMenuItem.Checked)
+                {
+                    message = GetPresetDirtyDebugInfo();
+                }
+
+                var result = MessageBox.Show(message, "Save Preset", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
                 if (result == DialogResult.Cancel) return false;
                 if (result == DialogResult.Yes) SaveCurrentPreset();
             }
