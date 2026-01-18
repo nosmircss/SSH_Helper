@@ -46,10 +46,8 @@ A Windows Forms application for executing SSH commands across multiple hosts wit
 - **Favorites**: Right-click a preset to mark as favorite (shown with star)
   - Access all favorites quickly via the Favorites tab
   - Both presets and folders can be marked as favorites
-- **Sort**: Use the sort button to organize presets
-  - Ascending (A-Z), Descending (Z-A), or Manual order
-  - Manual order allows drag-and-drop reordering
-  - Sort order is saved per folder
+- **Presets**: Use the sort button to organize presets
+  - drag-and-drop reordering
 - **Folders**: Organize presets into folders for better management
   - Right-click to create/rename/delete folders
   - Drag presets into folders or use "Move to Folder" menu
