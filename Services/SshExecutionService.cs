@@ -297,6 +297,224 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Executes multiple presets from a folder on multiple hosts with configurable parallelism.
+        /// </summary>
+        /// <param name="hosts">Collection of host connections</param>
+        /// <param name="presets">Dictionary of preset name to PresetInfo</param>
+        /// <param name="defaultUsername">Default username if not specified per-host</param>
+        /// <param name="defaultPassword">Default password if not specified per-host</param>
+        /// <param name="timeouts">Timeout configuration</param>
+        /// <param name="options">Folder execution options (parallelism settings)</param>
+        /// <param name="progress">Optional progress reporter</param>
+        /// <returns>Results for each host</returns>
+        public async Task<List<ExecutionResult>> ExecuteFolderAsync(
+            IEnumerable<HostConnection> hosts,
+            Dictionary<string, PresetInfo> presets,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts,
+            FolderExecutionOptions options,
+            IProgress<FolderExecutionProgress>? progress = null)
+        {
+            var results = new List<ExecutionResult>();
+            _cts = new CancellationTokenSource();
+            _isRunning = true;
+
+            var hostList = hosts.Where(h => h.IsValid()).ToList();
+            var presetNames = options.SelectedPresets;
+            int totalHosts = hostList.Count;
+            int totalPresets = presetNames.Count;
+            int completedHosts = 0;
+            bool errorOccurred = false;
+
+            try
+            {
+                // Process hosts in batches based on ParallelHostCount
+                var hostBatches = hostList
+                    .Select((host, index) => new { host, index })
+                    .GroupBy(x => x.index / options.ParallelHostCount)
+                    .Select(g => g.Select(x => x.host).ToList())
+                    .ToList();
+
+                foreach (var batch in hostBatches)
+                {
+                    if (_cts.Token.IsCancellationRequested || (options.StopOnFirstError && errorOccurred))
+                        break;
+
+                    // Execute batch in parallel
+                    var batchTasks = batch.Select(async host =>
+                    {
+                        var hostResult = new ExecutionResult
+                        {
+                            Host = host,
+                            Timestamp = DateTime.Now,
+                            Success = true
+                        };
+
+                        var outputBuilder = new StringBuilder();
+                        int completedPresets = 0;
+                        bool isFirstPreset = true;
+
+                        // Execute presets on this host
+                        if (options.RunPresetsInParallel)
+                        {
+                            // Parallel preset execution
+                            var presetTasks = presetNames.Select(async presetName =>
+                            {
+                                if (_cts.Token.IsCancellationRequested || (options.StopOnFirstError && errorOccurred))
+                                    return;
+
+                                if (!presets.TryGetValue(presetName, out var preset))
+                                    return;
+
+                                progress?.Report(new FolderExecutionProgress
+                                {
+                                    CurrentHost = host.IpAddress,
+                                    CurrentPreset = presetName,
+                                    CompletedPresets = completedPresets,
+                                    TotalPresets = totalPresets,
+                                    CompletedHosts = completedHosts,
+                                    TotalHosts = totalHosts
+                                });
+
+                                // Add preset separator
+                                if (!options.SuppressPresetNames)
+                                {
+                                    var separator = $"\r\n═══ {presetName} ═══\r\n";
+                                    lock (outputBuilder) { outputBuilder.Append(separator); }
+                                    OnOutputReceived(host, separator);
+                                }
+
+                                var presetResults = await ExecutePresetAsync(
+                                    new[] { host },
+                                    preset,
+                                    defaultUsername,
+                                    defaultPassword,
+                                    timeouts,
+                                    showHeader: false);
+
+                                if (presetResults.Count > 0)
+                                {
+                                    var presetResult = presetResults[0];
+                                    lock (outputBuilder) { outputBuilder.Append(presetResult.Output); }
+
+                                    if (!presetResult.Success)
+                                    {
+                                        hostResult.Success = false;
+                                        hostResult.ErrorMessage = presetResult.ErrorMessage;
+                                        if (options.StopOnFirstError)
+                                            errorOccurred = true;
+
+                                        // Mark failed preset in output
+                                        if (!options.SuppressPresetNames)
+                                        {
+                                            var failMarker = $"\r\n═══ {presetName} [FAILED] ═══\r\n";
+                                            lock (outputBuilder) { outputBuilder.Append(failMarker); }
+                                            OnOutputReceived(host, failMarker);
+                                        }
+                                    }
+                                }
+
+                                Interlocked.Increment(ref completedPresets);
+                            });
+
+                            await Task.WhenAll(presetTasks);
+                        }
+                        else
+                        {
+                            // Sequential preset execution
+                            foreach (var presetName in presetNames)
+                            {
+                                if (_cts.Token.IsCancellationRequested || (options.StopOnFirstError && errorOccurred))
+                                    break;
+
+                                if (!presets.TryGetValue(presetName, out var preset))
+                                    continue;
+
+                                progress?.Report(new FolderExecutionProgress
+                                {
+                                    CurrentHost = host.IpAddress,
+                                    CurrentPreset = presetName,
+                                    CompletedPresets = completedPresets,
+                                    TotalPresets = totalPresets,
+                                    CompletedHosts = completedHosts,
+                                    TotalHosts = totalHosts
+                                });
+
+                                // Add preset separator
+                                if (!options.SuppressPresetNames)
+                                {
+                                    var separator = $"\r\n═══ {presetName} ═══\r\n";
+                                    outputBuilder.Append(separator);
+                                    OnOutputReceived(host, separator);
+                                }
+
+                                var presetResults = await ExecutePresetAsync(
+                                    new[] { host },
+                                    preset,
+                                    defaultUsername,
+                                    defaultPassword,
+                                    timeouts,
+                                    showHeader: isFirstPreset);
+
+                                isFirstPreset = false;
+
+                                if (presetResults.Count > 0)
+                                {
+                                    var presetResult = presetResults[0];
+                                    outputBuilder.Append(presetResult.Output);
+
+                                    if (!presetResult.Success)
+                                    {
+                                        hostResult.Success = false;
+                                        hostResult.ErrorMessage = presetResult.ErrorMessage;
+                                        if (options.StopOnFirstError)
+                                        {
+                                            errorOccurred = true;
+                                            // Mark failed preset in output
+                                            if (!options.SuppressPresetNames)
+                                            {
+                                                var failMarker = $"\r\n═══ {presetName} [FAILED] ═══\r\n";
+                                                outputBuilder.Append(failMarker);
+                                                OnOutputReceived(host, failMarker);
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                completedPresets++;
+                            }
+                        }
+
+                        hostResult.Output = outputBuilder.ToString();
+                        return hostResult;
+                    });
+
+                    var batchResults = await Task.WhenAll(batchTasks);
+                    results.AddRange(batchResults);
+                    completedHosts += batch.Count;
+
+                    progress?.Report(new FolderExecutionProgress
+                    {
+                        CurrentHost = string.Empty,
+                        CurrentPreset = string.Empty,
+                        CompletedPresets = totalPresets,
+                        TotalPresets = totalPresets,
+                        CompletedHosts = completedHosts,
+                        TotalHosts = totalHosts
+                    });
+                }
+            }
+            finally
+            {
+                _isRunning = false;
+            }
+
+            return results;
+        }
+
+        /// <summary>
         /// Stops the current execution.
         /// </summary>
         public void Stop()

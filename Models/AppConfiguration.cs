@@ -44,6 +44,12 @@ namespace SSH_Helper.Models
         /// </summary>
         public List<string> ManualFolderOrder { get; set; } = new();
 
+        /// <summary>
+        /// Manual ordering for root-level items on the Favorites tab.
+        /// Contains preset names (prefixed with "preset:") and folder names (prefixed with "folder:").
+        /// </summary>
+        public List<string> ManualFavoriteOrder { get; set; } = new();
+
         // Update settings
         public UpdateSettings UpdateSettings { get; set; } = new();
 
@@ -81,6 +87,11 @@ namespace SSH_Helper.Models
         public string? SelectedPreset { get; set; }
 
         /// <summary>
+        /// The currently selected folder name (if a folder is selected instead of a preset).
+        /// </summary>
+        public string? SelectedFolder { get; set; }
+
+        /// <summary>
         /// The saved username (not password for security).
         /// </summary>
         public string? Username { get; set; }
@@ -98,6 +109,22 @@ namespace SSH_Helper.Models
     {
         public string Timestamp { get; set; } = string.Empty;
         public string Output { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Per-host results for folder executions. Null for single preset executions.
+        /// </summary>
+        public List<HostHistoryEntry>? HostResults { get; set; }
+    }
+
+    /// <summary>
+    /// Per-host execution data stored within a folder history entry.
+    /// </summary>
+    public class HostHistoryEntry
+    {
+        public string HostAddress { get; set; } = string.Empty;
+        public string Output { get; set; } = string.Empty;
+        public bool Success { get; set; } = true;
+        public DateTime Timestamp { get; set; }
     }
 
     /// <summary>
@@ -152,5 +179,6 @@ namespace SSH_Helper.Models
         public int? TopSplitterDistance { get; set; } = 800;
         public int? CommandSplitterDistance { get; set; } = 350;
         public int? OutputSplitterDistance { get; set; } = 300;
+        public int? HistorySplitterDistance { get; set; } = 137;
     }
 }
