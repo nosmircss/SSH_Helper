@@ -45,7 +45,7 @@ namespace SSH_Helper
             commandPanel = new Panel();
             commandSplitContainer = new SplitContainer();
             presetsPanel = new Panel();
-            presetsTabControl = new TabControl();
+            presetsTabControl = new BorderlessTabControl();
             tabPresets = new TabPage();
             tabFavorites = new TabPage();
             trvPresets = new TreeView();
@@ -326,7 +326,7 @@ namespace SSH_Helper
             // 
             lblHostsTitle.AutoSize = true;
             lblHostsTitle.Dock = DockStyle.Left;
-            lblHostsTitle.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+            lblHostsTitle.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             lblHostsTitle.ForeColor = Color.FromArgb(33, 37, 41);
             lblHostsTitle.Location = new Point(12, 8);
             lblHostsTitle.Name = "lblHostsTitle";
@@ -684,7 +684,7 @@ namespace SSH_Helper
             // 
             lblPresetsTitle.AutoSize = true;
             lblPresetsTitle.Dock = DockStyle.Left;
-            lblPresetsTitle.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+            lblPresetsTitle.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             lblPresetsTitle.ForeColor = Color.FromArgb(33, 37, 41);
             lblPresetsTitle.Location = new Point(4, 4);
             lblPresetsTitle.Name = "lblPresetsTitle";
@@ -711,7 +711,7 @@ namespace SSH_Helper
             txtCommand.BackColor = Color.FromArgb(253, 253, 253);
             txtCommand.BorderStyle = BorderStyle.None;
             txtCommand.Dock = DockStyle.Fill;
-            txtCommand.Font = new Font("Cascadia Code", 10F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            txtCommand.Font = new Font("Cascadia Code", 9.75F, FontStyle.Regular, GraphicsUnit.Point, 0);
             txtCommand.Location = new Point(0, 60);
             txtCommand.Multiline = true;
             txtCommand.Name = "txtCommand";
@@ -731,11 +731,11 @@ namespace SSH_Helper
             scriptFooterPanel.TabIndex = 2;
             // 
             // lblLinePosition
-            // 
+            //
             lblLinePosition.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             lblLinePosition.Font = new Font("Segoe UI", 8F);
             lblLinePosition.ForeColor = Color.FromArgb(108, 117, 125);
-            lblLinePosition.Location = new Point(216, 2);
+            lblLinePosition.Location = new Point(158, 2);
             lblLinePosition.Name = "lblLinePosition";
             lblLinePosition.Size = new Size(96, 16);
             lblLinePosition.TabIndex = 0;
@@ -1106,7 +1106,7 @@ namespace SSH_Helper
             txtOutput.BackColor = Color.FromArgb(30, 30, 30);
             txtOutput.BorderStyle = BorderStyle.None;
             txtOutput.Dock = DockStyle.Fill;
-            txtOutput.Font = new Font("Cascadia Code", 9.5F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            txtOutput.Font = new Font("Cascadia Code", 9.75F, FontStyle.Regular, GraphicsUnit.Point, 0);
             txtOutput.ForeColor = Color.FromArgb(212, 212, 212);
             txtOutput.HideSelection = false;
             txtOutput.Location = new Point(0, 0);
@@ -1515,7 +1515,7 @@ namespace SSH_Helper
 
         // Presets panel
         private Panel presetsPanel;
-        private TabControl presetsTabControl;
+        private BorderlessTabControl presetsTabControl;
         private TabPage tabPresets;
         private TabPage tabFavorites;
         private Panel presetsHeaderPanel;
@@ -1669,5 +1669,251 @@ namespace SSH_Helper
         public override Color MenuStripGradientEnd => Color.FromArgb(248, 249, 250);
         public override Color StatusStripGradientBegin => Color.FromArgb(248, 249, 250);
         public override Color StatusStripGradientEnd => Color.FromArgb(248, 249, 250);
+    }
+
+    /// <summary>
+    /// Dark theme ToolStrip renderer - VS Code inspired
+    /// </summary>
+    public class DarkToolStripRenderer : ToolStripProfessionalRenderer
+    {
+        // VS Code inspired colors
+        private static readonly Color Surface3 = Color.FromArgb(45, 45, 46);
+        private static readonly Color Surface4 = Color.FromArgb(51, 51, 52);
+        private static readonly Color HoverBg = Color.FromArgb(62, 62, 64);
+        private static readonly Color TextPrimary = Color.FromArgb(204, 204, 204);
+        private static readonly Color Border = Color.FromArgb(48, 48, 48);
+
+        public DarkToolStripRenderer() : base(new DarkColorTable()) { }
+
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+        {
+            using var brush = new SolidBrush(Surface3);
+            e.Graphics.FillRectangle(brush, e.AffectedBounds);
+        }
+
+        protected override void OnRenderButtonBackground(ToolStripItemRenderEventArgs e)
+        {
+            var bounds = new Rectangle(Point.Empty, e.Item.Size);
+
+            if (e.Item.Pressed)
+            {
+                using var brush = new SolidBrush(Color.FromArgb(0, 122, 204)); // Accent color when pressed
+                e.Graphics.FillRectangle(brush, bounds);
+            }
+            else if (e.Item.Selected)
+            {
+                using var brush = new SolidBrush(HoverBg);
+                e.Graphics.FillRectangle(brush, bounds);
+            }
+        }
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            // Draw subtle bottom border
+            using var pen = new Pen(Border);
+            e.Graphics.DrawLine(pen, 0, e.AffectedBounds.Height - 1, e.AffectedBounds.Width, e.AffectedBounds.Height - 1);
+        }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            var bounds = new Rectangle(Point.Empty, e.Item.Size);
+
+            if (e.Item.Selected || e.Item.Pressed)
+            {
+                using var brush = new SolidBrush(HoverBg);
+                e.Graphics.FillRectangle(brush, bounds);
+            }
+            else
+            {
+                using var brush = new SolidBrush(Surface3);
+                e.Graphics.FillRectangle(brush, bounds);
+            }
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            e.TextColor = e.Item.Enabled ? TextPrimary : Color.FromArgb(100, 100, 100);
+            base.OnRenderItemText(e);
+        }
+
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        {
+            using var pen = new Pen(Border);
+            int y = e.Item.Height / 2;
+            e.Graphics.DrawLine(pen, 4, y, e.Item.Width - 4, y);
+        }
+
+        protected override void OnRenderDropDownButtonBackground(ToolStripItemRenderEventArgs e)
+        {
+            OnRenderButtonBackground(e);
+        }
+
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+        {
+            var bounds = new Rectangle(e.ImageRectangle.X - 2, e.ImageRectangle.Y - 2,
+                e.ImageRectangle.Width + 4, e.ImageRectangle.Height + 4);
+            using var brush = new SolidBrush(Color.FromArgb(0, 122, 204));
+            e.Graphics.FillRectangle(brush, bounds);
+            base.OnRenderItemCheck(e);
+        }
+    }
+
+    public class DarkColorTable : ProfessionalColorTable
+    {
+        private static readonly Color Surface3 = Color.FromArgb(45, 45, 46);
+        private static readonly Color Surface4 = Color.FromArgb(51, 51, 52);
+        private static readonly Color HoverBg = Color.FromArgb(62, 62, 64);
+        private static readonly Color Border = Color.FromArgb(48, 48, 48);
+        private static readonly Color Accent = Color.FromArgb(0, 122, 204);
+
+        public override Color ToolStripGradientBegin => Surface3;
+        public override Color ToolStripGradientMiddle => Surface3;
+        public override Color ToolStripGradientEnd => Surface3;
+        public override Color MenuStripGradientBegin => Surface3;
+        public override Color MenuStripGradientEnd => Surface3;
+        public override Color StatusStripGradientBegin => Surface3;
+        public override Color StatusStripGradientEnd => Surface3;
+        public override Color MenuItemSelected => HoverBg;
+        public override Color MenuItemSelectedGradientBegin => HoverBg;
+        public override Color MenuItemSelectedGradientEnd => HoverBg;
+        public override Color MenuItemBorder => Color.Transparent;
+        public override Color MenuBorder => Border;
+        public override Color ToolStripDropDownBackground => Surface3;
+        public override Color ImageMarginGradientBegin => Surface3;
+        public override Color ImageMarginGradientMiddle => Surface3;
+        public override Color ImageMarginGradientEnd => Surface3;
+        public override Color SeparatorDark => Border;
+        public override Color SeparatorLight => Border;
+        public override Color CheckBackground => Accent;
+        public override Color CheckSelectedBackground => Accent;
+        public override Color CheckPressedBackground => Accent;
+        public override Color ButtonSelectedBorder => Color.Transparent;
+        public override Color ButtonSelectedGradientBegin => HoverBg;
+        public override Color ButtonSelectedGradientEnd => HoverBg;
+        public override Color ButtonPressedGradientBegin => Accent;
+        public override Color ButtonPressedGradientEnd => Accent;
+    }
+
+    /// <summary>
+    /// Custom TabControl that can hide its border in dark mode.
+    /// </summary>
+    public class BorderlessTabControl : TabControl
+    {
+        private const int WM_PAINT = 0x000F;
+        private const int WM_ERASEBKGND = 0x0014;
+
+        private bool _hideBorder;
+        private Color _borderColor = Color.FromArgb(30, 30, 30);
+        private Color _backgroundColor = Color.FromArgb(30, 30, 30);
+
+        /// <summary>
+        /// When true, the control hides its default border.
+        /// </summary>
+        public bool HideBorder
+        {
+            get => _hideBorder;
+            set
+            {
+                _hideBorder = value;
+                Invalidate();
+            }
+        }
+
+        /// <summary>
+        /// Background color when hiding border.
+        /// </summary>
+        public Color BorderBackgroundColor
+        {
+            get => _backgroundColor;
+            set
+            {
+                _backgroundColor = value;
+                _borderColor = value;
+                Invalidate();
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+
+            if (_hideBorder && m.Msg == WM_PAINT)
+            {
+                using var g = Graphics.FromHwnd(Handle);
+                using var brush = new SolidBrush(_backgroundColor);
+
+                // Get the display rectangle (content area inside the border)
+                var displayRect = DisplayRectangle;
+
+                // Paint over borders around the content area
+                // Left border of content area
+                g.FillRectangle(brush, 0, displayRect.Top - 2, displayRect.Left + 2, Height - displayRect.Top + 2);
+                // Right border of content area
+                g.FillRectangle(brush, displayRect.Right - 2, displayRect.Top - 2, Width - displayRect.Right + 4, Height - displayRect.Top + 2);
+                // Bottom border
+                g.FillRectangle(brush, 0, displayRect.Bottom - 2, Width, Height - displayRect.Bottom + 4);
+                // Top border (between tabs and content)
+                g.FillRectangle(brush, 0, displayRect.Top - 2, Width, 4);
+
+                // Now paint over the tab header area borders
+                // Get the first tab rect to find where tabs start
+                if (TabCount > 0)
+                {
+                    var firstTab = GetTabRect(0);
+                    var lastTab = GetTabRect(TabCount - 1);
+
+                    // Left side of tab header (before first tab)
+                    if (firstTab.Left > 0)
+                    {
+                        g.FillRectangle(brush, 0, 0, firstTab.Left, firstTab.Height + 4);
+                    }
+
+                    // Right side of tab header (after last tab) - start a bit earlier to cover edge
+                    if (lastTab.Right < Width)
+                    {
+                        g.FillRectangle(brush, lastTab.Right - 2, 0, Width - lastTab.Right + 4, lastTab.Height + 4);
+                    }
+
+                    // Top edge above the tabs
+                    g.FillRectangle(brush, 0, 0, Width, 2);
+
+                    // Cover the border at the right edge of the last tab where it meets the header area
+                    g.FillRectangle(brush, lastTab.Right - 2, lastTab.Bottom - 3, 4, 5);
+
+                    // Paint over the edge highlights of each tab (Windows 3D border artifact)
+                    for (int i = 0; i < TabCount; i++)
+                    {
+                        var tabRect = GetTabRect(i);
+                        bool isSelected = SelectedIndex == i;
+
+                        // Use appropriate color based on selection state
+                        var tabBgColor = isSelected
+                            ? Color.FromArgb(30, 30, 30)   // DarkSurface1 - selected tab
+                            : Color.FromArgb(45, 45, 46);  // DarkSurface3 - unselected tab
+
+                        using var tabBrush = new SolidBrush(tabBgColor);
+
+                        // Cover left edge of tab
+                        g.FillRectangle(tabBrush, tabRect.Left, tabRect.Top, 2, tabRect.Height);
+
+                        // Cover top-left corner
+                        g.FillRectangle(tabBrush, tabRect.Left, tabRect.Top, 3, 3);
+
+                        // Cover right edge of tab
+                        g.FillRectangle(tabBrush, tabRect.Right - 2, tabRect.Top, 2, tabRect.Height);
+
+                        // Cover top-right corner
+                        g.FillRectangle(tabBrush, tabRect.Right - 3, tabRect.Top, 3, 3);
+
+                        // For unselected tabs, draw a darker top line
+                        if (!isSelected)
+                        {
+                            using var topPen = new Pen(Color.FromArgb(60, 60, 60), 2);
+                            g.DrawLine(topPen, tabRect.Left, tabRect.Top + 1, tabRect.Right, tabRect.Top + 1);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
