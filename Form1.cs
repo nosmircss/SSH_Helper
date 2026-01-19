@@ -535,15 +535,13 @@ namespace SSH_Helper
             var tabFont = new Font(uiFont, Scaled(fontSettings.TabFontSize));
             presetsTabControl.Font = tabFont;
 
-            // Host list (DataGridView) - only apply custom row height if explicitly set
+            // Host list (DataGridView) - apply row height setting
             // Don't change font on DataGridView as it interferes with existing styling
-            if (fontSettings.HostListRowHeight > 0)
+            var hostRowHeight = fontSettings.HostListRowHeight > 0 ? fontSettings.HostListRowHeight : 28;
+            dgv_variables.RowTemplate.Height = hostRowHeight;
+            foreach (DataGridViewRow row in dgv_variables.Rows)
             {
-                dgv_variables.RowTemplate.Height = fontSettings.HostListRowHeight;
-                foreach (DataGridViewRow row in dgv_variables.Rows)
-                {
-                    row.Height = fontSettings.HostListRowHeight;
-                }
+                row.Height = hostRowHeight;
             }
 
             // History list boxes

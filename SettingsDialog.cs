@@ -522,9 +522,9 @@ namespace SSH_Helper
             {
                 Location = new Point(350, y - 2),
                 Size = new Size(50, 23),
-                Minimum = 0,
+                Minimum = 16,
                 Maximum = 50,
-                Value = 0
+                Value = 28
             };
 
             scrollPanel.Controls.Add(lblTreeViewRowHeight);

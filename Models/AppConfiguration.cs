@@ -202,9 +202,9 @@ namespace SSH_Helper.Models
         public int TreeViewRowHeight { get; set; } = 0;
 
         /// <summary>
-        /// Row height for host list in pixels (0 = auto based on font).
+        /// Row height for host list in pixels.
         /// </summary>
-        public int HostListRowHeight { get; set; } = 0;
+        public int HostListRowHeight { get; set; } = 28;
 
         // === Icon Settings ===
 
