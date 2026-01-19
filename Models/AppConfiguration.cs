@@ -59,6 +59,176 @@ namespace SSH_Helper.Models
 
         // History settings
         public int MaxHistoryEntries { get; set; } = 30;
+
+        // Theme settings
+        /// <summary>
+        /// When true, the application uses dark theme. Output window is always dark.
+        /// </summary>
+        public bool DarkMode { get; set; } = false;
+
+        // Font settings
+        /// <summary>
+        /// Font customization settings for UI elements.
+        /// </summary>
+        public FontSettings FontSettings { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Icon size options for toolbar and UI elements.
+    /// </summary>
+    public enum IconSize
+    {
+        Small = 16,
+        Medium = 24,
+        Large = 32
+    }
+
+    /// <summary>
+    /// Font customization settings for different UI element categories.
+    /// </summary>
+    public class FontSettings
+    {
+        // === Font Families ===
+
+        /// <summary>
+        /// Font family for UI elements (e.g., "Segoe UI").
+        /// </summary>
+        public string UIFontFamily { get; set; } = "Segoe UI";
+
+        /// <summary>
+        /// Font family for code/monospace elements (e.g., "Cascadia Code").
+        /// </summary>
+        public string CodeFontFamily { get; set; } = "Cascadia Code";
+
+        // === Font Sizes ===
+
+        /// <summary>
+        /// Font size for section titles (e.g., "Hosts", "Presets", "Commands").
+        /// </summary>
+        public float SectionTitleFontSize { get; set; } = 9.5f;
+
+        /// <summary>
+        /// Font size for tree views (preset list, favorites).
+        /// </summary>
+        public float TreeViewFontSize { get; set; } = 9.5f;
+
+        /// <summary>
+        /// Font size for placeholder/empty labels.
+        /// </summary>
+        public float EmptyLabelFontSize { get; set; } = 9.5f;
+
+        /// <summary>
+        /// Font size for execute buttons.
+        /// </summary>
+        public float ExecuteButtonFontSize { get; set; } = 9.5f;
+
+        /// <summary>
+        /// Font size for code editor (command input).
+        /// </summary>
+        public float CodeEditorFontSize { get; set; } = 9.75f;
+
+        /// <summary>
+        /// Font size for output area.
+        /// </summary>
+        public float OutputAreaFontSize { get; set; } = 9.75f;
+
+        /// <summary>
+        /// Font size for tab headers.
+        /// </summary>
+        public float TabFontSize { get; set; } = 9f;
+
+        /// <summary>
+        /// Font size for general buttons (Save, Browse, etc.).
+        /// </summary>
+        public float ButtonFontSize { get; set; } = 9f;
+
+        /// <summary>
+        /// Font size for host list items.
+        /// </summary>
+        public float HostListFontSize { get; set; } = 9f;
+
+        /// <summary>
+        /// Font size for context menus.
+        /// </summary>
+        public float MenuFontSize { get; set; } = 9f;
+
+        /// <summary>
+        /// Font size for tooltips.
+        /// </summary>
+        public float TooltipFontSize { get; set; } = 9f;
+
+        /// <summary>
+        /// Font size for status bar text.
+        /// </summary>
+        public float StatusBarFontSize { get; set; } = 9f;
+
+        // === Global Scaling ===
+
+        /// <summary>
+        /// Global scale factor for all fonts (0.8 = 80%, 1.5 = 150%). Applied on top of individual sizes.
+        /// </summary>
+        public float GlobalScaleFactor { get; set; } = 1.0f;
+
+        // === Layout Settings ===
+
+        /// <summary>
+        /// Line spacing multiplier for code editor (1.0 = normal, 1.5 = 150% line height).
+        /// </summary>
+        public float CodeEditorLineSpacing { get; set; } = 1.0f;
+
+        /// <summary>
+        /// Line spacing multiplier for output area.
+        /// </summary>
+        public float OutputAreaLineSpacing { get; set; } = 1.0f;
+
+        /// <summary>
+        /// Tab width in spaces for code editor indentation.
+        /// </summary>
+        public int TabWidth { get; set; } = 4;
+
+        /// <summary>
+        /// Enable word wrap in code editor.
+        /// </summary>
+        public bool CodeEditorWordWrap { get; set; } = false;
+
+        /// <summary>
+        /// Enable word wrap in output area.
+        /// </summary>
+        public bool OutputAreaWordWrap { get; set; } = false;
+
+        /// <summary>
+        /// Row height for tree views in pixels (0 = auto based on font).
+        /// </summary>
+        public int TreeViewRowHeight { get; set; } = 0;
+
+        /// <summary>
+        /// Row height for host list in pixels.
+        /// </summary>
+        public int HostListRowHeight { get; set; } = 28;
+
+        // === Icon Settings ===
+
+        /// <summary>
+        /// Size of icons in the UI.
+        /// </summary>
+        public IconSize IconSize { get; set; } = IconSize.Small;
+
+        // === Accent Color ===
+
+        /// <summary>
+        /// Custom accent color in ARGB format. Null uses system/theme default.
+        /// </summary>
+        public int? CustomAccentColor { get; set; } = null;
+
+        /// <summary>
+        /// Creates a copy of the current settings with default values.
+        /// </summary>
+        public static FontSettings CreateDefault() => new FontSettings();
+
+        /// <summary>
+        /// Applies the global scale factor to a font size.
+        /// </summary>
+        public float ScaledSize(float baseSize) => baseSize * GlobalScaleFactor;
     }
 
     /// <summary>

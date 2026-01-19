@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Data;
+using System.Runtime.InteropServices;
 using System.Text;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
@@ -7,6 +8,20 @@ using SSH_Helper.Utilities;
 
 namespace SSH_Helper
 {
+    /// <summary>
+    /// Native methods for dark mode scrollbar support on Windows 10/11.
+    /// </summary>
+    internal static class NativeMethods
+    {
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+        public static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string? pszSubIdList);
+
+        public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+    }
+
     /// <summary>
     /// Tag object for TreeView nodes to identify presets vs folders.
     /// </summary>
@@ -20,7 +35,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.0";
+        private const string ApplicationVersion = "0.50.1";
         private const string ApplicationName = "SSH Helper";
 
         #endregion
@@ -77,6 +92,9 @@ namespace SSH_Helper
 
         public Form1()
         {
+            // Enable form-level double buffering to reduce flicker
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+
             InitializeComponent();
             Text = $"{ApplicationName} {ApplicationVersion}";
 
@@ -103,10 +121,16 @@ namespace SSH_Helper
             InitializeEventHandlers();
             InitializeToolbarSync();
             InitializePasswordMasking();
+            EnableDoubleBuffering();
             RestoreWindowState();
             UpdateHostCount();
             UpdateSortModeIndicator();
             UpdateStatusBar("Ready");
+
+            // Apply saved theme and fonts
+            var currentConfig = _configService.GetCurrent();
+            ApplyTheme(currentConfig.DarkMode);
+            ApplyFontSettings(currentConfig.FontSettings);
 
             // Check for updates on startup (after form is shown)
             Shown += Form1_Shown;
@@ -204,6 +228,9 @@ namespace SSH_Helper
             dgv_variables.DefaultCellStyle.SelectionForeColor = Color.White;
             dgv_variables.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
             dgv_variables.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+
+            // Explicitly disable auto row sizing and set fixed row height
+            dgv_variables.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
             dgv_variables.RowTemplate.Height = 28;
 
             dgv_variables.ColumnHeadersVisible = true;
@@ -224,9 +251,11 @@ namespace SSH_Helper
             // DataGridView events
             dgv_variables.MouseDown += Dgv_Variables_MouseDown;
             dgv_variables.RowPostPaint += Dgv_Variables_RowPostPaint;
+            dgv_variables.CellPainting += Dgv_Variables_CellPainting;
             dgv_variables.CellClick += Dgv_Variables_CellClick;
             dgv_variables.ColumnAdded += Dgv_Variables_ColumnAdded;
             dgv_variables.CellLeave += Dgv_Variables_CellLeave;
+            dgv_variables.Leave += Dgv_Variables_Leave;
             dgv_variables.CellValueChanged += Dgv_Variables_CellValueChanged;
             dgv_variables.RowsAdded += Dgv_Variables_RowsAdded;
             dgv_variables.RowsRemoved += Dgv_Variables_RowsRemoved;
@@ -238,8 +267,9 @@ namespace SSH_Helper
             trvPresets.NodeMouseClick += TrvPresets_NodeMouseClick;
             contextPresetLst.Opening += ContextPresetLst_Opening;
 
-            // History and host list right-click selection
+            // History and host list right-click selection and custom drawing
             lstOutput.MouseDown += LstOutput_MouseDown;
+            lstOutput.DrawItem += LstOutput_DrawItem;
             lstHosts.MouseDown += LstHosts_MouseDown;
 
             // Script editor cursor position tracking
@@ -272,6 +302,23 @@ namespace SSH_Helper
             {
                 tsbPassword.TextBox.UseSystemPasswordChar = true;
             }
+        }
+
+        private void EnableDoubleBuffering()
+        {
+            // Enable double buffering on controls to reduce flicker during owner-draw
+            EnableControlDoubleBuffering(trvPresets);
+            EnableControlDoubleBuffering(trvFavorites);
+            EnableControlDoubleBuffering(lstOutput);
+            EnableControlDoubleBuffering(lstHosts);
+        }
+
+        private static void EnableControlDoubleBuffering(Control control)
+        {
+            // Use reflection to set the protected DoubleBuffered property
+            typeof(Control).GetProperty("DoubleBuffered",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?
+                .SetValue(control, true, null);
         }
 
         private void RestoreWindowState()
@@ -360,6 +407,704 @@ namespace SSH_Helper
             }
         }
 
+        #region Theme
+
+        // Light theme colors (clean, modern light theme)
+        private static readonly Color LightBackground = Color.FromArgb(248, 249, 250);
+        private static readonly Color LightPanelBackground = Color.White;
+        private static readonly Color LightTextColor = Color.FromArgb(33, 37, 41);
+        private static readonly Color LightSecondaryText = Color.FromArgb(108, 117, 125);
+        private static readonly Color LightBorderColor = Color.FromArgb(222, 226, 230);
+        private static readonly Color LightControlBackground = Color.FromArgb(253, 253, 253);
+        private static readonly Color LightAlternateRow = Color.FromArgb(248, 249, 250);
+        private static readonly Color LightFormBackground = Color.FromArgb(233, 236, 239);
+        private static readonly Color LightAccent = Color.FromArgb(13, 110, 253);
+        private static readonly Color LightSelectionBorder = Color.FromArgb(10, 88, 202);  // Darker accent for border
+
+        // Dark theme colors (VS Code inspired - professional and easy on the eyes)
+        private static readonly Color DarkSurface0 = Color.FromArgb(24, 24, 24);      // Deepest background
+        private static readonly Color DarkSurface1 = Color.FromArgb(30, 30, 30);      // Main panel background
+        private static readonly Color DarkSurface2 = Color.FromArgb(37, 37, 38);      // Elevated surfaces
+        private static readonly Color DarkSurface3 = Color.FromArgb(45, 45, 46);      // Headers, toolbars
+        private static readonly Color DarkTextPrimary = Color.FromArgb(204, 204, 204);    // Primary text
+        private static readonly Color DarkTextSecondary = Color.FromArgb(128, 128, 128);  // Secondary/muted text
+        private static readonly Color DarkBorder = Color.FromArgb(48, 48, 48);            // Subtle borders
+        private static readonly Color DarkSelectionBg = Color.FromArgb(4, 57, 94);        // Subtle selection (VS Code style)
+        private static readonly Color DarkSelectionBorder = Color.FromArgb(0, 122, 204); // Selection border accent
+        private static readonly Color DarkInputBackground = Color.FromArgb(60, 60, 60);   // Input fields
+        private static readonly Color DarkInputText = Color.FromArgb(220, 220, 220);      // Input text
+
+        // Track current theme for owner-draw methods
+        private bool _isDarkMode;
+
+        private void ApplyTheme(bool darkMode)
+        {
+            _isDarkMode = darkMode;
+            SuspendLayout();
+
+            if (darkMode)
+            {
+                ApplyDarkTheme();
+            }
+            else
+            {
+                ApplyLightTheme();
+            }
+
+            // Set up owner-draw for history listbox
+            lstOutput.DrawMode = DrawMode.OwnerDrawFixed;
+            lstOutput.ItemHeight = 22;
+
+            // Set up owner-draw for TreeViews only in dark mode
+            if (darkMode)
+            {
+                trvPresets.DrawMode = TreeViewDrawMode.OwnerDrawAll;
+                trvPresets.DrawNode -= TreeView_DrawNode;
+                trvPresets.DrawNode += TreeView_DrawNode;
+
+                trvFavorites.DrawMode = TreeViewDrawMode.OwnerDrawAll;
+                trvFavorites.DrawNode -= TreeView_DrawNode;
+                trvFavorites.DrawNode += TreeView_DrawNode;
+            }
+            else
+            {
+                // Light mode: also use owner draw for consistent selection visibility
+                trvPresets.DrawMode = TreeViewDrawMode.OwnerDrawAll;
+                trvPresets.DrawNode -= TreeView_DrawNode;
+                trvPresets.DrawNode += TreeView_DrawNode;
+
+                trvFavorites.DrawMode = TreeViewDrawMode.OwnerDrawAll;
+                trvFavorites.DrawNode -= TreeView_DrawNode;
+                trvFavorites.DrawNode += TreeView_DrawNode;
+            }
+
+            ResumeLayout(true);
+            Refresh();
+        }
+
+        private void ApplyFontSettings(Models.FontSettings fontSettings)
+        {
+            SuspendLayout();
+
+            var uiFont = fontSettings.UIFontFamily;
+            var codeFont = fontSettings.CodeFontFamily;
+            var scale = fontSettings.GlobalScaleFactor;
+
+            // Helper to apply scaling
+            float Scaled(float size) => size * scale;
+
+            // Section titles (Semibold)
+            lblHostsTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+            lblPresetsTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+            lblScriptTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+            lblHistoryTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+            lblHostsListTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+
+            // Tree views
+            trvPresets.Font = new Font(uiFont, Scaled(fontSettings.TreeViewFontSize));
+            trvFavorites.Font = new Font(uiFont, Scaled(fontSettings.TreeViewFontSize));
+
+            // Apply custom row height for tree views if specified (0 = auto based on font)
+            if (fontSettings.TreeViewRowHeight > 0)
+            {
+                trvPresets.ItemHeight = fontSettings.TreeViewRowHeight;
+                trvFavorites.ItemHeight = fontSettings.TreeViewRowHeight;
+            }
+            else
+            {
+                // Calculate height based on font (font height + padding)
+                var autoHeight = trvPresets.Font.Height + 4;
+                trvPresets.ItemHeight = autoHeight;
+                trvFavorites.ItemHeight = autoHeight;
+            }
+
+            // Empty labels
+            lblFavoritesEmpty.Font = new Font(uiFont, Scaled(fontSettings.EmptyLabelFontSize));
+
+            // Execute buttons (Semibold)
+            btnExecuteAll.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
+            btnExecuteSelected.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
+            btnStopAll.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
+
+            // General buttons
+            btnSavePreset.Font = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+
+            // Code editor
+            txtCommand.Font = new Font(codeFont, Scaled(fontSettings.CodeEditorFontSize));
+            txtCommand.WordWrap = fontSettings.CodeEditorWordWrap;
+
+            // Output area
+            txtOutput.Font = new Font(codeFont, Scaled(fontSettings.OutputAreaFontSize));
+            txtOutput.WordWrap = fontSettings.OutputAreaWordWrap;
+
+            // Tab controls
+            var tabFont = new Font(uiFont, Scaled(fontSettings.TabFontSize));
+            presetsTabControl.Font = tabFont;
+
+            // Host list (DataGridView) - apply row height setting
+            // Don't change font on DataGridView as it interferes with existing styling
+            var hostRowHeight = fontSettings.HostListRowHeight > 0 ? fontSettings.HostListRowHeight : 28;
+            dgv_variables.RowTemplate.Height = hostRowHeight;
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                row.Height = hostRowHeight;
+            }
+
+            // History list boxes
+            lstOutput.Font = new Font(uiFont, Scaled(fontSettings.HostListFontSize));
+            lstHosts.Font = new Font(uiFont, Scaled(fontSettings.HostListFontSize));
+
+            // Menu strip
+            menuStrip1.Font = new Font(uiFont, Scaled(fontSettings.MenuFontSize));
+            ApplyMenuFontRecursive(menuStrip1.Items, new Font(uiFont, Scaled(fontSettings.MenuFontSize)));
+
+            // Context menus
+            ApplyContextMenuFont(contextMenuStrip1, uiFont, Scaled(fontSettings.MenuFontSize));
+            ApplyContextMenuFont(contextPresetLst, uiFont, Scaled(fontSettings.MenuFontSize));
+            ApplyContextMenuFont(contextPresetLstAdd, uiFont, Scaled(fontSettings.MenuFontSize));
+            ApplyContextMenuFont(contextHistoryLst, uiFont, Scaled(fontSettings.MenuFontSize));
+            ApplyContextMenuFont(contextHostLst, uiFont, Scaled(fontSettings.MenuFontSize));
+
+            // Toolstrips
+            mainToolStrip.Font = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+            presetsToolStrip.Font = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+
+            // Status bar
+            statusStrip.Font = new Font(uiFont, Scaled(fontSettings.StatusBarFontSize));
+
+            // Apply accent color if custom
+            ApplyAccentColor(fontSettings.CustomAccentColor);
+
+            ResumeLayout(true);
+        }
+
+        private void ApplyMenuFontRecursive(ToolStripItemCollection items, Font font)
+        {
+            foreach (ToolStripItem item in items)
+            {
+                item.Font = font;
+                if (item is ToolStripMenuItem menuItem && menuItem.DropDownItems.Count > 0)
+                {
+                    ApplyMenuFontRecursive(menuItem.DropDownItems, font);
+                }
+            }
+        }
+
+        private void ApplyContextMenuFont(ContextMenuStrip? menu, string fontFamily, float fontSize)
+        {
+            if (menu == null) return;
+            var font = new Font(fontFamily, fontSize);
+            menu.Font = font;
+            foreach (ToolStripItem item in menu.Items)
+            {
+                item.Font = font;
+            }
+        }
+
+        private void ApplyAccentColor(int? accentColorArgb)
+        {
+            if (!accentColorArgb.HasValue) return;
+
+            var accentColor = Color.FromArgb(accentColorArgb.Value);
+            var contrastColor = GetContrastColor(accentColor);
+
+            // Apply accent to execute buttons
+            btnExecuteAll.BackColor = accentColor;
+            btnExecuteAll.ForeColor = contrastColor;
+            btnExecuteAll.FlatStyle = FlatStyle.Flat;
+            btnExecuteAll.FlatAppearance.BorderSize = 0;
+
+            btnExecuteSelected.BackColor = accentColor;
+            btnExecuteSelected.ForeColor = contrastColor;
+            btnExecuteSelected.FlatStyle = FlatStyle.Flat;
+            btnExecuteSelected.FlatAppearance.BorderSize = 0;
+        }
+
+        private static Color GetContrastColor(Color color)
+        {
+            var luminance = (0.299 * color.R + 0.587 * color.G + 0.114 * color.B) / 255;
+            return luminance > 0.5 ? Color.Black : Color.White;
+        }
+
+        private void ApplyLightTheme()
+        {
+            // Apply light title bar (Windows 10 1809+ / Windows 11)
+            int value = 0;
+            _ = NativeMethods.DwmSetWindowAttribute(Handle, NativeMethods.DWMWA_USE_IMMERSIVE_DARK_MODE, ref value, sizeof(int));
+
+            // Form
+            BackColor = LightFormBackground;
+
+            // Menu and toolbar
+            menuStrip1.BackColor = LightBackground;
+            menuStrip1.ForeColor = LightTextColor;
+            mainToolStrip.BackColor = LightBackground;
+            mainToolStrip.ForeColor = LightTextColor;
+            statusStrip.BackColor = LightBackground;
+            statusStrip.ForeColor = LightTextColor;
+            statusLabel.ForeColor = LightTextColor;
+            statusHostCount.ForeColor = LightSecondaryText;
+
+            // Hosts panel
+            hostsPanel.BackColor = LightPanelBackground;
+            hostsHeaderPanel.BackColor = LightBackground;
+            lblHostsTitle.ForeColor = LightTextColor;
+            lblHostCount.ForeColor = LightSecondaryText;
+
+            // DataGridView
+            dgv_variables.BackgroundColor = LightPanelBackground;
+            dgv_variables.GridColor = LightBorderColor;
+            dgv_variables.ColumnHeadersDefaultCellStyle.BackColor = LightBackground;
+            dgv_variables.ColumnHeadersDefaultCellStyle.ForeColor = LightTextColor;
+            dgv_variables.RowHeadersDefaultCellStyle.BackColor = LightBackground;
+            dgv_variables.RowHeadersDefaultCellStyle.ForeColor = LightSecondaryText;
+            dgv_variables.DefaultCellStyle.BackColor = LightPanelBackground;
+            dgv_variables.DefaultCellStyle.ForeColor = LightTextColor;
+            dgv_variables.DefaultCellStyle.SelectionBackColor = LightAccent;
+            dgv_variables.DefaultCellStyle.SelectionForeColor = Color.White;
+            dgv_variables.AlternatingRowsDefaultCellStyle.BackColor = LightAlternateRow;
+            dgv_variables.AlternatingRowsDefaultCellStyle.SelectionBackColor = LightAccent;
+            dgv_variables.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
+
+            // Command panel
+            commandPanel.BackColor = LightPanelBackground;
+
+            // Presets panel
+            presetsPanel.BackColor = LightBackground;
+            presetsHeaderPanel.BackColor = LightBackground;
+            presetsToolStrip.BackColor = LightBackground;
+            lblPresetsTitle.ForeColor = LightTextColor;
+            presetsTabControl.BackColor = LightBackground;
+            tabPresets.BackColor = LightPanelBackground;
+            tabFavorites.BackColor = LightPanelBackground;
+            trvPresets.BackColor = LightPanelBackground;
+            trvPresets.ForeColor = LightTextColor;
+            trvFavorites.BackColor = LightPanelBackground;
+            trvFavorites.ForeColor = LightTextColor;
+            lblFavoritesEmpty.ForeColor = LightSecondaryText;
+
+            // Script panel
+            scriptPanel.BackColor = LightPanelBackground;
+            scriptHeaderPanel.BackColor = LightBackground;
+            scriptFooterPanel.BackColor = LightBackground;
+            lblScriptTitle.ForeColor = LightTextColor;
+            lblPresetName.ForeColor = LightSecondaryText;
+            lblTimeoutHeader.ForeColor = LightSecondaryText;
+            lblLinePosition.ForeColor = LightSecondaryText;
+            txtPreset.BackColor = LightControlBackground;
+            txtPreset.ForeColor = LightTextColor;
+            txtTimeoutHeader.BackColor = LightControlBackground;
+            txtTimeoutHeader.ForeColor = LightTextColor;
+            txtCommand.BackColor = LightControlBackground;
+            txtCommand.ForeColor = LightTextColor;
+            btnSavePreset.BackColor = LightAccent;
+            btnSavePreset.FlatAppearance.BorderColor = LightSelectionBorder;
+
+            // Execute panel
+            executePanel.BackColor = LightBackground;
+
+            // History panel (NOT the output - that stays dark)
+            outputPanel.BackColor = LightPanelBackground;
+            historyPanel.BackColor = LightPanelBackground;
+            historyHeaderPanel.BackColor = LightBackground;
+            lblHistoryTitle.ForeColor = LightTextColor;
+            lstOutput.BackColor = LightPanelBackground;
+            lstOutput.ForeColor = LightTextColor;
+            hostListPanel.BackColor = LightPanelBackground;
+            hostHeaderPanel.BackColor = LightBackground;
+            lblHostsListTitle.ForeColor = LightTextColor;
+            lstHosts.BackColor = LightPanelBackground;
+            lstHosts.ForeColor = LightTextColor;
+
+            // Toolstrip styling
+            ApplyToolStripTheme(mainToolStrip, false);
+            ApplyToolStripTheme(presetsToolStrip, false);
+            mainToolStrip.Renderer = new ModernToolStripRenderer();
+            presetsToolStrip.Renderer = new ModernToolStripRenderer();
+            menuStrip1.Renderer = new ModernToolStripRenderer();
+
+            // Splitter styling - light theme
+            mainSplitContainer.BackColor = LightFormBackground;
+            topSplitContainer.BackColor = LightFormBackground;
+            commandSplitContainer.BackColor = LightFormBackground;
+            outputSplitContainer.BackColor = LightFormBackground;
+            historySplitContainer.BackColor = LightFormBackground;
+
+            // Input field borders - standard for light mode
+            txtPreset.BorderStyle = BorderStyle.Fixed3D;
+            txtTimeoutHeader.BorderStyle = BorderStyle.Fixed3D;
+
+            // Reset scrollbars to light theme
+            ApplyLightScrollbars(dgv_variables);
+            ApplyLightScrollbars(trvPresets);
+            ApplyLightScrollbars(trvFavorites);
+            ApplyLightScrollbars(lstOutput);
+            ApplyLightScrollbars(lstHosts);
+            ApplyLightScrollbars(txtCommand);
+            ApplyLightScrollbars(txtOutput);
+
+            // Reset TabControl to default drawing
+            ApplyLightTabControl(presetsTabControl);
+        }
+
+        private void ApplyDarkTheme()
+        {
+            // Apply dark title bar (Windows 10 1809+ / Windows 11)
+            int value = 1;
+            _ = NativeMethods.DwmSetWindowAttribute(Handle, NativeMethods.DWMWA_USE_IMMERSIVE_DARK_MODE, ref value, sizeof(int));
+
+            // Form - deep background
+            BackColor = DarkSurface0;
+
+            // Menu and toolbar - elevated surface
+            menuStrip1.BackColor = DarkSurface3;
+            menuStrip1.ForeColor = DarkTextPrimary;
+            mainToolStrip.BackColor = DarkSurface3;
+            mainToolStrip.ForeColor = DarkTextPrimary;
+            statusStrip.BackColor = DarkSurface3;
+            statusStrip.ForeColor = DarkTextPrimary;
+            statusLabel.ForeColor = DarkTextPrimary;
+            statusHostCount.ForeColor = DarkTextSecondary;
+
+            // Hosts panel
+            hostsPanel.BackColor = DarkSurface1;
+            hostsHeaderPanel.BackColor = DarkSurface2;
+            lblHostsTitle.ForeColor = DarkTextPrimary;
+            lblHostCount.ForeColor = DarkTextSecondary;
+
+            // DataGridView - refined dark styling with subtle selection
+            dgv_variables.BackgroundColor = DarkSurface1;
+            dgv_variables.GridColor = DarkBorder;
+            dgv_variables.ColumnHeadersDefaultCellStyle.BackColor = DarkSurface2;
+            dgv_variables.ColumnHeadersDefaultCellStyle.ForeColor = DarkTextPrimary;
+            dgv_variables.RowHeadersDefaultCellStyle.BackColor = DarkSurface2;
+            dgv_variables.RowHeadersDefaultCellStyle.ForeColor = DarkTextSecondary;
+            dgv_variables.DefaultCellStyle.BackColor = DarkSurface1;
+            dgv_variables.DefaultCellStyle.ForeColor = DarkTextPrimary;
+            dgv_variables.DefaultCellStyle.SelectionBackColor = DarkSelectionBg;
+            dgv_variables.DefaultCellStyle.SelectionForeColor = Color.White;
+            dgv_variables.AlternatingRowsDefaultCellStyle.BackColor = DarkSurface2;
+            dgv_variables.AlternatingRowsDefaultCellStyle.SelectionBackColor = DarkSelectionBg;
+            dgv_variables.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
+
+            // Command panel
+            commandPanel.BackColor = DarkSurface1;
+
+            // Presets panel
+            presetsPanel.BackColor = DarkSurface1;
+            presetsHeaderPanel.BackColor = DarkSurface2;
+            presetsToolStrip.BackColor = DarkSurface2;
+            lblPresetsTitle.ForeColor = DarkTextPrimary;
+            presetsTabControl.BackColor = DarkSurface1;
+            tabPresets.BackColor = DarkSurface1;
+            tabFavorites.BackColor = DarkSurface1;
+            trvPresets.BackColor = DarkSurface1;
+            trvPresets.ForeColor = DarkTextPrimary;
+            trvFavorites.BackColor = DarkSurface1;
+            trvFavorites.ForeColor = DarkTextPrimary;
+            lblFavoritesEmpty.ForeColor = DarkTextSecondary;
+
+            // Script panel
+            scriptPanel.BackColor = DarkSurface1;
+            scriptHeaderPanel.BackColor = DarkSurface2;
+            scriptFooterPanel.BackColor = DarkSurface2;
+            lblScriptTitle.ForeColor = DarkTextPrimary;
+            lblPresetName.ForeColor = DarkTextSecondary;
+            lblTimeoutHeader.ForeColor = DarkTextSecondary;
+            lblLinePosition.ForeColor = DarkTextSecondary;
+            txtPreset.BackColor = DarkInputBackground;
+            txtPreset.ForeColor = DarkInputText;
+            txtTimeoutHeader.BackColor = DarkInputBackground;
+            txtTimeoutHeader.ForeColor = DarkInputText;
+            txtCommand.BackColor = DarkSurface2;
+            txtCommand.ForeColor = DarkInputText;
+            btnSavePreset.BackColor = DarkSelectionBg;
+            btnSavePreset.FlatAppearance.BorderColor = DarkSelectionBorder;
+
+            // Execute panel
+            executePanel.BackColor = DarkSurface2;
+
+            // History panel (NOT the output - that stays dark)
+            outputPanel.BackColor = DarkSurface1;
+            historyPanel.BackColor = DarkSurface1;
+            historyHeaderPanel.BackColor = DarkSurface2;
+            lblHistoryTitle.ForeColor = DarkTextPrimary;
+            lstOutput.BackColor = DarkSurface1;
+            lstOutput.ForeColor = DarkTextPrimary;
+            hostListPanel.BackColor = DarkSurface1;
+            hostHeaderPanel.BackColor = DarkSurface2;
+            lblHostsListTitle.ForeColor = DarkTextPrimary;
+            lstHosts.BackColor = DarkSurface1;
+            lstHosts.ForeColor = DarkTextPrimary;
+
+            // Toolstrip styling with dark theme
+            ApplyToolStripTheme(mainToolStrip, true);
+            ApplyToolStripTheme(presetsToolStrip, true);
+            mainToolStrip.Renderer = new DarkToolStripRenderer();
+            presetsToolStrip.Renderer = new DarkToolStripRenderer();
+            menuStrip1.Renderer = new DarkToolStripRenderer();
+
+            // Splitter styling
+            mainSplitContainer.BackColor = DarkSurface0;
+            topSplitContainer.BackColor = DarkSurface0;
+            commandSplitContainer.BackColor = DarkSurface0;
+            outputSplitContainer.BackColor = DarkSurface0;
+            historySplitContainer.BackColor = DarkSurface0;
+
+            // Input field borders - use BorderStyle.FixedSingle for dark visibility
+            txtPreset.BorderStyle = BorderStyle.FixedSingle;
+            txtTimeoutHeader.BorderStyle = BorderStyle.FixedSingle;
+
+            // Apply dark scrollbars to scrollable controls
+            ApplyDarkScrollbars(dgv_variables);
+            ApplyDarkScrollbars(trvPresets);
+            ApplyDarkScrollbars(trvFavorites);
+            ApplyDarkScrollbars(lstOutput);
+            ApplyDarkScrollbars(lstHosts);
+            ApplyDarkScrollbars(txtCommand);
+            ApplyDarkScrollbars(txtOutput);
+
+            // Style TabControl for dark mode
+            ApplyDarkTabControl(presetsTabControl);
+        }
+
+        private void ApplyToolStripTheme(ToolStrip strip, bool darkMode)
+        {
+            var textColor = darkMode ? DarkTextPrimary : LightTextColor;
+            var inputBg = darkMode ? DarkInputBackground : LightControlBackground;
+            var inputText = darkMode ? DarkInputText : LightTextColor;
+
+            foreach (ToolStripItem item in strip.Items)
+            {
+                item.ForeColor = textColor;
+                if (item is ToolStripTextBox textBox)
+                {
+                    textBox.BackColor = inputBg;
+                    textBox.ForeColor = inputText;
+                    if (textBox.TextBox != null)
+                    {
+                        textBox.TextBox.BackColor = inputBg;
+                        textBox.TextBox.ForeColor = inputText;
+                    }
+                }
+                else if (item is ToolStripLabel label)
+                {
+                    label.ForeColor = darkMode ? DarkTextSecondary : LightSecondaryText;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Applies dark scrollbars to a control using Windows 10/11 dark mode theme.
+        /// </summary>
+        private static void ApplyDarkScrollbars(Control control)
+        {
+            if (control.IsHandleCreated)
+            {
+                NativeMethods.SetWindowTheme(control.Handle, "DarkMode_Explorer", null);
+            }
+            else
+            {
+                control.HandleCreated += (s, e) =>
+                {
+                    if (s is Control c)
+                        NativeMethods.SetWindowTheme(c.Handle, "DarkMode_Explorer", null);
+                };
+            }
+        }
+
+        /// <summary>
+        /// Resets scrollbars to default light theme.
+        /// </summary>
+        private static void ApplyLightScrollbars(Control control)
+        {
+            if (control.IsHandleCreated)
+            {
+                NativeMethods.SetWindowTheme(control.Handle, "Explorer", null);
+            }
+            else
+            {
+                control.HandleCreated += (s, e) =>
+                {
+                    if (s is Control c)
+                        NativeMethods.SetWindowTheme(c.Handle, "Explorer", null);
+                };
+            }
+        }
+
+        /// <summary>
+        /// Applies dark mode styling to a TabControl.
+        /// </summary>
+        private void ApplyDarkTabControl(TabControl tabControl)
+        {
+            // Keep normal appearance but use owner draw
+            tabControl.Appearance = TabAppearance.Normal;
+            tabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
+            tabControl.DrawItem -= TabControl_DrawItem;
+            tabControl.DrawItem += TabControl_DrawItem;
+
+            // Handle painting to cover any remaining artifacts
+            tabControl.Paint -= TabControl_Paint;
+            tabControl.Paint += TabControl_Paint;
+
+            // Use the custom BorderlessTabControl properties if available
+            if (tabControl is BorderlessTabControl borderlessTab)
+            {
+                borderlessTab.HideBorder = true;
+                borderlessTab.BorderBackgroundColor = DarkSurface1;
+            }
+
+            // Style the parent panel
+            if (tabControl.Parent is Panel parentPanel)
+            {
+                parentPanel.BackColor = DarkSurface1;
+            }
+
+            // Style the tab pages themselves
+            foreach (TabPage page in tabControl.TabPages)
+            {
+                page.BackColor = DarkSurface1;
+                page.ForeColor = DarkTextPrimary;
+            }
+
+            tabControl.Invalidate();
+            tabControl.Parent?.Invalidate();
+        }
+
+        /// <summary>
+        /// Resets TabControl to default drawing.
+        /// </summary>
+        private void ApplyLightTabControl(TabControl tabControl)
+        {
+            // Reset to normal tab appearance
+            tabControl.Appearance = TabAppearance.Normal;
+            tabControl.DrawMode = TabDrawMode.Normal;
+            tabControl.DrawItem -= TabControl_DrawItem;
+            tabControl.Paint -= TabControl_Paint;
+
+            // Disable border hiding on custom TabControl
+            if (tabControl is BorderlessTabControl borderlessTab)
+            {
+                borderlessTab.HideBorder = false;
+            }
+
+            // Reset tab page colors
+            foreach (TabPage page in tabControl.TabPages)
+            {
+                page.BackColor = SystemColors.Control;
+                page.ForeColor = SystemColors.ControlText;
+            }
+
+            tabControl.Invalidate();
+        }
+
+        private void TabControl_Paint(object? sender, PaintEventArgs e)
+        {
+            if (sender is not TabControl tabControl) return;
+
+            using var bgBrush = new SolidBrush(DarkSurface1);
+            using var headerBrush = new SolidBrush(DarkSurface2);
+
+            var tabHeight = tabControl.ItemSize.Height + 4;
+
+            // Fill the entire content area (everything below the tabs)
+            var contentRect = new Rectangle(0, tabHeight - 2, tabControl.Width, tabControl.Height - tabHeight + 2);
+            e.Graphics.FillRectangle(bgBrush, contentRect);
+
+            // Paint thick borders to cover all default 3D effects
+            // Left edge (extra wide to ensure coverage)
+            e.Graphics.FillRectangle(bgBrush, 0, tabHeight - 2, 4, tabControl.Height - tabHeight + 4);
+            // Right edge
+            e.Graphics.FillRectangle(bgBrush, tabControl.Width - 4, tabHeight - 2, 4, tabControl.Height - tabHeight + 4);
+            // Bottom edge
+            e.Graphics.FillRectangle(bgBrush, 0, tabControl.Height - 4, tabControl.Width, 4);
+
+            // Fill the area to the right of the last tab (header area)
+            if (tabControl.TabCount > 0)
+            {
+                var lastTabRect = tabControl.GetTabRect(tabControl.TabCount - 1);
+                var fillRect = new Rectangle(lastTabRect.Right, 0, tabControl.Width - lastTabRect.Right, tabHeight - 2);
+                e.Graphics.FillRectangle(headerBrush, fillRect);
+
+                // Also fill above the tabs to cover any top border
+                e.Graphics.FillRectangle(headerBrush, 0, 0, tabControl.Width, 2);
+            }
+
+            // Draw a subtle separator line between tabs and content
+            using var borderPen = new Pen(DarkBorder);
+            e.Graphics.DrawLine(borderPen, 0, tabHeight - 2, tabControl.Width, tabHeight - 2);
+        }
+
+        private void TabControl_DrawItem(object? sender, DrawItemEventArgs e)
+        {
+            if (sender is not TabControl tabControl) return;
+
+            var tabPage = tabControl.TabPages[e.Index];
+            var tabRect = tabControl.GetTabRect(e.Index);
+            var isSelected = tabControl.SelectedIndex == e.Index;
+
+            // First, fill the header background area to eliminate any white artifacts
+            using (var headerBrush = new SolidBrush(DarkSurface2))
+            {
+                // Paint the entire row above and around this tab
+                e.Graphics.FillRectangle(headerBrush, tabRect.X - 4, 0, tabRect.Width + 8, tabRect.Y + 2);
+            }
+
+            // Draw tab background
+            var bgColor = isSelected ? DarkSurface1 : DarkSurface3;
+            using (var bgBrush = new SolidBrush(bgColor))
+            {
+                // Fill the actual tab area (not the expanded rect for non-selected)
+                var fillRect = new Rectangle(tabRect.X, tabRect.Y, tabRect.Width, tabRect.Height);
+                e.Graphics.FillRectangle(bgBrush, fillRect);
+            }
+
+            // For selected tab: draw accent line at top and blend bottom with content
+            if (isSelected)
+            {
+                // Blue accent line at top
+                using var accentPen = new Pen(DarkSelectionBorder, 2);
+                e.Graphics.DrawLine(accentPen, tabRect.Left, tabRect.Top + 1, tabRect.Right - 1, tabRect.Top + 1);
+
+                // Make sure bottom blends with content (no border)
+                using var contentBrush = new SolidBrush(DarkSurface1);
+                e.Graphics.FillRectangle(contentBrush, tabRect.Left - 2, tabRect.Bottom - 2, tabRect.Width + 4, 6);
+            }
+            else
+            {
+                // For unselected tabs: paint over any edge highlights
+                // Cover the right edge where white highlight appears
+                using var edgeBrush = new SolidBrush(DarkSurface2);
+                e.Graphics.FillRectangle(edgeBrush, tabRect.Right - 1, tabRect.Y, 4, tabRect.Height);
+                // Cover the left edge
+                e.Graphics.FillRectangle(edgeBrush, tabRect.Left - 3, tabRect.Y, 4, tabRect.Height);
+                // Cover the top edge highlight with a darker line
+                using var topPen = new Pen(Color.Red, 2);
+                e.Graphics.DrawLine(topPen, tabRect.Left, tabRect.Top + 1, tabRect.Right - 1, tabRect.Top + 1);
+
+                // Draw bottom border line
+                using var borderBrush = new SolidBrush(DarkSurface1);
+                e.Graphics.FillRectangle(borderBrush, tabRect.Left - 2, tabRect.Bottom - 1, tabRect.Width + 4, 5);
+
+                using var borderPen = new Pen(DarkBorder);
+                e.Graphics.DrawLine(borderPen, tabRect.Left - 2, tabRect.Bottom - 1, tabRect.Right + 2, tabRect.Bottom - 1);
+            }
+
+            // Draw tab text
+            var textColor = isSelected ? Color.White : DarkTextSecondary;
+            using (var textBrush = new SolidBrush(textColor))
+            {
+                var sf = new StringFormat
+                {
+                    Alignment = StringAlignment.Center,
+                    LineAlignment = StringAlignment.Center
+                };
+                e.Graphics.DrawString(tabPage.Text, tabControl.Font, textBrush, tabRect, sf);
+            }
+        }
+
+        #endregion
+
         #endregion
 
         #region Form Events
@@ -402,7 +1147,7 @@ namespace SSH_Helper
                 hit.Type != DataGridViewHitTestType.ColumnHeader &&
                 hit.Type != DataGridViewHitTestType.RowHeader)
             {
-                EndEditAndClearSelection();
+                SelectHostIpColumnOnly();
             }
 
             if (e.Button == MouseButtons.Right)
@@ -465,9 +1210,66 @@ namespace SSH_Helper
             e.Graphics.DrawString(rowIdx, grid.Font, brush, headerBounds, centerFormat);
         }
 
+        private void Dgv_Variables_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || e.Graphics == null) return;
+
+            var cell = dgv_variables.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            if (!cell.Selected) return;
+
+            // Paint selected cells with consistent color regardless of focus state
+            var selectionColor = _isDarkMode ? DarkSelectionBg : LightAccent;
+
+            e.Paint(e.CellBounds, DataGridViewPaintParts.Background);
+
+            using (var brush = new SolidBrush(selectionColor))
+            {
+                e.Graphics.FillRectangle(brush, e.CellBounds);
+            }
+
+            // Paint the rest (content, border)
+            e.Paint(e.CellBounds, DataGridViewPaintParts.ContentForeground | DataGridViewPaintParts.Border);
+
+            e.Handled = true;
+        }
+
+        private void Dgv_Variables_Leave(object? sender, EventArgs e)
+        {
+            SelectHostIpColumnOnly();
+        }
+
+        private void SelectHostIpColumnOnly()
+        {
+            if (dgv_variables.IsCurrentCellInEditMode)
+                dgv_variables.EndEdit();
+
+            // Select only the Host_IP column of selected rows
+            if (dgv_variables.Columns.Contains("Host_IP") && dgv_variables.SelectedCells.Count > 0)
+            {
+                var selectedRows = dgv_variables.SelectedCells
+                    .Cast<DataGridViewCell>()
+                    .Select(c => c.RowIndex)
+                    .Distinct()
+                    .Where(r => r >= 0 && r < dgv_variables.Rows.Count)
+                    .ToList();
+
+                dgv_variables.ClearSelection();
+
+                foreach (var rowIndex in selectedRows)
+                {
+                    dgv_variables.Rows[rowIndex].Cells["Host_IP"].Selected = true;
+                }
+            }
+            else
+            {
+                dgv_variables.ClearSelection();
+            }
+        }
+
         private void Dgv_Variables_CellClick(object? sender, DataGridViewCellEventArgs e)
         {
-            if (e.RowIndex == -1) // Column header click
+            // Column header click (but not top-left corner where ColumnIndex is also -1)
+            if (e.RowIndex == -1 && e.ColumnIndex >= 0)
             {
                 dgv_variables.ClearSelection();
                 foreach (DataGridViewRow row in dgv_variables.Rows)
@@ -495,6 +1297,12 @@ namespace SSH_Helper
 
         private void Dgv_Variables_RowsAdded(object? sender, DataGridViewRowsAddedEventArgs e)
         {
+            // Ensure consistent row height for all added rows (including the new row placeholder)
+            for (int i = 0; i < e.RowCount; i++)
+            {
+                dgv_variables.Rows[e.RowIndex + i].Height = 28;
+            }
+
             _csvDirty = true;
             UpdateHostCount();
         }
@@ -1565,6 +2373,11 @@ namespace SSH_Helper
             {
                 // Settings saved - default timeout only applies to new presets
                 // Don't update the current timeout field as it's preset-specific
+
+                // Apply theme and font settings if changed
+                var config = _configService.GetCurrent();
+                ApplyTheme(config.DarkMode);
+                ApplyFontSettings(config.FontSettings);
             }
         }
 
@@ -2020,7 +2833,21 @@ namespace SSH_Helper
         {
             if (e.Index < 0) return;
 
-            e.DrawBackground();
+            var isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+
+            // Draw background with theme-aware colors
+            var bgColor = isSelected
+                ? (_isDarkMode ? DarkSelectionBg : LightAccent)
+                : (_isDarkMode ? DarkSurface1 : e.BackColor);
+            using var bgBrush = new SolidBrush(bgColor);
+            e.Graphics.FillRectangle(bgBrush, e.Bounds);
+
+            // Draw selection border
+            if (isSelected)
+            {
+                using var borderPen = new Pen(_isDarkMode ? DarkSelectionBorder : LightSelectionBorder, 1);
+                e.Graphics.DrawRectangle(borderPen, e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1);
+            }
 
             var item = lstHosts.Items[e.Index];
             if (item is HostHistoryEntry hostEntry)
@@ -2028,22 +2855,224 @@ namespace SSH_Helper
                 // Draw status icon
                 var iconRect = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top + 2, 16, 16);
                 var iconColor = hostEntry.Success ? Color.FromArgb(40, 167, 69) : Color.FromArgb(220, 53, 69);
-                var iconText = hostEntry.Success ? "✓" : "✗";
+                var iconText = hostEntry.Success ? "\u2713" : "\u2717";
 
                 using var iconFont = new Font("Segoe UI", 10F, FontStyle.Bold);
                 using var iconBrush = new SolidBrush(iconColor);
                 e.Graphics.DrawString(iconText, iconFont, iconBrush, iconRect.Left, iconRect.Top - 1);
 
-                // Draw host address
+                // Draw host address with theme-aware text color
                 var textRect = new Rectangle(e.Bounds.Left + 24, e.Bounds.Top, e.Bounds.Width - 28, e.Bounds.Height);
-                var textColor = (e.State & DrawItemState.Selected) == DrawItemState.Selected
-                    ? SystemColors.HighlightText
-                    : e.ForeColor;
+                var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
                 using var textBrush = new SolidBrush(textColor);
                 e.Graphics.DrawString(hostEntry.HostAddress, e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
             }
+        }
 
-            e.DrawFocusRectangle();
+        private void LstOutput_DrawItem(object? sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+
+            var isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+
+            // Draw background with theme-aware colors
+            var bgColor = isSelected
+                ? (_isDarkMode ? DarkSelectionBg : LightAccent)
+                : (_isDarkMode ? DarkSurface1 : e.BackColor);
+            using var bgBrush = new SolidBrush(bgColor);
+            e.Graphics.FillRectangle(bgBrush, e.Bounds);
+
+            // Draw selection border for visual clarity
+            if (isSelected)
+            {
+                using var borderPen = new Pen(_isDarkMode ? DarkSelectionBorder : LightSelectionBorder, 1);
+                e.Graphics.DrawRectangle(borderPen, e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1);
+            }
+
+            // Get the item text
+            var item = lstOutput.Items[e.Index];
+            string text = item is KeyValuePair<string, string> kvp ? kvp.Key : item?.ToString() ?? "";
+
+            // Check if this is a folder entry (contains folder emoji)
+            bool isFolderEntry = text.Contains("\U0001F4C1"); // 📁 Unicode
+
+            // Draw text with theme-aware color
+            var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
+            using var textBrush = new SolidBrush(textColor);
+            var sf = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+
+            if (isFolderEntry)
+            {
+                // Remove the folder emoji from text
+                text = text.Replace("\U0001F4C1 ", "").Replace("\U0001F4C1", "");
+
+                // Parse the text to extract date/time and folder name
+                // Format is "2026-01-18 17:39:04 - FolderName"
+                int separatorIndex = text.IndexOf(" - ");
+                string dateTimePart = separatorIndex > 0 ? text.Substring(0, separatorIndex) : "";
+                string folderName = separatorIndex > 0 ? text.Substring(separatorIndex + 3) : text;
+
+                int currentX = e.Bounds.Left + 4;
+
+                // Draw date/time first
+                if (!string.IsNullOrEmpty(dateTimePart))
+                {
+                    var dateTimeSize = e.Graphics.MeasureString(dateTimePart + " - ", e.Font ?? lstOutput.Font);
+                    var dateTimeRect = new RectangleF(currentX, e.Bounds.Top, dateTimeSize.Width, e.Bounds.Height);
+                    e.Graphics.DrawString(dateTimePart + " - ", e.Font ?? lstOutput.Font, textBrush, dateTimeRect, sf);
+                    currentX += (int)dateTimeSize.Width;
+                }
+
+                // Draw folder icon after date/time
+                var iconColor = _isDarkMode ? Color.FromArgb(220, 180, 80) : Color.FromArgb(180, 140, 60);
+                using var iconFont = new Font("Segoe UI Symbol", 9F);
+                using var iconBrush = new SolidBrush(iconColor);
+                var iconRect = new RectangleF(currentX, e.Bounds.Top, 18, e.Bounds.Height);
+                var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
+                e.Graphics.DrawString("\U0001F4C1", iconFont, iconBrush, iconRect, iconSf);
+                currentX += 18;
+
+                // Draw folder name
+                var nameRect = new Rectangle(currentX, e.Bounds.Top, e.Bounds.Width - currentX - 4, e.Bounds.Height);
+                e.Graphics.DrawString(folderName, e.Font ?? lstOutput.Font, textBrush, nameRect, sf);
+            }
+            else
+            {
+                // Regular entry - just draw the text
+                var textRect = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top, e.Bounds.Width - 8, e.Bounds.Height);
+                e.Graphics.DrawString(text, e.Font ?? lstOutput.Font, textBrush, textRect, sf);
+            }
+        }
+
+        private void TreeView_DrawNode(object? sender, DrawTreeNodeEventArgs e)
+        {
+            if (e.Node == null || e.Bounds.IsEmpty) return;
+
+            if (sender is not TreeView treeView) return;
+
+            bool isSelected = e.Node == treeView.SelectedNode;
+
+            // Draw background with theme-aware colors
+            var rowBounds = new Rectangle(0, e.Bounds.Y, treeView.ClientSize.Width, e.Bounds.Height);
+
+            if (isSelected)
+            {
+                // Use a prominent selection color whether focused or not (matches hosts grid)
+                var selectionColor = _isDarkMode ? DarkSelectionBg : LightAccent;
+                using var bgBrush = new SolidBrush(selectionColor);
+                e.Graphics.FillRectangle(bgBrush, rowBounds);
+
+                // Draw selection border for visual clarity
+                using var borderPen = new Pen(_isDarkMode ? DarkSelectionBorder : LightSelectionBorder, 1);
+                e.Graphics.DrawRectangle(borderPen, rowBounds.X, rowBounds.Y, rowBounds.Width - 1, rowBounds.Height - 1);
+            }
+            else
+            {
+                // Non-selected: fill with background color
+                using var bgBrush = new SolidBrush(treeView.BackColor);
+                e.Graphics.FillRectangle(bgBrush, rowBounds);
+            }
+
+            // Calculate text position (account for indentation and expand/collapse button)
+            int indent = e.Node.Level * treeView.Indent + 19; // 19 pixels for the expand/collapse area
+
+            // Theme-aware colors
+            var lineColor = _isDarkMode ? DarkTextSecondary : Color.FromArgb(128, 128, 128);
+            var arrowColor = _isDarkMode ? DarkTextSecondary : Color.FromArgb(96, 96, 96);
+            var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : treeView.ForeColor);
+
+            // Draw tree lines
+            if (treeView.ShowLines)
+            {
+                using var linePen = new Pen(lineColor, 1) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot };
+                int midY = e.Bounds.Y + e.Bounds.Height / 2;
+                bool hasChildren = e.Node.Nodes.Count > 0;
+
+                // Only draw lines for non-root nodes, or root nodes when ShowRootLines is enabled
+                bool shouldDrawNodeLines = e.Node.Level > 0 || treeView.ShowRootLines;
+
+                if (shouldDrawNodeLines && !hasChildren)
+                {
+                    // Draw horizontal line to leaf nodes only (folders have expand/collapse indicator)
+                    int lineStartX = e.Node.Level * treeView.Indent + 8;
+                    int lineEndX = indent - 2;
+                    e.Graphics.DrawLine(linePen, lineStartX, midY, lineEndX, midY);
+
+                    // Draw vertical line segment at this node's level
+                    int vertX = e.Node.Level * treeView.Indent + 8;
+                    bool isLastSibling = e.Node.NextNode == null;
+                    int vertTop = e.Bounds.Y;
+                    int vertBottom = isLastSibling ? midY : e.Bounds.Y + e.Bounds.Height;
+                    e.Graphics.DrawLine(linePen, vertX, vertTop, vertX, vertBottom);
+                }
+
+                // Draw vertical continuation lines for ancestor levels
+                var ancestor = e.Node.Parent;
+                int ancestorLevel = e.Node.Level - 1;
+                while (ancestor != null && ancestorLevel >= 0)
+                {
+                    // Draw continuation line if this ancestor has more siblings below
+                    if (ancestor.NextNode != null)
+                    {
+                        // Only draw if it's not root level, or ShowRootLines is enabled
+                        if (ancestorLevel > 0 || treeView.ShowRootLines)
+                        {
+                            int ancestorX = ancestorLevel * treeView.Indent + 8;
+                            e.Graphics.DrawLine(linePen, ancestorX, e.Bounds.Y, ancestorX, e.Bounds.Y + e.Bounds.Height);
+                        }
+                    }
+                    ancestor = ancestor.Parent;
+                    ancestorLevel--;
+                }
+            }
+
+            // Draw expand/collapse indicator if node has children
+            if (e.Node.Nodes.Count > 0)
+            {
+                int arrowX = e.Node.Level * treeView.Indent + 4;
+                int arrowY = e.Bounds.Y + (e.Bounds.Height / 2);
+                using var arrowPen = new Pen(arrowColor, 1.5f);
+
+                if (e.Node.IsExpanded)
+                {
+                    // Down arrow for expanded
+                    e.Graphics.DrawLine(arrowPen, arrowX, arrowY - 2, arrowX + 4, arrowY + 2);
+                    e.Graphics.DrawLine(arrowPen, arrowX + 4, arrowY + 2, arrowX + 8, arrowY - 2);
+                }
+                else
+                {
+                    // Right arrow for collapsed
+                    e.Graphics.DrawLine(arrowPen, arrowX + 2, arrowY - 4, arrowX + 6, arrowY);
+                    e.Graphics.DrawLine(arrowPen, arrowX + 6, arrowY, arrowX + 2, arrowY + 4);
+                }
+            }
+
+            // Check if this is a folder node
+            bool isFolder = e.Node.Tag is PresetNodeTag nodeTag && nodeTag.IsFolder;
+            int iconWidth = 0;
+
+            // Get text and strip any folder emoji characters
+            string nodeText = e.Node.Text;
+            if (isFolder)
+            {
+                // Remove folder emoji and any leading space
+                nodeText = nodeText.Replace("\U0001F4C1", "").Replace("\uD83D\uDCC1", "").TrimStart();
+
+                // Draw folder icon using Segoe UI Symbol (same as history section)
+                iconWidth = 18;
+                var iconColor = _isDarkMode ? Color.FromArgb(220, 180, 80) : Color.FromArgb(180, 140, 60);
+                using var iconFont = new Font("Segoe UI Symbol", 9F);
+                using var iconBrush = new SolidBrush(iconColor);
+                var iconRect = new RectangleF(indent, e.Bounds.Y, iconWidth, e.Bounds.Height);
+                var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
+                e.Graphics.DrawString("\U0001F4C1", iconFont, iconBrush, iconRect, iconSf);
+            }
+
+            // Draw text
+            var textBounds = new Rectangle(indent + iconWidth, e.Bounds.Y, treeView.ClientSize.Width - indent - iconWidth, e.Bounds.Height);
+            using var textBrush = new SolidBrush(textColor);
+            var sf = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
+            e.Graphics.DrawString(nodeText, treeView.Font, textBrush, textBounds, sf);
         }
 
         private void exportHostOutputToolStripMenuItem_Click(object? sender, EventArgs e)
@@ -2094,6 +3123,14 @@ namespace SSH_Helper
                     _loadedFilePath = ofd.FileName;
                     dgv_variables.Columns.Clear();
                     dgv_variables.DataSource = dataTable;
+
+                    // Apply row template height to all rows (DataSource binding doesn't use RowTemplate)
+                    foreach (DataGridViewRow row in dgv_variables.Rows)
+                    {
+                        if (!row.IsNewRow)
+                            row.Height = dgv_variables.RowTemplate.Height;
+                    }
+
                     _csvDirty = false;
                     UpdateHostCount();
                     UpdateStatusBar($"Loaded: {Path.GetFileName(ofd.FileName)}");
@@ -2402,7 +3439,21 @@ namespace SSH_Helper
             }
 
             dgv_variables.AllowUserToAddRows = true;
+
+            // Select Host_IP column for the pasted rows
             dgv_variables.ClearSelection();
+            if (dgv_variables.Columns.Contains("Host_IP"))
+            {
+                for (int i = 0; i < rows.Length; i++)
+                {
+                    int rowIndex = startRow + i;
+                    if (rowIndex >= 0 && rowIndex < dgv_variables.Rows.Count)
+                    {
+                        dgv_variables.Rows[rowIndex].Cells["Host_IP"].Selected = true;
+                    }
+                }
+            }
+
             _csvDirty = true;
             UpdateHostCount();
         }
@@ -4044,9 +5095,13 @@ namespace SSH_Helper
 
                 if (state.Hosts != null)
                 {
+                    // Ensure row template height is set before adding rows
+                    dgv_variables.RowTemplate.Height = 28;
+
                     foreach (var rowData in state.Hosts)
                     {
                         var rowIndex = dgv_variables.Rows.Add();
+                        dgv_variables.Rows[rowIndex].Height = 28;
                         foreach (var kvp in rowData)
                         {
                             if (dgv_variables.Columns.Contains(kvp.Key))
@@ -4085,13 +5140,8 @@ namespace SSH_Helper
                     }
                 }
 
-                // Select first history entry and display its output
-                if (_outputHistory.Count > 0)
-                {
-                    lstOutput.SelectedIndex = 0;
-                    // The SelectedIndexChanged handler will take care of showing output
-                    // and showing the host list if applicable
-                }
+                // Clear selection - don't auto-select any history item on load
+                lstOutput.ClearSelected();
             }
 
             // Restore selected preset or folder (do this last so it loads properly)
@@ -4144,17 +5194,6 @@ namespace SSH_Helper
             }
 
             return true;
-        }
-
-        #endregion
-
-        #region Helpers
-
-        private void EndEditAndClearSelection()
-        {
-            if (dgv_variables.IsCurrentCellInEditMode)
-                dgv_variables.EndEdit();
-            dgv_variables.ClearSelection();
         }
 
         #endregion
