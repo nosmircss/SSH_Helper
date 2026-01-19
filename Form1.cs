@@ -35,7 +35,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.1";
+        private const string ApplicationVersion = "0.50.2";
         private const string ApplicationName = "SSH Helper";
 
         #endregion
@@ -189,7 +189,8 @@ namespace SSH_Helper
             _manualPresetOrder.AddRange(config.ManualPresetOrder);
 
             // Populate preset list with proper sorting
-            RefreshPresetList();
+            // Don't restore expand state here - Form1_Shown will do it after the form is visible
+            RefreshPresetList(restoreExpandState: false);
 
             // Apply defaults to presets that don't have them
             _presetManager.ApplyDefaults(config.Timeout);
@@ -1535,6 +1536,16 @@ namespace SSH_Helper
                 else
                     hitInfo.Node.Expand();
             }
+
+            // Full-row selection: select node when clicking anywhere on the row
+            if (!_clickedOnPlusMinus && e.Button == MouseButtons.Left)
+            {
+                var node = trvPresets.GetNodeAt(0, e.Y);
+                if (node != null)
+                {
+                    trvPresets.SelectedNode = node;
+                }
+            }
         }
 
         private void trvPresets_BeforeCollapse(object? sender, TreeViewCancelEventArgs e)
@@ -1691,7 +1702,6 @@ namespace SSH_Helper
                 }
 
                 RefreshPresetList();
-                RestoreFolderExpandState();
                 SelectPresetByName(draggedTag.IsFolder ? null : draggedTag.Name);
             }
             finally
@@ -1983,13 +1993,11 @@ namespace SSH_Helper
 
         private void trvFavorites_MouseDown(object? sender, MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Right)
+            // Full-row selection: select node when clicking anywhere on the row
+            var node = trvFavorites.GetNodeAt(0, e.Y);
+            if (node != null)
             {
-                var hitInfo = trvFavorites.HitTest(e.Location);
-                if (hitInfo.Node != null)
-                {
-                    trvFavorites.SelectedNode = hitInfo.Node;
-                }
+                trvFavorites.SelectedNode = node;
             }
         }
 
@@ -2105,7 +2113,6 @@ namespace SSH_Helper
 
                         // Refresh both tabs since they share the same folder data
                         RefreshPresetList();
-                        RestoreFolderExpandState();
                         RefreshFavoritesList();
                         SelectPresetInFavoritesTree(draggedTag.Name);
 
@@ -2477,7 +2484,6 @@ namespace SSH_Helper
             }
 
             RefreshPresetList();
-            RestoreFolderExpandState();
             UpdateSortModeIndicator();
             UpdateStatusBar($"Sort mode: {_currentSortMode}");
         }
@@ -3516,7 +3522,6 @@ namespace SSH_Helper
                     _manualPresetOrder.Add(presetName);
                 }
                 RefreshPresetList();
-                RestoreFolderExpandState();
             }
 
             _activePresetName = presetName;
@@ -3590,7 +3595,6 @@ namespace SSH_Helper
             }
 
             RefreshPresetList();
-            RestoreFolderExpandState();
             SelectPresetByName(presetName);
 
             // Load the new preset into the editor
@@ -3637,7 +3641,6 @@ namespace SSH_Helper
                 }
 
                 RefreshPresetList();
-                RestoreFolderExpandState();
                 SelectPresetByName(finalName);
 
                 var preset = _presetManager.Get(finalName);
@@ -3678,7 +3681,6 @@ namespace SSH_Helper
             }
 
             RefreshPresetList();
-            RestoreFolderExpandState();
             SelectPresetByName(newName);
             txtPreset.Text = newName;
             _activePresetName = newName;
@@ -3708,7 +3710,6 @@ namespace SSH_Helper
                 }
 
                 RefreshPresetList();
-                RestoreFolderExpandState();
 
                 // Select another preset if any exist
                 if (_presetManager.Presets.Count > 0)
@@ -3769,7 +3770,6 @@ namespace SSH_Helper
                 string finalName = _presetManager.Import(input, defaultTimeout);
 
                 RefreshPresetList();
-                RestoreFolderExpandState();
                 SelectPresetByName(finalName);
 
                 var preset = _presetManager.Get(finalName);
@@ -3840,7 +3840,6 @@ namespace SSH_Helper
             {
                 int count = _presetManager.ImportAllFromFile(dialog.FileName);
                 RefreshPresetList();
-                RestoreFolderExpandState();
                 MessageBox.Show($"Imported {count} presets.\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
                     "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -3854,7 +3853,7 @@ namespace SSH_Helper
             }
         }
 
-        private void RefreshPresetList()
+        private void RefreshPresetList(bool restoreExpandState = true)
         {
             string? currentSelection = null;
             if (trvPresets.SelectedNode?.Tag is PresetNodeTag selectedTag && !selectedTag.IsFolder)
@@ -3897,6 +3896,13 @@ namespace SSH_Helper
                     };
                     folderNode.Nodes.Add(presetNode);
                 }
+
+                // Restore expand state immediately while still in BeginUpdate block
+                // This prevents flicker by doing all visual changes before EndUpdate
+                if (restoreExpandState && folderInfo?.IsExpanded == true)
+                {
+                    folderNode.Expand();
+                }
             }
 
             // Add root-level presets (no folder)
@@ -3913,9 +3919,6 @@ namespace SSH_Helper
             }
 
             trvPresets.EndUpdate();
-
-            // Note: Folder expand/collapse state is restored in Form1_Shown -> RestoreFolderExpandState()
-            // because expanding nodes before the form is visible doesn't work reliably in WinForms
 
             // Restore selection
             if (!string.IsNullOrEmpty(currentSelection))
@@ -4162,7 +4165,6 @@ namespace SSH_Helper
             _presetManager.Save(presetName, preset);
 
             RefreshPresetList();
-            RestoreFolderExpandState();
             RefreshFavoritesList();
             SelectPresetByName(presetName);
 
@@ -4178,7 +4180,6 @@ namespace SSH_Helper
             _presetManager.SetFolderFavorite(folderName, newFavoriteState);
 
             RefreshPresetList();
-            RestoreFolderExpandState();
             RefreshFavoritesList();
             SelectFolderByName(folderName);
 
