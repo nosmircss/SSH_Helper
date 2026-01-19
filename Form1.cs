@@ -510,7 +510,13 @@ namespace SSH_Helper
                 trvPresets.ItemHeight = fontSettings.TreeViewRowHeight;
                 trvFavorites.ItemHeight = fontSettings.TreeViewRowHeight;
             }
-            // When 0, the TreeView automatically calculates height based on font size
+            else
+            {
+                // Calculate height based on font (font height + padding)
+                var autoHeight = trvPresets.Font.Height + 4;
+                trvPresets.ItemHeight = autoHeight;
+                trvFavorites.ItemHeight = autoHeight;
+            }
 
             // Empty labels
             lblFavoritesEmpty.Font = new Font(uiFont, Scaled(fontSettings.EmptyLabelFontSize));
