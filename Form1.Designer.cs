@@ -1201,12 +1201,14 @@ namespace SSH_Helper
             tsbPassword.Size = new Size(120, 25);
             // 
             // statusStrip
-            // 
+            //
+            statusStrip.AutoSize = false;
             statusStrip.BackColor = Color.FromArgb(248, 249, 250);
             statusStrip.Items.AddRange(new ToolStripItem[] { statusLabel, statusProgress, statusHostCount });
             statusStrip.Location = new Point(0, 720);
+            statusStrip.MinimumSize = new Size(0, 24);
             statusStrip.Name = "statusStrip";
-            statusStrip.Size = new Size(1400, 22);
+            statusStrip.Size = new Size(1400, 24);
             statusStrip.TabIndex = 2;
             // 
             // statusLabel

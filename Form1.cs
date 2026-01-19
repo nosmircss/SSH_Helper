@@ -92,6 +92,9 @@ namespace SSH_Helper
 
         public Form1()
         {
+            // Enable form-level double buffering to reduce flicker
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+
             InitializeComponent();
             Text = $"{ApplicationName} {ApplicationVersion}";
 
@@ -118,6 +121,7 @@ namespace SSH_Helper
             InitializeEventHandlers();
             InitializeToolbarSync();
             InitializePasswordMasking();
+            EnableDoubleBuffering();
             RestoreWindowState();
             UpdateHostCount();
             UpdateSortModeIndicator();
@@ -298,6 +302,23 @@ namespace SSH_Helper
             {
                 tsbPassword.TextBox.UseSystemPasswordChar = true;
             }
+        }
+
+        private void EnableDoubleBuffering()
+        {
+            // Enable double buffering on controls to reduce flicker during owner-draw
+            EnableControlDoubleBuffering(trvPresets);
+            EnableControlDoubleBuffering(trvFavorites);
+            EnableControlDoubleBuffering(lstOutput);
+            EnableControlDoubleBuffering(lstHosts);
+        }
+
+        private static void EnableControlDoubleBuffering(Control control)
+        {
+            // Use reflection to set the protected DoubleBuffered property
+            typeof(Control).GetProperty("DoubleBuffered",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?
+                .SetValue(control, true, null);
         }
 
         private void RestoreWindowState()
