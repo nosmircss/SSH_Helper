@@ -249,9 +249,10 @@ namespace SSH_Helper.Services
             var startInfo = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = arguments,
+                Arguments = "-WindowStyle Hidden " + arguments,
                 UseShellExecute = true,
-                WorkingDirectory = tempDir
+                WorkingDirectory = tempDir,
+                WindowStyle = ProcessWindowStyle.Hidden
             };
 
             Process.Start(startInfo);
