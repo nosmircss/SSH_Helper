@@ -20,6 +20,22 @@ namespace SSH_Helper
 
         [DllImport("dwmapi.dll")]
         public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        // Dark mode APIs for scrollbars (Windows 10 1903+)
+        [DllImport("uxtheme.dll", EntryPoint = "#135", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern int SetPreferredAppMode(int mode);
+
+        [DllImport("uxtheme.dll", EntryPoint = "#133", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern bool AllowDarkModeForWindow(IntPtr hWnd, bool allow);
+
+        [DllImport("uxtheme.dll", EntryPoint = "#136", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern void FlushMenuThemes();
+
+        // App mode constants
+        public const int AppModeDefault = 0;
+        public const int AppModeAllowDark = 1;
+        public const int AppModeForceDark = 2;
+        public const int AppModeForceLight = 3;
     }
 
     /// <summary>
@@ -92,6 +108,9 @@ namespace SSH_Helper
 
         public Form1()
         {
+            // Enable dark mode support for scrollbars (must be called before creating windows)
+            NativeMethods.SetPreferredAppMode(NativeMethods.AppModeAllowDark);
+
             // Enable form-level double buffering to reduce flicker
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
@@ -895,42 +914,62 @@ namespace SSH_Helper
             }
         }
 
+        // Track controls that have had scrollbar theme handlers attached
+        private readonly HashSet<Control> _scrollbarThemedControls = new();
+
         /// <summary>
         /// Applies dark scrollbars to a control using Windows 10/11 dark mode theme.
         /// </summary>
-        private static void ApplyDarkScrollbars(Control control)
+        private void ApplyDarkScrollbars(Control control)
         {
-            if (control.IsHandleCreated)
-            {
-                NativeMethods.SetWindowTheme(control.Handle, "DarkMode_Explorer", null);
-            }
-            else
-            {
-                control.HandleCreated += (s, e) =>
-                {
-                    if (s is Control c)
-                        NativeMethods.SetWindowTheme(c.Handle, "DarkMode_Explorer", null);
-                };
-            }
+            ApplyScrollbarTheme(control, "DarkMode_Explorer");
         }
 
         /// <summary>
         /// Resets scrollbars to default light theme.
         /// </summary>
-        private static void ApplyLightScrollbars(Control control)
+        private void ApplyLightScrollbars(Control control)
         {
+            ApplyScrollbarTheme(control, "Explorer");
+        }
+
+        /// <summary>
+        /// Applies scrollbar theme to a control, handling both immediate and deferred scenarios.
+        /// </summary>
+        private void ApplyScrollbarTheme(Control control, string theme)
+        {
+            bool isDark = theme == "DarkMode_Explorer";
+
             if (control.IsHandleCreated)
             {
-                NativeMethods.SetWindowTheme(control.Handle, "Explorer", null);
+                ApplyScrollbarThemeToHandle(control.Handle, isDark);
             }
-            else
+
+            // Only attach the HandleCreated handler once per control
+            if (!_scrollbarThemedControls.Contains(control))
             {
+                _scrollbarThemedControls.Add(control);
                 control.HandleCreated += (s, e) =>
                 {
                     if (s is Control c)
-                        NativeMethods.SetWindowTheme(c.Handle, "Explorer", null);
+                    {
+                        ApplyScrollbarThemeToHandle(c.Handle, _isDarkMode);
+                    }
                 };
             }
+        }
+
+        /// <summary>
+        /// Applies dark/light scrollbar theme to a window handle using Windows dark mode APIs.
+        /// </summary>
+        private static void ApplyScrollbarThemeToHandle(IntPtr handle, bool dark)
+        {
+            // Allow dark mode for this specific window
+            NativeMethods.AllowDarkModeForWindow(handle, dark);
+
+            // Set the visual theme
+            var theme = dark ? "DarkMode_Explorer" : "Explorer";
+            NativeMethods.SetWindowTheme(handle, theme, null);
         }
 
         /// <summary>
