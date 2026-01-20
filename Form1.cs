@@ -4072,6 +4072,10 @@ namespace SSH_Helper
                 var allSize = g.MeasureString(btnExecuteAll.Text, btnExecuteAll.Font);
                 btnExecuteAll.Width = (int)allSize.Width + 40;
                 btnExecuteAll.Left = btnExecuteSelected.Right + 8;
+
+                // Position Stop button with same spacing and ensure matching height
+                btnStopAll.Left = btnExecuteAll.Right + 8;
+                btnStopAll.Height = btnExecuteAll.Height;
             }
         }
 
@@ -4562,14 +4566,16 @@ namespace SSH_Helper
 
         private void StopExecution()
         {
+            // Immediate visual feedback - disable button and change text
+            btnStopAll.Enabled = false;
+            btnStopAll.Text = "Stopping...";
+            UpdateStatusBar("Stopping execution...");
+
+            // Request cancellation
             _sshService.Stop();
-            Invoke(() =>
-            {
-                Thread.Sleep(300);
-                btnStopAll.Visible = false;
-                txtOutput.AppendText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
-                UpdateStatusBar("Execution stopped by user");
-            });
+
+            // Append stop message to output
+            txtOutput.AppendText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
         }
 
         private IEnumerable<HostConnection> GetHostConnections(IEnumerable<DataGridViewRow> rows)
@@ -4615,7 +4621,13 @@ namespace SSH_Helper
             tsbSaveCsvAs.Enabled = !executing;
             tsbClearGrid.Enabled = !executing;
 
-            if (!executing)
+            if (executing)
+            {
+                // Reset stop button to initial state when starting execution
+                btnStopAll.Enabled = true;
+                btnStopAll.Text = "Stop";
+            }
+            else
             {
                 statusProgress.Visible = false;
             }
