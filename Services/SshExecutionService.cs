@@ -918,9 +918,7 @@ namespace SSH_Helper.Services
                     string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
                     string separator = new string('#', header.Length);
 
-                    if (outputBuilder.Length > 0)
-                        outputBuilder.Append("\r\n");
-                    outputBuilder.AppendLine(separator);
+                    outputBuilder.AppendLine("\r\n" + separator);
                     outputBuilder.AppendLine(header);
                     outputBuilder.AppendLine(separator);
                     outputBuilder.Append(prompt + " ");
@@ -1013,9 +1011,7 @@ namespace SSH_Helper.Services
                 string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
                 string separator = new string('#', header.Length);
 
-                if (outputBuilder.Length > 0)
-                    outputBuilder.Append("\r\n");
-                outputBuilder.AppendLine(separator);
+                outputBuilder.AppendLine("\r\n" + separator);
                 outputBuilder.AppendLine(header);
                 outputBuilder.AppendLine(separator);
                 outputBuilder.Append(prompt + " ");

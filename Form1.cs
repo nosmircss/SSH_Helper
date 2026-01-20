@@ -4519,16 +4519,22 @@ namespace SSH_Helper
             var hostResults = new List<HostHistoryEntry>();
             var combinedOutput = new StringBuilder();
 
-            foreach (var result in results)
+            for (int i = 0; i < results.Count; i++)
             {
+                var result = results[i];
+                var output = result.Output;
+                // Trim leading newlines only from first result
+                if (i == 0)
+                    output = output.TrimStart('\r', '\n');
+
                 hostResults.Add(new HostHistoryEntry
                 {
                     HostAddress = result.Host.ToString(),
-                    Output = result.Output,
+                    Output = output,
                     Success = result.Success,
                     Timestamp = result.Timestamp
                 });
-                combinedOutput.Append(result.Output);
+                combinedOutput.Append(output);
             }
 
             string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - 📁 {folderName}";
@@ -4635,13 +4641,18 @@ namespace SSH_Helper
 
         private void SshService_OutputReceived(object? sender, SshOutputEventArgs e)
         {
+            var output = e.Output;
+            // Trim leading newlines if textbox is empty (first banner)
+            if (txtOutput.TextLength == 0)
+                output = output.TrimStart('\r', '\n');
+
             if (InvokeRequired)
             {
-                Invoke(() => txtOutput.AppendText(e.Output));
+                Invoke(() => txtOutput.AppendText(output));
             }
             else
             {
-                txtOutput.AppendText(e.Output);
+                txtOutput.AppendText(output);
             }
         }
 
@@ -4687,9 +4698,13 @@ namespace SSH_Helper
         private void StoreExecutionHistory(List<ExecutionResult> results)
         {
             var combinedOutput = new StringBuilder();
-            foreach (var result in results)
+            for (int i = 0; i < results.Count; i++)
             {
-                combinedOutput.Append(result.Output);
+                var output = results[i].Output;
+                // Trim leading newlines only from first result
+                if (i == 0)
+                    output = output.TrimStart('\r', '\n');
+                combinedOutput.Append(output);
             }
 
             string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
