@@ -35,7 +35,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.4";
+        private const string ApplicationVersion = "0.50.5";
         private const string ApplicationName = "SSH Helper";
 
         #endregion
