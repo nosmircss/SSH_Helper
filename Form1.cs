@@ -3446,18 +3446,12 @@ namespace SSH_Helper
 
             dgv_variables.AllowUserToAddRows = true;
 
-            // Select Host_IP column for the pasted rows
+            // Select the new empty row so user can continue pasting
             dgv_variables.ClearSelection();
-            if (dgv_variables.Columns.Contains("Host_IP"))
+            int newRowIndex = dgv_variables.Rows.Count - 1; // The new empty row
+            if (newRowIndex >= 0 && dgv_variables.Rows[newRowIndex].IsNewRow)
             {
-                for (int i = 0; i < rows.Length; i++)
-                {
-                    int rowIndex = startRow + i;
-                    if (rowIndex >= 0 && rowIndex < dgv_variables.Rows.Count)
-                    {
-                        dgv_variables.Rows[rowIndex].Cells["Host_IP"].Selected = true;
-                    }
-                }
+                dgv_variables.CurrentCell = dgv_variables.Rows[newRowIndex].Cells[startCol];
             }
 
             _csvDirty = true;
