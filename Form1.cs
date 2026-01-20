@@ -102,6 +102,9 @@ namespace SSH_Helper
         // Track which TreeView triggered the context menu
         private TreeView? _contextMenuSourceTreeView;
 
+        // SSH startup debug mode - logs timing from button click through SSH connection
+        private bool _sshDebugMode;
+
         #endregion
 
         #region Constructor
@@ -425,6 +428,19 @@ namespace SSH_Helper
                 statusProgress.Maximum = total;
                 statusProgress.Value = Math.Min(progress, total);
             }
+        }
+
+        /// <summary>
+        /// Logs a timestamped debug message to the output window when SSH Debug mode is enabled.
+        /// </summary>
+        private void SshDebugLog(string phase, string message, System.Diagnostics.Stopwatch? stopwatch = null)
+        {
+            if (!_sshDebugMode) return;
+
+            var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+            var elapsed = stopwatch != null ? $" (+{stopwatch.ElapsedMilliseconds}ms)" : "";
+            var debugLine = $"[SSH DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";
+            txtOutput.AppendText(debugLine);
         }
 
         #region Theme
@@ -2354,6 +2370,9 @@ namespace SSH_Helper
 
         private void btnExecuteSelected_Click(object sender, EventArgs e)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            SshDebugLog("CLICK", "btnExecuteSelected_Click entered");
+
             // Check if a folder is selected - use tracked folder name as fallback
             // (TreeView selection can be unreliable when clicking buttons)
             string? folderName = null;
@@ -2361,6 +2380,7 @@ namespace SSH_Helper
             // Check both trvPresets and trvFavorites based on current tab
             if (presetsTabControl.SelectedTab == tabFavorites)
             {
+                SshDebugLog("CLICK", "Checking Favorites tab for folder selection", sw);
                 if (trvFavorites.SelectedNode?.Tag is PresetNodeTag favTag && favTag.IsFolder)
                 {
                     folderName = favTag.Name;
@@ -2372,6 +2392,7 @@ namespace SSH_Helper
             }
             else
             {
+                SshDebugLog("CLICK", "Checking Presets tab for folder selection", sw);
                 if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag && tag.IsFolder)
                 {
                     folderName = tag.Name;
@@ -2382,12 +2403,16 @@ namespace SSH_Helper
                 }
             }
 
+            SshDebugLog("CLICK", $"Folder selection check complete. Folder: {folderName ?? "(none)"}", sw);
+
             if (folderName != null)
             {
+                SshDebugLog("CLICK", $"Dispatching to ExecuteFolderPresetsOnSelectedHost", sw);
                 ExecuteFolderPresetsOnSelectedHost(folderName);
             }
             else
             {
+                SshDebugLog("CLICK", $"Dispatching to ExecuteOnSelectedHost", sw);
                 ExecuteOnSelectedHost();
             }
         }
@@ -2458,6 +2483,13 @@ namespace SSH_Helper
         {
             _sshService.DebugMode = debugModeToolStripMenuItem.Checked;
             UpdateStatusBar(debugModeToolStripMenuItem.Checked ? "Debug mode enabled" : "Debug mode disabled");
+        }
+
+        private void sshDebugModeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            _sshDebugMode = sshDebugModeToolStripMenuItem.Checked;
+            _sshService.SshDebugMode = _sshDebugMode;
+            UpdateStatusBar(_sshDebugMode ? "SSH Debug enabled - timing info will be logged" : "SSH Debug disabled");
         }
 
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
@@ -4330,40 +4362,61 @@ namespace SSH_Helper
 
         private async void ExecuteOnAllHosts()
         {
-            if (_sshService.IsRunning) return;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            SshDebugLog("EXEC", "ExecuteOnAllHosts entered");
 
+            if (_sshService.IsRunning)
+            {
+                SshDebugLog("EXEC", "Aborted - SSH service already running", sw);
+                return;
+            }
+
+            SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
             SetExecutionMode(true);
             txtOutput.Clear();
 
+            SshDebugLog("EXEC", "Building host connections from grid", sw);
             var hosts = GetHostConnections(dgv_variables.Rows.Cast<DataGridViewRow>()).ToList();
+            SshDebugLog("EXEC", $"Host connections built: {hosts.Count} host(s)", sw);
+
+            SshDebugLog("EXEC", "Loading configuration for timeouts", sw);
             int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
             int connectionTimeout = _configService.GetCurrent().ConnectionTimeout;
             var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
+            SshDebugLog("EXEC", $"Timeouts configured - command: {commandTimeout}s, connection: {connectionTimeout}s", sw);
 
             // Create a preset from the current command text (supports both simple commands and YAML scripts)
             var preset = new PresetInfo { Commands = txtCommand.Text };
+            SshDebugLog("EXEC", $"Preset created. IsScript: {preset.IsScript}", sw);
 
             UpdateStatusBar($"Executing on {hosts.Count} hosts...", true, 0, hosts.Count);
 
             try
             {
+                SshDebugLog("EXEC", "Calling _sshService.ExecutePresetAsync - SSH connection starting", sw);
                 var results = await _sshService.ExecutePresetAsync(hosts, preset, tsbUsername.Text, tsbPassword.Text, timeouts);
+                SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
                 StoreExecutionHistory(results);
                 UpdateStatusBar($"Completed execution on {results.Count} hosts");
             }
             catch (Exception ex)
             {
+                SshDebugLog("EXEC", $"Exception: {ex.GetType().Name}: {ex.Message}", sw);
                 MessageBox.Show($"An error occurred: {ex.Message}");
                 UpdateStatusBar("Execution failed");
             }
             finally
             {
+                SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
                 SetExecutionMode(false);
             }
         }
 
         private async void ExecuteOnSelectedHost()
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            SshDebugLog("EXEC", "ExecuteOnSelectedHost entered");
+
             if (dgv_variables.CurrentCell == null)
             {
                 txtOutput.Clear();
@@ -4373,6 +4426,7 @@ namespace SSH_Helper
 
             var row = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
             string host = GetCellValue(row, CsvManager.HostColumnName);
+            SshDebugLog("EXEC", $"Host from grid: {host}", sw);
 
             if (row.IsNewRow || string.IsNullOrWhiteSpace(host) || !InputValidator.IsValidIpAddress(host))
             {
@@ -4381,27 +4435,38 @@ namespace SSH_Helper
                 return;
             }
 
+            SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
             SetExecutionMode(true);
             txtOutput.Clear();
 
+            SshDebugLog("EXEC", "Building host connections", sw);
             var hosts = GetHostConnections(new[] { row }).ToList();
+            SshDebugLog("EXEC", $"Host connections built: {hosts.Count} host(s)", sw);
+
+            SshDebugLog("EXEC", "Loading configuration for timeouts", sw);
             int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
             int connectionTimeout = _configService.GetCurrent().ConnectionTimeout;
             var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
+            SshDebugLog("EXEC", $"Timeouts configured - command: {commandTimeout}s, connection: {connectionTimeout}s", sw);
 
             // Create a preset from the current command text (supports both simple commands and YAML scripts)
             var preset = new PresetInfo { Commands = txtCommand.Text };
+            var commandPreview = txtCommand.Text.Length > 50 ? txtCommand.Text.Substring(0, 50) + "..." : txtCommand.Text;
+            SshDebugLog("EXEC", $"Preset created. IsScript: {preset.IsScript}, Commands: {commandPreview.Replace("\r", "\\r").Replace("\n", "\\n")}", sw);
 
             UpdateStatusBar($"Executing on {host}...", true, 0, 1);
 
             try
             {
+                SshDebugLog("EXEC", "Calling _sshService.ExecutePresetAsync - SSH connection starting", sw);
                 var results = await _sshService.ExecutePresetAsync(hosts, preset, tsbUsername.Text, tsbPassword.Text, timeouts);
+                SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
                 StoreExecutionHistory(results);
                 UpdateStatusBar($"Completed execution on {host}");
             }
             finally
             {
+                SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
                 SetExecutionMode(false);
             }
         }
@@ -4662,6 +4727,9 @@ namespace SSH_Helper
 
         private void SetExecutionMode(bool executing)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            SshDebugLog("UI", $"SetExecutionMode({executing}) entered");
+
             Cursor = executing ? Cursors.WaitCursor : Cursors.Default;
             btnExecuteAll.Enabled = !executing;
             btnExecuteSelected.Enabled = !executing;
@@ -4682,6 +4750,8 @@ namespace SSH_Helper
             {
                 statusProgress.Visible = false;
             }
+
+            SshDebugLog("UI", $"SetExecutionMode({executing}) completed", sw);
         }
 
         private void SshService_OutputReceived(object? sender, SshOutputEventArgs e)
@@ -4742,18 +4812,12 @@ namespace SSH_Helper
 
         private void StoreExecutionHistory(List<ExecutionResult> results)
         {
-            var combinedOutput = new StringBuilder();
-            for (int i = 0; i < results.Count; i++)
-            {
-                var output = results[i].Output;
-                // Trim leading newlines only from first result
-                if (i == 0)
-                    output = output.TrimStart('\r', '\n');
-                combinedOutput.Append(output);
-            }
+            // Use txtOutput.Text as the source of truth - this includes all debug output
+            // that was written during execution, ensuring history matches what user saw
+            var output = txtOutput.Text;
 
             string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
-            var entry = new KeyValuePair<string, string>(key, combinedOutput.ToString());
+            var entry = new KeyValuePair<string, string>(key, output);
 
             Invoke(() =>
             {
@@ -5054,7 +5118,7 @@ namespace SSH_Helper
                     if (debugModeToolStripMenuItem.Checked)
                     {
                         var folderStates = string.Join(", ", _presetManager.Folders.Select(f => $"{f.Key}={f.Value.IsExpanded}"));
-                        MessageBox.Show($"Saving folder states: {folderStates}", "Debug - SaveConfiguration");
+                        //MessageBox.Show($"Saving folder states: {folderStates}", "Debug - SaveConfiguration");
                     }
 
                     // Save window state

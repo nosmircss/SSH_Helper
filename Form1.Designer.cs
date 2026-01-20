@@ -144,6 +144,7 @@ namespace SSH_Helper
             findToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparatorEdit1 = new ToolStripSeparator();
             debugModeToolStripMenuItem = new ToolStripMenuItem();
+            sshDebugModeToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             checkForUpdatesToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparatorHelp1 = new ToolStripSeparator();
@@ -1317,7 +1318,7 @@ namespace SSH_Helper
             // 
             // editToolStripMenuItem
             // 
-            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, toolStripSeparatorEdit1, debugModeToolStripMenuItem });
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, toolStripSeparatorEdit1, debugModeToolStripMenuItem, sshDebugModeToolStripMenuItem });
             editToolStripMenuItem.Name = "editToolStripMenuItem";
             editToolStripMenuItem.Size = new Size(39, 20);
             editToolStripMenuItem.Text = "&Edit";
@@ -1343,7 +1344,16 @@ namespace SSH_Helper
             debugModeToolStripMenuItem.Text = "&Debug Mode";
             debugModeToolStripMenuItem.ToolTipText = "When enabled, shows timestamps and diagnostic info to help troubleshoot prompt detection";
             debugModeToolStripMenuItem.CheckedChanged += debugModeToolStripMenuItem_CheckedChanged;
-            // 
+            //
+            // sshDebugModeToolStripMenuItem
+            //
+            sshDebugModeToolStripMenuItem.CheckOnClick = true;
+            sshDebugModeToolStripMenuItem.Name = "sshDebugModeToolStripMenuItem";
+            sshDebugModeToolStripMenuItem.Size = new Size(146, 22);
+            sshDebugModeToolStripMenuItem.Text = "&SSH Debug";
+            sshDebugModeToolStripMenuItem.ToolTipText = "When enabled, logs detailed timing info from button click through SSH connection to help diagnose startup delays";
+            sshDebugModeToolStripMenuItem.CheckedChanged += sshDebugModeToolStripMenuItem_CheckedChanged;
+            //
             // helpToolStripMenuItem
             // 
             helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { checkForUpdatesToolStripMenuItem, toolStripSeparatorHelp1, aboutToolStripMenuItem });
@@ -1594,6 +1604,7 @@ namespace SSH_Helper
         private ToolStripMenuItem findToolStripMenuItem;
         private ToolStripSeparator toolStripSeparatorEdit1;
         private ToolStripMenuItem debugModeToolStripMenuItem;
+        private ToolStripMenuItem sshDebugModeToolStripMenuItem;
         private ToolStripMenuItem helpToolStripMenuItem;
         private ToolStripMenuItem checkForUpdatesToolStripMenuItem;
         private ToolStripSeparator toolStripSeparatorHelp1;

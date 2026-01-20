@@ -74,6 +74,12 @@ namespace SSH_Helper.Services
         public bool DebugMode { get; set; }
 
         /// <summary>
+        /// When enabled, emits detailed startup timing info to help diagnose delays from button click to SSH connection.
+        /// Debug output is sent via the OutputReceived event with [SSH DEBUG] prefix.
+        /// </summary>
+        public bool SshDebugMode { get; set; }
+
+        /// <summary>
         /// Creates a new SSH execution service without connection pooling.
         /// </summary>
         public SshExecutionService()
@@ -173,22 +179,33 @@ namespace SSH_Helper.Services
             SshTimeoutOptions timeouts,
             bool showHeader = true)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var hostList = hosts.ToList();
+            var dummyHost = hostList.FirstOrDefault() ?? new HostConnection();
+            SshDebugLog(dummyHost, "SERVICE", $"ExecuteAsync entered. Hosts: {hostList.Count}, Commands: {commands.Length}", sw);
+
             var results = new List<ExecutionResult>();
             _cts = new CancellationTokenSource();
             _isRunning = true;
+            SshDebugLog(dummyHost, "SERVICE", "CancellationTokenSource created, _isRunning = true", sw);
 
             try
             {
-                foreach (var host in hosts)
+                foreach (var host in hostList)
                 {
                     if (_cts.Token.IsCancellationRequested)
                         break;
 
                     if (!host.IsValid())
+                    {
+                        SshDebugLog(host, "SERVICE", $"Skipping invalid host: {host.IpAddress}", sw);
                         continue;
+                    }
 
+                    SshDebugLog(host, "SERVICE", $"Starting Task.Run for ExecuteSingleHost on {host.IpAddress}:{host.Port}", sw);
                     var result = await Task.Run(() =>
                         ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, _cts.Token, showHeader));
+                    SshDebugLog(host, "SERVICE", $"ExecuteSingleHost completed for {host.IpAddress}", sw);
 
                     results.Add(result);
                 }
@@ -196,6 +213,7 @@ namespace SSH_Helper.Services
             finally
             {
                 _isRunning = false;
+                SshDebugLog(dummyHost, "SERVICE", "ExecuteAsync complete", sw);
             }
 
             return results;
@@ -532,6 +550,9 @@ namespace SSH_Helper.Services
             CancellationToken cancellationToken,
             bool showHeader = true)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            SshDebugLog(host, "HOST", $"ExecuteSingleHost entered for {host.IpAddress}:{host.Port}");
+
             var result = new ExecutionResult
             {
                 Host = host,
@@ -541,19 +562,25 @@ namespace SSH_Helper.Services
             var outputBuilder = new StringBuilder();
             string username = !string.IsNullOrWhiteSpace(host.Username) ? host.Username : defaultUsername;
             string password = !string.IsNullOrWhiteSpace(host.Password) ? host.Password : defaultPassword;
+            SshDebugLog(host, "HOST", $"Credentials resolved. Username: {username}, UsePooling: {UseConnectionPooling}", sw);
 
             try
             {
                 if (UseConnectionPooling && _connectionPool != null)
                 {
+                    SshDebugLog(host, "HOST", "Calling ExecuteWithPool", sw);
                     ExecuteWithPool(host, commands, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
+                    SshDebugLog(host, "HOST", "ExecuteWithPool returned", sw);
                 }
                 else
                 {
+                    SshDebugLog(host, "HOST", "Calling ExecuteWithoutPool", sw);
                     ExecuteWithoutPool(host, commands, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
+                    SshDebugLog(host, "HOST", "ExecuteWithoutPool returned", sw);
                 }
 
                 result.Success = true;
+                SshDebugLog(host, "HOST", "Execution successful", sw);
             }
             catch (Renci.SshNet.Common.SshAuthenticationException ex)
             {
@@ -953,8 +980,12 @@ namespace SSH_Helper.Services
             CancellationToken cancellationToken,
             bool showHeader = true)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            SshDebugLog(host, "SSH", $"ExecuteWithoutPool entered. Creating SshClient for {host.IpAddress}:{host.Port}");
+
             using var client = new SshClient(host.IpAddress, host.Port, username, password);
             client.ConnectionInfo.Timeout = timeouts.ConnectionTimeout;
+            SshDebugLog(host, "SSH", $"SshClient created. ConnectionTimeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
 
             client.ErrorOccurred += (s, e) =>
             {
@@ -964,12 +995,19 @@ namespace SSH_Helper.Services
                 }
             };
 
+            SshDebugLog(host, "SSH", "Calling client.Connect() - TCP handshake + SSH negotiation starting", sw);
             client.Connect();
+            SshDebugLog(host, "SSH", "client.Connect() completed - SSH session established", sw);
 
             OnProgressChanged(host, $"Connected to {host}", false, true);
 
+            SshDebugLog(host, "SSH", "Creating shell stream", sw);
             using var shellStream = client.CreateShellStream("xterm", 200, 48, 1200, 800, 16384);
+            SshDebugLog(host, "SSH", "Shell stream created", sw);
+
+            SshDebugLog(host, "SSH", "Creating SshShellSession", sw);
             using var session = new SshShellSession(shellStream, timeouts);
+            SshDebugLog(host, "SSH", "SshShellSession created", sw);
 
             // Configure debug mode BEFORE subscribing to events
             session.DebugMode = DebugMode;
@@ -1002,7 +1040,9 @@ namespace SSH_Helper.Services
             }
 
             // Initialize session (detect prompt)
+            SshDebugLog(host, "SSH", "Calling session.InitializeAsync - waiting for shell prompt", sw);
             var banner = session.InitializeAsync(cancellationToken).GetAwaiter().GetResult();
+            SshDebugLog(host, "SSH", $"session.InitializeAsync completed. Prompt detected: {session.CurrentPrompt}", sw);
 
             // Build header (only if showHeader is true)
             if (showHeader)
@@ -1022,10 +1062,14 @@ namespace SSH_Helper.Services
 
             // Execute commands using the session
             // Output is captured via OutputReceived event above, no need to append return value
+            SshDebugLog(host, "SSH", $"Calling session.ExecuteBatchAsync with {commands.Length} command(s)", sw);
             session.ExecuteBatchAsync(commands, host.Variables, cancellationToken)
                 .GetAwaiter().GetResult();
+            SshDebugLog(host, "SSH", "session.ExecuteBatchAsync completed", sw);
 
+            SshDebugLog(host, "SSH", "Calling client.Disconnect()", sw);
             client.Disconnect();
+            SshDebugLog(host, "SSH", "client.Disconnect() completed", sw);
         }
 
         private string FormatError(string errorType, HostConnection host, Exception ex)
@@ -1074,6 +1118,18 @@ namespace SSH_Helper.Services
                 ColumnName = columnName,
                 Value = value
             });
+        }
+
+        /// <summary>
+        /// Emits SSH debug timing information when SshDebugMode is enabled.
+        /// </summary>
+        private void SshDebugLog(HostConnection host, string phase, string message, System.Diagnostics.Stopwatch? sw = null)
+        {
+            if (!SshDebugMode) return;
+            var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+            var elapsed = sw != null ? $" (+{sw.ElapsedMilliseconds}ms)" : "";
+            var output = $"[SSH DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";
+            OnOutputReceived(host, output);
         }
 
         public void Dispose()
