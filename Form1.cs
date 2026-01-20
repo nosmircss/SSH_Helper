@@ -35,7 +35,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.3";
+        private const string ApplicationVersion = "0.50.4";
         private const string ApplicationName = "SSH Helper";
 
         #endregion
@@ -1169,6 +1169,15 @@ namespace SSH_Helper
                     dgv_variables.CurrentCell = dgv_variables[hit.ColumnIndex, hit.RowIndex];
                 }
 
+                // Hide column operations when clicking on row header
+                bool isRowHeader = hit.Type == DataGridViewHitTestType.RowHeader;
+                deleteColumnToolStripMenuItem.Visible = !isRowHeader;
+                renameColumnToolStripMenuItem.Visible = !isRowHeader;
+
+                // Hide row operations when clicking on column header
+                bool isColumnHeader = hit.Type == DataGridViewHitTestType.ColumnHeader;
+                deleteRowToolStripMenuItem.Visible = !isColumnHeader;
+
                 // Enable/disable delete/rename based on Host_IP protection
                 bool isProtected = IsHostIpColumn(_rightClickedColumnIndex);
                 deleteColumnToolStripMenuItem.Enabled = !isProtected;
@@ -1180,8 +1189,11 @@ namespace SSH_Helper
             {
                 _rightClickedColumnIndex = -1;
                 _rightClickedRowIndex = -1;
+                deleteColumnToolStripMenuItem.Visible = true;
                 deleteColumnToolStripMenuItem.Enabled = true;
+                renameColumnToolStripMenuItem.Visible = true;
                 renameColumnToolStripMenuItem.Enabled = true;
+                deleteRowToolStripMenuItem.Visible = true;
             }
         }
 
