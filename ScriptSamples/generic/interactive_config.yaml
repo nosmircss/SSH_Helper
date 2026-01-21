@@ -1,0 +1,64 @@
+---
+# Demonstrates: input (with validation), if/else, set, print, exit statuses
+# Scenario: Interactively configure a service with validated user input
+
+name: Interactive Service Config
+description: Prompts user for settings and applies configuration
+
+steps:
+  - print: "=== Interactive Service Configuration ==="
+  - print: "Target: ${Host_IP}"
+
+  # Get service name with validation
+  - input:
+      prompt: "Enter service name to configure:"
+      into: service_name
+      validate: "^[a-zA-Z][a-zA-Z0-9_-]+$"
+      validation_error: "Service name must start with letter, use only letters/numbers/underscore/dash"
+
+  # Get port number with validation
+  - input:
+      prompt: "Enter port number (1024-65535):"
+      into: port_number
+      default: "8080"
+      validate: "^[0-9]+$"
+      validation_error: "Port must be a number"
+
+  # Validate port range in script
+  - if: port_number < 1024 or port_number > 65535
+    then:
+      - exit: failure "Port ${port_number} is outside valid range (1024-65535)"
+
+  # Get action choice
+  - input:
+      prompt: "Action (start/stop/restart):"
+      into: action
+      default: "restart"
+      validate: "^(start|stop|restart)$"
+      validation_error: "Action must be: start, stop, or restart"
+
+  # Confirmation
+  - input:
+      prompt: "Apply ${action} to ${service_name} on port ${port_number}? (yes/no):"
+      into: confirm
+      validate: "^(yes|no)$"
+      validation_error: "Please type 'yes' or 'no'"
+
+  - if: confirm != "yes"
+    then:
+      - exit: "Configuration cancelled by user"
+
+  # Apply configuration
+  - print: "Applying configuration..."
+
+  - send: systemctl ${action} ${service_name}
+    capture: result
+    on_error: continue
+
+  - if: result contains "error" or result contains "failed"
+    then:
+      - exit: failure "Failed to ${action} ${service_name}: ${result}"
+
+  - print: "Service ${service_name} ${action} completed successfully"
+
+  - exit: success "Configuration applied"

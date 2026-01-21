@@ -1,0 +1,74 @@
+---
+# Demonstrates: writefile with csv format, headers, extract, string building
+# Scenario: Collect system metrics and export to CSV for spreadsheet analysis
+
+name: Metrics CSV Export
+description: Gathers system metrics and exports to CSV format
+
+vars:
+  output_file: "C:\\output\\system_metrics.csv"
+  write_header: "true"
+
+steps:
+  - print: "Collecting metrics from ${Host_IP}..."
+
+  # Get hostname
+  - send: hostname
+    capture: hostname_out
+  - extract:
+      from: hostname_out
+      pattern: '(\S+)'
+      into: device_name
+
+  # Get OS info
+  - send: cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2
+    capture: os_out
+    on_error: continue
+  - set: os_name = trim(os_out)
+
+  # Get CPU count
+  - send: nproc
+    capture: cpu_count
+
+  # Get memory total (GB)
+  - send: free -g | grep Mem | awk '{print $2}'
+    capture: mem_total
+
+  # Get disk usage percentage
+  - send: df -h / | tail -1 | awk '{print $5}' | tr -d '%'
+    capture: disk_pct
+
+  # Get load average (1 min)
+  - send: cat /proc/loadavg | awk '{print $1}'
+    capture: load_avg
+
+  # Write CSV header on first run (controlled by variable)
+  - if: write_header == "true"
+    then:
+      - writefile:
+          path: "${output_file}"
+          format: csv
+          content: ""
+          headers: [Timestamp, Host_IP, Hostname, OS, CPUs, Memory_GB, Disk_Pct, Load_1min]
+          mode: overwrite
+      - print: "CSV header written"
+
+  # Build CSV row
+  - set: csv_row = "${_timestamp},${Host_IP},${device_name},${os_name},${cpu_count},${mem_total},${disk_pct},${load_avg}"
+
+  # Append data row
+  - writefile:
+      path: "${output_file}"
+      format: csv
+      content: "${csv_row}"
+      mode: append
+
+  - print: "Metrics exported:"
+  - print: "  Host: ${device_name}"
+  - print: "  OS: ${os_name}"
+  - print: "  CPUs: ${cpu_count}"
+  - print: "  Memory: ${mem_total} GB"
+  - print: "  Disk: ${disk_pct}%"
+  - print: "  Load: ${load_avg}"
+
+  - exit: success "Metrics exported to CSV"

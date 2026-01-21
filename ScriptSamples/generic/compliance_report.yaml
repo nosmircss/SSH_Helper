@@ -1,0 +1,146 @@
+---
+# Demonstrates: json.merge, json.set, json.keys, multiple extracts, complex conditionals
+# Scenario: Run compliance checks and generate detailed JSON report
+
+name: Security Compliance Scan
+description: Performs security compliance checks and generates JSON report
+
+vars:
+  report_dir: "C:\\compliance\\reports"
+
+steps:
+  - print: "=== Security Compliance Scan: ${Host_IP} ==="
+
+  # Initialize base report structure
+  - set: defaults = json("scan_version", "1.0", "framework", "CIS-Benchmark")
+  - set: host_info = json("ip", ${Host_IP}, "port", ${port})
+
+  # Merge to create initial report
+  - set: report = json.merge(defaults, host_info)
+
+  # Add metadata
+  - set: report = json.set(report, "metadata.timestamp", ${_timestamp})
+  - set: report = json.set(report, "metadata.scanner", "SSH Helper")
+
+  # Initialize check counters
+  - set: passed = 0
+  - set: failed = 0
+  - set: skipped = 0
+
+  # ----- CHECK 1: SSH Root Login -----
+  - send: grep -E "^PermitRootLogin" /etc/ssh/sshd_config 2>/dev/null || echo "not found"
+    capture: ssh_root
+    on_error: continue
+
+  - if: ssh_root contains "no"
+    then:
+      - set: check1_status = "PASS"
+      - set: passed = passed + 1
+    else:
+      - if: ssh_root contains "not found"
+        then:
+          - set: check1_status = "SKIP"
+          - set: skipped = skipped + 1
+        else:
+          - set: check1_status = "FAIL"
+          - set: failed = failed + 1
+
+  - set: report = json.set(report, "checks.ssh_root_login.status", ${check1_status})
+  - set: report = json.set(report, "checks.ssh_root_login.finding", ${ssh_root})
+
+  # ----- CHECK 2: Password Authentication -----
+  - send: grep -E "^PasswordAuthentication" /etc/ssh/sshd_config 2>/dev/null || echo "yes"
+    capture: ssh_passwd
+    on_error: continue
+
+  - if: ssh_passwd contains "no"
+    then:
+      - set: check2_status = "PASS"
+      - set: passed = passed + 1
+    else:
+      - set: check2_status = "FAIL"
+      - set: failed = failed + 1
+
+  - set: report = json.set(report, "checks.password_auth.status", ${check2_status})
+
+  # ----- CHECK 3: Firewall Status -----
+  - send: systemctl is-active firewalld 2>/dev/null || systemctl is-active ufw 2>/dev/null || echo "inactive"
+    capture: fw_status
+    on_error: continue
+
+  - if: fw_status contains "active"
+    then:
+      - set: check3_status = "PASS"
+      - set: passed = passed + 1
+    else:
+      - set: check3_status = "FAIL"
+      - set: failed = failed + 1
+
+  - set: report = json.set(report, "checks.firewall_active.status", ${check3_status})
+
+  # ----- CHECK 4: Unattended Upgrades -----
+  - send: dpkg -l unattended-upgrades 2>/dev/null | grep -q "^ii" && echo "installed" || echo "not installed"
+    capture: auto_update
+    on_error: continue
+
+  - if: auto_update contains "installed"
+    then:
+      - set: check4_status = "PASS"
+      - set: passed = passed + 1
+    else:
+      - set: check4_status = "INFO"
+      - set: skipped = skipped + 1
+
+  - set: report = json.set(report, "checks.auto_updates.status", ${check4_status})
+
+  # ----- Build Summary -----
+  - set: total = passed + failed + skipped
+  - set: report = json.set(report, "summary.total_checks", ${total})
+  - set: report = json.set(report, "summary.passed", ${passed})
+  - set: report = json.set(report, "summary.failed", ${failed})
+  - set: report = json.set(report, "summary.skipped", ${skipped})
+
+  # Determine overall compliance
+  - if: failed == 0
+    then:
+      - set: overall = "COMPLIANT"
+    else:
+      - if: failed <= 1
+        then:
+          - set: overall = "PARTIAL"
+        else:
+          - set: overall = "NON-COMPLIANT"
+
+  - set: report = json.set(report, "summary.overall", ${overall})
+
+  # Get check names for display
+  - set: check_names = json.keys(report, "checks")
+
+  - print: " "
+  - print: "Results:"
+  - foreach: check in check_names
+    do:
+      - set: status = json.get(report, "checks.${check}.status")
+      - print: "  ${check}: ${status}"
+
+  - print: " "
+  - print: "Summary: ${passed} passed, ${failed} failed, ${skipped} skipped"
+  - print: "Overall: ${overall}"
+
+  # Write report file
+  - writefile:
+      path: "${report_dir}\\${Host_IP}_compliance.json"
+      format: json
+      content: "${report}"
+      pretty: true
+
+  - log:
+      message: "Compliance report saved"
+      level: success
+
+  # Update grid column
+  - updatecolumn:
+      column: compliance
+      value: ${overall}
+
+  - exit: success "Compliance scan complete: ${overall}"

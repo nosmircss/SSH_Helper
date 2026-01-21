@@ -1,0 +1,82 @@
+---
+# Demonstrates: writefile with jsonl format, json(), log levels, timestamps
+# Scenario: Create an audit trail of script actions in JSON Lines format
+
+name: Audit Event Logger
+description: Logs script events to a JSONL file for audit/SIEM integration
+
+vars:
+  log_file: "C:\\logs\\ssh_audit.jsonl"
+
+steps:
+  # Log connection event
+  - set: event.type = "connection"
+  - set: event.host = ${Host_IP}
+  - set: event.port = ${port}
+  - set: event.timestamp = ${_timestamp}
+  - set: event.status = "started"
+
+  - writefile:
+      path: "${log_file}"
+      format: jsonl
+      content: "${event}"
+      mode: append
+
+  - log: "Audit: Connected to ${Host_IP}"
+
+  # Perform some action
+  - send: whoami
+    capture: current_user
+
+  - extract:
+      from: current_user
+      pattern: '(\S+)'
+      into: username
+
+  # Log command execution event
+  - set: cmd_event = json("type", "command", "host", ${Host_IP}, "command", "whoami", "result", ${username}, "timestamp", ${_timestamp})
+
+  - writefile:
+      path: "${log_file}"
+      format: jsonl
+      content: "${cmd_event}"
+      mode: append
+
+  # Check sudo access
+  - send: sudo -n true 2>&1
+    capture: sudo_check
+    on_error: continue
+
+  - if: sudo_check is empty
+    then:
+      - set: has_sudo = "true"
+    else:
+      - set: has_sudo = "false"
+
+  # Log privilege check
+  - set: priv_event = json("type", "privilege_check", "host", ${Host_IP}, "user", ${username}, "sudo_access", ${has_sudo}, "timestamp", ${_timestamp})
+
+  - writefile:
+      path: "${log_file}"
+      format: jsonl
+      content: "${priv_event}"
+      mode: append
+
+  - log:
+      message: "User ${username} has sudo: ${has_sudo}"
+      level: info
+
+  # Log completion event
+  - set: complete_event = json("type", "connection", "host", ${Host_IP}, "status", "completed", "timestamp", ${_timestamp})
+
+  - writefile:
+      path: "${log_file}"
+      format: jsonl
+      content: "${complete_event}"
+      mode: append
+
+  - log:
+      message: "Audit log written to ${log_file}"
+      level: success
+
+  - exit: success "Audit complete"

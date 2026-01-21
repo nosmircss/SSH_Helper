@@ -1,0 +1,61 @@
+---
+# Demonstrates: webhook, json(), log with levels, if/else, variables
+# Scenario: Check disk usage and send alert to Slack/Teams webhook if threshold exceeded
+
+name: Disk Alert Webhook
+description: Monitors disk usage and sends webhook alert if threshold exceeded
+
+vars:
+  threshold: 80
+  webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+steps:
+  - log: "Checking disk usage on ${Host_IP}..."
+
+  # Get disk usage percentage
+  - send: df -h / | tail -1 | awk '{print $5}' | tr -d '%'
+    capture: disk_output
+
+  - extract:
+      from: disk_output
+      pattern: '(\d+)'
+      into: disk_percent
+
+  - print: "Disk usage: ${disk_percent}%"
+
+  # Check if over threshold
+  - if: disk_percent >= threshold
+    then:
+      - log:
+          message: "ALERT: Disk usage ${disk_percent}% exceeds threshold ${threshold}%"
+          level: warning
+
+      # Build alert payload
+      - set: alert = json("host", ${Host_IP}, "metric", "disk_usage", "value", ${disk_percent}, "threshold", ${threshold}, "timestamp", ${_timestamp})
+
+      # Send webhook notification
+      - webhook:
+          url: "${webhook_url}"
+          method: POST
+          body: '{"text": "Disk Alert: ${Host_IP} at ${disk_percent}% usage", "attachments": [{"color": "danger", "fields": [{"title": "Host", "value": "${Host_IP}"}, {"title": "Usage", "value": "${disk_percent}%"}]}]}'
+          headers:
+            Content-Type: "application/json"
+          into: webhook_result
+          on_error: continue
+
+      - if: webhook_result_status == 200
+        then:
+          - log:
+              message: "Alert sent successfully"
+              level: success
+        else:
+          - log:
+              message: "Failed to send alert (status: ${webhook_result_status})"
+              level: error
+
+    else:
+      - log:
+          message: "Disk usage ${disk_percent}% is within acceptable range"
+          level: success
+
+  - exit: success "Disk check complete"

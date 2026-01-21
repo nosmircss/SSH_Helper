@@ -1,0 +1,68 @@
+---
+# Demonstrates: readfile, foreach, writefile (append), set arithmetic, if/when filter
+# Scenario: Read IP list from file, ping each, log results to output file
+
+name: Bulk IP Ping Test
+description: Reads IPs from file and tests connectivity, logging results
+
+vars:
+  input_file: "C:\\Users\\me\\ip_list.txt"
+  output_file: "C:\\Users\\me\\ping_results.txt"
+
+steps:
+  - print: "=== Bulk IP Ping Test ==="
+
+  # Read list of IPs from file
+  - readfile:
+      path: "${input_file}"
+      into: ip_list
+
+  - if: ip_list is empty
+    then:
+      - exit: failure "No IPs found in ${input_file}"
+
+  - print: "Loaded ${ip_list.length} IPs to test"
+
+  # Initialize counters
+  - set: success_count = 0
+  - set: fail_count = 0
+
+  # Write header to output file
+  - writefile:
+      path: "${output_file}"
+      content: "Ping Results - ${_timestamp}\n==============================\n"
+      mode: overwrite
+
+  # Process each IP
+  - foreach: target_ip in ip_list
+    do:
+      - print: "Testing ${target_ip}..."
+
+      - send: ping -c 1 -W 2 ${target_ip} 2>&1
+        capture: ping_result
+        on_error: continue
+
+      - if: ping_result contains "1 received" or ping_result contains "1 packets received"
+        then:
+          - set: status = "REACHABLE"
+          - set: success_count = success_count + 1
+        else:
+          - set: status = "UNREACHABLE"
+          - set: fail_count = fail_count + 1
+
+      # Append result to file
+      - writefile:
+          path: "${output_file}"
+          content: "${target_ip} - ${status}"
+          mode: append
+
+  # Write summary
+  - writefile:
+      path: "${output_file}"
+      content: "\n==============================\nTotal: ${ip_list.length} | Success: ${success_count} | Failed: ${fail_count}"
+      mode: append
+
+  - print: "Results saved to ${output_file}"
+  - print: "Success: ${success_count} | Failed: ${fail_count}"
+
+  - exit: success "Ping test complete"

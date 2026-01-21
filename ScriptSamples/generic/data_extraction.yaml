@@ -1,0 +1,101 @@
+---
+# Demonstrates: extract (single/multiple/all), updatecolumn, foreach with filter, length
+# Scenario: Extract system data and store results back to the host grid
+
+name: System Data Extraction
+description: Extracts system metrics and stores them in host table columns
+
+steps:
+  - print: "=== Extracting System Data from ${Host_IP} ==="
+
+  # Get and extract hostname
+  - send: hostname
+    capture: hostname_out
+
+  - extract:
+      from: hostname_out
+      pattern: '(\S+)'
+      into: device_hostname
+
+  # Update hostname column in grid
+  - updatecolumn:
+      column: hostname
+      value: ${device_hostname}
+
+  # Get uptime and extract days
+  - send: uptime
+    capture: uptime_out
+
+  - extract:
+      from: uptime_out
+      pattern: 'up\s+(\d+)\s+day'
+      into: uptime_days
+
+  - if: uptime_days is not empty
+    then:
+      - updatecolumn:
+          column: uptime_days
+          value: ${uptime_days}
+    else:
+      - updatecolumn:
+          column: uptime_days
+          value: "<1"
+
+  # Get all network interfaces (extract all matches)
+  - send: ip -o link show | awk '{print $2}' | tr -d ':'
+    capture: iface_out
+
+  - extract:
+      from: iface_out
+      pattern: '(\S+)'
+      into: interfaces
+      match: all
+
+  - print: "Found ${interfaces.length} interfaces"
+
+  # Count active interfaces
+  - set: active_count = 0
+
+  - foreach: iface in interfaces
+    when: iface != "lo"
+    do:
+      - send: ip link show ${iface} | grep -q "state UP" && echo "UP" || echo "DOWN"
+        capture: state
+        on_error: continue
+
+      - if: state contains "UP"
+        then:
+          - set: active_count = active_count + 1
+
+  - updatecolumn:
+      column: interface_count
+      value: ${interfaces.length}
+
+  - updatecolumn:
+      column: interfaces_up
+      value: ${active_count}
+
+  # Get memory usage
+  - send: free | grep Mem | awk '{printf "%.0f", $3/$2 * 100}'
+    capture: mem_percent
+
+  - extract:
+      from: mem_percent
+      pattern: '(\d+)'
+      into: memory_usage
+
+  - updatecolumn:
+      column: memory_pct
+      value: ${memory_usage}
+
+  # Record scan timestamp
+  - updatecolumn:
+      column: last_scanned
+      value: ${_timestamp}
+
+  - print: "Data extraction complete for ${device_hostname}"
+  - print: "  Uptime: ${uptime_days} days"
+  - print: "  Interfaces: ${active_count}/${interfaces.length} up"
+  - print: "  Memory: ${memory_usage}%"
+
+  - exit: success "Extraction complete"

@@ -1,0 +1,58 @@
+---
+# Demonstrates: json(), json.set, json.merge, writefile (json format), dot notation
+# Scenario: Collect device info and generate a structured JSON report
+
+name: JSON Inventory Report
+description: Collects device data and writes a JSON inventory file
+
+steps:
+  # Gather basic system info
+  - send: hostname
+    capture: hostname_output
+
+  - extract:
+      from: hostname_output
+      pattern: '(\S+)'
+      into: device_name
+
+  - send: uname -r
+    capture: kernel_output
+
+  - extract:
+      from: kernel_output
+      pattern: '(\S+)'
+      into: kernel_version
+
+  # Build nested JSON using dot notation
+  - set: report.device.name = ${device_name}
+  - set: report.device.ip = ${Host_IP}
+  - set: report.device.port = ${port}
+  - set: report.system.kernel = ${kernel_version}
+  - set: report.metadata.collected_at = ${_timestamp}
+  - set: report.metadata.collected_by = "SSH Helper"
+
+  # Get interface count
+  - send: ip link show | grep -c "^[0-9]"
+    capture: iface_count
+    on_error: continue
+
+  - extract:
+      from: iface_count
+      pattern: '(\d+)'
+      into: interface_count
+
+  # Add interface count to report
+  - set: report.network.interface_count = ${interface_count}
+
+  # Write individual device JSON file
+  - writefile:
+      path: "C:\\output\\inventory\\${Host_IP}.json"
+      format: json
+      content: "${report}"
+      pretty: true
+
+  - log:
+      message: "Inventory saved for ${device_name} (${Host_IP})"
+      level: success
+
+  - exit: success "JSON inventory report generated"

@@ -1,0 +1,63 @@
+---
+# Demonstrates: while loop, log levels, wait, _iteration, set arithmetic, retry pattern
+# Scenario: Health check with retry logic and escalating log messages
+
+name: Service Health Check with Retry
+description: Checks service health with configurable retries and wait intervals
+
+vars:
+  service_url: "http://localhost:8080/health"
+  max_retries: 5
+  wait_seconds: 10
+
+steps:
+  - log: "Starting health check for ${Host_IP}"
+
+  - set: retry = 0
+  - set: healthy = ""
+
+  # Retry loop
+  - while: retry < max_retries and healthy is empty
+    do:
+      - if: retry > 0
+        then:
+          - log:
+              message: "Retry attempt ${retry} of ${max_retries}..."
+              level: warning
+          - wait: ${wait_seconds}
+
+      # Check service health
+      - send: curl -s -o /dev/null -w "%{http_code}" ${service_url}
+        capture: http_code
+        on_error: continue
+
+      - log:
+          message: "Health check returned: ${http_code}"
+          level: debug
+
+      - if: http_code == "200"
+        then:
+          - set: healthy = "yes"
+          - log:
+              message: "Service is healthy!"
+              level: success
+        else:
+          - log:
+              message: "Service returned ${http_code}, expected 200"
+              level: warning
+          - set: retry = retry + 1
+
+  # Final status
+  - if: healthy is empty
+    then:
+      - log:
+          message: "CRITICAL: Service failed health check after ${max_retries} attempts"
+          level: error
+
+      # Could send alert here
+      - set: alert_msg = "Health check failed for ${Host_IP} after ${max_retries} retries"
+
+      - exit: failure "${alert_msg}"
+
+  - print: "Health check passed on attempt ${retry}"
+  - exit: success "Service healthy"

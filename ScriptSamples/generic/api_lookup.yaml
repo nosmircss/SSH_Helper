@@ -1,0 +1,84 @@
+---
+# Demonstrates: webhook GET, json.get, json.exists, json.len, json.items, foreach
+# Scenario: Query an API for IP reputation/threat intel and process the response
+
+name: API Threat Lookup
+description: Queries external API for threat intelligence on discovered IPs
+
+vars:
+  api_url: "https://api.threatintel.example.com/v1/lookup"
+  api_key: "YOUR_API_KEY_HERE"
+
+steps:
+  - print: "=== Threat Intelligence Lookup ==="
+
+  # Get list of connected IPs from the system
+  - send: ss -tn state established | awk 'NR>1 {print $5}' | cut -d: -f1 | sort -u | head -5
+    capture: ip_output
+
+  - extract:
+      from: ip_output
+      pattern: '(\d+\.\d+\.\d+\.\d+)'
+      into: external_ips
+      match: all
+
+  - if: external_ips.length == 0
+    then:
+      - print: "No external connections found"
+      - exit: success "No IPs to check"
+
+  - print: "Found ${external_ips.length} unique IPs to check"
+
+  # Process each IP
+  - foreach: check_ip in external_ips
+    do:
+      - print: "Checking ${check_ip}..."
+
+      # Query the API
+      - webhook:
+          url: "${api_url}?ip=${check_ip}"
+          method: GET
+          headers:
+            Authorization: "Bearer ${api_key}"
+            Accept: "application/json"
+          into: api_response
+          timeout: 15
+          on_error: continue
+
+      # Check for valid response
+      - if: api_response_status != 200
+        then:
+          - log:
+              message: "API returned ${api_response_status} for ${check_ip}"
+              level: warning
+        else:
+          # Check if threat data exists
+          - if: json.exists(api_response, "data.threat_score")
+            then:
+              - set: score = json.get(api_response, "data.threat_score", 0)
+              - set: category = json.get(api_response, "data.category", "unknown")
+
+              - if: score > 70
+                then:
+                  - log:
+                      message: "HIGH THREAT: ${check_ip} - Score: ${score}, Category: ${category}"
+                      level: error
+                else:
+                  - if: score > 30
+                    then:
+                      - log:
+                          message: "MODERATE: ${check_ip} - Score: ${score}"
+                          level: warning
+                    else:
+                      - print: "${check_ip}: Clean (score: ${score})"
+
+              # Check for any tags
+              - set: tag_count = json.len(api_response, "data.tags")
+              - if: tag_count > 0
+                then:
+                  - foreach: tag in json.items(api_response, "data.tags")
+                    do:
+                      - print: "  Tag: ${tag}"
+
+  - print: "=== Lookup Complete ==="
+  - exit: success "Threat lookup finished"
