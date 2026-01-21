@@ -171,11 +171,22 @@ namespace SSH_Helper.Services
         /// </summary>
         private void InitializeScriptEvents()
         {
+            // Use Regex objects with proper options (especially IgnoreCase for banner detection)
+            // This matches the RebexPOC approach that works correctly
             _shellPromptEvent = ScriptEvent.FromRegex(Patterns.ShellPromptPattern);
-            _pagerEvent = ScriptEvent.FromRegex(string.Join("|", Patterns.PagerPatterns));
-            _promptOrPagerEvent = ScriptEvent.FromRegex(
-                $@"(?:{string.Join("|", Patterns.PagerPatterns)}|{Patterns.ShellPromptPattern})");
-            _bannerEvent = ScriptEvent.FromRegex(Patterns.BannerAcceptPattern);
+
+            // Create pager regex with IgnoreCase
+            var pagerPattern = string.Join("|", Patterns.PagerPatterns);
+            var pagerRegex = new Regex(pagerPattern, RegexOptions.IgnoreCase);
+            _pagerEvent = ScriptEvent.FromRegex(pagerRegex);
+
+            // Combined prompt-or-pager pattern with IgnoreCase
+            var combinedPattern = $@"(?:{pagerPattern}|{Patterns.ShellPromptPattern})";
+            var combinedRegex = new Regex(combinedPattern, RegexOptions.IgnoreCase);
+            _promptOrPagerEvent = ScriptEvent.FromRegex(combinedRegex);
+
+            // Use the existing Regex object which already has IgnoreCase
+            _bannerEvent = ScriptEvent.FromRegex(Patterns.BannerAcceptPrompt);
         }
 
         /// <summary>
@@ -200,15 +211,9 @@ namespace SSH_Helper.Services
             // Set initial timeout for prompt detection
             _scripting.Timeout = (int)_timeouts.InitialPromptTimeout.TotalMilliseconds;
 
-            // Send empty line to trigger prompt
-            try
-            {
-                _scripting.Send("\r");
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException("SSH shell was closed unexpectedly while initializing. The connection may have been terminated by the server.", ex);
-            }
+            // NOTE: Do NOT send \r before reading initial output.
+            // Devices like FortiGate send their banner/prompt automatically after shell starts.
+            // Sending \r prematurely can cause the connection to be closed.
 
             while (attemptCount < maxBannerAttempts)
             {
@@ -388,30 +393,38 @@ namespace SSH_Helper.Services
 
                     if (!string.IsNullOrEmpty(chunk))
                     {
-                        // Process the chunk
-                        chunk = TerminalOutputProcessor.Sanitize(chunk);
-                        chunk = TerminalOutputProcessor.StripPagerArtifacts(chunk, out bool sawPager);
+                        // Debug: show raw characters at start of chunk
+                        EmitDebug($"RAW chunk start (first 80 chars): {EscapeForDebug(chunk, 80)}");
 
-                        output.Append(chunk);
-                        OnOutputReceived(chunk);
-
-                        EmitDebug($"Received {chunk.Length} chars. Buffer now {output.Length} chars");
-
-                        // Check if we hit a pager
+                        // Check for pager BEFORE stripping artifacts (must detect before removal)
                         bool hitPager = false;
                         foreach (var pattern in Patterns.PagerPatterns)
                         {
                             if (Regex.IsMatch(chunk, pattern, RegexOptions.IgnoreCase))
                             {
                                 hitPager = true;
-                                pageCount++;
-                                EmitDebug($"Pager detected ({pageCount}), sending space");
-                                _scripting.Send(" ");
                                 break;
                             }
                         }
 
-                        if (!hitPager)
+                        // Now process the chunk for clean output
+                        chunk = TerminalOutputProcessor.Sanitize(chunk);
+                        chunk = TerminalOutputProcessor.StripPagerArtifacts(chunk, out _);
+                        chunk = TerminalOutputProcessor.StripPagerDismissalArtifacts(chunk);
+                        EmitDebug($"AFTER processing (first 80 chars): {EscapeForDebug(chunk, 80)}");
+
+                        output.Append(chunk);
+                        OnOutputReceived(chunk);
+
+                        EmitDebug($"Received {chunk.Length} chars. Buffer now {output.Length} chars");
+
+                        if (hitPager)
+                        {
+                            pageCount++;
+                            EmitDebug($"Pager detected ({pageCount}), sending space");
+                            _scripting.Send(" ");
+                        }
+                        else
                         {
                             // We hit the shell prompt - done!
                             EmitDebug("Prompt detected, command complete");
@@ -499,6 +512,43 @@ namespace SSH_Helper.Services
                 var debugLine = $"[DEBUG {timestamp}] {message}\r\n";
                 DebugOutput?.Invoke(this, new ShellOutputEventArgs { Output = debugLine });
             }
+        }
+
+        /// <summary>
+        /// Escapes control characters for debug display.
+        /// </summary>
+        private static string EscapeForDebug(string input, int maxLength)
+        {
+            if (string.IsNullOrEmpty(input))
+                return "<empty>";
+
+            var sb = new StringBuilder();
+            var len = Math.Min(input.Length, maxLength);
+
+            for (int i = 0; i < len; i++)
+            {
+                char c = input[i];
+                switch (c)
+                {
+                    case '\r': sb.Append("\\r"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    case '\x1b': sb.Append("\\e"); break;  // ESC
+                    case '\b': sb.Append("\\b"); break;    // Backspace
+                    case '\0': sb.Append("\\0"); break;
+                    default:
+                        if (c < 32)
+                            sb.Append($"\\x{(int)c:X2}");
+                        else
+                            sb.Append(c);
+                        break;
+                }
+            }
+
+            if (input.Length > maxLength)
+                sb.Append("...");
+
+            return sb.ToString();
         }
 
         private void ThrowIfDisposed()

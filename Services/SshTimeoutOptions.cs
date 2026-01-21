@@ -27,8 +27,9 @@ namespace SSH_Helper.Services
 
         /// <summary>
         /// Time to wait for the initial prompt after connection.
+        /// Should be long enough for devices that show banners/EULA (e.g., FortiGate).
         /// </summary>
-        public TimeSpan InitialPromptTimeout { get; set; } = TimeSpan.FromSeconds(5);
+        public TimeSpan InitialPromptTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
         /// <summary>
         /// Creates default timeout options.

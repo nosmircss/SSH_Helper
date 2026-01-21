@@ -139,9 +139,9 @@ namespace SSH_Helper.Utilities
             // 3. \r (carriage return again to go back to column 0)
             // 4. Then the actual content continues with proper indentation
             //
-            // Pattern: \r followed by spaces followed by \r
+            // Observed pattern: " \r         \r" (space, CR, 9 spaces, CR)
             // We strip this entire clearing sequence, leaving just the actual content
-            return Regex.Replace(chunk, @"^\r[ ]+\r", string.Empty);
+            return Regex.Replace(chunk, @"^ \r +\r", string.Empty);
         }
 
         private static int ProcessEscapeSequence(string input, int startIndex, StringBuilder line, ref int cursor, ref int savedCursor)

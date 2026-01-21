@@ -33,11 +33,4 @@
     </None>
   </ItemGroup>
 
-  <!-- Copy rebex.key to output directory if it exists (gitignored, local dev only) -->
-  <ItemGroup>
-    <Content Include="rebex.key" Condition="Exists('rebex.key')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
 </Project>

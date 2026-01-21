@@ -27,9 +27,13 @@ jobs:
 
     - name: Build
       run: dotnet build --configuration Release --no-restore
+      env:
+        REBEX_LICENSE_KEY: ${{ secrets.REBEX_LICENSE_KEY }}
 
     - name: Publish
       run: dotnet publish -c Release -o ./publish --self-contained true -r win-x64 -p:PublishSingleFile=true
+      env:
+        REBEX_LICENSE_KEY: ${{ secrets.REBEX_LICENSE_KEY }}
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
