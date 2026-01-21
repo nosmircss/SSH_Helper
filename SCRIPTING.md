@@ -19,11 +19,14 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [writefile](#writefile---write-text-files)
    - [input](#input---prompt-for-user-input)
    - [updatecolumn](#updatecolumn---update-host-table-column)
+   - [log](#log---output-with-log-level)
+   - [webhook](#webhook---http-requests)
 3. [Variables](#variables)
 4. [Expressions and Conditions](#expressions-and-conditions)
 5. [Error Handling](#error-handling)
 6. [Debug Mode](#debug-mode)
-7. [Examples](#examples)
+7. [Working with JSON](#working-with-json)
+8. [Examples](#examples)
 
 ---
 
@@ -53,7 +56,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Keywords: `name:`, `description:`, `vars:`, `steps:`, `version:`, `nobanner:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- foreach:`, `- while:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- foreach:`, `- while:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- log:`, `- webhook:`
 
 Plain text (without YAML markers) is treated as simple commands to execute line by line.
 
@@ -183,12 +186,22 @@ Sets or modifies variable values with expression support.
 | Substitution | `msg = "Host: ${ip}"` | String with variables |
 | Addition | `counter = counter + 1` | Numeric addition |
 | Subtraction | `value = total - 5` | Numeric subtraction |
+| Multiplication | `total = count * 10` | Numeric multiplication |
+| Division | `avg = total / count` | Numeric division |
+| Modulo | `remainder = value % 10` | Numeric modulo |
 | length() | `len = length(text)` | String or list length |
 | trim() | `clean = trim(input)` | Remove whitespace |
 | upper() | `caps = upper(text)` | Convert to uppercase |
 | lower() | `small = lower(text)` | Convert to lowercase |
+| push() | `arr = push(arr, item)` | Add item to array |
+| json_array() | `json = json_array(list)` | Convert list to JSON array |
+| json_array_pretty() | `json = json_array_pretty(list)` | Convert list to pretty JSON array |
+| json_object() | `obj = json_object(k1, v1, k2, v2)` | Create JSON object |
+| json_object_pretty() | `obj = json_object_pretty(k1, v1)` | Create pretty JSON object |
+| json_merge() | `merged = json_merge(obj1, obj2)` | Merge two JSON objects |
+| Nested assignment | `obj.key.subkey = value` | Assign to nested path |
 
-**Examples:**
+**Basic Examples:**
 ```yaml
 # Literal values
 - set: timeout = 30
@@ -198,6 +211,8 @@ Sets or modifies variable values with expression support.
 - set: i = 0
 - set: i = i + 1
 - set: remaining = total - processed
+- set: doubled = count * 2
+- set: average = total / count
 
 # String manipulation
 - set: message = "Device: ${Host_IP}"
@@ -207,6 +222,104 @@ Sets or modifies variable values with expression support.
 # Get length
 - set: line_count = length(output)
 - set: num_items = length(items)
+```
+
+**Array Functions:**
+```yaml
+# Create and build an array
+- set: results = push(results, ${Host_IP})
+- set: results = push(results, ${status})
+
+# Get array length
+- set: count = length(results)
+```
+
+**JSON Functions:**
+
+The `json_array()` and `json_array_pretty()` functions convert a list variable to a JSON array string with automatic type detection:
+- Strings that look like `true` or `false` become booleans
+- Numeric strings become numbers
+- Strings starting with `{` or `[` are parsed as JSON objects/arrays
+- Everything else remains as strings
+
+```yaml
+# Build a list and convert to JSON
+- set: items = push(items, "192.168.1.1")
+- set: items = push(items, "true")      # Will be boolean in JSON
+- set: items = push(items, "42")        # Will be number in JSON
+- set: json_result = json_array(items)
+# Result: ["192.168.1.1",true,42]
+
+# Pretty-printed version
+- set: json_result = json_array_pretty(items)
+# Result:
+# [
+#   "192.168.1.1",
+#   true,
+#   42
+# ]
+```
+
+The `json_object()` and `json_object_pretty()` functions create a JSON object from key-value pairs:
+
+```yaml
+# Create a JSON object
+- set: data = json_object("host", ${Host_IP}, "status", ${status}, "count", 5)
+# Result: {"host":"192.168.1.1","status":"up","count":5}
+
+# Pretty-printed version
+- set: data = json_object_pretty("host", ${Host_IP}, "status", ${status})
+# Result:
+# {
+#   "host": "192.168.1.1",
+#   "status": "up"
+# }
+
+# Using variables as values
+- set: record = json_object("timestamp", ${_timestamp}, "ip", ${Host_IP}, "version", ${version})
+```
+
+The `json_merge()` function deep-merges two JSON objects (second object's values override first):
+
+```yaml
+# Merge two objects
+- set: base = json_object("name", "server1", "type", "linux")
+- set: updates = json_object("status", "active", "type", "ubuntu")
+- set: merged = json_merge(base, updates)
+# Result: {"name":"server1","type":"ubuntu","status":"active"}
+```
+
+**Nested Assignment (Dot Notation):**
+
+You can build nested JSON objects using dot notation. Intermediate objects are created automatically:
+
+```yaml
+# Build a nested structure
+- set: data.server.name = ${hostname}
+- set: data.server.ip = ${Host_IP}
+- set: data.server.port = 22
+- set: data.metadata.timestamp = ${_timestamp}
+- set: data.metadata.scanned_by = "SSH Helper"
+
+# The 'data' variable now contains:
+# {
+#   "server": {
+#     "name": "router1",
+#     "ip": "192.168.1.1",
+#     "port": 22
+#   },
+#   "metadata": {
+#     "timestamp": "2024-01-15 10:30:00",
+#     "scanned_by": "SSH Helper"
+#   }
+# }
+
+# Write the nested object to a file
+- writefile:
+    path: "C:\\output\\${Host_IP}.json"
+    format: json
+    content: "${data}"
+    pretty: true
 ```
 
 ---
@@ -238,6 +351,11 @@ Extracts data from a variable using regex patterns with capture groups.
 - **last**: Last match only
 - **all**: All matches as a list
 - **0, 1, 2...**: Specific match by zero-based index
+
+**Pattern Notes:**
+- Pattern delimiters (`/pattern/`, `"pattern"`, `'pattern'`) are automatically stripped
+- Patterns are matched case-insensitively and support multiline mode
+- Debug output truncates extracted values at 50 characters for readability
 
 **Single vs Multiple Capture Groups:**
 
@@ -397,7 +515,7 @@ Iterates over items in a collection.
 
 **Special Variables in Loop:**
 - `${item}`: Current item value (or your chosen variable name)
-- `${item_index}`: Zero-based index of current item
+- `${item_index}`: Zero-based index of current item (uses your iterator name, e.g., `${line_index}` if you use `foreach: line in ...`)
 
 **Examples:**
 ```yaml
@@ -413,10 +531,10 @@ Iterates over items in a collection.
     - send: show interface ${iface}
     - print: "Checked ${iface}"
 
-# Loop with index
+# Loop with index (index variable uses your iterator name)
 - foreach: line in output
   do:
-    - print: "Line ${item_index}: ${line}"
+    - print: "Line ${line_index}: ${line}"
 
 # Loop with filter
 - foreach: iface in interfaces
@@ -509,7 +627,7 @@ Ends script execution with a status and message.
 
 **Status Types:**
 - **success**: Script completed successfully
-- **failure**: Script detected a failure condition
+- **failure** (alias: `fail`): Script detected a failure condition
 - **error**: An unexpected error occurred
 
 **Examples:**
@@ -555,7 +673,7 @@ Reads a text file line by line into a list variable. Useful for processing IP li
 | `skip_empty_lines` | No | `true` | Skip blank lines |
 | `trim_lines` | No | `true` | Remove leading/trailing whitespace from each line |
 | `max_lines` | No | `10000` | Maximum lines to read (0 = unlimited) |
-| `encoding` | No | `utf-8` | File encoding: `utf-8`, `ascii`, `utf-16`, `utf-32`, `latin1` |
+| `encoding` | No | `utf-8` | File encoding: `utf-8`, `ascii`, `utf-16`, `utf-16be`, `utf-32`, `latin1` (aliases: `unicode` for utf-16, `iso-8859-1` for latin1) |
 
 **Security:**
 - **Blocked paths**: Cannot read from `C:\Windows`, `C:\Program Files`, `C:\ProgramData`, or other users' directories
@@ -593,14 +711,17 @@ Reads a text file line by line into a list variable. Useful for processing IP li
 
 ### writefile - Write Text Files
 
-Writes content to a text file. Supports append and overwrite modes.
+Writes content to a text file. Supports multiple formats including text, JSON, JSON Lines (JSONL), and CSV.
 
 **Syntax:**
 ```yaml
 - writefile:
     path: "C:\\path\\to\\file.txt"
     content: "text to write"
-    mode: append               # Optional: append (default) or overwrite
+    mode: overwrite            # Optional: overwrite (default) or append
+    format: text               # Optional: text (default), json, jsonl, or csv
+    pretty: true               # Optional: pretty-print JSON (default: true)
+    headers: [col1, col2]      # Optional: CSV headers
 ```
 
 **Parameters:**
@@ -608,20 +729,33 @@ Writes content to a text file. Supports append and overwrite modes.
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `path` | Yes | - | Path to the file (supports variable substitution) |
-| `content` | No | `""` | Content to write (supports variable substitution) |
-| `mode` | No | `append` | Write mode: `append` or `overwrite` |
+| `content` | No | `""` | Content to write (use `${varname}` for variables) |
+| `mode` | No | `overwrite` | Write mode: `overwrite` or `append` |
+| `format` | No | `text` | Output format: `text`, `json`, `jsonl`, or `csv` |
+| `pretty` | No | `true` | Pretty-print JSON with indentation |
+| `headers` | No | - | CSV column headers (list of strings) |
 
 **Security:**
 - **Blocked paths**: Cannot write to system directories or Program Files
 - **Blocked extensions**: Cannot write executable files (`.exe`, `.dll`, `.bat`, `.ps1`, `.cmd`, etc.)
 - **Allowed paths**: User profile, Documents, Desktop, AppData, Temp only
 
-**Examples:**
+**Format Details:**
+
+| Format | Description | Append Behavior |
+|--------|-------------|-----------------|
+| `text` | Plain text output | Appends content with newline |
+| `json` | JSON with automatic type detection | **Merges** with existing file (arrays concatenated, objects deep-merged) |
+| `jsonl` | JSON Lines (one JSON object per line) | Appends single JSON line |
+| `csv` | Comma-separated values | Appends rows |
+
+**Basic Examples:**
 ```yaml
 # Log results to a file
 - writefile:
     path: "C:\\Users\\me\\output.log"
     content: "${_timestamp} - Processed ${Host_IP}: ${status}"
+    mode: append
 
 # Overwrite a file
 - writefile:
@@ -635,11 +769,114 @@ Writes content to a text file. Supports append and overwrite modes.
     - writefile:
         path: "C:\\logs\\processed.txt"
         content: "${ip} - completed"
+        mode: append
 
 # Create file with path from variable
 - writefile:
     path: "${output_dir}\\results.csv"
     content: "${Host_IP},${status},${version}"
+```
+
+**JSON Format:**
+
+When using `format: json`, the content is automatically serialized with type detection:
+- Numbers, booleans, and null are preserved as their JSON types
+- Strings are properly escaped
+- Lists become JSON arrays
+- Objects (from `json_object()` or dot notation) become JSON objects
+
+```yaml
+# Write a JSON array from a list variable
+- set: hosts = push(hosts, ${Host_IP})
+- set: hosts = push(hosts, ${other_ip})
+- writefile:
+    path: "C:\\output\\hosts.json"
+    format: json
+    content: "${hosts}"
+    pretty: true
+
+# Write a JSON object
+- set: data = json_object("host", ${Host_IP}, "status", "success", "port", 22)
+- writefile:
+    path: "C:\\output\\result.json"
+    format: json
+    content: "${data}"
+    pretty: true
+
+# Write nested object built with dot notation
+- set: result.server.ip = ${Host_IP}
+- set: result.server.hostname = ${hostname}
+- set: result.scan.timestamp = ${_timestamp}
+- writefile:
+    path: "C:\\output\\scan.json"
+    format: json
+    content: "${result}"
+```
+
+**JSON Append Merging:**
+
+When using `format: json` with `mode: append`, the new content is intelligently merged with existing file content:
+
+- **Arrays**: New items are concatenated to the existing array
+- **Objects**: Properties are deep-merged (new values override existing)
+
+```yaml
+# First write creates the file with an array
+- set: item = json_object("ip", "192.168.1.1", "status", "up")
+- writefile:
+    path: "C:\\output\\results.json"
+    format: json
+    content: "[${item}]"
+    mode: overwrite
+
+# Subsequent writes append to the array
+- set: item = json_object("ip", "192.168.1.2", "status", "down")
+- writefile:
+    path: "C:\\output\\results.json"
+    format: json
+    content: "[${item}]"
+    mode: append
+# File now contains: [{"ip":"192.168.1.1","status":"up"},{"ip":"192.168.1.2","status":"down"}]
+```
+
+**JSON Lines (JSONL) Format:**
+
+JSONL format writes one compact JSON object per line, ideal for log files and streaming data:
+
+```yaml
+# Write events as JSON Lines
+- set: event = json_object("timestamp", ${_timestamp}, "host", ${Host_IP}, "action", "scanned")
+- writefile:
+    path: "C:\\logs\\events.jsonl"
+    format: jsonl
+    content: "${event}"
+    mode: append
+
+# Each execution appends a line like:
+# {"timestamp":"2024-01-15 10:30:00","host":"192.168.1.1","action":"scanned"}
+# {"timestamp":"2024-01-15 10:30:05","host":"192.168.1.2","action":"scanned"}
+```
+
+**CSV Format:**
+
+CSV format with optional headers:
+
+```yaml
+# Write CSV with headers (first write)
+- writefile:
+    path: "C:\\output\\inventory.csv"
+    format: csv
+    content: "${hosts}"
+    headers: [IP, Hostname, Version, Status]
+    mode: overwrite
+
+# Append data rows
+- set: row = "${Host_IP},${hostname},${version},${status}"
+- writefile:
+    path: "C:\\output\\inventory.csv"
+    format: csv
+    content: "${row}"
+    mode: append
 ```
 
 ---
@@ -790,6 +1027,198 @@ Writes a value back to a column in the host table for the current host. This all
 
 ---
 
+### log - Output with Log Level
+
+Outputs a message with a specific log level for categorized output. Unlike `print`, log messages are styled based on their level and can be filtered.
+
+**Simple Syntax:**
+```yaml
+- log: "message text"
+```
+
+**With Options:**
+```yaml
+- log:
+    message: "message text"
+    level: warning
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `message` | Yes | - | The message to output (supports variable substitution) |
+| `level` | No | `info` | Log level: `debug`, `info`, `warning`, `error`, `success` |
+
+**Log Levels:**
+
+| Level | Aliases | Description |
+|-------|---------|-------------|
+| `debug` | - | Debug information (only shown when debug mode is enabled) |
+| `info` | - | General information (default level) |
+| `warning` | `warn` | Warning messages |
+| `error` | `err` | Error messages |
+| `success` | - | Success/completion messages |
+
+**Examples:**
+```yaml
+# Simple info message (default level)
+- log: "Processing ${Host_IP}..."
+
+# Warning level
+- log:
+    message: "Configuration may be outdated"
+    level: warning
+
+# Error level with variable
+- log:
+    message: "Failed to connect: ${error_msg}"
+    level: error
+
+# Success level
+- log:
+    message: "All checks passed for ${Host_IP}"
+    level: success
+
+# Debug (only visible with debug: true in script header or global debug mode)
+- log:
+    message: "Variable state: count=${count}, status=${status}"
+    level: debug
+
+# Using warn/err aliases
+- log:
+    message: "Disk space low"
+    level: warn
+
+- log:
+    message: "Connection timeout"
+    level: err
+```
+
+**Note:** The `log` command always succeeds and never causes script failure, similar to `print`.
+
+---
+
+### webhook - HTTP Requests
+
+Makes HTTP requests to external APIs and captures responses. Useful for integrating with webhooks, REST APIs, notification services, or logging platforms.
+
+**Syntax:**
+```yaml
+- webhook:
+    url: "https://api.example.com/endpoint"
+    method: POST
+    body: '{"key": "value"}'
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer ${token}"
+    into: response
+    timeout: 30
+    on_error: continue
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `url` | Yes | - | Target URL (must be `http://` or `https://`) |
+| `method` | No | `POST` | HTTP method: `GET`, `POST`, `PUT`, `PATCH`, `DELETE` |
+| `body` | No | - | Request body (for POST, PUT, PATCH). Supports variable substitution |
+| `headers` | No | - | Custom HTTP headers as key-value pairs |
+| `into` | No | - | Variable to capture response body |
+| `timeout` | No | `30` | Request timeout in seconds |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+
+**Response Capture:**
+
+When using the `into` parameter, two variables are created:
+- `${varname}` - The response body content
+- `${varname}_status` - The HTTP status code (e.g., 200, 404, 500)
+
+**Examples:**
+
+```yaml
+# Simple GET request
+- webhook:
+    url: "https://api.example.com/status"
+    method: GET
+    into: api_response
+
+- if: api_response_status == 200
+  then:
+    - print: "API is healthy"
+  else:
+    - print: "API returned status: ${api_response_status}"
+
+# POST with JSON body
+- set: payload = json_object("host", ${Host_IP}, "status", ${status})
+- webhook:
+    url: "https://hooks.slack.com/services/xxx/yyy/zzz"
+    method: POST
+    body: "${payload}"
+    headers:
+      Content-Type: "application/json"
+    into: result
+    on_error: continue
+
+# Send notification with authentication
+- webhook:
+    url: "https://api.pagerduty.com/incidents"
+    method: POST
+    body: '{"incident": {"title": "Alert from ${Host_IP}", "service": {"id": "PXXXXXX"}}}'
+    headers:
+      Authorization: "Token token=${api_key}"
+      Content-Type: "application/json"
+    timeout: 10
+
+# Log events to external service
+- set: event = json_object("timestamp", ${_timestamp}, "host", ${Host_IP}, "event", "scan_complete")
+- webhook:
+    url: "https://logs.example.com/ingest"
+    body: "${event}"
+    headers:
+      Content-Type: "application/json"
+      X-API-Key: "${logging_api_key}"
+
+# GET request with query parameters in URL
+- webhook:
+    url: "https://api.example.com/lookup?ip=${Host_IP}&format=json"
+    method: GET
+    into: lookup_result
+    timeout: 15
+
+# Check response and handle errors
+- webhook:
+    url: "https://api.example.com/validate"
+    method: POST
+    body: '{"device": "${Host_IP}"}'
+    headers:
+      Content-Type: "application/json"
+    into: validation
+    on_error: continue
+
+- if: validation_status == 200
+  then:
+    - print: "Validation successful"
+  else:
+    - if: validation_status is defined
+      then:
+        - log:
+            message: "Validation failed with status ${validation_status}"
+            level: warning
+      else:
+        - log:
+            message: "Webhook request failed (network error)"
+            level: error
+```
+
+**Security Notes:**
+- URLs must use `http://` or `https://` protocol
+- Consider using `on_error: continue` when webhook failures shouldn't stop script execution
+- Sensitive data in headers (like API keys) should be stored in script variables or CSV columns, not hardcoded
+
+---
+
 ## Variables
 
 ### Variable Sources
@@ -890,6 +1319,47 @@ Lists support index-based access and properties:
 
 **Note:** The `.length` property works on lists created by `extract` (with `match: all`) or `readfile`.
 
+### Variable Precedence
+
+When multiple sources define the same variable name, the following precedence applies (highest to lowest):
+
+1. **CSV Grid Columns** - Values from the host table (highest priority)
+2. **Set/Extract/Captured Variables** - Variables modified during script execution
+3. **Script `vars:` Section** - Default values (only set if not already defined)
+
+This means:
+- A column named `timeout` in your CSV will override a `timeout` defined in `vars:`
+- Using `set: myvar = value` during execution will override the `vars:` default
+- You can use `vars:` to provide fallback defaults when columns don't exist
+
+**Example:**
+```yaml
+---
+vars:
+  timeout: 30        # Default timeout
+  interface: "eth0"  # Default interface
+
+steps:
+  # If CSV has a 'timeout' column with value 60, ${timeout} will be 60, not 30
+  - print: "Using timeout: ${timeout}"
+```
+
+### Variable Type System
+
+Variables can hold different types of data:
+
+| Type | Source | Example |
+|------|--------|---------|
+| `string` | CSV columns, `set`, `input`, `extract` | `"hello"`, `"192.168.1.1"` |
+| `List<string>` | `readfile`, `extract` (with `match: all`), `push()` | `["item1", "item2"]` |
+| `int` / `double` | Arithmetic operations | `42`, `3.14` |
+| `JsonObject` | `json_object()`, nested dot assignment | `{"key": "value"}` |
+
+**Type Coercion:**
+- String variables containing numbers are automatically converted for arithmetic operations
+- List variables can be iterated with `foreach`
+- JSON objects can be written to files using `format: json`
+
 ---
 
 ## Expressions and Conditions
@@ -939,6 +1409,79 @@ Use parentheses for complex expressions:
 - if: (status == "up" or status == "active") and count > 0
   then:
     - print: "System is operational"
+```
+
+### Truthy/Falsy Evaluation
+
+When a condition has no comparison operator, it's evaluated as truthy or falsy:
+
+**Falsy Values:**
+- `null` or undefined variables
+- Empty string `""`
+- The string `"false"` (case-insensitive)
+- The number `0`
+- Empty lists
+
+**Truthy Values:**
+- Non-empty strings (except `"false"`)
+- Non-zero numbers
+- Non-empty lists
+- The string `"true"` (case-insensitive)
+
+**Example:**
+```yaml
+# These all evaluate as truthy
+- if: some_variable
+  then:
+    - print: "Variable has a value"
+
+# Check if variable has content
+- if: output
+  then:
+    - print: "Got output: ${output}"
+  else:
+    - print: "No output received"
+```
+
+### Numeric Comparison Details
+
+When comparing values with `==`, `!=`, `>`, `>=`, `<`, `<=`:
+
+- Both values must parse as numbers for numeric comparison
+- If either value cannot be parsed as a number, string comparison is used
+- Numeric equality uses a small tolerance (`0.0001`) to handle floating-point precision
+- String comparisons are case-insensitive
+
+**Example:**
+```yaml
+# These are numeric comparisons
+- if: count > 10
+- if: version >= 2.0
+- if: result == 0
+
+# These are string comparisons (because "active" isn't a number)
+- if: status == "active"
+```
+
+### Regex Pattern Syntax
+
+When using the `matches` operator:
+
+- Patterns can be enclosed in `/pattern/`, `"pattern"`, or `'pattern'`
+- Delimiters are automatically stripped
+- Patterns are always case-insensitive
+- Invalid regex patterns silently return false (they don't cause errors)
+
+**Example:**
+```yaml
+# All these are equivalent
+- if: output matches '/error|warning/'
+- if: output matches "error|warning"
+- if: output matches 'error|warning'
+
+# Using regex special characters
+- if: version matches '^\d+\.\d+\.\d+$'
+- if: line matches '^interface\s+\S+'
 ```
 
 ---
@@ -1062,6 +1605,160 @@ Enable via menu: **Edit > Debug Mode**. This affects all script executions until
 - File operation results from `readfile` and `writefile`
 
 Debug messages are prefixed with `[DEBUG]` for easy identification.
+
+---
+
+## Working with JSON
+
+SSH Helper provides comprehensive support for creating, manipulating, and writing JSON data. This is useful for generating reports, logging structured data, or integrating with other tools.
+
+### Building JSON Objects
+
+There are two ways to build JSON objects:
+
+**1. Using `json_object()` function:**
+```yaml
+- set: data = json_object("key1", value1, "key2", value2, ...)
+```
+
+**2. Using dot notation (nested assignment):**
+```yaml
+- set: data.key1 = value1
+- set: data.nested.key2 = value2
+```
+
+### Building JSON Arrays
+
+Use `push()` to build a list, then convert with `json_array()`:
+
+```yaml
+- set: items = push(items, "first")
+- set: items = push(items, "second")
+- set: json_result = json_array(items)
+```
+
+### Automatic Type Detection
+
+When converting to JSON, values are automatically typed:
+
+| Input | JSON Type | Example |
+|-------|-----------|---------|
+| `"true"` or `"false"` | boolean | `true` |
+| Numeric string | number | `42`, `3.14` |
+| `"null"` | null | `null` |
+| String starting with `{` or `[` | parsed JSON | `{"nested": "object"}` |
+| Everything else | string | `"text value"` |
+
+### JSON Workflow Examples
+
+**Collecting Data from Multiple Hosts:**
+```yaml
+---
+name: Collect Host Inventory as JSON
+steps:
+  # Initialize the results array on first host
+  - if: _host_index == 0
+    then:
+      - writefile:
+          path: "C:\\output\\inventory.json"
+          format: json
+          content: "[]"
+          mode: overwrite
+
+  # Gather data
+  - send: show version
+    capture: version_output
+  - extract:
+      from: version_output
+      pattern: 'Version (\S+)'
+      into: version
+
+  # Build this host's record
+  - set: record = json_object("ip", ${Host_IP}, "version", ${version}, "timestamp", ${_timestamp})
+
+  # Append to the JSON array
+  - writefile:
+      path: "C:\\output\\inventory.json"
+      format: json
+      content: "[${record}]"
+      mode: append
+```
+
+**Building Nested Reports:**
+```yaml
+---
+name: Generate Nested JSON Report
+steps:
+  - send: show version
+    capture: version_out
+  - extract:
+      from: version_out
+      pattern: 'Version (\S+)'
+      into: sw_version
+
+  - send: show ip interface brief
+    capture: interfaces
+
+  # Build nested structure using dot notation
+  - set: report.host.ip = ${Host_IP}
+  - set: report.host.port = ${port}
+  - set: report.software.version = ${sw_version}
+  - set: report.metadata.scanned_at = ${_timestamp}
+  - set: report.metadata.scanned_by = "SSH Helper"
+
+  # Write the nested JSON
+  - writefile:
+      path: "C:\\reports\\${Host_IP}.json"
+      format: json
+      content: "${report}"
+      pretty: true
+```
+
+**Logging Events as JSON Lines:**
+```yaml
+---
+name: Structured Event Logging
+steps:
+  - set: event.type = "connection"
+  - set: event.host = ${Host_IP}
+  - set: event.timestamp = ${_timestamp}
+  - set: event.status = "started"
+
+  - writefile:
+      path: "C:\\logs\\events.jsonl"
+      format: jsonl
+      content: "${event}"
+      mode: append
+
+  # ... do work ...
+
+  - set: event.status = "completed"
+  - set: event.result = "success"
+
+  - writefile:
+      path: "C:\\logs\\events.jsonl"
+      format: jsonl
+      content: "${event}"
+      mode: append
+```
+
+**Merging Configuration Objects:**
+```yaml
+---
+name: Merge Configurations
+vars:
+  defaults: '{"timeout": 30, "retries": 3, "debug": false}'
+
+steps:
+  # Build host-specific overrides
+  - set: overrides = json_object("host", ${Host_IP}, "timeout", 60)
+
+  # Merge defaults with overrides
+  - set: config = json_merge(${defaults}, overrides)
+
+  # config now has: {"timeout": 60, "retries": 3, "debug": false, "host": "192.168.1.1"}
+  - print: "Using config: ${config}"
+```
 
 ---
 
@@ -1441,8 +2138,156 @@ steps:
 
 ---
 
+### Example 10: Export Network Inventory to JSON
+
+```yaml
+---
+name: Network Inventory Export
+description: Collects device info and exports to a structured JSON file
+
+steps:
+  # Gather device information
+  - send: show version
+    capture: version_output
+
+  - extract:
+      from: version_output
+      pattern: 'Version (\S+)'
+      into: sw_version
+
+  - extract:
+      from: version_output
+      pattern: 'uptime is (.+?)$'
+      into: uptime
+
+  - send: show running-config | include hostname
+    capture: hostname_output
+
+  - extract:
+      from: hostname_output
+      pattern: 'hostname (\S+)'
+      into: hostname
+
+  # Build nested JSON structure using dot notation
+  - set: device.identity.hostname = ${hostname}
+  - set: device.identity.ip = ${Host_IP}
+  - set: device.identity.port = ${port}
+
+  - set: device.software.version = ${sw_version}
+  - set: device.software.uptime = ${uptime}
+
+  - set: device.metadata.scanned_at = ${_timestamp}
+  - set: device.metadata.scanned_by = "SSH Helper"
+
+  # Write individual device JSON file
+  - writefile:
+      path: "C:\\inventory\\devices\\${Host_IP}.json"
+      format: json
+      content: "${device}"
+      pretty: true
+
+  # Also append to master inventory (JSON array)
+  - set: summary = json_object("ip", ${Host_IP}, "hostname", ${hostname}, "version", ${sw_version})
+  - writefile:
+      path: "C:\\inventory\\all_devices.json"
+      format: json
+      content: "[${summary}]"
+      mode: append
+
+  # Log the event
+  - set: log_entry = json_object("timestamp", ${_timestamp}, "host", ${Host_IP}, "action", "inventory_collected")
+  - writefile:
+      path: "C:\\inventory\\audit.jsonl"
+      format: jsonl
+      content: "${log_entry}"
+      mode: append
+
+  - print: "Exported ${hostname} (${Host_IP}) to JSON"
+```
+
+---
+
+### Example 11: Compliance Check with JSON Report
+
+```yaml
+---
+name: Security Compliance Check
+description: Checks security settings and generates JSON compliance report
+
+vars:
+  required_version: "15.0"
+
+steps:
+  # Initialize compliance status
+  - set: checks_passed = 0
+  - set: checks_failed = 0
+
+  # Check 1: Software version
+  - send: show version
+    capture: version_output
+  - extract:
+      from: version_output
+      pattern: 'Version (\d+\.\d+)'
+      into: current_version
+
+  - set: result.checks.version.current = ${current_version}
+  - set: result.checks.version.required = ${required_version}
+
+  - if: current_version >= required_version
+    then:
+      - set: result.checks.version.status = "PASS"
+      - set: checks_passed = checks_passed + 1
+    else:
+      - set: result.checks.version.status = "FAIL"
+      - set: checks_failed = checks_failed + 1
+
+  # Check 2: SSH enabled
+  - send: show ip ssh
+    capture: ssh_output
+    on_error: continue
+
+  - if: ssh_output contains "SSH Enabled"
+    then:
+      - set: result.checks.ssh.status = "PASS"
+      - set: result.checks.ssh.detail = "SSH is enabled"
+      - set: checks_passed = checks_passed + 1
+    else:
+      - set: result.checks.ssh.status = "FAIL"
+      - set: result.checks.ssh.detail = "SSH not enabled or not available"
+      - set: checks_failed = checks_failed + 1
+
+  # Build final report
+  - set: result.host = ${Host_IP}
+  - set: result.timestamp = ${_timestamp}
+  - set: result.summary.passed = ${checks_passed}
+  - set: result.summary.failed = ${checks_failed}
+
+  - if: checks_failed == 0
+    then:
+      - set: result.summary.overall = "COMPLIANT"
+    else:
+      - set: result.summary.overall = "NON-COMPLIANT"
+
+  # Write compliance report
+  - writefile:
+      path: "C:\\compliance\\${Host_IP}_report.json"
+      format: json
+      content: "${result}"
+      pretty: true
+
+  # Update host table
+  - updatecolumn:
+      column: compliance_status
+      value: ${result.summary.overall}
+
+  - print: "${Host_IP}: ${result.summary.overall} (${checks_passed} passed, ${checks_failed} failed)"
+```
+
+---
+
 ## Tips and Best Practices
 
+### General
 1. **Use `capture` and `extract` together**: Capture output first, then extract specific data
 2. **Enable `debug: true` while developing**: Helps troubleshoot variable values and conditions
 3. **Use `suppress: true` for sensitive commands**: Prevents credentials from appearing in output
@@ -1451,6 +2296,18 @@ steps:
 6. **Initialize variables in `vars:`**: Provides default values and documents expected variables
 7. **Use meaningful variable names**: Makes scripts easier to read and maintain
 8. **Test with single host first**: Verify script works before running on multiple hosts
+
+### Working with Data
 9. **Use `updatecolumn` for inventory**: Store extracted data back to the host grid for export
 10. **Check list length before processing**: Use `${list.length}` to validate data before loops
 11. **Use array indexing for specific items**: Access `${list[0]}` for first item, `${list[1]}` for second, etc.
+
+### Working with JSON
+12. **Use dot notation for nested structures**: Build complex objects with `data.level1.level2 = value`
+13. **Choose the right format for your use case**:
+    - `json` for structured reports (supports pretty-printing)
+    - `jsonl` for log files and streaming data (one object per line)
+14. **Leverage JSON append merging**: Use `mode: append` with `format: json` to build arrays across multiple hosts
+15. **Use `json_object()` for inline objects**: Quick way to create JSON without building nested structures
+16. **Automatic type detection**: Numbers and booleans in arrays are preserved (e.g., `"42"` becomes `42` in JSON)
+17. **Use `json_merge()` for configuration overrides**: Combine base settings with host-specific overrides

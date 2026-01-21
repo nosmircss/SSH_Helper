@@ -84,6 +84,18 @@ namespace SSH_Helper.Services.Scripting.Models
         /// </summary>
         public UpdateColumnOptions? UpdateColumn { get; set; }
 
+        /// <summary>
+        /// Log command - outputs a message with a specific log level.
+        /// Simple form: "log: message" (defaults to info level)
+        /// Options form: log: { message: "text", level: "warning" }
+        /// </summary>
+        public object? Log { get; set; }
+
+        /// <summary>
+        /// Webhook command - makes an HTTP request to a URL.
+        /// </summary>
+        public WebhookOptions? Webhook { get; set; }
+
         // ===== Command Options =====
 
         /// <summary>
@@ -150,6 +162,8 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Writefile != null) return StepType.Writefile;
             if (Input != null) return StepType.Input;
             if (UpdateColumn != null) return StepType.UpdateColumn;
+            if (Log != null) return StepType.Log;
+            if (Webhook != null) return StepType.Webhook;
             return StepType.Unknown;
         }
     }
@@ -228,14 +242,32 @@ namespace SSH_Helper.Services.Scripting.Models
         public string Path { get; set; } = string.Empty;
 
         /// <summary>
-        /// Content to write to the file.
+        /// Content to write to the file. For text format, this is the raw content.
+        /// For json/csv formats, this should be a variable reference like ${varname}.
         /// </summary>
         public string Content { get; set; } = string.Empty;
 
         /// <summary>
-        /// Write mode: "append" or "overwrite" (default: append).
+        /// Write mode: "overwrite" (default) or "append".
         /// </summary>
-        public string Mode { get; set; } = "append";
+        public string Mode { get; set; } = "overwrite";
+
+        /// <summary>
+        /// Output format: "text" (default), "json", "jsonl" (JSON Lines), or "csv".
+        /// For JSON with mode "append": arrays are concatenated, objects are deep-merged.
+        /// For JSONL: each write appends a single JSON object on a new line.
+        /// </summary>
+        public string? Format { get; set; }
+
+        /// <summary>
+        /// For JSON format: whether to pretty-print with indentation (default: true).
+        /// </summary>
+        public bool Pretty { get; set; } = true;
+
+        /// <summary>
+        /// For CSV format: optional header row. If not provided, no header is written.
+        /// </summary>
+        public List<string>? Headers { get; set; }
     }
 
     /// <summary>
@@ -292,6 +324,59 @@ namespace SSH_Helper.Services.Scripting.Models
     }
 
     /// <summary>
+    /// Options for the log command.
+    /// </summary>
+    public class LogOptions
+    {
+        /// <summary>
+        /// The message to log.
+        /// </summary>
+        public string Message { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Log level: "info" (default), "debug", "warning", "error", "success".
+        /// </summary>
+        public string Level { get; set; } = "info";
+    }
+
+    /// <summary>
+    /// Options for the webhook command.
+    /// </summary>
+    public class WebhookOptions
+    {
+        /// <summary>
+        /// The URL to send the request to.
+        /// </summary>
+        public string Url { get; set; } = string.Empty;
+
+        /// <summary>
+        /// HTTP method: "GET", "POST" (default), "PUT", "PATCH", "DELETE".
+        /// </summary>
+        public string Method { get; set; } = "POST";
+
+        /// <summary>
+        /// Request body (for POST, PUT, PATCH). Supports variable substitution.
+        /// </summary>
+        public string? Body { get; set; }
+
+        /// <summary>
+        /// Optional HTTP headers as key-value pairs.
+        /// </summary>
+        public Dictionary<string, string>? Headers { get; set; }
+
+        /// <summary>
+        /// Variable name to capture the response body into.
+        /// Also sets {varname}_status with the HTTP status code.
+        /// </summary>
+        public string? Into { get; set; }
+
+        /// <summary>
+        /// Request timeout in seconds (default: 30).
+        /// </summary>
+        public int Timeout { get; set; } = 30;
+    }
+
+    /// <summary>
     /// Enumeration of step types.
     /// </summary>
     public enum StepType
@@ -309,6 +394,8 @@ namespace SSH_Helper.Services.Scripting.Models
         Readfile,
         Writefile,
         Input,
-        UpdateColumn
+        UpdateColumn,
+        Log,
+        Webhook
     }
 }

@@ -68,7 +68,9 @@ namespace SSH_Helper.Services.Scripting
                     trimmedLine.StartsWith("- updatecolumn:") ||
                     trimmedLine.StartsWith("- readfile:") ||
                     trimmedLine.StartsWith("- writefile:") ||
-                    trimmedLine.StartsWith("- input:"))
+                    trimmedLine.StartsWith("- input:") ||
+                    trimmedLine.StartsWith("- log:") ||
+                    trimmedLine.StartsWith("- webhook:"))
                 {
                     return true;
                 }
@@ -289,6 +291,12 @@ namespace SSH_Helper.Services.Scripting
                     case "updatecolumn":
                         step.UpdateColumn = ParseUpdateColumnOptions(parser);
                         break;
+                    case "log":
+                        step.Log = ParseLogValue(parser);
+                        break;
+                    case "webhook":
+                        step.Webhook = ParseWebhookOptions(parser);
+                        break;
                     case "then":
                         step.Then = ParseSteps(parser);
                         break;
@@ -464,6 +472,18 @@ namespace SSH_Helper.Services.Scripting
                         case "mode":
                             options.Mode = parser.Consume<Scalar>().Value;
                             break;
+                        case "format":
+                            options.Format = parser.Consume<Scalar>().Value;
+                            break;
+                        case "pretty":
+                            var prettyValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                            options.Pretty = prettyValue == "true" || prettyValue == "yes" || prettyValue == "1";
+                            break;
+                        case "headers":
+                            var headersList = ParseScalarOrSequence(parser);
+                            if (headersList is List<string> list)
+                                options.Headers = list;
+                            break;
                         default:
                             SkipValue(parser);
                             break;
@@ -561,6 +581,120 @@ namespace SSH_Helper.Services.Scripting
                 SkipValue(parser);
                 return null;
             }
+        }
+
+        private object? ParseLogValue(IParser parser)
+        {
+            // Log can be a simple string or an options object
+            if (parser.Accept<Scalar>(out _))
+            {
+                return parser.Consume<Scalar>().Value;
+            }
+            else if (parser.Accept<MappingStart>(out _))
+            {
+                var options = new LogOptions();
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "message":
+                            options.Message = parser.Consume<Scalar>().Value;
+                            break;
+                        case "level":
+                            options.Level = parser.Consume<Scalar>().Value;
+                            break;
+                        default:
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                return options;
+            }
+            else
+            {
+                SkipValue(parser);
+                return null;
+            }
+        }
+
+        private WebhookOptions ParseWebhookOptions(IParser parser)
+        {
+            var options = new WebhookOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "url":
+                            options.Url = parser.Consume<Scalar>().Value;
+                            break;
+                        case "method":
+                            options.Method = parser.Consume<Scalar>().Value;
+                            break;
+                        case "body":
+                            options.Body = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "timeout":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
+                                options.Timeout = timeout;
+                            break;
+                        case "headers":
+                            options.Headers = ParseStringDictionary(parser);
+                            break;
+                        default:
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private Dictionary<string, string> ParseStringDictionary(IParser parser)
+        {
+            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var key = parser.Consume<Scalar>().Value;
+                    var value = parser.Consume<Scalar>().Value;
+                    dict[key] = value;
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return dict;
         }
 
         private void SkipValue(IParser parser)

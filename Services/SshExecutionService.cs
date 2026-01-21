@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 using Rebex.Net;
 using Rebex.TerminalEmulation;
@@ -278,6 +279,10 @@ namespace SSH_Helper.Services
             }
             catch (ScriptParseException ex)
             {
+                // Emit the error so it appears in the output window
+                var errorOutput = $"Script parse error: {ex.Message}\n";
+                OnOutputReceived(hosts.FirstOrDefault(), errorOutput);
+
                 // Return error result for all hosts
                 foreach (var host in hosts)
                 {
@@ -286,7 +291,7 @@ namespace SSH_Helper.Services
                         Host = host,
                         Success = false,
                         ErrorMessage = ex.Message,
-                        Output = $"Script parse error: {ex.Message}",
+                        Output = errorOutput,
                         Timestamp = DateTime.Now
                     });
                 }
