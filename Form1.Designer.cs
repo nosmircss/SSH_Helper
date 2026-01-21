@@ -146,6 +146,8 @@ namespace SSH_Helper
             debugModeToolStripMenuItem = new ToolStripMenuItem();
             sshDebugModeToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
+            documentationToolStripMenuItem = new ToolStripMenuItem();
+            scriptingDocumentationToolStripMenuItem = new ToolStripMenuItem();
             checkForUpdatesToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparatorHelp1 = new ToolStripSeparator();
             aboutToolStripMenuItem = new ToolStripMenuItem();
@@ -1356,13 +1358,27 @@ namespace SSH_Helper
             //
             // helpToolStripMenuItem
             // 
-            helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { checkForUpdatesToolStripMenuItem, toolStripSeparatorHelp1, aboutToolStripMenuItem });
+            helpToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { documentationToolStripMenuItem, scriptingDocumentationToolStripMenuItem, checkForUpdatesToolStripMenuItem, toolStripSeparatorHelp1, aboutToolStripMenuItem });
             helpToolStripMenuItem.Name = "helpToolStripMenuItem";
             helpToolStripMenuItem.Size = new Size(44, 20);
             helpToolStripMenuItem.Text = "&Help";
-            // 
+            //
+            // documentationToolStripMenuItem
+            //
+            documentationToolStripMenuItem.Name = "documentationToolStripMenuItem";
+            documentationToolStripMenuItem.Size = new Size(180, 22);
+            documentationToolStripMenuItem.Text = "&Documentation";
+            documentationToolStripMenuItem.Click += documentationToolStripMenuItem_Click;
+            //
+            // scriptingDocumentationToolStripMenuItem
+            //
+            scriptingDocumentationToolStripMenuItem.Name = "scriptingDocumentationToolStripMenuItem";
+            scriptingDocumentationToolStripMenuItem.Size = new Size(180, 22);
+            scriptingDocumentationToolStripMenuItem.Text = "&Scripting Documentation";
+            scriptingDocumentationToolStripMenuItem.Click += scriptingDocumentationToolStripMenuItem_Click;
+            //
             // checkForUpdatesToolStripMenuItem
-            // 
+            //
             checkForUpdatesToolStripMenuItem.Name = "checkForUpdatesToolStripMenuItem";
             checkForUpdatesToolStripMenuItem.Size = new Size(180, 22);
             checkForUpdatesToolStripMenuItem.Text = "Check for &Updates...";
@@ -1606,6 +1622,8 @@ namespace SSH_Helper
         private ToolStripMenuItem debugModeToolStripMenuItem;
         private ToolStripMenuItem sshDebugModeToolStripMenuItem;
         private ToolStripMenuItem helpToolStripMenuItem;
+        private ToolStripMenuItem documentationToolStripMenuItem;
+        private ToolStripMenuItem scriptingDocumentationToolStripMenuItem;
         private ToolStripMenuItem checkForUpdatesToolStripMenuItem;
         private ToolStripSeparator toolStripSeparatorHelp1;
         private ToolStripMenuItem aboutToolStripMenuItem;

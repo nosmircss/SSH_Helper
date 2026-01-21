@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using SSH_Helper.Models;
@@ -2814,6 +2815,32 @@ namespace SSH_Helper
             _sshDebugMode = sshDebugModeToolStripMenuItem.Checked;
             _sshService.SshDebugMode = _sshDebugMode;
             UpdateStatusBar(_sshDebugMode ? "SSH Debug enabled - timing info will be logged" : "SSH Debug disabled");
+        }
+
+        private void documentationToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://github.com/nosmircss/SSH_Helper",
+                    UseShellExecute = true
+                });
+            }
+            catch { }
+        }
+
+        private void scriptingDocumentationToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://github.com/nosmircss/SSH_Helper/blob/master/SCRIPTING.md",
+                    UseShellExecute = true
+                });
+            }
+            catch { }
         }
 
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
