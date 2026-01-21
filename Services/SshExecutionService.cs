@@ -1172,9 +1172,18 @@ namespace SSH_Helper.Services
             sb.AppendLine(title);
             sb.AppendLine(separator);
 
+            string? lastMessage = null;
             for (var e = ex; e != null; e = e.InnerException)
             {
-                sb.AppendLine($"{e.GetType().Name}: {e.Message}");
+                // Clean up unhelpful Rebex library messages
+                var message = e.Message.Replace(" Make sure you are connecting to an SSH server.", "");
+
+                // Skip duplicate messages in the exception chain
+                if (message != lastMessage)
+                {
+                    sb.AppendLine($"{e.GetType().Name}: {message}");
+                    lastMessage = message;
+                }
             }
 
             return sb.ToString();

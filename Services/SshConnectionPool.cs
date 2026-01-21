@@ -279,7 +279,8 @@ namespace SSH_Helper.Services
             client.Timeout = (int)_defaultTimeouts.ConnectionTimeout.TotalMilliseconds;
 
             // Apply algorithm preferences before connecting (from SSH config)
-            ApplyAlgorithmSettings(client, host);
+            // TODO: Temporarily disabled to diagnose connection issues
+            // ApplyAlgorithmSettings(client, host);
 
             // Connect and authenticate
             await Task.Run(() =>
