@@ -1035,6 +1035,9 @@ namespace SSH_Helper.Services
             client.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
             SshDebugLog(host, "SSH", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
 
+            // Apply algorithm preferences from SSH config (if any)
+            ApplyAlgorithmSettings(client, host);
+
             SshDebugLog(host, "SSH", "Calling client.Connect() - TCP handshake + SSH negotiation starting", sw);
             var connectSw = System.Diagnostics.Stopwatch.StartNew();
             client.Connect(host.IpAddress, host.Port);
@@ -1042,7 +1045,20 @@ namespace SSH_Helper.Services
             SshDebugLog(host, "SSH", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw);
 
             SshDebugLog(host, "SSH", "Calling client.Login()", sw);
-            client.Login(username, password);
+
+            // Key-based or password authentication
+            if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
+            {
+                // Use key-based authentication
+                SshDebugLog(host, "SSH", $"Using key-based auth with: {host.IdentityFile}", sw);
+                var passphrase = host.IdentityFilePassphrase ?? string.Empty;
+                client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
+            }
+            else
+            {
+                // Use password authentication
+                client.Login(username, password);
+            }
             SshDebugLog(host, "SSH", "client.Login() completed - SSH session established", sw);
 
             OnProgressChanged(host, $"Connected to {host}", false, true);
@@ -1204,6 +1220,27 @@ namespace SSH_Helper.Services
             var elapsed = sw != null ? $" (+{sw.ElapsedMilliseconds}ms)" : "";
             var output = $"[SSH DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";
             OnOutputReceived(host, output);
+        }
+
+        /// <summary>
+        /// Applies SSH algorithm preferences from the host connection settings.
+        /// These settings typically come from the SSH config file.
+        /// </summary>
+        private static void ApplyAlgorithmSettings(Ssh client, HostConnection host)
+        {
+            // Apply host key algorithms if specified
+            // Rebex accepts OpenSSH-style algorithm IDs directly
+            if (host.HostKeyAlgorithms?.Length > 0)
+            {
+                client.Settings.SshParameters.SetHostKeyAlgorithms(host.HostKeyAlgorithms);
+            }
+
+            // Apply encryption ciphers if specified
+            // Rebex accepts OpenSSH-style cipher IDs directly
+            if (host.Ciphers?.Length > 0)
+            {
+                client.Settings.SshParameters.SetEncryptionAlgorithms(host.Ciphers);
+            }
         }
 
         public void Dispose()

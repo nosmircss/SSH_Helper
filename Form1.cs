@@ -51,7 +51,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.7";
+        private const string ApplicationVersion = "0.50.8";
         private const string ApplicationName = "SSH Helper";
 
         #endregion
@@ -63,6 +63,7 @@ namespace SSH_Helper
         private readonly CsvManager _csvManager;
         private readonly SshExecutionService _sshService;
         private readonly UpdateService _updateService;
+        private readonly SshConfigService _sshConfigService;
 
         #endregion
 
@@ -126,6 +127,7 @@ namespace SSH_Helper
             _presetManager = new PresetManager(_configService);
             _csvManager = new CsvManager();
             _sshService = new SshExecutionService();
+            _sshConfigService = new SshConfigService();
 
             // Wire up SSH service events
             _sshService.OutputReceived += SshService_OutputReceived;
@@ -4759,6 +4761,9 @@ namespace SSH_Helper
 
         private IEnumerable<HostConnection> GetHostConnections(IEnumerable<DataGridViewRow> rows)
         {
+            // Check if SSH config is enabled
+            var sshConfigEnabled = _configService.GetCurrent().SshConfig.EnableSshConfig;
+
             foreach (var row in rows)
             {
                 if (row.IsNewRow) continue;
@@ -4775,6 +4780,13 @@ namespace SSH_Helper
                 foreach (DataGridViewColumn col in dgv_variables.Columns)
                 {
                     host.Variables[col.Name] = row.Cells[col.Index].Value?.ToString() ?? "";
+                }
+
+                // Apply SSH config settings if enabled (grid values take precedence)
+                if (sshConfigEnabled)
+                {
+                    var sshConfig = _sshConfigService.GetHostConfig(host.IpAddress);
+                    host.ApplySshConfig(sshConfig);
                 }
 
                 yield return host;

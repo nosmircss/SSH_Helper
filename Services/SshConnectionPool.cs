@@ -278,15 +278,51 @@ namespace SSH_Helper.Services
             var client = new Ssh();
             client.Timeout = (int)_defaultTimeouts.ConnectionTimeout.TotalMilliseconds;
 
+            // Apply algorithm preferences before connecting (from SSH config)
+            ApplyAlgorithmSettings(client, host);
+
             // Connect and authenticate
             await Task.Run(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 client.Connect(host.IpAddress, host.Port);
-                client.Login(username, password);
+
+                // Key-based or password authentication
+                if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
+                {
+                    // Use key-based authentication
+                    var passphrase = host.IdentityFilePassphrase ?? string.Empty;
+                    client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
+                }
+                else
+                {
+                    // Use password authentication
+                    client.Login(username, password);
+                }
             }, cancellationToken);
 
             return client;
+        }
+
+        /// <summary>
+        /// Applies SSH algorithm preferences from the host connection settings.
+        /// These settings typically come from the SSH config file.
+        /// </summary>
+        private static void ApplyAlgorithmSettings(Ssh client, HostConnection host)
+        {
+            // Apply host key algorithms if specified
+            // Rebex accepts OpenSSH-style algorithm IDs directly
+            if (host.HostKeyAlgorithms?.Length > 0)
+            {
+                client.Settings.SshParameters.SetHostKeyAlgorithms(host.HostKeyAlgorithms);
+            }
+
+            // Apply encryption ciphers if specified
+            // Rebex accepts OpenSSH-style cipher IDs directly
+            if (host.Ciphers?.Length > 0)
+            {
+                client.Settings.SshParameters.SetEncryptionAlgorithms(host.Ciphers);
+            }
         }
 
         private async Task<bool> IsConnectionHealthyAsync(PooledConnection pooled, CancellationToken cancellationToken)
