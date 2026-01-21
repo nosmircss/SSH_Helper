@@ -2914,7 +2914,8 @@ namespace SSH_Helper
         {
             if (lstHosts.SelectedItem is HostHistoryEntry hostEntry)
             {
-                txtOutput.Text = hostEntry.Output;
+                // Trim leading blank lines for cleaner display
+                txtOutput.Text = hostEntry.Output.TrimStart('\r', '\n');
             }
         }
 
