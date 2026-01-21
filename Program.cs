@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace SSH_Helper
 {
     internal static class Program
@@ -8,8 +10,11 @@ namespace SSH_Helper
         [STAThread]
         static void Main()
         {
-            // Initialize Rebex license key from environment variable
-            var rebexKey = Environment.GetEnvironmentVariable("REBEX_LICENSE_KEY");
+            // Initialize Rebex license key - try embedded metadata first (from build), then env var
+            var rebexKey = Assembly.GetExecutingAssembly()
+                .GetCustomAttributes<AssemblyMetadataAttribute>()
+                .FirstOrDefault(a => a.Key == "RebexLicenseKey")?.Value
+                ?? Environment.GetEnvironmentVariable("REBEX_LICENSE_KEY");
             if (!string.IsNullOrEmpty(rebexKey))
             {
                 Rebex.Licensing.Key = rebexKey;
