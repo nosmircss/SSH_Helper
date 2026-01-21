@@ -199,6 +199,9 @@ Sets or modifies variable values with expression support.
 | json_object() | `obj = json_object(k1, v1, k2, v2)` | Create JSON object |
 | json_object_pretty() | `obj = json_object_pretty(k1, v1)` | Create pretty JSON object |
 | json_merge() | `merged = json_merge(obj1, obj2)` | Merge two JSON objects |
+| json_get() | `val = json_get(json, "path.key")` | Extract value from JSON |
+| json_pretty() | `pretty = json_pretty(json)` | Format JSON with indentation |
+| json_items() | `items = json_items(json, "path")` | Extract array items for foreach |
 | Nested assignment | `obj.key.subkey = value` | Assign to nested path |
 
 **Basic Examples:**
@@ -287,6 +290,88 @@ The `json_merge()` function deep-merges two JSON objects (second object's values
 - set: updates = json_object("status", "active", "type", "ubuntu")
 - set: merged = json_merge(base, updates)
 # Result: {"name":"server1","type":"ubuntu","status":"active"}
+```
+
+The `json_get()` function extracts a value from JSON using dot notation path:
+
+```yaml
+# Given a JSON response from a webhook
+- webhook:
+    url: "https://api.example.com/data"
+    method: GET
+    into: response
+
+# Extract specific values using dot notation
+- set: name = json_get(response, "data.user.name")
+- set: email = json_get(response, "data.user.email")
+- print: "User: ${name} (${email})"
+
+# Array indexing is supported with [n] syntax
+- set: first_item = json_get(response, "items[0].name")
+- set: third_status = json_get(response, "results[2].status")
+
+# Combine with conditions
+- set: error_code = json_get(response, "error.code")
+- if: error_code is not empty
+  then:
+    - print: "Error: ${error_code}"
+```
+
+The `json_pretty()` function formats JSON with indentation for readable output:
+
+```yaml
+# Pretty-print a JSON response
+- webhook:
+    url: "https://httpbin.org/post"
+    method: POST
+    body: '{"test": true}'
+    into: response
+
+- set: formatted = json_pretty(response)
+- print: "${formatted}"
+# Output:
+# {
+#   "args": {},
+#   "data": "{\"test\": true}",
+#   "headers": { ... },
+#   ...
+# }
+
+# Works with any JSON variable
+- set: data = json_object("host", ${Host_IP}, "status", "ok")
+- set: pretty_data = json_pretty(data)
+- print: "${pretty_data}"
+```
+
+The `json_items()` function extracts array elements as a list for use with `foreach`:
+
+```yaml
+# Given a JSON response with an array
+- webhook:
+    url: "https://api.example.com/users"
+    method: GET
+    into: response
+
+# Extract the users array into a list variable
+- set: users = json_items(response, "data.users")
+
+# Loop over each user object
+- foreach: user in users
+  do:
+    # Each user is a JSON string, use json_get to extract fields
+    - set: name = json_get(user, "name")
+    - set: email = json_get(user, "email")
+    - print: "User: ${name} (${email})"
+
+# Simple array without path (if variable is already an array)
+- set: items = json_items(my_array)
+
+# Process nested arrays
+- set: addresses = json_items(response, "data.users[0].addresses")
+- foreach: addr in addresses
+  do:
+    - set: city = json_get(addr, "city")
+    - print: "City: ${city}"
 ```
 
 **Nested Assignment (Dot Notation):**
