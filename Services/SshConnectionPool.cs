@@ -1,6 +1,10 @@
 using System.Collections.Concurrent;
-using Renci.SshNet;
+using Rebex.Net;
+using Rebex.TerminalEmulation;
 using SSH_Helper.Models;
+
+// Alias to avoid conflict with SSH_Helper.Services.Scripting namespace
+using RebexScripting = Rebex.TerminalEmulation.Scripting;
 
 namespace SSH_Helper.Services
 {
@@ -103,7 +107,7 @@ namespace SSH_Helper.Services
         /// <param name="password">Password for authentication</param>
         /// <param name="cancellationToken">Cancellation token</param>
         /// <returns>A connected SSH client</returns>
-        public async Task<SshClient> GetOrCreateAsync(
+        public async Task<Ssh> GetOrCreateAsync(
             HostConnection host,
             string username,
             string password,
@@ -185,7 +189,7 @@ namespace SSH_Helper.Services
         /// <param name="timeouts">Optional timeout overrides</param>
         /// <param name="cancellationToken">Cancellation token</param>
         /// <returns>An initialized shell session</returns>
-        public async Task<(SshClient Client, SshShellSession Session)> CreateSessionAsync(
+        public async Task<(Ssh Client, SshShellSession Session)> CreateSessionAsync(
             HostConnection host,
             string username,
             string password,
@@ -195,8 +199,9 @@ namespace SSH_Helper.Services
             var client = await GetOrCreateAsync(host, username, password, cancellationToken);
             var effectiveTimeouts = timeouts ?? _defaultTimeouts;
 
-            var shellStream = client.CreateShellStream("xterm", 200, 48, 1200, 800, 16384);
-            var session = new SshShellSession(shellStream, effectiveTimeouts);
+            RebexScripting scripting = client.StartScripting();
+            scripting.Timeout = (int)effectiveTimeouts.CommandTimeout.TotalMilliseconds;
+            var session = new SshShellSession(client, scripting, effectiveTimeouts);
 
             await session.InitializeAsync(cancellationToken);
 
@@ -264,28 +269,21 @@ namespace SSH_Helper.Services
                 .ToList();
         }
 
-        private async Task<SshClient> CreateConnectionAsync(
+        private async Task<Ssh> CreateConnectionAsync(
             HostConnection host,
             string username,
             string password,
             CancellationToken cancellationToken)
         {
-            var client = new SshClient(host.IpAddress, host.Port, username, password);
-            client.ConnectionInfo.Timeout = _defaultTimeouts.ConnectionTimeout;
+            var client = new Ssh();
+            client.Timeout = (int)_defaultTimeouts.ConnectionTimeout.TotalMilliseconds;
 
-            client.ErrorOccurred += (s, e) =>
-            {
-                if (e.Exception != null)
-                {
-                    OnConnectionError(host, username, e.Exception);
-                }
-            };
-
-            // Connect asynchronously with cancellation support
+            // Connect and authenticate
             await Task.Run(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                client.Connect();
+                client.Connect(host.IpAddress, host.Port);
+                client.Login(username, password);
             }, cancellationToken);
 
             return client;
@@ -305,14 +303,19 @@ namespace SSH_Helper.Services
             if (DateTime.UtcNow - pooled.LastHealthCheck < _healthCheckInterval)
                 return true;
 
-            // Perform active health check by sending a simple command
+            // Perform active health check by running a simple command
             try
             {
                 await Task.Run(() =>
                 {
-                    using var cmd = pooled.Client.CreateCommand("echo 1");
-                    cmd.CommandTimeout = TimeSpan.FromSeconds(5);
-                    cmd.Execute();
+                    // Use a simple echo command to verify the connection is working
+                    RebexScripting scripting = pooled.Client.StartScripting();
+                    scripting.Timeout = 5000; // 5 second timeout for health check
+                    scripting.Send("echo 1\r");
+
+                    // Read a small amount of output to confirm connection is responsive
+                    var promptEvent = ScriptEvent.FromRegex(@"[#$>%]\s*$");
+                    scripting.ReadUntil(promptEvent);
                 }, cancellationToken);
 
                 pooled.LastHealthCheck = DateTime.UtcNow;
@@ -410,7 +413,7 @@ namespace SSH_Helper.Services
 
         private class PooledConnection
         {
-            public SshClient Client { get; set; } = null!;
+            public Ssh Client { get; set; } = null!;
             public string Key { get; set; } = string.Empty;
             public HostConnection Host { get; set; } = new();
             public string Username { get; set; } = string.Empty;

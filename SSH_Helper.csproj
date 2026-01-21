@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <DefaultItemExcludes>$(DefaultItemExcludes);SSH_Helper.Tests\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);SSH_Helper.Tests\**;RebexPOC\**</DefaultItemExcludes>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
@@ -14,7 +14,7 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.0-preview.3.24172.9" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.0-preview.3.24172.9" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="SSH.NET" Version="2024.0.0" />
+    <PackageReference Include="Rebex.SshShell" Version="7.0.9448" />
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
   </ItemGroup>
 
@@ -33,5 +33,11 @@
     </None>
   </ItemGroup>
 
+  <!-- Copy rebex.key to output directory if it exists (gitignored, local dev only) -->
+  <ItemGroup>
+    <Content Include="rebex.key" Condition="Exists('rebex.key')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 
 </Project>

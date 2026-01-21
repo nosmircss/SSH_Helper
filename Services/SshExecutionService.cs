@@ -1,9 +1,13 @@
 using System.Text;
-using Renci.SshNet;
+using Rebex.Net;
+using Rebex.TerminalEmulation;
 using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Models;
 using SSH_Helper.Utilities;
+
+// Alias to avoid conflict with SSH_Helper.Services.Scripting namespace
+using RebexScripting = Rebex.TerminalEmulation.Scripting;
 
 namespace SSH_Helper.Services
 {
@@ -39,7 +43,7 @@ namespace SSH_Helper.Services
 
     /// <summary>
     /// Handles SSH command execution against remote hosts.
-    /// Now uses connection pooling and the Expect API for improved reliability.
+    /// Now uses connection pooling and Rebex Scripting API for improved reliability.
     /// </summary>
     public class SshExecutionService : IDisposable
     {
@@ -582,7 +586,7 @@ namespace SSH_Helper.Services
                 result.Success = true;
                 SshDebugLog(host, "HOST", "Execution successful", sw);
             }
-            catch (Renci.SshNet.Common.SshAuthenticationException ex)
+            catch (SshException ex) when (IsAuthenticationError(ex))
             {
                 result.Success = false;
                 result.ErrorMessage = "Authentication failed";
@@ -591,7 +595,7 @@ namespace SSH_Helper.Services
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
-            catch (Renci.SshNet.Common.SshConnectionException ex)
+            catch (SshException ex) when (IsConnectionError(ex))
             {
                 result.Success = false;
                 result.ErrorMessage = "Connection failed";
@@ -600,7 +604,7 @@ namespace SSH_Helper.Services
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
-            catch (Renci.SshNet.Common.SshOperationTimeoutException ex)
+            catch (SshException ex) when (IsTimeoutError(ex))
             {
                 result.Success = false;
                 result.ErrorMessage = "Operation timed out";
@@ -674,7 +678,7 @@ namespace SSH_Helper.Services
 
                 result.Success = true;
             }
-            catch (Renci.SshNet.Common.SshAuthenticationException ex)
+            catch (SshException ex) when (IsAuthenticationError(ex))
             {
                 result.Success = false;
                 result.ErrorMessage = "Authentication failed";
@@ -683,7 +687,7 @@ namespace SSH_Helper.Services
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
-            catch (Renci.SshNet.Common.SshConnectionException ex)
+            catch (SshException ex) when (IsConnectionError(ex))
             {
                 result.Success = false;
                 result.ErrorMessage = "Connection failed";
@@ -692,7 +696,7 @@ namespace SSH_Helper.Services
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
-            catch (Renci.SshNet.Common.SshOperationTimeoutException ex)
+            catch (SshException ex) when (IsTimeoutError(ex))
             {
                 result.Success = false;
                 result.ErrorMessage = "Operation timed out";
@@ -817,27 +821,61 @@ namespace SSH_Helper.Services
             CancellationToken cancellationToken,
             bool showHeader = true)
         {
-            using var client = new SshClient(host.IpAddress, host.Port, username, password);
-            client.ConnectionInfo.Timeout = timeouts.ConnectionTimeout;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            SshDebugLog(host, "SCRIPT", $"ExecuteScriptWithoutPool entered for {host.IpAddress}:{host.Port}");
 
-            client.ErrorOccurred += (s, e) =>
-            {
-                if (e.Exception != null && _isRunning)
-                {
-                    OnProgressChanged(host, $"SSH Error: {e.Exception.Message}", true, true);
-                }
-            };
+            // Create Rebex SSH client
+            using var client = new Ssh();
+            client.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
+            SshDebugLog(host, "SCRIPT", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
 
-            client.Connect();
+            SshDebugLog(host, "SCRIPT", "Calling client.Connect()", sw);
+            var connectSw = System.Diagnostics.Stopwatch.StartNew();
+            client.Connect(host.IpAddress, host.Port);
+            connectSw.Stop();
+            SshDebugLog(host, "SCRIPT", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw);
+
+            SshDebugLog(host, "SCRIPT", "Calling client.Login()", sw);
+            client.Login(username, password);
+            SshDebugLog(host, "SCRIPT", "client.Login() completed", sw);
+
             OnProgressChanged(host, $"Connected to {host} (script mode)", false, true);
 
-            using var shellStream = client.CreateShellStream("xterm", 200, 48, 1200, 800, 16384);
-            using var session = new SshShellSession(shellStream, timeouts);
+            SshDebugLog(host, "SCRIPT", "Starting scripting session", sw);
+            RebexScripting scripting = client.StartScripting();
+            scripting.Timeout = (int)timeouts.CommandTimeout.TotalMilliseconds;
+            SshDebugLog(host, "SCRIPT", "Scripting session created", sw);
 
+            using var session = new SshShellSession(client, scripting, timeouts);
             session.DebugMode = DebugMode;
 
+            // Also enable debug mode on the session if SSH debug is on
+            if (SshDebugMode)
+            {
+                session.DebugMode = true;
+            }
+
+            // Subscribe to session debug output so we can see banner detection, prompt detection, etc.
+            session.DebugOutput += (s, e) =>
+            {
+                outputBuilder.Append(e.Output);
+                OnOutputReceived(host, e.Output);
+            };
+
             // Initialize session (detect prompt)
-            var banner = session.InitializeAsync(cancellationToken).GetAwaiter().GetResult();
+            SshDebugLog(host, "SCRIPT", "Calling session.InitializeAsync - waiting for prompt", sw);
+            try
+            {
+                var banner = session.InitializeAsync(cancellationToken).GetAwaiter().GetResult();
+                SshDebugLog(host, "SCRIPT", $"session.InitializeAsync completed. Prompt: {session.CurrentPrompt}", sw);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Provide more context about why the session might have failed
+                SshDebugLog(host, "SCRIPT", $"SESSION INIT FAILED during InitializeAsync: {ex.Message}", sw);
+                SshDebugLog(host, "SCRIPT", $"Client.IsConnected: {client.IsConnected}", sw);
+                throw;
+            }
 
             // Build header with script name (only if showHeader is true)
             if (showHeader)
@@ -981,32 +1019,50 @@ namespace SSH_Helper.Services
             bool showHeader = true)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            SshDebugLog(host, "SSH", $"ExecuteWithoutPool entered. Creating SshClient for {host.IpAddress}:{host.Port}");
+            SshDebugLog(host, "SSH", $"ExecuteWithoutPool entered. Creating Ssh client for {host.IpAddress}:{host.Port}");
 
-            using var client = new SshClient(host.IpAddress, host.Port, username, password);
-            client.ConnectionInfo.Timeout = timeouts.ConnectionTimeout;
-            SshDebugLog(host, "SSH", $"SshClient created. ConnectionTimeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
-
-            client.ErrorOccurred += (s, e) =>
+            // Test raw TCP connectivity first to isolate network latency from SSH negotiation
+            if (SshDebugMode)
             {
-                if (e.Exception != null && _isRunning)
+                try
                 {
-                    OnProgressChanged(host, $"SSH Error: {e.Exception.Message}", true, true);
+                    using var tcpTest = new System.Net.Sockets.TcpClient();
+                    var tcpSw = System.Diagnostics.Stopwatch.StartNew();
+                    tcpTest.Connect(host.IpAddress, host.Port);
+                    tcpSw.Stop();
+                    SshDebugLog(host, "SSH", $"TCP pre-check completed in {tcpSw.ElapsedMilliseconds}ms (raw socket connect)", sw);
+                    tcpTest.Close();
                 }
-            };
+                catch (Exception ex)
+                {
+                    SshDebugLog(host, "SSH", $"TCP pre-check failed: {ex.Message}", sw);
+                }
+            }
+
+            // Create Rebex SSH client
+            using var client = new Ssh();
+            client.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
+            SshDebugLog(host, "SSH", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
 
             SshDebugLog(host, "SSH", "Calling client.Connect() - TCP handshake + SSH negotiation starting", sw);
-            client.Connect();
-            SshDebugLog(host, "SSH", "client.Connect() completed - SSH session established", sw);
+            var connectSw = System.Diagnostics.Stopwatch.StartNew();
+            client.Connect(host.IpAddress, host.Port);
+            connectSw.Stop();
+            SshDebugLog(host, "SSH", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw);
+
+            SshDebugLog(host, "SSH", "Calling client.Login()", sw);
+            client.Login(username, password);
+            SshDebugLog(host, "SSH", "client.Login() completed - SSH session established", sw);
 
             OnProgressChanged(host, $"Connected to {host}", false, true);
 
-            SshDebugLog(host, "SSH", "Creating shell stream", sw);
-            using var shellStream = client.CreateShellStream("xterm", 200, 48, 1200, 800, 16384);
-            SshDebugLog(host, "SSH", "Shell stream created", sw);
+            SshDebugLog(host, "SSH", "Starting scripting session", sw);
+            RebexScripting scripting = client.StartScripting();
+            scripting.Timeout = (int)timeouts.CommandTimeout.TotalMilliseconds;
+            SshDebugLog(host, "SSH", "Scripting session created", sw);
 
             SshDebugLog(host, "SSH", "Creating SshShellSession", sw);
-            using var session = new SshShellSession(shellStream, timeouts);
+            using var session = new SshShellSession(client, scripting, timeouts);
             SshDebugLog(host, "SSH", "SshShellSession created", sw);
 
             // Configure debug mode BEFORE subscribing to events
@@ -1070,6 +1126,33 @@ namespace SSH_Helper.Services
             SshDebugLog(host, "SSH", "Calling client.Disconnect()", sw);
             client.Disconnect();
             SshDebugLog(host, "SSH", "client.Disconnect() completed", sw);
+        }
+
+        /// <summary>
+        /// Checks if an SshException indicates an authentication error.
+        /// </summary>
+        private static bool IsAuthenticationError(SshException ex)
+        {
+            var msg = ex.Message.ToLowerInvariant();
+            return msg.Contains("authentication") || msg.Contains("password") || msg.Contains("login") || msg.Contains("credentials");
+        }
+
+        /// <summary>
+        /// Checks if an SshException indicates a connection error.
+        /// </summary>
+        private static bool IsConnectionError(SshException ex)
+        {
+            var msg = ex.Message.ToLowerInvariant();
+            return msg.Contains("connection") || msg.Contains("refused") || msg.Contains("reset") || msg.Contains("closed");
+        }
+
+        /// <summary>
+        /// Checks if an SshException indicates a timeout error.
+        /// </summary>
+        private static bool IsTimeoutError(SshException ex)
+        {
+            var msg = ex.Message.ToLowerInvariant();
+            return msg.Contains("timeout") || msg.Contains("time limit") || msg.Contains("timed out");
         }
 
         private string FormatError(string errorType, HostConnection host, Exception ex)

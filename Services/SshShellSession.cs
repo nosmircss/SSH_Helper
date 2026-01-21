@@ -1,7 +1,11 @@
 using System.Text;
 using System.Text.RegularExpressions;
-using Renci.SshNet;
+using Rebex.Net;
+using Rebex.TerminalEmulation;
 using SSH_Helper.Utilities;
+
+// Alias to avoid conflict with SSH_Helper.Services.Scripting namespace
+using RebexScripting = Rebex.TerminalEmulation.Scripting;
 
 namespace SSH_Helper.Services
 {
@@ -15,11 +19,11 @@ namespace SSH_Helper.Services
 
     /// <summary>
     /// Represents an interactive SSH shell session that maintains state across commands.
-    /// Uses SSH.NET's Expect API for reliable prompt detection.
+    /// Uses Rebex Scripting API for reliable prompt detection.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Benefits of the Expect API:</b>
+    /// <b>Benefits of the Scripting API:</b>
     /// </para>
     /// <list type="bullet">
     ///   <item>
@@ -38,43 +42,21 @@ namespace SSH_Helper.Services
     ///     <b>Cleaner code:</b> Declarative pattern matching vs. manual read loops with string parsing.
     ///   </item>
     /// </list>
-    /// <para>
-    /// <b>Future capabilities enabled by Expect:</b>
-    /// </para>
-    /// <list type="bullet">
-    ///   <item>
-    ///     <b>Interactive prompts:</b> Handle sudo password prompts, confirmation dialogs (yes/no),
-    ///     and multi-step authentication.
-    ///   </item>
-    ///   <item>
-    ///     <b>Error detection:</b> Detect and react to error patterns mid-stream (e.g., "Permission denied",
-    ///     "Command not found") without waiting for timeout.
-    ///   </item>
-    ///   <item>
-    ///     <b>Conditional execution:</b> Branch command flow based on output patterns
-    ///     (e.g., different commands for different OS versions).
-    ///   </item>
-    ///   <item>
-    ///     <b>Progress indicators:</b> Detect progress patterns and report real-time status
-    ///     (e.g., "50% complete", "Processing file X of Y").
-    ///   </item>
-    ///   <item>
-    ///     <b>Multi-stage authentication:</b> Handle MFA prompts, banner acknowledgments,
-    ///     or terms-of-service acceptance.
-    ///   </item>
-    ///   <item>
-    ///     <b>Menu navigation:</b> Automatically navigate text-based menus by detecting options
-    ///     and sending appropriate selections.
-    ///   </item>
-    /// </list>
     /// </remarks>
     public class SshShellSession : IDisposable
     {
-        private readonly ShellStream _stream;
+        private readonly Ssh _sshClient;
+        private readonly RebexScripting _scripting;
         private readonly SshTimeoutOptions _timeouts;
         private Regex _promptPattern;
         private string _currentPrompt;
         private bool _disposed;
+
+        // Rebex ScriptEvents for pattern matching
+        private ScriptEvent? _shellPromptEvent;
+        private ScriptEvent? _pagerEvent;
+        private ScriptEvent? _promptOrPagerEvent;
+        private ScriptEvent? _bannerEvent;
 
         /// <summary>
         /// When enabled, emits debug timestamps and diagnostic info to help troubleshoot prompt detection.
@@ -99,7 +81,7 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Gets whether the session is still valid and connected.
         /// </summary>
-        public bool IsConnected => !_disposed && _stream.CanRead && _stream.CanWrite;
+        public bool IsConnected => !_disposed && _sshClient.IsConnected;
 
         /// <summary>
         /// Common patterns used in expect operations.
@@ -109,8 +91,21 @@ namespace SSH_Helper.Services
             /// <summary>Matches common shell prompts ending with #, $, >, or %</summary>
             public static readonly Regex ShellPrompt = new(@"^.+[#$>%]\s*$", RegexOptions.Multiline);
 
+            /// <summary>Shell prompt pattern string for Rebex ScriptEvent</summary>
+            public const string ShellPromptPattern = @"(?:^|[\r\n])[\w][\w.-]*(?:\s*\([^)]+\))?\s*[#$>%]\s*$";
+
             /// <summary>Matches "-- More --" style pager prompts</summary>
             public static readonly Regex PagerPrompt = new(@"--\s*More\s*--", RegexOptions.IgnoreCase);
+
+            /// <summary>Pager patterns for Rebex ScriptEvent</summary>
+            public static readonly string[] PagerPatterns = new[]
+            {
+                @"--\s*[Mm]ore\s*--",                    // --More-- or -- More --
+                @"--\s*[Pp]ress\s+",                     // --Press SPACE-- (pager-specific)
+                @"\(END\)",                              // (END) from less
+                @"lines\s+\d+-\d+",                      // lines 1-24
+                @"Press\s+(?:[Ss][Pp][Aa][Cc][Ee]|any\s+key)",  // Press SPACE / Press any key
+            };
 
             /// <summary>Matches yes/no confirmation prompts</summary>
             public static readonly Regex ConfirmationPrompt = new(@"\[(?:y(?:es)?/n(?:o)?|confirm)\]\s*[:?]?\s*$", RegexOptions.IgnoreCase);
@@ -125,57 +120,180 @@ namespace SSH_Helper.Services
             public static readonly Regex ErrorIndicator = new(
                 @"(?:error|failed|denied|not found|invalid|unknown command)",
                 RegexOptions.IgnoreCase);
+
+            /// <summary>
+            /// Matches pre-login banner acceptance prompts (e.g., FortiGate EULA).
+            /// Returns the key to press in group 1.
+            /// Examples: "(Press 'a' to accept):", "Press 'q' to quit", "[Press any key to continue]"
+            /// FortiGate specific: "Press 'a' to accept:", "(a)ccept", "[A]ccept"
+            /// </summary>
+            public static readonly Regex BannerAcceptPrompt = new(
+                @"(?:" +
+                    @"press\s+['""]?([aqy])['""]?\s+to\s+(?:accept|agree|continue|quit)" + // "Press 'a' to accept"
+                    @"|press\s+any\s+key" +                                                  // "Press any key"
+                    @"|\(([aqy])\)\s*(?:ccept|gree|uit|ontinue)" +                          // "(a)ccept" or "(q)uit"
+                    @"|\[([AaQqYy])\]\s*(?:ccept|gree|uit|ontinue)" +                       // "[A]ccept" or "[Q]uit"
+                    @"|to\s+accept[,:]?\s+press\s+['""]?([aqy])['""]?" +                    // "to accept, press 'a'"
+                @")",
+                RegexOptions.IgnoreCase);
+
+            /// <summary>Banner pattern string for Rebex ScriptEvent</summary>
+            public const string BannerAcceptPattern =
+                @"(?:" +
+                    @"press\s+['""]?([aqy])['""]?\s+to\s+(?:accept|agree|continue|quit)" +
+                    @"|press\s+any\s+key" +
+                    @"|\(([aqy])\)\s*(?:ccept|gree|uit|ontinue)" +
+                    @"|\[([AaQqYy])\]\s*(?:ccept|gree|uit|ontinue)" +
+                    @"|to\s+accept[,:]?\s+press\s+['""]?([aqy])['""]?" +
+                @")";
         }
 
         /// <summary>
-        /// Creates a new shell session from an existing ShellStream.
+        /// Creates a new shell session from a Rebex SSH client and Scripting instance.
         /// </summary>
-        /// <param name="stream">The SSH shell stream</param>
+        /// <param name="sshClient">The Rebex SSH client</param>
+        /// <param name="scripting">The Rebex Scripting instance from StartScripting()</param>
         /// <param name="timeouts">Timeout configuration</param>
-        public SshShellSession(ShellStream stream, SshTimeoutOptions? timeouts = null)
+        public SshShellSession(Ssh sshClient, RebexScripting scripting, SshTimeoutOptions? timeouts = null)
         {
-            _stream = stream ?? throw new ArgumentNullException(nameof(stream));
+            _sshClient = sshClient ?? throw new ArgumentNullException(nameof(sshClient));
+            _scripting = scripting ?? throw new ArgumentNullException(nameof(scripting));
             _timeouts = timeouts ?? SshTimeoutOptions.Default;
             _currentPrompt = string.Empty;
             _promptPattern = Patterns.ShellPrompt;
+
+            // Initialize ScriptEvents for pattern matching
+            InitializeScriptEvents();
+        }
+
+        /// <summary>
+        /// Initializes the Rebex ScriptEvents for pattern matching.
+        /// </summary>
+        private void InitializeScriptEvents()
+        {
+            _shellPromptEvent = ScriptEvent.FromRegex(Patterns.ShellPromptPattern);
+            _pagerEvent = ScriptEvent.FromRegex(string.Join("|", Patterns.PagerPatterns));
+            _promptOrPagerEvent = ScriptEvent.FromRegex(
+                $@"(?:{string.Join("|", Patterns.PagerPatterns)}|{Patterns.ShellPromptPattern})");
+            _bannerEvent = ScriptEvent.FromRegex(Patterns.BannerAcceptPattern);
         }
 
         /// <summary>
         /// Initializes the session by detecting the shell prompt.
+        /// Automatically handles pre-login banners that require acceptance (e.g., FortiGate EULA).
         /// Call this after creating the session before executing commands.
         /// </summary>
         /// <param name="cancellationToken">Cancellation token</param>
         /// <returns>The detected prompt and any banner text</returns>
         public async Task<string> InitializeAsync(CancellationToken cancellationToken = default)
         {
-            // Send empty line to trigger prompt
-            _stream.WriteLine("");
-            _stream.Flush();
+            var allOutput = new StringBuilder();
+            var maxBannerAttempts = 3; // Prevent infinite loops if banner keeps appearing
+            var attemptCount = 0;
 
-            // Wait for initial output using Expect with timeout
-            var banner = await ExpectPromptAsync(_timeouts.InitialPromptTimeout, cancellationToken);
-
-            // Try to detect the actual prompt from the output
-            var sanitized = TerminalOutputProcessor.Sanitize(banner);
-            var normalized = TerminalOutputProcessor.Normalize(sanitized);
-
-            if (PromptDetector.TryDetectPrompt(normalized, out var detectedPrompt))
+            // Check connection validity before starting
+            if (!IsConnected)
             {
-                _currentPrompt = detectedPrompt;
-                _promptPattern = PromptDetector.BuildPromptRegex(detectedPrompt);
+                throw new ObjectDisposedException(nameof(SshShellSession), "SSH connection is not valid. The connection may have failed or been closed by the server.");
             }
-            else
+
+            // Set initial timeout for prompt detection
+            _scripting.Timeout = (int)_timeouts.InitialPromptTimeout.TotalMilliseconds;
+
+            // Send empty line to trigger prompt
+            try
             {
-                // Fall back to last line
-                var lines = normalized.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-                _currentPrompt = lines.LastOrDefault()?.TrimEnd() ?? "";
-                if (!string.IsNullOrEmpty(_currentPrompt))
+                _scripting.Send("\r");
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("SSH shell was closed unexpectedly while initializing. The connection may have been terminated by the server.", ex);
+            }
+
+            while (attemptCount < maxBannerAttempts)
+            {
+                attemptCount++;
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
                 {
-                    _promptPattern = PromptDetector.BuildPromptRegex(_currentPrompt);
+                    // Wait for initial output using ReadUntil with banner and prompt events
+                    EmitDebug($"Waiting for banner or prompt (attempt {attemptCount}/{maxBannerAttempts})");
+                    var output = _scripting.ReadUntil(_bannerEvent!, _shellPromptEvent!);
+                    allOutput.Append(output);
+
+                    // Try to detect the actual prompt from the output
+                    var sanitized = TerminalOutputProcessor.Sanitize(output ?? "");
+                    var normalized = TerminalOutputProcessor.Normalize(sanitized);
+
+                    // Check if we got a real shell prompt
+                    if (PromptDetector.TryDetectPrompt(normalized, out var detectedPrompt))
+                    {
+                        _currentPrompt = detectedPrompt;
+                        _promptPattern = PromptDetector.BuildPromptRegex(detectedPrompt);
+                        EmitDebug($"Shell prompt detected: {detectedPrompt}");
+                        break;
+                    }
+
+                    // Check for banner acceptance prompt (e.g., "Press 'a' to accept")
+                    var bannerMatch = Patterns.BannerAcceptPrompt.Match(normalized);
+                    if (bannerMatch.Success)
+                    {
+                        EmitDebug($"[InitializeAsync] Banner prompt matched: '{bannerMatch.Value}' at position {bannerMatch.Index}");
+
+                        // Send acceptance key IMMEDIATELY - FortiGate has very short timeout
+                        var keyToPress = GetBannerAcceptKey(bannerMatch);
+                        EmitDebug($"[InitializeAsync] Sending banner acceptance key: '{keyToPress}'");
+
+                        try
+                        {
+                            _scripting.Send(keyToPress);
+                            EmitDebug("[InitializeAsync] Banner acceptance sent successfully");
+                        }
+                        catch (Exception ex)
+                        {
+                            EmitDebug($"[InitializeAsync] Exception during banner acceptance: {ex.GetType().Name}: {ex.Message}");
+                            throw;
+                        }
+
+                        // Small delay to let the server process the keypress
+                        await Task.Delay(100, cancellationToken);
+                        continue; // Loop to wait for the real prompt
+                    }
+
+                    // No shell prompt and no banner prompt - check if last line could be a prompt
+                    var lines = normalized.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+                    var lastLine = lines.LastOrDefault()?.TrimEnd() ?? "";
+
+                    if (!string.IsNullOrEmpty(lastLine) && PromptDetector.IsLikelyPrompt(lastLine))
+                    {
+                        _currentPrompt = lastLine;
+                        _promptPattern = PromptDetector.BuildPromptRegex(lastLine);
+                        EmitDebug($"Fallback prompt detected: {lastLine}");
+                        break;
+                    }
+
+                    // If we reach here, we didn't find a valid prompt - try sending another newline
+                    if (attemptCount < maxBannerAttempts)
+                    {
+                        EmitDebug($"No valid prompt found, attempt {attemptCount}/{maxBannerAttempts}, sending newline");
+                        _scripting.Send("\r");
+                    }
+                }
+                catch (SshException ex) when (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase))
+                {
+                    EmitDebug($"Timeout waiting for prompt on attempt {attemptCount}");
+                    if (attemptCount >= maxBannerAttempts)
+                        break;
                 }
             }
 
-            return normalized;
+            if (string.IsNullOrEmpty(_currentPrompt))
+            {
+                EmitDebug("Warning: Could not detect a valid shell prompt after all attempts");
+            }
+
+            return TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(allOutput.ToString()));
         }
 
         /// <summary>
@@ -188,10 +306,9 @@ namespace SSH_Helper.Services
         {
             ThrowIfDisposed();
 
-            _stream.WriteLine(command);
-            _stream.Flush();
+            _scripting.Send(command + "\r");
 
-            var output = await ReadUntilPromptWithExpectAsync(cancellationToken);
+            var output = await ReadUntilPromptAsync(cancellationToken);
             return output;
         }
 
@@ -232,77 +349,47 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Uses SSH.NET's Expect API to wait for the prompt pattern.
-        /// This is the core method that leverages Expect for reliable prompt detection.
+        /// Uses Rebex Scripting API to wait for the prompt pattern.
+        /// Handles pager prompts automatically.
         /// </summary>
-        /// <remarks>
-        /// <b>How Expect works:</b>
-        /// The Expect method reads from the stream and matches against provided patterns.
-        /// When a pattern matches, the corresponding action is executed.
-        /// This enables reactive handling of different output scenarios.
-        ///
-        /// <b>Current implementation:</b>
-        /// - Detects pager prompts ("-- More --") and automatically sends space to continue
-        /// - Detects the shell prompt to know when a command completes
-        /// - Falls back to idle timeout if no pattern matches
-        ///
-        /// <b>Future enhancements possible:</b>
-        /// - Add ExpectAction for password prompts with auto-response
-        /// - Add ExpectAction for confirmation prompts (yes/no)
-        /// - Add ExpectAction for error patterns with early termination
-        /// - Add ExpectAction for progress indicators with real-time callbacks
-        /// </remarks>
-        private async Task<string> ReadUntilPromptWithExpectAsync(CancellationToken cancellationToken)
+        private Task<string> ReadUntilPromptAsync(CancellationToken cancellationToken)
+        {
+            return Task.Run(() => ReadUntilPromptCore(cancellationToken), cancellationToken);
+        }
+
+        /// <summary>
+        /// Core implementation of ReadUntilPrompt (runs on background thread).
+        /// </summary>
+        private string ReadUntilPromptCore(CancellationToken cancellationToken)
         {
             var output = new StringBuilder();
-            var idleTimeout = _timeouts.IdleTimeout;
-            var commandTimeout = _timeouts.CommandTimeout;
-            var startTime = DateTime.UtcNow;
             var maxPages = 50000;
             var pageCount = 0;
-            var lastDataTime = DateTime.UtcNow;
-            var pollInterval = _timeouts.PollInterval;
 
-            // Short quiet period to confirm prompt detection (wait for more data after seeing prompt-like pattern)
-            var promptConfirmMs = 150; // Wait 150ms to confirm no more data is coming
-            var quietPeriodMs = Math.Max(200, (int)pollInterval.TotalMilliseconds * 3);
-            bool potentialPromptDetected = false;
-            DateTime? potentialPromptTime = null;
-
-            // Track when we just dismissed a pager so we can clean up echo artifacts in the next chunk
-            bool justDismissedPager = false;
+            // Set command timeout
+            _scripting.Timeout = (int)_timeouts.CommandTimeout.TotalMilliseconds;
 
             EmitDebug($"ReadUntilPrompt started. Prompt pattern: {_promptPattern}");
-            EmitDebug($"IdleTimeout: {idleTimeout.TotalSeconds}s, CommandTimeout: {commandTimeout.TotalSeconds}s");
+            EmitDebug($"CommandTimeout: {_timeouts.CommandTimeout.TotalSeconds}s");
 
             while (!cancellationToken.IsCancellationRequested && pageCount < maxPages)
             {
-                // Check overall command timeout
-                if (DateTime.UtcNow - startTime > commandTimeout)
+                // Check if connection is still valid
+                if (!IsConnected)
                 {
-                    EmitDebug("Command timeout reached");
-                    break;
+                    EmitDebug("Connection is no longer valid during ReadUntilPrompt");
+                    throw new InvalidOperationException("SSH connection was closed unexpectedly.");
                 }
 
-                if (_stream.DataAvailable)
+                try
                 {
-                    var chunk = _stream.Read();
+                    // Read until we hit either a prompt or a pager
+                    var chunk = _scripting.ReadUntil(_promptOrPagerEvent!);
+
                     if (!string.IsNullOrEmpty(chunk))
                     {
-                        lastDataTime = DateTime.UtcNow;
-                        potentialPromptDetected = false; // Reset - more data arrived
-                        potentialPromptTime = null;
-
                         // Process the chunk
                         chunk = TerminalOutputProcessor.Sanitize(chunk);
-
-                        // If we just dismissed a pager, clean up any echo artifacts from the space key
-                        if (justDismissedPager)
-                        {
-                            chunk = TerminalOutputProcessor.StripPagerDismissalArtifacts(chunk);
-                            justDismissedPager = false;
-                        }
-
                         chunk = TerminalOutputProcessor.StripPagerArtifacts(chunk, out bool sawPager);
 
                         output.Append(chunk);
@@ -310,74 +397,38 @@ namespace SSH_Helper.Services
 
                         EmitDebug($"Received {chunk.Length} chars. Buffer now {output.Length} chars");
 
-                        if (sawPager)
+                        // Check if we hit a pager
+                        bool hitPager = false;
+                        foreach (var pattern in Patterns.PagerPatterns)
                         {
-                            EmitDebug("Pager detected, sending space");
-                            _stream.Write(" ");
-                            _stream.Flush();
-                            pageCount++;
-                            justDismissedPager = true;
-                            continue;
+                            if (Regex.IsMatch(chunk, pattern, RegexOptions.IgnoreCase))
+                            {
+                                hitPager = true;
+                                pageCount++;
+                                EmitDebug($"Pager detected ({pageCount}), sending space");
+                                _scripting.Send(" ");
+                                break;
+                            }
                         }
 
-                        // Check if we have a definitive prompt match (compiled regex)
-                        if (PromptDetector.BufferEndsWithPrompt(output, _promptPattern))
+                        if (!hitPager)
                         {
-                            EmitDebug("Prompt detected via regex match");
+                            // We hit the shell prompt - done!
+                            EmitDebug("Prompt detected, command complete");
                             UpdatePromptIfChanged(output);
                             break;
                         }
-
-                        // Check if buffer ends with something that looks like a prompt
-                        // Mark it as potential and confirm after a short quiet period
-                        if (CheckForPromptInTail(output, confirmAndUpdate: false))
-                        {
-                            potentialPromptDetected = true;
-                            potentialPromptTime = DateTime.UtcNow;
-                            EmitDebug("Potential prompt detected, waiting to confirm...");
-                        }
                     }
                 }
-                else
+                catch (SshException ex) when (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase))
                 {
-                    // No data available
-                    var quietTime = (DateTime.UtcNow - lastDataTime).TotalMilliseconds;
-
-                    // If we detected a potential prompt, confirm after short wait
-                    if (potentialPromptDetected && potentialPromptTime.HasValue)
-                    {
-                        var timeSincePotential = (DateTime.UtcNow - potentialPromptTime.Value).TotalMilliseconds;
-                        if (timeSincePotential >= promptConfirmMs)
-                        {
-                            // No more data came, confirm the prompt
-                            if (CheckForPromptInTail(output, confirmAndUpdate: true))
-                            {
-                                EmitDebug($"Prompt confirmed after {timeSincePotential:F0}ms quiet");
-                                break;
-                            }
-                            potentialPromptDetected = false;
-                            potentialPromptTime = null;
-                        }
-                    }
-
-                    // Standard quiet period check (fallback)
-                    if (quietTime >= quietPeriodMs && !potentialPromptDetected)
-                    {
-                        if (output.Length > 0 && CheckForPromptInTail(output, confirmAndUpdate: true))
-                        {
-                            EmitDebug($"Prompt detected after {quietTime:F0}ms quiet period");
-                            break;
-                        }
-                    }
-
-                    // Check for idle timeout
-                    if (quietTime >= idleTimeout.TotalMilliseconds)
-                    {
-                        EmitDebug($"Idle timeout reached after {quietTime:F0}ms");
-                        break;
-                    }
-
-                    await Task.Delay(pollInterval, cancellationToken);
+                    EmitDebug("Command timeout reached");
+                    break;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    EmitDebug($"Error during ReadUntilPrompt: {ex.Message}");
+                    break;
                 }
             }
 
@@ -387,98 +438,21 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Checks the tail of the buffer for prompt-like patterns.
-        /// This is a fallback for when the main regex doesn't match.
+        /// Extracts the key to press from a banner acceptance prompt match.
+        /// Checks all capture groups since the regex has multiple alternatives.
         /// </summary>
-        /// <param name="buffer">The output buffer to check</param>
-        /// <param name="confirmAndUpdate">If true, updates the prompt pattern when a new prompt is found</param>
-        /// <returns>True if a prompt-like pattern was found at the end of the buffer</returns>
-        private bool CheckForPromptInTail(StringBuilder buffer, bool confirmAndUpdate = true)
+        private static string GetBannerAcceptKey(Match bannerMatch)
         {
-            if (buffer.Length == 0)
-                return false;
-
-            // Look at the last portion of the buffer
-            int lookback = Math.Min(512, buffer.Length);
-            string tail = buffer.ToString(buffer.Length - lookback, lookback);
-
-            // Split by newlines and check the last non-empty line
-            var lines = tail.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
-
-            for (int i = lines.Length - 1; i >= 0; i--)
+            // Check each capture group (groups 1-4 contain the key in different patterns)
+            for (int i = 1; i <= 4; i++)
             {
-                var line = lines[i].TrimEnd();
-                if (string.IsNullOrEmpty(line))
-                    continue;
-
-                // Check if this line looks like a prompt
-                if (PromptDetector.IsLikelyPrompt(line))
+                if (bannerMatch.Groups[i].Success && !string.IsNullOrEmpty(bannerMatch.Groups[i].Value))
                 {
-                    if (confirmAndUpdate)
-                    {
-                        EmitDebug($"Likely prompt found: '{line}'");
-
-                        // Update the prompt pattern if it's different
-                        if (!_promptPattern.IsMatch(line))
-                        {
-                            EmitDebug($"Updating prompt pattern from: {_currentPrompt} to: {line}");
-                            _currentPrompt = line;
-                            _promptPattern = PromptDetector.BuildPromptRegex(line);
-                        }
-                    }
-                    return true;
-                }
-
-                // Only check the last non-empty line
-                break;
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Simple expect for initial prompt detection.
-        /// </summary>
-        private async Task<string> ExpectPromptAsync(TimeSpan timeout, CancellationToken cancellationToken)
-        {
-            var output = new StringBuilder();
-            var startTime = DateTime.UtcNow;
-            var pollInterval = _timeouts.PollInterval;
-
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                if (DateTime.UtcNow - startTime > timeout)
-                    break;
-
-                if (_stream.DataAvailable)
-                {
-                    var chunk = _stream.Read();
-                    if (!string.IsNullOrEmpty(chunk))
-                    {
-                        output.Append(chunk);
-
-                        // Check if we've received a prompt
-                        var text = output.ToString();
-                        var sanitized = TerminalOutputProcessor.Sanitize(text);
-                        if (PromptDetector.TryDetectPrompt(sanitized, out _))
-                        {
-                            // Wait a bit more for any trailing output
-                            await Task.Delay(100, cancellationToken);
-                            if (_stream.DataAvailable)
-                            {
-                                output.Append(_stream.Read());
-                            }
-                            break;
-                        }
-                    }
-                }
-                else
-                {
-                    await Task.Delay(pollInterval, cancellationToken);
+                    return bannerMatch.Groups[i].Value.ToLowerInvariant();
                 }
             }
-
-            return output.ToString();
+            // Default to 'a' for patterns like "press any key"
+            return "a";
         }
 
         /// <summary>
@@ -538,7 +512,7 @@ namespace SSH_Helper.Services
             if (!_disposed)
             {
                 _disposed = true;
-                // Note: We don't dispose the stream here as it's owned by the caller/pool
+                // Note: We don't dispose the Ssh client or Scripting here as they're owned by the caller/pool
             }
         }
     }

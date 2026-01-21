@@ -4757,18 +4757,24 @@ namespace SSH_Helper
         private void SshService_OutputReceived(object? sender, SshOutputEventArgs e)
         {
             var output = e.Output;
+
+            if (InvokeRequired)
+            {
+                Invoke(() => AppendOutputText(output));
+            }
+            else
+            {
+                AppendOutputText(output);
+            }
+        }
+
+        private void AppendOutputText(string output)
+        {
             // Trim leading newlines if textbox is empty (first banner)
             if (txtOutput.TextLength == 0)
                 output = output.TrimStart('\r', '\n');
 
-            if (InvokeRequired)
-            {
-                Invoke(() => txtOutput.AppendText(output));
-            }
-            else
-            {
-                txtOutput.AppendText(output);
-            }
+            txtOutput.AppendText(output);
         }
 
         private void SshService_ColumnUpdateRequested(object? sender, SshColumnUpdateEventArgs e)
