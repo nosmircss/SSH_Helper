@@ -31,6 +31,27 @@ namespace SSH_Helper
         [DllImport("uxtheme.dll", EntryPoint = "#136", SetLastError = true, CharSet = CharSet.Unicode)]
         public static extern void FlushMenuThemes();
 
+        // Child window enumeration for applying theme to scrollbars
+        public delegate bool EnumChildProc(IntPtr hwnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        public static extern bool EnumChildWindows(IntPtr hwndParent, EnumChildProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
+
+        // Window message constants
+        public const int WM_THEMECHANGED = 0x031A;
+
+        // SetWindowPos flags for forcing frame/non-client area redraw
+        [DllImport("user32.dll")]
+        public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        public const uint SWP_NOMOVE = 0x0002;
+        public const uint SWP_NOSIZE = 0x0001;
+        public const uint SWP_NOZORDER = 0x0004;
+        public const uint SWP_FRAMECHANGED = 0x0020;
+
         // App mode constants
         public const int AppModeDefault = 0;
         public const int AppModeAllowDark = 1;
@@ -51,7 +72,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.8";
+        private const string ApplicationVersion = "0.50.9";
         private const string ApplicationName = "SSH Helper";
 
         #endregion
@@ -106,6 +127,11 @@ namespace SSH_Helper
 
         // SSH startup debug mode - logs timing from button click through SSH connection
         private bool _sshDebugMode;
+
+        // Custom scrollbars for DataGridView (to support dark mode theming)
+        private VScrollBar? _dgvVScrollBar;
+        private HScrollBar? _dgvHScrollBar;
+        private Panel? _dgvScrollCorner;
 
         #endregion
 
@@ -270,6 +296,222 @@ namespace SSH_Helper
 
             dgv_variables.ColumnHeadersVisible = true;
             dgv_variables.RowHeadersVisible = true;
+
+            // Set up custom scrollbars for dark mode support
+            SetupDataGridViewScrollbars();
+        }
+
+        private void SetupDataGridViewScrollbars()
+        {
+            // Hide the built-in scrollbars
+            dgv_variables.ScrollBars = ScrollBars.None;
+
+            // Change DataGridView from Dock.Fill to manual positioning so we can add scrollbars
+            dgv_variables.Dock = DockStyle.None;
+            dgv_variables.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+
+            // Create vertical scrollbar
+            _dgvVScrollBar = new VScrollBar
+            {
+                Width = SystemInformation.VerticalScrollBarWidth,
+                Visible = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom
+            };
+
+            // Create horizontal scrollbar
+            _dgvHScrollBar = new HScrollBar
+            {
+                Height = SystemInformation.HorizontalScrollBarHeight,
+                Visible = false,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
+            };
+
+            // Create corner panel (fills the gap when both scrollbars are visible)
+            _dgvScrollCorner = new Panel
+            {
+                Width = SystemInformation.VerticalScrollBarWidth,
+                Height = SystemInformation.HorizontalScrollBarHeight,
+                Visible = false,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
+            };
+
+            // Add controls to the hosts panel
+            hostsPanel.Controls.Add(_dgvScrollCorner);
+            hostsPanel.Controls.Add(_dgvHScrollBar);
+            hostsPanel.Controls.Add(_dgvVScrollBar);
+
+            // Bring scrollbars to front
+            _dgvVScrollBar.BringToFront();
+            _dgvHScrollBar.BringToFront();
+            _dgvScrollCorner.BringToFront();
+
+            // Wire up scrollbar events
+            _dgvVScrollBar.Scroll += DgvVScrollBar_Scroll;
+            _dgvHScrollBar.Scroll += DgvHScrollBar_Scroll;
+
+            // Wire up DataGridView events to update scrollbar state
+            dgv_variables.RowsAdded += (s, e) => UpdateDataGridViewScrollbars();
+            dgv_variables.RowsRemoved += (s, e) => UpdateDataGridViewScrollbars();
+            dgv_variables.ColumnAdded += (s, e) => UpdateDataGridViewScrollbars();
+            dgv_variables.ColumnRemoved += (s, e) => UpdateDataGridViewScrollbars();
+            dgv_variables.ColumnWidthChanged += (s, e) => UpdateDataGridViewScrollbars();
+            dgv_variables.Resize += (s, e) => UpdateDataGridViewScrollbars();
+            dgv_variables.Scroll += DgvVariables_Scroll;
+            dgv_variables.MouseWheel += DgvVariables_MouseWheel;
+            hostsPanel.Resize += (s, e) => UpdateDataGridViewScrollbars();
+
+            // Initial update
+            UpdateDataGridViewScrollbars();
+        }
+
+        private void DgvVScrollBar_Scroll(object? sender, ScrollEventArgs e)
+        {
+            if (e.NewValue >= 0 && e.NewValue < dgv_variables.RowCount)
+            {
+                dgv_variables.FirstDisplayedScrollingRowIndex = e.NewValue;
+            }
+        }
+
+        private void DgvHScrollBar_Scroll(object? sender, ScrollEventArgs e)
+        {
+            dgv_variables.HorizontalScrollingOffset = e.NewValue;
+        }
+
+        private void DgvVariables_Scroll(object? sender, ScrollEventArgs e)
+        {
+            // Sync custom scrollbars with DataGridView's internal scroll position
+            if (_dgvVScrollBar != null && e.ScrollOrientation == ScrollOrientation.VerticalScroll)
+            {
+                _dgvVScrollBar.Value = Math.Min(e.NewValue, _dgvVScrollBar.Maximum);
+            }
+            else if (_dgvHScrollBar != null && e.ScrollOrientation == ScrollOrientation.HorizontalScroll)
+            {
+                _dgvHScrollBar.Value = Math.Min(e.NewValue, _dgvHScrollBar.Maximum);
+            }
+        }
+
+        private void DgvVariables_MouseWheel(object? sender, MouseEventArgs e)
+        {
+            if (_dgvVScrollBar == null || !_dgvVScrollBar.Visible || dgv_variables.RowCount == 0)
+                return;
+
+            // Calculate scroll amount (typically 3 rows per wheel notch)
+            int scrollLines = SystemInformation.MouseWheelScrollLines;
+            int delta = e.Delta > 0 ? -scrollLines : scrollLines;
+
+            // Calculate new row index
+            int currentRow = dgv_variables.FirstDisplayedScrollingRowIndex;
+            int newRow = Math.Max(0, Math.Min(dgv_variables.RowCount - 1, currentRow + delta));
+
+            if (newRow != currentRow && newRow >= 0)
+            {
+                dgv_variables.FirstDisplayedScrollingRowIndex = newRow;
+                _dgvVScrollBar.Value = Math.Min(newRow, _dgvVScrollBar.Maximum);
+            }
+
+            // Mark the event as handled to prevent default behavior
+            if (e is HandledMouseEventArgs handled)
+            {
+                handled.Handled = true;
+            }
+        }
+
+        private void UpdateDataGridViewScrollbars()
+        {
+            if (_dgvVScrollBar == null || _dgvHScrollBar == null || _dgvScrollCorner == null)
+                return;
+
+            // Get the available area within hostsPanel (accounting for padding and header)
+            int headerHeight = hostsHeaderPanel.Height;
+            int padding = hostsPanel.Padding.All;
+            int availableWidth = hostsPanel.ClientSize.Width - padding * 2;
+            int availableHeight = hostsPanel.ClientSize.Height - headerHeight - padding;
+
+            // Calculate total content dimensions
+            int totalRowHeight = dgv_variables.RowCount * dgv_variables.RowTemplate.Height + dgv_variables.ColumnHeadersHeight;
+            int totalColumnWidth = dgv_variables.Columns.Cast<DataGridViewColumn>().Sum(c => c.Width) + dgv_variables.RowHeadersWidth;
+
+            // Determine if scrollbars are needed (iteratively since they affect available space)
+            bool needVScroll = totalRowHeight > availableHeight;
+            bool needHScroll = totalColumnWidth > availableWidth;
+
+            // If vertical scrollbar is shown, it reduces horizontal space
+            if (needVScroll)
+                needHScroll = totalColumnWidth > (availableWidth - _dgvVScrollBar.Width);
+            // If horizontal scrollbar is shown, it reduces vertical space
+            if (needHScroll)
+                needVScroll = totalRowHeight > (availableHeight - _dgvHScrollBar.Height);
+
+            // Calculate DataGridView size
+            int dgvWidth = availableWidth - (needVScroll ? _dgvVScrollBar.Width : 0);
+            int dgvHeight = availableHeight - (needHScroll ? _dgvHScrollBar.Height : 0);
+
+            // Position and size the DataGridView
+            dgv_variables.Location = new Point(padding, headerHeight);
+            dgv_variables.Size = new Size(dgvWidth, dgvHeight);
+
+            // Position vertical scrollbar
+            _dgvVScrollBar.Visible = needVScroll;
+            if (needVScroll)
+            {
+                _dgvVScrollBar.Location = new Point(padding + dgvWidth, headerHeight);
+                _dgvVScrollBar.Height = dgvHeight;
+
+                int displayedRows = dgv_variables.DisplayedRowCount(false);
+                _dgvVScrollBar.Minimum = 0;
+                _dgvVScrollBar.Maximum = Math.Max(0, dgv_variables.RowCount - 1);
+                _dgvVScrollBar.LargeChange = Math.Max(1, displayedRows);
+                _dgvVScrollBar.SmallChange = 1;
+                if (dgv_variables.FirstDisplayedScrollingRowIndex >= 0)
+                {
+                    _dgvVScrollBar.Value = Math.Min(dgv_variables.FirstDisplayedScrollingRowIndex, _dgvVScrollBar.Maximum);
+                }
+            }
+
+            // Position horizontal scrollbar
+            _dgvHScrollBar.Visible = needHScroll;
+            if (needHScroll)
+            {
+                _dgvHScrollBar.Location = new Point(padding, headerHeight + dgvHeight);
+                _dgvHScrollBar.Width = dgvWidth;
+
+                _dgvHScrollBar.Minimum = 0;
+                _dgvHScrollBar.Maximum = Math.Max(0, totalColumnWidth - dgvWidth + _dgvHScrollBar.LargeChange);
+                _dgvHScrollBar.LargeChange = Math.Max(1, dgvWidth / 4);
+                _dgvHScrollBar.SmallChange = 20;
+                _dgvHScrollBar.Value = Math.Min(dgv_variables.HorizontalScrollingOffset, Math.Max(0, _dgvHScrollBar.Maximum - _dgvHScrollBar.LargeChange + 1));
+            }
+
+            // Position corner panel only when both scrollbars are visible
+            _dgvScrollCorner.Visible = needVScroll && needHScroll;
+            if (_dgvScrollCorner.Visible)
+            {
+                _dgvScrollCorner.Location = new Point(padding + dgvWidth, headerHeight + dgvHeight);
+                _dgvScrollCorner.BringToFront();
+            }
+
+            // Apply current theme colors to scrollbars
+            ApplyScrollbarColors();
+        }
+
+        private void ApplyScrollbarColors()
+        {
+            if (_dgvVScrollBar == null || _dgvHScrollBar == null || _dgvScrollCorner == null)
+                return;
+
+            if (_isDarkMode)
+            {
+                _dgvScrollCorner.BackColor = DarkSurface0;
+                // Apply dark mode theme to scrollbars
+                ApplyDarkScrollbars(_dgvVScrollBar);
+                ApplyDarkScrollbars(_dgvHScrollBar);
+            }
+            else
+            {
+                _dgvScrollCorner.BackColor = Color.FromArgb(248, 249, 250);
+                ApplyLightScrollbars(_dgvVScrollBar);
+                ApplyLightScrollbars(_dgvHScrollBar);
+            }
         }
 
         private void InitializeOutputHistory()
@@ -525,6 +767,9 @@ namespace SSH_Helper
                 trvFavorites.DrawNode -= TreeView_DrawNode;
                 trvFavorites.DrawNode += TreeView_DrawNode;
             }
+
+            // Update custom DataGridView scrollbar colors
+            ApplyScrollbarColors();
 
             ResumeLayout(true);
             Refresh();
@@ -1039,6 +1284,7 @@ namespace SSH_Helper
 
         /// <summary>
         /// Applies dark/light scrollbar theme to a window handle using Windows dark mode APIs.
+        /// Also applies the theme to child windows (scrollbars in complex controls like DataGridView).
         /// </summary>
         private static void ApplyScrollbarThemeToHandle(IntPtr handle, bool dark)
         {
@@ -1048,6 +1294,21 @@ namespace SSH_Helper
             // Set the visual theme
             var theme = dark ? "DarkMode_Explorer" : "Explorer";
             NativeMethods.SetWindowTheme(handle, theme, null);
+
+            // Also apply theme to child windows (scrollbars are child windows in complex controls)
+            NativeMethods.EnumChildWindows(handle, (childHwnd, lParam) =>
+            {
+                NativeMethods.AllowDarkModeForWindow(childHwnd, dark);
+                NativeMethods.SetWindowTheme(childHwnd, theme, null);
+                return true; // Continue enumeration
+            }, IntPtr.Zero);
+
+            // Send theme changed message to force the control to refresh its scrollbars
+            NativeMethods.SendMessage(handle, NativeMethods.WM_THEMECHANGED, IntPtr.Zero, IntPtr.Zero);
+
+            // Force the non-client area (including scrollbars) to be recalculated and redrawn
+            NativeMethods.SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_FRAMECHANGED);
         }
 
         /// <summary>
@@ -3400,17 +3661,24 @@ namespace SSH_Helper
 
         private void AddColumn()
         {
+            // Find a unique column name by checking existing columns
             int nextNumber = dgv_variables.Columns.Count + 1;
             string defaultName = $"Column{nextNumber}";
+            while (dgv_variables.Columns.Contains(defaultName))
+            {
+                nextNumber++;
+                defaultName = $"Column{nextNumber}";
+            }
 
             string columnName = Microsoft.VisualBasic.Interaction.InputBox(
                 "Enter the name of the new column:",
                 "Add Column",
                 defaultName);
 
-            columnName = InputValidator.SanitizeColumnName(columnName);
+            // Check raw input first - if user cleared the box or cancelled, return early
+            if (string.IsNullOrWhiteSpace(columnName)) return;
 
-            if (string.IsNullOrEmpty(columnName)) return;
+            columnName = InputValidator.SanitizeColumnName(columnName);
 
             if (dgv_variables.Columns.Contains(columnName))
             {
@@ -3434,9 +3702,10 @@ namespace SSH_Helper
                 "Rename Column",
                 currentName);
 
-            newName = InputValidator.SanitizeColumnName(newName);
+            // Check raw input first - if user cleared the box or cancelled, return early
+            if (string.IsNullOrWhiteSpace(newName) || newName == currentName) return;
 
-            if (string.IsNullOrEmpty(newName) || newName == currentName) return;
+            newName = InputValidator.SanitizeColumnName(newName);
 
             if (dgv_variables.Columns.Cast<DataGridViewColumn>()
                 .Any(c => c.HeaderText.Equals(newName, StringComparison.OrdinalIgnoreCase)))
