@@ -122,14 +122,10 @@ service.OutputReceived += (s, e) => AppendOutput(e.Output);
 
 The DataGridView supports these predefined columns:
 - `Host_IP` (required, cannot be deleted)
-- `dudescript`, `port`, `delay`, `timeout`
+- `port`, `delay`, `timeout`
 - `transport`, `username`, `password`, `personality`
 
 Custom columns can be added and used as variables in commands via `{{column_name}}` syntax.
-
-## Dudescript
-
-The `dudescript/` folder contains documentation for a custom scripting language for complex SSH automation. Commands include: `send`, `grab`, `check`, `wait`, `do`, `print`, `write`, `set`, `goto`, `include`, `return`, `interactive`, `exit`.
 
 ## Dependencies
 
