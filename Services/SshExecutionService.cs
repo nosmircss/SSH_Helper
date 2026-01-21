@@ -796,10 +796,6 @@ namespace SSH_Helper.Services
                 var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                     .GetAwaiter().GetResult();
 
-                // Report final status
-                var statusMsg = $"\n=== Script {scriptResult.Status}: {scriptResult.Message} ===\n";
-                outputBuilder.Append(statusMsg);
-                OnOutputReceived(host, statusMsg);
             }
             finally
             {
@@ -915,11 +911,6 @@ namespace SSH_Helper.Services
             var executor = new ScriptExecutor();
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
-
-            // Report final status
-            var statusMsg = $"\n=== Script {scriptResult.Status}: {scriptResult.Message} ===\n";
-            outputBuilder.Append(statusMsg);
-            OnOutputReceived(host, statusMsg);
 
             client.Disconnect();
         }

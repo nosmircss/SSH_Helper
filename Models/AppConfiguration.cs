@@ -66,6 +66,12 @@ namespace SSH_Helper.Models
         /// </summary>
         public bool DarkMode { get; set; } = false;
 
+        // Host grid settings
+        /// <summary>
+        /// When true, columns in the hosts DataGridView auto-resize to fit content.
+        /// </summary>
+        public bool AutoResizeHostColumns { get; set; } = false;
+
         // Font settings
         /// <summary>
         /// Font customization settings for UI elements.

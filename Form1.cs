@@ -74,6 +74,7 @@ namespace SSH_Helper
         private bool _exitConfirmed;
         private bool _suppressPresetSelectionChange;
         private bool _suppressExpandCollapseEvents;
+        private bool _pendingColumnAutoSize;
         private int _rightClickedColumnIndex = -1;
         private int _rightClickedRowIndex = -1;
         private readonly BindingList<KeyValuePair<string, string>> _outputHistory = new();
@@ -153,6 +154,7 @@ namespace SSH_Helper
             var currentConfig = _configService.GetCurrent();
             ApplyTheme(currentConfig.DarkMode);
             ApplyFontSettings(currentConfig.FontSettings);
+            ApplyColumnAutoResize(currentConfig.AutoResizeHostColumns);
 
             // Check for updates on startup (after form is shown)
             Shown += Form1_Shown;
@@ -165,6 +167,13 @@ namespace SSH_Helper
 
             // Restore folder expand/collapse state after form is fully shown
             RestoreFolderExpandState();
+
+            // Auto-size columns to content if state was restored (must happen after form is visible)
+            if (_pendingColumnAutoSize)
+            {
+                _pendingColumnAutoSize = false;
+                AutoSizeColumnsToContent();
+            }
 
             var config = _configService.GetCurrent();
             if (config.UpdateSettings.CheckOnStartup)
@@ -221,6 +230,7 @@ namespace SSH_Helper
         private void InitializeDataGridView()
         {
             dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
+            dgv_variables.Columns[CsvManager.HostColumnName].Width = 150;
 
             // Modern styling
             dgv_variables.EnableHeadersVisualStyles = false;
@@ -612,6 +622,56 @@ namespace SSH_Helper
             ApplyAccentColor(fontSettings.CustomAccentColor);
 
             ResumeLayout(true);
+        }
+
+        private void ApplyColumnAutoResize(bool autoResize)
+        {
+            if (autoResize)
+            {
+                dgv_variables.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.AllCells;
+            }
+            else
+            {
+                // Capture current column widths before disabling auto-resize
+                var columnWidths = new Dictionary<string, int>();
+                foreach (DataGridViewColumn column in dgv_variables.Columns)
+                {
+                    columnWidths[column.Name] = column.Width;
+                }
+
+                dgv_variables.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+
+                // Restore the widths that were set during auto-resize
+                foreach (DataGridViewColumn column in dgv_variables.Columns)
+                {
+                    if (columnWidths.TryGetValue(column.Name, out int width))
+                    {
+                        column.Width = width;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Performs a one-time auto-size of columns to fit their content.
+        /// This is called when loading data (CSV import or state restore) to size columns appropriately,
+        /// regardless of the AutoResizeHostColumns setting.
+        /// </summary>
+        private void AutoSizeColumnsToContent()
+        {
+            // Skip if auto-resize is already enabled (it will handle sizing automatically)
+            if (dgv_variables.AutoSizeColumnsMode == DataGridViewAutoSizeColumnsMode.AllCells)
+                return;
+
+            // Skip if no columns
+            if (dgv_variables.Columns.Count == 0)
+                return;
+
+            // Auto-resize each column individually to fit content
+            foreach (DataGridViewColumn column in dgv_variables.Columns)
+            {
+                dgv_variables.AutoResizeColumn(column.Index, DataGridViewAutoSizeColumnMode.AllCells);
+            }
         }
 
         private void ApplyMenuFontRecursive(ToolStripItemCollection items, Font font)
@@ -2461,6 +2521,7 @@ namespace SSH_Helper
                 var config = _configService.GetCurrent();
                 ApplyTheme(config.DarkMode);
                 ApplyFontSettings(config.FontSettings);
+                ApplyColumnAutoResize(config.AutoResizeHostColumns);
             }
         }
 
@@ -3222,6 +3283,7 @@ namespace SSH_Helper
                     }
 
                     _csvDirty = false;
+                    AutoSizeColumnsToContent();
                     UpdateHostCount();
                     UpdateStatusBar($"Loaded: {Path.GetFileName(ofd.FileName)}");
                 }
@@ -5299,6 +5361,9 @@ namespace SSH_Helper
             }
 
             UpdateHostCount();
+
+            // Flag for auto-sizing after the form is fully visible (handled in Form1_Shown)
+            _pendingColumnAutoSize = true;
 
             // Reset dirty flag since we're restoring saved state, not making new changes
             _csvDirty = false;

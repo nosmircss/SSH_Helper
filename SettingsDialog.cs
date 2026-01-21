@@ -18,6 +18,7 @@ namespace SSH_Helper
         private readonly NumericUpDown _numDefaultTimeout;
         private readonly NumericUpDown _numConnectionTimeout;
         private readonly CheckBox _chkDarkMode;
+        private readonly CheckBox _chkAutoResizeHostColumns;
 
         // Updates tab controls
         private readonly CheckBox _chkCheckForUpdatesOnStartup;
@@ -154,6 +155,7 @@ namespace SSH_Helper
             _numDefaultTimeout = (NumericUpDown)tabGeneral.Controls["numDefaultTimeout"]!;
             _numConnectionTimeout = (NumericUpDown)tabGeneral.Controls["numConnectionTimeout"]!;
             _chkDarkMode = (CheckBox)tabGeneral.Controls["chkDarkMode"]!;
+            _chkAutoResizeHostColumns = (CheckBox)tabGeneral.Controls["chkAutoResizeHostColumns"]!;
 
             _chkCheckForUpdatesOnStartup = (CheckBox)tabUpdates.Controls["chkCheckForUpdatesOnStartup"]!;
             _chkEnableUpdateLog = (CheckBox)tabUpdates.Controls["chkEnableUpdateLog"]!;
@@ -260,6 +262,22 @@ namespace SSH_Helper
                 AutoSize = true
             };
 
+            var lblHostGridSection = new Label
+            {
+                Text = "Host Grid",
+                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
+                Location = new Point(15, 260),
+                AutoSize = true
+            };
+
+            var chkAutoResizeHostColumns = new CheckBox
+            {
+                Name = "chkAutoResizeHostColumns",
+                Text = "Auto-resize columns to fit content",
+                Location = new Point(15, 285),
+                AutoSize = true
+            };
+
             tabGeneral.Controls.Add(lblStateSection);
             tabGeneral.Controls.Add(chkRememberState);
             tabGeneral.Controls.Add(lblMaxHistory);
@@ -271,6 +289,8 @@ namespace SSH_Helper
             tabGeneral.Controls.Add(numConnectionTimeout);
             tabGeneral.Controls.Add(lblAppearanceSection);
             tabGeneral.Controls.Add(chkDarkMode);
+            tabGeneral.Controls.Add(lblHostGridSection);
+            tabGeneral.Controls.Add(chkAutoResizeHostColumns);
 
             return tabGeneral;
         }
@@ -843,6 +863,7 @@ namespace SSH_Helper
             _numDefaultTimeout.Value = Math.Clamp(config.Timeout, 1, 300);
             _numConnectionTimeout.Value = Math.Clamp(config.ConnectionTimeout, 5, 120);
             _chkDarkMode.Checked = config.DarkMode;
+            _chkAutoResizeHostColumns.Checked = config.AutoResizeHostColumns;
 
             // Updates
             _chkCheckForUpdatesOnStartup.Checked = config.UpdateSettings.CheckOnStartup;
@@ -922,6 +943,7 @@ namespace SSH_Helper
                 config.Timeout = (int)_numDefaultTimeout.Value;
                 config.ConnectionTimeout = (int)_numConnectionTimeout.Value;
                 config.DarkMode = _chkDarkMode.Checked;
+                config.AutoResizeHostColumns = _chkAutoResizeHostColumns.Checked;
 
                 // Updates
                 config.UpdateSettings.CheckOnStartup = _chkCheckForUpdatesOnStartup.Checked;

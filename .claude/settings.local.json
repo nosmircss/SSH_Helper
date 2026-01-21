@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(dotnet nuget search:*)",
-      "Bash(dotnet list:*)"
+      "Bash(dotnet list:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\n## New Features\n- Add auto-resize columns option and clean up script output\n- Add \"Auto-resize columns to fit content\" setting in Settings > Host Grid\n- Columns automatically size to content when loading CSV files or restoring state\nEOF\n\\)\")"
     ]
   }
 }
