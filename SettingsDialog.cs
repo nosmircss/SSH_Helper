@@ -19,6 +19,7 @@ namespace SSH_Helper
         private readonly NumericUpDown _numConnectionTimeout;
         private readonly CheckBox _chkDarkMode;
         private readonly CheckBox _chkAutoResizeHostColumns;
+        private readonly CheckBox _chkEnableSshConfig;
 
         // Updates tab controls
         private readonly CheckBox _chkCheckForUpdatesOnStartup;
@@ -156,6 +157,7 @@ namespace SSH_Helper
             _numConnectionTimeout = (NumericUpDown)tabGeneral.Controls["numConnectionTimeout"]!;
             _chkDarkMode = (CheckBox)tabGeneral.Controls["chkDarkMode"]!;
             _chkAutoResizeHostColumns = (CheckBox)tabGeneral.Controls["chkAutoResizeHostColumns"]!;
+            _chkEnableSshConfig = (CheckBox)tabGeneral.Controls["chkEnableSshConfig"]!;
 
             _chkCheckForUpdatesOnStartup = (CheckBox)tabUpdates.Controls["chkCheckForUpdatesOnStartup"]!;
             _chkEnableUpdateLog = (CheckBox)tabUpdates.Controls["chkEnableUpdateLog"]!;
@@ -278,6 +280,34 @@ namespace SSH_Helper
                 AutoSize = true
             };
 
+            var lblSshConfigSection = new Label
+            {
+                Text = "SSH Config",
+                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
+                Location = new Point(15, 320),
+                AutoSize = true
+            };
+
+            var chkEnableSshConfig = new CheckBox
+            {
+                Name = "chkEnableSshConfig",
+                Text = "Use SSH config file (~/.ssh/config)",
+                Location = new Point(15, 345),
+                AutoSize = true
+            };
+
+            var sshConfigPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".ssh", "config");
+            var lblSshConfigPath = new Label
+            {
+                Text = $"Path: {sshConfigPath}",
+                Location = new Point(32, 368),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 8f)
+            };
+
             tabGeneral.Controls.Add(lblStateSection);
             tabGeneral.Controls.Add(chkRememberState);
             tabGeneral.Controls.Add(lblMaxHistory);
@@ -291,6 +321,9 @@ namespace SSH_Helper
             tabGeneral.Controls.Add(chkDarkMode);
             tabGeneral.Controls.Add(lblHostGridSection);
             tabGeneral.Controls.Add(chkAutoResizeHostColumns);
+            tabGeneral.Controls.Add(lblSshConfigSection);
+            tabGeneral.Controls.Add(chkEnableSshConfig);
+            tabGeneral.Controls.Add(lblSshConfigPath);
 
             return tabGeneral;
         }
@@ -864,6 +897,7 @@ namespace SSH_Helper
             _numConnectionTimeout.Value = Math.Clamp(config.ConnectionTimeout, 5, 120);
             _chkDarkMode.Checked = config.DarkMode;
             _chkAutoResizeHostColumns.Checked = config.AutoResizeHostColumns;
+            _chkEnableSshConfig.Checked = config.SshConfig.EnableSshConfig;
 
             // Updates
             _chkCheckForUpdatesOnStartup.Checked = config.UpdateSettings.CheckOnStartup;
@@ -944,6 +978,7 @@ namespace SSH_Helper
                 config.ConnectionTimeout = (int)_numConnectionTimeout.Value;
                 config.DarkMode = _chkDarkMode.Checked;
                 config.AutoResizeHostColumns = _chkAutoResizeHostColumns.Checked;
+                config.SshConfig.EnableSshConfig = _chkEnableSshConfig.Checked;
 
                 // Updates
                 config.UpdateSettings.CheckOnStartup = _chkCheckForUpdatesOnStartup.Checked;

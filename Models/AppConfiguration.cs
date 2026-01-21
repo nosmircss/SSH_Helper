@@ -77,6 +77,12 @@ namespace SSH_Helper.Models
         /// Font customization settings for UI elements.
         /// </summary>
         public FontSettings FontSettings { get; set; } = new();
+
+        // SSH config settings
+        /// <summary>
+        /// Settings for SSH config file integration.
+        /// </summary>
+        public SshConfigSettings SshConfig { get; set; } = new();
     }
 
     /// <summary>
@@ -356,5 +362,17 @@ namespace SSH_Helper.Models
         public int? CommandSplitterDistance { get; set; } = 350;
         public int? OutputSplitterDistance { get; set; } = 300;
         public int? HistorySplitterDistance { get; set; } = 137;
+    }
+
+    /// <summary>
+    /// Settings for SSH config file integration.
+    /// </summary>
+    public class SshConfigSettings
+    {
+        /// <summary>
+        /// When true, reads SSH config from %USERPROFILE%\.ssh\config
+        /// and applies settings (IdentityFile, algorithms, etc.) to connections.
+        /// </summary>
+        public bool EnableSshConfig { get; set; } = false;
     }
 }
