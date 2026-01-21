@@ -194,14 +194,25 @@ Sets or modifies variable values with expression support.
 | upper() | `caps = upper(text)` | Convert to uppercase |
 | lower() | `small = lower(text)` | Convert to lowercase |
 | push() | `arr = push(arr, item)` | Add item to array |
-| json_array() | `json = json_array(list)` | Convert list to JSON array |
-| json_array_pretty() | `json = json_array_pretty(list)` | Convert list to pretty JSON array |
-| json_object() | `obj = json_object(k1, v1, k2, v2)` | Create JSON object |
-| json_object_pretty() | `obj = json_object_pretty(k1, v1)` | Create pretty JSON object |
-| json_merge() | `merged = json_merge(obj1, obj2)` | Merge two JSON objects |
-| json_get() | `val = json_get(json, "path.key")` | Extract value from JSON |
-| json_pretty() | `pretty = json_pretty(json)` | Format JSON with indentation |
-| json_items() | `items = json_items(json, "path")` | Extract array items for foreach |
+| json() | `obj = json("k1", v1, "k2", v2)` | Create JSON object or array |
+| json.get() | `val = json.get(data, "path", default)` | Extract value with optional default |
+| json.set() | `obj = json.set(obj, "path", value)` | Set value at path |
+| json.delete() | `obj = json.delete(obj, "path")` | Remove key/element at path |
+| json.merge() | `merged = json.merge(obj1, obj2, ...)` | Merge multiple objects |
+| json.format() | `pretty = json.format(data)` | Format JSON (pretty/compact) |
+| json.exists() | `bool = json.exists(data, "path")` | Check if path exists |
+| json.len() | `count = json.len(data, "path")` | Get array/object length |
+| json.type() | `type = json.type(data, "path")` | Get value type |
+| json.keys() | `keys = json.keys(obj)` | Get object keys as list |
+| json.values() | `vals = json.values(obj)` | Get object values as list |
+| json.items() | `items = json.items(data, "path")` | Extract array/object entries |
+| json.push() | `arr = json.push(arr, value)` | Append to JSON array |
+| json.pop() | `last = json.pop(arr)` | Get last element |
+| json.unshift() | `arr = json.unshift(arr, value)` | Prepend to JSON array |
+| json.shift() | `first = json.shift(arr)` | Get first element |
+| json.slice() | `sub = json.slice(arr, 0, 3)` | Extract array subset |
+| json.concat() | `all = json.concat(arr1, arr2)` | Concatenate arrays |
+| json.indexOf() | `idx = json.indexOf(arr, value)` | Find element index |
 | Nested assignment | `obj.key.subkey = value` | Assign to nested path |
 
 **Basic Examples:**
@@ -239,139 +250,259 @@ Sets or modifies variable values with expression support.
 
 **JSON Functions:**
 
-The `json_array()` and `json_array_pretty()` functions convert a list variable to a JSON array string with automatic type detection:
-- Strings that look like `true` or `false` become booleans
-- Numeric strings become numbers
-- Strings starting with `{` or `[` are parsed as JSON objects/arrays
-- Everything else remains as strings
+All JSON functions use dot notation (`json.get`, `json.set`, etc.) for a clean, consistent API.
+
+**Type Detection:** When creating JSON, values are automatically converted:
+- Strings `"true"` or `"false"` → booleans
+- Numeric strings → numbers
+- Strings starting with `{` or `[` → parsed as JSON objects/arrays
+- Everything else → strings
+
+---
+
+**`json(...)` - Universal Constructor**
+
+Creates JSON objects or arrays. Add `pretty` anywhere for formatted output.
 
 ```yaml
-# Build a list and convert to JSON
-- set: items = push(items, "192.168.1.1")
-- set: items = push(items, "true")      # Will be boolean in JSON
-- set: items = push(items, "42")        # Will be number in JSON
-- set: json_result = json_array(items)
-# Result: ["192.168.1.1",true,42]
+# Create object from key-value pairs
+- set: data = json("host", ${Host_IP}, "status", "up", "port", 22)
+# Result: {"host":"192.168.1.1","status":"up","port":22}
 
-# Pretty-printed version
-- set: json_result = json_array_pretty(items)
-# Result:
-# [
-#   "192.168.1.1",
-#   true,
-#   42
-# ]
+# Pretty-printed object
+- set: data = json("host", ${Host_IP}, "status", "up", pretty)
+
+# Create array from list variable
+- set: items = push(items, "a")
+- set: items = push(items, "b")
+- set: arr = json(items)
+# Result: ["a","b"]
+
+# Create array inline with []
+- set: arr = json([], "item1", "item2", "item3")
+# Result: ["item1","item2","item3"]
+
+# Nested objects
+- set: data = json("server", json("host", ${ip}, "port", 22), "active", true)
 ```
 
-The `json_object()` and `json_object_pretty()` functions create a JSON object from key-value pairs:
+---
+
+**`json.get(json, path, default?)` - Extract Value**
+
+Extracts a value using dot notation path. Supports optional default value.
 
 ```yaml
-# Create a JSON object
-- set: data = json_object("host", ${Host_IP}, "status", ${status}, "count", 5)
-# Result: {"host":"192.168.1.1","status":"up","count":5}
+# Basic extraction
+- set: name = json.get(response, "data.user.name")
+- set: email = json.get(response, "data.user.email")
 
-# Pretty-printed version
-- set: data = json_object_pretty("host", ${Host_IP}, "status", ${status})
-# Result:
-# {
-#   "host": "192.168.1.1",
-#   "status": "up"
-# }
+# With default value (returned if path doesn't exist)
+- set: port = json.get(config, "server.port", 22)
+- set: timeout = json.get(config, "settings.timeout", 30)
 
-# Using variables as values
-- set: record = json_object("timestamp", ${_timestamp}, "ip", ${Host_IP}, "version", ${version})
+# Array indexing with [n] syntax
+- set: first = json.get(data, "items[0].name")
+- set: nested = json.get(data, "users[0].addresses[1].city")
 ```
 
-The `json_merge()` function deep-merges two JSON objects (second object's values override first):
+---
+
+**`json.set(json, path, value)` - Set Value at Path**
+
+Sets a value at a path, creating intermediate objects as needed.
+
+```yaml
+# Update a nested value
+- set: config = json.set(config, "server.port", 8080)
+
+# Add new keys
+- set: data = json.set(data, "metadata.created", ${_timestamp})
+
+# Set array element
+- set: data = json.set(data, "users[0].active", true)
+```
+
+---
+
+**`json.delete(json, path)` - Remove Key or Element**
+
+Removes a key from an object or element from an array.
+
+```yaml
+# Remove a key
+- set: user = json.delete(user, "password")
+- set: data = json.delete(data, "sensitive.ssn")
+
+# Remove array element by index
+- set: arr = json.delete(arr, "items[2]")
+```
+
+---
+
+**`json.merge(obj1, obj2, ...)` - Deep Merge Objects**
+
+Merges multiple objects. Later objects override earlier ones.
 
 ```yaml
 # Merge two objects
-- set: base = json_object("name", "server1", "type", "linux")
-- set: updates = json_object("status", "active", "type", "ubuntu")
-- set: merged = json_merge(base, updates)
+- set: base = json("name", "server1", "type", "linux")
+- set: updates = json("status", "active", "type", "ubuntu")
+- set: merged = json.merge(base, updates)
 # Result: {"name":"server1","type":"ubuntu","status":"active"}
+
+# Merge multiple objects (variadic)
+- set: final = json.merge(defaults, env_config, user_overrides)
 ```
 
-The `json_get()` function extracts a value from JSON using dot notation path:
+---
+
+**`json.format(json, style?)` - Format JSON**
+
+Formats JSON for display. Default is pretty-printed.
 
 ```yaml
-# Given a JSON response from a webhook
-- webhook:
-    url: "https://api.example.com/data"
-    method: GET
-    into: response
+# Pretty print (default)
+- set: formatted = json.format(data)
+- set: formatted = json.format(data, pretty)
 
-# Extract specific values using dot notation
-- set: name = json_get(response, "data.user.name")
-- set: email = json_get(response, "data.user.email")
-- print: "User: ${name} (${email})"
+# Compact (single line)
+- set: compact = json.format(data, compact)
+```
 
-# Array indexing is supported with [n] syntax
-- set: first_item = json_get(response, "items[0].name")
-- set: third_status = json_get(response, "results[2].status")
+---
 
-# Combine with conditions
-- set: error_code = json_get(response, "error.code")
-- if: error_code is not empty
+**`json.exists(json, path)` - Check Path Existence**
+
+Returns true/false indicating whether a path exists. Distinguishes between null values and missing keys.
+
+```yaml
+# Check for error response
+- if: json.exists(response, "error.code")
   then:
-    - print: "Error: ${error_code}"
+    - set: err = json.get(response, "error.code")
+    - log: "Error: ${err}"
+      level: error
+
+# Safer than checking for empty
+- if: json.exists(config, "optional") and json.get(config, "optional") != null
+  then:
+    - print: "Optional is set and not null"
 ```
 
-The `json_pretty()` function formats JSON with indentation for readable output:
+---
+
+**`json.len(json, path?)` - Get Length**
+
+Returns array length or object key count.
 
 ```yaml
-# Pretty-print a JSON response
-- webhook:
-    url: "https://httpbin.org/post"
-    method: POST
-    body: '{"test": true}'
-    into: response
+# Array length
+- set: count = json.len(response, "data.items")
 
-- set: formatted = json_pretty(response)
-- print: "${formatted}"
-# Output:
-# {
-#   "args": {},
-#   "data": "{\"test\": true}",
-#   "headers": { ... },
-#   ...
-# }
+# Object key count
+- set: num_keys = json.len(config)
 
-# Works with any JSON variable
-- set: data = json_object("host", ${Host_IP}, "status", "ok")
-- set: pretty_data = json_pretty(data)
-- print: "${pretty_data}"
+# Use in loops
+- if: json.len(users) > 0
+  then:
+    - print: "Found ${json.len(users)} users"
 ```
 
-The `json_items()` function extracts array elements as a list for use with `foreach`:
+---
+
+**`json.type(json, path?)` - Get Value Type**
+
+Returns the type: `"object"`, `"array"`, `"string"`, `"number"`, `"boolean"`, or `"null"`.
 
 ```yaml
-# Given a JSON response with an array
-- webhook:
-    url: "https://api.example.com/users"
-    method: GET
-    into: response
+- set: t = json.type(response, "data")
+- if: t == "array"
+  then:
+    - print: "Data is an array"
+```
 
-# Extract the users array into a list variable
-- set: users = json_items(response, "data.users")
+---
 
-# Loop over each user object
-- foreach: user in users
+**`json.keys(json, path?)` - Get Object Keys**
+
+Returns object keys as a list for iteration.
+
+```yaml
+- set: fields = json.keys(user)
+- foreach: field in fields
   do:
-    # Each user is a JSON string, use json_get to extract fields
-    - set: name = json_get(user, "name")
-    - set: email = json_get(user, "email")
+    - set: val = json.get(user, field)
+    - print: "${field}: ${val}"
+```
+
+---
+
+**`json.values(json, path?)` - Get Object Values**
+
+Returns object values as a list.
+
+```yaml
+- set: ips = json.values(servers)
+- foreach: ip in ips
+  do:
+    - send: ping ${ip} -c 1
+```
+
+---
+
+**`json.items(json, path?)` - Extract Array or Object Entries**
+
+For arrays: returns elements as a list.
+For objects: returns `{"key": k, "value": v}` entries.
+
+```yaml
+# Array iteration
+- foreach: user in json.items(response, "data.users")
+  do:
+    - set: name = json.get(user, "name")
+    - set: email = json.get(user, "email")
     - print: "User: ${name} (${email})"
 
-# Simple array without path (if variable is already an array)
-- set: items = json_items(my_array)
-
-# Process nested arrays
-- set: addresses = json_items(response, "data.users[0].addresses")
-- foreach: addr in addresses
+# Object iteration (key-value pairs)
+- set: servers = json("web", "10.0.0.1", "db", "10.0.0.2")
+- foreach: entry in json.items(servers)
   do:
-    - set: city = json_get(addr, "city")
-    - print: "City: ${city}"
+    - set: name = json.get(entry, "key")
+    - set: ip = json.get(entry, "value")
+    - print: "${name}: ${ip}"
+```
+
+---
+
+**Array Manipulation Functions**
+
+```yaml
+# Append to array
+- set: arr = json.push(arr, "new_item")
+- set: arr = json.push(arr, json("key", "value"))
+
+# Get last element
+- set: last = json.pop(arr)
+
+# Prepend to array
+- set: arr = json.unshift(arr, "first")
+
+# Get first element
+- set: first = json.shift(arr)
+
+# Slice array (supports negative indices)
+- set: first_three = json.slice(arr, 0, 3)
+- set: last_two = json.slice(arr, -2)
+
+# Concatenate arrays
+- set: all = json.concat(arr1, arr2, arr3)
+
+# Find element index (-1 if not found)
+- set: idx = json.indexOf(arr, "search_value")
+- if: idx >= 0
+  then:
+    - print: "Found at index ${idx}"
 ```
 
 **Nested Assignment (Dot Notation):**
@@ -868,7 +999,7 @@ When using `format: json`, the content is automatically serialized with type det
 - Numbers, booleans, and null are preserved as their JSON types
 - Strings are properly escaped
 - Lists become JSON arrays
-- Objects (from `json_object()` or dot notation) become JSON objects
+- Objects (from `json()` or dot notation) become JSON objects
 
 ```yaml
 # Write a JSON array from a list variable
@@ -881,7 +1012,7 @@ When using `format: json`, the content is automatically serialized with type det
     pretty: true
 
 # Write a JSON object
-- set: data = json_object("host", ${Host_IP}, "status", "success", "port", 22)
+- set: data = json("host", ${Host_IP}, "status", "success", "port", 22)
 - writefile:
     path: "C:\\output\\result.json"
     format: json
@@ -907,7 +1038,7 @@ When using `format: json` with `mode: append`, the new content is intelligently 
 
 ```yaml
 # First write creates the file with an array
-- set: item = json_object("ip", "192.168.1.1", "status", "up")
+- set: item = json("ip", "192.168.1.1", "status", "up")
 - writefile:
     path: "C:\\output\\results.json"
     format: json
@@ -915,7 +1046,7 @@ When using `format: json` with `mode: append`, the new content is intelligently 
     mode: overwrite
 
 # Subsequent writes append to the array
-- set: item = json_object("ip", "192.168.1.2", "status", "down")
+- set: item = json("ip", "192.168.1.2", "status", "down")
 - writefile:
     path: "C:\\output\\results.json"
     format: json
@@ -930,7 +1061,7 @@ JSONL format writes one compact JSON object per line, ideal for log files and st
 
 ```yaml
 # Write events as JSON Lines
-- set: event = json_object("timestamp", ${_timestamp}, "host", ${Host_IP}, "action", "scanned")
+- set: event = json("timestamp", ${_timestamp}, "host", ${Host_IP}, "action", "scanned")
 - writefile:
     path: "C:\\logs\\events.jsonl"
     format: jsonl
@@ -1236,7 +1367,7 @@ When using the `into` parameter, two variables are created:
     - print: "API returned status: ${api_response_status}"
 
 # POST with JSON body
-- set: payload = json_object("host", ${Host_IP}, "status", ${status})
+- set: payload = json("host", ${Host_IP}, "status", ${status})
 - webhook:
     url: "https://hooks.slack.com/services/xxx/yyy/zzz"
     method: POST
@@ -1257,7 +1388,7 @@ When using the `into` parameter, two variables are created:
     timeout: 10
 
 # Log events to external service
-- set: event = json_object("timestamp", ${_timestamp}, "host", ${Host_IP}, "event", "scan_complete")
+- set: event = json("timestamp", ${_timestamp}, "host", ${Host_IP}, "event", "scan_complete")
 - webhook:
     url: "https://logs.example.com/ingest"
     body: "${event}"
@@ -1438,7 +1569,7 @@ Variables can hold different types of data:
 | `string` | CSV columns, `set`, `input`, `extract` | `"hello"`, `"192.168.1.1"` |
 | `List<string>` | `readfile`, `extract` (with `match: all`), `push()` | `["item1", "item2"]` |
 | `int` / `double` | Arithmetic operations | `42`, `3.14` |
-| `JsonObject` | `json_object()`, nested dot assignment | `{"key": "value"}` |
+| `JsonObject` | `json()`, nested dot assignment | `{"key": "value"}` |
 
 **Type Coercion:**
 - String variables containing numbers are automatically converted for arithmetic operations
@@ -1701,9 +1832,9 @@ SSH Helper provides comprehensive support for creating, manipulating, and writin
 
 There are two ways to build JSON objects:
 
-**1. Using `json_object()` function:**
+**1. Using `json()` function:**
 ```yaml
-- set: data = json_object("key1", value1, "key2", value2, ...)
+- set: data = json("key1", value1, "key2", value2, ...)
 ```
 
 **2. Using dot notation (nested assignment):**
@@ -1714,12 +1845,17 @@ There are two ways to build JSON objects:
 
 ### Building JSON Arrays
 
-Use `push()` to build a list, then convert with `json_array()`:
+Use `push()` to build a list, then convert with `json()`:
 
 ```yaml
 - set: items = push(items, "first")
 - set: items = push(items, "second")
-- set: json_result = json_array(items)
+- set: arr = json(items)
+```
+
+Or create inline arrays:
+```yaml
+- set: arr = json([], "item1", "item2", "item3")
 ```
 
 ### Automatic Type Detection
@@ -1759,7 +1895,7 @@ steps:
       into: version
 
   # Build this host's record
-  - set: record = json_object("ip", ${Host_IP}, "version", ${version}, "timestamp", ${_timestamp})
+  - set: record = json("ip", ${Host_IP}, "version", ${version}, "timestamp", ${_timestamp})
 
   # Append to the JSON array
   - writefile:
@@ -1836,13 +1972,57 @@ vars:
 
 steps:
   # Build host-specific overrides
-  - set: overrides = json_object("host", ${Host_IP}, "timeout", 60)
+  - set: overrides = json("host", ${Host_IP}, "timeout", 60)
 
-  # Merge defaults with overrides
-  - set: config = json_merge(${defaults}, overrides)
+  # Merge defaults with overrides (supports multiple objects)
+  - set: config = json.merge(${defaults}, overrides)
 
   # config now has: {"timeout": 60, "retries": 3, "debug": false, "host": "192.168.1.1"}
   - print: "Using config: ${config}"
+```
+
+**Processing API Responses:**
+```yaml
+---
+name: Process API Response
+steps:
+  - webhook:
+      url: "https://api.example.com/users"
+      method: GET
+      into: response
+
+  # Check for errors first
+  - if: json.exists(response, "error")
+    then:
+      - set: err = json.get(response, "error.message", "Unknown error")
+      - exit: failure "API Error: ${err}"
+
+  # Get array length
+  - set: count = json.len(response, "data.users")
+  - print: "Found ${count} users"
+
+  # Iterate over users
+  - foreach: user in json.items(response, "data.users")
+    do:
+      - set: name = json.get(user, "name")
+      - set: email = json.get(user, "email", "no email")
+      - print: "${name}: ${email}"
+
+**Modifying JSON Data:**
+```yaml
+---
+name: Update Configuration
+steps:
+  # Start with base config
+  - set: config = json("server", json("host", "localhost", "port", 8080))
+
+  # Update values
+  - set: config = json.set(config, "server.port", 443)
+  - set: config = json.set(config, "server.ssl", true)
+
+  # Remove sensitive data before logging
+  - set: safe = json.delete(config, "server.password")
+  - print: "Config: ${safe}"
 ```
 
 ---
@@ -2272,7 +2452,7 @@ steps:
       pretty: true
 
   # Also append to master inventory (JSON array)
-  - set: summary = json_object("ip", ${Host_IP}, "hostname", ${hostname}, "version", ${sw_version})
+  - set: summary = json("ip", ${Host_IP}, "hostname", ${hostname}, "version", ${sw_version})
   - writefile:
       path: "C:\\inventory\\all_devices.json"
       format: json
@@ -2280,7 +2460,7 @@ steps:
       mode: append
 
   # Log the event
-  - set: log_entry = json_object("timestamp", ${_timestamp}, "host", ${Host_IP}, "action", "inventory_collected")
+  - set: log_entry = json("timestamp", ${_timestamp}, "host", ${Host_IP}, "action", "inventory_collected")
   - writefile:
       path: "C:\\inventory\\audit.jsonl"
       format: jsonl
@@ -2393,6 +2573,6 @@ steps:
     - `json` for structured reports (supports pretty-printing)
     - `jsonl` for log files and streaming data (one object per line)
 14. **Leverage JSON append merging**: Use `mode: append` with `format: json` to build arrays across multiple hosts
-15. **Use `json_object()` for inline objects**: Quick way to create JSON without building nested structures
+15. **Use `json()` for inline objects**: Quick way to create JSON without building nested structures
 16. **Automatic type detection**: Numbers and booleans in arrays are preserved (e.g., `"42"` becomes `42` in JSON)
-17. **Use `json_merge()` for configuration overrides**: Combine base settings with host-specific overrides
+17. **Use `json.merge()` for configuration overrides**: Combine base settings with host-specific overrides

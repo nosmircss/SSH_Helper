@@ -11,9 +11,8 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// <summary>
     /// Sets or manipulates a variable value.
     /// Supports: "var = value", "var = var + 1", "var = var - 1", "var = length(other)",
-    /// "var = push(array, value)", "var = json_array(array)", "var = json_object(...)",
-    /// "var = json_merge(obj1, obj2)", "var = json_get(json, path)", "var = json_pretty(json)",
-    /// "var = json_items(json, path)" (extract array items for foreach), "var.path = value" (nested assignment)
+    /// "var = push(array, value)", JSON functions with dot notation (json.get, json.set, etc.),
+    /// "var.path = value" (nested assignment)
     /// </summary>
     public class SetCommand : IScriptCommand
     {
@@ -231,62 +230,141 @@ namespace SSH_Helper.Services.Scripting.Commands
                 }
             }
 
-            // json_array(array) - converts array to JSON array string
-            if (expression.StartsWith("json_array(") && expression.EndsWith(")"))
+            // ============================================
+            // JSON Functions with dot notation (json.*)
+            // ============================================
+
+            // json(...) - Universal constructor for objects and arrays
+            if (expression.StartsWith("json(") && expression.EndsWith(")"))
             {
-                var inner = expression.Substring(11, expression.Length - 12).Trim();
-                var arrayValue = context.GetVariable(inner);
-                return ConvertToJsonArray(arrayValue, pretty: false);
+                var inner = expression.Substring(5, expression.Length - 6).Trim();
+                return JsonConstructor(inner, context);
             }
 
-            // json_array_pretty(array) - converts array to pretty-printed JSON array string
-            if (expression.StartsWith("json_array_pretty(") && expression.EndsWith(")"))
-            {
-                var inner = expression.Substring(18, expression.Length - 19).Trim();
-                var arrayValue = context.GetVariable(inner);
-                return ConvertToJsonArray(arrayValue, pretty: true);
-            }
-
-            // json_object(key1, value1, key2, value2, ...) - creates a JSON object from key-value pairs
-            if (expression.StartsWith("json_object(") && expression.EndsWith(")"))
-            {
-                var inner = expression.Substring(12, expression.Length - 13).Trim();
-                return BuildJsonObject(inner, context, pretty: false);
-            }
-
-            // json_object_pretty(key1, value1, key2, value2, ...) - creates a pretty-printed JSON object
-            if (expression.StartsWith("json_object_pretty(") && expression.EndsWith(")"))
-            {
-                var inner = expression.Substring(19, expression.Length - 20).Trim();
-                return BuildJsonObject(inner, context, pretty: true);
-            }
-
-            // json_merge(obj1, obj2) - merges two JSON objects (obj2 values override obj1)
-            if (expression.StartsWith("json_merge(") && expression.EndsWith(")"))
-            {
-                var inner = expression.Substring(11, expression.Length - 12).Trim();
-                return MergeJsonObjects(inner, context);
-            }
-
-            // json_get(json, "path.to.key") - extracts a value from JSON using dot notation
-            if (expression.StartsWith("json_get(") && expression.EndsWith(")"))
+            // json.get(json, path, default?) - Extract value with optional default
+            if (expression.StartsWith("json.get(") && expression.EndsWith(")"))
             {
                 var inner = expression.Substring(9, expression.Length - 10).Trim();
-                return JsonGetValue(inner, context);
+                return JsonGet(inner, context);
             }
 
-            // json_pretty(json) - formats JSON with indentation
-            if (expression.StartsWith("json_pretty(") && expression.EndsWith(")"))
+            // json.set(json, path, value) - Set value at path
+            if (expression.StartsWith("json.set(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(9, expression.Length - 10).Trim();
+                return JsonSet(inner, context);
+            }
+
+            // json.delete(json, path) - Remove key or element at path
+            if (expression.StartsWith("json.delete(") && expression.EndsWith(")"))
             {
                 var inner = expression.Substring(12, expression.Length - 13).Trim();
-                return JsonPrettyFormat(inner, context);
+                return JsonDelete(inner, context);
             }
 
-            // json_items(json) or json_items(json, "path") - extracts array items as List<string> for foreach
-            if (expression.StartsWith("json_items(") && expression.EndsWith(")"))
+            // json.merge(obj1, obj2, ...) - Deep merge multiple objects
+            if (expression.StartsWith("json.merge(") && expression.EndsWith(")"))
             {
                 var inner = expression.Substring(11, expression.Length - 12).Trim();
-                return JsonItemsToList(inner, context);
+                return JsonMergeVariadic(inner, context);
+            }
+
+            // json.format(json, style?) - Format JSON (pretty/compact)
+            if (expression.StartsWith("json.format(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(12, expression.Length - 13).Trim();
+                return JsonFormat(inner, context);
+            }
+
+            // json.exists(json, path) - Check if path exists
+            if (expression.StartsWith("json.exists(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(12, expression.Length - 13).Trim();
+                return JsonExists(inner, context);
+            }
+
+            // json.len(json, path?) - Get array length or object key count
+            if (expression.StartsWith("json.len(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(9, expression.Length - 10).Trim();
+                return JsonLen(inner, context);
+            }
+
+            // json.type(json, path?) - Get value type
+            if (expression.StartsWith("json.type(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(10, expression.Length - 11).Trim();
+                return JsonType(inner, context);
+            }
+
+            // json.keys(json, path?) - Get object keys as list
+            if (expression.StartsWith("json.keys(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(10, expression.Length - 11).Trim();
+                return JsonKeys(inner, context);
+            }
+
+            // json.values(json, path?) - Get object values as list
+            if (expression.StartsWith("json.values(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(12, expression.Length - 13).Trim();
+                return JsonValues(inner, context);
+            }
+
+            // json.items(json, path?) - Extract array elements or object entries
+            if (expression.StartsWith("json.items(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(11, expression.Length - 12).Trim();
+                return JsonItems(inner, context);
+            }
+
+            // json.push(arr, value) - Append to array
+            if (expression.StartsWith("json.push(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(10, expression.Length - 11).Trim();
+                return JsonPush(inner, context);
+            }
+
+            // json.pop(arr) - Remove and return last element
+            if (expression.StartsWith("json.pop(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(9, expression.Length - 10).Trim();
+                return JsonPop(inner, context);
+            }
+
+            // json.unshift(arr, value) - Prepend to array
+            if (expression.StartsWith("json.unshift(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(13, expression.Length - 14).Trim();
+                return JsonUnshift(inner, context);
+            }
+
+            // json.shift(arr) - Remove and return first element
+            if (expression.StartsWith("json.shift(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(11, expression.Length - 12).Trim();
+                return JsonShift(inner, context);
+            }
+
+            // json.slice(arr, start, end?) - Extract subset of array
+            if (expression.StartsWith("json.slice(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(11, expression.Length - 12).Trim();
+                return JsonSlice(inner, context);
+            }
+
+            // json.concat(arr1, arr2, ...) - Concatenate arrays
+            if (expression.StartsWith("json.concat(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(12, expression.Length - 13).Trim();
+                return JsonConcat(inner, context);
+            }
+
+            // json.indexOf(arr, value) - Find index of value
+            if (expression.StartsWith("json.indexOf(") && expression.EndsWith(")"))
+            {
+                var inner = expression.Substring(13, expression.Length - 14).Trim();
+                return JsonIndexOf(inner, context);
             }
 
             // Check for arithmetic: var + 1, var - 1, var * 2, var / 3, var % 10
@@ -674,27 +752,6 @@ namespace SSH_Helper.Services.Scripting.Commands
         }
 
         /// <summary>
-        /// Merges two JSON objects. Values from obj2 override values in obj1.
-        /// </summary>
-        private object MergeJsonObjects(string argsString, ScriptContext context)
-        {
-            var commaIdx = FindTopLevelComma(argsString);
-            if (commaIdx < 0)
-                return "{}";
-
-            var obj1Expr = argsString.Substring(0, commaIdx).Trim();
-            var obj2Expr = argsString.Substring(commaIdx + 1).Trim();
-
-            var obj1 = GetJsonObject(obj1Expr, context);
-            var obj2 = GetJsonObject(obj2Expr, context);
-
-            // Deep merge obj2 into obj1
-            MergeInto(obj1, obj2);
-
-            return obj1;
-        }
-
-        /// <summary>
         /// Gets a JsonObject from a variable or expression.
         /// </summary>
         private JsonObject GetJsonObject(string expr, ScriptContext context)
@@ -757,31 +814,6 @@ namespace SSH_Helper.Services.Scripting.Commands
                     target[prop.Key] = prop.Value?.DeepClone();
                 }
             }
-        }
-
-        /// <summary>
-        /// Extracts a value from JSON using dot notation path: json_get(json, "path.to.key")
-        /// Supports array indexing with [n] syntax: "items[0].name"
-        /// </summary>
-        private object? JsonGetValue(string argsString, ScriptContext context)
-        {
-            var commaIdx = FindTopLevelComma(argsString);
-            if (commaIdx < 0)
-                return null;
-
-            var jsonExpr = argsString.Substring(0, commaIdx).Trim();
-            var pathExpr = argsString.Substring(commaIdx + 1).Trim();
-
-            // Get the JSON source
-            var jsonNode = GetJsonNode(jsonExpr, context);
-            if (jsonNode == null)
-                return null;
-
-            // Resolve the path (remove quotes if present)
-            var path = ResolveStringValue(pathExpr, context);
-
-            // Navigate the path
-            return NavigateJsonPath(jsonNode, path);
         }
 
         /// <summary>
@@ -995,19 +1027,307 @@ namespace SSH_Helper.Services.Scripting.Commands
             return node.ToJsonString();
         }
 
+        // ============================================
+        // New JSON API Implementation (json.* functions)
+        // ============================================
+
         /// <summary>
-        /// Formats JSON with indentation: json_pretty(json)
+        /// Universal JSON constructor: json(...)
+        /// - json(list) or json(list, pretty) - convert list to JSON array
+        /// - json([], item1, item2, ...) - create array from items
+        /// - json("key1", val1, "key2", val2, ...) - create object from key-value pairs
+        /// - Add "pretty" anywhere for formatted output
         /// </summary>
-        private string JsonPrettyFormat(string expr, ScriptContext context)
+        private object JsonConstructor(string argsString, ScriptContext context)
         {
-            var jsonNode = GetJsonNode(expr, context);
+            if (string.IsNullOrWhiteSpace(argsString))
+                return "{}";
+
+            var args = SplitTopLevelCommas(argsString);
+            bool pretty = args.RemoveAll(a => a.Trim().Equals("pretty", StringComparison.OrdinalIgnoreCase)) > 0;
+
+            if (args.Count == 0)
+                return "{}";
+
+            var firstArg = args[0].Trim();
+
+            // Check if first arg is [] for explicit array creation
+            if (firstArg == "[]")
+            {
+                var jsonArray = new JsonArray();
+                for (int i = 1; i < args.Count; i++)
+                {
+                    var value = ResolveJsonValue(args[i], context);
+                    jsonArray.Add(ConvertToJsonNode(value));
+                }
+                return jsonArray.ToJsonString(new JsonSerializerOptions { WriteIndented = pretty });
+            }
+
+            // Check if first arg is a list variable (for array conversion)
+            var listValue = context.GetVariable(firstArg);
+            if (listValue is List<string> list)
+            {
+                return ConvertToJsonArray(list, pretty);
+            }
+
+            // Check if it's a variable reference to a list
+            if (firstArg.StartsWith("${") && firstArg.EndsWith("}"))
+            {
+                var varName = firstArg.Substring(2, firstArg.Length - 3);
+                var varValue = context.GetVariable(varName);
+                if (varValue is List<string> varList)
+                {
+                    return ConvertToJsonArray(varList, pretty);
+                }
+            }
+
+            // Otherwise, treat as key-value pairs for object creation
+            var obj = new Dictionary<string, object?>();
+            for (int i = 0; i + 1 < args.Count; i += 2)
+            {
+                var key = ResolveStringValue(args[i], context);
+                var value = ResolveJsonValue(args[i + 1], context);
+                obj[key] = value;
+            }
+
+            return JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = pretty });
+        }
+
+        /// <summary>
+        /// json.get(json, path, default?) - Extract value with optional default
+        /// </summary>
+        private object? JsonGet(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count < 2)
+                return null;
+
+            var jsonExpr = args[0].Trim();
+            var pathExpr = args[1].Trim();
+            object? defaultValue = args.Count >= 3 ? ResolveJsonValue(args[2], context) : null;
+
+            var jsonNode = GetJsonNode(jsonExpr, context);
+            if (jsonNode == null)
+                return defaultValue;
+
+            var path = ResolveStringValue(pathExpr, context);
+            var result = NavigateJsonPath(jsonNode, path);
+
+            // Return default if path doesn't exist (result is null)
+            return result ?? defaultValue;
+        }
+
+        /// <summary>
+        /// json.set(json, path, value) - Set value at path, creating intermediate objects as needed
+        /// </summary>
+        private object? JsonSet(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count < 3)
+                return null;
+
+            var jsonExpr = args[0].Trim();
+            var pathExpr = args[1].Trim();
+            var valueExpr = args[2].Trim();
+
+            // Get the source JSON (clone it to avoid modifying original)
+            var jsonNode = GetJsonNode(jsonExpr, context);
+            JsonNode root;
             if (jsonNode == null)
             {
-                // Try to parse the expression directly after substitution
-                var substituted = context.SubstituteVariables(expr);
+                root = new JsonObject();
+            }
+            else
+            {
+                root = jsonNode.DeepClone();
+            }
+
+            var path = ResolveStringValue(pathExpr, context);
+            var value = ResolveJsonValue(valueExpr, context);
+            var valueNode = ConvertToJsonNode(value);
+
+            // Navigate and set the value
+            SetJsonPath(root, path, valueNode);
+
+            return root.ToJsonString();
+        }
+
+        /// <summary>
+        /// Sets a value at a JSON path, creating intermediate objects/arrays as needed.
+        /// </summary>
+        private void SetJsonPath(JsonNode root, string path, JsonNode? value)
+        {
+            var segments = ParseJsonPath(path);
+            if (segments.Count == 0)
+                return;
+
+            JsonNode? current = root;
+
+            // Navigate to parent of target
+            for (int i = 0; i < segments.Count - 1; i++)
+            {
+                var segment = segments[i];
+                var nextSegment = segments[i + 1];
+
+                if (segment.IsArrayIndex)
+                {
+                    if (current is JsonArray arr)
+                    {
+                        // Extend array if needed
+                        while (arr.Count <= segment.Index)
+                            arr.Add(nextSegment.IsArrayIndex ? new JsonArray() : new JsonObject());
+                        current = arr[segment.Index];
+                    }
+                    else
+                    {
+                        return; // Can't navigate
+                    }
+                }
+                else
+                {
+                    if (current is JsonObject obj)
+                    {
+                        if (!obj.ContainsKey(segment.Key))
+                        {
+                            obj[segment.Key] = nextSegment.IsArrayIndex ? new JsonArray() : new JsonObject();
+                        }
+                        current = obj[segment.Key];
+                    }
+                    else
+                    {
+                        return; // Can't navigate
+                    }
+                }
+            }
+
+            // Set the final value
+            var lastSegment = segments[segments.Count - 1];
+            if (lastSegment.IsArrayIndex)
+            {
+                if (current is JsonArray finalArr)
+                {
+                    while (finalArr.Count <= lastSegment.Index)
+                        finalArr.Add(null);
+                    finalArr[lastSegment.Index] = value;
+                }
+            }
+            else
+            {
+                if (current is JsonObject finalObj)
+                {
+                    finalObj[lastSegment.Key] = value;
+                }
+            }
+        }
+
+        /// <summary>
+        /// json.delete(json, path) - Remove key or element at path
+        /// </summary>
+        private object? JsonDelete(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count < 2)
+                return null;
+
+            var jsonExpr = args[0].Trim();
+            var pathExpr = args[1].Trim();
+
+            var jsonNode = GetJsonNode(jsonExpr, context);
+            if (jsonNode == null)
+                return null;
+
+            var root = jsonNode.DeepClone();
+            var path = ResolveStringValue(pathExpr, context);
+
+            DeleteJsonPath(root, path);
+
+            return root.ToJsonString();
+        }
+
+        /// <summary>
+        /// Deletes a value at a JSON path.
+        /// </summary>
+        private void DeleteJsonPath(JsonNode root, string path)
+        {
+            var segments = ParseJsonPath(path);
+            if (segments.Count == 0)
+                return;
+
+            JsonNode? current = root;
+
+            // Navigate to parent of target
+            for (int i = 0; i < segments.Count - 1; i++)
+            {
+                var segment = segments[i];
+
+                if (segment.IsArrayIndex)
+                {
+                    if (current is JsonArray arr && segment.Index >= 0 && segment.Index < arr.Count)
+                        current = arr[segment.Index];
+                    else
+                        return;
+                }
+                else
+                {
+                    if (current is JsonObject obj && obj.TryGetPropertyValue(segment.Key, out var propValue))
+                        current = propValue;
+                    else
+                        return;
+                }
+            }
+
+            // Delete the target
+            var lastSegment = segments[segments.Count - 1];
+            if (lastSegment.IsArrayIndex)
+            {
+                if (current is JsonArray finalArr && lastSegment.Index >= 0 && lastSegment.Index < finalArr.Count)
+                    finalArr.RemoveAt(lastSegment.Index);
+            }
+            else
+            {
+                if (current is JsonObject finalObj)
+                    finalObj.Remove(lastSegment.Key);
+            }
+        }
+
+        /// <summary>
+        /// json.merge(obj1, obj2, ...) - Deep merge multiple objects (variadic)
+        /// </summary>
+        private object JsonMergeVariadic(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count == 0)
+                return "{}";
+
+            JsonObject result = new JsonObject();
+
+            foreach (var arg in args)
+            {
+                var obj = GetJsonObject(arg.Trim(), context);
+                MergeInto(result, obj);
+            }
+
+            return result.ToJsonString();
+        }
+
+        /// <summary>
+        /// json.format(json, style?) - Format JSON (pretty by default, compact if specified)
+        /// </summary>
+        private string JsonFormat(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count == 0)
+                return "";
+
+            var jsonExpr = args[0].Trim();
+            bool compact = args.Count >= 2 && args[1].Trim().Equals("compact", StringComparison.OrdinalIgnoreCase);
+
+            var jsonNode = GetJsonNode(jsonExpr, context);
+            if (jsonNode == null)
+            {
+                var substituted = context.SubstituteVariables(jsonExpr);
                 var trimmed = substituted.Trim();
 
-                // Remove quotes if it's a quoted string containing JSON
                 if ((trimmed.StartsWith("\"") && trimmed.EndsWith("\"")) ||
                     (trimmed.StartsWith("'") && trimmed.EndsWith("'")))
                 {
@@ -1019,105 +1339,600 @@ namespace SSH_Helper.Services.Scripting.Commands
                     try
                     {
                         using var doc = JsonDocument.Parse(trimmed);
-                        return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+                        return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = !compact });
                     }
                     catch
                     {
-                        return trimmed; // Return as-is if not valid JSON
+                        return trimmed;
                     }
                 }
-
                 return substituted;
             }
 
-            return jsonNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+            return jsonNode.ToJsonString(new JsonSerializerOptions { WriteIndented = !compact });
         }
 
         /// <summary>
-        /// Extracts array items as a List&lt;string&gt; for use with foreach.
-        /// Syntax: json_items(json) or json_items(json, "path.to.array")
-        /// Each array element is serialized as a JSON string if it's an object/array.
+        /// json.exists(json, path) - Check if path exists (returns true/false)
         /// </summary>
-        private List<string> JsonItemsToList(string argsString, ScriptContext context)
+        private bool JsonExists(string argsString, ScriptContext context)
         {
-            var result = new List<string>();
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count < 2)
+                return false;
 
-            // Check if we have a path argument
-            var commaIdx = FindTopLevelComma(argsString);
-            JsonNode? arrayNode;
+            var jsonExpr = args[0].Trim();
+            var pathExpr = args[1].Trim();
 
-            if (commaIdx > 0)
+            var jsonNode = GetJsonNode(jsonExpr, context);
+            if (jsonNode == null)
+                return false;
+
+            var path = ResolveStringValue(pathExpr, context);
+
+            // Try to navigate the path
+            return JsonPathExists(jsonNode, path);
+        }
+
+        /// <summary>
+        /// Checks if a JSON path exists (distinguishes between null value and missing key).
+        /// </summary>
+        private bool JsonPathExists(JsonNode node, string path)
+        {
+            var segments = ParseJsonPath(path);
+            JsonNode? current = node;
+
+            foreach (var segment in segments)
             {
-                // json_items(json, "path")
-                var jsonExpr = argsString.Substring(0, commaIdx).Trim();
-                var pathExpr = argsString.Substring(commaIdx + 1).Trim();
+                if (current == null)
+                    return false;
 
-                var jsonNode = GetJsonNode(jsonExpr, context);
-                if (jsonNode == null)
-                    return result;
+                if (segment.IsArrayIndex)
+                {
+                    if (current is JsonArray arr)
+                    {
+                        if (segment.Index < 0 || segment.Index >= arr.Count)
+                            return false;
+                        current = arr[segment.Index];
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    if (current is JsonObject obj)
+                    {
+                        if (!obj.ContainsKey(segment.Key))
+                            return false;
+                        current = obj[segment.Key];
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+            }
 
+            return true;
+        }
+
+        /// <summary>
+        /// json.len(json, path?) - Get array length or object key count
+        /// </summary>
+        private int JsonLen(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count == 0)
+                return 0;
+
+            var jsonExpr = args[0].Trim();
+            var jsonNode = GetJsonNode(jsonExpr, context);
+
+            if (jsonNode == null)
+                return 0;
+
+            // If path is provided, navigate to it first
+            if (args.Count >= 2)
+            {
+                var pathExpr = args[1].Trim();
                 var path = ResolveStringValue(pathExpr, context);
+                var result = NavigateJsonPath(jsonNode, path);
 
-                // Navigate to the array using the path
-                var navResult = NavigateJsonPath(jsonNode, path);
-                if (navResult is string jsonStr && (jsonStr.TrimStart().StartsWith("[")))
+                if (result is string jsonStr && (jsonStr.TrimStart().StartsWith("[") || jsonStr.TrimStart().StartsWith("{")))
                 {
                     try
                     {
-                        arrayNode = JsonNode.Parse(jsonStr);
+                        jsonNode = JsonNode.Parse(jsonStr);
+                    }
+                    catch
+                    {
+                        return 0;
+                    }
+                }
+                else if (result is JsonNode resultNode)
+                {
+                    jsonNode = resultNode;
+                }
+                else
+                {
+                    return 0;
+                }
+            }
+
+            if (jsonNode is JsonArray arr)
+                return arr.Count;
+            if (jsonNode is JsonObject obj)
+                return obj.Count;
+
+            return 0;
+        }
+
+        /// <summary>
+        /// json.type(json, path?) - Get value type
+        /// Returns: "object", "array", "string", "number", "boolean", "null"
+        /// </summary>
+        private string JsonType(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count == 0)
+                return "null";
+
+            var jsonExpr = args[0].Trim();
+            var jsonNode = GetJsonNode(jsonExpr, context);
+
+            if (jsonNode == null)
+                return "null";
+
+            // If path is provided, navigate to it first
+            if (args.Count >= 2)
+            {
+                var pathExpr = args[1].Trim();
+                var path = ResolveStringValue(pathExpr, context);
+                var result = NavigateJsonPath(jsonNode, path);
+
+                if (result == null)
+                    return "null";
+
+                if (result is string jsonStr)
+                {
+                    var trimmed = jsonStr.TrimStart();
+                    if (trimmed.StartsWith("{"))
+                        return "object";
+                    if (trimmed.StartsWith("["))
+                        return "array";
+                    return "string";
+                }
+                if (result is JsonNode resultNode)
+                    jsonNode = resultNode;
+                else if (result is long || result is int || result is double)
+                    return "number";
+                else if (result is bool)
+                    return "boolean";
+                else
+                    return "string";
+            }
+
+            return GetJsonNodeType(jsonNode);
+        }
+
+        private string GetJsonNodeType(JsonNode? node)
+        {
+            if (node == null)
+                return "null";
+            if (node is JsonObject)
+                return "object";
+            if (node is JsonArray)
+                return "array";
+            if (node is JsonValue jv)
+            {
+                if (jv.TryGetValue<bool>(out _))
+                    return "boolean";
+                if (jv.TryGetValue<long>(out _) || jv.TryGetValue<double>(out _))
+                    return "number";
+                return "string";
+            }
+            return "null";
+        }
+
+        /// <summary>
+        /// json.keys(json, path?) - Get object keys as list
+        /// </summary>
+        private List<string> JsonKeys(string argsString, ScriptContext context)
+        {
+            var result = new List<string>();
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count == 0)
+                return result;
+
+            var jsonExpr = args[0].Trim();
+            var jsonNode = GetJsonNode(jsonExpr, context);
+
+            if (jsonNode == null)
+                return result;
+
+            // If path is provided, navigate to it first
+            if (args.Count >= 2)
+            {
+                var pathExpr = args[1].Trim();
+                var path = ResolveStringValue(pathExpr, context);
+                var navResult = NavigateJsonPath(jsonNode, path);
+
+                if (navResult is string jsonStr && jsonStr.TrimStart().StartsWith("{"))
+                {
+                    try
+                    {
+                        jsonNode = JsonNode.Parse(jsonStr);
                     }
                     catch
                     {
                         return result;
                     }
                 }
-                else if (navResult is JsonNode node)
+                else if (navResult is JsonNode resultNode)
                 {
-                    arrayNode = node;
+                    jsonNode = resultNode;
                 }
                 else
                 {
                     return result;
                 }
             }
-            else
-            {
-                // json_items(json) - no path, the expression itself should be an array
-                arrayNode = GetJsonNode(argsString, context);
-            }
 
-            // Extract items from the array
-            if (arrayNode is JsonArray arr)
+            if (jsonNode is JsonObject obj)
             {
-                foreach (var item in arr)
+                foreach (var prop in obj)
                 {
-                    if (item == null)
-                    {
-                        result.Add("null");
-                    }
-                    else if (item is JsonValue jv)
-                    {
-                        // Get the raw value for primitives
-                        if (jv.TryGetValue<string>(out var str))
-                            result.Add(str);
-                        else if (jv.TryGetValue<long>(out var lng))
-                            result.Add(lng.ToString());
-                        else if (jv.TryGetValue<double>(out var dbl))
-                            result.Add(dbl.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                        else if (jv.TryGetValue<bool>(out var bln))
-                            result.Add(bln ? "true" : "false");
-                        else
-                            result.Add(jv.ToString());
-                    }
-                    else
-                    {
-                        // For objects and arrays, serialize to compact JSON
-                        result.Add(item.ToJsonString());
-                    }
+                    result.Add(prop.Key);
                 }
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// json.values(json, path?) - Get object values as list
+        /// </summary>
+        private List<string> JsonValues(string argsString, ScriptContext context)
+        {
+            var result = new List<string>();
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count == 0)
+                return result;
+
+            var jsonExpr = args[0].Trim();
+            var jsonNode = GetJsonNode(jsonExpr, context);
+
+            if (jsonNode == null)
+                return result;
+
+            // If path is provided, navigate to it first
+            if (args.Count >= 2)
+            {
+                var pathExpr = args[1].Trim();
+                var path = ResolveStringValue(pathExpr, context);
+                var navResult = NavigateJsonPath(jsonNode, path);
+
+                if (navResult is string jsonStr && jsonStr.TrimStart().StartsWith("{"))
+                {
+                    try
+                    {
+                        jsonNode = JsonNode.Parse(jsonStr);
+                    }
+                    catch
+                    {
+                        return result;
+                    }
+                }
+                else if (navResult is JsonNode resultNode)
+                {
+                    jsonNode = resultNode;
+                }
+                else
+                {
+                    return result;
+                }
+            }
+
+            if (jsonNode is JsonObject obj)
+            {
+                foreach (var prop in obj)
+                {
+                    result.Add(JsonNodeToStringValue(prop.Value));
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Converts a JsonNode to a string representation for lists.
+        /// </summary>
+        private string JsonNodeToStringValue(JsonNode? node)
+        {
+            if (node == null)
+                return "null";
+
+            if (node is JsonValue jv)
+            {
+                if (jv.TryGetValue<string>(out var str))
+                    return str;
+                if (jv.TryGetValue<long>(out var lng))
+                    return lng.ToString();
+                if (jv.TryGetValue<double>(out var dbl))
+                    return dbl.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (jv.TryGetValue<bool>(out var bln))
+                    return bln ? "true" : "false";
+                return jv.ToString();
+            }
+
+            return node.ToJsonString();
+        }
+
+        /// <summary>
+        /// json.items(json, path?) - Extract array elements or object entries
+        /// For arrays: returns list of elements
+        /// For objects: returns list of {"key": k, "value": v} entries
+        /// </summary>
+        private List<string> JsonItems(string argsString, ScriptContext context)
+        {
+            var result = new List<string>();
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count == 0)
+                return result;
+
+            var jsonExpr = args[0].Trim();
+            var jsonNode = GetJsonNode(jsonExpr, context);
+
+            if (jsonNode == null)
+                return result;
+
+            // If path is provided, navigate to it first
+            if (args.Count >= 2)
+            {
+                var pathExpr = args[1].Trim();
+                var path = ResolveStringValue(pathExpr, context);
+                var navResult = NavigateJsonPath(jsonNode, path);
+
+                if (navResult is string jsonStr && (jsonStr.TrimStart().StartsWith("[") || jsonStr.TrimStart().StartsWith("{")))
+                {
+                    try
+                    {
+                        jsonNode = JsonNode.Parse(jsonStr);
+                    }
+                    catch
+                    {
+                        return result;
+                    }
+                }
+                else if (navResult is JsonNode resultNode)
+                {
+                    jsonNode = resultNode;
+                }
+                else
+                {
+                    return result;
+                }
+            }
+
+            // Handle arrays (same as before)
+            if (jsonNode is JsonArray arr)
+            {
+                foreach (var item in arr)
+                {
+                    result.Add(JsonNodeToStringValue(item));
+                }
+            }
+            // Handle objects - return key/value entries
+            else if (jsonNode is JsonObject obj)
+            {
+                foreach (var prop in obj)
+                {
+                    var entry = new JsonObject
+                    {
+                        ["key"] = prop.Key,
+                        ["value"] = prop.Value?.DeepClone()
+                    };
+                    result.Add(entry.ToJsonString());
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// json.push(arr, value) - Append value to array
+        /// </summary>
+        private object? JsonPush(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count < 2)
+                return null;
+
+            var arrExpr = args[0].Trim();
+            var valueExpr = args[1].Trim();
+
+            var arrNode = GetJsonNode(arrExpr, context);
+            JsonArray arr;
+
+            if (arrNode is JsonArray existingArr)
+            {
+                arr = JsonNode.Parse(existingArr.ToJsonString())!.AsArray();
+            }
+            else
+            {
+                arr = new JsonArray();
+            }
+
+            var value = ResolveJsonValue(valueExpr, context);
+            arr.Add(ConvertToJsonNode(value));
+
+            return arr.ToJsonString();
+        }
+
+        /// <summary>
+        /// json.pop(arr) - Remove and return last element
+        /// </summary>
+        private object? JsonPop(string argsString, ScriptContext context)
+        {
+            var arrNode = GetJsonNode(argsString.Trim(), context);
+            if (arrNode is not JsonArray arr || arr.Count == 0)
+                return null;
+
+            var lastIdx = arr.Count - 1;
+            var lastItem = arr[lastIdx];
+
+            // Return just the value (the array modification is not persisted - user must use json.delete or reassign)
+            return JsonNodeToValue(lastItem);
+        }
+
+        /// <summary>
+        /// json.unshift(arr, value) - Prepend value to array
+        /// </summary>
+        private object? JsonUnshift(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count < 2)
+                return null;
+
+            var arrExpr = args[0].Trim();
+            var valueExpr = args[1].Trim();
+
+            var arrNode = GetJsonNode(arrExpr, context);
+            JsonArray arr;
+
+            if (arrNode is JsonArray existingArr)
+            {
+                arr = JsonNode.Parse(existingArr.ToJsonString())!.AsArray();
+            }
+            else
+            {
+                arr = new JsonArray();
+            }
+
+            var value = ResolveJsonValue(valueExpr, context);
+            var newArr = new JsonArray();
+            newArr.Add(ConvertToJsonNode(value));
+            foreach (var item in arr)
+            {
+                newArr.Add(item?.DeepClone());
+            }
+
+            return newArr.ToJsonString();
+        }
+
+        /// <summary>
+        /// json.shift(arr) - Remove and return first element
+        /// </summary>
+        private object? JsonShift(string argsString, ScriptContext context)
+        {
+            var arrNode = GetJsonNode(argsString.Trim(), context);
+            if (arrNode is not JsonArray arr || arr.Count == 0)
+                return null;
+
+            var firstItem = arr[0];
+            return JsonNodeToValue(firstItem);
+        }
+
+        /// <summary>
+        /// json.slice(arr, start, end?) - Extract subset of array
+        /// Supports negative indices (from end)
+        /// </summary>
+        private object? JsonSlice(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count < 2)
+                return "[]";
+
+            var arrExpr = args[0].Trim();
+            var startExpr = args[1].Trim();
+
+            var arrNode = GetJsonNode(arrExpr, context);
+            if (arrNode is not JsonArray arr)
+                return "[]";
+
+            var startVal = ResolveJsonValue(startExpr, context);
+            int start = startVal is int si ? si : (startVal is long sl ? (int)sl : 0);
+
+            int end = arr.Count;
+            if (args.Count >= 3)
+            {
+                var endExpr = args[2].Trim();
+                var endVal = ResolveJsonValue(endExpr, context);
+                end = endVal is int ei ? ei : (endVal is long el ? (int)el : arr.Count);
+            }
+
+            // Handle negative indices
+            if (start < 0)
+                start = Math.Max(0, arr.Count + start);
+            if (end < 0)
+                end = Math.Max(0, arr.Count + end);
+
+            // Clamp to bounds
+            start = Math.Max(0, Math.Min(start, arr.Count));
+            end = Math.Max(0, Math.Min(end, arr.Count));
+
+            var result = new JsonArray();
+            for (int i = start; i < end; i++)
+            {
+                result.Add(arr[i]?.DeepClone());
+            }
+
+            return result.ToJsonString();
+        }
+
+        /// <summary>
+        /// json.concat(arr1, arr2, ...) - Concatenate multiple arrays
+        /// </summary>
+        private object? JsonConcat(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            var result = new JsonArray();
+
+            foreach (var arg in args)
+            {
+                var arrNode = GetJsonNode(arg.Trim(), context);
+                if (arrNode is JsonArray arr)
+                {
+                    foreach (var item in arr)
+                    {
+                        result.Add(item?.DeepClone());
+                    }
+                }
+            }
+
+            return result.ToJsonString();
+        }
+
+        /// <summary>
+        /// json.indexOf(arr, value) - Find index of value (-1 if not found)
+        /// </summary>
+        private int JsonIndexOf(string argsString, ScriptContext context)
+        {
+            var args = SplitTopLevelCommas(argsString);
+            if (args.Count < 2)
+                return -1;
+
+            var arrExpr = args[0].Trim();
+            var valueExpr = args[1].Trim();
+
+            var arrNode = GetJsonNode(arrExpr, context);
+            if (arrNode is not JsonArray arr)
+                return -1;
+
+            var searchValue = ResolveJsonValue(valueExpr, context);
+            var searchStr = searchValue?.ToString() ?? "";
+
+            for (int i = 0; i < arr.Count; i++)
+            {
+                var item = arr[i];
+                var itemStr = JsonNodeToStringValue(item);
+                if (itemStr == searchStr)
+                    return i;
+            }
+
+            return -1;
         }
     }
 }
