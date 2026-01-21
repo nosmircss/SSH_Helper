@@ -29,6 +29,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public bool Debug { get; set; }
 
         /// <summary>
+        /// Suppress the script execution banner/header in output.
+        /// </summary>
+        public bool NoBanner { get; set; }
+
+        /// <summary>
         /// Variables declared in the script with their default values.
         /// </summary>
         public Dictionary<string, object?> Vars { get; set; } = new();

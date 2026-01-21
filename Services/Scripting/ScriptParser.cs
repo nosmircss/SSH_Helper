@@ -124,6 +124,10 @@ namespace SSH_Helper.Services.Scripting
                                 var debugValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
                                 script.Debug = debugValue == "true" || debugValue == "yes" || debugValue == "1";
                                 break;
+                            case "nobanner":
+                                var nobannerValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                                script.NoBanner = nobannerValue == "true" || nobannerValue == "yes" || nobannerValue == "1";
+                                break;
                             case "vars":
                                 script.Vars = ParseVars(parser);
                                 break;

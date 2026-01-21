@@ -757,8 +757,8 @@ namespace SSH_Helper.Services
                 OnProgressChanged(host, $"Connected to {host} (pooled, script mode)", false, true);
                 session.DebugMode = DebugMode;
 
-                // Build header with script name (only if showHeader is true)
-                if (showHeader)
+                // Build header with script name (only if showHeader is true and script doesn't suppress it)
+                if (showHeader && !script.NoBanner)
                 {
                     var prompt = session.CurrentPrompt;
                     var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
@@ -873,8 +873,8 @@ namespace SSH_Helper.Services
                 throw;
             }
 
-            // Build header with script name (only if showHeader is true)
-            if (showHeader)
+            // Build header with script name (only if showHeader is true and script doesn't suppress it)
+            if (showHeader && !script.NoBanner)
             {
                 var prompt = session.CurrentPrompt;
                 var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";

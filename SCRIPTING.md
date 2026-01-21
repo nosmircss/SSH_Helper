@@ -37,6 +37,7 @@ name: "Script Name"              # Optional: human-readable name
 description: "Description"       # Optional: what the script does
 version: 1                       # Optional: script version (default: 1)
 debug: false                     # Optional: enable debug output (default: false)
+nobanner: false                  # Optional: suppress script execution banner (default: false)
 
 vars:                            # Optional: variable declarations
   variable_name: "default_value"
@@ -51,7 +52,7 @@ steps:                           # Required: list of execution steps
 
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
-- Keywords: `name:`, `description:`, `vars:`, `steps:`, `version:`
+- Keywords: `name:`, `description:`, `vars:`, `steps:`, `version:`, `nobanner:`
 - Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- foreach:`, `- while:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`
 
 Plain text (without YAML markers) is treated as simple commands to execute line by line.
@@ -992,6 +993,36 @@ Use parentheses for complex expressions:
   then:
     - exit: failure "Command failed after 3 retries"
 ```
+
+---
+
+## Output Options
+
+### NoBanner Mode
+
+By default, script execution displays a banner header showing the host, prompt, and script name:
+
+```
+############################################################################################################
+#################### SCRIPT: 192.168.1.1 FortiGate-VM64-KVM # My Script Name ###############################
+############################################################################################################
+```
+
+To suppress this banner, set `nobanner: true` in your script header:
+
+```yaml
+---
+name: Clean Output Script
+nobanner: true
+
+steps:
+  - send: show version
+```
+
+This is useful when:
+- You want cleaner output for reports or logs
+- You're processing many hosts and don't need the visual separators
+- You're using `writefile` to save output and don't want the banner included
 
 ---
 
