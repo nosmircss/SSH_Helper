@@ -196,7 +196,8 @@ namespace SSH_Helper
                 Size = new Size(80, 23),
                 Minimum = 1,
                 Maximum = 500,
-                Value = 30
+                Value = 30,
+                TextAlign = HorizontalAlignment.Right
             };
 
             var lblDefaultsSection = new Label
@@ -221,7 +222,8 @@ namespace SSH_Helper
                 Size = new Size(80, 23),
                 Minimum = 1,
                 Maximum = 300,
-                Value = 10
+                Value = 10,
+                TextAlign = HorizontalAlignment.Right
             };
 
             var lblConnectionTimeout = new Label
@@ -238,7 +240,8 @@ namespace SSH_Helper
                 Size = new Size(80, 23),
                 Minimum = 5,
                 Maximum = 120,
-                Value = 30
+                Value = 30,
+                TextAlign = HorizontalAlignment.Right
             };
 
             var lblAppearanceSection = new Label

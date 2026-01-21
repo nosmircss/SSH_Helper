@@ -148,7 +148,8 @@ namespace SSH_Helper
             {
                 Text = "1",
                 Location = new Point(105, 453),
-                Size = new Size(50, 23)
+                Size = new Size(50, 23),
+                TextAlign = HorizontalAlignment.Right
             };
             _txtParallelHosts.KeyPress += TxtParallelHosts_KeyPress;
 

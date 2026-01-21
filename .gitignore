@@ -363,3 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 nul
 RebexPOC/
+
+# Rebex license key file (local development)
+rebex.key

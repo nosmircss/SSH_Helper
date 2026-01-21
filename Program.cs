@@ -10,11 +10,28 @@ namespace SSH_Helper
         [STAThread]
         static void Main()
         {
-            // Initialize Rebex license key - try embedded metadata first (from build), then env var
+            // Initialize Rebex license key - try embedded metadata first (from build),
+            // then local rebex.key file (for dev), then env var
             var rebexKey = Assembly.GetExecutingAssembly()
                 .GetCustomAttributes<AssemblyMetadataAttribute>()
-                .FirstOrDefault(a => a.Key == "RebexLicenseKey")?.Value
-                ?? Environment.GetEnvironmentVariable("REBEX_LICENSE_KEY");
+                .FirstOrDefault(a => a.Key == "RebexLicenseKey")?.Value;
+
+            // Check for local rebex.key file (useful for development)
+            if (string.IsNullOrEmpty(rebexKey))
+            {
+                var keyFilePath = Path.Combine(AppContext.BaseDirectory, "rebex.key");
+                if (File.Exists(keyFilePath))
+                {
+                    rebexKey = File.ReadAllText(keyFilePath).Trim();
+                }
+            }
+
+            // Fall back to environment variable
+            if (string.IsNullOrEmpty(rebexKey))
+            {
+                rebexKey = Environment.GetEnvironmentVariable("REBEX_LICENSE_KEY");
+            }
+
             if (!string.IsNullOrEmpty(rebexKey))
             {
                 Rebex.Licensing.Key = rebexKey;
