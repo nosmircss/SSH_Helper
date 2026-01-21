@@ -83,6 +83,10 @@ namespace SSH_Helper
         {
             _configService = configService;
 
+            // Enable DPI scaling - must be set before any Size/Location values
+            AutoScaleDimensions = new SizeF(7F, 15F);
+            AutoScaleMode = AutoScaleMode.Font;
+
             Text = "Settings";
             Size = new Size(520, 620);
             FormBorderStyle = FormBorderStyle.FixedDialog;
