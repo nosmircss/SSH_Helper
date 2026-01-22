@@ -59,7 +59,9 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: SSH_Helper.zip
+        files: |
+          release/SSH_Helper.exe
+          SSH_Helper.zip
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
