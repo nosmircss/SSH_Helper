@@ -53,15 +53,10 @@ jobs:
         name: SSH_Helper
         path: ./release
 
-    - name: Create zip
-      run: cd release && zip -r ../SSH_Helper.zip .
-
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          release/SSH_Helper.exe
-          SSH_Helper.zip
+        files: release/SSH_Helper.exe
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
