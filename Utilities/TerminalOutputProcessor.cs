@@ -57,7 +57,7 @@ namespace SSH_Helper.Utilities
                         break;
 
                     default:
-                        if (c >= ' ' && c <= '~')
+                        if ((c >= ' ' && c <= '~') || c >= '\u0080')
                         {
                             EnsureLineLength(line, cursor + 1);
                             line[cursor] = c;
@@ -86,7 +86,7 @@ namespace SSH_Helper.Utilities
             if (string.IsNullOrEmpty(input))
                 return input;
 
-            return Regex.Replace(input, @"[^\u0020-\u007E\r\n\t\b\u001B]", "");
+            return Regex.Replace(input, @"[^\u0020-\u007E\u0080-\uFFFF\r\n\t\b\u001B]", "");
         }
 
         /// <summary>
@@ -134,14 +134,16 @@ namespace SSH_Helper.Utilities
                 return chunk;
 
             // After sending space to dismiss pager, FortiGate (and similar devices) send:
-            // 1. \r (carriage return to go to column 0)
-            // 2. Spaces to overwrite the "--More--" prompt
-            // 3. \r (carriage return again to go back to column 0)
-            // 4. Then the actual content continues with proper indentation
+            // 1. Optional echoed space character
+            // 2. \r (carriage return to go to column 0)
+            // 3. Spaces to overwrite the "--More--" prompt
+            // 4. \r (carriage return again to go back to column 0)
+            // 5. Then the actual content continues
             //
-            // Observed pattern: " \r         \r" (space, CR, 9 spaces, CR)
-            // We strip this entire clearing sequence, leaving just the actual content
-            return Regex.Replace(chunk, @"^ \r +\r", string.Empty);
+            // Observed patterns:
+            //   " \r         \r" (space, CR, 9 spaces, CR) - when space echo is in same chunk
+            //   "\r         \r"  (CR, 9 spaces, CR) - when space echo was in previous chunk
+            return Regex.Replace(chunk, @"^ ?\r +\r", string.Empty);
         }
 
         private static int ProcessEscapeSequence(string input, int startIndex, StringBuilder line, ref int cursor, ref int savedCursor)

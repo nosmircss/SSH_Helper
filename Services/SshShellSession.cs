@@ -88,11 +88,11 @@ namespace SSH_Helper.Services
         /// </summary>
         public static class Patterns
         {
-            /// <summary>Matches common shell prompts ending with #, $, >, or %</summary>
-            public static readonly Regex ShellPrompt = new(@"^.+[#$>%]\s*$", RegexOptions.Multiline);
+            /// <summary>Matches common shell prompts ending with #, $, >, %, or arrow characters</summary>
+            public static readonly Regex ShellPrompt = new(@"^.+[#$>%\u2192\u276F\u279C]\s*$", RegexOptions.Multiline);
 
             /// <summary>Shell prompt pattern string for Rebex ScriptEvent</summary>
-            public const string ShellPromptPattern = @"(?:^|[\r\n])[\w][\w.-]*(?:\s*\([^)]+\))?\s*[#$>%]\s*$";
+            public const string ShellPromptPattern = @"(?:^|[\r\n]).+[#$>%\u2192\u276F\u279C]\s*$";
 
             /// <summary>Matches "-- More --" style pager prompts</summary>
             public static readonly Regex PagerPrompt = new(@"--\s*More\s*--", RegexOptions.IgnoreCase);
@@ -190,6 +190,18 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Rebuilds the prompt ScriptEvent with a specific detected prompt pattern.
+        /// Must be called after initialization detects the actual prompt.
+        /// </summary>
+        private void RebuildPromptEvent(string specificPromptPattern)
+        {
+            var pagerPattern = string.Join("|", Patterns.PagerPatterns);
+            var combinedPattern = $@"(?:{pagerPattern}|{specificPromptPattern})";
+            var combinedRegex = new Regex(combinedPattern, RegexOptions.IgnoreCase);
+            _promptOrPagerEvent = ScriptEvent.FromRegex(combinedRegex);
+        }
+
+        /// <summary>
         /// Initializes the session by detecting the shell prompt.
         /// Automatically handles pre-login banners that require acceptance (e.g., FortiGate EULA).
         /// Call this after creating the session before executing commands.
@@ -200,7 +212,6 @@ namespace SSH_Helper.Services
         {
             var allOutput = new StringBuilder();
             var maxBannerAttempts = 3; // Prevent infinite loops if banner keeps appearing
-            var attemptCount = 0;
 
             // Check connection validity before starting
             if (!IsConnected)
@@ -215,6 +226,64 @@ namespace SSH_Helper.Services
             // Devices like FortiGate send their banner/prompt automatically after shell starts.
             // Sending \r prematurely can cause the connection to be closed.
 
+            if (DebugMode)
+            {
+                // Debug mode: Use polling with a catch-all ScriptEvent to see data as it arrives.
+                // Normal ReadUntil blocks for the full timeout with no visibility into received data.
+                await InitializeWithPollingAsync(allOutput, maxBannerAttempts, cancellationToken);
+            }
+            else
+            {
+                // Normal mode: Use standard ReadUntil with banner/prompt events
+                await InitializeStandardAsync(allOutput, maxBannerAttempts, cancellationToken);
+            }
+
+            if (string.IsNullOrEmpty(_currentPrompt))
+            {
+                EmitDebug("WARNING: Could not detect a valid shell prompt after all attempts");
+                EmitDebug($"Total raw data received across all attempts ({allOutput.Length} chars): {EscapeForDebug(allOutput.ToString(), 1000)}");
+            }
+
+            return TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(allOutput.ToString()));
+        }
+
+        /// <summary>
+        /// Flushes any remaining data in the scripting buffer.
+        /// Call after InitializeAsync() to ensure no residual prompt/banner
+        /// data bleeds into command execution output.
+        /// </summary>
+        public void FlushBuffer()
+        {
+            var savedTimeout = _scripting.Timeout;
+            _scripting.Timeout = 200;
+            var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
+            try
+            {
+                while (true)
+                {
+                    _scripting.ReadUntil(anyDataEvent);
+                }
+            }
+            catch (Exception ex) when (
+                ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase))
+            {
+                // Timeout means buffer is drained
+            }
+            finally
+            {
+                _scripting.Timeout = savedTimeout;
+            }
+        }
+
+        /// <summary>
+        /// Standard initialization: uses ReadUntil with banner/prompt events (blocks until match or timeout).
+        /// </summary>
+        private async Task InitializeStandardAsync(StringBuilder allOutput, int maxBannerAttempts, CancellationToken cancellationToken)
+        {
+            var attemptCount = 0;
+
             while (attemptCount < maxBannerAttempts)
             {
                 attemptCount++;
@@ -222,49 +291,170 @@ namespace SSH_Helper.Services
 
                 try
                 {
-                    // Wait for initial output using ReadUntil with banner and prompt events
-                    EmitDebug($"Waiting for banner or prompt (attempt {attemptCount}/{maxBannerAttempts})");
-                    EmitDebug($"InitTimeout: {_scripting.Timeout}ms | ShellPromptPattern: {Patterns.ShellPromptPattern}");
-                    EmitDebug($"BannerAcceptPattern: {Patterns.BannerAcceptPattern}");
-
-                    var readSw = System.Diagnostics.Stopwatch.StartNew();
                     var output = _scripting.ReadUntil(_bannerEvent!, _shellPromptEvent!);
-                    readSw.Stop();
-
                     allOutput.Append(output);
 
-                    // Log what ReadUntil returned
-                    var rawLen = output?.Length ?? 0;
-                    EmitDebug($"ReadUntil returned after {readSw.ElapsedMilliseconds}ms | Raw output length: {rawLen} chars");
-                    if (rawLen > 0)
-                    {
-                        EmitDebug($"Raw output: {EscapeForDebug(output!, 500)}");
-                    }
-                    else
-                    {
-                        EmitDebug("Raw output: <null or empty>");
-                    }
-
-                    // Try to detect the actual prompt from the output
-                    var sanitized = TerminalOutputProcessor.Sanitize(output ?? "");
-                    var normalized = TerminalOutputProcessor.Normalize(sanitized);
-
-                    EmitDebug($"Sanitized ({sanitized.Length} chars): {EscapeForDebug(sanitized, 500)}");
-                    EmitDebug($"Normalized ({normalized.Length} chars): {EscapeForDebug(normalized, 500)}");
-
-                    // Check if we got a real shell prompt
-                    if (PromptDetector.TryDetectPrompt(normalized, out var detectedPrompt))
-                    {
-                        _currentPrompt = detectedPrompt;
-                        _promptPattern = PromptDetector.BuildPromptRegex(detectedPrompt);
-                        EmitDebug($"Shell prompt detected: {EscapeForDebug(detectedPrompt, 200)}");
-                        EmitDebug($"Built prompt regex: {_promptPattern}");
+                    if (ProcessInitOutput(output ?? "", allOutput))
                         break;
+
+                    // Check for banner
+                    var normalized = TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(output ?? ""));
+                    var bannerMatch = Patterns.BannerAcceptPrompt.Match(normalized);
+                    if (bannerMatch.Success)
+                    {
+                        var keyToPress = GetBannerAcceptKey(bannerMatch);
+                        _scripting.Send(keyToPress);
+                        await Task.Delay(100, cancellationToken);
+                        continue;
                     }
 
-                    // TryDetectPrompt failed - log detailed per-line analysis
+                    if (attemptCount < maxBannerAttempts)
+                        _scripting.Send("\r");
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException &&
+                    (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                     ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+                     ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (attemptCount >= maxBannerAttempts)
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Debug initialization: uses a catch-all ScriptEvent with short poll intervals to show
+        /// received data in real-time, rather than blocking for the full timeout with no visibility.
+        /// </summary>
+        private async Task InitializeWithPollingAsync(StringBuilder allOutput, int maxBannerAttempts, CancellationToken cancellationToken)
+        {
+            var attemptCount = 0;
+            var overallTimeout = _scripting.Timeout; // Save original (e.g., 30000ms)
+            var pollInterval = 3000; // Poll every 3 seconds
+            var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]"); // Matches as soon as any data arrives
+            var bannerAcceptCount = 0;
+            var maxBannerAccepts = 5; // Max times we'll send the acceptance key before giving up
+
+            EmitDebug($"Using debug polling mode: {pollInterval}ms polls, {overallTimeout}ms overall timeout");
+            EmitDebug($"ShellPromptPattern: {Patterns.ShellPromptPattern}");
+            EmitDebug($"BannerAcceptPattern: {Patterns.BannerAcceptPattern}");
+
+            while (attemptCount < maxBannerAttempts)
+            {
+                attemptCount++;
+                cancellationToken.ThrowIfCancellationRequested();
+                EmitDebug($"--- Attempt {attemptCount}/{maxBannerAttempts} ---");
+
+                var attemptSw = System.Diagnostics.Stopwatch.StartNew();
+                var dataReceived = false;
+
+                // Poll loop: read data in chunks as it arrives
+                while (attemptSw.ElapsedMilliseconds < overallTimeout)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    _scripting.Timeout = pollInterval;
+
+                    try
+                    {
+                        // Use catch-all event to return as soon as ANY data arrives
+                        var chunk = _scripting.ReadUntil(anyDataEvent);
+
+                        if (!string.IsNullOrEmpty(chunk))
+                        {
+                            dataReceived = true;
+                            allOutput.Append(chunk);
+
+                            // Check accumulated data against our patterns
+                            var accumulated = allOutput.ToString();
+                            var sanitized = TerminalOutputProcessor.Sanitize(accumulated);
+                            var normalized = TerminalOutputProcessor.Normalize(sanitized);
+
+                            // Check for shell prompt
+                            if (PromptDetector.TryDetectPrompt(normalized, out var detectedPrompt))
+                            {
+                                _currentPrompt = detectedPrompt;
+                                _promptPattern = PromptDetector.BuildPromptRegex(detectedPrompt);
+                                RebuildPromptEvent(_promptPattern.ToString());
+                                EmitDebug($"Shell prompt detected: {EscapeForDebug(detectedPrompt, 200)}");
+                                EmitDebug($"Built prompt regex: {_promptPattern}");
+                                _scripting.Timeout = overallTimeout;
+                                return;
+                            }
+
+                            // Check for banner
+                            var bannerMatch = Patterns.BannerAcceptPrompt.Match(normalized);
+                            if (bannerMatch.Success)
+                            {
+                                if (bannerAcceptCount >= maxBannerAccepts)
+                                {
+                                    EmitDebug($"Banner acceptance limit reached ({maxBannerAccepts}). Trying with carriage return...");
+                                    var keyToPress = GetBannerAcceptKey(bannerMatch);
+                                    _scripting.Send(keyToPress + "\r");
+                                    await Task.Delay(500, cancellationToken);
+                                    allOutput.Clear();
+                                    bannerAcceptCount++;
+                                    if (bannerAcceptCount > maxBannerAccepts + 2)
+                                    {
+                                        EmitDebug("Banner acceptance failed after all retries. Moving to next attempt.");
+                                        break;
+                                    }
+                                    continue;
+                                }
+
+                                bannerAcceptCount++;
+                                EmitDebug($"Banner prompt matched ({bannerAcceptCount}/{maxBannerAccepts}): '{bannerMatch.Value}'");
+                                var key = GetBannerAcceptKey(bannerMatch);
+                                EmitDebug($"Sending banner acceptance key: '{key}'");
+                                _scripting.Send(key);
+                                await Task.Delay(500, cancellationToken);
+                                // Clear the buffer completely so we don't re-match old banner text
+                                allOutput.Clear();
+                                continue;
+                            }
+
+                            // Check fallback prompt detection
+                            var lines = normalized.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+                            var lastLine = lines.LastOrDefault()?.TrimEnd() ?? "";
+                            if (!string.IsNullOrEmpty(lastLine) && PromptDetector.IsLikelyPrompt(lastLine))
+                            {
+                                _currentPrompt = lastLine;
+                                _promptPattern = PromptDetector.BuildPromptRegex(lastLine);
+                                RebuildPromptEvent(_promptPattern.ToString());
+                                EmitDebug($"Fallback prompt detected: {EscapeForDebug(lastLine, 200)}");
+                                EmitDebug($"Built fallback prompt regex: {_promptPattern}");
+                                _scripting.Timeout = overallTimeout;
+                                return;
+                            }
+
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException &&
+                        (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        // Short poll timed out - no new data in this interval
+                        EmitDebug($"[+{attemptSw.ElapsedMilliseconds}ms] Poll timeout (no new data in last {pollInterval}ms). Total buffered: {allOutput.Length} chars");
+
+                        if (attemptSw.ElapsedMilliseconds >= overallTimeout)
+                        {
+                            EmitDebug($"Overall timeout reached ({overallTimeout}ms)");
+                            break;
+                        }
+                    }
+                }
+
+                // Attempt finished (timed out) - log what we have
+                if (allOutput.Length > 0 && !dataReceived)
+                {
+                    EmitDebug($"Attempt {attemptCount} finished. No new data received.");
+                }
+                else if (allOutput.Length > 0)
+                {
+                    // We have data but no pattern matched - analyze why
+                    var normalized = TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(allOutput.ToString()));
                     var debugLines = normalized.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-                    EmitDebug($"TryDetectPrompt failed. Lines found: {debugLines.Length}");
+                    EmitDebug($"Pattern matching failed. Analyzing {debugLines.Length} lines:");
                     for (int i = 0; i < debugLines.Length; i++)
                     {
                         var candidate = debugLines[i].TrimEnd();
@@ -273,88 +463,52 @@ namespace SSH_Helper.Services
                         var charInfo = lastChar != '\0' ? $"LastChar: '{lastChar}' (U+{(int)lastChar:X4})" : "LastChar: <empty>";
                         EmitDebug($"  Line[{i}]: \"{EscapeForDebug(candidate, 200)}\" | {charInfo} | IsLikelyPrompt: {isLikely}");
                     }
-
-                    // Check for banner acceptance prompt (e.g., "Press 'a' to accept")
-                    var bannerMatch = Patterns.BannerAcceptPrompt.Match(normalized);
-                    if (bannerMatch.Success)
-                    {
-                        EmitDebug($"Banner prompt matched: '{bannerMatch.Value}' at position {bannerMatch.Index}");
-
-                        // Send acceptance key IMMEDIATELY - FortiGate has very short timeout
-                        var keyToPress = GetBannerAcceptKey(bannerMatch);
-                        EmitDebug($"Sending banner acceptance key: '{keyToPress}'");
-
-                        try
-                        {
-                            _scripting.Send(keyToPress);
-                            EmitDebug("Banner acceptance sent successfully");
-                        }
-                        catch (Exception ex)
-                        {
-                            EmitDebug($"Exception during banner acceptance: {ex.GetType().Name}: {ex.Message}");
-                            throw;
-                        }
-
-                        // Small delay to let the server process the keypress
-                        await Task.Delay(100, cancellationToken);
-                        continue; // Loop to wait for the real prompt
-                    }
-
-                    // No shell prompt and no banner prompt - check if last line could be a prompt
-                    var lines = normalized.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-                    var lastLine = lines.LastOrDefault()?.TrimEnd() ?? "";
-
-                    if (!string.IsNullOrEmpty(lastLine) && PromptDetector.IsLikelyPrompt(lastLine))
-                    {
-                        _currentPrompt = lastLine;
-                        _promptPattern = PromptDetector.BuildPromptRegex(lastLine);
-                        EmitDebug($"Fallback prompt detected: {EscapeForDebug(lastLine, 200)}");
-                        EmitDebug($"Built fallback prompt regex: {_promptPattern}");
-                        break;
-                    }
-
-                    // Log why fallback also failed
-                    if (!string.IsNullOrEmpty(lastLine))
-                    {
-                        var fbLastChar = lastLine[^1];
-                        EmitDebug($"Fallback also failed for last line: \"{EscapeForDebug(lastLine, 200)}\" | LastChar: '{fbLastChar}' (U+{(int)fbLastChar:X4}) not in [#>$%]");
-                    }
-                    else
-                    {
-                        EmitDebug("Fallback failed: no non-empty lines found in normalized output");
-                    }
-
-                    // If we reach here, we didn't find a valid prompt - try sending another newline
-                    if (attemptCount < maxBannerAttempts)
-                    {
-                        EmitDebug($"No valid prompt found, attempt {attemptCount}/{maxBannerAttempts}, sending newline to retry");
-                        _scripting.Send("\r");
-                    }
                 }
-                catch (SshException ex) when (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase))
+                else
                 {
-                    EmitDebug($"Timeout on attempt {attemptCount}/{maxBannerAttempts} after waiting {_scripting.Timeout}ms");
-                    EmitDebug($"Data received before timeout: {allOutput.Length} chars");
-                    if (allOutput.Length > 0)
-                    {
-                        EmitDebug($"Partial data received: {EscapeForDebug(allOutput.ToString(), 500)}");
-                    }
-                    else
-                    {
-                        EmitDebug("No data received from server before timeout - server may not have sent prompt/banner");
-                    }
-                    if (attemptCount >= maxBannerAttempts)
-                        break;
+                    EmitDebug($"Attempt {attemptCount} finished. No data received from server at all.");
+                }
+
+                // Try sending newline for next attempt
+                if (attemptCount < maxBannerAttempts)
+                {
+                    EmitDebug($"Sending newline to retry...");
+                    _scripting.Send("\r");
+                    await Task.Delay(200, cancellationToken);
                 }
             }
 
-            if (string.IsNullOrEmpty(_currentPrompt))
+            _scripting.Timeout = overallTimeout; // Restore original timeout
+        }
+
+        /// <summary>
+        /// Processes initialization output: checks for prompt detection and returns true if found.
+        /// Used by the standard (non-debug) path.
+        /// </summary>
+        private bool ProcessInitOutput(string output, StringBuilder allOutput)
+        {
+            var sanitized = TerminalOutputProcessor.Sanitize(output);
+            var normalized = TerminalOutputProcessor.Normalize(sanitized);
+
+            if (PromptDetector.TryDetectPrompt(normalized, out var detectedPrompt))
             {
-                EmitDebug("WARNING: Could not detect a valid shell prompt after all attempts");
-                EmitDebug($"Total raw data received across all attempts ({allOutput.Length} chars): {EscapeForDebug(allOutput.ToString(), 500)}");
+                _currentPrompt = detectedPrompt;
+                _promptPattern = PromptDetector.BuildPromptRegex(detectedPrompt);
+                RebuildPromptEvent(_promptPattern.ToString());
+                return true;
             }
 
-            return TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(allOutput.ToString()));
+            var lines = normalized.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+            var lastLine = lines.LastOrDefault()?.TrimEnd() ?? "";
+            if (!string.IsNullOrEmpty(lastLine) && PromptDetector.IsLikelyPrompt(lastLine))
+            {
+                _currentPrompt = lastLine;
+                _promptPattern = PromptDetector.BuildPromptRegex(lastLine);
+                RebuildPromptEvent(_promptPattern.ToString());
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -366,6 +520,9 @@ namespace SSH_Helper.Services
         public async Task<string> ExecuteAsync(string command, CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
+
+            EmitDebug($">>> Sending command: \"{EscapeForDebug(command, 200)}\"");
+            EmitDebug($">>> Prompt regex in use: {_promptPattern}");
 
             _scripting.Send(command + "\r");
 
@@ -420,86 +577,210 @@ namespace SSH_Helper.Services
 
         /// <summary>
         /// Core implementation of ReadUntilPrompt (runs on background thread).
+        /// Uses polling with data accumulation to reliably capture all output.
         /// </summary>
         private string ReadUntilPromptCore(CancellationToken cancellationToken)
         {
+            return ReadUntilPromptWithPolling(cancellationToken);
+        }
+
+        /// <summary>
+        /// ReadUntilPrompt implementation: polls for data in short intervals, accumulates
+        /// all received data, and checks for prompt/pager patterns in the accumulated buffer.
+        /// This avoids premature regex matches on the command-echo prompt that occur with
+        /// blocking ReadUntil(patternEvent) calls.
+        /// </summary>
+        private string ReadUntilPromptWithPolling(CancellationToken cancellationToken)
+        {
             var output = new StringBuilder();
+            var rawBuffer = new StringBuilder();
             var maxPages = 50000;
             var pageCount = 0;
 
-            // Set command timeout
-            _scripting.Timeout = (int)_timeouts.CommandTimeout.TotalMilliseconds;
+            var overallTimeout = (int)_timeouts.CommandTimeout.TotalMilliseconds;
+            var batchTimeout = 150; // Short timeout to accumulate chars into batches
+            var idleTimeout = 2000; // How long to wait with no data before trying again
+            var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
 
-            EmitDebug($"ReadUntilPrompt started. Prompt pattern: {_promptPattern}");
-            EmitDebug($"CommandTimeout: {_timeouts.CommandTimeout.TotalSeconds}s");
+            // Guard against matching the command-echo prompt. When a command is sent,
+            // the device echoes "prompt# command-text\r\n" before the output. Without
+            // this guard, the prompt regex can match the echo before output arrives.
+            bool seenNewlineAfterEcho = false;
+            var minTimeBeforePromptMatch = 500; // ms - safety for commands with no output
+
+            EmitDebug($"ReadUntilPrompt started.");
+            EmitDebug($"  Prompt pattern: {_promptPattern}");
+            EmitDebug($"  CommandTimeout: {_timeouts.CommandTimeout.TotalSeconds}s");
+
+            var overallSw = System.Diagnostics.Stopwatch.StartNew();
+            bool promptMatched = false;
 
             while (!cancellationToken.IsCancellationRequested && pageCount < maxPages)
             {
-                // Check if connection is still valid
                 if (!IsConnected)
                 {
-                    EmitDebug("Connection is no longer valid during ReadUntilPrompt");
+                    EmitDebug("Connection lost during ReadUntilPrompt");
                     throw new InvalidOperationException("SSH connection was closed unexpectedly.");
                 }
 
-                try
+                if (overallSw.ElapsedMilliseconds >= overallTimeout)
                 {
-                    // Read until we hit either a prompt or a pager
-                    var chunk = _scripting.ReadUntil(_promptOrPagerEvent!);
+                    EmitDebug($"Overall command timeout reached ({overallTimeout}ms)");
+                    break;
+                }
 
-                    if (!string.IsNullOrEmpty(chunk))
+                // Inner loop: accumulate characters into a batch using short timeout
+                var batch = new StringBuilder();
+                _scripting.Timeout = batchTimeout;
+                bool gotData = false;
+
+                while (true)
+                {
+                    try
                     {
-                        // Debug: show raw characters at start of chunk
-                        EmitDebug($"RAW chunk start (first 80 chars): {EscapeForDebug(chunk, 80)}");
-
-                        // Check for pager BEFORE stripping artifacts (must detect before removal)
-                        bool hitPager = false;
-                        foreach (var pattern in Patterns.PagerPatterns)
+                        var ch = _scripting.ReadUntil(anyDataEvent);
+                        if (!string.IsNullOrEmpty(ch))
                         {
-                            if (Regex.IsMatch(chunk, pattern, RegexOptions.IgnoreCase))
-                            {
-                                hitPager = true;
-                                break;
-                            }
+                            batch.Append(ch);
+                            gotData = true;
                         }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException &&
+                        (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        // No more data available within batchTimeout — batch is complete
+                        break;
+                    }
 
-                        // Now process the chunk for clean output
-                        chunk = TerminalOutputProcessor.Sanitize(chunk);
-                        chunk = TerminalOutputProcessor.StripPagerArtifacts(chunk, out _);
-                        chunk = TerminalOutputProcessor.StripPagerDismissalArtifacts(chunk);
-                        EmitDebug($"AFTER processing (first 80 chars): {EscapeForDebug(chunk, 80)}");
+                    // Safety: don't accumulate forever in the inner loop
+                    if (batch.Length > 4096 || overallSw.ElapsedMilliseconds >= overallTimeout)
+                        break;
+                }
 
-                        output.Append(chunk);
-                        OnOutputReceived(chunk);
+                if (gotData)
+                {
+                    var chunk = batch.ToString();
+                    rawBuffer.Append(chunk);
+                    EmitDebug($"[+{overallSw.ElapsedMilliseconds}ms] Received {chunk.Length} chars. RAW: {EscapeForDebug(chunk, 300)}");
 
-                        EmitDebug($"Received {chunk.Length} chars. Buffer now {output.Length} chars");
+                    // Track newlines to know when the command echo line has completed
+                    if (!seenNewlineAfterEcho && rawBuffer.ToString().Contains('\n'))
+                    {
+                        seenNewlineAfterEcho = true;
+                    }
 
-                        if (hitPager)
+                    // Check for pager BEFORE stripping
+                    bool hitPager = false;
+                    foreach (var pattern in Patterns.PagerPatterns)
+                    {
+                        if (Regex.IsMatch(chunk, pattern, RegexOptions.IgnoreCase))
                         {
-                            pageCount++;
-                            EmitDebug($"Pager detected ({pageCount}), sending space");
-                            _scripting.Send(" ");
+                            hitPager = true;
+                            break;
                         }
-                        else
+                    }
+
+                    // Process chunk for clean output
+                    var processed = TerminalOutputProcessor.Sanitize(chunk);
+                    processed = TerminalOutputProcessor.StripPagerArtifacts(processed, out _);
+                    processed = TerminalOutputProcessor.StripPagerDismissalArtifacts(processed);
+
+                    output.Append(processed);
+                    OnOutputReceived(processed);
+
+                    if (hitPager)
+                    {
+                        pageCount++;
+                        EmitDebug($"Pager detected ({pageCount}), sending space");
+                        _scripting.Send(" ");
+                        continue;
+                    }
+
+                    // Only check for prompt after the command echo line has completed
+                    // (contains a newline), or after enough time for no-output commands.
+                    bool canCheckPrompt = seenNewlineAfterEcho ||
+                                          overallSw.ElapsedMilliseconds >= minTimeBeforePromptMatch;
+
+                    if (canCheckPrompt)
+                    {
+                        // Check if accumulated normalized output matches prompt
+                        var accumulated = TerminalOutputProcessor.Sanitize(rawBuffer.ToString());
+                        var normalized = TerminalOutputProcessor.Normalize(accumulated);
+
+                        if (_promptPattern != null && _promptPattern.IsMatch(normalized))
                         {
-                            // We hit the shell prompt - done!
-                            EmitDebug("Prompt detected, command complete");
+                            EmitDebug($"Prompt regex matched! Command complete.");
+                            promptMatched = true;
                             UpdatePromptIfChanged(output);
                             break;
                         }
                     }
                 }
-                catch (SshException ex) when (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase))
+                else
                 {
-                    EmitDebug("Command timeout reached");
-                    break;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    EmitDebug($"Error during ReadUntilPrompt: {ex.Message}");
-                    break;
+                    // No data received — wait for idleTimeout before trying again
+                    _scripting.Timeout = idleTimeout;
+                    try
+                    {
+                        var ch = _scripting.ReadUntil(anyDataEvent);
+                        if (!string.IsNullOrEmpty(ch))
+                        {
+                            // Got data after idle wait — put it back in the buffer and continue
+                            rawBuffer.Append(ch);
+                            // Feed back into the next iteration's batch start
+                            continue;
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException &&
+                        (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        EmitDebug($"[+{overallSw.ElapsedMilliseconds}ms] No data for {idleTimeout}ms. Buffer: {rawBuffer.Length} chars");
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        EmitDebug($"Error during polling read: {ex.Message}");
+                        break;
+                    }
                 }
             }
+
+            // Diagnostic dump when prompt wasn't matched (only in debug mode to avoid computation)
+            if (DebugMode && !promptMatched && rawBuffer.Length > 0)
+            {
+                EmitDebug("=== TIMEOUT: Prompt regex did NOT match. Buffer analysis: ===");
+                var finalNormalized = TerminalOutputProcessor.Normalize(
+                    TerminalOutputProcessor.Sanitize(rawBuffer.ToString()));
+                var lines = finalNormalized.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                EmitDebug($"  Total lines: {lines.Length}, Total raw chars: {rawBuffer.Length}");
+                EmitDebug($"  Prompt regex: {_promptPattern}");
+
+                var startLine = Math.Max(0, lines.Length - 10);
+                for (int i = startLine; i < lines.Length; i++)
+                {
+                    var line = lines[i].TrimEnd();
+                    var isMatch = _promptPattern != null && _promptPattern.IsMatch(line);
+                    var isLikely = PromptDetector.IsLikelyPrompt(line);
+                    var lastChar = line.Length > 0 ? line[^1] : '\0';
+                    var charInfo = lastChar != '\0' ? $"U+{(int)lastChar:X4} '{lastChar}'" : "<empty>";
+                    EmitDebug($"  Line[{i}]: \"{EscapeForDebug(line, 120)}\" | End: {charInfo} | RegexMatch: {isMatch} | IsLikelyPrompt: {isLikely}");
+                }
+
+                var rawTail = rawBuffer.Length > 300
+                    ? rawBuffer.ToString(rawBuffer.Length - 300, 300)
+                    : rawBuffer.ToString();
+                EmitDebug($"  Raw buffer tail: {EscapeForDebug(rawTail, 300)}");
+            }
+            else if (DebugMode && !promptMatched && rawBuffer.Length == 0)
+            {
+                EmitDebug("=== TIMEOUT: No data received from server at all ===");
+            }
+
+            // Restore original timeout
+            _scripting.Timeout = overallTimeout;
 
             var result = output.ToString();
             EmitDebug($"ReadUntilPrompt finished. Total chars: {result.Length}");
@@ -533,6 +814,7 @@ namespace SSH_Helper.Services
             {
                 _currentPrompt = newPrompt;
                 _promptPattern = PromptDetector.BuildPromptRegex(newPrompt);
+                RebuildPromptEvent(_promptPattern.ToString());
             }
         }
 

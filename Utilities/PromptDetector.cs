@@ -8,7 +8,7 @@ namespace SSH_Helper.Utilities
     /// </summary>
     public class PromptDetector
     {
-        private static readonly char[] PromptTerminators = { '#', '>', '$', '%' };
+        private static readonly char[] PromptTerminators = { '#', '>', '$', '%', '\u2192', '\u276F', '\u279C' };
 
         /// <summary>
         /// Builds a regex pattern to match the given prompt, allowing for mode changes
@@ -25,7 +25,7 @@ namespace SSH_Helper.Utilities
             trimmed = Regex.Replace(trimmed, @"\x1B\[[0-9;]*[A-Za-z]", "");
 
             // Ensure it ends with a typical prompt terminator
-            if (!Regex.IsMatch(trimmed, @"[#>$%]\s*$"))
+            if (!Regex.IsMatch(trimmed, @"[#>$%\u2192\u276F\u279C]\s*$"))
                 return CreateFallbackRegex();
 
             // Extract base hostname and terminator
@@ -44,10 +44,23 @@ namespace SSH_Helper.Utilities
             if (string.IsNullOrWhiteSpace(baseHost))
                 baseHost = body;
 
+            // If baseHost doesn't contain alphanumeric characters, it's likely a
+            // status indicator (e.g., ○, ●) from a starship/oh-my-zsh style prompt,
+            // not a real hostname. Use a terminator-only pattern.
+            if (!Regex.IsMatch(baseHost, @"[a-zA-Z0-9]"))
+            {
+                string terminatorEsc = Regex.Escape(terminator.ToString());
+                // Use (?:^|[\r\n]) instead of bare ^ so pattern works both with
+                // RegexOptions.Multiline (direct IsMatch) and without it (Rebex ScriptEvent)
+                string fallbackPattern = $@"(?:^|[\r\n]).*{terminatorEsc}\s*$";
+                return new Regex(fallbackPattern, RegexOptions.Multiline | RegexOptions.CultureInvariant);
+            }
+
             string baseEsc = Regex.Escape(baseHost);
 
-            // Build adaptive pattern allowing optional mode indicator
-            string pattern = $"^{baseEsc}(?:\\s*\\([^)]+\\))?\\s*[{Regex.Escape(terminator.ToString())}#>$%]\\s*$";
+            // Use (?:^|[\r\n]) for Rebex ScriptEvent compatibility (pattern is used
+            // via .ToString() in contexts without RegexOptions.Multiline)
+            string pattern = $"(?:^|[\\r\\n]){baseEsc}(?:\\s*\\([^)]+\\))?\\s*[{Regex.Escape(terminator.ToString())}#>$%]\\s*$";
 
             return new Regex(pattern, RegexOptions.Multiline | RegexOptions.CultureInvariant);
         }
@@ -144,6 +157,7 @@ namespace SSH_Helper.Utilities
 
         /// <summary>
         /// Determines if a line looks like a shell prompt based on common conventions.
+        /// Rejects lines that appear to be natural language or warning text.
         /// </summary>
         public static bool IsLikelyPrompt(string line)
         {
@@ -155,12 +169,26 @@ namespace SSH_Helper.Utilities
                 return false;
 
             char last = line[^1];
-            return PromptTerminators.Contains(last);
+            if (!PromptTerminators.Contains(last))
+                return false;
+
+            // Real prompts are short — reject very long lines (likely wrapped text/warnings)
+            if (line.Length > 80)
+                return false;
+
+            // Lines containing paired quotes are likely instructional text, not prompts
+            // e.g., "Please run 'execute disk list' and then 'execute disk scan <ref#"
+            if (line.Count(c => c == '\'') >= 2 || line.Count(c => c == '"') >= 2)
+                return false;
+
+            return true;
         }
 
         private static Regex CreateFallbackRegex()
         {
-            return new Regex(@"^.*(?:[#>$%])[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
+            // Use (?:^|[\r\n]) instead of bare ^ so pattern works both with
+            // RegexOptions.Multiline (direct IsMatch) and without it (Rebex ScriptEvent)
+            return new Regex(@"(?:^|[\r\n]).*(?:[#>$%\u2192\u276F\u279C])[ \t]*$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
         }
     }
 }

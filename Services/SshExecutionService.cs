@@ -843,7 +843,8 @@ namespace SSH_Helper.Services
             OnProgressChanged(host, $"Connected to {host} (script mode)", false, true);
 
             SshDebugLog(host, "SCRIPT", "Starting scripting session", sw);
-            RebexScripting scripting = client.StartScripting();
+            var terminalOptions = new TerminalOptions { Encoding = System.Text.Encoding.UTF8 };
+            RebexScripting scripting = client.StartScripting(terminalOptions);
             scripting.Timeout = (int)timeouts.CommandTimeout.TotalMilliseconds;
             SshDebugLog(host, "SCRIPT", "Scripting session created", sw);
 
@@ -1069,7 +1070,8 @@ namespace SSH_Helper.Services
             OnProgressChanged(host, $"Connected to {host}", false, true);
 
             SshDebugLog(host, "SSH", "Starting scripting session", sw);
-            RebexScripting scripting = client.StartScripting();
+            var terminalOptions = new TerminalOptions { Encoding = System.Text.Encoding.UTF8 };
+            RebexScripting scripting = client.StartScripting(terminalOptions);
             scripting.Timeout = (int)timeouts.CommandTimeout.TotalMilliseconds;
             SshDebugLog(host, "SSH", "Scripting session created", sw);
 
@@ -1111,6 +1113,9 @@ namespace SSH_Helper.Services
             SshDebugLog(host, "SSH", "Calling session.InitializeAsync - waiting for shell prompt", sw);
             var banner = session.InitializeAsync(cancellationToken).GetAwaiter().GetResult();
             SshDebugLog(host, "SSH", $"session.InitializeAsync completed. Prompt detected: {session.CurrentPrompt}", sw);
+
+            // Flush any residual data left in the scripting buffer after prompt detection
+            session.FlushBuffer();
 
             // Build header (only if showHeader is true)
             if (showHeader)
