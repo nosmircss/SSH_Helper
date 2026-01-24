@@ -30,5 +30,11 @@ namespace SSH_Helper.Models
         /// If true, suppress preset name separators from output.
         /// </summary>
         public bool SuppressPresetNames { get; set; }
+
+        /// <summary>
+        /// Indices of the selected hosts from the original host list.
+        /// Used to filter which hosts to execute against.
+        /// </summary>
+        public List<int> SelectedHostIndices { get; set; } = new();
     }
 }

@@ -12,12 +12,14 @@ namespace SSH_Helper
         private readonly List<string> _hostAddresses;
 
         private readonly CheckedListBox _lstPresets;
-        private readonly ListBox _lstHosts;
+        private readonly CheckedListBox _lstHosts;
+        private readonly Label _lblHosts;
         private readonly RadioButton _rbSequential;
         private readonly RadioButton _rbParallel;
         private readonly CheckBox _chkStopOnError;
         private readonly CheckBox _chkSuppressPresetNames;
         private readonly TextBox _txtParallelHosts;
+        private readonly Label _lblHostCount;
         private readonly Button _btnRun;
         private readonly Button _btnCancel;
 
@@ -62,25 +64,25 @@ namespace SSH_Helper
             _lstPresets.ItemCheck += LstPresets_ItemCheck;
 
             // Hosts section
-            var lblHosts = new Label
+            _lblHosts = new Label
             {
                 Text = $"Target hosts ({_hostAddresses.Count}):",
                 Location = new Point(15, 140),
                 AutoSize = true
             };
 
-            _lstHosts = new ListBox
+            _lstHosts = new CheckedListBox
             {
                 Location = new Point(15, 163),
                 Size = new Size(375, 94),
-                SelectionMode = SelectionMode.None,
-                BackColor = SystemColors.Control
+                CheckOnClick = true
             };
 
             foreach (var host in _hostAddresses)
             {
-                _lstHosts.Items.Add(host);
+                _lstHosts.Items.Add(host, true);
             }
+            _lstHosts.ItemCheck += LstHosts_ItemCheck;
 
             // Preset Execution section
             var lblPresetSection = new Label
@@ -153,7 +155,7 @@ namespace SSH_Helper
             };
             _txtParallelHosts.KeyPress += TxtParallelHosts_KeyPress;
 
-            var lblHostCount = new Label
+            _lblHostCount = new Label
             {
                 Text = $"(of {_hostAddresses.Count} selected)",
                 Location = new Point(162, 456),
@@ -183,7 +185,7 @@ namespace SSH_Helper
             // Add controls
             Controls.Add(lblPresets);
             Controls.Add(_lstPresets);
-            Controls.Add(lblHosts);
+            Controls.Add(_lblHosts);
             Controls.Add(_lstHosts);
             Controls.Add(lblPresetSection);
             Controls.Add(lblRunMode);
@@ -194,7 +196,7 @@ namespace SSH_Helper
             Controls.Add(lblHostSection);
             Controls.Add(lblParallelHosts);
             Controls.Add(_txtParallelHosts);
-            Controls.Add(lblHostCount);
+            Controls.Add(_lblHostCount);
             Controls.Add(_btnCancel);
             Controls.Add(_btnRun);
 
@@ -204,15 +206,23 @@ namespace SSH_Helper
 
         private void LstPresets_ItemCheck(object? sender, ItemCheckEventArgs e)
         {
-            // Calculate new count after the check change is applied
-            int count = _lstPresets.CheckedItems.Count;
-            if (e.NewValue == CheckState.Checked)
-                count++;
-            else if (e.NewValue == CheckState.Unchecked)
-                count--;
+            int presetCount = _lstPresets.CheckedItems.Count;
+            if (e.NewValue == CheckState.Checked) presetCount++;
+            else if (e.NewValue == CheckState.Unchecked) presetCount--;
 
-            _btnRun.Text = $"Run {count} Presets";
-            _btnRun.Enabled = count > 0;
+            _btnRun.Text = $"Run {presetCount} Presets";
+            _btnRun.Enabled = presetCount > 0 && _lstHosts.CheckedItems.Count > 0;
+        }
+
+        private void LstHosts_ItemCheck(object? sender, ItemCheckEventArgs e)
+        {
+            int hostCount = _lstHosts.CheckedItems.Count;
+            if (e.NewValue == CheckState.Checked) hostCount++;
+            else if (e.NewValue == CheckState.Unchecked) hostCount--;
+
+            _lblHosts.Text = $"Target hosts ({hostCount} of {_hostAddresses.Count}):";
+            _lblHostCount.Text = $"(of {hostCount} selected)";
+            _btnRun.Enabled = _lstPresets.CheckedItems.Count > 0 && hostCount > 0;
         }
 
         private void TxtParallelHosts_KeyPress(object? sender, KeyPressEventArgs e)
@@ -242,6 +252,7 @@ namespace SSH_Helper
             Options = new FolderExecutionOptions
             {
                 SelectedPresets = _lstPresets.CheckedItems.Cast<string>().ToList(),
+                SelectedHostIndices = _lstHosts.CheckedIndices.Cast<int>().ToList(),
                 RunPresetsInParallel = _rbParallel.Checked,
                 StopOnFirstError = _chkStopOnError.Checked,
                 ParallelHostCount = parallelHosts,

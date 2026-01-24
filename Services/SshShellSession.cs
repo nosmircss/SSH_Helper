@@ -226,17 +226,11 @@ namespace SSH_Helper.Services
             // Devices like FortiGate send their banner/prompt automatically after shell starts.
             // Sending \r prematurely can cause the connection to be closed.
 
-            if (DebugMode)
-            {
-                // Debug mode: Use polling with a catch-all ScriptEvent to see data as it arrives.
-                // Normal ReadUntil blocks for the full timeout with no visibility into received data.
-                await InitializeWithPollingAsync(allOutput, maxBannerAttempts, cancellationToken);
-            }
-            else
-            {
-                // Normal mode: Use standard ReadUntil with banner/prompt events
-                await InitializeStandardAsync(allOutput, maxBannerAttempts, cancellationToken);
-            }
+            // Always use polling-based initialization for reliable prompt/banner detection.
+            // The polling approach accumulates all data before pattern matching, avoiding
+            // premature prompt matches from incremental Rebex ScriptEvent processing.
+            // Debug output is controlled by EmitDebug() which checks DebugMode internally.
+            await InitializeWithPollingAsync(allOutput, maxBannerAttempts, cancellationToken);
 
             if (string.IsNullOrEmpty(_currentPrompt))
             {
@@ -278,64 +272,20 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Standard initialization: uses ReadUntil with banner/prompt events (blocks until match or timeout).
-        /// </summary>
-        private async Task InitializeStandardAsync(StringBuilder allOutput, int maxBannerAttempts, CancellationToken cancellationToken)
-        {
-            var attemptCount = 0;
-
-            while (attemptCount < maxBannerAttempts)
-            {
-                attemptCount++;
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
-                {
-                    var output = _scripting.ReadUntil(_bannerEvent!, _shellPromptEvent!);
-                    allOutput.Append(output);
-
-                    if (ProcessInitOutput(output ?? "", allOutput))
-                        break;
-
-                    // Check for banner
-                    var normalized = TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(output ?? ""));
-                    var bannerMatch = Patterns.BannerAcceptPrompt.Match(normalized);
-                    if (bannerMatch.Success)
-                    {
-                        var keyToPress = GetBannerAcceptKey(bannerMatch);
-                        _scripting.Send(keyToPress);
-                        await Task.Delay(100, cancellationToken);
-                        continue;
-                    }
-
-                    if (attemptCount < maxBannerAttempts)
-                        _scripting.Send("\r");
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException &&
-                    (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
-                     ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
-                     ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase)))
-                {
-                    if (attemptCount >= maxBannerAttempts)
-                        break;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Debug initialization: uses a catch-all ScriptEvent with short poll intervals to show
-        /// received data in real-time, rather than blocking for the full timeout with no visibility.
+        /// Polling-based initialization: uses a catch-all ScriptEvent to read data as it arrives,
+        /// accumulates all received data, and checks banner/prompt patterns on the full buffer.
+        /// This avoids premature pattern matches from Rebex's incremental ScriptEvent processing.
         /// </summary>
         private async Task InitializeWithPollingAsync(StringBuilder allOutput, int maxBannerAttempts, CancellationToken cancellationToken)
         {
             var attemptCount = 0;
             var overallTimeout = _scripting.Timeout; // Save original (e.g., 30000ms)
-            var pollInterval = 3000; // Poll every 3 seconds
+            var pollInterval = DebugMode ? 3000 : 1000; // Longer polls in debug for readable output pacing
             var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]"); // Matches as soon as any data arrives
             var bannerAcceptCount = 0;
             var maxBannerAccepts = 5; // Max times we'll send the acceptance key before giving up
 
-            EmitDebug($"Using debug polling mode: {pollInterval}ms polls, {overallTimeout}ms overall timeout");
+            EmitDebug($"Using polling initialization: {pollInterval}ms idle polls, {overallTimeout}ms overall timeout");
             EmitDebug($"ShellPromptPattern: {Patterns.ShellPromptPattern}");
             EmitDebug($"BannerAcceptPattern: {Patterns.BannerAcceptPattern}");
 
@@ -482,36 +432,6 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Processes initialization output: checks for prompt detection and returns true if found.
-        /// Used by the standard (non-debug) path.
-        /// </summary>
-        private bool ProcessInitOutput(string output, StringBuilder allOutput)
-        {
-            var sanitized = TerminalOutputProcessor.Sanitize(output);
-            var normalized = TerminalOutputProcessor.Normalize(sanitized);
-
-            if (PromptDetector.TryDetectPrompt(normalized, out var detectedPrompt))
-            {
-                _currentPrompt = detectedPrompt;
-                _promptPattern = PromptDetector.BuildPromptRegex(detectedPrompt);
-                RebuildPromptEvent(_promptPattern.ToString());
-                return true;
-            }
-
-            var lines = normalized.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-            var lastLine = lines.LastOrDefault()?.TrimEnd() ?? "";
-            if (!string.IsNullOrEmpty(lastLine) && PromptDetector.IsLikelyPrompt(lastLine))
-            {
-                _currentPrompt = lastLine;
-                _promptPattern = PromptDetector.BuildPromptRegex(lastLine);
-                RebuildPromptEvent(_promptPattern.ToString());
-                return true;
-            }
-
-            return false;
-        }
-
-        /// <summary>
         /// Executes a single command and waits for the prompt to return.
         /// </summary>
         /// <param name="command">The command to execute</param>
@@ -598,7 +518,7 @@ namespace SSH_Helper.Services
             var pageCount = 0;
 
             var overallTimeout = (int)_timeouts.CommandTimeout.TotalMilliseconds;
-            var batchTimeout = 150; // Short timeout to accumulate chars into batches
+            var batchTimeout = 50; // Short timeout to accumulate chars into batches
             var idleTimeout = 2000; // How long to wait with no data before trying again
             var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
 
@@ -643,6 +563,20 @@ namespace SSH_Helper.Services
                         {
                             batch.Append(ch);
                             gotData = true;
+
+                            // Track newlines inside the loop for early prompt detection
+                            if (!seenNewlineAfterEcho && ch.Contains('\n'))
+                            {
+                                seenNewlineAfterEcho = true;
+                            }
+
+                            // Early-break: if echo guard is satisfied and batch contains a
+                            // prompt terminator, exit inner loop immediately to let the outer
+                            // loop run the full prompt regex check without waiting for timeout
+                            if (seenNewlineAfterEcho && ContainsPromptTerminator(batch))
+                            {
+                                break;
+                            }
                         }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException &&
@@ -664,12 +598,6 @@ namespace SSH_Helper.Services
                     var chunk = batch.ToString();
                     rawBuffer.Append(chunk);
                     EmitDebug($"[+{overallSw.ElapsedMilliseconds}ms] Received {chunk.Length} chars. RAW: {EscapeForDebug(chunk, 300)}");
-
-                    // Track newlines to know when the command echo line has completed
-                    if (!seenNewlineAfterEcho && rawBuffer.ToString().Contains('\n'))
-                    {
-                        seenNewlineAfterEcho = true;
-                    }
 
                     // Check for pager BEFORE stripping
                     bool hitPager = false;
@@ -887,6 +815,22 @@ namespace SSH_Helper.Services
                 sb.Append("...");
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Fast check for whether a StringBuilder contains any prompt terminator character.
+        /// Used as a guard to break the inner batch loop early for prompt detection.
+        /// </summary>
+        private static bool ContainsPromptTerminator(StringBuilder sb)
+        {
+            for (int i = 0; i < sb.Length; i++)
+            {
+                char c = sb[i];
+                if (c == '#' || c == '>' || c == '$' || c == '%' ||
+                    c == '\u2192' || c == '\u276F' || c == '\u279C')
+                    return true;
+            }
+            return false;
         }
 
         private void ThrowIfDisposed()

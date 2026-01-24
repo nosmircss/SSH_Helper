@@ -4916,6 +4916,15 @@ namespace SSH_Helper
             var config = _configService.Load();
             int connectionTimeout = config.ConnectionTimeout;
 
+            // Filter hostRows by selected indices if specified
+            if (options.SelectedHostIndices.Count > 0)
+            {
+                hostRows = options.SelectedHostIndices
+                    .Where(i => i >= 0 && i < hostRows.Count)
+                    .Select(i => hostRows[i])
+                    .ToList();
+            }
+
             // Build preset dictionary
             var presets = new Dictionary<string, PresetInfo>();
             foreach (var presetName in options.SelectedPresets)
