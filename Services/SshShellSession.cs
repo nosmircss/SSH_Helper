@@ -224,40 +224,74 @@ namespace SSH_Helper.Services
                 {
                     // Wait for initial output using ReadUntil with banner and prompt events
                     EmitDebug($"Waiting for banner or prompt (attempt {attemptCount}/{maxBannerAttempts})");
+                    EmitDebug($"InitTimeout: {_scripting.Timeout}ms | ShellPromptPattern: {Patterns.ShellPromptPattern}");
+                    EmitDebug($"BannerAcceptPattern: {Patterns.BannerAcceptPattern}");
+
+                    var readSw = System.Diagnostics.Stopwatch.StartNew();
                     var output = _scripting.ReadUntil(_bannerEvent!, _shellPromptEvent!);
+                    readSw.Stop();
+
                     allOutput.Append(output);
+
+                    // Log what ReadUntil returned
+                    var rawLen = output?.Length ?? 0;
+                    EmitDebug($"ReadUntil returned after {readSw.ElapsedMilliseconds}ms | Raw output length: {rawLen} chars");
+                    if (rawLen > 0)
+                    {
+                        EmitDebug($"Raw output: {EscapeForDebug(output!, 500)}");
+                    }
+                    else
+                    {
+                        EmitDebug("Raw output: <null or empty>");
+                    }
 
                     // Try to detect the actual prompt from the output
                     var sanitized = TerminalOutputProcessor.Sanitize(output ?? "");
                     var normalized = TerminalOutputProcessor.Normalize(sanitized);
+
+                    EmitDebug($"Sanitized ({sanitized.Length} chars): {EscapeForDebug(sanitized, 500)}");
+                    EmitDebug($"Normalized ({normalized.Length} chars): {EscapeForDebug(normalized, 500)}");
 
                     // Check if we got a real shell prompt
                     if (PromptDetector.TryDetectPrompt(normalized, out var detectedPrompt))
                     {
                         _currentPrompt = detectedPrompt;
                         _promptPattern = PromptDetector.BuildPromptRegex(detectedPrompt);
-                        EmitDebug($"Shell prompt detected: {detectedPrompt}");
+                        EmitDebug($"Shell prompt detected: {EscapeForDebug(detectedPrompt, 200)}");
+                        EmitDebug($"Built prompt regex: {_promptPattern}");
                         break;
+                    }
+
+                    // TryDetectPrompt failed - log detailed per-line analysis
+                    var debugLines = normalized.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+                    EmitDebug($"TryDetectPrompt failed. Lines found: {debugLines.Length}");
+                    for (int i = 0; i < debugLines.Length; i++)
+                    {
+                        var candidate = debugLines[i].TrimEnd();
+                        var isLikely = PromptDetector.IsLikelyPrompt(candidate);
+                        var lastChar = candidate.Length > 0 ? candidate[^1] : '\0';
+                        var charInfo = lastChar != '\0' ? $"LastChar: '{lastChar}' (U+{(int)lastChar:X4})" : "LastChar: <empty>";
+                        EmitDebug($"  Line[{i}]: \"{EscapeForDebug(candidate, 200)}\" | {charInfo} | IsLikelyPrompt: {isLikely}");
                     }
 
                     // Check for banner acceptance prompt (e.g., "Press 'a' to accept")
                     var bannerMatch = Patterns.BannerAcceptPrompt.Match(normalized);
                     if (bannerMatch.Success)
                     {
-                        EmitDebug($"[InitializeAsync] Banner prompt matched: '{bannerMatch.Value}' at position {bannerMatch.Index}");
+                        EmitDebug($"Banner prompt matched: '{bannerMatch.Value}' at position {bannerMatch.Index}");
 
                         // Send acceptance key IMMEDIATELY - FortiGate has very short timeout
                         var keyToPress = GetBannerAcceptKey(bannerMatch);
-                        EmitDebug($"[InitializeAsync] Sending banner acceptance key: '{keyToPress}'");
+                        EmitDebug($"Sending banner acceptance key: '{keyToPress}'");
 
                         try
                         {
                             _scripting.Send(keyToPress);
-                            EmitDebug("[InitializeAsync] Banner acceptance sent successfully");
+                            EmitDebug("Banner acceptance sent successfully");
                         }
                         catch (Exception ex)
                         {
-                            EmitDebug($"[InitializeAsync] Exception during banner acceptance: {ex.GetType().Name}: {ex.Message}");
+                            EmitDebug($"Exception during banner acceptance: {ex.GetType().Name}: {ex.Message}");
                             throw;
                         }
 
@@ -274,20 +308,41 @@ namespace SSH_Helper.Services
                     {
                         _currentPrompt = lastLine;
                         _promptPattern = PromptDetector.BuildPromptRegex(lastLine);
-                        EmitDebug($"Fallback prompt detected: {lastLine}");
+                        EmitDebug($"Fallback prompt detected: {EscapeForDebug(lastLine, 200)}");
+                        EmitDebug($"Built fallback prompt regex: {_promptPattern}");
                         break;
+                    }
+
+                    // Log why fallback also failed
+                    if (!string.IsNullOrEmpty(lastLine))
+                    {
+                        var fbLastChar = lastLine[^1];
+                        EmitDebug($"Fallback also failed for last line: \"{EscapeForDebug(lastLine, 200)}\" | LastChar: '{fbLastChar}' (U+{(int)fbLastChar:X4}) not in [#>$%]");
+                    }
+                    else
+                    {
+                        EmitDebug("Fallback failed: no non-empty lines found in normalized output");
                     }
 
                     // If we reach here, we didn't find a valid prompt - try sending another newline
                     if (attemptCount < maxBannerAttempts)
                     {
-                        EmitDebug($"No valid prompt found, attempt {attemptCount}/{maxBannerAttempts}, sending newline");
+                        EmitDebug($"No valid prompt found, attempt {attemptCount}/{maxBannerAttempts}, sending newline to retry");
                         _scripting.Send("\r");
                     }
                 }
                 catch (SshException ex) when (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase))
                 {
-                    EmitDebug($"Timeout waiting for prompt on attempt {attemptCount}");
+                    EmitDebug($"Timeout on attempt {attemptCount}/{maxBannerAttempts} after waiting {_scripting.Timeout}ms");
+                    EmitDebug($"Data received before timeout: {allOutput.Length} chars");
+                    if (allOutput.Length > 0)
+                    {
+                        EmitDebug($"Partial data received: {EscapeForDebug(allOutput.ToString(), 500)}");
+                    }
+                    else
+                    {
+                        EmitDebug("No data received from server before timeout - server may not have sent prompt/banner");
+                    }
                     if (attemptCount >= maxBannerAttempts)
                         break;
                 }
@@ -295,7 +350,8 @@ namespace SSH_Helper.Services
 
             if (string.IsNullOrEmpty(_currentPrompt))
             {
-                EmitDebug("Warning: Could not detect a valid shell prompt after all attempts");
+                EmitDebug("WARNING: Could not detect a valid shell prompt after all attempts");
+                EmitDebug($"Total raw data received across all attempts ({allOutput.Length} chars): {EscapeForDebug(allOutput.ToString(), 500)}");
             }
 
             return TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(allOutput.ToString()));
