@@ -465,6 +465,19 @@ namespace SSH_Helper.Services.Scripting.Commands
         {
             expr = expr.Trim();
 
+            if (expr.EndsWith(".length", StringComparison.OrdinalIgnoreCase))
+            {
+                var baseName = expr.Substring(0, expr.Length - 7);
+                var value = context.GetVariable(baseName);
+                return value switch
+                {
+                    List<string> list => list.Count,
+                    string str => str.Length,
+                    System.Collections.ICollection collection => collection.Count,
+                    _ => 0
+                };
+            }
+
             // Variable substitution
             if (expr.Contains("${"))
             {
@@ -482,6 +495,19 @@ namespace SSH_Helper.Services.Scripting.Commands
         private double ResolveNumeric(string expr, ScriptContext context)
         {
             expr = expr.Trim();
+
+            if (expr.EndsWith(".length", StringComparison.OrdinalIgnoreCase))
+            {
+                var baseName = expr.Substring(0, expr.Length - 7);
+                var value = context.GetVariable(baseName);
+                return value switch
+                {
+                    List<string> list => list.Count,
+                    string str => str.Length,
+                    System.Collections.ICollection collection => collection.Count,
+                    _ => 0
+                };
+            }
 
             // Try direct numeric parse
             if (double.TryParse(expr, out var num))

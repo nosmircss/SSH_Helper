@@ -30,7 +30,8 @@ namespace SSH_Helper.Services.Scripting.Commands
                 }
 
                 // Execute the command
-                var output = await context.Session.ExecuteAsync(command, cancellationToken);
+                var timeoutSeconds = step.Timeout.HasValue && step.Timeout.Value > 0 ? step.Timeout.Value : (int?)null;
+                var output = await context.Session.ExecuteAsync(command, step.Expect, timeoutSeconds, cancellationToken);
 
                 // Record the output
                 context.RecordCommandOutput(output, step.Capture);

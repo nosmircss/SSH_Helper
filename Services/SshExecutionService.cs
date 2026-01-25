@@ -830,6 +830,9 @@ namespace SSH_Helper.Services
             client.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
             SshDebugLog(host, "SCRIPT", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
 
+            // Apply algorithm preferences from SSH config (if any)
+            ApplyAlgorithmSettings(client, host);
+
             SshDebugLog(host, "SCRIPT", "Calling client.Connect()", sw);
             var connectSw = System.Diagnostics.Stopwatch.StartNew();
             client.Connect(host.IpAddress, host.Port);
@@ -837,7 +840,19 @@ namespace SSH_Helper.Services
             SshDebugLog(host, "SCRIPT", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw);
 
             SshDebugLog(host, "SCRIPT", "Calling client.Login()", sw);
-            client.Login(username, password);
+
+            // Key-based or password authentication
+            if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
+            {
+                SshDebugLog(host, "SCRIPT", $"Using key-based auth with: {host.IdentityFile}", sw);
+                var passphrase = host.IdentityFilePassphrase ?? string.Empty;
+                client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
+            }
+            else
+            {
+                client.Login(username, password);
+            }
+
             SshDebugLog(host, "SCRIPT", "client.Login() completed", sw);
 
             OnProgressChanged(host, $"Connected to {host} (script mode)", false, true);

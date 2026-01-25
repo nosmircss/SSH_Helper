@@ -451,6 +451,38 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Executes a single command and waits for a custom expected pattern or prompt.
+        /// </summary>
+        /// <param name="command">The command to execute</param>
+        /// <param name="expectPattern">Regex pattern to wait for (optional)</param>
+        /// <param name="timeoutSeconds">Override timeout in seconds (optional)</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        public async Task<string> ExecuteAsync(
+            string command,
+            string? expectPattern,
+            int? timeoutSeconds,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(expectPattern) && (!timeoutSeconds.HasValue || timeoutSeconds.Value <= 0))
+                return await ExecuteAsync(command, cancellationToken);
+
+            ThrowIfDisposed();
+
+            EmitDebug($">>> Sending command: \"{EscapeForDebug(command, 200)}\"");
+            EmitDebug($">>> Prompt regex in use: {_promptPattern}");
+
+            _scripting.Send(command + "\r");
+
+            if (!string.IsNullOrWhiteSpace(expectPattern))
+            {
+                var expectRegex = BuildExpectRegex(expectPattern);
+                return await ReadUntilPatternAsync(expectRegex, cancellationToken, timeoutSeconds);
+            }
+
+            return await ReadUntilPromptAsync(cancellationToken, timeoutSeconds);
+        }
+
+        /// <summary>
         /// Executes multiple commands in sequence, maintaining session state.
         /// </summary>
         /// <param name="commands">Commands to execute</param>
@@ -490,18 +522,18 @@ namespace SSH_Helper.Services
         /// Uses Rebex Scripting API to wait for the prompt pattern.
         /// Handles pager prompts automatically.
         /// </summary>
-        private Task<string> ReadUntilPromptAsync(CancellationToken cancellationToken)
+        private Task<string> ReadUntilPromptAsync(CancellationToken cancellationToken, int? timeoutSeconds = null)
         {
-            return Task.Run(() => ReadUntilPromptCore(cancellationToken), cancellationToken);
+            return Task.Run(() => ReadUntilPromptCore(cancellationToken, timeoutSeconds), cancellationToken);
         }
 
         /// <summary>
         /// Core implementation of ReadUntilPrompt (runs on background thread).
         /// Uses polling with data accumulation to reliably capture all output.
         /// </summary>
-        private string ReadUntilPromptCore(CancellationToken cancellationToken)
+        private string ReadUntilPromptCore(CancellationToken cancellationToken, int? timeoutSeconds = null)
         {
-            return ReadUntilPromptWithPolling(cancellationToken);
+            return ReadUntilPromptWithPolling(cancellationToken, timeoutSeconds);
         }
 
         /// <summary>
@@ -510,14 +542,17 @@ namespace SSH_Helper.Services
         /// This avoids premature regex matches on the command-echo prompt that occur with
         /// blocking ReadUntil(patternEvent) calls.
         /// </summary>
-        private string ReadUntilPromptWithPolling(CancellationToken cancellationToken)
+        private string ReadUntilPromptWithPolling(CancellationToken cancellationToken, int? timeoutSeconds = null)
         {
             var output = new StringBuilder();
             var rawBuffer = new StringBuilder();
             var maxPages = 50000;
             var pageCount = 0;
 
-            var overallTimeout = (int)_timeouts.CommandTimeout.TotalMilliseconds;
+            var savedTimeout = _scripting.Timeout;
+            var overallTimeout = timeoutSeconds.HasValue && timeoutSeconds.Value > 0
+                ? timeoutSeconds.Value * 1000
+                : (int)_timeouts.CommandTimeout.TotalMilliseconds;
             var batchTimeout = 50; // Short timeout to accumulate chars into batches
             var idleTimeout = 2000; // How long to wait with no data before trying again
             var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
@@ -530,7 +565,7 @@ namespace SSH_Helper.Services
 
             EmitDebug($"ReadUntilPrompt started.");
             EmitDebug($"  Prompt pattern: {_promptPattern}");
-            EmitDebug($"  CommandTimeout: {_timeouts.CommandTimeout.TotalSeconds}s");
+            EmitDebug($"  CommandTimeout: {overallTimeout / 1000.0:F1}s");
 
             var overallSw = System.Diagnostics.Stopwatch.StartNew();
             bool promptMatched = false;
@@ -708,10 +743,193 @@ namespace SSH_Helper.Services
             }
 
             // Restore original timeout
-            _scripting.Timeout = overallTimeout;
+            _scripting.Timeout = savedTimeout;
 
             var result = output.ToString();
             EmitDebug($"ReadUntilPrompt finished. Total chars: {result.Length}");
+            return TerminalOutputProcessor.Normalize(result);
+        }
+
+        /// <summary>
+        /// Uses polling to wait for a custom expected regex pattern.
+        /// Handles pager prompts automatically.
+        /// </summary>
+        private Task<string> ReadUntilPatternAsync(Regex expectRegex, CancellationToken cancellationToken, int? timeoutSeconds)
+        {
+            return Task.Run(() => ReadUntilPatternWithPolling(expectRegex, cancellationToken, timeoutSeconds), cancellationToken);
+        }
+
+        /// <summary>
+        /// ReadUntilPattern implementation: polls for data in short intervals, accumulates
+        /// output, and checks for a custom expected regex in the accumulated buffer.
+        /// </summary>
+        private string ReadUntilPatternWithPolling(Regex expectRegex, CancellationToken cancellationToken, int? timeoutSeconds)
+        {
+            var output = new StringBuilder();
+            var rawBuffer = new StringBuilder();
+            var maxPages = 50000;
+            var pageCount = 0;
+
+            var savedTimeout = _scripting.Timeout;
+            var overallTimeout = timeoutSeconds.HasValue && timeoutSeconds.Value > 0
+                ? timeoutSeconds.Value * 1000
+                : (int)_timeouts.CommandTimeout.TotalMilliseconds;
+            var batchTimeout = 50;
+            var idleTimeout = 2000;
+            var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
+
+            bool seenNewlineAfterEcho = false;
+            var minTimeBeforeMatch = 500;
+
+            EmitDebug($"ReadUntilExpect started.");
+            EmitDebug($"  Expect regex: {expectRegex}");
+            EmitDebug($"  CommandTimeout: {overallTimeout / 1000.0:F1}s");
+
+            var overallSw = System.Diagnostics.Stopwatch.StartNew();
+            bool matched = false;
+
+            while (!cancellationToken.IsCancellationRequested && pageCount < maxPages)
+            {
+                if (!IsConnected)
+                {
+                    EmitDebug("Connection lost during ReadUntilExpect");
+                    throw new InvalidOperationException("SSH connection was closed unexpectedly.");
+                }
+
+                if (overallSw.ElapsedMilliseconds >= overallTimeout)
+                {
+                    EmitDebug($"Overall command timeout reached ({overallTimeout}ms)");
+                    break;
+                }
+
+                var batch = new StringBuilder();
+                _scripting.Timeout = batchTimeout;
+                bool gotData = false;
+
+                while (true)
+                {
+                    try
+                    {
+                        var ch = _scripting.ReadUntil(anyDataEvent);
+                        if (!string.IsNullOrEmpty(ch))
+                        {
+                            batch.Append(ch);
+                            gotData = true;
+
+                            if (!seenNewlineAfterEcho && ch.Contains('\n'))
+                            {
+                                seenNewlineAfterEcho = true;
+                            }
+
+                            if (seenNewlineAfterEcho && ch.IndexOfAny(new[] { '#', '>', '$', '%' }) >= 0)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException &&
+                        (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        break;
+                    }
+
+                    if (batch.Length > 4096 || overallSw.ElapsedMilliseconds >= overallTimeout)
+                        break;
+                }
+
+                if (gotData)
+                {
+                    var chunk = batch.ToString();
+                    rawBuffer.Append(chunk);
+                    EmitDebug($"[+{overallSw.ElapsedMilliseconds}ms] Received {chunk.Length} chars. RAW: {EscapeForDebug(chunk, 300)}");
+
+                    bool hitPager = false;
+                    foreach (var pattern in Patterns.PagerPatterns)
+                    {
+                        if (Regex.IsMatch(chunk, pattern, RegexOptions.IgnoreCase))
+                        {
+                            hitPager = true;
+                            break;
+                        }
+                    }
+
+                    var processed = TerminalOutputProcessor.Sanitize(chunk);
+                    processed = TerminalOutputProcessor.StripPagerArtifacts(processed, out _);
+                    processed = TerminalOutputProcessor.StripPagerDismissalArtifacts(processed);
+
+                    output.Append(processed);
+                    OnOutputReceived(processed);
+
+                    if (hitPager)
+                    {
+                        pageCount++;
+                        EmitDebug($"Pager detected ({pageCount}), sending space");
+                        _scripting.Send(" ");
+                        continue;
+                    }
+
+                    bool canCheck = seenNewlineAfterEcho || overallSw.ElapsedMilliseconds >= minTimeBeforeMatch;
+                    if (canCheck)
+                    {
+                        var normalized = TerminalOutputProcessor.Normalize(
+                            TerminalOutputProcessor.Sanitize(rawBuffer.ToString()));
+
+                        if (expectRegex.IsMatch(normalized))
+                        {
+                            matched = true;
+                            // Update prompt if the output indicates a prompt change.
+                            UpdatePromptIfChanged(new StringBuilder(normalized));
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    _scripting.Timeout = idleTimeout;
+                    try
+                    {
+                        var ch = _scripting.ReadUntil(anyDataEvent);
+                        if (!string.IsNullOrEmpty(ch))
+                        {
+                            rawBuffer.Append(ch);
+                            continue;
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException &&
+                        (ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        EmitDebug($"[+{overallSw.ElapsedMilliseconds}ms] No data for {idleTimeout}ms. Buffer: {rawBuffer.Length} chars");
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        EmitDebug($"Error during polling read: {ex.Message}");
+                        break;
+                    }
+                }
+            }
+
+            if (DebugMode && !matched)
+            {
+                EmitDebug("=== TIMEOUT: Expect regex did NOT match. Buffer analysis: ===");
+                var finalNormalized = TerminalOutputProcessor.Normalize(
+                    TerminalOutputProcessor.Sanitize(rawBuffer.ToString()));
+                EmitDebug($"  Total raw chars: {rawBuffer.Length}");
+                EmitDebug($"  Expect regex: {expectRegex}");
+
+                var rawTail = rawBuffer.Length > 300
+                    ? rawBuffer.ToString(rawBuffer.Length - 300, 300)
+                    : rawBuffer.ToString();
+                EmitDebug($"  Raw buffer tail: {EscapeForDebug(rawTail, 300)}");
+            }
+
+            _scripting.Timeout = savedTimeout;
+
+            var result = output.ToString();
+            EmitDebug($"ReadUntilExpect finished. Total chars: {result.Length}");
             return TerminalOutputProcessor.Normalize(result);
         }
 
@@ -731,6 +949,37 @@ namespace SSH_Helper.Services
             }
             // Default to 'a' for patterns like "press any key"
             return "a";
+        }
+
+        /// <summary>
+        /// Builds a Regex for the "expect" pattern, handling /pattern/ and quoted forms.
+        /// </summary>
+        private static Regex BuildExpectRegex(string pattern)
+        {
+            var normalized = NormalizeExpectPattern(pattern);
+            try
+            {
+                return new Regex(normalized, RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new ArgumentException($"Invalid expect pattern: {ex.Message}", ex);
+            }
+        }
+
+        private static string NormalizeExpectPattern(string pattern)
+        {
+            var trimmed = pattern.Trim();
+            if (trimmed.Length >= 2)
+            {
+                if ((trimmed.StartsWith("/") && trimmed.EndsWith("/")) ||
+                    (trimmed.StartsWith("\"") && trimmed.EndsWith("\"")) ||
+                    (trimmed.StartsWith("'") && trimmed.EndsWith("'")))
+                {
+                    return trimmed.Substring(1, trimmed.Length - 2);
+                }
+            }
+            return trimmed;
         }
 
         /// <summary>
