@@ -171,9 +171,11 @@ dotnet run
 - Visual Studio 2022 or later (recommended)
 - .NET 8.0 SDK
 - NuGet packages:
-  - SSH.NET
+  - Rebex.SshShell
   - Newtonsoft.Json
   - YamlDotNet
+  - Microsoft.Extensions.Configuration.Json
+  - Microsoft.Extensions.Configuration.Binder
 
 ## License
 
