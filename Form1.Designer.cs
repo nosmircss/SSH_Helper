@@ -39,6 +39,10 @@ namespace SSH_Helper
             deleteColumnToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator5 = new ToolStripSeparator();
             deleteRowToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparatorSelection = new ToolStripSeparator();
+            selectAllHostsToolStripMenuItem = new ToolStripMenuItem();
+            deselectAllHostsToolStripMenuItem = new ToolStripMenuItem();
+            invertSelectionToolStripMenuItem = new ToolStripMenuItem();
             hostsHeaderPanel = new Panel();
             lblHostsTitle = new Label();
             lblHostCount = new Label();
@@ -276,7 +280,7 @@ namespace SSH_Helper
             // 
             // contextMenuStrip1
             // 
-            contextMenuStrip1.Items.AddRange(new ToolStripItem[] { addColumnToolStripMenuItem, renameColumnToolStripMenuItem, deleteColumnToolStripMenuItem, toolStripSeparator5, deleteRowToolStripMenuItem });
+            contextMenuStrip1.Items.AddRange(new ToolStripItem[] { addColumnToolStripMenuItem, renameColumnToolStripMenuItem, deleteColumnToolStripMenuItem, toolStripSeparator5, deleteRowToolStripMenuItem, toolStripSeparatorSelection, selectAllHostsToolStripMenuItem, deselectAllHostsToolStripMenuItem, invertSelectionToolStripMenuItem });
             contextMenuStrip1.Name = "contextMenuStrip1";
             contextMenuStrip1.Size = new Size(164, 98);
             // 
@@ -305,14 +309,40 @@ namespace SSH_Helper
             // 
             toolStripSeparator5.Name = "toolStripSeparator5";
             toolStripSeparator5.Size = new Size(160, 6);
-            // 
+            //
             // deleteRowToolStripMenuItem
-            // 
+            //
             deleteRowToolStripMenuItem.Name = "deleteRowToolStripMenuItem";
             deleteRowToolStripMenuItem.Size = new Size(163, 22);
             deleteRowToolStripMenuItem.Text = "Delete &Row";
             deleteRowToolStripMenuItem.Click += deleteRowToolStripMenuItem_Click;
-            // 
+            //
+            // toolStripSeparatorSelection
+            //
+            toolStripSeparatorSelection.Name = "toolStripSeparatorSelection";
+            toolStripSeparatorSelection.Size = new Size(160, 6);
+            //
+            // selectAllHostsToolStripMenuItem
+            //
+            selectAllHostsToolStripMenuItem.Name = "selectAllHostsToolStripMenuItem";
+            selectAllHostsToolStripMenuItem.Size = new Size(163, 22);
+            selectAllHostsToolStripMenuItem.Text = "&Select All Hosts";
+            selectAllHostsToolStripMenuItem.Click += selectAllHostsToolStripMenuItem_Click;
+            //
+            // deselectAllHostsToolStripMenuItem
+            //
+            deselectAllHostsToolStripMenuItem.Name = "deselectAllHostsToolStripMenuItem";
+            deselectAllHostsToolStripMenuItem.Size = new Size(163, 22);
+            deselectAllHostsToolStripMenuItem.Text = "&Deselect All Hosts";
+            deselectAllHostsToolStripMenuItem.Click += deselectAllHostsToolStripMenuItem_Click;
+            //
+            // invertSelectionToolStripMenuItem
+            //
+            invertSelectionToolStripMenuItem.Name = "invertSelectionToolStripMenuItem";
+            invertSelectionToolStripMenuItem.Size = new Size(163, 22);
+            invertSelectionToolStripMenuItem.Text = "&Invert Selection";
+            invertSelectionToolStripMenuItem.Click += invertSelectionToolStripMenuItem_Click;
+            //
             // hostsHeaderPanel
             // 
             hostsHeaderPanel.BackColor = Color.FromArgb(248, 249, 250);
@@ -1635,6 +1665,10 @@ namespace SSH_Helper
         private ToolStripMenuItem deleteColumnToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator5;
         private ToolStripMenuItem deleteRowToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparatorSelection;
+        private ToolStripMenuItem selectAllHostsToolStripMenuItem;
+        private ToolStripMenuItem deselectAllHostsToolStripMenuItem;
+        private ToolStripMenuItem invertSelectionToolStripMenuItem;
 
         private ContextMenuStrip contextPresetLst;
         private ToolStripMenuItem ctxAddPreset;

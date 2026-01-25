@@ -73,8 +73,9 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.10";
+        private const string ApplicationVersion = "0.50.11";
         private const string ApplicationName = "SSH Helper";
+        private const string SelectColumnName = "";
 
         #endregion
 
@@ -133,6 +134,10 @@ namespace SSH_Helper
         private VScrollBar? _dgvVScrollBar;
         private HScrollBar? _dgvHScrollBar;
         private Panel? _dgvScrollCorner;
+
+        // Multi-host selection state
+        private bool _selectAllChecked;
+        private Rectangle _selectAllCheckboxBounds;
 
         #endregion
 
@@ -258,6 +263,21 @@ namespace SSH_Helper
 
         private void InitializeDataGridView()
         {
+            // Add checkbox column for multi-host selection (first column)
+            var selectColumn = new DataGridViewCheckBoxColumn
+            {
+                Name = SelectColumnName,
+                HeaderText = "",
+                Width = 40,
+                Resizable = DataGridViewTriState.False,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                ReadOnly = false,
+                FalseValue = false,
+                TrueValue = true,
+                ValueType = typeof(bool)
+            };
+            dgv_variables.Columns.Add(selectColumn);
+
             dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
             dgv_variables.Columns[CsvManager.HostColumnName].Width = 150;
 
@@ -540,6 +560,8 @@ namespace SSH_Helper
             dgv_variables.ColumnRemoved += Dgv_Variables_ColumnRemoved;
             dgv_variables.KeyPress += Dgv_Variables_KeyPress;
             dgv_variables.KeyDown += Dgv_Variables_KeyDown;
+            dgv_variables.ColumnHeaderMouseClick += Dgv_Variables_ColumnHeaderMouseClick;
+            dgv_variables.CurrentCellDirtyStateChanged += Dgv_Variables_CurrentCellDirtyStateChanged;
 
             // Preset TreeView events are wired up in Designer
             trvPresets.NodeMouseClick += TrvPresets_NodeMouseClick;
@@ -672,6 +694,78 @@ namespace SSH_Helper
             string text = count == 1 ? "1 host" : $"{count} hosts";
             lblHostCount.Text = text;
             statusHostCount.Text = text;
+        }
+
+        private int GetCheckedHostCount()
+        {
+            // Guard: column may not exist during initialization or when loading saved state
+            if (!dgv_variables.Columns.Contains(SelectColumnName))
+                return 0;
+
+            return dgv_variables.Rows.Cast<DataGridViewRow>()
+                .Count(r => !r.IsNewRow &&
+                            r.Cells[SelectColumnName].Value is true);
+        }
+
+        private void UpdateSelectionCount()
+        {
+            int checkedCount = GetCheckedHostCount();
+            int totalCount = dgv_variables.Rows.Cast<DataGridViewRow>()
+                .Count(r => !r.IsNewRow && !string.IsNullOrWhiteSpace(GetCellValue(r, CsvManager.HostColumnName)));
+
+            if (checkedCount > 0)
+            {
+                string text = $"{checkedCount} of {totalCount} selected";
+                lblHostCount.Text = text;
+                statusHostCount.Text = text;
+            }
+            else
+            {
+                string text = totalCount == 1 ? "1 host" : $"{totalCount} hosts";
+                lblHostCount.Text = text;
+                statusHostCount.Text = text;
+            }
+
+            UpdateRunButtonText();
+        }
+
+        private void SetAllCheckboxes(bool value)
+        {
+            if (!dgv_variables.Columns.Contains(SelectColumnName))
+                return;
+
+            _selectAllChecked = value;
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (!row.IsNewRow)
+                {
+                    row.Cells[SelectColumnName].Value = value;
+                }
+            }
+            dgv_variables.InvalidateColumn(dgv_variables.Columns[SelectColumnName]!.Index);
+            UpdateSelectionCount();
+        }
+
+        private void EnsureSelectColumn()
+        {
+            // Add checkbox column if it doesn't exist (e.g., after loading CSV or restoring state)
+            if (dgv_variables.Columns.Contains(SelectColumnName))
+                return;
+
+            var selectColumn = new DataGridViewCheckBoxColumn
+            {
+                Name = SelectColumnName,
+                HeaderText = "",
+                Width = 40,
+                Resizable = DataGridViewTriState.False,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                ReadOnly = false,
+                FalseValue = false,
+                TrueValue = true,
+                ValueType = typeof(bool)
+            };
+            dgv_variables.Columns.Insert(0, selectColumn);
+            _selectAllChecked = false;
         }
 
         private void UpdateStatusBar(string message, bool showProgress = false, int progress = 0, int total = 0)
@@ -1558,7 +1652,7 @@ namespace SSH_Helper
                 deleteRowToolStripMenuItem.Visible = !isColumnHeader;
 
                 // Enable/disable delete/rename based on Host_IP protection
-                bool isProtected = IsHostIpColumn(_rightClickedColumnIndex);
+                bool isProtected = IsProtectedColumn(_rightClickedColumnIndex);
                 deleteColumnToolStripMenuItem.Enabled = !isProtected;
                 renameColumnToolStripMenuItem.Enabled = !isProtected;
 
@@ -1576,14 +1670,15 @@ namespace SSH_Helper
             }
         }
 
-        private bool IsHostIpColumn(int columnIndex)
+        private bool IsProtectedColumn(int columnIndex)
         {
             if (columnIndex < 0 || columnIndex >= dgv_variables.Columns.Count)
                 return false;
 
             var col = dgv_variables.Columns[columnIndex];
             return string.Equals(col.Name, CsvManager.HostColumnName, StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(col.HeaderText, CsvManager.HostColumnName, StringComparison.OrdinalIgnoreCase);
+                   string.Equals(col.HeaderText, CsvManager.HostColumnName, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(col.Name, SelectColumnName, StringComparison.OrdinalIgnoreCase);
         }
 
         private void Dgv_Variables_RowPostPaint(object? sender, DataGridViewRowPostPaintEventArgs e)
@@ -1604,7 +1699,85 @@ namespace SSH_Helper
 
         private void Dgv_Variables_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
         {
-            if (e.RowIndex < 0 || e.ColumnIndex < 0 || e.Graphics == null) return;
+            if (e.Graphics == null) return;
+
+            // Paint header checkbox for Select column
+            if (e.RowIndex == -1 && e.ColumnIndex >= 0 &&
+                dgv_variables.Columns[e.ColumnIndex].Name == SelectColumnName)
+            {
+                e.Paint(e.CellBounds, DataGridViewPaintParts.All);
+
+                // Draw checkbox in center of header
+                var checkboxSize = 14;
+                var x = e.CellBounds.X + (e.CellBounds.Width - checkboxSize) / 2;
+                var y = e.CellBounds.Y + (e.CellBounds.Height - checkboxSize) / 2;
+                _selectAllCheckboxBounds = new Rectangle(x, y, checkboxSize, checkboxSize);
+
+                var state = _selectAllChecked ? ButtonState.Checked : ButtonState.Normal;
+                if (_isDarkMode)
+                {
+                    // Dark mode: draw a custom checkbox
+                    using var pen = new Pen(Color.FromArgb(128, 128, 128), 1);
+                    using var brush = new SolidBrush(_selectAllChecked ? DarkSelectionBorder : Color.FromArgb(45, 45, 48));
+                    e.Graphics.FillRectangle(brush, _selectAllCheckboxBounds);
+                    e.Graphics.DrawRectangle(pen, _selectAllCheckboxBounds);
+
+                    if (_selectAllChecked)
+                    {
+                        // Draw checkmark
+                        using var checkPen = new Pen(Color.White, 2);
+                        var checkX = _selectAllCheckboxBounds.X + 3;
+                        var checkY = _selectAllCheckboxBounds.Y + 7;
+                        e.Graphics.DrawLine(checkPen, checkX, checkY, checkX + 3, checkY + 3);
+                        e.Graphics.DrawLine(checkPen, checkX + 3, checkY + 3, checkX + 9, checkY - 3);
+                    }
+                }
+                else
+                {
+                    ControlPaint.DrawCheckBox(e.Graphics, _selectAllCheckboxBounds, state);
+                }
+
+                e.Handled = true;
+                return;
+            }
+
+            // Paint data row checkboxes for Select column in dark mode
+            if (_isDarkMode && e.RowIndex >= 0 && e.ColumnIndex >= 0 &&
+                dgv_variables.Columns[e.ColumnIndex].Name == SelectColumnName)
+            {
+                // Paint background
+                e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border);
+
+                // Get checkbox state
+                var checkboxCell = dgv_variables.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                var isChecked = checkboxCell.Value is true;
+
+                // Draw custom checkbox in center
+                var checkboxSize = 14;
+                var x = e.CellBounds.X + (e.CellBounds.Width - checkboxSize) / 2;
+                var y = e.CellBounds.Y + (e.CellBounds.Height - checkboxSize) / 2;
+                var checkboxBounds = new Rectangle(x, y, checkboxSize, checkboxSize);
+
+                using var pen = new Pen(Color.FromArgb(128, 128, 128), 1);
+                using var brush = new SolidBrush(isChecked ? DarkSelectionBorder : Color.FromArgb(45, 45, 48));
+                e.Graphics.FillRectangle(brush, checkboxBounds);
+                e.Graphics.DrawRectangle(pen, checkboxBounds);
+
+                if (isChecked)
+                {
+                    // Draw checkmark
+                    using var checkPen = new Pen(Color.White, 2);
+                    var checkX = checkboxBounds.X + 3;
+                    var checkY = checkboxBounds.Y + 7;
+                    e.Graphics.DrawLine(checkPen, checkX, checkY, checkX + 3, checkY + 3);
+                    e.Graphics.DrawLine(checkPen, checkX + 3, checkY + 3, checkX + 9, checkY - 3);
+                }
+
+                e.Handled = true;
+                return;
+            }
+
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
 
             var cell = dgv_variables.Rows[e.RowIndex].Cells[e.ColumnIndex];
             if (!cell.Selected) return;
@@ -1668,6 +1841,17 @@ namespace SSH_Helper
                 {
                     row.Cells[e.ColumnIndex].Selected = true;
                 }
+                return;
+            }
+
+            // Single-click checkbox toggle (since EditMode is EditProgrammatically)
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0 &&
+                dgv_variables.Columns[e.ColumnIndex].Name == SelectColumnName &&
+                !dgv_variables.Rows[e.RowIndex].IsNewRow)
+            {
+                var cell = dgv_variables.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                bool currentValue = cell.Value is true;
+                cell.Value = !currentValue;
             }
         }
 
@@ -1683,8 +1867,33 @@ namespace SSH_Helper
 
         private void Dgv_Variables_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
         {
+            // Don't mark dirty for checkbox changes (they're not persisted to CSV)
+            if (e.ColumnIndex >= 0 && dgv_variables.Columns[e.ColumnIndex].Name == SelectColumnName)
+            {
+                UpdateSelectionCount();
+                return;
+            }
+
             _csvDirty = true;
             UpdateHostCount();
+        }
+
+        private void Dgv_Variables_ColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.ColumnIndex >= 0 && dgv_variables.Columns[e.ColumnIndex].Name == SelectColumnName)
+            {
+                _selectAllChecked = !_selectAllChecked;
+                SetAllCheckboxes(_selectAllChecked);
+            }
+        }
+
+        private void Dgv_Variables_CurrentCellDirtyStateChanged(object? sender, EventArgs e)
+        {
+            // Commit checkbox changes immediately so CellValueChanged fires right away
+            if (dgv_variables.CurrentCell is DataGridViewCheckBoxCell)
+            {
+                dgv_variables.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
         }
 
         private void Dgv_Variables_RowsAdded(object? sender, DataGridViewRowsAddedEventArgs e)
@@ -2731,13 +2940,32 @@ namespace SSH_Helper
 
             if (folderName != null)
             {
-                SshDebugLog("CLICK", $"Dispatching to ExecuteFolderPresetsOnSelectedHost", sw);
-                ExecuteFolderPresetsOnSelectedHost(folderName);
+                int checkedCount = GetCheckedHostCount();
+                if (checkedCount > 0)
+                {
+                    SshDebugLog("CLICK", $"Dispatching to ExecuteFolderPresetsOnCheckedHosts ({checkedCount} hosts)", sw);
+                    ExecuteFolderPresetsOnCheckedHosts(folderName);
+                }
+                else
+                {
+                    SshDebugLog("CLICK", $"Dispatching to ExecuteFolderPresetsOnSelectedHost", sw);
+                    ExecuteFolderPresetsOnSelectedHost(folderName);
+                }
             }
             else
             {
-                SshDebugLog("CLICK", $"Dispatching to ExecuteOnSelectedHost", sw);
-                ExecuteOnSelectedHost();
+                // Check if any hosts are checkbox-selected
+                int checkedCount = GetCheckedHostCount();
+                if (checkedCount > 0)
+                {
+                    SshDebugLog("CLICK", $"Dispatching to ExecuteOnCheckedHosts ({checkedCount} hosts)", sw);
+                    ExecuteOnCheckedHosts();
+                }
+                else
+                {
+                    SshDebugLog("CLICK", $"Dispatching to ExecuteOnSelectedHost", sw);
+                    ExecuteOnSelectedHost();
+                }
             }
         }
 
@@ -2867,6 +3095,31 @@ namespace SSH_Helper
         private void deleteRowToolStripMenuItem_Click(object sender, EventArgs e)
         {
             DeleteRow(_rightClickedRowIndex);
+        }
+
+        private void selectAllHostsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            SetAllCheckboxes(true);
+        }
+
+        private void deselectAllHostsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            SetAllCheckboxes(false);
+        }
+
+        private void invertSelectionToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (!row.IsNewRow)
+                {
+                    bool current = row.Cells[SelectColumnName].Value is true;
+                    row.Cells[SelectColumnName].Value = !current;
+                }
+            }
+            _selectAllChecked = false; // Reset since invert breaks the "all selected" state
+            dgv_variables.InvalidateColumn(dgv_variables.Columns[SelectColumnName]!.Index);
+            UpdateSelectionCount();
         }
 
         private void addPresetToolStripMenuItem_Click(object sender, EventArgs e)
@@ -3564,6 +3817,7 @@ namespace SSH_Helper
                     _loadedFilePath = ofd.FileName;
                     dgv_variables.Columns.Clear();
                     dgv_variables.DataSource = dataTable;
+                    EnsureSelectColumn();
 
                     // Apply row template height to all rows (DataSource binding doesn't use RowTemplate)
                     foreach (DataGridViewRow row in dgv_variables.Rows)
@@ -3632,6 +3886,7 @@ namespace SSH_Helper
         {
             var columns = dgv_variables.Columns
                 .Cast<DataGridViewColumn>()
+                .Where(c => c.Name != SelectColumnName) // Exclude checkbox column from CSV
                 .OrderBy(c => c.DisplayIndex)
                 .Select(c => (c.Name, c.HeaderText));
 
@@ -3658,6 +3913,7 @@ namespace SSH_Helper
                 dgv_variables.Columns.Clear();
                 dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
             }
+            EnsureSelectColumn();
             _csvDirty = true;
             _loadedFilePath = null;
             UpdateHostCount();
@@ -3750,7 +4006,7 @@ namespace SSH_Helper
         {
             if (columnIndex < 0 || columnIndex >= dgv_variables.Columns.Count) return;
 
-            if (IsHostIpColumn(columnIndex))
+            if (IsProtectedColumn(columnIndex))
             {
                 MessageBox.Show("The Host_IP column cannot be deleted.", "Delete Column", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
@@ -4489,16 +4745,22 @@ namespace SSH_Helper
 
         private void UpdateRunButtonText()
         {
+            int checkedCount = GetCheckedHostCount();
+
             if (!string.IsNullOrEmpty(_selectedFolderName))
             {
                 int count = _presetManager.GetPresetsInFolder(_selectedFolderName).Count();
                 btnExecuteAll.Text = $"Run 📁 {_selectedFolderName} ({count})";
-                btnExecuteSelected.Text = $"Run Selected 📁";
+                btnExecuteSelected.Text = checkedCount > 0
+                    ? $"Run Checked ({checkedCount}) 📁"
+                    : $"Run Selected 📁";
             }
             else
             {
                 btnExecuteAll.Text = "Run All";
-                btnExecuteSelected.Text = "Run Selected";
+                btnExecuteSelected.Text = checkedCount > 0
+                    ? $"Run Checked ({checkedCount})"
+                    : "Run Selected";
             }
 
             // Reposition buttons based on text width
@@ -4832,6 +5094,71 @@ namespace SSH_Helper
             }
         }
 
+        private async void ExecuteOnCheckedHosts()
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            SshDebugLog("EXEC", "ExecuteOnCheckedHosts entered");
+
+            if (_sshService.IsRunning)
+            {
+                SshDebugLog("EXEC", "Aborted - SSH service already running", sw);
+                return;
+            }
+
+            // Get rows with checkbox checked
+            var checkedRows = dgv_variables.Rows.Cast<DataGridViewRow>()
+                .Where(r => !r.IsNewRow &&
+                            r.Cells[SelectColumnName].Value is true)
+                .ToList();
+
+            if (checkedRows.Count == 0)
+            {
+                MessageBox.Show("No hosts selected. Check the boxes next to hosts you want to execute on.",
+                    "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
+            SetExecutionMode(true);
+            txtOutput.Clear();
+
+            SshDebugLog("EXEC", "Building host connections from checked rows", sw);
+            var hosts = GetHostConnections(checkedRows).ToList();
+            SshDebugLog("EXEC", $"Host connections built: {hosts.Count} host(s)", sw);
+
+            SshDebugLog("EXEC", "Loading configuration for timeouts", sw);
+            int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
+            int connectionTimeout = _configService.GetCurrent().ConnectionTimeout;
+            var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
+            SshDebugLog("EXEC", $"Timeouts configured - command: {commandTimeout}s, connection: {connectionTimeout}s", sw);
+
+            // Create a preset from the current command text (supports both simple commands and YAML scripts)
+            var preset = new PresetInfo { Commands = txtCommand.Text };
+            SshDebugLog("EXEC", $"Preset created. IsScript: {preset.IsScript}", sw);
+
+            UpdateStatusBar($"Executing on {hosts.Count} selected hosts...", true, 0, hosts.Count);
+
+            try
+            {
+                SshDebugLog("EXEC", "Calling _sshService.ExecutePresetAsync - SSH connection starting", sw);
+                var results = await _sshService.ExecutePresetAsync(hosts, preset, tsbUsername.Text, tsbPassword.Text, timeouts);
+                SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
+                StoreExecutionHistory(results);
+                UpdateStatusBar($"Completed execution on {results.Count} hosts");
+            }
+            catch (Exception ex)
+            {
+                SshDebugLog("EXEC", $"Exception: {ex.GetType().Name}: {ex.Message}", sw);
+                MessageBox.Show($"An error occurred: {ex.Message}");
+                UpdateStatusBar("Execution failed");
+            }
+            finally
+            {
+                SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
+                SetExecutionMode(false);
+            }
+        }
+
         private async void ExecuteFolderPresetsOnAllHosts(string folderName)
         {
             var config = _configService.Load();
@@ -4909,6 +5236,47 @@ namespace SSH_Helper
             if (_sshService.IsRunning) return;
 
             await ExecuteFolderWithOptionsAsync(folderName, options, new List<DataGridViewRow> { row });
+        }
+
+        private async void ExecuteFolderPresetsOnCheckedHosts(string folderName)
+        {
+            var config = _configService.Load();
+            var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
+            if (presetNames.Count == 0)
+            {
+                MessageBox.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Get checked host rows with valid hosts
+            var checkedRows = dgv_variables.Rows.Cast<DataGridViewRow>()
+                .Where(r => !r.IsNewRow &&
+                            r.Cells[SelectColumnName].Value is true &&
+                            !string.IsNullOrWhiteSpace(GetCellValue(r, CsvManager.HostColumnName)))
+                .ToList();
+
+            if (checkedRows.Count == 0)
+            {
+                txtOutput.Clear();
+                txtOutput.AppendText("No valid hosts checked");
+                return;
+            }
+
+            // Show folder execution dialog with all checked hosts
+            var hostAddresses = checkedRows
+                .Select(r => GetCellValue(r, CsvManager.HostColumnName))
+                .ToList();
+            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            var options = dialog.Options;
+            if (options.SelectedPresets.Count == 0)
+                return;
+
+            if (_sshService.IsRunning) return;
+
+            await ExecuteFolderWithOptionsAsync(folderName, options, checkedRows);
         }
 
         private async Task ExecuteFolderWithOptionsAsync(string folderName, FolderExecutionOptions options, List<DataGridViewRow> hostRows)
@@ -5546,11 +5914,14 @@ namespace SSH_Helper
         {
             var state = new ApplicationState();
 
-            // Save hosts data
+            // Save hosts data (exclude checkbox column and whitespace-only column names)
             state.HostColumns = new List<string>();
             for (int i = 0; i < dgv_variables.Columns.Count; i++)
             {
-                state.HostColumns.Add(dgv_variables.Columns[i].Name);
+                var colName = dgv_variables.Columns[i].Name;
+                if (colName == SelectColumnName || string.IsNullOrWhiteSpace(colName))
+                    continue;
+                state.HostColumns.Add(colName);
             }
 
             state.Hosts = new List<Dictionary<string, string>>();
@@ -5562,10 +5933,25 @@ namespace SSH_Helper
                 for (int col = 0; col < dgv_variables.Columns.Count; col++)
                 {
                     var colName = dgv_variables.Columns[col].Name;
+                    // Skip checkbox column and whitespace-only column names
+                    if (colName == SelectColumnName || string.IsNullOrWhiteSpace(colName))
+                        continue;
                     var value = dgv_variables.Rows[row].Cells[col].Value?.ToString() ?? "";
                     rowData[colName] = value;
                 }
                 state.Hosts.Add(rowData);
+            }
+
+            // Save selected (checked) host indices
+            state.SelectedHostIndices = new List<int>();
+            for (int row = 0; row < dgv_variables.Rows.Count; row++)
+            {
+                if (dgv_variables.Rows[row].IsNewRow) continue;
+                if (dgv_variables.Columns.Contains(SelectColumnName) &&
+                    dgv_variables.Rows[row].Cells[SelectColumnName].Value is true)
+                {
+                    state.SelectedHostIndices.Add(row);
+                }
             }
 
             // Save CSV path
@@ -5613,8 +5999,12 @@ namespace SSH_Helper
             {
                 foreach (var colName in state.HostColumns)
                 {
+                    // Skip checkbox column name and whitespace-only names (will be added by EnsureSelectColumn)
+                    if (colName == SelectColumnName || string.IsNullOrWhiteSpace(colName))
+                        continue;
                     dgv_variables.Columns.Add(colName, colName);
                 }
+                EnsureSelectColumn();
 
                 if (state.Hosts != null)
                 {
@@ -5631,6 +6021,18 @@ namespace SSH_Helper
                             {
                                 dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
                             }
+                        }
+                    }
+                }
+
+                // Restore selected (checked) host indices
+                if (state.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
+                {
+                    foreach (var index in state.SelectedHostIndices)
+                    {
+                        if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
+                        {
+                            dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
                         }
                     }
                 }

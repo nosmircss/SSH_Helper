@@ -259,6 +259,11 @@ namespace SSH_Helper.Models
         public List<string> HostColumns { get; set; } = new();
 
         /// <summary>
+        /// Indices of selected (checked) hosts in the grid.
+        /// </summary>
+        public List<int> SelectedHostIndices { get; set; } = new();
+
+        /// <summary>
         /// The path to the last loaded CSV file (if any).
         /// </summary>
         public string? LastCsvPath { get; set; }
