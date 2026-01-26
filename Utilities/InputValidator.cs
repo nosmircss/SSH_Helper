@@ -40,6 +40,46 @@ namespace SSH_Helper.Utilities
         }
 
         /// <summary>
+        /// Validates a host entry (IPv4 or DNS hostname) with optional port.
+        /// </summary>
+        /// <param name="hostWithPort">Host in format "name" or "name:port"</param>
+        /// <returns>True if host is valid and port (if present) is valid.</returns>
+        public static bool IsValidHostOrIp(string hostWithPort)
+        {
+            if (string.IsNullOrWhiteSpace(hostWithPort))
+                return false;
+
+            string host = hostWithPort.Trim();
+            int? port = null;
+
+            int colonIndex = host.LastIndexOf(':');
+            if (colonIndex > -1)
+            {
+                var hostPart = host[..colonIndex];
+                var portPart = host[(colonIndex + 1)..];
+
+                if (!string.IsNullOrWhiteSpace(portPart))
+                {
+                    if (!int.TryParse(portPart, out int parsedPort) || parsedPort <= 0 || parsedPort > 65535)
+                        return false;
+                    port = parsedPort;
+                }
+
+                host = hostPart;
+            }
+
+            if (string.IsNullOrWhiteSpace(host))
+                return false;
+
+            // Accept IPv4 addresses or DNS hostnames (no IPv6 support here)
+            var hostType = Uri.CheckHostName(host);
+            if (hostType != UriHostNameType.IPv4 && hostType != UriHostNameType.Dns)
+                return false;
+
+            return port == null || IsValidPort(port.Value);
+        }
+
+        /// <summary>
         /// Validates a port number.
         /// </summary>
         public static bool IsValidPort(int port)

@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using SSH_Helper.Services.Scripting;
 using SSH_Helper.Utilities;
 
 namespace SSH_Helper
@@ -102,7 +103,7 @@ namespace SSH_Helper
         private bool _pendingColumnAutoSize;
         private int _rightClickedColumnIndex = -1;
         private int _rightClickedRowIndex = -1;
-        private readonly BindingList<KeyValuePair<string, string>> _outputHistory = new();
+        private readonly BindingList<HistoryListItem> _outputHistory = new();
 
         // Find dialog state
         private FindDialog? _findDialog;
@@ -124,6 +125,12 @@ namespace SSH_Helper
 
         // Per-host history data for the currently selected folder history entry
         private List<HostHistoryEntry>? _currentHostResults;
+
+        // Output state
+        private readonly StringBuilder _outputBuffer = new();
+
+        // Credential provider
+        private ICredentialProvider? _credentialProvider;
 
         // Track which TreeView triggered the context menu
         private TreeView? _contextMenuSourceTreeView;
@@ -163,6 +170,7 @@ namespace SSH_Helper
             var poolTimeouts = SshTimeoutOptions.Create(config.Timeout, config.ConnectionTimeout);
             _sshService = new SshExecutionService(enablePooling: true, poolTimeouts);
             _sshService.UseConnectionPooling = config.UseConnectionPooling;
+            _sshService.PreferSshAgent = config.Credentials.PreferSshAgent;
             _sshConfigService = new SshConfigService();
             _executionCoordinator = new ExecutionCoordinator(_sshService, _configService);
 
@@ -177,6 +185,7 @@ namespace SSH_Helper
                 ApplicationVersion);
 
             InitializeFromConfiguration();
+            InitializeCredentials();
             InitializeDataGridView();
             InitializeOutputHistory();
             InitializeEventHandlers();
@@ -542,7 +551,85 @@ namespace SSH_Helper
         private void InitializeOutputHistory()
         {
             lstOutput.DataSource = _outputHistory;
-            lstOutput.DisplayMember = "Key";
+            lstOutput.DisplayMember = nameof(HistoryListItem.Label);
+        }
+
+        private void InitializeCredentials()
+        {
+            var config = _configService.GetCurrent();
+            _credentialProvider = config.Credentials.UseCredentialManager
+                ? new CredentialManagerProvider()
+                : null;
+
+            if (_credentialProvider?.IsAvailable == true)
+            {
+                TryLoadDefaultPassword();
+            }
+        }
+
+        private void TryLoadDefaultPassword()
+        {
+            if (_credentialProvider == null || !_credentialProvider.IsAvailable)
+                return;
+
+            if (_credentialProvider.TryGetPassword(CredentialTargets.DefaultPasswordTarget, out _, out var password))
+            {
+                tsbPassword.Text = password;
+                txtPassword.Text = password;
+            }
+        }
+
+        private void StoreDefaultPassword()
+        {
+            if (_credentialProvider == null || !_credentialProvider.IsAvailable)
+                return;
+
+            _credentialProvider.SavePassword(CredentialTargets.DefaultPasswordTarget, tsbUsername.Text, tsbPassword.Text);
+        }
+
+        private bool TryResolveHostPassword(string hostKey, string username, out string password)
+        {
+            password = string.Empty;
+            if (_credentialProvider == null || !_credentialProvider.IsAvailable)
+                return false;
+
+            var target = CredentialTargets.HostPasswordTarget(hostKey, username);
+            return _credentialProvider.TryGetPassword(target, out _, out password);
+        }
+
+        private void StoreHostPassword(string hostKey, string username, string password)
+        {
+            if (_credentialProvider == null || !_credentialProvider.IsAvailable)
+                return;
+
+            var target = CredentialTargets.HostPasswordTarget(hostKey, username);
+            _credentialProvider.SavePassword(target, username, password);
+        }
+
+        private void MigratePasswordsToCredentialManager()
+        {
+            if (_credentialProvider == null || !_credentialProvider.IsAvailable)
+                return;
+
+            StoreDefaultPassword();
+
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (row.IsNewRow) continue;
+
+                var hostValue = GetCellValue(row, CsvManager.HostColumnName);
+                if (string.IsNullOrWhiteSpace(hostValue))
+                    continue;
+
+                var usernameValue = GetCellValue(row, "username");
+                var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
+                var passwordValue = GetCellValue(row, "password");
+
+                if (!string.IsNullOrWhiteSpace(passwordValue))
+                {
+                    StoreHostPassword(hostValue, resolvedUsername, passwordValue);
+                }
+            }
         }
 
         private void InitializeEventHandlers()
@@ -793,7 +880,7 @@ namespace SSH_Helper
             var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
             var elapsed = stopwatch != null ? $" (+{stopwatch.ElapsedMilliseconds}ms)" : "";
             var debugLine = $"[SSH DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";
-            txtOutput.AppendText(debugLine);
+            AppendOutputText(debugLine);
         }
 
         #region Theme
@@ -928,6 +1015,7 @@ namespace SSH_Helper
             // Output area
             txtOutput.Font = new Font(codeFont, Scaled(fontSettings.OutputAreaFontSize));
             txtOutput.WordWrap = fontSettings.OutputAreaWordWrap;
+
 
             // Tab controls
             var tabFont = new Font(uiFont, Scaled(fontSettings.TabFontSize));
@@ -1158,6 +1246,8 @@ namespace SSH_Helper
             lstHosts.BackColor = LightPanelBackground;
             lstHosts.ForeColor = LightTextColor;
 
+            // Output tools (light)
+
             // Toolstrip styling
             ApplyToolStripTheme(mainToolStrip, false);
             ApplyToolStripTheme(presetsToolStrip, false);
@@ -1278,6 +1368,8 @@ namespace SSH_Helper
             lblHostsListTitle.ForeColor = DarkTextPrimary;
             lstHosts.BackColor = DarkSurface1;
             lstHosts.ForeColor = DarkTextPrimary;
+
+            // Output tools (dark)
 
             // Toolstrip styling with dark theme
             ApplyToolStripTheme(mainToolStrip, true);
@@ -3007,6 +3099,7 @@ namespace SSH_Helper
 
         private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            var previousCredentialManager = _configService.GetCurrent().Credentials.UseCredentialManager;
             using var dialog = new SettingsDialog(_configService);
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
@@ -3019,7 +3112,17 @@ namespace SSH_Helper
                 ApplyFontSettings(config.FontSettings);
                 ApplyColumnAutoResize(config.AutoResizeHostColumns);
                 _sshService.UseConnectionPooling = config.UseConnectionPooling;
+                _sshService.PreferSshAgent = config.Credentials.PreferSshAgent;
                 UpdateStatusBar(config.UseConnectionPooling ? "Connection pooling enabled" : "Connection pooling disabled");
+
+                if (previousCredentialManager != config.Credentials.UseCredentialManager)
+                {
+                    InitializeCredentials();
+                    if (config.Credentials.UseCredentialManager)
+                    {
+                        MigratePasswordsToCredentialManager();
+                    }
+                }
             }
         }
 
@@ -3036,6 +3139,44 @@ namespace SSH_Helper
         private void findToolStripMenuItem_Click(object sender, EventArgs e)
         {
             ShowFindDialog();
+        }
+
+        private void validateScriptToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var scriptText = txtCommand.Text ?? string.Empty;
+
+            if (!Services.Scripting.ScriptParser.IsYamlScript(scriptText))
+            {
+                MessageBox.Show("Current commands are not a YAML script.", "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var parser = new Services.Scripting.ScriptParser();
+
+            try
+            {
+                var script = parser.Parse(scriptText);
+                var errors = parser.Validate(script, scriptText);
+
+                if (errors.Count == 0)
+                {
+                    var successMessage = ScriptValidationFormatter.FormatSuccessMessage();
+                    AppendOutputText(Environment.NewLine + successMessage + Environment.NewLine);
+                    MessageBox.Show(successMessage, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    var message = ScriptValidationFormatter.FormatFailureMessage(errors);
+                    AppendOutputText(Environment.NewLine + message + Environment.NewLine);
+                    MessageBox.Show(message, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                var message = ScriptValidationFormatter.FormatExceptionMessage(ex);
+                AppendOutputText(Environment.NewLine + message + Environment.NewLine);
+                MessageBox.Show(message, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void debugModeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
@@ -3431,15 +3572,15 @@ namespace SSH_Helper
 
         private void lstOutput_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (lstOutput.SelectedItem is KeyValuePair<string, string> entry)
+            if (lstOutput.SelectedItem is HistoryListItem entry)
             {
                 // Check if this is a folder history entry (contains folder emoji)
-                bool isFolderEntry = entry.Key.Contains("📁");
+                bool isFolderEntry = entry.Label.Contains("📁");
 
                 if (isFolderEntry)
                 {
                     // Try to get per-host results from in-memory cache or from saved state
-                    _currentHostResults = GetHostResultsForEntry(entry.Key);
+                    _currentHostResults = GetHostResultsForEntry(entry.Id);
 
                     if (_currentHostResults != null && _currentHostResults.Count > 0)
                     {
@@ -3467,7 +3608,7 @@ namespace SSH_Helper
                 historySplitContainer.Panel2Collapsed = true;
                 lstHosts.Items.Clear();
                 _currentHostResults = null;
-                txtOutput.Text = entry.Value;
+                SetOutputText(entry.Output);
             }
         }
 
@@ -3525,7 +3666,7 @@ namespace SSH_Helper
             if (lstHosts.SelectedItem is HostHistoryEntry hostEntry)
             {
                 // Trim leading blank lines for cleaner display
-                txtOutput.Text = hostEntry.Output.TrimStart('\r', '\n');
+                SetOutputText(hostEntry.Output.TrimStart('\r', '\n'));
             }
         }
 
@@ -3591,7 +3732,7 @@ namespace SSH_Helper
 
             // Get the item text
             var item = lstOutput.Items[e.Index];
-            string text = item is KeyValuePair<string, string> kvp ? kvp.Key : item?.ToString() ?? "";
+            string text = item is HistoryListItem historyItem ? historyItem.Label : item?.ToString() ?? "";
 
             // Check if this is a folder entry (contains folder emoji)
             bool isFolderEntry = text.Contains("\U0001F4C1"); // 📁 Unicode
@@ -5006,7 +5147,7 @@ namespace SSH_Helper
 
             SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
             SetExecutionMode(true);
-            txtOutput.Clear();
+            ClearOutput();
 
             SshDebugLog("EXEC", "Building host connections", sw);
             var hosts = GetHostConnections(hostRows).ToList();
@@ -5075,8 +5216,8 @@ namespace SSH_Helper
 
             if (dgv_variables.CurrentCell == null)
             {
-                txtOutput.Clear();
-                txtOutput.AppendText("No host selected");
+                ClearOutput();
+                AppendOutputText("No host selected");
                 return;
             }
 
@@ -5084,10 +5225,10 @@ namespace SSH_Helper
             string host = GetCellValue(row, CsvManager.HostColumnName);
             SshDebugLog("EXEC", $"Host from grid: {host}", sw);
 
-            if (row.IsNewRow || string.IsNullOrWhiteSpace(host) || !InputValidator.IsValidIpAddress(host))
+            if (row.IsNewRow || string.IsNullOrWhiteSpace(host) || !InputValidator.IsValidHostOrIp(host))
             {
-                txtOutput.Clear();
-                txtOutput.AppendText("No valid host selected");
+                ClearOutput();
+                AppendOutputText("No valid host selected");
                 return;
             }
 
@@ -5166,18 +5307,18 @@ namespace SSH_Helper
         {
             if (dgv_variables.CurrentCell == null)
             {
-                txtOutput.Clear();
-                txtOutput.AppendText("No host selected");
+                ClearOutput();
+                AppendOutputText("No host selected");
                 return;
             }
 
             var row = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
             string host = GetCellValue(row, CsvManager.HostColumnName);
 
-            if (row.IsNewRow || string.IsNullOrWhiteSpace(host) || !InputValidator.IsValidIpAddress(host))
+            if (row.IsNewRow || string.IsNullOrWhiteSpace(host) || !InputValidator.IsValidHostOrIp(host))
             {
-                txtOutput.Clear();
-                txtOutput.AppendText("No valid host selected");
+                ClearOutput();
+                AppendOutputText("No valid host selected");
                 return;
             }
 
@@ -5222,8 +5363,8 @@ namespace SSH_Helper
 
             if (checkedRows.Count == 0)
             {
-                txtOutput.Clear();
-                txtOutput.AppendText("No valid hosts checked");
+                ClearOutput();
+                AppendOutputText("No valid hosts checked");
                 return;
             }
 
@@ -5275,7 +5416,7 @@ namespace SSH_Helper
                 return;
 
             SetExecutionMode(true);
-            txtOutput.Clear();
+            ClearOutput();
 
             int totalOperations = hosts.Count * presets.Count;
             UpdateStatusBar($"Executing folder '{folderName}' on {hosts.Count} hosts...", true, 0, totalOperations);
@@ -5350,37 +5491,36 @@ namespace SSH_Helper
                 combinedOutput.Append(output);
             }
 
-            string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - 📁 {folderName}";
-            var entry = new KeyValuePair<string, string>(key, combinedOutput.ToString());
+            string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - 📁 {folderName}";
+            var entryId = HistoryIdGenerator.NewId();
+            var entry = new HistoryListItem(entryId, label, combinedOutput.ToString());
 
             Invoke(() =>
             {
                 _outputHistory.Insert(0, entry);
 
-                // Store host results in a way that can be retrieved when this entry is selected
-                // We'll use a parallel list that matches _outputHistory indices
-                StoreHostResultsForEntry(0, hostResults);
+                // Store host results by entry ID
+                StoreHostResultsForEntry(entryId, hostResults);
 
                 lstOutput.SelectedIndex = 0;
                 SaveConfiguration();
             });
         }
 
-        // Dictionary to store host results by history entry key
-        private readonly Dictionary<string, List<HostHistoryEntry>> _hostResultsByHistoryKey = [];
+        // Store host results by history entry ID
+        private readonly HistoryResultStore _historyResults = new();
 
-        private void StoreHostResultsForEntry(int index, List<HostHistoryEntry> hostResults)
+        private void StoreHostResultsForEntry(string entryId, List<HostHistoryEntry> hostResults)
         {
-            if (index >= 0 && index < _outputHistory.Count)
-            {
-                var key = _outputHistory[index].Key;
-                _hostResultsByHistoryKey[key] = hostResults;
-            }
+            if (string.IsNullOrWhiteSpace(entryId))
+                return;
+
+            _historyResults.SetResults(entryId, hostResults);
         }
 
-        private List<HostHistoryEntry>? GetHostResultsForEntry(string key)
+        private List<HostHistoryEntry>? GetHostResultsForEntry(string entryId)
         {
-            return _hostResultsByHistoryKey.TryGetValue(key, out var results) ? results : null;
+            return _historyResults.TryGetResults(entryId, out var results) ? results : null;
         }
 
         private void StopExecution()
@@ -5394,7 +5534,7 @@ namespace SSH_Helper
             _sshService.Stop();
 
             // Append stop message to output
-            txtOutput.AppendText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
+            AppendOutputText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
         }
 
         private IEnumerable<HostConnection> GetHostConnections(IEnumerable<DataGridViewRow> rows)
@@ -5407,17 +5547,39 @@ namespace SSH_Helper
                 if (row.IsNewRow) continue;
 
                 string hostIp = GetCellValue(row, CsvManager.HostColumnName);
-                if (string.IsNullOrWhiteSpace(hostIp) || !InputValidator.IsValidIpAddress(hostIp))
+                if (string.IsNullOrWhiteSpace(hostIp) || !InputValidator.IsValidHostOrIp(hostIp))
                     continue;
 
                 var host = HostConnection.Parse(hostIp);
                 host.Username = GetCellValue(row, "username");
-                host.Password = GetCellValue(row, "password");
+                var resolvedUsername = string.IsNullOrWhiteSpace(host.Username) ? tsbUsername.Text : host.Username;
+                var passwordValue = GetCellValue(row, "password");
+
+                var useCredentialManager = _credentialProvider?.IsAvailable == true &&
+                                           _configService.GetCurrent().Credentials.UseCredentialManager;
+                if (useCredentialManager)
+                {
+                    if (!string.IsNullOrWhiteSpace(passwordValue))
+                    {
+                        StoreHostPassword(host.ToString(), resolvedUsername, passwordValue);
+                    }
+                    else if (TryResolveHostPassword(host.ToString(), resolvedUsername, out var storedPassword))
+                    {
+                        passwordValue = storedPassword;
+                    }
+                }
+
+                host.Password = passwordValue;
 
                 // Collect all variables from the row
                 foreach (DataGridViewColumn col in dgv_variables.Columns)
                 {
                     host.Variables[col.Name] = row.Cells[col.Index].Value?.ToString() ?? "";
+                }
+
+                if (!string.IsNullOrEmpty(host.Password))
+                {
+                    host.Variables["password"] = host.Password;
                 }
 
                 // Apply SSH config settings if enabled (grid values take precedence)
@@ -5483,11 +5645,39 @@ namespace SSH_Helper
 
         private void AppendOutputText(string output)
         {
-            // Trim leading newlines if textbox is empty (first banner)
-            if (txtOutput.TextLength == 0)
+            if (string.IsNullOrEmpty(output))
+                return;
+
+            // Trim leading newlines if output buffer is empty (first banner)
+            if (_outputBuffer.Length == 0)
                 output = output.TrimStart('\r', '\n');
 
+            _outputBuffer.Append(output);
             txtOutput.AppendText(output);
+            ScrollOutputToEnd();
+        }
+
+        private void SetOutputText(string text)
+        {
+            _outputBuffer.Clear();
+            if (!string.IsNullOrEmpty(text))
+                _outputBuffer.Append(text);
+
+            txtOutput.Text = text ?? string.Empty;
+            ScrollOutputToEnd();
+        }
+
+        private void ClearOutput()
+        {
+            _outputBuffer.Clear();
+            txtOutput.Clear();
+        }
+
+        private void ScrollOutputToEnd()
+        {
+            txtOutput.SelectionStart = txtOutput.TextLength;
+            txtOutput.SelectionLength = 0;
+            txtOutput.ScrollToCaret();
         }
 
         private void SshService_ColumnUpdateRequested(object? sender, SshColumnUpdateEventArgs e)
@@ -5531,12 +5721,12 @@ namespace SSH_Helper
 
         private void StoreExecutionHistory(List<ExecutionResult> results)
         {
-            // Use txtOutput.Text as the source of truth - this includes all debug output
-            // that was written during execution, ensuring history matches what user saw
-            var output = txtOutput.Text;
+            // Use output buffer as the source of truth - includes all debug output
+            var output = _outputBuffer.ToString();
 
-            string key = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
-            var entry = new KeyValuePair<string, string>(key, output);
+            string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
+            var entryId = HistoryIdGenerator.NewId();
+            var entry = new HistoryListItem(entryId, label, output);
 
             Invoke(() =>
             {
@@ -5552,7 +5742,7 @@ namespace SSH_Helper
 
         private void SaveHistoryEntry()
         {
-            if (lstOutput.SelectedItem is not KeyValuePair<string, string> entry)
+            if (lstOutput.SelectedItem is not HistoryListItem entry)
             {
                 MessageBox.Show("Please select an item from the list to save.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -5562,14 +5752,14 @@ namespace SSH_Helper
             {
                 Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*",
                 DefaultExt = "txt",
-                FileName = entry.Key.Replace(":", "_")
+                FileName = entry.Label.Replace(":", "_")
             };
 
             if (sfd.ShowDialog() == DialogResult.OK)
             {
                 try
                 {
-                    File.WriteAllText(sfd.FileName, entry.Value);
+                    File.WriteAllText(sfd.FileName, entry.Output);
                 }
                 catch (Exception ex)
                 {
@@ -5601,9 +5791,9 @@ namespace SSH_Helper
                     for (int i = 0; i < _outputHistory.Count; i++)
                     {
                         var entry = _outputHistory[i];
-                        sw.WriteLine($"===== {entry.Key} =====");
+                        sw.WriteLine($"===== {entry.Label} =====");
                         sw.WriteLine();
-                        string body = (entry.Value ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n");
+                        string body = (entry.Output ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n");
                         if (!string.IsNullOrEmpty(body)) sw.WriteLine(body);
                         if (i < _outputHistory.Count - 1) sw.WriteLine();
                     }
@@ -5617,20 +5807,21 @@ namespace SSH_Helper
 
         private void DeleteHistoryEntry()
         {
-            if (lstOutput.SelectedItem is not KeyValuePair<string, string> entry)
+            if (lstOutput.SelectedItem is not HistoryListItem entry)
             {
                 MessageBox.Show("Please select an item from the list to delete.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            if (MessageBox.Show($"Are you sure you want to delete {entry.Key}?", "Delete Entry", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+            if (MessageBox.Show($"Are you sure you want to delete {entry.Label}?", "Delete Entry", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                 return;
 
             _outputHistory.Remove(entry);
+            _historyResults.RemoveResults(entry.Id);
             if (lstOutput.Items.Count > 0)
                 lstOutput.SelectedIndex = 0;
             else
-                txtOutput.Clear();
+                ClearOutput();
         }
 
         private void DeleteAllHistory()
@@ -5639,7 +5830,8 @@ namespace SSH_Helper
                 return;
 
             _outputHistory.Clear();
-            txtOutput.Clear();
+            _historyResults.Clear();
+            ClearOutput();
         }
 
         #endregion
@@ -5867,7 +6059,15 @@ namespace SSH_Helper
                     {
                         config.SavedState = null;
                     }
+
                 });
+
+                var config = _configService.GetCurrent();
+                if (config.Credentials.UseCredentialManager)
+                {
+                    StoreDefaultPassword();
+                    MigratePasswordsToCredentialManager();
+                }
             }
             catch (Exception ex)
             {
@@ -5889,12 +6089,25 @@ namespace SSH_Helper
                 state.HostColumns.Add(colName);
             }
 
+            var useCredentialManager = _credentialProvider?.IsAvailable == true &&
+                                       _configService.GetCurrent().Credentials.UseCredentialManager;
+
             state.Hosts = new List<Dictionary<string, string>>();
             for (int row = 0; row < dgv_variables.Rows.Count; row++)
             {
                 if (dgv_variables.Rows[row].IsNewRow) continue;
 
                 var rowData = new Dictionary<string, string>();
+                var hostValue = GetCellValue(dgv_variables.Rows[row], CsvManager.HostColumnName);
+                var usernameValue = GetCellValue(dgv_variables.Rows[row], "username");
+                var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
+                var passwordValue = GetCellValue(dgv_variables.Rows[row], "password");
+
+                if (useCredentialManager && !string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
+                {
+                    StoreHostPassword(hostValue, resolvedUsername, passwordValue);
+                }
+
                 for (int col = 0; col < dgv_variables.Columns.Count; col++)
                 {
                     var colName = dgv_variables.Columns[col].Name;
@@ -5902,7 +6115,15 @@ namespace SSH_Helper
                     if (colName == SelectColumnName || string.IsNullOrWhiteSpace(colName))
                         continue;
                     var value = dgv_variables.Rows[row].Cells[col].Value?.ToString() ?? "";
-                    rowData[colName] = value;
+
+                    if (useCredentialManager && string.Equals(colName, "password", StringComparison.OrdinalIgnoreCase))
+                    {
+                        rowData[colName] = string.Empty;
+                    }
+                    else
+                    {
+                        rowData[colName] = value;
+                    }
                 }
                 state.Hosts.Add(rowData);
             }
@@ -5932,16 +6153,21 @@ namespace SSH_Helper
             // Save history (limited to maxHistoryEntries, keeping most recent)
             state.History = new List<HistoryEntry>();
             var historyToSave = _outputHistory.Take(maxHistoryEntries);
-            foreach (var kvp in historyToSave)
+            foreach (var entry in historyToSave)
             {
+                var entryId = string.IsNullOrWhiteSpace(entry.Id)
+                    ? HistoryIdGenerator.NewId()
+                    : entry.Id;
+
                 var historyEntry = new HistoryEntry
                 {
-                    Timestamp = kvp.Key,
-                    Output = kvp.Value
+                    Id = entryId,
+                    Timestamp = entry.Label,
+                    Output = entry.Output
                 };
 
                 // Include per-host results if this is a folder entry
-                if (_hostResultsByHistoryKey.TryGetValue(kvp.Key, out var hostResults))
+                if (_historyResults.TryGetResults(entryId, out var hostResults))
                 {
                     historyEntry.HostResults = hostResults;
                 }
@@ -5975,9 +6201,25 @@ namespace SSH_Helper
                 {
                     // Ensure row template height is set before adding rows
                     dgv_variables.RowTemplate.Height = 28;
+                    var useCredentialManager = _credentialProvider?.IsAvailable == true &&
+                                               _configService.GetCurrent().Credentials.UseCredentialManager;
 
                     foreach (var rowData in state.Hosts)
                     {
+                        if (useCredentialManager)
+                        {
+                            rowData.TryGetValue(CsvManager.HostColumnName, out var hostValue);
+                            rowData.TryGetValue("username", out var usernameValue);
+                            rowData.TryGetValue("password", out var passwordValue);
+
+                            var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
+                            if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
+                            {
+                                StoreHostPassword(hostValue, resolvedUsername, passwordValue);
+                                rowData["password"] = string.Empty;
+                            }
+                        }
+
                         var rowIndex = dgv_variables.Rows.Add();
                         dgv_variables.Rows[rowIndex].Height = 28;
                         foreach (var kvp in rowData)
@@ -6017,16 +6259,23 @@ namespace SSH_Helper
             if (state.History != null && state.History.Count > 0)
             {
                 _outputHistory.Clear();
-                _hostResultsByHistoryKey.Clear();
+                _historyResults.Clear();
 
                 foreach (var entry in state.History)
                 {
-                    _outputHistory.Add(new KeyValuePair<string, string>(entry.Timestamp, entry.Output));
+                    var entryId = string.IsNullOrWhiteSpace(entry.Id)
+                        ? HistoryIdGenerator.NewId()
+                        : entry.Id;
+                    var label = string.IsNullOrWhiteSpace(entry.Timestamp)
+                        ? entryId
+                        : entry.Timestamp;
+
+                    _outputHistory.Add(new HistoryListItem(entryId, label, entry.Output));
 
                     // Restore per-host results if available
                     if (entry.HostResults != null && entry.HostResults.Count > 0)
                     {
-                        _hostResultsByHistoryKey[entry.Timestamp] = entry.HostResults;
+                        _historyResults.SetResults(entryId, entry.HostResults);
                     }
                 }
 

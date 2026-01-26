@@ -84,6 +84,12 @@ namespace SSH_Helper.Models
         /// Settings for SSH config file integration.
         /// </summary>
         public SshConfigSettings SshConfig { get; set; } = new();
+
+        /// <summary>
+        /// Credential and agent preferences.
+        /// </summary>
+        public CredentialSettings Credentials { get; set; } = new();
+
     }
 
     /// <summary>
@@ -295,6 +301,14 @@ namespace SSH_Helper.Models
     /// </summary>
     public class HistoryEntry
     {
+        /// <summary>
+        /// Stable unique identifier for the history entry.
+        /// </summary>
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+        /// <summary>
+        /// Display label for the history entry (legacy field name: Timestamp).
+        /// </summary>
         public string Timestamp { get; set; } = string.Empty;
         public string Output { get; set; } = string.Empty;
 
@@ -381,4 +395,21 @@ namespace SSH_Helper.Models
         /// </summary>
         public bool EnableSshConfig { get; set; } = false;
     }
+
+    /// <summary>
+    /// Credential storage and SSH agent preferences.
+    /// </summary>
+    public class CredentialSettings
+    {
+        /// <summary>
+        /// Store and retrieve passwords using Windows Credential Manager.
+        /// </summary>
+        public bool UseCredentialManager { get; set; } = false;
+
+        /// <summary>
+        /// Prefer SSH agent authentication when available.
+        /// </summary>
+        public bool PreferSshAgent { get; set; } = false;
+    }
+
 }
