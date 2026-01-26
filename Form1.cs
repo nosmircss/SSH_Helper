@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Data;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -77,6 +77,10 @@ namespace SSH_Helper
         private const string ApplicationVersion = "0.50.12";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
+        private const string FolderIcon = "\U0001F4C1";
+        private const string StarIcon = "\u2605";
+        private static readonly string FolderSummarySeparator = new string('-', 60);
+        private static readonly string FolderSummarySubSeparator = new string('-', 9);
 
         #endregion
 
@@ -2129,7 +2133,7 @@ namespace SSH_Helper
                 // Display folder summary and track selected folder
                 _activePresetName = null;
                 _selectedFolderName = tag.Name;
-                txtPreset.Text = $"📁 {tag.Name}";
+                txtPreset.Text = $"{FolderIcon} {tag.Name}";
                 txtTimeoutHeader.Clear();
                 DisplayFolderSummary(tag.Name);
                 UpdateRunButtonText();
@@ -2524,7 +2528,7 @@ namespace SSH_Helper
                 if (item.StartsWith("folder:"))
                 {
                     var folderName = item.Substring(7);
-                    var folderNode = new TreeNode($"📁 {folderName}")
+                    var folderNode = new TreeNode($"{FolderIcon} {folderName}")
                     {
                         Tag = new PresetNodeTag { IsFolder = true, Name = folderName }
                     };
@@ -2635,7 +2639,7 @@ namespace SSH_Helper
                 // Display folder summary
                 _activePresetName = null;
                 _selectedFolderName = tag.Name;
-                txtPreset.Text = $"📁 {tag.Name}";
+                txtPreset.Text = $"{FolderIcon} {tag.Name}";
                 txtTimeoutHeader.Clear();
                 DisplayFolderSummary(tag.Name);
                 UpdateRunButtonText();
@@ -3574,37 +3578,30 @@ namespace SSH_Helper
         {
             if (lstOutput.SelectedItem is HistoryListItem entry)
             {
-                // Check if this is a folder history entry (contains folder emoji)
-                bool isFolderEntry = entry.Label.Contains("📁");
+                // Try to get per-host results from in-memory cache or from saved state
+                _currentHostResults = GetHostResultsForEntry(entry.Id);
 
-                if (isFolderEntry)
+                if (_currentHostResults != null && _currentHostResults.Count > 0)
                 {
-                    // Try to get per-host results from in-memory cache or from saved state
-                    _currentHostResults = GetHostResultsForEntry(entry.Id);
-
-                    if (_currentHostResults != null && _currentHostResults.Count > 0)
+                    // Populate and show the host list
+                    lstHosts.Items.Clear();
+                    foreach (var hostResult in _currentHostResults)
                     {
-                        // Populate and show the host list
-                        lstHosts.Items.Clear();
-                        foreach (var hostResult in _currentHostResults)
-                        {
-                            lstHosts.Items.Add(hostResult);
-                        }
-
-                        // Show the host list panel
-                        historySplitContainer.Panel2Collapsed = false;
-
-                        // Select the first host to show its output
-                        if (lstHosts.Items.Count > 0)
-                        {
-                            lstHosts.SelectedIndex = 0;
-                        }
-                        return;
+                        lstHosts.Items.Add(hostResult);
                     }
+
+                    // Show the host list panel
+                    historySplitContainer.Panel2Collapsed = false;
+
+                    // Select the first host to show its output
+                    if (lstHosts.Items.Count > 0)
+                    {
+                        lstHosts.SelectedIndex = 0;
+                    }
+                    return;
                 }
 
-                // For non-folder entries or folder entries without per-host data,
-                // hide the host list and show combined output
+                // For entries without per-host data, hide the host list and show combined output
                 historySplitContainer.Panel2Collapsed = true;
                 lstHosts.Items.Clear();
                 _currentHostResults = null;
@@ -3735,7 +3732,7 @@ namespace SSH_Helper
             string text = item is HistoryListItem historyItem ? historyItem.Label : item?.ToString() ?? "";
 
             // Check if this is a folder entry (contains folder emoji)
-            bool isFolderEntry = text.Contains("\U0001F4C1"); // 📁 Unicode
+            bool isFolderEntry = text.Contains(FolderIcon); // folder icon
 
             // Draw text with theme-aware color
             var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
@@ -4337,7 +4334,7 @@ namespace SSH_Helper
             }
 
             // Prevent saving preset with folder icon prefix (safety check)
-            if (presetName.StartsWith("📁"))
+            if (presetName.StartsWith(FolderIcon, StringComparison.Ordinal))
             {
                 return;
             }
@@ -4717,7 +4714,9 @@ namespace SSH_Helper
             foreach (var folderName in folders)
             {
                 var folderInfo = _presetManager.Folders.GetValueOrDefault(folderName);
-                string folderDisplay = folderInfo?.IsFavorite == true ? $"★ 📁 {folderName}" : $"📁 {folderName}";
+                string folderDisplay = folderInfo?.IsFavorite == true
+                    ? $"{StarIcon} {FolderIcon} {folderName}"
+                    : $"{FolderIcon} {folderName}";
                 var folderNode = new TreeNode(folderDisplay)
                 {
                     Tag = new PresetNodeTag { IsFolder = true, Name = folderName }
@@ -4730,7 +4729,7 @@ namespace SSH_Helper
                 foreach (var presetName in presetsInFolder)
                 {
                     var preset = _presetManager.Get(presetName);
-                    string displayName = preset?.IsFavorite == true ? $"★ {presetName}" : presetName;
+                    string displayName = preset?.IsFavorite == true ? $"{StarIcon} {presetName}" : presetName;
                     var presetNode = new TreeNode(displayName)
                     {
                         Tag = new PresetNodeTag { IsFolder = false, Name = presetName }
@@ -4751,7 +4750,7 @@ namespace SSH_Helper
             foreach (var presetName in rootPresets)
             {
                 var preset = _presetManager.Get(presetName);
-                string displayName = preset?.IsFavorite == true ? $"★ {presetName}" : presetName;
+                string displayName = preset?.IsFavorite == true ? $"{StarIcon} {presetName}" : presetName;
                 var presetNode = new TreeNode(displayName)
                 {
                     Tag = new PresetNodeTag { IsFolder = false, Name = presetName }
@@ -4862,9 +4861,9 @@ namespace SSH_Helper
             var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
 
             var sb = new StringBuilder();
-            sb.AppendLine($"═══════════════════════════════════════════");
+            sb.AppendLine(FolderSummarySeparator);
             sb.AppendLine($"  FOLDER: {folderName}");
-            sb.AppendLine($"═══════════════════════════════════════════");
+            sb.AppendLine(FolderSummarySeparator);
             sb.AppendLine();
             sb.AppendLine($"  Presets: {presetNames.Count}");
             sb.AppendLine();
@@ -4872,11 +4871,11 @@ namespace SSH_Helper
             if (presetNames.Count > 0)
             {
                 sb.AppendLine("  Contents:");
-                sb.AppendLine("  ─────────");
+                sb.AppendLine($"  {FolderSummarySubSeparator}");
                 foreach (var name in presetNames)
                 {
                     var preset = _presetManager.Get(name);
-                    var favorite = preset?.IsFavorite == true ? "★ " : "  ";
+                    var favorite = preset?.IsFavorite == true ? $"{StarIcon} " : "  ";
                     var type = preset?.IsScript == true ? "[Script]" : "";
                     sb.AppendLine($"  {favorite}{name} {type}");
                 }
@@ -4897,10 +4896,10 @@ namespace SSH_Helper
             if (!string.IsNullOrEmpty(_selectedFolderName))
             {
                 int count = _presetManager.GetPresetsInFolder(_selectedFolderName).Count();
-                btnExecuteAll.Text = $"Run 📁 {_selectedFolderName} ({count})";
+                btnExecuteAll.Text = $"Run {FolderIcon} {_selectedFolderName} ({count})";
                 btnExecuteSelected.Text = checkedCount > 0
-                    ? $"Run Checked ({checkedCount}) 📁"
-                    : $"Run Selected 📁";
+                    ? $"Run Checked ({checkedCount}) {FolderIcon}"
+                    : $"Run Selected {FolderIcon}";
             }
             else
             {
@@ -5039,7 +5038,7 @@ namespace SSH_Helper
 
         private string GetPresetNameFromDisplay(string displayName)
         {
-            return displayName.StartsWith("★ ") ? displayName.Substring(2) : displayName;
+            return displayName.StartsWith($"{StarIcon} ", StringComparison.Ordinal) ? displayName.Substring(2) : displayName;
         }
 
         private bool IsPresetDirty()
@@ -5145,13 +5144,38 @@ namespace SSH_Helper
                 return;
             }
 
-            SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
-            SetExecutionMode(true);
-            ClearOutput();
-
             SshDebugLog("EXEC", "Building host connections", sw);
             var hosts = GetHostConnections(hostRows).ToList();
             SshDebugLog("EXEC", $"Host connections built: {hosts.Count} host(s)", sw);
+
+            string presetDisplayName = string.IsNullOrWhiteSpace(txtPreset.Text) ? "Current Preset" : txtPreset.Text.Trim();
+            FolderExecutionOptions? dialogOptions = null;
+
+            if (ExecutionDialogPolicy.ShouldPromptForPresetExecutionOptions(hosts.Count))
+            {
+                var hostAddresses = hosts.Select(h => h.ToString()).ToList();
+                using var dialog = new FolderExecutionDialog(presetDisplayName, new List<string> { presetDisplayName }, hostAddresses);
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                    return;
+
+                dialogOptions = dialog.Options;
+                if (dialogOptions.SelectedPresets.Count == 0)
+                    return;
+                if (dialogOptions.SelectedHostIndices.Count == 0)
+                    return;
+
+                hosts = dialogOptions.SelectedHostIndices
+                    .Where(i => i >= 0 && i < hosts.Count)
+                    .Select(i => hosts[i])
+                    .ToList();
+            }
+
+            if (hosts.Count == 0)
+                return;
+
+            SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
+            SetExecutionMode(true);
+            ClearOutput();
 
             SshDebugLog("EXEC", "Preparing execution options", sw);
             int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
@@ -5173,13 +5197,34 @@ namespace SSH_Helper
 
             try
             {
-                SshDebugLog("EXEC", "Calling ExecutePresetAsync - SSH connection starting", sw);
-                var results = await _executionCoordinator.ExecutePresetAsync(
-                    hosts,
-                    preparation,
-                    tsbUsername.Text,
-                    tsbPassword.Text);
-                SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
+                List<ExecutionResult> results;
+                if (dialogOptions != null)
+                {
+                    var presets = new Dictionary<string, PresetInfo>(StringComparer.Ordinal)
+                    {
+                        [presetDisplayName] = preparation.Preset
+                    };
+
+                    SshDebugLog("EXEC", "Calling ExecuteFolderAsync for multi-host preset execution", sw);
+                    results = await _sshService.ExecuteFolderAsync(
+                        hosts,
+                        presets,
+                        tsbUsername.Text,
+                        tsbPassword.Text,
+                        preparation.Timeouts,
+                        dialogOptions);
+                    SshDebugLog("EXEC", $"ExecuteFolderAsync completed. Results: {results.Count}", sw);
+                }
+                else
+                {
+                    SshDebugLog("EXEC", "Calling ExecutePresetAsync - SSH connection starting", sw);
+                    results = await _executionCoordinator.ExecutePresetAsync(
+                        hosts,
+                        preparation,
+                        tsbUsername.Text,
+                        tsbPassword.Text);
+                    SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
+                }
                 StoreExecutionHistory(results);
                 UpdateStatusBar(completionStatus(results.Count));
             }
@@ -5491,7 +5536,7 @@ namespace SSH_Helper
                 combinedOutput.Append(output);
             }
 
-            string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - 📁 {folderName}";
+            string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {FolderIcon} {folderName}";
             var entryId = HistoryIdGenerator.NewId();
             var entry = new HistoryListItem(entryId, label, combinedOutput.ToString());
 
@@ -5505,6 +5550,31 @@ namespace SSH_Helper
                 lstOutput.SelectedIndex = 0;
                 SaveConfiguration();
             });
+        }
+
+        private static List<HostHistoryEntry> BuildHostHistoryEntries(List<ExecutionResult> results)
+        {
+            var hostResults = new List<HostHistoryEntry>();
+            if (results == null || results.Count == 0)
+                return hostResults;
+
+            for (int i = 0; i < results.Count; i++)
+            {
+                var result = results[i];
+                var output = result.Output;
+                if (i == 0)
+                    output = output.TrimStart('\r', '\n');
+
+                hostResults.Add(new HostHistoryEntry
+                {
+                    HostAddress = result.Host.ToString(),
+                    Output = output,
+                    Success = result.Success,
+                    Timestamp = result.Timestamp
+                });
+            }
+
+            return hostResults;
         }
 
         // Store host results by history entry ID
@@ -5731,6 +5801,11 @@ namespace SSH_Helper
             Invoke(() =>
             {
                 _outputHistory.Insert(0, entry);
+                var hostResults = BuildHostHistoryEntries(results);
+                if (hostResults.Count > 0)
+                {
+                    StoreHostResultsForEntry(entryId, hostResults);
+                }
                 lstOutput.SelectedIndex = 0;
                 SaveConfiguration();
             });
@@ -6434,3 +6509,6 @@ namespace SSH_Helper
         }
     }
 }
+
+
+
