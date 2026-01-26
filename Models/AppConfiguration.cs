@@ -19,6 +19,7 @@ namespace SSH_Helper.Models
         public string Username { get; set; } = string.Empty;
         public int Timeout { get; set; } = 10;
         public int ConnectionTimeout { get; set; } = 30;
+        public bool UseConnectionPooling { get; set; } = false;
 
         // Window state
         public WindowState WindowState { get; set; } = new();

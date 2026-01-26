@@ -11,6 +11,8 @@ A Windows Forms application for executing SSH commands across multiple hosts wit
 - **History Management**: Track execution history with output preservation
 - **State Persistence**: Remember hosts, presets, and history between sessions
 - **Auto-Updates**: Check for updates from GitHub releases
+  - Updates are applied by a temporary PowerShell script run with `-ExecutionPolicy Bypass`
+  - Update packages are verified via a SHA256 checksum file (`<asset>.sha256`) before installation
 
 ## Getting Started
 
@@ -174,8 +176,6 @@ dotnet run
   - Rebex.SshShell
   - Newtonsoft.Json
   - YamlDotNet
-  - Microsoft.Extensions.Configuration.Json
-  - Microsoft.Extensions.Configuration.Binder
 
 ## License
 

@@ -468,8 +468,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (expr.EndsWith(".length", StringComparison.OrdinalIgnoreCase))
             {
                 var baseName = expr.Substring(0, expr.Length - 7);
-                var value = context.GetVariable(baseName);
-                return value switch
+                var baseValue = context.GetVariable(baseName);
+                return baseValue switch
                 {
                     List<string> list => list.Count,
                     string str => str.Length,
@@ -485,9 +485,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             // Direct variable reference
-            var value = context.GetVariable(expr);
-            if (value != null)
-                return value;
+            var directValue = context.GetVariable(expr);
+            if (directValue != null)
+                return directValue;
 
             return expr;
         }
@@ -499,8 +499,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (expr.EndsWith(".length", StringComparison.OrdinalIgnoreCase))
             {
                 var baseName = expr.Substring(0, expr.Length - 7);
-                var value = context.GetVariable(baseName);
-                return value switch
+                var baseValue = context.GetVariable(baseName);
+                return baseValue switch
                 {
                     List<string> list => list.Count,
                     string str => str.Length,
@@ -514,8 +514,8 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return num;
 
             // Try variable lookup
-            var value = context.GetVariable(expr);
-            if (value != null && double.TryParse(value.ToString(), out var varNum))
+            var directValue = context.GetVariable(expr);
+            if (directValue != null && double.TryParse(directValue.ToString(), out var varNum))
                 return varNum;
 
             // Try with variable substitution

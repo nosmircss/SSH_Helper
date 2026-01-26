@@ -85,6 +85,7 @@ namespace SSH_Helper
         private readonly PresetManager _presetManager;
         private readonly CsvManager _csvManager;
         private readonly SshExecutionService _sshService;
+        private readonly ExecutionCoordinator _executionCoordinator;
         private readonly UpdateService _updateService;
         private readonly SshConfigService _sshConfigService;
 
@@ -158,15 +159,18 @@ namespace SSH_Helper
             _configService = new ConfigurationService();
             _presetManager = new PresetManager(_configService);
             _csvManager = new CsvManager();
-            _sshService = new SshExecutionService();
+            var config = _configService.Load();
+            var poolTimeouts = SshTimeoutOptions.Create(config.Timeout, config.ConnectionTimeout);
+            _sshService = new SshExecutionService(enablePooling: true, poolTimeouts);
+            _sshService.UseConnectionPooling = config.UseConnectionPooling;
             _sshConfigService = new SshConfigService();
+            _executionCoordinator = new ExecutionCoordinator(_sshService, _configService);
 
             // Wire up SSH service events
             _sshService.OutputReceived += SshService_OutputReceived;
             _sshService.ColumnUpdateRequested += SshService_ColumnUpdateRequested;
 
             // Initialize update service
-            var config = _configService.Load();
             _updateService = new UpdateService(
                 config.UpdateSettings.GitHubOwner,
                 config.UpdateSettings.GitHubRepo,
@@ -3014,6 +3018,8 @@ namespace SSH_Helper
                 ApplyTheme(config.DarkMode);
                 ApplyFontSettings(config.FontSettings);
                 ApplyColumnAutoResize(config.AutoResizeHostColumns);
+                _sshService.UseConnectionPooling = config.UseConnectionPooling;
+                UpdateStatusBar(config.UseConnectionPooling ? "Connection pooling enabled" : "Connection pooling disabled");
             }
         }
 
@@ -4983,12 +4989,16 @@ namespace SSH_Helper
 
         #region SSH Execution
 
-        private async void ExecuteOnAllHosts()
+        private async Task ExecutePresetOnRowsAsync(
+            List<DataGridViewRow> hostRows,
+            Func<int, string> startStatus,
+            Func<int, string> completionStatus,
+            Stopwatch sw,
+            bool includeCommandPreview = false)
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            SshDebugLog("EXEC", "ExecuteOnAllHosts entered");
+            SshDebugLog("EXEC", "ExecutePresetOnRowsAsync entered");
 
-            if (_sshService.IsRunning)
+            if (_executionCoordinator.IsRunning)
             {
                 SshDebugLog("EXEC", "Aborted - SSH service already running", sw);
                 return;
@@ -4998,29 +5008,39 @@ namespace SSH_Helper
             SetExecutionMode(true);
             txtOutput.Clear();
 
-            SshDebugLog("EXEC", "Building host connections from grid", sw);
-            var hosts = GetHostConnections(dgv_variables.Rows.Cast<DataGridViewRow>()).ToList();
+            SshDebugLog("EXEC", "Building host connections", sw);
+            var hosts = GetHostConnections(hostRows).ToList();
             SshDebugLog("EXEC", $"Host connections built: {hosts.Count} host(s)", sw);
 
-            SshDebugLog("EXEC", "Loading configuration for timeouts", sw);
+            SshDebugLog("EXEC", "Preparing execution options", sw);
             int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
-            int connectionTimeout = _configService.GetCurrent().ConnectionTimeout;
-            var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
-            SshDebugLog("EXEC", $"Timeouts configured - command: {commandTimeout}s, connection: {connectionTimeout}s", sw);
+            var preparation = _executionCoordinator.PrepareExecution(txtCommand.Text, commandTimeout);
+            SshDebugLog("EXEC", $"Timeouts configured - command: {preparation.CommandTimeoutSeconds}s, connection: {preparation.ConnectionTimeoutSeconds}s", sw);
 
-            // Create a preset from the current command text (supports both simple commands and YAML scripts)
-            var preset = new PresetInfo { Commands = txtCommand.Text };
-            SshDebugLog("EXEC", $"Preset created. IsScript: {preset.IsScript}", sw);
+            var preset = preparation.Preset;
+            if (includeCommandPreview)
+            {
+                var commandPreview = txtCommand.Text.Length > 50 ? txtCommand.Text.Substring(0, 50) + "..." : txtCommand.Text;
+                SshDebugLog("EXEC", $"Preset created. IsScript: {preset.IsScript}, Commands: {commandPreview.Replace("\r", "\\r").Replace("\n", "\\n")}", sw);
+            }
+            else
+            {
+                SshDebugLog("EXEC", $"Preset created. IsScript: {preset.IsScript}", sw);
+            }
 
-            UpdateStatusBar($"Executing on {hosts.Count} hosts...", true, 0, hosts.Count);
+            UpdateStatusBar(startStatus(hosts.Count), true, 0, hosts.Count);
 
             try
             {
-                SshDebugLog("EXEC", "Calling _sshService.ExecutePresetAsync - SSH connection starting", sw);
-                var results = await _sshService.ExecutePresetAsync(hosts, preset, tsbUsername.Text, tsbPassword.Text, timeouts);
+                SshDebugLog("EXEC", "Calling ExecutePresetAsync - SSH connection starting", sw);
+                var results = await _executionCoordinator.ExecutePresetAsync(
+                    hosts,
+                    preparation,
+                    tsbUsername.Text,
+                    tsbPassword.Text);
                 SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
                 StoreExecutionHistory(results);
-                UpdateStatusBar($"Completed execution on {results.Count} hosts");
+                UpdateStatusBar(completionStatus(results.Count));
             }
             catch (Exception ex)
             {
@@ -5033,6 +5053,19 @@ namespace SSH_Helper
                 SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
                 SetExecutionMode(false);
             }
+        }
+
+        private async void ExecuteOnAllHosts()
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            SshDebugLog("EXEC", "ExecuteOnAllHosts entered");
+
+            var hostRows = dgv_variables.Rows.Cast<DataGridViewRow>().ToList();
+            await ExecutePresetOnRowsAsync(
+                hostRows,
+                hostCount => $"Executing on {hostCount} hosts...",
+                resultCount => $"Completed execution on {resultCount} hosts",
+                sw);
         }
 
         private async void ExecuteOnSelectedHost()
@@ -5058,52 +5091,18 @@ namespace SSH_Helper
                 return;
             }
 
-            SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
-            SetExecutionMode(true);
-            txtOutput.Clear();
-
-            SshDebugLog("EXEC", "Building host connections", sw);
-            var hosts = GetHostConnections(new[] { row }).ToList();
-            SshDebugLog("EXEC", $"Host connections built: {hosts.Count} host(s)", sw);
-
-            SshDebugLog("EXEC", "Loading configuration for timeouts", sw);
-            int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
-            int connectionTimeout = _configService.GetCurrent().ConnectionTimeout;
-            var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
-            SshDebugLog("EXEC", $"Timeouts configured - command: {commandTimeout}s, connection: {connectionTimeout}s", sw);
-
-            // Create a preset from the current command text (supports both simple commands and YAML scripts)
-            var preset = new PresetInfo { Commands = txtCommand.Text };
-            var commandPreview = txtCommand.Text.Length > 50 ? txtCommand.Text.Substring(0, 50) + "..." : txtCommand.Text;
-            SshDebugLog("EXEC", $"Preset created. IsScript: {preset.IsScript}, Commands: {commandPreview.Replace("\r", "\\r").Replace("\n", "\\n")}", sw);
-
-            UpdateStatusBar($"Executing on {host}...", true, 0, 1);
-
-            try
-            {
-                SshDebugLog("EXEC", "Calling _sshService.ExecutePresetAsync - SSH connection starting", sw);
-                var results = await _sshService.ExecutePresetAsync(hosts, preset, tsbUsername.Text, tsbPassword.Text, timeouts);
-                SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
-                StoreExecutionHistory(results);
-                UpdateStatusBar($"Completed execution on {host}");
-            }
-            finally
-            {
-                SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
-                SetExecutionMode(false);
-            }
+            await ExecutePresetOnRowsAsync(
+                new List<DataGridViewRow> { row },
+                _ => $"Executing on {host}...",
+                _ => $"Completed execution on {host}",
+                sw,
+                includeCommandPreview: true);
         }
 
         private async void ExecuteOnCheckedHosts()
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             SshDebugLog("EXEC", "ExecuteOnCheckedHosts entered");
-
-            if (_sshService.IsRunning)
-            {
-                SshDebugLog("EXEC", "Aborted - SSH service already running", sw);
-                return;
-            }
 
             // Get rows with checkbox checked
             var checkedRows = dgv_variables.Rows.Cast<DataGridViewRow>()
@@ -5118,45 +5117,11 @@ namespace SSH_Helper
                 return;
             }
 
-            SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
-            SetExecutionMode(true);
-            txtOutput.Clear();
-
-            SshDebugLog("EXEC", "Building host connections from checked rows", sw);
-            var hosts = GetHostConnections(checkedRows).ToList();
-            SshDebugLog("EXEC", $"Host connections built: {hosts.Count} host(s)", sw);
-
-            SshDebugLog("EXEC", "Loading configuration for timeouts", sw);
-            int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
-            int connectionTimeout = _configService.GetCurrent().ConnectionTimeout;
-            var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
-            SshDebugLog("EXEC", $"Timeouts configured - command: {commandTimeout}s, connection: {connectionTimeout}s", sw);
-
-            // Create a preset from the current command text (supports both simple commands and YAML scripts)
-            var preset = new PresetInfo { Commands = txtCommand.Text };
-            SshDebugLog("EXEC", $"Preset created. IsScript: {preset.IsScript}", sw);
-
-            UpdateStatusBar($"Executing on {hosts.Count} selected hosts...", true, 0, hosts.Count);
-
-            try
-            {
-                SshDebugLog("EXEC", "Calling _sshService.ExecutePresetAsync - SSH connection starting", sw);
-                var results = await _sshService.ExecutePresetAsync(hosts, preset, tsbUsername.Text, tsbPassword.Text, timeouts);
-                SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
-                StoreExecutionHistory(results);
-                UpdateStatusBar($"Completed execution on {results.Count} hosts");
-            }
-            catch (Exception ex)
-            {
-                SshDebugLog("EXEC", $"Exception: {ex.GetType().Name}: {ex.Message}", sw);
-                MessageBox.Show($"An error occurred: {ex.Message}");
-                UpdateStatusBar("Execution failed");
-            }
-            finally
-            {
-                SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
-                SetExecutionMode(false);
-            }
+            await ExecutePresetOnRowsAsync(
+                checkedRows,
+                hostCount => $"Executing on {hostCount} selected hosts...",
+                resultCount => $"Completed execution on {resultCount} hosts",
+                sw);
         }
 
         private async void ExecuteFolderPresetsOnAllHosts(string folderName)

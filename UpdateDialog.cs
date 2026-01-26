@@ -244,7 +244,24 @@ namespace SSH_Helper
             {
                 var downloadPath = await _updateService.DownloadUpdateAsync(_updateResult.DownloadUrl, _downloadCts.Token);
 
-                _lblProgress.Text = "Download complete. Installing update...";
+                if (string.IsNullOrWhiteSpace(_updateResult.ChecksumUrl))
+                {
+                    MessageBox.Show(
+                        "This update does not include checksum information and cannot be verified. " +
+                        "Please download the update manually from GitHub.",
+                        "Verification Required",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+
+                    _lblProgress.Text = "Verification failed.";
+                    ResetButtons();
+                    return;
+                }
+
+                _lblProgress.Text = "Verifying update...";
+                await _updateService.VerifyUpdatePackageAsync(downloadPath, _updateResult.ChecksumUrl, _downloadCts.Token);
+
+                _lblProgress.Text = "Verification complete. Installing update...";
                 _progressBar.Value = 100;
 
                 // Give UI a moment to update
@@ -256,6 +273,17 @@ namespace SSH_Helper
             catch (OperationCanceledException)
             {
                 _lblProgress.Text = "Download cancelled.";
+                ResetButtons();
+            }
+            catch (InvalidDataException ex)
+            {
+                MessageBox.Show(
+                    $"Update verification failed: {ex.Message}",
+                    "Verification Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+
+                _lblProgress.Text = "Verification failed.";
                 ResetButtons();
             }
             catch (FileNotFoundException ex)

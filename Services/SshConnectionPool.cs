@@ -111,11 +111,13 @@ namespace SSH_Helper.Services
             HostConnection host,
             string username,
             string password,
+            SshTimeoutOptions? timeouts = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
 
             var key = CreateConnectionKey(host, username);
+            var effectiveTimeouts = timeouts ?? _defaultTimeouts;
 
             // Try to get existing connection
             if (_connections.TryGetValue(key, out var pooled))
@@ -155,7 +157,7 @@ namespace SSH_Helper.Services
                 }
 
                 // Create new connection
-                var client = await CreateConnectionAsync(host, username, password, cancellationToken);
+                var client = await CreateConnectionAsync(host, username, password, effectiveTimeouts, cancellationToken);
 
                 pooled = new PooledConnection
                 {
@@ -196,8 +198,8 @@ namespace SSH_Helper.Services
             SshTimeoutOptions? timeouts = null,
             CancellationToken cancellationToken = default)
         {
-            var client = await GetOrCreateAsync(host, username, password, cancellationToken);
             var effectiveTimeouts = timeouts ?? _defaultTimeouts;
+            var client = await GetOrCreateAsync(host, username, password, effectiveTimeouts, cancellationToken);
 
             RebexScripting scripting = client.StartScripting();
             scripting.Timeout = (int)effectiveTimeouts.CommandTimeout.TotalMilliseconds;
@@ -273,14 +275,14 @@ namespace SSH_Helper.Services
             HostConnection host,
             string username,
             string password,
+            SshTimeoutOptions effectiveTimeouts,
             CancellationToken cancellationToken)
         {
             var client = new Ssh();
-            client.Timeout = (int)_defaultTimeouts.ConnectionTimeout.TotalMilliseconds;
+            client.Timeout = (int)effectiveTimeouts.ConnectionTimeout.TotalMilliseconds;
 
             // Apply algorithm preferences before connecting (from SSH config)
-            // TODO: Temporarily disabled to diagnose connection issues
-            // ApplyAlgorithmSettings(client, host);
+            ApplyAlgorithmSettings(client, host);
 
             // Connect and authenticate
             await Task.Run(() =>
