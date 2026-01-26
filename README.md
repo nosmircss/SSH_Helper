@@ -66,6 +66,7 @@ Execute multiple presets from a folder with advanced options:
 - **Parallel Hosts**: Configure how many hosts to run simultaneously (1-N)
 - **Suppress Separators**: Hide preset name separators from output
 - Per-host results are tracked in history for later review
+- **Developer Note**: Execution methods are single-scope; avoid nesting or running multiple executions concurrently on the same `SshExecutionService` instance.
 
 ### YAML Scripts
 

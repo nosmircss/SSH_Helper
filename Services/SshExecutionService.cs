@@ -442,21 +442,19 @@ namespace SSH_Helper.Services
                                     OnOutputReceived(host, separator);
                                 }
 
-                                var presetResults = await ExecutePresetAsync(
-                                    new[] { host },
+                                var presetResult = await ExecutePresetOnHostAsync(
+                                    host,
                                     preset,
                                     defaultUsername,
                                     defaultPassword,
                                     timeouts,
+                                    cancellationToken,
                                     showHeader: false);
 
-                                if (presetResults.Count > 0)
-                                {
-                                    var presetResult = presetResults[0];
-                                    lock (outputBuilder) { outputBuilder.Append(presetResult.Output); }
+                                lock (outputBuilder) { outputBuilder.Append(presetResult.Output); }
 
-                                    if (!presetResult.Success)
-                                    {
+                                if (!presetResult.Success)
+                                {
                                         hostResult.Success = false;
                                         hostResult.ErrorMessage = presetResult.ErrorMessage;
                                         if (options.StopOnFirstError && errorTracker.TrySignalError())
@@ -470,8 +468,6 @@ namespace SSH_Helper.Services
                                             OnOutputReceived(host, failMarker);
                                         }
                                     }
-                                }
-
                                 Interlocked.Increment(ref completedPresets);
                             });
 
@@ -506,23 +502,21 @@ namespace SSH_Helper.Services
                                     OnOutputReceived(host, separator);
                                 }
 
-                                var presetResults = await ExecutePresetAsync(
-                                    new[] { host },
+                                var presetResult = await ExecutePresetOnHostAsync(
+                                    host,
                                     preset,
                                     defaultUsername,
                                     defaultPassword,
                                     timeouts,
+                                    cancellationToken,
                                     showHeader: isFirstPreset);
 
                                 isFirstPreset = false;
 
-                                if (presetResults.Count > 0)
-                                {
-                                    var presetResult = presetResults[0];
-                                    outputBuilder.Append(presetResult.Output);
+                                outputBuilder.Append(presetResult.Output);
 
-                                    if (!presetResult.Success)
-                                    {
+                                if (!presetResult.Success)
+                                {
                                         hostResult.Success = false;
                                         hostResult.ErrorMessage = presetResult.ErrorMessage;
                                         if (options.StopOnFirstError)
@@ -536,8 +530,7 @@ namespace SSH_Helper.Services
                                                 outputBuilder.Append(failMarker);
                                                 OnOutputReceived(host, failMarker);
                                             }
-                                            break;
-                                        }
+                                        break;
                                     }
                                 }
 
@@ -570,6 +563,76 @@ namespace SSH_Helper.Services
             }
 
             return results;
+        }
+
+        // Execute a preset without starting a new execution scope (caller owns BeginExecution/EndExecution).
+        private Task<ExecutionResult> ExecutePresetOnHostAsync(
+            HostConnection host,
+            PresetInfo preset,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts,
+            CancellationToken cancellationToken,
+            bool showHeader)
+        {
+            return Task.Run(() =>
+                ExecutePresetOnHost(host, preset, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader));
+        }
+
+        private ExecutionResult ExecutePresetOnHost(
+            HostConnection host,
+            PresetInfo preset,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts,
+            CancellationToken cancellationToken,
+            bool showHeader)
+        {
+            if (preset.IsScript)
+            {
+                return ExecuteScriptTextOnHost(host, preset.Commands, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader);
+            }
+
+            var commands = preset.Commands.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            return ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader);
+        }
+
+        private ExecutionResult ExecuteScriptTextOnHost(
+            HostConnection host,
+            string scriptText,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts,
+            CancellationToken cancellationToken,
+            bool showHeader)
+        {
+            var parser = new ScriptParser();
+            Script script;
+            try
+            {
+                script = parser.Parse(scriptText);
+                var validationErrors = parser.Validate(script, scriptText);
+                if (validationErrors.Count > 0)
+                {
+                    throw new ScriptParseException("Script validation failed:\n" + string.Join("\n", validationErrors));
+                }
+            }
+            catch (ScriptParseException ex)
+            {
+                var errorOutput = $"Script parse error: {ex.Message}\n";
+                OnOutputReceived(host, errorOutput);
+
+                return new ExecutionResult
+                {
+                    Host = host,
+                    Success = false,
+                    ErrorMessage = ex.Message,
+                    Output = errorOutput,
+                    Timestamp = DateTime.Now
+                };
+            }
+
+            return ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader);
         }
 
         /// <summary>
