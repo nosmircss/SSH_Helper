@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 
 namespace SSH_Helper.Services
@@ -61,6 +62,8 @@ namespace SSH_Helper.Services
         public string LatestVersion { get; set; } = string.Empty;
         public string ReleaseNotes { get; set; } = string.Empty;
         public string DownloadUrl { get; set; } = string.Empty;
+        public string? ChecksumUrl { get; set; }
+        public string ChecksumAlgorithm { get; set; } = "SHA256";
         public string ReleaseUrl { get; set; } = string.Empty;
         public string? ErrorMessage { get; set; }
         public GitHubRelease? Release { get; set; }
@@ -147,6 +150,11 @@ namespace SSH_Helper.Services
                 if (asset != null)
                 {
                     result.DownloadUrl = asset.DownloadUrl;
+                    var checksumAsset = FindChecksumAsset(release, asset);
+                    if (checksumAsset != null)
+                    {
+                        result.ChecksumUrl = checksumAsset.DownloadUrl;
+                    }
                 }
 
                 // Compare versions
@@ -211,6 +219,27 @@ namespace SSH_Helper.Services
             }
 
             return downloadPath;
+        }
+
+        /// <summary>
+        /// Verifies the downloaded update package using a SHA256 checksum.
+        /// </summary>
+        /// <param name="updatePackagePath">Path to the downloaded update package</param>
+        /// <param name="checksumUrl">URL to download the checksum from</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        public async Task VerifyUpdatePackageAsync(string updatePackagePath, string checksumUrl, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(checksumUrl))
+                throw new InvalidDataException("Checksum URL is missing.");
+
+            var checksumContent = await _httpClient.GetStringAsync(checksumUrl, cancellationToken);
+            var expectedHash = ExtractSha256(checksumContent, Path.GetFileName(updatePackagePath));
+            if (string.IsNullOrWhiteSpace(expectedHash))
+                throw new InvalidDataException("Checksum file does not contain a valid SHA256 hash.");
+
+            var actualHash = ComputeSha256(updatePackagePath);
+            if (!string.Equals(expectedHash, actualHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Update package checksum verification failed.");
         }
 
         /// <summary>
@@ -346,6 +375,84 @@ try {
     exit 1
 }
 ";
+        }
+
+        private static GitHubAsset? FindChecksumAsset(GitHubRelease release, GitHubAsset targetAsset)
+        {
+            var suffixes = new[]
+            {
+                ".sha256",
+                ".sha256.txt",
+                ".sha256sum",
+                ".sha256sum.txt"
+            };
+
+            foreach (var suffix in suffixes)
+            {
+                var expectedName = targetAsset.Name + suffix;
+                var match = release.Assets.FirstOrDefault(a =>
+                    string.Equals(a.Name, expectedName, StringComparison.OrdinalIgnoreCase));
+                if (match != null)
+                    return match;
+            }
+
+            return null;
+        }
+
+        private static string? ExtractSha256(string content, string? fileName)
+        {
+            string? fallback = null;
+            var lines = content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (string.IsNullOrEmpty(trimmed))
+                    continue;
+
+                var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var part in parts)
+                {
+                    if (!IsHexHash(part))
+                        continue;
+
+                    if (!string.IsNullOrEmpty(fileName) &&
+                        trimmed.Contains(fileName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return part;
+                    }
+
+                    fallback ??= part;
+                    break;
+                }
+            }
+
+            return fallback;
+        }
+
+        private static bool IsHexHash(string value)
+        {
+            if (value.Length != 64)
+                return false;
+
+            foreach (var c in value)
+            {
+                bool isHex = (c >= '0' && c <= '9') ||
+                             (c >= 'a' && c <= 'f') ||
+                             (c >= 'A' && c <= 'F');
+                if (!isHex)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static string ComputeSha256(string filePath)
+        {
+            using var sha256 = SHA256.Create();
+            using var stream = File.OpenRead(filePath);
+            var hashBytes = sha256.ComputeHash(stream);
+            return Convert.ToHexString(hashBytes).ToLowerInvariant();
         }
 
         /// <summary>
