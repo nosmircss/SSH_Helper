@@ -237,6 +237,21 @@ namespace SSH_Helper.Services.Scripting
         {
             expr = expr.Trim();
 
+            // Handle list length property: numbers.length
+            var lengthMatch = Regex.Match(expr, @"^(\w+)\.length$", RegexOptions.IgnoreCase);
+            if (lengthMatch.Success)
+            {
+                var baseName = lengthMatch.Groups[1].Value;
+                var value = _context.GetVariable(baseName);
+                return value switch
+                {
+                    List<string> list => list.Count,
+                    string str => str.Length,
+                    System.Collections.ICollection collection => collection.Count,
+                    _ => 0
+                };
+            }
+
             // Handle quoted strings
             if ((expr.StartsWith("\"") && expr.EndsWith("\"")) ||
                 (expr.StartsWith("'") && expr.EndsWith("'")))

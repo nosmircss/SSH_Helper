@@ -78,7 +78,7 @@ Executes a command on the SSH session.
 - send: command_text
   capture: variable_name      # Store output in variable
   suppress: true              # Hide command and output from display
-  expect: '/regex_pattern/'   # Custom prompt pattern to expect
+  expect: '/regex_pattern/'   # Regex to wait for in output
   timeout: 30                 # Timeout in seconds for this command
   on_error: continue          # continue or stop (default)
 ```
@@ -89,9 +89,13 @@ Executes a command on the SSH session.
 |--------|------|-------------|
 | `capture` | string | Variable name to store command output |
 | `suppress` | boolean | When true, hides both command and output from display |
-| `expect` | string | Regex pattern for custom prompt detection |
+| `expect` | string | Regex pattern to wait for in output (case-insensitive, multiline). When matched, the send completes immediately. |
 | `timeout` | integer | Command-specific timeout in seconds |
 | `on_error` | string | `continue` to proceed on error, `stop` to halt (default) |
+
+**Notes:**
+- `expect` supports `/pattern/`, `"pattern"`, or `'pattern'` delimiters (they are stripped automatically).
+- When `expect` is set, the command stops as soon as the pattern matches; it does not automatically wait for the prompt. Omit `expect` to wait for the prompt, or include the prompt in your regex if needed.
 
 **Examples:**
 ```yaml
@@ -1872,20 +1876,11 @@ When converting to JSON, values are automatically typed:
 
 ### JSON Workflow Examples
 
-**Collecting Data from Multiple Hosts:**
+**Collecting Data from Multiple Hosts (JSON Lines):**
 ```yaml
 ---
 name: Collect Host Inventory as JSON
 steps:
-  # Initialize the results array on first host
-  - if: _host_index == 0
-    then:
-      - writefile:
-          path: "C:\\output\\inventory.json"
-          format: json
-          content: "[]"
-          mode: overwrite
-
   # Gather data
   - send: show version
     capture: version_output
@@ -1897,13 +1892,15 @@ steps:
   # Build this host's record
   - set: record = json("ip", ${Host_IP}, "version", ${version}, "timestamp", ${_timestamp})
 
-  # Append to the JSON array
+  # Append as JSON Lines (one object per line)
   - writefile:
-      path: "C:\\output\\inventory.json"
-      format: json
-      content: "[${record}]"
+      path: "C:\\output\\inventory.jsonl"
+      format: jsonl
+      content: "${record}"
       mode: append
 ```
+
+**Tip:** If you need a single JSON array, create the file with `[]` before running the script across hosts, then use `format: json` with `mode: append`.
 
 **Building Nested Reports:**
 ```yaml

@@ -121,7 +121,7 @@ Use `capture:` to save command output:
     - set: i = i + 1
 ```
 
-### Custom Prompt (for login sequences)
+### Custom Expect (for login sequences)
 ```yaml
 - send: login
   expect: '/Username:/'

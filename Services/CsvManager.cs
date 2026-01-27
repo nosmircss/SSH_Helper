@@ -24,12 +24,12 @@ namespace SSH_Helper.Services
 
             using var sr = new StreamReader(filePath);
 
-            // Read header line
-            string? headerLine = sr.ReadLine();
-            if (string.IsNullOrEmpty(headerLine))
+            // Read header record (supports multiline/quoted values)
+            string[]? headers = ReadCsvRecord(sr);
+            if (headers == null || headers.Length == 0 || headers.All(string.IsNullOrWhiteSpace))
                 throw new InvalidDataException("CSV file is empty or has no header");
 
-            string[] headers = ParseCsvLine(headerLine);
+            headers[0] = headers[0].TrimStart('\uFEFF');
 
             // First column is always Host_IP
             dt.Columns.Add(HostColumnName);
@@ -47,13 +47,11 @@ namespace SSH_Helper.Services
             }
 
             // Read data rows
-            while (!sr.EndOfStream)
+            while (true)
             {
-                string? line = sr.ReadLine();
-                if (string.IsNullOrEmpty(line))
-                    continue;
-
-                string[] values = ParseCsvLine(line);
+                var values = ReadCsvRecord(sr);
+                if (values == null)
+                    break;
 
                 // Skip completely empty rows
                 if (values.All(string.IsNullOrWhiteSpace))
@@ -115,27 +113,39 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Parses a CSV line, handling quoted values.
+        /// Reads a CSV record from a TextReader, supporting quoted fields with embedded newlines.
         /// </summary>
-        private static string[] ParseCsvLine(string line)
+        private static string[]? ReadCsvRecord(TextReader reader)
         {
             var values = new List<string>();
             var currentValue = new StringBuilder();
             bool inQuotes = false;
+            bool readAny = false;
 
-            for (int i = 0; i < line.Length; i++)
+            while (true)
             {
-                char c = line[i];
+                int next = reader.Read();
+                if (next == -1)
+                {
+                    if (!readAny && values.Count == 0 && currentValue.Length == 0)
+                        return null;
+
+                    values.Add(currentValue.ToString());
+                    return values.ToArray();
+                }
+
+                readAny = true;
+                char c = (char)next;
 
                 if (inQuotes)
                 {
                     if (c == '"')
                     {
-                        // Check for escaped quote
-                        if (i + 1 < line.Length && line[i + 1] == '"')
+                        // Escaped quote
+                        if (reader.Peek() == '"')
                         {
+                            reader.Read();
                             currentValue.Append('"');
-                            i++; // Skip next quote
                         }
                         else
                         {
@@ -158,15 +168,24 @@ namespace SSH_Helper.Services
                         values.Add(currentValue.ToString());
                         currentValue.Clear();
                     }
+                    else if (c == '\r')
+                    {
+                        if (reader.Peek() == '\n')
+                            reader.Read();
+                        values.Add(currentValue.ToString());
+                        return values.ToArray();
+                    }
+                    else if (c == '\n')
+                    {
+                        values.Add(currentValue.ToString());
+                        return values.ToArray();
+                    }
                     else
                     {
                         currentValue.Append(c);
                     }
                 }
             }
-
-            values.Add(currentValue.ToString());
-            return values.ToArray();
         }
 
         /// <summary>

@@ -98,6 +98,7 @@ namespace SSH_Helper
             btnStopAll = new Button();
             outputPanel = new Panel();
             outputSplitContainer = new SplitContainer();
+            outputRightPanel = new Panel();
             historyPanel = new Panel();
             historySplitContainer = new SplitContainer();
             lstOutput = new ListBox();
@@ -146,6 +147,7 @@ namespace SSH_Helper
             ExitMenuItem = new ToolStripMenuItem();
             editToolStripMenuItem = new ToolStripMenuItem();
             findToolStripMenuItem = new ToolStripMenuItem();
+            validateScriptToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparatorEdit1 = new ToolStripSeparator();
             debugModeToolStripMenuItem = new ToolStripMenuItem();
             sshDebugModeToolStripMenuItem = new ToolStripMenuItem();
@@ -955,7 +957,7 @@ namespace SSH_Helper
             // 
             // outputSplitContainer.Panel2
             // 
-            outputSplitContainer.Panel2.Controls.Add(txtOutput);
+            outputSplitContainer.Panel2.Controls.Add(outputRightPanel);
             outputSplitContainer.Size = new Size(1384, 303);
             outputSplitContainer.SplitterDistance = 257;
             outputSplitContainer.SplitterWidth = 6;
@@ -1133,6 +1135,15 @@ namespace SSH_Helper
             lblHistoryTitle.Size = new Size(45, 15);
             lblHistoryTitle.TabIndex = 0;
             lblHistoryTitle.Text = "History";
+            // 
+            // outputRightPanel
+            // 
+            outputRightPanel.Controls.Add(txtOutput);
+            outputRightPanel.Dock = DockStyle.Fill;
+            outputRightPanel.Location = new Point(0, 0);
+            outputRightPanel.Name = "outputRightPanel";
+            outputRightPanel.Size = new Size(1121, 303);
+            outputRightPanel.TabIndex = 0;
             // 
             // txtOutput
             // 
@@ -1350,7 +1361,7 @@ namespace SSH_Helper
             // 
             // editToolStripMenuItem
             // 
-            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, toolStripSeparatorEdit1, debugModeToolStripMenuItem, sshDebugModeToolStripMenuItem });
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, validateScriptToolStripMenuItem, toolStripSeparatorEdit1, debugModeToolStripMenuItem, sshDebugModeToolStripMenuItem });
             editToolStripMenuItem.Name = "editToolStripMenuItem";
             editToolStripMenuItem.Size = new Size(39, 20);
             editToolStripMenuItem.Text = "&Edit";
@@ -1362,6 +1373,14 @@ namespace SSH_Helper
             findToolStripMenuItem.Size = new Size(146, 22);
             findToolStripMenuItem.Text = "&Find...";
             findToolStripMenuItem.Click += findToolStripMenuItem_Click;
+            // 
+            // validateScriptToolStripMenuItem
+            // 
+            validateScriptToolStripMenuItem.Name = "validateScriptToolStripMenuItem";
+            validateScriptToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.V;
+            validateScriptToolStripMenuItem.Size = new Size(146, 22);
+            validateScriptToolStripMenuItem.Text = "Validate &Script...";
+            validateScriptToolStripMenuItem.Click += validateScriptToolStripMenuItem_Click;
             // 
             // toolStripSeparatorEdit1
             // 
@@ -1613,6 +1632,7 @@ namespace SSH_Helper
         private Panel outputPanel;
         private SplitContainer outputSplitContainer;
         private TextBox txtOutput;
+        private Panel outputRightPanel;
         private Panel historyPanel;
         private SplitContainer historySplitContainer;
         private Panel historyHeaderPanel;
@@ -1648,6 +1668,7 @@ namespace SSH_Helper
         private ToolStripMenuItem ExitMenuItem;
         private ToolStripMenuItem editToolStripMenuItem;
         private ToolStripMenuItem findToolStripMenuItem;
+        private ToolStripMenuItem validateScriptToolStripMenuItem;
         private ToolStripSeparator toolStripSeparatorEdit1;
         private ToolStripMenuItem debugModeToolStripMenuItem;
         private ToolStripMenuItem sshDebugModeToolStripMenuItem;

@@ -12,17 +12,30 @@ namespace SSH_Helper.Services
         private readonly string _configFilePath;
         private AppConfiguration? _cachedConfig;
 
-        public ConfigurationService()
+        public ConfigurationService(string? configFilePath = null)
         {
-            string folder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string appFolder = Path.Combine(folder, "SSH_Helper");
-
-            if (!Directory.Exists(appFolder))
+            if (string.IsNullOrWhiteSpace(configFilePath))
             {
-                Directory.CreateDirectory(appFolder);
+                string folder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string appFolder = Path.Combine(folder, "SSH_Helper");
+
+                if (!Directory.Exists(appFolder))
+                {
+                    Directory.CreateDirectory(appFolder);
+                }
+
+                _configFilePath = Path.Combine(appFolder, "config.json");
+                return;
             }
 
-            _configFilePath = Path.Combine(appFolder, "config.json");
+            var directory = Path.GetDirectoryName(configFilePath);
+            if (string.IsNullOrEmpty(directory))
+                throw new ArgumentException("Config file path must include a directory.", nameof(configFilePath));
+
+            if (!Directory.Exists(directory))
+                Directory.CreateDirectory(directory);
+
+            _configFilePath = configFilePath;
         }
 
         public string ConfigFilePath => _configFilePath;
@@ -126,6 +139,7 @@ namespace SSH_Helper.Services
             {
                 Username = "",
                 Timeout = 10,
+                UseConnectionPooling = false,
                 Presets = new Dictionary<string, PresetInfo>
                 {
                     { "Custom", new PresetInfo { Commands = "get system status" } },

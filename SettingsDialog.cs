@@ -20,6 +20,9 @@ namespace SSH_Helper
         private readonly CheckBox _chkDarkMode;
         private readonly CheckBox _chkAutoResizeHostColumns;
         private readonly CheckBox _chkEnableSshConfig;
+        private readonly CheckBox _chkUseConnectionPooling;
+        private readonly CheckBox _chkUseCredentialManager;
+        private readonly CheckBox _chkPreferSshAgent;
 
         // Updates tab controls
         private readonly CheckBox _chkCheckForUpdatesOnStartup;
@@ -158,6 +161,9 @@ namespace SSH_Helper
             _chkDarkMode = (CheckBox)tabGeneral.Controls["chkDarkMode"]!;
             _chkAutoResizeHostColumns = (CheckBox)tabGeneral.Controls["chkAutoResizeHostColumns"]!;
             _chkEnableSshConfig = (CheckBox)tabGeneral.Controls["chkEnableSshConfig"]!;
+            _chkUseConnectionPooling = (CheckBox)tabGeneral.Controls["chkUseConnectionPooling"]!;
+            _chkUseCredentialManager = (CheckBox)tabGeneral.Controls["chkUseCredentialManager"]!;
+            _chkPreferSshAgent = (CheckBox)tabGeneral.Controls["chkPreferSshAgent"]!;
 
             _chkCheckForUpdatesOnStartup = (CheckBox)tabUpdates.Controls["chkCheckForUpdatesOnStartup"]!;
             _chkEnableUpdateLog = (CheckBox)tabUpdates.Controls["chkEnableUpdateLog"]!;
@@ -168,7 +174,10 @@ namespace SSH_Helper
 
         private TabPage CreateGeneralTab()
         {
-            var tabGeneral = new TabPage("General");
+            var tabGeneral = new TabPage("General")
+            {
+                AutoScroll = true
+            };
 
             var lblStateSection = new Label
             {
@@ -308,6 +317,55 @@ namespace SSH_Helper
                 Font = new Font("Segoe UI", 8f)
             };
 
+            var lblPoolingSection = new Label
+            {
+                Text = "Connection Pooling",
+                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
+                Location = new Point(15, 395),
+                AutoSize = true
+            };
+
+            var chkUseConnectionPooling = new CheckBox
+            {
+                Name = "chkUseConnectionPooling",
+                Text = "Reuse SSH connections across executions",
+                Location = new Point(15, 420),
+                AutoSize = true
+            };
+
+            var lblPoolingNote = new Label
+            {
+                Text = "May improve performance for repeated runs on the same hosts.",
+                Location = new Point(32, 442),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 8f)
+            };
+
+            var lblCredentialsSection = new Label
+            {
+                Text = "Credentials",
+                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
+                Location = new Point(15, 470),
+                AutoSize = true
+            };
+
+            var chkUseCredentialManager = new CheckBox
+            {
+                Name = "chkUseCredentialManager",
+                Text = "Store passwords in Windows Credential Manager",
+                Location = new Point(15, 495),
+                AutoSize = true
+            };
+
+            var chkPreferSshAgent = new CheckBox
+            {
+                Name = "chkPreferSshAgent",
+                Text = "Prefer SSH agent when available",
+                Location = new Point(15, 520),
+                AutoSize = true
+            };
+
             tabGeneral.Controls.Add(lblStateSection);
             tabGeneral.Controls.Add(chkRememberState);
             tabGeneral.Controls.Add(lblMaxHistory);
@@ -324,6 +382,12 @@ namespace SSH_Helper
             tabGeneral.Controls.Add(lblSshConfigSection);
             tabGeneral.Controls.Add(chkEnableSshConfig);
             tabGeneral.Controls.Add(lblSshConfigPath);
+            tabGeneral.Controls.Add(lblPoolingSection);
+            tabGeneral.Controls.Add(chkUseConnectionPooling);
+            tabGeneral.Controls.Add(lblPoolingNote);
+            tabGeneral.Controls.Add(lblCredentialsSection);
+            tabGeneral.Controls.Add(chkUseCredentialManager);
+            tabGeneral.Controls.Add(chkPreferSshAgent);
 
             return tabGeneral;
         }
@@ -898,6 +962,9 @@ namespace SSH_Helper
             _chkDarkMode.Checked = config.DarkMode;
             _chkAutoResizeHostColumns.Checked = config.AutoResizeHostColumns;
             _chkEnableSshConfig.Checked = config.SshConfig.EnableSshConfig;
+            _chkUseConnectionPooling.Checked = config.UseConnectionPooling;
+            _chkUseCredentialManager.Checked = config.Credentials.UseCredentialManager;
+            _chkPreferSshAgent.Checked = config.Credentials.PreferSshAgent;
 
             // Updates
             _chkCheckForUpdatesOnStartup.Checked = config.UpdateSettings.CheckOnStartup;
@@ -979,6 +1046,9 @@ namespace SSH_Helper
                 config.DarkMode = _chkDarkMode.Checked;
                 config.AutoResizeHostColumns = _chkAutoResizeHostColumns.Checked;
                 config.SshConfig.EnableSshConfig = _chkEnableSshConfig.Checked;
+                config.UseConnectionPooling = _chkUseConnectionPooling.Checked;
+                config.Credentials.UseCredentialManager = _chkUseCredentialManager.Checked;
+                config.Credentials.PreferSshAgent = _chkPreferSshAgent.Checked;
 
                 // Updates
                 config.UpdateSettings.CheckOnStartup = _chkCheckForUpdatesOnStartup.Checked;

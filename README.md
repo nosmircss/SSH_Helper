@@ -11,6 +11,8 @@ A Windows Forms application for executing SSH commands across multiple hosts wit
 - **History Management**: Track execution history with output preservation
 - **State Persistence**: Remember hosts, presets, and history between sessions
 - **Auto-Updates**: Check for updates from GitHub releases
+  - Updates are applied by a temporary PowerShell script run with `-ExecutionPolicy Bypass`
+  - Update packages are verified via a SHA256 checksum file (`<asset>.sha256`) before installation
 
 ## Getting Started
 
@@ -64,6 +66,7 @@ Execute multiple presets from a folder with advanced options:
 - **Parallel Hosts**: Configure how many hosts to run simultaneously (1-N)
 - **Suppress Separators**: Hide preset name separators from output
 - Per-host results are tracked in history for later review
+- **Developer Note**: Execution methods are single-scope; avoid nesting or running multiple executions concurrently on the same `SshExecutionService` instance.
 
 ### YAML Scripts
 
@@ -171,7 +174,7 @@ dotnet run
 - Visual Studio 2022 or later (recommended)
 - .NET 8.0 SDK
 - NuGet packages:
-  - SSH.NET
+  - Rebex.SshShell
   - Newtonsoft.Json
   - YamlDotNet
 

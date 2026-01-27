@@ -61,17 +61,7 @@ namespace SSH_Helper.Models
             if (string.IsNullOrWhiteSpace(IpAddress))
                 return false;
 
-            var octets = IpAddress.Split('.');
-            if (octets.Length != 4)
-                return false;
-
-            foreach (var octet in octets)
-            {
-                if (!int.TryParse(octet, out int value) || value < 0 || value > 255)
-                    return false;
-            }
-
-            return Port > 0 && Port <= 65535;
+            return Utilities.InputValidator.IsValidHostOrIp(ToString());
         }
 
         /// <summary>

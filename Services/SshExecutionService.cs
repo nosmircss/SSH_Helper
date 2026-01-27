@@ -1,7 +1,6 @@
 using System.Linq;
 using System.Text;
 using Rebex.Net;
-using Rebex.TerminalEmulation;
 using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Models;
@@ -61,6 +60,23 @@ namespace SSH_Helper.Services
 
         public bool IsRunning => _isRunning;
 
+        private CancellationToken BeginExecution()
+        {
+            _cts?.Cancel();
+            _cts?.Dispose();
+            _cts = new CancellationTokenSource();
+            _isRunning = true;
+            return _cts.Token;
+        }
+
+        private void EndExecution()
+        {
+            _isRunning = false;
+            var cts = _cts;
+            _cts = null;
+            cts?.Dispose();
+        }
+
         /// <summary>
         /// Gets the connection pool (if pooling is enabled).
         /// </summary>
@@ -83,6 +99,24 @@ namespace SSH_Helper.Services
         /// Debug output is sent via the OutputReceived event with [SSH DEBUG] prefix.
         /// </summary>
         public bool SshDebugMode { get; set; }
+
+        /// <summary>
+        /// When enabled, attempts SSH agent authentication before falling back to key/password.
+        /// </summary>
+        public bool PreferSshAgent
+        {
+            get => _preferSshAgent;
+            set
+            {
+                _preferSshAgent = value;
+                if (_connectionPool != null)
+                {
+                    _connectionPool.PreferSshAgent = value;
+                }
+            }
+        }
+
+        private bool _preferSshAgent;
 
         /// <summary>
         /// Creates a new SSH execution service without connection pooling.
@@ -143,8 +177,7 @@ namespace SSH_Helper.Services
             int timeoutSeconds)
         {
             var results = new List<ExecutionResult>();
-            _cts = new CancellationTokenSource();
-            _isRunning = true;
+            var cancellationToken = BeginExecution();
 
             var timeouts = SshTimeoutOptions.FromSeconds(timeoutSeconds);
 
@@ -152,21 +185,21 @@ namespace SSH_Helper.Services
             {
                 foreach (var host in hosts)
                 {
-                    if (_cts.Token.IsCancellationRequested)
+                    if (cancellationToken.IsCancellationRequested)
                         break;
 
                     if (!host.IsValid())
                         continue;
 
                     var result = await Task.Run(() =>
-                        ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, _cts.Token));
+                        ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, cancellationToken));
 
                     results.Add(result);
                 }
             }
             finally
             {
-                _isRunning = false;
+                EndExecution();
             }
 
             return results;
@@ -190,15 +223,14 @@ namespace SSH_Helper.Services
             SshDebugLog(dummyHost, "SERVICE", $"ExecuteAsync entered. Hosts: {hostList.Count}, Commands: {commands.Length}", sw);
 
             var results = new List<ExecutionResult>();
-            _cts = new CancellationTokenSource();
-            _isRunning = true;
+            var cancellationToken = BeginExecution();
             SshDebugLog(dummyHost, "SERVICE", "CancellationTokenSource created, _isRunning = true", sw);
 
             try
             {
                 foreach (var host in hostList)
                 {
-                    if (_cts.Token.IsCancellationRequested)
+                    if (cancellationToken.IsCancellationRequested)
                         break;
 
                     if (!host.IsValid())
@@ -209,7 +241,7 @@ namespace SSH_Helper.Services
 
                     SshDebugLog(host, "SERVICE", $"Starting Task.Run for ExecuteSingleHost on {host.IpAddress}:{host.Port}", sw);
                     var result = await Task.Run(() =>
-                        ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, _cts.Token, showHeader));
+                        ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader));
                     SshDebugLog(host, "SERVICE", $"ExecuteSingleHost completed for {host.IpAddress}", sw);
 
                     results.Add(result);
@@ -217,7 +249,7 @@ namespace SSH_Helper.Services
             }
             finally
             {
-                _isRunning = false;
+                EndExecution();
                 SshDebugLog(dummyHost, "SERVICE", "ExecuteAsync complete", sw);
             }
 
@@ -262,8 +294,7 @@ namespace SSH_Helper.Services
             bool showHeader = true)
         {
             var results = new List<ExecutionResult>();
-            _cts = new CancellationTokenSource();
-            _isRunning = true;
+            var cancellationToken = BeginExecution();
 
             // Parse the script once
             var parser = new ScriptParser();
@@ -281,7 +312,7 @@ namespace SSH_Helper.Services
             {
                 // Emit the error so it appears in the output window
                 var errorOutput = $"Script parse error: {ex.Message}\n";
-                OnOutputReceived(hosts.FirstOrDefault(), errorOutput);
+                OnOutputReceived(hosts.FirstOrDefault() ?? new HostConnection(), errorOutput);
 
                 // Return error result for all hosts
                 foreach (var host in hosts)
@@ -295,7 +326,7 @@ namespace SSH_Helper.Services
                         Timestamp = DateTime.Now
                     });
                 }
-                _isRunning = false;
+                EndExecution();
                 return results;
             }
 
@@ -303,21 +334,21 @@ namespace SSH_Helper.Services
             {
                 foreach (var host in hosts)
                 {
-                    if (_cts.Token.IsCancellationRequested)
+                    if (cancellationToken.IsCancellationRequested)
                         break;
 
                     if (!host.IsValid())
                         continue;
 
                     var result = await Task.Run(() =>
-                        ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, _cts.Token, showHeader));
+                        ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader));
 
                     results.Add(result);
                 }
             }
             finally
             {
-                _isRunning = false;
+                EndExecution();
             }
 
             return results;
@@ -344,15 +375,14 @@ namespace SSH_Helper.Services
             IProgress<FolderExecutionProgress>? progress = null)
         {
             var results = new List<ExecutionResult>();
-            _cts = new CancellationTokenSource();
-            _isRunning = true;
+            var cancellationToken = BeginExecution();
 
             var hostList = hosts.Where(h => h.IsValid()).ToList();
             var presetNames = options.SelectedPresets;
             int totalHosts = hostList.Count;
             int totalPresets = presetNames.Count;
             int completedHosts = 0;
-            bool errorOccurred = false;
+            var errorTracker = new StopOnFirstErrorTracker();
 
             try
             {
@@ -365,7 +395,7 @@ namespace SSH_Helper.Services
 
                 foreach (var batch in hostBatches)
                 {
-                    if (_cts.Token.IsCancellationRequested || (options.StopOnFirstError && errorOccurred))
+                    if (cancellationToken.IsCancellationRequested || (options.StopOnFirstError && errorTracker.HasError))
                         break;
 
                     // Execute batch in parallel
@@ -388,7 +418,7 @@ namespace SSH_Helper.Services
                             // Parallel preset execution
                             var presetTasks = presetNames.Select(async presetName =>
                             {
-                                if (_cts.Token.IsCancellationRequested || (options.StopOnFirstError && errorOccurred))
+                                if (cancellationToken.IsCancellationRequested || (options.StopOnFirstError && errorTracker.HasError))
                                     return;
 
                                 if (!presets.TryGetValue(presetName, out var preset))
@@ -412,25 +442,23 @@ namespace SSH_Helper.Services
                                     OnOutputReceived(host, separator);
                                 }
 
-                                var presetResults = await ExecutePresetAsync(
-                                    new[] { host },
+                                var presetResult = await ExecutePresetOnHostAsync(
+                                    host,
                                     preset,
                                     defaultUsername,
                                     defaultPassword,
                                     timeouts,
+                                    cancellationToken,
                                     showHeader: false);
 
-                                if (presetResults.Count > 0)
-                                {
-                                    var presetResult = presetResults[0];
-                                    lock (outputBuilder) { outputBuilder.Append(presetResult.Output); }
+                                lock (outputBuilder) { outputBuilder.Append(presetResult.Output); }
 
-                                    if (!presetResult.Success)
-                                    {
+                                if (!presetResult.Success)
+                                {
                                         hostResult.Success = false;
                                         hostResult.ErrorMessage = presetResult.ErrorMessage;
-                                        if (options.StopOnFirstError)
-                                            errorOccurred = true;
+                                        if (options.StopOnFirstError && errorTracker.TrySignalError())
+                                            _cts?.Cancel();
 
                                         // Mark failed preset in output
                                         if (!options.SuppressPresetNames)
@@ -440,8 +468,6 @@ namespace SSH_Helper.Services
                                             OnOutputReceived(host, failMarker);
                                         }
                                     }
-                                }
-
                                 Interlocked.Increment(ref completedPresets);
                             });
 
@@ -452,7 +478,7 @@ namespace SSH_Helper.Services
                             // Sequential preset execution
                             foreach (var presetName in presetNames)
                             {
-                                if (_cts.Token.IsCancellationRequested || (options.StopOnFirstError && errorOccurred))
+                                if (cancellationToken.IsCancellationRequested || (options.StopOnFirstError && errorTracker.HasError))
                                     break;
 
                                 if (!presets.TryGetValue(presetName, out var preset))
@@ -476,28 +502,27 @@ namespace SSH_Helper.Services
                                     OnOutputReceived(host, separator);
                                 }
 
-                                var presetResults = await ExecutePresetAsync(
-                                    new[] { host },
+                                var presetResult = await ExecutePresetOnHostAsync(
+                                    host,
                                     preset,
                                     defaultUsername,
                                     defaultPassword,
                                     timeouts,
+                                    cancellationToken,
                                     showHeader: isFirstPreset);
 
                                 isFirstPreset = false;
 
-                                if (presetResults.Count > 0)
-                                {
-                                    var presetResult = presetResults[0];
-                                    outputBuilder.Append(presetResult.Output);
+                                outputBuilder.Append(presetResult.Output);
 
-                                    if (!presetResult.Success)
-                                    {
+                                if (!presetResult.Success)
+                                {
                                         hostResult.Success = false;
                                         hostResult.ErrorMessage = presetResult.ErrorMessage;
                                         if (options.StopOnFirstError)
                                         {
-                                            errorOccurred = true;
+                                            if (errorTracker.TrySignalError())
+                                                _cts?.Cancel();
                                             // Mark failed preset in output
                                             if (!options.SuppressPresetNames)
                                             {
@@ -505,8 +530,7 @@ namespace SSH_Helper.Services
                                                 outputBuilder.Append(failMarker);
                                                 OnOutputReceived(host, failMarker);
                                             }
-                                            break;
-                                        }
+                                        break;
                                     }
                                 }
 
@@ -535,10 +559,80 @@ namespace SSH_Helper.Services
             }
             finally
             {
-                _isRunning = false;
+                EndExecution();
             }
 
             return results;
+        }
+
+        // Execute a preset without starting a new execution scope (caller owns BeginExecution/EndExecution).
+        private Task<ExecutionResult> ExecutePresetOnHostAsync(
+            HostConnection host,
+            PresetInfo preset,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts,
+            CancellationToken cancellationToken,
+            bool showHeader)
+        {
+            return Task.Run(() =>
+                ExecutePresetOnHost(host, preset, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader));
+        }
+
+        private ExecutionResult ExecutePresetOnHost(
+            HostConnection host,
+            PresetInfo preset,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts,
+            CancellationToken cancellationToken,
+            bool showHeader)
+        {
+            if (preset.IsScript)
+            {
+                return ExecuteScriptTextOnHost(host, preset.Commands, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader);
+            }
+
+            var commands = preset.Commands.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            return ExecuteSingleHost(host, commands, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader);
+        }
+
+        private ExecutionResult ExecuteScriptTextOnHost(
+            HostConnection host,
+            string scriptText,
+            string defaultUsername,
+            string defaultPassword,
+            SshTimeoutOptions timeouts,
+            CancellationToken cancellationToken,
+            bool showHeader)
+        {
+            var parser = new ScriptParser();
+            Script script;
+            try
+            {
+                script = parser.Parse(scriptText);
+                var validationErrors = parser.Validate(script, scriptText);
+                if (validationErrors.Count > 0)
+                {
+                    throw new ScriptParseException("Script validation failed:\n" + string.Join("\n", validationErrors));
+                }
+            }
+            catch (ScriptParseException ex)
+            {
+                var errorOutput = $"Script parse error: {ex.Message}\n";
+                OnOutputReceived(host, errorOutput);
+
+                return new ExecutionResult
+                {
+                    Host = host,
+                    Success = false,
+                    ErrorMessage = ex.Message,
+                    Output = errorOutput,
+                    Timestamp = DateTime.Now
+                };
+            }
+
+            return ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader);
         }
 
         /// <summary>
@@ -546,7 +640,6 @@ namespace SSH_Helper.Services
         /// </summary>
         public void Stop()
         {
-            _isRunning = false;
             _cts?.Cancel();
         }
 
@@ -830,6 +923,9 @@ namespace SSH_Helper.Services
             client.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
             SshDebugLog(host, "SCRIPT", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
 
+            // Apply algorithm preferences from SSH config (if any)
+            ApplyAlgorithmSettings(client, host);
+
             SshDebugLog(host, "SCRIPT", "Calling client.Connect()", sw);
             var connectSw = System.Diagnostics.Stopwatch.StartNew();
             client.Connect(host.IpAddress, host.Port);
@@ -837,13 +933,28 @@ namespace SSH_Helper.Services
             SshDebugLog(host, "SCRIPT", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw);
 
             SshDebugLog(host, "SCRIPT", "Calling client.Login()", sw);
-            client.Login(username, password);
+
+            // SSH agent, key-based, or password authentication
+            if (!TryLoginWithAgent(client, username, host, sw))
+            {
+                if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
+                {
+                    SshDebugLog(host, "SCRIPT", $"Using key-based auth with: {host.IdentityFile}", sw);
+                    var passphrase = host.IdentityFilePassphrase ?? string.Empty;
+                    client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
+                }
+                else
+                {
+                    client.Login(username, password);
+                }
+            }
+
             SshDebugLog(host, "SCRIPT", "client.Login() completed", sw);
 
             OnProgressChanged(host, $"Connected to {host} (script mode)", false, true);
 
             SshDebugLog(host, "SCRIPT", "Starting scripting session", sw);
-            var terminalOptions = new TerminalOptions { Encoding = System.Text.Encoding.UTF8 };
+            var terminalOptions = SshTerminalOptionsFactory.Create();
             RebexScripting scripting = client.StartScripting(terminalOptions);
             scripting.Timeout = (int)timeouts.CommandTimeout.TotalMilliseconds;
             SshDebugLog(host, "SCRIPT", "Scripting session created", sw);
@@ -1052,25 +1163,28 @@ namespace SSH_Helper.Services
 
             SshDebugLog(host, "SSH", "Calling client.Login()", sw);
 
-            // Key-based or password authentication
-            if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
+            // SSH agent, key-based, or password authentication
+            if (!TryLoginWithAgent(client, username, host, sw))
             {
-                // Use key-based authentication
-                SshDebugLog(host, "SSH", $"Using key-based auth with: {host.IdentityFile}", sw);
-                var passphrase = host.IdentityFilePassphrase ?? string.Empty;
-                client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
-            }
-            else
-            {
-                // Use password authentication
-                client.Login(username, password);
+                if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
+                {
+                    // Use key-based authentication
+                    SshDebugLog(host, "SSH", $"Using key-based auth with: {host.IdentityFile}", sw);
+                    var passphrase = host.IdentityFilePassphrase ?? string.Empty;
+                    client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
+                }
+                else
+                {
+                    // Use password authentication
+                    client.Login(username, password);
+                }
             }
             SshDebugLog(host, "SSH", "client.Login() completed - SSH session established", sw);
 
             OnProgressChanged(host, $"Connected to {host}", false, true);
 
             SshDebugLog(host, "SSH", "Starting scripting session", sw);
-            var terminalOptions = new TerminalOptions { Encoding = System.Text.Encoding.UTF8 };
+            var terminalOptions = SshTerminalOptionsFactory.Create();
             RebexScripting scripting = client.StartScripting(terminalOptions);
             scripting.Timeout = (int)timeouts.CommandTimeout.TotalMilliseconds;
             SshDebugLog(host, "SSH", "Scripting session created", sw);
@@ -1260,6 +1374,32 @@ namespace SSH_Helper.Services
             {
                 client.Settings.SshParameters.SetEncryptionAlgorithms(host.Ciphers);
             }
+        }
+
+        private bool TryLoginWithAgent(Ssh client, string username, HostConnection host, System.Diagnostics.Stopwatch? sw = null)
+        {
+            if (!PreferSshAgent)
+                return false;
+
+            if (!IsSshAgentAvailable())
+            {
+                SshDebugLog(host, "SSH", "SSH agent not available; falling back to key/password.", sw);
+                return false;
+            }
+
+            // The current SSH library does not expose agent-backed authentication APIs.
+            SshDebugLog(host, "SSH", "SSH agent detected but not supported by current SSH library; falling back to key/password.", sw);
+            return false;
+        }
+
+        private static bool IsSshAgentAvailable()
+        {
+            var sock = Environment.GetEnvironmentVariable("SSH_AUTH_SOCK");
+            if (!string.IsNullOrWhiteSpace(sock))
+                return true;
+
+            var pid = Environment.GetEnvironmentVariable("SSH_AGENT_PID");
+            return !string.IsNullOrWhiteSpace(pid);
         }
 
         public void Dispose()

@@ -7,6 +7,8 @@ SSH_Helper is a Windows Forms desktop application that executes preset CLI comma
 - Variable substitution using `{{column_name}}` syntax from grid columns
 - A scripting engine with control flow (if/while/foreach), file I/O, and webhooks
 - Import/export of host lists and presets
+ - Execution history with output preservation
+ - Auto-update checks against GitHub releases
 
 ## Tech Stack
 - **.NET 8.0** - Target framework
@@ -29,6 +31,7 @@ SSH_Helper is a Windows Forms desktop application that executes preset CLI comma
 - **XML documentation comments** on public service methods
 - Single responsibility per class; services are stateless where possible
 - Use `var` for local variables when type is obvious
+- Avoid blocking the UI thread; long-running work should run in services and report progress via events
 
 ### Architecture Patterns
 - **Service-oriented architecture** with clear separation:
@@ -53,6 +56,15 @@ SSH_Helper is a Windows Forms desktop application that executes preset CLI comma
 - No co-authoring references in commit messages
 - Commit messages should be concise and descriptive
 
+## Project Structure
+- `Form1.cs` - Main UI form and event wiring
+- `SettingsDialog.cs` - Settings UI
+- `Models/` - Configuration and data models
+- `Services/` - Core business logic (SSH execution, config, updates, CSV)
+- `Services/Scripting/` - YAML scripting engine
+- `Utilities/` - Helpers (validation, terminal output processing)
+- `SSH_Helper.Tests/` - Unit tests for services and utilities
+
 ## Domain Context
 - **SSH Shell Sessions**: The app maintains interactive shell sessions (not just exec commands) to handle prompts and multi-line output
 - **Prompt Detection**: Uses regex-based prompt detection to know when commands complete
@@ -65,9 +77,19 @@ SSH_Helper is a Windows Forms desktop application that executes preset CLI comma
 - **Windows-only**: Uses Windows Forms, targets `net8.0-windows`
 - **Local configuration**: Config stored in `%LocalAppData%\SSH_Helper\config.json`
 - **Rebex license**: Optional Rebex license key via environment variable or file
-- **No async/await in UI thread**: Use events and background execution for SSH operations
+- **Updater**: Uses a PowerShell script launched from the app (see `Services/UpdateService.cs`)
 
 ## External Dependencies
 - **SSH hosts**: Connects to user-specified SSH servers (network devices, Linux hosts, etc.)
 - **Webhooks**: Script commands can POST to external URLs
 - **GitHub**: Update checking via GitHub releases API
+
+## Configuration
+- **Location**: `%LocalAppData%\SSH_Helper\config.json`
+- **Format**: JSON (serialized via Newtonsoft.Json)
+- **Contents**: Window/layout state, presets/folders/favorites, history, and update settings
+
+## Build & Run
+- **Build**: `dotnet build`
+- **Run**: `dotnet run`
+- **Prereqs**: Windows 10+ and .NET 8.0 SDK/runtime

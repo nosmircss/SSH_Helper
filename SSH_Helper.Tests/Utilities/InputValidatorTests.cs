@@ -70,6 +70,44 @@ public class InputValidatorTests
 
     #endregion
 
+    #region IsValidHostOrIp Tests
+
+    [Theory]
+    [InlineData("router1.example.com", true)]
+    [InlineData("router1.example.com:2222", true)]
+    [InlineData("localhost", true)]
+    [InlineData("localhost:22", true)]
+    [InlineData("my-host", true)]
+    [InlineData("my-host.internal:2200", true)]
+    public void IsValidHostOrIp_ValidHostnames_ReturnsTrue(string host, bool expected)
+    {
+        var result = InputValidator.IsValidHostOrIp(host);
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("192.168.1.1", true)]
+    [InlineData("192.168.1.1:22", true)]
+    public void IsValidHostOrIp_ValidIp_ReturnsTrue(string host, bool expected)
+    {
+        var result = InputValidator.IsValidHostOrIp(host);
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("bad host!!")]
+    [InlineData("bad:host:22")]
+    [InlineData("example.com:0")]
+    [InlineData("example.com:99999")]
+    [InlineData(":22")]
+    public void IsValidHostOrIp_InvalidHost_ReturnsFalse(string host)
+    {
+        var result = InputValidator.IsValidHostOrIp(host);
+        result.Should().BeFalse();
+    }
+
+    #endregion
+
     #region IsValidPort Tests
 
     [Theory]

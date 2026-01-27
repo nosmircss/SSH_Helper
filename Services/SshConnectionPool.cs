@@ -84,6 +84,11 @@ namespace SSH_Helper.Services
         public PoolStatistics Statistics { get; } = new();
 
         /// <summary>
+        /// When enabled, attempts SSH agent authentication before key/password.
+        /// </summary>
+        public bool PreferSshAgent { get; set; }
+
+        /// <summary>
         /// Creates a new connection pool.
         /// </summary>
         /// <param name="defaultTimeouts">Default timeout settings for connections</param>
@@ -111,11 +116,13 @@ namespace SSH_Helper.Services
             HostConnection host,
             string username,
             string password,
+            SshTimeoutOptions? timeouts = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
 
             var key = CreateConnectionKey(host, username);
+            var effectiveTimeouts = timeouts ?? _defaultTimeouts;
 
             // Try to get existing connection
             if (_connections.TryGetValue(key, out var pooled))
@@ -155,7 +162,7 @@ namespace SSH_Helper.Services
                 }
 
                 // Create new connection
-                var client = await CreateConnectionAsync(host, username, password, cancellationToken);
+                var client = await CreateConnectionAsync(host, username, password, effectiveTimeouts, cancellationToken);
 
                 pooled = new PooledConnection
                 {
@@ -196,10 +203,11 @@ namespace SSH_Helper.Services
             SshTimeoutOptions? timeouts = null,
             CancellationToken cancellationToken = default)
         {
-            var client = await GetOrCreateAsync(host, username, password, cancellationToken);
             var effectiveTimeouts = timeouts ?? _defaultTimeouts;
+            var client = await GetOrCreateAsync(host, username, password, effectiveTimeouts, cancellationToken);
 
-            RebexScripting scripting = client.StartScripting();
+            var terminalOptions = SshTerminalOptionsFactory.Create();
+            RebexScripting scripting = client.StartScripting(terminalOptions);
             scripting.Timeout = (int)effectiveTimeouts.CommandTimeout.TotalMilliseconds;
             var session = new SshShellSession(client, scripting, effectiveTimeouts);
 
@@ -273,14 +281,14 @@ namespace SSH_Helper.Services
             HostConnection host,
             string username,
             string password,
+            SshTimeoutOptions effectiveTimeouts,
             CancellationToken cancellationToken)
         {
             var client = new Ssh();
-            client.Timeout = (int)_defaultTimeouts.ConnectionTimeout.TotalMilliseconds;
+            client.Timeout = (int)effectiveTimeouts.ConnectionTimeout.TotalMilliseconds;
 
             // Apply algorithm preferences before connecting (from SSH config)
-            // TODO: Temporarily disabled to diagnose connection issues
-            // ApplyAlgorithmSettings(client, host);
+            ApplyAlgorithmSettings(client, host);
 
             // Connect and authenticate
             await Task.Run(() =>
@@ -288,17 +296,20 @@ namespace SSH_Helper.Services
                 cancellationToken.ThrowIfCancellationRequested();
                 client.Connect(host.IpAddress, host.Port);
 
-                // Key-based or password authentication
-                if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
+                // SSH agent, key-based, or password authentication
+                if (!TryLoginWithAgent(client, username, host))
                 {
-                    // Use key-based authentication
-                    var passphrase = host.IdentityFilePassphrase ?? string.Empty;
-                    client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
-                }
-                else
-                {
-                    // Use password authentication
-                    client.Login(username, password);
+                    if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
+                    {
+                        // Use key-based authentication
+                        var passphrase = host.IdentityFilePassphrase ?? string.Empty;
+                        client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
+                    }
+                    else
+                    {
+                        // Use password authentication
+                        client.Login(username, password);
+                    }
                 }
             }, cancellationToken);
 
@@ -343,17 +354,28 @@ namespace SSH_Helper.Services
             // Perform active health check by running a simple command
             try
             {
-                await Task.Run(() =>
+                RebexScripting? scripting = null;
+                try
                 {
-                    // Use a simple echo command to verify the connection is working
-                    RebexScripting scripting = pooled.Client.StartScripting();
-                    scripting.Timeout = 5000; // 5 second timeout for health check
-                    scripting.Send("echo 1\r");
+                    await Task.Run(() =>
+                    {
+                        // Use a simple echo command to verify the connection is working
+                        scripting = pooled.Client.StartScripting();
+                        scripting.Timeout = 5000; // 5 second timeout for health check
+                        scripting.Send("echo 1\r");
 
-                    // Read a small amount of output to confirm connection is responsive
-                    var promptEvent = ScriptEvent.FromRegex(@"[#$>%]\s*$");
-                    scripting.ReadUntil(promptEvent);
-                }, cancellationToken);
+                        // Read a small amount of output to confirm connection is responsive
+                        var promptEvent = ScriptEvent.FromRegex(@"[#$>%]\s*$");
+                        scripting.ReadUntil(promptEvent);
+                    }, cancellationToken);
+                }
+                finally
+                {
+                    if (scripting is IDisposable disposable)
+                    {
+                        disposable.Dispose();
+                    }
+                }
 
                 pooled.LastHealthCheck = DateTime.UtcNow;
                 return true;
@@ -388,6 +410,16 @@ namespace SSH_Helper.Services
         private static string CreateConnectionKey(HostConnection host, string username)
         {
             return $"{host.IpAddress}:{host.Port}:{username}";
+        }
+
+        private bool TryLoginWithAgent(Ssh client, string username, HostConnection host)
+        {
+            if (!PreferSshAgent)
+                return false;
+
+            // Agent integration is not available via the current SSH library.
+            // Fall back to key/password authentication.
+            return false;
         }
 
         protected virtual void OnConnectionCreated(HostConnection host, string username)

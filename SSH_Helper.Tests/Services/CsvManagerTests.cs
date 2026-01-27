@@ -98,6 +98,22 @@ public class CsvManagerTests : IDisposable
     }
 
     [Fact]
+    public void LoadFromFile_QuotedMultilineField_ParsesCorrectly()
+    {
+        var filePath = Path.Combine(_testDirectory, "multiline.csv");
+        var newline = "\r\n";
+        var content = $"Host_IP,description{newline}" +
+                      $"192.168.1.1,\"Line1{newline}Line2\"{newline}" +
+                      $"192.168.1.2,Single line";
+        File.WriteAllText(filePath, content);
+
+        var table = _csvManager.LoadFromFile(filePath);
+
+        table.Rows.Count.Should().Be(2);
+        table.Rows[0]["description"].Should().Be($"Line1{newline}Line2");
+    }
+
+    [Fact]
     public void LoadFromFile_EmptyColumnName_GeneratesDefault()
     {
         var filePath = Path.Combine(_testDirectory, "empty_header.csv");
@@ -207,6 +223,27 @@ public class CsvManagerTests : IDisposable
 
         var content = File.ReadAllText(filePath);
         content.Should().Contain("\"Has \"\"quotes\"\"\"");
+    }
+
+    [Fact]
+    public void SaveToFile_ValuesWithNewlines_QuotesValues()
+    {
+        var filePath = Path.Combine(_testDirectory, "newline_values.csv");
+        var columns = new List<(string Name, string Header)>
+        {
+            ("Host_IP", "Host_IP"),
+            ("description", "description")
+        };
+        var rows = new List<List<string?>>
+        {
+            new() { "192.168.1.1", $"Line1{Environment.NewLine}Line2" }
+        };
+
+        _csvManager.SaveToFile(filePath, columns, rows);
+
+        var content = File.ReadAllText(filePath);
+        content.Should().Contain("\"Line1");
+        content.Should().Contain("Line2\"");
     }
 
     [Fact]
