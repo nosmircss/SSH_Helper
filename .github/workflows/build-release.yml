@@ -52,11 +52,18 @@ jobs:
       with:
         name: SSH_Helper
         path: ./release
+    
+    - name: Generate SHA256 checksum
+      run: |
+        cd release
+        sha256sum SSH_Helper.exe > SSH_Helper.exe.sha256
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: release/SSH_Helper.exe
+        files: |
+          release/SSH_Helper.exe
+          release/SSH_Helper.exe.sha256
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
