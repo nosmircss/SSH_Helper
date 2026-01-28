@@ -192,7 +192,7 @@ namespace SSH_Helper.Utilities
 
         private static void ProcessCsiCommand(char command, string parameters, StringBuilder line, ref int cursor, ref int savedCursor)
         {
-            string[] parts = parameters.Split(';', StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = parameters.Split(';');
 
             switch (command)
             {
@@ -296,7 +296,7 @@ namespace SSH_Helper.Utilities
             if (parts.Length >= 2)
                 col = ParseIntOrDefault(parts, 1, 1);
             else if (parts.Length == 1)
-                col = ParseIntOrDefault(parts, 0, 1);
+                col = 1; // Single parameter is row; column defaults to 1
 
             cursor = Math.Max(0, col - 1);
         }
@@ -320,7 +320,7 @@ namespace SSH_Helper.Utilities
 
         private static int ParseIntOrDefault(string[] parts, int index, int defaultValue)
         {
-            if (index < parts.Length && int.TryParse(parts[index], out int value) && value > 0)
+            if (index < parts.Length && int.TryParse(parts[index], out int value) && value >= 0)
                 return value;
             return defaultValue;
         }
