@@ -81,6 +81,16 @@ namespace SSH_Helper.Services
         private bool _disposed;
 
         /// <summary>
+        /// Default retry delays for download attempts (exponential backoff).
+        /// </summary>
+        private static readonly TimeSpan[] DefaultRetryDelays =
+        {
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromSeconds(5)
+        };
+
+        /// <summary>
         /// Event raised during download to report progress.
         /// </summary>
         public event EventHandler<UpdateDownloadProgressEventArgs>? DownloadProgressChanged;
@@ -177,12 +187,18 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Downloads the update to a temporary location.
+        /// Downloads the update to a temporary location with automatic retry on failure.
         /// </summary>
         /// <param name="downloadUrl">URL to download from</param>
         /// <param name="cancellationToken">Cancellation token</param>
+        /// <param name="maxRetries">Maximum number of retry attempts (default: 3)</param>
+        /// <param name="retryProgress">Optional progress reporter for retry attempts</param>
         /// <returns>Path to the downloaded file</returns>
-        public async Task<string> DownloadUpdateAsync(string downloadUrl, CancellationToken cancellationToken = default)
+        public async Task<string> DownloadUpdateAsync(
+            string downloadUrl,
+            CancellationToken cancellationToken = default,
+            int maxRetries = 3,
+            IProgress<DownloadRetryEventArgs>? retryProgress = null)
         {
             var tempDir = Path.Combine(Path.GetTempPath(), "SSH_Helper_Update");
             Directory.CreateDirectory(tempDir);
@@ -190,10 +206,53 @@ namespace SSH_Helper.Services
             var fileName = Path.GetFileName(new Uri(downloadUrl).LocalPath);
             var downloadPath = Path.Combine(tempDir, fileName);
 
-            // Delete existing file if present
-            if (File.Exists(downloadPath))
-                File.Delete(downloadPath);
+            Exception? lastException = null;
+            var retryDelays = DefaultRetryDelays;
 
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    // Delete existing file if present (for retry scenarios)
+                    if (File.Exists(downloadPath))
+                        File.Delete(downloadPath);
+
+                    await DownloadFileAsync(downloadUrl, downloadPath, cancellationToken);
+                    return downloadPath;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Don't retry on explicit cancellation
+                    throw;
+                }
+                catch (Exception ex) when (IsRetryableException(ex) && attempt < maxRetries)
+                {
+                    lastException = ex;
+                    var delay = attempt <= retryDelays.Length ? retryDelays[attempt - 1] : retryDelays[^1];
+
+                    retryProgress?.Report(new DownloadRetryEventArgs(attempt, maxRetries, delay, ex));
+
+                    await Task.Delay(delay, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    // Non-retryable or final attempt
+                    lastException = ex;
+                    break;
+                }
+            }
+
+            // If we get here, all retries failed
+            throw new HttpRequestException(
+                $"Download failed after {maxRetries} attempts. Last error: {lastException?.Message}",
+                lastException);
+        }
+
+        /// <summary>
+        /// Performs the actual file download.
+        /// </summary>
+        private async Task DownloadFileAsync(string downloadUrl, string downloadPath, CancellationToken cancellationToken)
+        {
             using var response = await _httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
 
@@ -217,8 +276,85 @@ namespace SSH_Helper.Services
                     DownloadProgressChanged?.Invoke(this, new UpdateDownloadProgressEventArgs(totalBytesRead, totalBytes, progressPercent));
                 }
             }
+        }
 
-            return downloadPath;
+        /// <summary>
+        /// Determines if an exception is retryable (transient network/TLS errors).
+        /// </summary>
+        public static bool IsRetryableException(Exception ex)
+        {
+            // TLS/SSL decryption errors
+            if (ex.Message.Contains("decryption", StringComparison.OrdinalIgnoreCase) ||
+                ex.InnerException?.Message?.Contains("decryption", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return true;
+            }
+
+            // Authentication/certificate errors
+            if (ex is System.Security.Authentication.AuthenticationException)
+            {
+                return true;
+            }
+
+            // Network errors (transient)
+            if (ex is HttpRequestException httpEx)
+            {
+                // Connection failures, DNS issues, etc. are often transient
+                return true;
+            }
+
+            // Socket errors
+            if (ex is System.Net.Sockets.SocketException)
+            {
+                return true;
+            }
+
+            // IO errors during download
+            if (ex is IOException ioEx && ioEx.InnerException is System.Net.Sockets.SocketException)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Gets a user-friendly error message for download failures.
+        /// </summary>
+        public static string GetUserFriendlyErrorMessage(Exception ex)
+        {
+            // TLS/SSL errors
+            if (ex.Message.Contains("decryption", StringComparison.OrdinalIgnoreCase) ||
+                ex.InnerException?.Message?.Contains("decryption", StringComparison.OrdinalIgnoreCase) == true ||
+                ex is System.Security.Authentication.AuthenticationException)
+            {
+                return "A secure connection could not be established. This may be due to network security settings, a firewall, or a temporary connection issue.";
+            }
+
+            // Timeout
+            if (ex is TaskCanceledException && ex.InnerException is TimeoutException)
+            {
+                return "The download timed out. Please check your internet connection and try again.";
+            }
+
+            // Network errors
+            if (ex is HttpRequestException)
+            {
+                if (ex.InnerException is System.Net.Sockets.SocketException socketEx)
+                {
+                    return socketEx.SocketErrorCode switch
+                    {
+                        System.Net.Sockets.SocketError.HostNotFound => "Could not connect to the server. Please check your internet connection.",
+                        System.Net.Sockets.SocketError.ConnectionRefused => "The connection was refused. Please try again later.",
+                        System.Net.Sockets.SocketError.TimedOut => "The connection timed out. Please check your internet connection.",
+                        _ => "A network error occurred. Please check your internet connection and try again."
+                    };
+                }
+                return "A network error occurred. Please check your internet connection and try again.";
+            }
+
+            // Generic fallback
+            return ex.Message;
         }
 
         /// <summary>
@@ -585,6 +721,25 @@ try {
             BytesDownloaded = bytesDownloaded;
             TotalBytes = totalBytes;
             ProgressPercent = progressPercent;
+        }
+    }
+
+    /// <summary>
+    /// Event arguments for download retry notifications.
+    /// </summary>
+    public class DownloadRetryEventArgs : EventArgs
+    {
+        public int Attempt { get; }
+        public int MaxAttempts { get; }
+        public TimeSpan Delay { get; }
+        public Exception LastException { get; }
+
+        public DownloadRetryEventArgs(int attempt, int maxAttempts, TimeSpan delay, Exception lastException)
+        {
+            Attempt = attempt;
+            MaxAttempts = maxAttempts;
+            Delay = delay;
+            LastException = lastException;
         }
     }
 }

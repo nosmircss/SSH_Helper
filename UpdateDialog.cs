@@ -209,19 +209,32 @@ namespace SSH_Helper
         {
             if (string.IsNullOrEmpty(_updateResult.DownloadUrl))
             {
-                MessageBox.Show(
-                    "No download URL available. Please download the update manually from GitHub.",
-                    "Download Not Available",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-
                 if (!string.IsNullOrEmpty(_updateResult.ReleaseUrl))
                 {
-                    Process.Start(new ProcessStartInfo
+                    var result = MessageBox.Show(
+                        $"Version {_updateResult.LatestVersion} is available but no direct download was found.\n\n" +
+                        "Would you like to open the GitHub release page to download it manually?",
+                        "Download Not Available",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information);
+
+                    if (result == DialogResult.Yes)
                     {
-                        FileName = _updateResult.ReleaseUrl,
-                        UseShellExecute = true
-                    });
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = _updateResult.ReleaseUrl,
+                            UseShellExecute = true
+                        });
+                    }
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"Version {_updateResult.LatestVersion} is available but no download information was found.\n\n" +
+                        "Please check the GitHub repository for the latest release.",
+                        "Download Not Available",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
                 }
                 return;
             }
@@ -240,9 +253,20 @@ namespace SSH_Helper
 
             _updateService.DownloadProgressChanged += UpdateService_DownloadProgressChanged;
 
+            // Progress reporter for retry attempts
+            var retryProgress = new Progress<DownloadRetryEventArgs>(args =>
+            {
+                _lblProgress.Text = $"Download failed, retrying ({args.Attempt}/{args.MaxAttempts})...";
+                _progressBar.Value = 0;
+            });
+
             try
             {
-                var downloadPath = await _updateService.DownloadUpdateAsync(_updateResult.DownloadUrl, _downloadCts.Token);
+                var downloadPath = await _updateService.DownloadUpdateAsync(
+                    _updateResult.DownloadUrl,
+                    _downloadCts.Token,
+                    maxRetries: 3,
+                    retryProgress: retryProgress);
 
                 if (string.IsNullOrWhiteSpace(_updateResult.ChecksumUrl))
                 {
@@ -306,11 +330,45 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
-                    $"Failed to download update: {ex.Message}",
+                var friendlyMessage = UpdateService.GetUserFriendlyErrorMessage(ex);
+                var isRetryable = UpdateService.IsRetryableException(ex);
+
+                var message = $"Failed to download update.\n\n{friendlyMessage}";
+                if (isRetryable)
+                {
+                    message += "\n\nWould you like to try again, or download the update manually from GitHub?";
+                }
+                else
+                {
+                    message += "\n\nYou can download the update manually from GitHub.";
+                }
+
+                var buttons = isRetryable
+                    ? MessageBoxButtons.YesNoCancel
+                    : MessageBoxButtons.OK;
+
+                var result = MessageBox.Show(
+                    message,
                     "Download Error",
-                    MessageBoxButtons.OK,
+                    buttons,
                     MessageBoxIcon.Error);
+
+                if (result == DialogResult.Yes)
+                {
+                    // Retry the download
+                    _updateService.DownloadProgressChanged -= UpdateService_DownloadProgressChanged;
+                    BtnYes_Click(sender, e);
+                    return;
+                }
+                else if (result == DialogResult.No && !string.IsNullOrEmpty(_updateResult.ReleaseUrl))
+                {
+                    // Open GitHub release page for manual download
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = _updateResult.ReleaseUrl,
+                        UseShellExecute = true
+                    });
+                }
 
                 _lblProgress.Text = "Download failed.";
                 ResetButtons();
