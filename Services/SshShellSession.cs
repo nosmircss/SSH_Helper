@@ -631,27 +631,9 @@ namespace SSH_Helper.Services
                 if (gotData)
                 {
                     var chunk = batch.ToString();
-                    rawBuffer.Append(chunk);
                     EmitDebug($"[+{overallSw.ElapsedMilliseconds}ms] Received {chunk.Length} chars. RAW: {EscapeForDebug(chunk, 300)}");
 
-                    // Check for pager BEFORE stripping
-                    bool hitPager = false;
-                    foreach (var pattern in Patterns.PagerPatterns)
-                    {
-                        if (Regex.IsMatch(chunk, pattern, RegexOptions.IgnoreCase))
-                        {
-                            hitPager = true;
-                            break;
-                        }
-                    }
-
-                    // Process chunk for clean output
-                    var processed = TerminalOutputProcessor.Sanitize(chunk);
-                    processed = TerminalOutputProcessor.StripPagerArtifacts(processed, out _);
-                    processed = TerminalOutputProcessor.StripPagerDismissalArtifacts(processed);
-
-                    output.Append(processed);
-                    OnOutputReceived(processed);
+                    bool hitPager = ProcessChunk(chunk, rawBuffer, output, ref seenNewlineAfterEcho, overallSw);
 
                     if (hitPager)
                     {
@@ -691,7 +673,13 @@ namespace SSH_Helper.Services
                         if (!string.IsNullOrEmpty(ch))
                         {
                             // Got data after idle wait — put it back in the buffer and continue
-                            rawBuffer.Append(ch);
+                            bool hitPager = ProcessChunk(ch, rawBuffer, output, ref seenNewlineAfterEcho, overallSw, "Idle read received");
+                            if (hitPager)
+                            {
+                                pageCount++;
+                                EmitDebug($"Pager detected ({pageCount}), sending space");
+                                _scripting.Send(" ");
+                            }
                             // Feed back into the next iteration's batch start
                             continue;
                         }
@@ -748,6 +736,46 @@ namespace SSH_Helper.Services
             var result = output.ToString();
             EmitDebug($"ReadUntilPrompt finished. Total chars: {result.Length}");
             return TerminalOutputProcessor.Normalize(result);
+        }
+
+        private bool ProcessChunk(
+            string chunk,
+            StringBuilder rawBuffer,
+            StringBuilder output,
+            ref bool seenNewlineAfterEcho,
+            System.Diagnostics.Stopwatch overallSw,
+            string? debugLabel = null)
+        {
+            rawBuffer.Append(chunk);
+
+            if (DebugMode && !string.IsNullOrEmpty(debugLabel))
+            {
+                EmitDebug($"[+{overallSw.ElapsedMilliseconds}ms] {debugLabel} {chunk.Length} chars. RAW: {EscapeForDebug(chunk, 300)}");
+            }
+
+            if (!seenNewlineAfterEcho && chunk.Contains('\n'))
+            {
+                seenNewlineAfterEcho = true;
+            }
+
+            bool hitPager = false;
+            foreach (var pattern in Patterns.PagerPatterns)
+            {
+                if (Regex.IsMatch(chunk, pattern, RegexOptions.IgnoreCase))
+                {
+                    hitPager = true;
+                    break;
+                }
+            }
+
+            var processed = TerminalOutputProcessor.Sanitize(chunk);
+            processed = TerminalOutputProcessor.StripPagerArtifacts(processed, out _);
+            processed = TerminalOutputProcessor.StripPagerDismissalArtifacts(processed);
+
+            output.Append(processed);
+            OnOutputReceived(processed);
+
+            return hitPager;
         }
 
         /// <summary>
@@ -842,25 +870,9 @@ namespace SSH_Helper.Services
                 if (gotData)
                 {
                     var chunk = batch.ToString();
-                    rawBuffer.Append(chunk);
                     EmitDebug($"[+{overallSw.ElapsedMilliseconds}ms] Received {chunk.Length} chars. RAW: {EscapeForDebug(chunk, 300)}");
 
-                    bool hitPager = false;
-                    foreach (var pattern in Patterns.PagerPatterns)
-                    {
-                        if (Regex.IsMatch(chunk, pattern, RegexOptions.IgnoreCase))
-                        {
-                            hitPager = true;
-                            break;
-                        }
-                    }
-
-                    var processed = TerminalOutputProcessor.Sanitize(chunk);
-                    processed = TerminalOutputProcessor.StripPagerArtifacts(processed, out _);
-                    processed = TerminalOutputProcessor.StripPagerDismissalArtifacts(processed);
-
-                    output.Append(processed);
-                    OnOutputReceived(processed);
+                    bool hitPager = ProcessChunk(chunk, rawBuffer, output, ref seenNewlineAfterEcho, overallSw);
 
                     if (hitPager)
                     {
@@ -893,7 +905,13 @@ namespace SSH_Helper.Services
                         var ch = _scripting.ReadUntil(anyDataEvent);
                         if (!string.IsNullOrEmpty(ch))
                         {
-                            rawBuffer.Append(ch);
+                            bool hitPager = ProcessChunk(ch, rawBuffer, output, ref seenNewlineAfterEcho, overallSw, "Idle read received");
+                            if (hitPager)
+                            {
+                                pageCount++;
+                                EmitDebug($"Pager detected ({pageCount}), sending space");
+                                _scripting.Send(" ");
+                            }
                             continue;
                         }
                     }

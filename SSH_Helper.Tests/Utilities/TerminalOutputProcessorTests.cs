@@ -149,6 +149,15 @@ public class TerminalOutputProcessorTests
     }
 
     [Fact]
+    public void Normalize_AnsiCursorForward_Zero_DoesNotMove()
+    {
+        // ESC[0C should not move the cursor
+        var input = "A\x1B[0CB";
+        var result = TerminalOutputProcessor.Normalize(input);
+        result.Should().Be("AB");
+    }
+
+    [Fact]
     public void Normalize_AnsiCursorBackward_MovesCursorLeft()
     {
         // ESC[2D = move cursor backward 2 positions
@@ -182,6 +191,33 @@ public class TerminalOutputProcessorTests
         var input = "Hello World\x1B[6GX";
         var result = TerminalOutputProcessor.Normalize(input);
         result.Should().Be("HelloXWorld");
+    }
+
+    [Fact]
+    public void Normalize_AnsiCursorPosition_EmptyRow_DefaultsColumn()
+    {
+        // ESC[;5H = row default, column 5
+        var input = "Hello\x1B[;5HX";
+        var result = TerminalOutputProcessor.Normalize(input);
+        result.Should().Be("HellX");
+    }
+
+    [Fact]
+    public void Normalize_AnsiCursorPosition_EmptyColumn_DefaultsToOne()
+    {
+        // ESC[5;H = row 5, column default (1)
+        var input = "Hello\x1B[5;HX";
+        var result = TerminalOutputProcessor.Normalize(input);
+        result.Should().Be("Xello");
+    }
+
+    [Fact]
+    public void Normalize_AnsiCursorPosition_SingleParam_TreatedAsRow()
+    {
+        // ESC[5H = row 5, column default (1)
+        var input = "Hello\x1B[5HX";
+        var result = TerminalOutputProcessor.Normalize(input);
+        result.Should().Be("Xello");
     }
 
     [Fact]
