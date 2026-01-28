@@ -299,6 +299,7 @@ param(
     [Parameter(Mandatory=$true)][string]$TargetDir,
     [Parameter(Mandatory=$true)][string]$ExeToLaunch,
     [Parameter(Mandatory=$true)][int]$ProcessId,
+    [int]$ShutdownTimeoutSec = 60,
     [switch]$EnableLog
 )
 
@@ -318,21 +319,30 @@ function Save-Log {
     }
 }
 
+function Pause-IfInteractive {
+    try {
+        if ([Environment]::UserInteractive -and $Host.Name -eq 'ConsoleHost') {
+            $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+        }
+    } catch { }
+}
+
 try {
     # Validate inputs
     if (-not (Test-Path $UpdatePackage)) {
         Write-Log ""ERROR: Update package not found: $UpdatePackage"" 'Red'
-        Save-Log; pause; exit 1
+        Save-Log; Pause-IfInteractive; exit 1
     }
     if (-not (Test-Path $TargetDir)) {
         Write-Log ""ERROR: Target directory not found: $TargetDir"" 'Red'
-        Save-Log; pause; exit 1
+        Save-Log; Pause-IfInteractive; exit 1
     }
 
     Write-Log 'Waiting for SSH Helper to close...' 'Yellow'
 
-    # Wait for process to exit (up to 30 seconds)
-    $timeout = [DateTime]::Now.AddSeconds(30)
+    # Wait for process to exit (default 60 seconds)
+    if ($ShutdownTimeoutSec -lt 5) { $ShutdownTimeoutSec = 5 }
+    $timeout = [DateTime]::Now.AddSeconds($ShutdownTimeoutSec)
     while ([DateTime]::Now -lt $timeout) {
         if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { break }
         Start-Sleep -Milliseconds 200
@@ -340,7 +350,7 @@ try {
 
     if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
         Write-Log 'Timed out waiting for SSH Helper to close.' 'Red'
-        Save-Log; pause; exit 1
+        Save-Log; Pause-IfInteractive; exit 1
     }
 
     # Brief pause for file handles
@@ -349,9 +359,13 @@ try {
     Write-Log 'Installing update...' 'Yellow'
 
     if ($UpdatePackage -like '*.zip') {
-        Expand-Archive -Path $UpdatePackage -DestinationPath $TargetDir -Force
+        Expand-Archive -Path $UpdatePackage -DestinationPath $TargetDir -Force -ErrorAction Stop
     } else {
-        Copy-Item -Path $UpdatePackage -Destination (Join-Path $TargetDir (Split-Path $UpdatePackage -Leaf)) -Force
+        $destPath = Join-Path $TargetDir (Split-Path $UpdatePackage -Leaf)
+        Copy-Item -Path $UpdatePackage -Destination $destPath -Force -ErrorAction Stop
+        if (-not (Test-Path $destPath)) {
+            throw ""Update copy failed: $destPath not found.""
+        }
     }
 
     Remove-Item -Path $UpdatePackage -Force -ErrorAction SilentlyContinue
@@ -359,7 +373,17 @@ try {
     Write-Log 'Update complete!' 'Green'
     Save-Log
 
-    Start-Process -FilePath $ExeToLaunch -WorkingDirectory $TargetDir
+    $exePath = $ExeToLaunch
+    if (-not (Test-Path $exePath)) {
+        $exeName = Split-Path $ExeToLaunch -Leaf
+        $fallback = Join-Path $TargetDir $exeName
+        if (Test-Path $fallback) {
+            $exePath = $fallback
+        } else {
+            throw ""Executable not found after update: $ExeToLaunch""
+        }
+    }
+    Start-Process -FilePath $exePath -WorkingDirectory $TargetDir -ErrorAction Stop
 
     # Clean up temp directory (delayed)
     if (-not $EnableLog) {
@@ -371,7 +395,7 @@ try {
     Write-Log ""Update failed: $_"" 'Red'
     Write-Log ""$($_.ScriptStackTrace)"" 'Red'
     Save-Log
-    pause
+    Pause-IfInteractive
     exit 1
 }
 ";
