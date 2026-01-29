@@ -11,6 +11,19 @@ namespace SSH_Helper.Utilities
     {
         private const int DefaultTabSize = 8;
 
+        // Pre-compiled regex patterns for hot path optimization
+        private static readonly Regex SanitizeRegex = new(
+            @"[^\u0020-\u007E\u0080-\uFFFF\r\n\t\b\u001B]",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private static readonly Regex PagerRegex = new(
+            @"\r?(?:--\s*More\s*--|(?:-+\s*More\s*-+))[ ]?\r?",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        private static readonly Regex PagerDismissalRegex = new(
+            @"^ ?\r +\r",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
         /// <summary>
         /// Normalizes terminal output by processing ANSI escape sequences,
         /// carriage returns, tabs, backspaces, and cursor movements.
@@ -86,7 +99,7 @@ namespace SSH_Helper.Utilities
             if (string.IsNullOrEmpty(input))
                 return input;
 
-            return Regex.Replace(input, @"[^\u0020-\u007E\u0080-\uFFFF\r\n\t\b\u001B]", "");
+            return SanitizeRegex.Replace(input, "");
         }
 
         /// <summary>
@@ -101,22 +114,10 @@ namespace SSH_Helper.Utilities
         {
             sawPager = false;
 
-            // Match pager prompts with optional surrounding whitespace and control sequences
-            // This handles: "--More--", "-- More --", and variations
-            // The pager prompt is typically followed by the echoed space character and a carriage return
-            // Pattern breakdown:
-            //   \r? - optional carriage return before pager
-            //   (?:--\s*More\s*--|(?:-+\s*More\s*-+)) - the pager prompt itself
-            //   [ ]? - optional literal space (the echoed space from pressing space to continue)
-            //   \r? - optional carriage return after (cursor repositioning)
-            var pagerRegex = new Regex(
-                @"\r?(?:--\s*More\s*--|(?:-+\s*More\s*-+))[ ]?\r?",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
-            if (pagerRegex.IsMatch(chunk))
+            if (PagerRegex.IsMatch(chunk))
             {
                 sawPager = true;
-                chunk = pagerRegex.Replace(chunk, string.Empty);
+                chunk = PagerRegex.Replace(chunk, string.Empty);
             }
 
             return chunk;
@@ -139,11 +140,7 @@ namespace SSH_Helper.Utilities
             // 3. Spaces to overwrite the "--More--" prompt
             // 4. \r (carriage return again to go back to column 0)
             // 5. Then the actual content continues
-            //
-            // Observed patterns:
-            //   " \r         \r" (space, CR, 9 spaces, CR) - when space echo is in same chunk
-            //   "\r         \r"  (CR, 9 spaces, CR) - when space echo was in previous chunk
-            return Regex.Replace(chunk, @"^ ?\r +\r", string.Empty);
+            return PagerDismissalRegex.Replace(chunk, string.Empty);
         }
 
         private static int ProcessEscapeSequence(string input, int startIndex, StringBuilder line, ref int cursor, ref int savedCursor)
