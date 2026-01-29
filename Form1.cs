@@ -3,6 +3,7 @@ using System.Data;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
@@ -77,6 +78,7 @@ namespace SSH_Helper
         private const string ApplicationVersion = "0.50.15";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
+        private const int UiOutputThrottleMs = 50;
         private const string FolderIcon = "\U0001F4C1";
         private const string StarIcon = "\u2605";
         private static readonly string FolderSummarySeparator = new string('-', 60);
@@ -132,6 +134,8 @@ namespace SSH_Helper
 
         // Output state
         private readonly StringBuilder _outputBuffer = new();
+        private readonly object _outputBufferLock = new();
+        private readonly OutputThrottler _uiOutputThrottler;
 
         // Credential provider
         private ICredentialProvider? _credentialProvider;
@@ -166,6 +170,10 @@ namespace SSH_Helper
             InitializeComponent();
             Text = $"{ApplicationName} {ApplicationVersion}";
 
+            var uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
+            _uiOutputThrottler = new OutputThrottler(TimeSpan.FromMilliseconds(UiOutputThrottleMs), AppendOutputToUi, uiContext);
+            FormClosed += (_, __) => _uiOutputThrottler.Dispose();
+
             // Initialize services
             _configService = new ConfigurationService();
             _presetManager = new PresetManager(_configService);
@@ -181,6 +189,8 @@ namespace SSH_Helper
             // Wire up SSH service events
             _sshService.OutputReceived += SshService_OutputReceived;
             _sshService.ColumnUpdateRequested += SshService_ColumnUpdateRequested;
+            _sshService.CommandCompleted += SshService_CommandCompleted;
+            _sshService.ExecutionCompleted += SshService_ExecutionCompleted;
 
             // Initialize update service
             _updateService = new UpdateService(
@@ -5701,37 +5711,87 @@ namespace SSH_Helper
 
         private void SshService_OutputReceived(object? sender, SshOutputEventArgs e)
         {
-            var output = e.Output;
+            AppendOutputText(e.Output);
+        }
 
-            if (InvokeRequired)
-            {
-                Invoke(() => AppendOutputText(output));
-            }
-            else
-            {
-                AppendOutputText(output);
-            }
+        private void SshService_CommandCompleted(object? sender, SshCommandCompletedEventArgs e)
+        {
+            _uiOutputThrottler.Flush();
+        }
+
+        private void SshService_ExecutionCompleted(object? sender, EventArgs e)
+        {
+            _uiOutputThrottler.Flush();
         }
 
         private void AppendOutputText(string output)
         {
+            HandleOutputReceived(output);
+        }
+
+        private void HandleOutputReceived(string output)
+        {
             if (string.IsNullOrEmpty(output))
                 return;
 
-            // Trim leading newlines if output buffer is empty (first banner)
-            if (_outputBuffer.Length == 0)
-                output = output.TrimStart('\r', '\n');
+            var appendedOutput = AppendToHistoryBuffer(output);
+            if (string.IsNullOrEmpty(appendedOutput))
+                return;
 
-            _outputBuffer.Append(output);
+            _uiOutputThrottler.Enqueue(appendedOutput);
+
+            if (IsDebugOutput(appendedOutput))
+            {
+                _uiOutputThrottler.Flush();
+            }
+        }
+
+        private string AppendToHistoryBuffer(string output)
+        {
+            lock (_outputBufferLock)
+            {
+                // Trim leading newlines if output buffer is empty (first banner)
+                if (_outputBuffer.Length == 0)
+                {
+                    output = output.TrimStart('\r', '\n');
+                }
+
+                _outputBuffer.Append(output);
+                return output;
+            }
+        }
+
+        private static bool IsDebugOutput(string output)
+        {
+            var trimmed = output.TrimStart('\r', '\n');
+            return trimmed.StartsWith("[DEBUG ", StringComparison.Ordinal) ||
+                   trimmed.StartsWith("[SSH DEBUG ", StringComparison.Ordinal);
+        }
+
+        private void AppendOutputToUi(string output)
+        {
+            if (string.IsNullOrEmpty(output))
+                return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke(() => AppendOutputToUi(output));
+                return;
+            }
+
             txtOutput.AppendText(output);
             ScrollOutputToEnd();
         }
 
         private void SetOutputText(string text)
         {
-            _outputBuffer.Clear();
-            if (!string.IsNullOrEmpty(text))
-                _outputBuffer.Append(text);
+            _uiOutputThrottler.Clear();
+            lock (_outputBufferLock)
+            {
+                _outputBuffer.Clear();
+                if (!string.IsNullOrEmpty(text))
+                    _outputBuffer.Append(text);
+            }
 
             txtOutput.Text = text ?? string.Empty;
             ScrollOutputToEnd();
@@ -5739,7 +5799,11 @@ namespace SSH_Helper
 
         private void ClearOutput()
         {
-            _outputBuffer.Clear();
+            _uiOutputThrottler.Clear();
+            lock (_outputBufferLock)
+            {
+                _outputBuffer.Clear();
+            }
             txtOutput.Clear();
         }
 
@@ -5792,7 +5856,11 @@ namespace SSH_Helper
         private void StoreExecutionHistory(List<ExecutionResult> results)
         {
             // Use output buffer as the source of truth - includes all debug output
-            var output = _outputBuffer.ToString();
+            string output;
+            lock (_outputBufferLock)
+            {
+                output = _outputBuffer.ToString();
+            }
 
             string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
             var entryId = HistoryIdGenerator.NewId();
