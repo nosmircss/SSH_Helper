@@ -42,6 +42,15 @@ namespace SSH_Helper.Services
     }
 
     /// <summary>
+    /// Event arguments for completed command execution.
+    /// </summary>
+    public class SshCommandCompletedEventArgs : EventArgs
+    {
+        public HostConnection Host { get; set; } = new();
+        public string Command { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Handles SSH command execution against remote hosts.
     /// Now uses connection pooling and Rebex Scripting API for improved reliability.
     /// </summary>
@@ -53,6 +62,8 @@ namespace SSH_Helper.Services
         public event EventHandler<SshProgressEventArgs>? ProgressChanged;
         public event EventHandler<SshOutputEventArgs>? OutputReceived;
         public event EventHandler<SshColumnUpdateEventArgs>? ColumnUpdateRequested;
+        public event EventHandler<SshCommandCompletedEventArgs>? CommandCompleted;
+        public event EventHandler? ExecutionCompleted;
 
         private volatile bool _isRunning;
         private CancellationTokenSource? _cts;
@@ -75,6 +86,7 @@ namespace SSH_Helper.Services
             var cts = _cts;
             _cts = null;
             cts?.Dispose();
+            OnExecutionCompleted();
         }
 
         /// <summary>
@@ -854,6 +866,7 @@ namespace SSH_Helper.Services
             {
                 OnProgressChanged(host, $"Connected to {host} (pooled, script mode)", false, true);
                 session.DebugMode = DebugMode;
+                session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
 
                 // Build header with script name (only if showHeader is true and script doesn't suppress it)
                 if (showHeader && !script.NoBanner)
@@ -961,6 +974,7 @@ namespace SSH_Helper.Services
 
             using var session = new SshShellSession(client, scripting, timeouts);
             session.DebugMode = DebugMode;
+            session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
 
             // Also enable debug mode on the session if SSH debug is on
             if (SshDebugMode)
@@ -1056,6 +1070,7 @@ namespace SSH_Helper.Services
 
                 // Configure debug mode BEFORE subscribing to events
                 session.DebugMode = DebugMode;
+                session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
 
                 // Track if we've sent the header yet (to avoid duplicating in outputBuilder)
                 bool headerSent = !showHeader; // If not showing header, pretend it's already sent
@@ -1195,6 +1210,7 @@ namespace SSH_Helper.Services
 
             // Configure debug mode BEFORE subscribing to events
             session.DebugMode = DebugMode;
+            session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
 
             // Track if we've sent the header yet (to avoid duplicating in outputBuilder)
             bool headerSent = !showHeader; // If not showing header, pretend it's already sent
@@ -1341,6 +1357,20 @@ namespace SSH_Helper.Services
                 ColumnName = columnName,
                 Value = value
             });
+        }
+
+        protected virtual void OnCommandCompleted(HostConnection host, string command)
+        {
+            CommandCompleted?.Invoke(this, new SshCommandCompletedEventArgs
+            {
+                Host = host,
+                Command = command
+            });
+        }
+
+        protected virtual void OnExecutionCompleted()
+        {
+            ExecutionCompleted?.Invoke(this, EventArgs.Empty);
         }
 
         /// <summary>

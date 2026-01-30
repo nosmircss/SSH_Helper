@@ -10,6 +10,12 @@ namespace SSH_Helper.Utilities
     {
         private static readonly char[] PromptTerminators = { '#', '>', '$', '%', '\u2192', '\u276F', '\u279C' };
 
+        // Pre-compiled regex patterns for hot path optimization
+        private static readonly Regex TrailingWhitespaceRegex = new(@"\s+$", RegexOptions.Compiled);
+        private static readonly Regex AnsiEscapeRegex = new(@"\x1B\[[0-9;]*[A-Za-z]", RegexOptions.Compiled);
+        private static readonly Regex TerminatorCheckRegex = new(@"[#>$%\u2192\u276F\u279C]\s*$", RegexOptions.Compiled);
+        private static readonly Regex AlphanumericRegex = new(@"[a-zA-Z0-9]", RegexOptions.Compiled);
+
         /// <summary>
         /// Builds a regex pattern to match the given prompt, allowing for mode changes
         /// (e.g., "hostname (config)#" vs "hostname#").
@@ -21,11 +27,11 @@ namespace SSH_Helper.Utilities
                 return CreateFallbackRegex();
 
             // Trim trailing whitespace and ANSI
-            var trimmed = Regex.Replace(promptLiteral, @"\s+$", "");
-            trimmed = Regex.Replace(trimmed, @"\x1B\[[0-9;]*[A-Za-z]", "");
+            var trimmed = TrailingWhitespaceRegex.Replace(promptLiteral, "");
+            trimmed = AnsiEscapeRegex.Replace(trimmed, "");
 
             // Ensure it ends with a typical prompt terminator
-            if (!Regex.IsMatch(trimmed, @"[#>$%\u2192\u276F\u279C]\s*$"))
+            if (!TerminatorCheckRegex.IsMatch(trimmed))
                 return CreateFallbackRegex();
 
             // Extract base hostname and terminator
@@ -47,7 +53,7 @@ namespace SSH_Helper.Utilities
             // If baseHost doesn't contain alphanumeric characters, it's likely a
             // status indicator (e.g., ○, ●) from a starship/oh-my-zsh style prompt,
             // not a real hostname. Use a terminator-only pattern.
-            if (!Regex.IsMatch(baseHost, @"[a-zA-Z0-9]"))
+            if (!AlphanumericRegex.IsMatch(baseHost))
             {
                 string terminatorEsc = Regex.Escape(terminator.ToString());
                 // Use (?:^|[\r\n]) instead of bare ^ so pattern works both with

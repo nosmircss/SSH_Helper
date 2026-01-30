@@ -18,6 +18,14 @@ namespace SSH_Helper.Services
     }
 
     /// <summary>
+    /// Event arguments for completed command execution.
+    /// </summary>
+    public class ShellCommandCompletedEventArgs : EventArgs
+    {
+        public string Command { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Represents an interactive SSH shell session that maintains state across commands.
     /// Uses Rebex Scripting API for reliable prompt detection.
     /// </summary>
@@ -67,6 +75,11 @@ namespace SSH_Helper.Services
         /// Fired when output is received from the shell (for real-time display).
         /// </summary>
         public event EventHandler<ShellOutputEventArgs>? OutputReceived;
+
+        /// <summary>
+        /// Fired when a command completes and the session returns control.
+        /// </summary>
+        public event EventHandler<ShellCommandCompletedEventArgs>? CommandCompleted;
 
         /// <summary>
         /// Fired when debug information is available (only when DebugMode is true).
@@ -441,13 +454,20 @@ namespace SSH_Helper.Services
         {
             ThrowIfDisposed();
 
-            EmitDebug($">>> Sending command: \"{EscapeForDebug(command, 200)}\"");
-            EmitDebug($">>> Prompt regex in use: {_promptPattern}");
+            try
+            {
+                EmitDebug($">>> Sending command: \"{EscapeForDebug(command, 200)}\"");
+                EmitDebug($">>> Prompt regex in use: {_promptPattern}");
 
-            _scripting.Send(command + "\r");
+                _scripting.Send(command + "\r");
 
-            var output = await ReadUntilPromptAsync(cancellationToken);
-            return output;
+                var output = await ReadUntilPromptAsync(cancellationToken);
+                return output;
+            }
+            finally
+            {
+                OnCommandCompleted(command);
+            }
         }
 
         /// <summary>
@@ -468,18 +488,25 @@ namespace SSH_Helper.Services
 
             ThrowIfDisposed();
 
-            EmitDebug($">>> Sending command: \"{EscapeForDebug(command, 200)}\"");
-            EmitDebug($">>> Prompt regex in use: {_promptPattern}");
-
-            _scripting.Send(command + "\r");
-
-            if (!string.IsNullOrWhiteSpace(expectPattern))
+            try
             {
-                var expectRegex = BuildExpectRegex(expectPattern);
-                return await ReadUntilPatternAsync(expectRegex, cancellationToken, timeoutSeconds);
-            }
+                EmitDebug($">>> Sending command: \"{EscapeForDebug(command, 200)}\"");
+                EmitDebug($">>> Prompt regex in use: {_promptPattern}");
 
-            return await ReadUntilPromptAsync(cancellationToken, timeoutSeconds);
+                _scripting.Send(command + "\r");
+
+                if (!string.IsNullOrWhiteSpace(expectPattern))
+                {
+                    var expectRegex = BuildExpectRegex(expectPattern);
+                    return await ReadUntilPatternAsync(expectRegex, cancellationToken, timeoutSeconds);
+                }
+
+                return await ReadUntilPromptAsync(cancellationToken, timeoutSeconds);
+            }
+            finally
+            {
+                OnCommandCompleted(command);
+            }
         }
 
         /// <summary>
@@ -1035,6 +1062,11 @@ namespace SSH_Helper.Services
         protected virtual void OnOutputReceived(string output)
         {
             OutputReceived?.Invoke(this, new ShellOutputEventArgs { Output = output });
+        }
+
+        protected virtual void OnCommandCompleted(string command)
+        {
+            CommandCompleted?.Invoke(this, new ShellCommandCompletedEventArgs { Command = command });
         }
 
         private void EmitDebug(string message)
