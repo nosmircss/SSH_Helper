@@ -798,9 +798,11 @@ namespace SSH_Helper.Services
             var processed = TerminalOutputProcessor.Sanitize(chunk);
             processed = TerminalOutputProcessor.StripPagerArtifacts(processed, out _);
             processed = TerminalOutputProcessor.StripPagerDismissalArtifacts(processed);
+            processed = TerminalOutputProcessor.StripZshPromptSp(processed);
 
             output.Append(processed);
-            OnOutputReceived(processed);
+            // Normalize before sending to UI to handle backspaces and other control sequences
+            OnOutputReceived(TerminalOutputProcessor.Normalize(processed));
 
             return hitPager;
         }

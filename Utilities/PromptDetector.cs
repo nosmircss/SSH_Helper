@@ -10,6 +10,11 @@ namespace SSH_Helper.Utilities
     {
         private static readonly char[] PromptTerminators = { '#', '>', '$', '%', '\u2192', '\u276F', '\u279C' };
 
+        // Arrow-style terminators that don't require alphanumeric content before them
+        // These are specific to modern shell prompts (starship, oh-my-zsh, powerlevel10k)
+        // and rarely appear in normal output, unlike % or $ which can appear in "50%", "$100"
+        private static readonly HashSet<char> ArrowStyleTerminators = new() { '\u2192', '\u276F', '\u279C' };
+
         // Pre-compiled regex patterns for hot path optimization
         private static readonly Regex TrailingWhitespaceRegex = new(@"\s+$", RegexOptions.Compiled);
         private static readonly Regex AnsiEscapeRegex = new(@"\x1B\[[0-9;]*[A-Za-z]", RegexOptions.Compiled);
@@ -180,6 +185,17 @@ namespace SSH_Helper.Utilities
 
             // Real prompts are short — reject very long lines (likely wrapped text/warnings)
             if (line.Length > 80)
+                return false;
+
+            // Require minimum length - a bare terminator is not a valid prompt
+            // Minimum realistic prompt: "h%" or "a$" (2 chars)
+            if (line.Length < 2)
+                return false;
+
+            // Require alphanumeric content before traditional terminators (#, >, $, %)
+            // Arrow-style terminators (→, ❯, ›) are specific to shell prompts and don't need this check
+            string beforeTerminator = line[..^1];
+            if (!ArrowStyleTerminators.Contains(last) && !AlphanumericRegex.IsMatch(beforeTerminator))
                 return false;
 
             // Lines containing paired quotes are likely instructional text, not prompts
