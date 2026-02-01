@@ -24,6 +24,14 @@ namespace SSH_Helper.Utilities
             @"^ ?\r +\r",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+        // zsh PROMPT_SP: When output doesn't end with newline, zsh displays % indicator
+        // then clears it with spaces + \r \r sequence before showing the actual prompt.
+        // Pattern 1: % followed by spaces and clearing sequence
+        // Pattern 2: Standalone clearing sequence (spaces + multiple CRs)
+        private static readonly Regex ZshPromptSpRegex = new(
+            @"%[ ]*(?=\r)|(?<=\r)[ ]+\r+",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
         /// <summary>
         /// Normalizes terminal output by processing ANSI escape sequences,
         /// carriage returns, tabs, backspaces, and cursor movements.
@@ -141,6 +149,21 @@ namespace SSH_Helper.Utilities
             // 4. \r (carriage return again to go back to column 0)
             // 5. Then the actual content continues
             return PagerDismissalRegex.Replace(chunk, string.Empty);
+        }
+
+        /// <summary>
+        /// Strips zsh PROMPT_SP artifacts from terminal output.
+        /// zsh displays a '%' character when command output doesn't end with a newline,
+        /// then clears it with spaces and carriage returns before showing the prompt.
+        /// </summary>
+        /// <param name="chunk">Input text chunk</param>
+        /// <returns>Text with zsh PROMPT_SP artifacts removed</returns>
+        public static string StripZshPromptSp(string chunk)
+        {
+            if (string.IsNullOrEmpty(chunk))
+                return chunk;
+
+            return ZshPromptSpRegex.Replace(chunk, string.Empty);
         }
 
         private static int ProcessEscapeSequence(string input, int startIndex, StringBuilder line, ref int cursor, ref int savedCursor)
