@@ -11,6 +11,18 @@
     <RebexLicenseKey Condition="'$(REBEX_LICENSE_KEY)' != ''">$(REBEX_LICENSE_KEY)</RebexLicenseKey>
   </PropertyGroup>
 
+  <!-- Build timestamp embedded at compile time -->
+  <PropertyGroup>
+    <BuildTimestamp>$([System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))</BuildTimestamp>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BuildTimestamp</_Parameter1>
+      <_Parameter2>$(BuildTimestamp)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <ItemGroup Condition="'$(RebexLicenseKey)' != ''">
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>RebexLicenseKey</_Parameter1>

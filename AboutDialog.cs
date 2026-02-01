@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Drawing;
-using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -131,16 +130,15 @@ Use responsibly.";
         {
             try
             {
-                string? path = asm.Location;
-                if (string.IsNullOrEmpty(path))
-                    path = Environment.ProcessPath;
-                if (string.IsNullOrEmpty(path))
-                    path = Process.GetCurrentProcess().MainModule?.FileName;
-                if (string.IsNullOrEmpty(path))
-                    path = Path.Combine(AppContext.BaseDirectory, AppDomain.CurrentDomain.FriendlyName);
+                var timestamp = asm.GetCustomAttributes<AssemblyMetadataAttribute>()
+                    .FirstOrDefault(a => a.Key == "BuildTimestamp")?.Value;
 
-                if (!string.IsNullOrEmpty(path) && File.Exists(path))
-                    return File.GetLastWriteTime(path).ToString("yyyy-MM-dd HH:mm:ss");
+                if (!string.IsNullOrEmpty(timestamp) &&
+                    DateTime.TryParse(timestamp, null,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var dt))
+                {
+                    return dt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+                }
             }
             catch { }
             return "Unknown";
