@@ -34,6 +34,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.UpdateColumn, new UpdateColumnCommand() },
                 { StepType.Log, new LogCommand() },
                 { StepType.Webhook, new WebhookCommand() },
+                { StepType.Parse, new ParseCommand() },
             };
         }
 
