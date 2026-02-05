@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.Utilities;
 
 namespace SSH_Helper.Services.Scripting.Commands
 {
@@ -26,12 +27,16 @@ namespace SSH_Helper.Services.Scripting.Commands
                 // Only show command if not suppressed
                 if (!step.Suppress)
                 {
-                    context.EmitOutput($">>> {command}", ScriptOutputType.Command);
+                    var prompt = context.Session?.CurrentPrompt ?? ">>>";
+                    context.EmitOutput($"{prompt} {command}", ScriptOutputType.Command);
                 }
 
                 // Execute the command
                 var timeoutSeconds = step.Timeout.HasValue && step.Timeout.Value > 0 ? step.Timeout.Value : (int?)null;
                 var output = await context.Session.ExecuteAsync(command, step.Expect, timeoutSeconds, cancellationToken);
+
+                // Strip the echoed command from output
+                output = TerminalOutputProcessor.StripCommandEcho(output, command);
 
                 // Record the output
                 context.RecordCommandOutput(output, step.Capture);

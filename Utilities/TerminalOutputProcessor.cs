@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -164,6 +165,45 @@ namespace SSH_Helper.Utilities
                 return chunk;
 
             return ZshPromptSpRegex.Replace(chunk, string.Empty);
+        }
+
+        /// <summary>
+        /// Strips the echoed command from the beginning of terminal output.
+        /// When a command is sent, devices typically echo it back before showing output.
+        /// </summary>
+        /// <param name="output">Raw terminal output that may contain command echo</param>
+        /// <param name="command">The command that was sent</param>
+        /// <returns>Output with the echoed command removed</returns>
+        public static string StripCommandEcho(string output, string command)
+        {
+            if (string.IsNullOrEmpty(output) || string.IsNullOrEmpty(command))
+                return output;
+
+            // Normalize the command for comparison (trim whitespace)
+            var normalizedCommand = command.Trim();
+
+            // Split output into lines, preserving empty lines
+            var lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            if (lines.Length == 0)
+                return output;
+
+            // Check if first line contains the echoed command
+            // The echo typically appears as just the command text (possibly with leading space)
+            var firstLine = lines[0].Trim();
+
+            // Match if the first line equals the command or ends with it
+            // (handles cases where prompt is included in echo like "hostname# command")
+            if (firstLine.Equals(normalizedCommand, StringComparison.Ordinal) ||
+                firstLine.EndsWith(normalizedCommand, StringComparison.Ordinal))
+            {
+                // Remove the first line and rejoin
+                if (lines.Length == 1)
+                    return string.Empty;
+
+                return string.Join("\r\n", lines.Skip(1));
+            }
+
+            return output;
         }
 
         private static int ProcessEscapeSequence(string input, int startIndex, StringBuilder line, ref int cursor, ref int savedCursor)

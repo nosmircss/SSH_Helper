@@ -110,7 +110,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (into is string varName)
             {
                 // Single variable - capture first group (or full match if no groups)
-                var value = match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
+                var value = (match.Groups.Count > 1 ? match.Groups[1].Value : match.Value).Trim();
                 context.SetVariable(varName, value);
                 context.EmitOutput($"Extract: {varName} = '{TruncateForDisplay(value)}'", ScriptOutputType.Debug);
             }
@@ -120,7 +120,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 for (int i = 0; i < varList.Count; i++)
                 {
                     var groupIndex = i + 1; // Group 0 is full match, groups start at 1
-                    var value = groupIndex < match.Groups.Count ? match.Groups[groupIndex].Value : "";
+                    var value = groupIndex < match.Groups.Count ? match.Groups[groupIndex].Value.Trim() : "";
                     var name = varList[i]?.ToString() ?? $"group{i}";
                     context.SetVariable(name, value);
                     context.EmitOutput($"Extract: {name} = '{TruncateForDisplay(value)}'", ScriptOutputType.Debug);
@@ -136,7 +136,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 var values = new List<string>();
                 foreach (Match match in matches)
                 {
-                    var value = match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
+                    var value = (match.Groups.Count > 1 ? match.Groups[1].Value : match.Value).Trim();
                     values.Add(value);
                 }
                 context.SetVariable(varName, values);
@@ -162,7 +162,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                         var name = varObj?.ToString();
                         if (!string.IsNullOrEmpty(name) && groupIndex < match.Groups.Count)
                         {
-                            groupLists[name].Add(match.Groups[groupIndex].Value);
+                            groupLists[name].Add(match.Groups[groupIndex].Value.Trim());
                         }
                         groupIndex++;
                     }

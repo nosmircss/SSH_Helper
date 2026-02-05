@@ -7,4 +7,4 @@
 
 ## 2. Tests
 - [x] 2.1 Add unit tests for the output throttler buffer/flush behavior.
-- [ ] 2.2 Add a test verifying debug output bypasses throttling.
+- [x] 2.2 Add a test verifying debug output bypasses throttling.
