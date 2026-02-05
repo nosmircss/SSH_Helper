@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -104,6 +105,31 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
             else if (value is string strValue)
             {
+                // Check if it's a JSON array
+                var trimmed = strValue.Trim();
+                if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                {
+                    try
+                    {
+                        var jsonArray = JsonNode.Parse(trimmed)?.AsArray();
+                        if (jsonArray != null)
+                        {
+                            foreach (var element in jsonArray)
+                            {
+                                if (element != null)
+                                {
+                                    items.Add(element.ToJsonString());
+                                }
+                            }
+                            return items;
+                        }
+                    }
+                    catch
+                    {
+                        // Not valid JSON, fall through to line splitting
+                    }
+                }
+
                 // Split by newlines to iterate over lines
                 var lines = strValue.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
                 foreach (var line in lines)

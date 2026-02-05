@@ -96,6 +96,11 @@ namespace SSH_Helper.Services.Scripting.Models
         /// </summary>
         public WebhookOptions? Webhook { get; set; }
 
+        /// <summary>
+        /// Parse command - parses device configuration text into structured JSON data.
+        /// </summary>
+        public ParseOptions? Parse { get; set; }
+
         // ===== Command Options =====
 
         /// <summary>
@@ -164,6 +169,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (UpdateColumn != null) return StepType.UpdateColumn;
             if (Log != null) return StepType.Log;
             if (Webhook != null) return StepType.Webhook;
+            if (Parse != null) return StepType.Parse;
             return StepType.Unknown;
         }
     }
@@ -377,6 +383,33 @@ namespace SSH_Helper.Services.Scripting.Models
     }
 
     /// <summary>
+    /// Options for the parse command.
+    /// </summary>
+    public class ParseOptions
+    {
+        /// <summary>
+        /// The configuration format to parse (e.g., "fortigate").
+        /// </summary>
+        public string Format { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Source variable containing the raw configuration text.
+        /// </summary>
+        public string From { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Variable name to store the parsed configuration result.
+        /// </summary>
+        public string Into { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Optional list of section paths to parse (e.g., "system interface", "firewall policy").
+        /// If not specified, the entire configuration is parsed.
+        /// </summary>
+        public List<string>? Sections { get; set; }
+    }
+
+    /// <summary>
     /// Enumeration of step types.
     /// </summary>
     public enum StepType
@@ -396,6 +429,7 @@ namespace SSH_Helper.Services.Scripting.Models
         Input,
         UpdateColumn,
         Log,
-        Webhook
+        Webhook,
+        Parse
     }
 }

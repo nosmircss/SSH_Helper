@@ -3,6 +3,7 @@ using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SSH_Helper.Models;
+using SSH_Helper.Utilities;
 
 namespace SSH_Helper.Services
 {
@@ -53,13 +54,21 @@ namespace SSH_Helper.Services
 
             // Ensure all folders referenced by presets have entries in _folders
             // This handles legacy configs or manual edits where PresetFolders might be missing entries
+            // Also ensures parent folders exist for nested paths
             bool needsPersist = false;
             foreach (var preset in _presets.Values)
             {
-                if (!string.IsNullOrEmpty(preset.Folder) && !_folders.ContainsKey(preset.Folder))
+                if (!string.IsNullOrEmpty(preset.Folder))
                 {
-                    _folders[preset.Folder] = new FolderInfo { IsExpanded = true };
-                    needsPersist = true;
+                    // Ensure the folder and all its ancestors exist
+                    foreach (var path in FolderPathUtility.GetAllPathsInHierarchy(preset.Folder))
+                    {
+                        if (!_folders.ContainsKey(path))
+                        {
+                            _folders[path] = new FolderInfo { IsExpanded = true };
+                            needsPersist = true;
+                        }
+                    }
                 }
             }
 
@@ -228,8 +237,13 @@ namespace SSH_Helper.Services
         /// Imports all presets from a JSON file.
         /// If a preset exists, appends "_imported" to the name.
         /// </summary>
+        /// <param name="filePath">Path to the JSON file containing presets to import</param>
+        /// <param name="targetFolder">Optional folder to place all imported presets into.
+        /// If null, presets keep their original folder structure.
+        /// If empty string, all presets go to root level.
+        /// If a folder name, all presets go into that folder.</param>
         /// <returns>The number of presets imported</returns>
-        public int ImportAllFromFile(string filePath)
+        public int ImportAllFromFile(string filePath, string? targetFolder = null)
         {
             string json = File.ReadAllText(filePath);
             var importData = JObject.Parse(json);
@@ -251,10 +265,35 @@ namespace SSH_Helper.Services
                 {
                     foreach (var kvp in importedFolders)
                     {
-                        if (!_folders.ContainsKey(kvp.Key))
+                        // When targetFolder is specified, prepend it to the folder path
+                        string folderPath = !string.IsNullOrEmpty(targetFolder)
+                            ? FolderPathUtility.CombinePath(targetFolder, kvp.Key)
+                            : kvp.Key;
+
+                        // Ensure parent folders exist for the (potentially combined) path
+                        foreach (var path in FolderPathUtility.GetAllPathsInHierarchy(folderPath))
                         {
-                            _folders[kvp.Key] = kvp.Value;
+                            if (!_folders.ContainsKey(path))
+                            {
+                                // Use imported folder info for the actual folder, default for parents
+                                if (path == folderPath)
+                                    _folders[path] = kvp.Value;
+                                else
+                                    _folders[path] = new FolderInfo { IsExpanded = true };
+                            }
                         }
+                    }
+                }
+            }
+
+            // Ensure target folder and its parents exist if specified
+            if (!string.IsNullOrEmpty(targetFolder))
+            {
+                foreach (var path in FolderPathUtility.GetAllPathsInHierarchy(targetFolder))
+                {
+                    if (!_folders.ContainsKey(path))
+                    {
+                        _folders[path] = new FolderInfo { IsExpanded = true };
                     }
                 }
             }
@@ -270,10 +309,36 @@ namespace SSH_Helper.Services
                     name = GetUniqueName(name + "_imported");
                 }
 
-                // Ensure folder exists if preset has one
-                if (!string.IsNullOrEmpty(kvp.Value.Folder) && !_folders.ContainsKey(kvp.Value.Folder))
+                // Override folder if targetFolder is specified (including empty string for root)
+                if (targetFolder != null)
                 {
-                    _folders[kvp.Value.Folder] = new FolderInfo { IsExpanded = true };
+                    if (string.IsNullOrEmpty(targetFolder))
+                    {
+                        // Empty string means import to root - clear the folder
+                        kvp.Value.Folder = null;
+                    }
+                    else if (string.IsNullOrEmpty(kvp.Value.Folder))
+                    {
+                        // Preset had no folder, put it directly in target folder
+                        kvp.Value.Folder = targetFolder;
+                    }
+                    else
+                    {
+                        // Preset had a folder, combine target with original to preserve structure
+                        kvp.Value.Folder = FolderPathUtility.CombinePath(targetFolder, kvp.Value.Folder);
+                    }
+                }
+
+                // Ensure folder and its parents exist if preset has one
+                if (!string.IsNullOrEmpty(kvp.Value.Folder))
+                {
+                    foreach (var path in FolderPathUtility.GetAllPathsInHierarchy(kvp.Value.Folder))
+                    {
+                        if (!_folders.ContainsKey(path))
+                        {
+                            _folders[path] = new FolderInfo { IsExpanded = true };
+                        }
+                    }
                 }
 
                 _presets[name] = kvp.Value;
@@ -315,50 +380,96 @@ namespace SSH_Helper.Services
         #region Folder Operations
 
         /// <summary>
-        /// Creates a new folder.
+        /// Creates a new folder. For nested paths (e.g., "A/B/C"), automatically creates
+        /// all parent folders that don't exist.
         /// </summary>
-        /// <param name="name">The folder name</param>
-        /// <returns>True if created, false if folder already exists</returns>
-        public bool CreateFolder(string name)
+        /// <param name="path">The folder path (can be nested with "/" separator)</param>
+        /// <returns>True if created (or any parents created), false if folder already exists</returns>
+        public bool CreateFolder(string path)
         {
-            if (string.IsNullOrWhiteSpace(name))
-                throw new ArgumentException("Folder name cannot be empty", nameof(name));
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("Folder name cannot be empty", nameof(path));
 
-            if (_folders.ContainsKey(name))
-                return false;
+            bool anyCreated = false;
 
-            _folders[name] = new FolderInfo { IsExpanded = true };
-            PersistToConfig();
-            OnFoldersChanged();
-            return true;
-        }
-
-        /// <summary>
-        /// Renames a folder and updates all presets in that folder.
-        /// </summary>
-        public bool RenameFolder(string oldName, string newName)
-        {
-            if (string.IsNullOrWhiteSpace(newName))
-                return false;
-
-            if (!_folders.TryGetValue(oldName, out var folderInfo))
-                return false;
-
-            if (_folders.ContainsKey(newName))
-                return false;
-
-            // Update all presets in this folder
-            foreach (var preset in _presets.Values)
+            // Create all folders in the path hierarchy
+            foreach (var folderPath in FolderPathUtility.GetAllPathsInHierarchy(path))
             {
-                if (string.Equals(preset.Folder, oldName, StringComparison.Ordinal))
+                if (!_folders.ContainsKey(folderPath))
                 {
-                    preset.Folder = newName;
+                    _folders[folderPath] = new FolderInfo { IsExpanded = true };
+                    anyCreated = true;
                 }
             }
 
-            // Move folder metadata
-            _folders.Remove(oldName);
-            _folders[newName] = folderInfo;
+            if (anyCreated)
+            {
+                PersistToConfig();
+                OnFoldersChanged();
+            }
+
+            return anyCreated;
+        }
+
+        /// <summary>
+        /// Renames a folder and updates all presets in that folder and descendant folders.
+        /// Also renames all descendant folders.
+        /// </summary>
+        public bool RenameFolder(string oldPath, string newPath)
+        {
+            if (string.IsNullOrWhiteSpace(newPath))
+                return false;
+
+            if (!_folders.TryGetValue(oldPath, out var folderInfo))
+                return false;
+
+            if (_folders.ContainsKey(newPath))
+                return false;
+
+            // Ensure parent folders exist for the new path
+            var parentPath = FolderPathUtility.GetParentPath(newPath);
+            if (parentPath != null && !_folders.ContainsKey(parentPath))
+            {
+                // Create parent folders
+                foreach (var path in FolderPathUtility.GetAllPathsInHierarchy(parentPath))
+                {
+                    if (!_folders.ContainsKey(path))
+                    {
+                        _folders[path] = new FolderInfo { IsExpanded = true };
+                    }
+                }
+            }
+
+            // Find all descendant folders
+            var descendantFolders = _folders.Keys
+                .Where(k => FolderPathUtility.IsDescendantOf(k, oldPath))
+                .ToList();
+
+            // Update all presets in this folder or descendants
+            foreach (var preset in _presets.Values)
+            {
+                if (string.Equals(preset.Folder, oldPath, StringComparison.Ordinal))
+                {
+                    preset.Folder = newPath;
+                }
+                else if (!string.IsNullOrEmpty(preset.Folder) && FolderPathUtility.IsDescendantOf(preset.Folder, oldPath))
+                {
+                    preset.Folder = FolderPathUtility.RenamePath(preset.Folder, oldPath, newPath);
+                }
+            }
+
+            // Move folder metadata for this folder
+            _folders.Remove(oldPath);
+            _folders[newPath] = folderInfo;
+
+            // Update all descendant folder paths
+            foreach (var descendant in descendantFolders)
+            {
+                var descendantInfo = _folders[descendant];
+                _folders.Remove(descendant);
+                var newDescendantPath = FolderPathUtility.RenamePath(descendant, oldPath, newPath);
+                _folders[newDescendantPath] = descendantInfo;
+            }
 
             PersistToConfig();
             OnFoldersChanged();
@@ -367,32 +478,48 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Deletes a folder.
+        /// Deletes a folder and optionally all descendant folders.
         /// </summary>
-        /// <param name="name">Folder name</param>
-        /// <param name="deletePresets">If true, deletes presets in folder. If false, moves them to root.</param>
+        /// <param name="path">Folder path</param>
+        /// <param name="deletePresets">If true, deletes presets. If false, moves them to parent folder (or root).</param>
         /// <returns>True if folder was deleted</returns>
-        public bool DeleteFolder(string name, bool deletePresets = false)
+        public bool DeleteFolder(string path, bool deletePresets = false)
         {
-            if (!_folders.Remove(name))
+            if (!_folders.Remove(path))
                 return false;
 
-            // Handle presets in the deleted folder
-            var presetsInFolder = _presets.Where(p => string.Equals(p.Value.Folder, name, StringComparison.Ordinal)).ToList();
+            // Find and remove all descendant folders
+            var descendantFolders = _folders.Keys
+                .Where(k => FolderPathUtility.IsDescendantOf(k, path))
+                .ToList();
+
+            foreach (var descendant in descendantFolders)
+            {
+                _folders.Remove(descendant);
+            }
+
+            // Determine parent folder for moving presets (null = root)
+            var parentPath = FolderPathUtility.GetParentPath(path);
+
+            // Handle presets in the deleted folder and all descendants
+            var affectedPresets = _presets.Where(p =>
+                string.Equals(p.Value.Folder, path, StringComparison.Ordinal) ||
+                (!string.IsNullOrEmpty(p.Value.Folder) && FolderPathUtility.IsDescendantOf(p.Value.Folder, path))
+            ).ToList();
 
             if (deletePresets)
             {
-                foreach (var kvp in presetsInFolder)
+                foreach (var kvp in affectedPresets)
                 {
                     _presets.Remove(kvp.Key);
                 }
             }
             else
             {
-                // Move presets to root
-                foreach (var kvp in presetsInFolder)
+                // Move presets to parent folder (or root if no parent)
+                foreach (var kvp in affectedPresets)
                 {
-                    kvp.Value.Folder = null;
+                    kvp.Value.Folder = parentPath;
                 }
             }
 
@@ -434,11 +561,62 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Gets all folder names.
+        /// Gets all folder paths.
         /// </summary>
         public IEnumerable<string> GetFolders()
         {
             return _folders.Keys;
+        }
+
+        /// <summary>
+        /// Gets all root-level folders (folders with no parent).
+        /// </summary>
+        public IEnumerable<string> GetRootFolders()
+        {
+            return _folders.Keys.Where(k => !k.Contains(FolderPathUtility.Separator));
+        }
+
+        /// <summary>
+        /// Gets immediate child folders of a parent path.
+        /// </summary>
+        /// <param name="parentPath">Parent folder path, or null for root-level folders.</param>
+        public IEnumerable<string> GetSubfolders(string? parentPath)
+        {
+            if (string.IsNullOrEmpty(parentPath))
+            {
+                return GetRootFolders();
+            }
+
+            return _folders.Keys.Where(k => FolderPathUtility.IsImmediateChildOf(k, parentPath));
+        }
+
+        /// <summary>
+        /// Gets all descendant folders of a parent path (recursive).
+        /// </summary>
+        public IEnumerable<string> GetAllDescendantFolders(string parentPath)
+        {
+            if (string.IsNullOrEmpty(parentPath))
+                return Enumerable.Empty<string>();
+
+            return _folders.Keys.Where(k => FolderPathUtility.IsDescendantOf(k, parentPath));
+        }
+
+        /// <summary>
+        /// Counts all presets in a folder and its descendants.
+        /// </summary>
+        public int CountPresetsInFolderAndDescendants(string path)
+        {
+            return _presets.Count(p =>
+                string.Equals(p.Value.Folder, path, StringComparison.Ordinal) ||
+                (!string.IsNullOrEmpty(p.Value.Folder) && FolderPathUtility.IsDescendantOf(p.Value.Folder, path)));
+        }
+
+        /// <summary>
+        /// Counts all descendant folders of a path.
+        /// </summary>
+        public int CountDescendantFolders(string path)
+        {
+            return GetAllDescendantFolders(path).Count();
         }
 
         /// <summary>
@@ -471,16 +649,24 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Gets a unique folder name by appending _1, _2, etc. if needed.
+        /// Gets a unique folder path by appending _1, _2, etc. to the last segment if needed.
         /// </summary>
-        public string GetUniqueFolderName(string baseName)
+        public string GetUniqueFolderName(string basePath)
         {
-            string candidate = baseName;
+            if (!_folders.ContainsKey(basePath))
+                return basePath;
+
+            var parentPath = FolderPathUtility.GetParentPath(basePath);
+            var folderName = FolderPathUtility.GetFolderName(basePath);
+
             int i = 1;
-            while (_folders.ContainsKey(candidate))
+            string candidate;
+            do
             {
-                candidate = $"{baseName}_{i++}";
-            }
+                var newName = $"{folderName}_{i++}";
+                candidate = FolderPathUtility.CombinePath(parentPath, newName);
+            } while (_folders.ContainsKey(candidate));
+
             return candidate;
         }
 
@@ -500,10 +686,16 @@ namespace SSH_Helper.Services
                     string? folder = obj["folder"]?.ToString();
                     bool isFavorite = obj["isFavorite"]?.Value<bool>() ?? false;
 
-                    // Ensure folder exists if specified
-                    if (!string.IsNullOrEmpty(folder) && !_folders.ContainsKey(folder))
+                    // Ensure folder and its parents exist if specified
+                    if (!string.IsNullOrEmpty(folder))
                     {
-                        _folders[folder] = new FolderInfo { IsExpanded = true };
+                        foreach (var path in FolderPathUtility.GetAllPathsInHierarchy(folder))
+                        {
+                            if (!_folders.ContainsKey(path))
+                            {
+                                _folders[path] = new FolderInfo { IsExpanded = true };
+                            }
+                        }
                     }
 
                     return new PresetInfo

@@ -21,6 +21,7 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [updatecolumn](#updatecolumn---update-host-table-column)
    - [log](#log---output-with-log-level)
    - [webhook](#webhook---http-requests)
+   - [parse](#parse---configuration-parsing)
 3. [Variables](#variables)
 4. [Expressions and Conditions](#expressions-and-conditions)
 5. [Error Handling](#error-handling)
@@ -56,7 +57,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Keywords: `name:`, `description:`, `vars:`, `steps:`, `version:`, `nobanner:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- foreach:`, `- while:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- log:`, `- webhook:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- foreach:`, `- while:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- log:`, `- webhook:`, `- parse:`
 
 Plain text (without YAML markers) is treated as simple commands to execute line by line.
 
@@ -1439,6 +1440,194 @@ When using the `into` parameter, two variables are created:
 
 ---
 
+### parse - Configuration Parsing
+
+Parses device configuration text into structured JSON data. Currently supports FortiGate/FortiOS configuration format. The parsed data can be accessed using the `json.*` functions and exported to CSV or JSON files.
+
+**Syntax:**
+```yaml
+- parse:
+    format: fortigate
+    from: source_variable
+    into: destination_variable
+    sections:              # Optional: limit parsing to specific sections
+      - system interface
+      - firewall policy
+```
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `format` | Yes | Configuration format: `fortigate` (or `fortios`) |
+| `from` | Yes | Variable containing raw configuration text |
+| `into` | Yes | Variable name to store the parsed result |
+| `sections` | No | List of section paths to parse (for performance with large configs) |
+
+**Supported Formats:**
+
+| Format | Aliases | Description |
+|--------|---------|-------------|
+| `fortigate` | `fortios` | FortiGate/FortiOS configuration (`config`/`edit`/`set`/`next`/`end` syntax) |
+
+**FortiGate Configuration Structure:**
+
+FortiGate configs use a hierarchical structure:
+
+```
+config system interface
+    edit "wan1"
+        set vdom "root"
+        set ip 10.0.0.1 255.255.255.0
+    next
+    edit "lan1"
+        set vdom "root"
+    next
+end
+```
+
+This is parsed into JSON:
+
+```json
+{
+  "system": {
+    "interface": {
+      "wan1": {
+        "vdom": "root",
+        "ip": "10.0.0.1 255.255.255.0"
+      },
+      "lan1": {
+        "vdom": "root"
+      }
+    }
+  }
+}
+```
+
+**Parsing Rules:**
+- `config <path>` creates nested objects along the path
+- `edit "name"` creates named entries within the current section
+- `set key value` assigns string values to keys
+- Multi-value sets (e.g., `set member "a" "b"`) become arrays
+- `unset` directives are omitted from the output
+- Comments (lines starting with `#`) are ignored
+
+**Accessing Parsed Data:**
+
+After parsing, use the `json.*` functions to access the data:
+
+```yaml
+# Get a specific value
+- set: hostname = json.get(config, "system.global.hostname")
+
+# List all interface names
+- set: interfaces = json.keys(config, "system.interface")
+
+# Iterate over interfaces
+- foreach: iface in json.keys(config, "system.interface")
+  do:
+    - set: ip = json.get(config, "system.interface.${iface}.ip", "N/A")
+    - print: "${iface}: ${ip}"
+```
+
+**Examples:**
+
+```yaml
+# Basic parsing
+- send: show full-configuration
+  capture: raw_config
+  suppress: true
+  timeout: 120
+
+- parse:
+    format: fortigate
+    from: raw_config
+    into: config
+
+- set: hostname = json.get(config, "system.global.hostname", "unknown")
+- print: "Hostname: ${hostname}"
+
+# Parse only specific sections (faster for large configs)
+- send: show full-configuration
+  capture: raw_config
+  suppress: true
+
+- parse:
+    format: fortigate
+    from: raw_config
+    into: config
+    sections:
+      - system interface
+      - system global
+
+# Get all interfaces as a list
+- set: interfaces = json.keys(config, "system.interface")
+- print: "Found ${interfaces.length} interfaces"
+
+# Check if a section exists
+- if: json.exists(config, "firewall.policy")
+  then:
+    - print: "Firewall policies configured"
+```
+
+**Building Reports from Parsed Config:**
+
+```yaml
+# Export interface inventory to CSV
+- send: show full-configuration system interface
+  capture: raw_config
+  suppress: true
+
+- parse:
+    format: fortigate
+    from: raw_config
+    into: config
+
+- set: interfaces = json.keys(config, "system.interface")
+- set: report = json([])
+
+- foreach: iface in interfaces
+  do:
+    - set: ip = json.get(config, "system.interface.${iface}.ip", "N/A")
+    - set: vdom = json.get(config, "system.interface.${iface}.vdom", "root")
+    - set: type = json.get(config, "system.interface.${iface}.type", "unknown")
+    - set: row = json("name", "${iface}", "ip", "${ip}", "vdom", "${vdom}", "type", "${type}")
+    - set: report = json.push(report, ${row})
+
+- writefile:
+    path: "C:\\reports\\${Host_IP}_interfaces.csv"
+    format: csv
+    headers: [name, ip, vdom, type]
+    content: "${report}"
+
+- print: "Exported ${interfaces.length} interfaces to CSV"
+```
+
+**Nested Config Blocks:**
+
+FortiGate configs can have nested `config` blocks inside `edit` entries:
+
+```
+config firewall policy
+    edit 1
+        set srcintf "wan1"
+        config dstaddr
+            edit "server1"
+                set ip 192.168.1.10
+            next
+        end
+    next
+end
+```
+
+These are accessible via nested paths:
+
+```yaml
+- set: addr = json.get(config, "firewall.policy.1.dstaddr.server1.ip")
+```
+
+---
+
 ## Variables
 
 ### Variable Sources
@@ -2547,6 +2736,219 @@ steps:
 
 ---
 
+### Example 12: FortiGate Configuration Parsing
+
+```yaml
+---
+name: FortiGate Interface Report
+description: Parses FortiGate config and exports interface inventory to CSV
+
+steps:
+  - print: "Collecting interface configuration from ${Host_IP}..."
+
+  # Capture the full interface configuration
+  - send: show full-configuration system interface
+    capture: raw_config
+    suppress: true
+    timeout: 120
+
+  # Parse the FortiGate configuration
+  - parse:
+      format: fortigate
+      from: raw_config
+      into: config
+
+  # Get hostname for report
+  - send: get system status
+    capture: status_output
+    suppress: true
+
+  - extract:
+      from: status_output
+      pattern: 'Hostname: (\S+)'
+      into: hostname
+
+  # Get list of all interfaces
+  - set: interfaces = json.keys(config, "system.interface")
+
+  - if: interfaces.length == 0
+    then:
+      - exit: failure "No interfaces found in configuration"
+
+  - print: "Found ${interfaces.length} interfaces on ${hostname}"
+
+  # Build report data as JSON array
+  - set: report = json([])
+
+  - foreach: iface in interfaces
+    do:
+      # Extract interface properties with defaults
+      - set: ip = json.get(config, "system.interface.${iface}.ip", "N/A")
+      - set: vdom = json.get(config, "system.interface.${iface}.vdom", "root")
+      - set: type = json.get(config, "system.interface.${iface}.type", "unknown")
+      - set: status = json.get(config, "system.interface.${iface}.status", "up")
+      - set: allowaccess = json.get(config, "system.interface.${iface}.allowaccess", "")
+
+      # Create row object
+      - set: row = json("hostname", "${hostname}", "interface", "${iface}", "ip", "${ip}", "vdom", "${vdom}", "type", "${type}", "status", "${status}", "access", "${allowaccess}")
+      - set: report = json.push(report, ${row})
+
+      # Log each interface
+      - log:
+          message: "  ${iface}: ${ip} (${type})"
+          level: debug
+
+  # Write CSV report
+  - writefile:
+      path: "C:\\reports\\${hostname}_interfaces.csv"
+      format: csv
+      headers: [hostname, interface, ip, vdom, type, status, access]
+      content: "${report}"
+
+  # Also write JSON for programmatic access
+  - writefile:
+      path: "C:\\reports\\${hostname}_interfaces.json"
+      format: json
+      content: "${report}"
+      pretty: true
+
+  # Update host table with summary
+  - updatecolumn:
+      column: interface_count
+      value: ${interfaces.length}
+
+  - updatecolumn:
+      column: last_scanned
+      value: ${_timestamp}
+
+  - print: "Exported ${interfaces.length} interfaces to CSV and JSON"
+  - exit: success "Interface report generated for ${hostname}"
+```
+
+---
+
+### Example 13: FortiGate Firewall Policy Audit
+
+```yaml
+---
+name: Firewall Policy Audit
+description: Parses FortiGate firewall policies and identifies potential issues
+
+steps:
+  - print: "Auditing firewall policies on ${Host_IP}..."
+
+  # Capture firewall policy configuration
+  - send: show full-configuration firewall policy
+    capture: raw_config
+    suppress: true
+    timeout: 180
+
+  - parse:
+      format: fortigate
+      from: raw_config
+      into: config
+
+  # Get all policy IDs
+  - set: policies = json.keys(config, "firewall.policy")
+
+  - if: policies.length == 0
+    then:
+      - log:
+          message: "No firewall policies found"
+          level: warning
+      - exit: success "No policies to audit"
+
+  - print: "Analyzing ${policies.length} firewall policies..."
+
+  # Initialize counters
+  - set: any_any_count = 0
+  - set: disabled_count = 0
+  - set: no_logging_count = 0
+  - set: issues = json([])
+
+  # Analyze each policy
+  - foreach: pid in policies
+    do:
+      - set: policy_path = "firewall.policy.${pid}"
+
+      # Get policy attributes
+      - set: srcaddr = json.get(config, "${policy_path}.srcaddr", "")
+      - set: dstaddr = json.get(config, "${policy_path}.dstaddr", "")
+      - set: service = json.get(config, "${policy_path}.service", "")
+      - set: action = json.get(config, "${policy_path}.action", "deny")
+      - set: status = json.get(config, "${policy_path}.status", "enable")
+      - set: logtraffic = json.get(config, "${policy_path}.logtraffic", "")
+      - set: name = json.get(config, "${policy_path}.name", "Policy ${pid}")
+
+      # Check for any-any rules
+      - if: srcaddr contains "all" and dstaddr contains "all" and action == "accept"
+        then:
+          - set: any_any_count = any_any_count + 1
+          - set: issue = json("policy", "${pid}", "name", "${name}", "issue", "any-any-accept", "severity", "high")
+          - set: issues = json.push(issues, ${issue})
+          - log:
+              message: "Policy ${pid} (${name}): ANY-ANY ACCEPT rule detected"
+              level: warning
+
+      # Check for disabled rules
+      - if: status == "disable"
+        then:
+          - set: disabled_count = disabled_count + 1
+
+      # Check for no logging
+      - if: logtraffic is empty or logtraffic == "disable"
+        then:
+          - set: no_logging_count = no_logging_count + 1
+
+  # Build audit report
+  - set: audit.host = ${Host_IP}
+  - set: audit.timestamp = ${_timestamp}
+  - set: audit.summary.total_policies = ${policies.length}
+  - set: audit.summary.any_any_rules = ${any_any_count}
+  - set: audit.summary.disabled_rules = ${disabled_count}
+  - set: audit.summary.no_logging = ${no_logging_count}
+  - set: audit.issues = ${issues}
+
+  # Determine overall status
+  - if: any_any_count > 0
+    then:
+      - set: audit.status = "NEEDS_REVIEW"
+    else:
+      - set: audit.status = "OK"
+
+  # Write audit report
+  - writefile:
+      path: "C:\\audits\\${Host_IP}_policy_audit.json"
+      format: json
+      content: "${audit}"
+      pretty: true
+
+  # Update host table
+  - updatecolumn:
+      column: policy_status
+      value: ${audit.status}
+
+  - updatecolumn:
+      column: policy_count
+      value: ${policies.length}
+
+  # Summary output
+  - print: "Audit complete: ${policies.length} policies analyzed"
+  - print: "  - Any-Any Accept rules: ${any_any_count}"
+  - print: "  - Disabled rules: ${disabled_count}"
+  - print: "  - Rules without logging: ${no_logging_count}"
+
+  - if: any_any_count > 0
+    then:
+      - log:
+          message: "Review required: ${any_any_count} any-any rules found"
+          level: warning
+
+  - exit: success "Policy audit complete"
+```
+
+---
+
 ## Tips and Best Practices
 
 ### General
@@ -2573,3 +2975,9 @@ steps:
 15. **Use `json()` for inline objects**: Quick way to create JSON without building nested structures
 16. **Automatic type detection**: Numbers and booleans in arrays are preserved (e.g., `"42"` becomes `42` in JSON)
 17. **Use `json.merge()` for configuration overrides**: Combine base settings with host-specific overrides
+
+### Working with Configuration Parsing
+18. **Use `parse` for structured device configs**: Parse FortiGate configs instead of regex for reliable data extraction
+19. **Filter sections for large configs**: Use the `sections` parameter to only parse what you need
+20. **Access parsed data with `json.get()`**: Use default values to handle missing keys gracefully
+21. **Iterate with `json.keys()`**: Get all interface names, policy IDs, etc. for processing in loops

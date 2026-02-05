@@ -126,7 +126,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (value is string str)
             {
                 // Try to parse as JSON first
-                if ((str.TrimStart().StartsWith("{") || str.TrimStart().StartsWith("[")) && str.TrimEnd().EndsWith("}") || str.TrimEnd().EndsWith("]"))
+                if ((str.TrimStart().StartsWith("{") || str.TrimStart().StartsWith("[")) && (str.TrimEnd().EndsWith("}") || str.TrimEnd().EndsWith("]")))
                 {
                     try
                     {
@@ -870,6 +870,17 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             if (value is JsonArray jsonArr)
                 return jsonArr;
+
+            // Handle Dictionary<string, object> (from parse command)
+            if (value is IDictionary<string, object> dict)
+            {
+                try
+                {
+                    var jsonString = JsonSerializer.Serialize(dict);
+                    return JsonNode.Parse(jsonString);
+                }
+                catch { }
+            }
 
             if (value is string strVal)
             {

@@ -29,8 +29,9 @@ namespace SSH_Helper.Models
         public bool IsFavorite { get; set; }
 
         /// <summary>
-        /// The folder this preset belongs to (null or empty = root level).
-        /// Single-level folders only, no nesting.
+        /// The folder path this preset belongs to (null or empty = root level).
+        /// Supports nested folders using forward-slash separator (e.g., "Network/Cisco/Switches").
+        /// Single-level folder names (no slash) represent root-level folders.
         /// </summary>
         public string? Folder { get; set; }
 

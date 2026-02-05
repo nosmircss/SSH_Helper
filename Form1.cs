@@ -45,6 +45,7 @@ namespace SSH_Helper
 
         // Window message constants
         public const int WM_THEMECHANGED = 0x031A;
+        public const int WM_SETREDRAW = 0x000B;
 
         // SetWindowPos flags for forcing frame/non-client area redraw
         [DllImport("user32.dll")]
@@ -75,7 +76,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.16";
+        private const string ApplicationVersion = "0.50.17";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -2377,10 +2378,39 @@ namespace SSH_Helper
             {
                 if (draggedTag.IsFolder)
                 {
-                    // Folder reordering in Manual mode (folders can't be nested)
-                    if (_currentSortMode == PresetSortMode.Manual && targetNode?.Tag is PresetNodeTag targetTag && targetTag.IsFolder)
+                    if (targetNode?.Tag is PresetNodeTag targetTag && targetTag.IsFolder)
                     {
-                        ReorderFolders(draggedTag.Name, targetTag.Name);
+                        // Check if this is a reorder within the same parent level
+                        var draggedParent = FolderPathUtility.GetParentPath(draggedTag.Name);
+                        var targetParent = FolderPathUtility.GetParentPath(targetTag.Name);
+
+                        if (_currentSortMode == PresetSortMode.Manual && draggedParent == targetParent)
+                        {
+                            // Folder reordering within same level
+                            ReorderFolders(draggedTag.Name, targetTag.Name);
+                        }
+                        else
+                        {
+                            // Move folder into target folder (make it a subfolder)
+                            var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
+                            var newPath = FolderPathUtility.CombinePath(targetTag.Name, folderName);
+
+                            // Get unique name if conflict
+                            newPath = _presetManager.GetUniqueFolderName(newPath);
+
+                            _presetManager.RenameFolder(draggedTag.Name, newPath);
+                        }
+                    }
+                    else if (targetNode == null)
+                    {
+                        // Drop on empty area = move folder to root level
+                        var currentParent = FolderPathUtility.GetParentPath(draggedTag.Name);
+                        if (currentParent != null)
+                        {
+                            var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
+                            var newPath = _presetManager.GetUniqueFolderName(folderName);
+                            _presetManager.RenameFolder(draggedTag.Name, newPath);
+                        }
                     }
                 }
                 else
@@ -2433,8 +2463,16 @@ namespace SSH_Helper
 
             if (draggedTag.IsFolder)
             {
-                // Folders can only be reordered with other folders in Manual mode
-                return _currentSortMode == PresetSortMode.Manual && targetTag.IsFolder;
+                if (!targetTag.IsFolder)
+                    return false;
+
+                // Prevent dropping folder into itself or its descendants (cycle prevention)
+                if (draggedTag.Name == targetTag.Name ||
+                    FolderPathUtility.IsDescendantOf(targetTag.Name, draggedTag.Name))
+                    return false;
+
+                // Can drop folder onto another folder (to make it a subfolder) or reorder in Manual mode
+                return true;
             }
             else
             {
@@ -3462,46 +3500,81 @@ namespace SSH_Helper
             };
             ctxMoveToFolder.DropDownItems.Add(rootItem);
 
-            // Add separator if there are folders
-            var folders = _presetManager.GetFolders().ToList();
-            if (folders.Count > 0)
+            // Build hierarchical folder menu
+            var allFolders = _presetManager.GetFolders().OrderBy(f => f).ToList();
+            if (allFolders.Count > 0)
             {
                 ctxMoveToFolder.DropDownItems.Add(new ToolStripSeparator());
             }
 
-            // Add folder options
-            foreach (var folderName in folders.OrderBy(f => f))
+            // Dictionary to track menu items by path for nesting
+            var menuItems = new Dictionary<string, ToolStripMenuItem>();
+
+            foreach (var folderPath in allFolders)
             {
+                var folderName = FolderPathUtility.GetFolderName(folderPath);
+                var parentPath = FolderPathUtility.GetParentPath(folderPath);
+
                 var folderItem = new ToolStripMenuItem(folderName)
                 {
-                    Checked = string.Equals(currentFolder, folderName, StringComparison.Ordinal),
-                    Tag = folderName
+                    Checked = string.Equals(currentFolder, folderPath, StringComparison.Ordinal),
+                    Tag = folderPath
                 };
+
+                // Capture folderPath for closure
+                var targetPath = folderPath;
                 folderItem.Click += (s, e) =>
                 {
-                    _presetManager.MovePresetToFolder(presetName, folderName);
+                    _presetManager.MovePresetToFolder(presetName, targetPath);
                     RefreshPresetList();
                     SelectPresetByName(presetName);
                 };
-                ctxMoveToFolder.DropDownItems.Add(folderItem);
+
+                // Add to parent menu or root
+                if (parentPath != null && menuItems.TryGetValue(parentPath, out var parentItem))
+                {
+                    parentItem.DropDownItems.Add(folderItem);
+                }
+                else
+                {
+                    ctxMoveToFolder.DropDownItems.Add(folderItem);
+                }
+
+                menuItems[folderPath] = folderItem;
             }
         }
 
         private void ctxAddFolder_Click(object? sender, EventArgs e)
         {
+            // Check if a folder is selected - if so, create as subfolder
+            string? parentPath = null;
+            if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                parentPath = tag.Name;
+            }
+
+            string prompt = parentPath != null
+                ? $"Enter a name for the new subfolder in '{parentPath}':"
+                : "Enter a name for the new folder (use / for nested paths, e.g., 'Network/Cisco'):";
+
             string folderName = Microsoft.VisualBasic.Interaction.InputBox(
-                "Enter a name for the new folder:",
+                prompt,
                 "New Folder",
                 "New Folder");
 
             if (string.IsNullOrWhiteSpace(folderName)) return;
 
-            folderName = _presetManager.GetUniqueFolderName(folderName);
+            // Build full path
+            string fullPath = parentPath != null
+                ? FolderPathUtility.CombinePath(parentPath, folderName)
+                : folderName;
 
-            if (_presetManager.CreateFolder(folderName))
+            fullPath = _presetManager.GetUniqueFolderName(fullPath);
+
+            if (_presetManager.CreateFolder(fullPath))
             {
                 RefreshPresetList();
-                UpdateStatusBar($"Folder '{folderName}' created");
+                UpdateStatusBar($"Folder '{fullPath}' created");
             }
         }
 
@@ -3510,18 +3583,28 @@ namespace SSH_Helper
             if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || !tag.IsFolder)
                 return;
 
-            string oldName = tag.Name;
-            string newName = Microsoft.VisualBasic.Interaction.InputBox(
-                $"Enter a new name for the folder '{oldName}':",
+            string oldPath = tag.Name;
+            string oldFolderName = FolderPathUtility.GetFolderName(oldPath);
+            string? parentPath = FolderPathUtility.GetParentPath(oldPath);
+
+            string prompt = parentPath != null
+                ? $"Enter a new name for the folder '{oldFolderName}' (in {parentPath}):"
+                : $"Enter a new name for the folder '{oldFolderName}':";
+
+            string newFolderName = Microsoft.VisualBasic.Interaction.InputBox(
+                prompt,
                 "Rename Folder",
-                oldName);
+                oldFolderName);
 
-            if (string.IsNullOrWhiteSpace(newName) || newName == oldName) return;
+            if (string.IsNullOrWhiteSpace(newFolderName) || newFolderName == oldFolderName) return;
 
-            if (_presetManager.RenameFolder(oldName, newName))
+            // Build new full path
+            string newPath = FolderPathUtility.CombinePath(parentPath, newFolderName);
+
+            if (_presetManager.RenameFolder(oldPath, newPath))
             {
                 RefreshPresetList();
-                UpdateStatusBar($"Folder renamed to '{newName}'");
+                UpdateStatusBar($"Folder renamed to '{newPath}'");
             }
             else
             {
@@ -3534,18 +3617,67 @@ namespace SSH_Helper
             if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || !tag.IsFolder)
                 return;
 
-            string folderName = tag.Name;
-            var presetsInFolder = _presetManager.GetPresetsInFolder(folderName).ToList();
+            string folderPath = tag.Name;
+            string folderName = FolderPathUtility.GetFolderName(folderPath);
+            string? parentPath = FolderPathUtility.GetParentPath(folderPath);
 
-            string message = presetsInFolder.Count > 0
-                ? $"Delete folder '{folderName}' and move its {presetsInFolder.Count} preset(s) to root level?"
-                : $"Delete empty folder '{folderName}'?";
+            // Count presets and subfolders
+            int presetCount = _presetManager.CountPresetsInFolderAndDescendants(folderPath);
+            int subfolderCount = _presetManager.CountDescendantFolders(folderPath);
 
-            if (MessageBox.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            // Build message based on contents
+            var messageParts = new List<string>();
+            if (subfolderCount > 0)
+                messageParts.Add($"{subfolderCount} subfolder(s)");
+            if (presetCount > 0)
+                messageParts.Add($"{presetCount} preset(s)");
+
+            string contentsDescription = messageParts.Count > 0
+                ? $" containing {string.Join(" and ", messageParts)}"
+                : " (empty)";
+
+            // If folder has presets, offer choice to delete or move them
+            if (presetCount > 0)
             {
-                _presetManager.DeleteFolder(folderName, deletePresets: false);
+                string targetLocation = parentPath != null ? $"parent folder '{parentPath}'" : "root level";
+                string message = $"Delete folder '{folderName}'{contentsDescription}?\n\n" +
+                               $"Yes = Delete folder AND all presets\n" +
+                               $"No = Delete folder but move presets to {targetLocation}\n" +
+                               $"Cancel = Abort";
+
+                var result = MessageBox.Show(message, "Delete Folder", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+
+                if (result == DialogResult.Cancel)
+                    return;
+
+                bool deletePresets = result == DialogResult.Yes;
+
+                if (deletePresets)
+                {
+                    // Clear editor before deleting to avoid "save changes?" prompt for deleted presets
+                    _activePresetName = null;
+                    txtPreset.Clear();
+                    txtCommand.Clear();
+                    txtTimeoutHeader.Clear();
+                }
+
+                _presetManager.DeleteFolder(folderPath, deletePresets: deletePresets);
                 RefreshPresetList();
-                UpdateStatusBar($"Folder '{folderName}' deleted");
+
+                string action = deletePresets ? "and its presets deleted" : "deleted (presets moved)";
+                UpdateStatusBar($"Folder '{folderPath}' {action}");
+            }
+            else
+            {
+                // No presets, just confirm deletion
+                string message = $"Delete folder '{folderName}'{contentsDescription}?";
+
+                if (MessageBox.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                {
+                    _presetManager.DeleteFolder(folderPath, deletePresets: false);
+                    RefreshPresetList();
+                    UpdateStatusBar($"Folder '{folderPath}' deleted");
+                }
             }
         }
 
@@ -3563,12 +3695,25 @@ namespace SSH_Helper
                 return;
             }
 
-            string folderName = tag.Name;
-            var presetsInFolder = _presetManager.GetPresetsInFolder(folderName).ToList();
+            string folderPath = tag.Name;
+            string folderName = FolderPathUtility.GetFolderName(folderPath);
 
-            string message = presetsInFolder.Count > 0
-                ? $"Are you sure you want to delete the folder '{folderName}' and ALL {presetsInFolder.Count} preset(s) inside it?\n\nThis action cannot be undone."
-                : $"Delete empty folder '{folderName}'?";
+            // Count presets and subfolders
+            int presetCount = _presetManager.CountPresetsInFolderAndDescendants(folderPath);
+            int subfolderCount = _presetManager.CountDescendantFolders(folderPath);
+
+            // Build message based on contents
+            var messageParts = new List<string>();
+            if (subfolderCount > 0)
+                messageParts.Add($"{subfolderCount} subfolder(s)");
+            if (presetCount > 0)
+                messageParts.Add($"{presetCount} preset(s)");
+
+            string contentsDescription = messageParts.Count > 0
+                ? $" and ALL its contents ({string.Join(" and ", messageParts)})"
+                : "";
+
+            string message = $"Are you sure you want to delete the folder '{folderName}'{contentsDescription}?\n\nThis action cannot be undone.";
 
             if (MessageBox.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
             {
@@ -3578,7 +3723,7 @@ namespace SSH_Helper
                 txtCommand.Clear();
                 txtTimeoutHeader.Clear();
 
-                _presetManager.DeleteFolder(folderName, deletePresets: true);
+                _presetManager.DeleteFolder(folderPath, deletePresets: true);
                 RefreshPresetList();
                 UpdateStatusBar($"Folder '{folderName}' and its presets deleted");
             }
@@ -4684,11 +4829,23 @@ namespace SSH_Helper
             if (dialog.ShowDialog() != DialogResult.OK)
                 return;
 
+            // Ask user where to import the presets
+            string? targetFolder = PromptForImportDestination();
+            if (targetFolder == "\x1B") // ESC marker for cancelled
+                return;
+
             try
             {
-                int count = _presetManager.ImportAllFromFile(dialog.FileName);
+                int count = _presetManager.ImportAllFromFile(dialog.FileName, targetFolder);
                 RefreshPresetList();
-                MessageBox.Show($"Imported {count} presets.\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
+
+                string locationMsg = targetFolder == null
+                    ? "Presets were imported with their original folder structure."
+                    : string.IsNullOrEmpty(targetFolder)
+                        ? "Presets were imported to root level."
+                        : $"Presets were imported to folder \"{targetFolder}\".";
+
+                MessageBox.Show($"Imported {count} presets.\n\n{locationMsg}\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
                     "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (FormatException ex)
@@ -4699,6 +4856,56 @@ namespace SSH_Helper
             {
                 MessageBox.Show($"Failed to import presets: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        /// <summary>
+        /// Prompts the user to select a destination folder for importing presets.
+        /// </summary>
+        /// <returns>
+        /// null = keep original structure,
+        /// empty string = import to root,
+        /// folder name = import to that folder,
+        /// "\x1B" = cancelled
+        /// </returns>
+        private string? PromptForImportDestination()
+        {
+            // Ask if user wants to import to a specific folder
+            var result = MessageBox.Show(
+                "Would you like to import these presets into a specific folder?\n\n" +
+                "• Yes - Choose a destination folder\n" +
+                "• No - Keep the original folder structure from the export",
+                "Import Destination",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Cancel)
+                return "\x1B";
+
+            if (result == DialogResult.No)
+                return null; // Keep original structure
+
+            // Get list of existing folders
+            var existingFolders = _presetManager.GetFolders().OrderBy(f => f).ToList();
+
+            // Build the prompt message with existing folders
+            string folderList = existingFolders.Count > 0
+                ? "\n\nExisting folders:\n• " + string.Join("\n• ", existingFolders)
+                : "";
+
+            string prompt = $"Enter the folder name to import presets into:{folderList}\n\n" +
+                           "(Leave empty to import to root level, or type a new name to create a folder)";
+
+            string folderName = Microsoft.VisualBasic.Interaction.InputBox(
+                prompt,
+                "Import Destination Folder",
+                existingFolders.Count > 0 ? existingFolders[0] : "");
+
+            // Empty result from InputBox means Cancel was pressed OR user left it empty
+            // We need to distinguish - if user presses Cancel, we abort
+            // InputBox returns empty string for both Cancel and empty input
+            // So we'll treat empty as "root level" and provide a way to cancel earlier
+
+            return folderName; // Empty string = root, non-empty = folder name
         }
 
         private void RefreshPresetList(bool restoreExpandState = true)
@@ -4716,26 +4923,43 @@ namespace SSH_Helper
 
             var config = _configService.Load();
 
-            // Get sorted folders
-            var folders = GetSortedFolders(config);
-
-            // Add folder nodes
+            // Dictionary to track nodes by full path for nested folder building
             var folderNodes = new Dictionary<string, TreeNode>();
-            foreach (var folderName in folders)
+
+            // Get all folders sorted
+            var allFolders = GetSortedFolders(config).ToList();
+
+            // Build nested folder hierarchy
+            foreach (var folderPath in allFolders)
             {
-                var folderInfo = _presetManager.Folders.GetValueOrDefault(folderName);
+                var folderInfo = _presetManager.Folders.GetValueOrDefault(folderPath);
+                var folderName = FolderPathUtility.GetFolderName(folderPath);
+                var parentPath = FolderPathUtility.GetParentPath(folderPath);
+
                 string folderDisplay = folderInfo?.IsFavorite == true
                     ? $"{StarIcon} {FolderIcon} {folderName}"
                     : $"{FolderIcon} {folderName}";
+
                 var folderNode = new TreeNode(folderDisplay)
                 {
-                    Tag = new PresetNodeTag { IsFolder = true, Name = folderName }
+                    Tag = new PresetNodeTag { IsFolder = true, Name = folderPath }
                 };
-                trvPresets.Nodes.Add(folderNode);
-                folderNodes[folderName] = folderNode;
 
-                // Add presets in this folder
-                var presetsInFolder = GetSortedPresetsInFolder(folderName, config);
+                // Add to parent node or tree root
+                if (parentPath != null && folderNodes.TryGetValue(parentPath, out var parentNode))
+                {
+                    parentNode.Nodes.Add(folderNode);
+                }
+                else
+                {
+                    // Root-level folder
+                    trvPresets.Nodes.Add(folderNode);
+                }
+
+                folderNodes[folderPath] = folderNode;
+
+                // Add presets in this folder (exact match only, not descendants)
+                var presetsInFolder = GetSortedPresetsInFolder(folderPath, config);
                 foreach (var presetName in presetsInFolder)
                 {
                     var preset = _presetManager.Get(presetName);
@@ -4748,7 +4972,6 @@ namespace SSH_Helper
                 }
 
                 // Restore expand state immediately while still in BeginUpdate block
-                // This prevents flicker by doing all visual changes before EndUpdate
                 if (restoreExpandState && folderInfo?.IsExpanded == true)
                 {
                     folderNode.Expand();
@@ -4784,13 +5007,28 @@ namespace SSH_Helper
         {
             var folders = _presetManager.GetFolders().ToList();
 
-            return _currentSortMode switch
+            // Sort folders so parents always come before their children
+            // This is critical for building the nested tree hierarchy correctly
+            IEnumerable<string> sortedFolders = _currentSortMode switch
             {
                 PresetSortMode.Ascending => folders.OrderBy(f => f, StringComparer.OrdinalIgnoreCase),
-                PresetSortMode.Descending => folders.OrderByDescending(f => f, StringComparer.OrdinalIgnoreCase),
+                PresetSortMode.Descending => folders
+                    .OrderBy(f => FolderPathUtility.GetDepth(f))  // Depth first to ensure parents before children
+                    .ThenByDescending(f => f, StringComparer.OrdinalIgnoreCase),
                 PresetSortMode.Manual => GetManualOrderedFolders(folders, config),
                 _ => folders
             };
+
+            // Ensure parents come before children by sorting by depth, then by the sort order
+            // Ascending alphabetical naturally handles this because "A" < "A/B"
+            // For descending and manual, we need to be more careful
+            if (_currentSortMode == PresetSortMode.Manual)
+            {
+                // For manual ordering, sort by depth first to ensure parent folders exist
+                sortedFolders = sortedFolders.OrderBy(f => FolderPathUtility.GetDepth(f)).ToList();
+            }
+
+            return sortedFolders;
         }
 
         private IEnumerable<string> GetManualOrderedFolders(List<string> folders, AppConfiguration config)
@@ -4865,22 +5103,44 @@ namespace SSH_Helper
             return result;
         }
 
-        private void DisplayFolderSummary(string folderName)
+        private void DisplayFolderSummary(string folderPath)
         {
             var config = _configService.Load();
-            var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
+            var presetNames = GetSortedPresetsInFolder(folderPath, config).ToList();
+            var subfolders = _presetManager.GetSubfolders(folderPath).ToList();
+            var folderName = FolderPathUtility.GetFolderName(folderPath);
 
             var sb = new StringBuilder();
             sb.AppendLine(FolderSummarySeparator);
             sb.AppendLine($"  FOLDER: {folderName}");
+            if (folderPath != folderName)
+            {
+                sb.AppendLine($"  PATH: {folderPath}");
+            }
             sb.AppendLine(FolderSummarySeparator);
             sb.AppendLine();
             sb.AppendLine($"  Presets: {presetNames.Count}");
+            if (subfolders.Count > 0)
+            {
+                sb.AppendLine($"  Subfolders: {subfolders.Count}");
+            }
             sb.AppendLine();
+
+            if (subfolders.Count > 0)
+            {
+                sb.AppendLine("  Subfolders:");
+                sb.AppendLine($"  {FolderSummarySubSeparator}");
+                foreach (var subfolder in subfolders.OrderBy(f => f))
+                {
+                    var subfolderName = FolderPathUtility.GetFolderName(subfolder);
+                    sb.AppendLine($"    {FolderIcon} {subfolderName}");
+                }
+                sb.AppendLine();
+            }
 
             if (presetNames.Count > 0)
             {
-                sb.AppendLine("  Contents:");
+                sb.AppendLine("  Presets:");
                 sb.AppendLine($"  {FolderSummarySubSeparator}");
                 foreach (var name in presetNames)
                 {
@@ -4890,7 +5150,7 @@ namespace SSH_Helper
                     sb.AppendLine($"  {favorite}{name} {type}");
                 }
             }
-            else
+            else if (subfolders.Count == 0)
             {
                 sb.AppendLine("  (Empty folder)");
             }
@@ -5785,26 +6045,48 @@ namespace SSH_Helper
 
         private void SetOutputText(string text)
         {
-            _uiOutputThrottler.Clear();
-            lock (_outputBufferLock)
+            // Suspend drawing to prevent flicker during text replacement
+            NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+            try
             {
-                _outputBuffer.Clear();
-                if (!string.IsNullOrEmpty(text))
-                    _outputBuffer.Append(text);
-            }
+                _uiOutputThrottler.Clear();
+                lock (_outputBufferLock)
+                {
+                    _outputBuffer.Clear();
+                    if (!string.IsNullOrEmpty(text))
+                        _outputBuffer.Append(text);
+                }
 
-            txtOutput.Text = text ?? string.Empty;
+                txtOutput.Text = text ?? string.Empty;
+            }
+            finally
+            {
+                // Resume drawing and force repaint
+                NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+                txtOutput.Invalidate();
+            }
             ScrollOutputToEnd();
         }
 
         private void ClearOutput()
         {
-            _uiOutputThrottler.Clear();
-            lock (_outputBufferLock)
+            // Suspend drawing to prevent flicker during clear
+            NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+            try
             {
-                _outputBuffer.Clear();
+                _uiOutputThrottler.Clear();
+                lock (_outputBufferLock)
+                {
+                    _outputBuffer.Clear();
+                }
+                txtOutput.Clear();
             }
-            txtOutput.Clear();
+            finally
+            {
+                // Resume drawing and force repaint
+                NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+                txtOutput.Invalidate();
+            }
         }
 
         private void ScrollOutputToEnd()
@@ -5868,6 +6150,8 @@ namespace SSH_Helper
 
             Invoke(() =>
             {
+                // Clear selection first to prevent auto-adjustment events when inserting at index 0
+                lstOutput.ClearSelected();
                 _outputHistory.Insert(0, entry);
                 var hostResults = BuildHostHistoryEntries(results);
                 if (hostResults.Count > 0)

@@ -70,7 +70,8 @@ namespace SSH_Helper.Services.Scripting
                     trimmedLine.StartsWith("- writefile:") ||
                     trimmedLine.StartsWith("- input:") ||
                     trimmedLine.StartsWith("- log:") ||
-                    trimmedLine.StartsWith("- webhook:"))
+                    trimmedLine.StartsWith("- webhook:") ||
+                    trimmedLine.StartsWith("- parse:"))
                 {
                     return true;
                 }
@@ -296,6 +297,9 @@ namespace SSH_Helper.Services.Scripting
                         break;
                     case "webhook":
                         step.Webhook = ParseWebhookOptions(parser);
+                        break;
+                    case "parse":
+                        step.Parse = ParseParseOptions(parser);
                         break;
                     case "then":
                         step.Then = ParseSteps(parser);
@@ -672,6 +676,52 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
+        private ParseOptions ParseParseOptions(IParser parser)
+        {
+            var options = new ParseOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "format":
+                            options.Format = parser.Consume<Scalar>().Value;
+                            break;
+                        case "from":
+                            options.From = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "sections":
+                            var sectionsList = ParseScalarOrSequence(parser);
+                            if (sectionsList is List<string> list)
+                                options.Sections = list;
+                            else if (sectionsList is string singleSection)
+                                options.Sections = new List<string> { singleSection };
+                            break;
+                        default:
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
         private Dictionary<string, string> ParseStringDictionary(IParser parser)
         {
             var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -858,6 +908,24 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Input requires 'into' variable{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Parse:
+                        if (step.Parse == null || string.IsNullOrEmpty(step.Parse.Format))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Parse requires 'format' (e.g., 'fortigate'){lineContent}");
+                        }
+                        if (step.Parse == null || string.IsNullOrEmpty(step.Parse.From))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Parse requires 'from' variable{lineContent}");
+                        }
+                        if (step.Parse == null || string.IsNullOrEmpty(step.Parse.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Parse requires 'into' variable{lineContent}");
                         }
                         break;
                 }
