@@ -26,8 +26,9 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             try
             {
-                // Substitute variables in path
-                var filePath = context.SubstituteVariables(step.Writefile.Path);
+                // Substitute variables in path (supports both script variables and Windows env vars like %HOMEPATH%)
+                var filePath = Environment.ExpandEnvironmentVariables(
+                    context.SubstituteVariables(step.Writefile.Path));
 
                 // Validate path for security
                 if (!ScriptFileAccessValidator.ValidateWritePath(filePath, out var pathError))
@@ -436,6 +437,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             // Check if content is a variable reference like ${varname}
             List<string>? rows = null;
+            List<string>? headers = options.Headers;
             if (rawContent.StartsWith("${") && rawContent.EndsWith("}"))
             {
                 var varName = rawContent.Substring(2, rawContent.Length - 3);
@@ -445,26 +447,85 @@ namespace SSH_Helper.Services.Scripting.Commands
                 {
                     rows = list;
                 }
+                else if (varValue is string strValue)
+                {
+                    // Check if it's a JSON array of objects
+                    var trimmed = strValue.Trim();
+                    if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                    {
+                        try
+                        {
+                            var jsonArray = JsonNode.Parse(trimmed)?.AsArray();
+                            if (jsonArray != null && jsonArray.Count > 0)
+                            {
+                                rows = new List<string>();
+                                foreach (var element in jsonArray)
+                                {
+                                    if (element is JsonObject obj)
+                                    {
+                                        // If headers provided, use them to extract values in order
+                                        if (headers != null && headers.Count > 0)
+                                        {
+                                            var values = new List<string>();
+                                            foreach (var header in headers)
+                                            {
+                                                var val = obj[header]?.ToString() ?? "";
+                                                values.Add(val);
+                                            }
+                                            rows.Add(string.Join(",", values.ConvertAll(EscapeCsvField)));
+                                        }
+                                        else
+                                        {
+                                            // No headers, just serialize each object
+                                            rows.Add(element.ToJsonString());
+                                        }
+                                    }
+                                    else if (element != null)
+                                    {
+                                        rows.Add(element.ToString() ?? "");
+                                    }
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // Not valid JSON, treat as regular string
+                            rows = new List<string> { strValue };
+                        }
+                    }
+                    else
+                    {
+                        rows = new List<string> { strValue };
+                    }
+                }
                 else if (varValue != null)
                 {
                     rows = new List<string> { varValue.ToString() ?? string.Empty };
                 }
             }
 
+            // Track if rows were pre-formatted from JSON (already escaped)
+            bool rowsPreFormatted = rows != null && rawContent.StartsWith("${");
+
             if (rows == null)
             {
                 // Substitute variables and split by newlines
                 var substituted = context.SubstituteVariables(rawContent);
                 rows = new List<string>(substituted.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries));
+                rowsPreFormatted = false;
             }
 
             // Write rows
             foreach (var row in rows)
             {
-                // If the row contains commas or tabs, treat as already delimited; otherwise, write as single value
-                if (row.Contains(',') || row.Contains('\t'))
+                if (rowsPreFormatted)
                 {
-                    // Split by comma or tab and escape each field
+                    // Rows from JSON parsing are already properly formatted
+                    sb.AppendLine(row);
+                }
+                else if (row.Contains(',') || row.Contains('\t'))
+                {
+                    // If the row contains commas or tabs, treat as already delimited
                     var fields = row.Split(new[] { ',', '\t' });
                     sb.AppendLine(string.Join(",", Array.ConvertAll(fields, f => EscapeCsvField(f.Trim()))));
                 }
