@@ -45,6 +45,7 @@ namespace SSH_Helper
 
         // Window message constants
         public const int WM_THEMECHANGED = 0x031A;
+        public const int WM_SETREDRAW = 0x000B;
 
         // SetWindowPos flags for forcing frame/non-client area redraw
         [DllImport("user32.dll")]
@@ -6044,26 +6045,48 @@ namespace SSH_Helper
 
         private void SetOutputText(string text)
         {
-            _uiOutputThrottler.Clear();
-            lock (_outputBufferLock)
+            // Suspend drawing to prevent flicker during text replacement
+            NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+            try
             {
-                _outputBuffer.Clear();
-                if (!string.IsNullOrEmpty(text))
-                    _outputBuffer.Append(text);
-            }
+                _uiOutputThrottler.Clear();
+                lock (_outputBufferLock)
+                {
+                    _outputBuffer.Clear();
+                    if (!string.IsNullOrEmpty(text))
+                        _outputBuffer.Append(text);
+                }
 
-            txtOutput.Text = text ?? string.Empty;
+                txtOutput.Text = text ?? string.Empty;
+            }
+            finally
+            {
+                // Resume drawing and force repaint
+                NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+                txtOutput.Invalidate();
+            }
             ScrollOutputToEnd();
         }
 
         private void ClearOutput()
         {
-            _uiOutputThrottler.Clear();
-            lock (_outputBufferLock)
+            // Suspend drawing to prevent flicker during clear
+            NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+            try
             {
-                _outputBuffer.Clear();
+                _uiOutputThrottler.Clear();
+                lock (_outputBufferLock)
+                {
+                    _outputBuffer.Clear();
+                }
+                txtOutput.Clear();
             }
-            txtOutput.Clear();
+            finally
+            {
+                // Resume drawing and force repaint
+                NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+                txtOutput.Invalidate();
+            }
         }
 
         private void ScrollOutputToEnd()
@@ -6127,6 +6150,8 @@ namespace SSH_Helper
 
             Invoke(() =>
             {
+                // Clear selection first to prevent auto-adjustment events when inserting at index 0
+                lstOutput.ClearSelected();
                 _outputHistory.Insert(0, entry);
                 var hostResults = BuildHostHistoryEntries(results);
                 if (hostResults.Count > 0)
