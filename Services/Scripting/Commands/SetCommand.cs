@@ -126,7 +126,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (value is string str)
             {
                 // Try to parse as JSON first
-                if ((str.TrimStart().StartsWith("{") || str.TrimStart().StartsWith("[")) && str.TrimEnd().EndsWith("}") || str.TrimEnd().EndsWith("]"))
+                if ((str.TrimStart().StartsWith("{") || str.TrimStart().StartsWith("[")) && (str.TrimEnd().EndsWith("}") || str.TrimEnd().EndsWith("]")))
                 {
                     try
                     {
