@@ -4684,11 +4684,23 @@ namespace SSH_Helper
             if (dialog.ShowDialog() != DialogResult.OK)
                 return;
 
+            // Ask user where to import the presets
+            string? targetFolder = PromptForImportDestination();
+            if (targetFolder == "\x1B") // ESC marker for cancelled
+                return;
+
             try
             {
-                int count = _presetManager.ImportAllFromFile(dialog.FileName);
+                int count = _presetManager.ImportAllFromFile(dialog.FileName, targetFolder);
                 RefreshPresetList();
-                MessageBox.Show($"Imported {count} presets.\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
+
+                string locationMsg = targetFolder == null
+                    ? "Presets were imported with their original folder structure."
+                    : string.IsNullOrEmpty(targetFolder)
+                        ? "Presets were imported to root level."
+                        : $"Presets were imported to folder \"{targetFolder}\".";
+
+                MessageBox.Show($"Imported {count} presets.\n\n{locationMsg}\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
                     "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (FormatException ex)
@@ -4699,6 +4711,56 @@ namespace SSH_Helper
             {
                 MessageBox.Show($"Failed to import presets: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        /// <summary>
+        /// Prompts the user to select a destination folder for importing presets.
+        /// </summary>
+        /// <returns>
+        /// null = keep original structure,
+        /// empty string = import to root,
+        /// folder name = import to that folder,
+        /// "\x1B" = cancelled
+        /// </returns>
+        private string? PromptForImportDestination()
+        {
+            // Ask if user wants to import to a specific folder
+            var result = MessageBox.Show(
+                "Would you like to import these presets into a specific folder?\n\n" +
+                "• Yes - Choose a destination folder\n" +
+                "• No - Keep the original folder structure from the export",
+                "Import Destination",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Cancel)
+                return "\x1B";
+
+            if (result == DialogResult.No)
+                return null; // Keep original structure
+
+            // Get list of existing folders
+            var existingFolders = _presetManager.GetFolders().OrderBy(f => f).ToList();
+
+            // Build the prompt message with existing folders
+            string folderList = existingFolders.Count > 0
+                ? "\n\nExisting folders:\n• " + string.Join("\n• ", existingFolders)
+                : "";
+
+            string prompt = $"Enter the folder name to import presets into:{folderList}\n\n" +
+                           "(Leave empty to import to root level, or type a new name to create a folder)";
+
+            string folderName = Microsoft.VisualBasic.Interaction.InputBox(
+                prompt,
+                "Import Destination Folder",
+                existingFolders.Count > 0 ? existingFolders[0] : "");
+
+            // Empty result from InputBox means Cancel was pressed OR user left it empty
+            // We need to distinguish - if user presses Cancel, we abort
+            // InputBox returns empty string for both Cancel and empty input
+            // So we'll treat empty as "root level" and provide a way to cancel earlier
+
+            return folderName; // Empty string = root, non-empty = folder name
         }
 
         private void RefreshPresetList(bool restoreExpandState = true)

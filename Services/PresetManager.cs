@@ -228,8 +228,13 @@ namespace SSH_Helper.Services
         /// Imports all presets from a JSON file.
         /// If a preset exists, appends "_imported" to the name.
         /// </summary>
+        /// <param name="filePath">Path to the JSON file containing presets to import</param>
+        /// <param name="targetFolder">Optional folder to place all imported presets into.
+        /// If null, presets keep their original folder structure.
+        /// If empty string, all presets go to root level.
+        /// If a folder name, all presets go into that folder.</param>
         /// <returns>The number of presets imported</returns>
-        public int ImportAllFromFile(string filePath)
+        public int ImportAllFromFile(string filePath, string? targetFolder = null)
         {
             string json = File.ReadAllText(filePath);
             var importData = JObject.Parse(json);
@@ -242,21 +247,30 @@ namespace SSH_Helper.Services
             if (importedPresets == null)
                 throw new FormatException("Invalid preset file format: could not parse presets");
 
-            // Import folders if present (version 2+)
-            var foldersToken = importData["folders"];
-            if (foldersToken != null)
+            // Import folders if present (version 2+) - only when not redirecting to a target folder
+            if (targetFolder == null)
             {
-                var importedFolders = foldersToken.ToObject<Dictionary<string, FolderInfo>>();
-                if (importedFolders != null)
+                var foldersToken = importData["folders"];
+                if (foldersToken != null)
                 {
-                    foreach (var kvp in importedFolders)
+                    var importedFolders = foldersToken.ToObject<Dictionary<string, FolderInfo>>();
+                    if (importedFolders != null)
                     {
-                        if (!_folders.ContainsKey(kvp.Key))
+                        foreach (var kvp in importedFolders)
                         {
-                            _folders[kvp.Key] = kvp.Value;
+                            if (!_folders.ContainsKey(kvp.Key))
+                            {
+                                _folders[kvp.Key] = kvp.Value;
+                            }
                         }
                     }
                 }
+            }
+
+            // Ensure target folder exists if specified
+            if (!string.IsNullOrEmpty(targetFolder) && !_folders.ContainsKey(targetFolder))
+            {
+                _folders[targetFolder] = new FolderInfo { IsExpanded = true };
             }
 
             int count = 0;
@@ -270,8 +284,13 @@ namespace SSH_Helper.Services
                     name = GetUniqueName(name + "_imported");
                 }
 
-                // Ensure folder exists if preset has one
-                if (!string.IsNullOrEmpty(kvp.Value.Folder) && !_folders.ContainsKey(kvp.Value.Folder))
+                // Override folder if targetFolder is specified (including empty string for root)
+                if (targetFolder != null)
+                {
+                    kvp.Value.Folder = string.IsNullOrEmpty(targetFolder) ? null : targetFolder;
+                }
+                // Ensure folder exists if preset has one (when keeping original structure)
+                else if (!string.IsNullOrEmpty(kvp.Value.Folder) && !_folders.ContainsKey(kvp.Value.Folder))
                 {
                     _folders[kvp.Value.Folder] = new FolderInfo { IsExpanded = true };
                 }
