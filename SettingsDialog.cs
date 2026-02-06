@@ -1,5 +1,6 @@
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using SSH_Helper.UI;
 
 namespace SSH_Helper
 {
@@ -10,7 +11,7 @@ namespace SSH_Helper
     {
         private readonly ConfigurationService _configService;
 
-        private readonly TabControl _tabControl;
+        private readonly BorderlessTabControl _tabControl;
 
         // General tab controls
         private readonly CheckBox _chkRememberState;
@@ -76,15 +77,15 @@ namespace SSH_Helper
         private TextBox _txtPreviewCode = null!;
         private Button _btnPreviewButton = null!;
 
-        // Reset button
-        private readonly Button _btnResetDefaults;
+        // Reset button (lives inside the Appearance tab)
+        private Button _btnResetDefaults = null!;
 
         private readonly Button _btnSave;
         private readonly Button _btnCancel;
 
         private Color _customAccentColor = Color.FromArgb(0, 120, 215);
 
-        public SettingsDialog(ConfigurationService configService)
+        public SettingsDialog(ConfigurationService configService, bool darkMode = false)
         {
             _configService = configService;
 
@@ -100,7 +101,7 @@ namespace SSH_Helper
             MinimizeBox = false;
             ShowInTaskbar = false;
 
-            _tabControl = new TabControl
+            _tabControl = new BorderlessTabControl
             {
                 Location = new Point(12, 12),
                 Size = new Size(480, 520),
@@ -120,14 +121,6 @@ namespace SSH_Helper
             _tabControl.TabPages.Add(tabAppearance);
 
             // Buttons
-            _btnResetDefaults = new Button
-            {
-                Text = "Reset to Defaults",
-                Size = new Size(110, 28),
-                Location = new Point(12, 545)
-            };
-            _btnResetDefaults.Click += BtnResetDefaults_Click;
-
             _btnSave = new Button
             {
                 Text = "Save",
@@ -146,7 +139,6 @@ namespace SSH_Helper
             };
 
             Controls.Add(_tabControl);
-            Controls.Add(_btnResetDefaults);
             Controls.Add(_btnSave);
             Controls.Add(_btnCancel);
 
@@ -170,6 +162,44 @@ namespace SSH_Helper
 
             LoadSettings();
             UpdatePreview();
+            ApplyDialogTheme(darkMode);
+        }
+
+        private void ApplyDialogTheme(bool darkMode)
+        {
+            DialogTheme.ApplyTo(this, darkMode);
+            DialogTheme.StyleButton(_btnSave, darkMode, isPrimary: true);
+            DialogTheme.StyleButton(_btnCancel, darkMode);
+            DialogTheme.StyleButton(_btnResetDefaults, darkMode);
+            DialogTheme.StyleButton(_btnChooseAccentColor, darkMode);
+            DialogTheme.SetDarkTitleBar(this, darkMode);
+            DialogTheme.StyleTabControl(_tabControl, darkMode);
+
+            if (darkMode)
+            {
+                Load += (_, _) => DialogTheme.ApplyNativeTheme(this, true);
+
+                // Re-apply native theme when switching tabs. Controls on
+                // non-visible tab pages can lose their native dark rendering
+                // until they are actually shown.
+                _tabControl.Selected += (_, e) =>
+                {
+                    if (e.TabPage != null)
+                        BeginInvoke(() => DialogTheme.ApplyNativeTheme(e.TabPage, true));
+                };
+            }
+
+            // The preview panel should reflect theme
+            if (darkMode)
+            {
+                _pnlPreview.BackColor = DialogTheme.DarkSurface1;
+                _pnlPreview.ForeColor = DialogTheme.DarkText;
+            }
+            else
+            {
+                _pnlPreview.BackColor = Color.White;
+                _pnlPreview.ForeColor = DialogTheme.LightText;
+            }
         }
 
         private TabPage CreateGeneralTab()
@@ -786,6 +816,17 @@ namespace SSH_Helper
             _pnlPreview.Controls.Add(_btnPreviewButton);
 
             scrollPanel.Controls.Add(_pnlPreview);
+            y += 130;
+
+            // Reset appearance defaults button — inside the Appearance tab
+            _btnResetDefaults = new Button
+            {
+                Text = "Reset Appearance to Defaults",
+                Size = new Size(190, 28),
+                Location = new Point(15, y)
+            };
+            _btnResetDefaults.Click += BtnResetDefaults_Click;
+            scrollPanel.Controls.Add(_btnResetDefaults);
 
             tabAppearance.Controls.Add(scrollPanel);
 

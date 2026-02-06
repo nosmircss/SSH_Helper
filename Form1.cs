@@ -1023,7 +1023,18 @@ namespace SSH_Helper
             else
             {
                 // Calculate height based on font (font height + padding)
-                var autoHeight = trvPresets.Font.Height + 4;
+                int fontHeight;
+                try
+                {
+                    fontHeight = treeFont.Height;
+                }
+                catch (ArgumentException)
+                {
+                    // GDI+ can fail with "Parameter is not valid" during font transitions;
+                    // approximate from point size (1pt ≈ 1.333px at 96 DPI, plus internal leading)
+                    fontHeight = (int)Math.Ceiling(Scaled(fontSettings.TreeViewFontSize) * 1.6f);
+                }
+                var autoHeight = fontHeight + 4;
                 trvPresets.ItemHeight = autoHeight;
                 trvFavorites.ItemHeight = autoHeight;
             }
@@ -1107,10 +1118,18 @@ namespace SSH_Helper
 
             ResumeLayout(true);
 
-            // Now safe to dispose previous fonts — all controls have been reassigned
-            foreach (var font in previousFonts)
+            // Defer disposal so any pending WM_PAINT messages (queued by ApplyTheme's
+            // Refresh or by ResumeLayout) are processed while old fonts are still valid.
+            if (previousFonts.Count > 0)
             {
-                try { font.Dispose(); } catch { }
+                var fontsToDispose = previousFonts;
+                BeginInvoke(() =>
+                {
+                    foreach (var font in fontsToDispose)
+                    {
+                        try { font.Dispose(); } catch { }
+                    }
+                });
             }
         }
 
@@ -1726,11 +1745,28 @@ namespace SSH_Helper
                     Alignment = StringAlignment.Center,
                     LineAlignment = StringAlignment.Center
                 };
-                e.Graphics.DrawString(tabPage.Text, tabControl.Font, textBrush, tabRect, sf);
+                SafeDrawString(e.Graphics, tabPage.Text, tabControl.Font, textBrush, tabRect, sf);
             }
         }
 
         #endregion
+
+        /// <summary>
+        /// Draws text safely, catching ArgumentException from disposed fonts during
+        /// font-settings transitions. Silently skips the draw on failure — the control
+        /// will repaint correctly on the next cycle with valid fonts.
+        /// </summary>
+        private static void SafeDrawString(Graphics g, string? s, Font font, Brush brush, RectangleF rect, StringFormat? format)
+        {
+            try
+            {
+                g.DrawString(s, font, brush, rect, format);
+            }
+            catch (ArgumentException)
+            {
+                // Font disposed during a settings transition; skip this frame
+            }
+        }
 
         #endregion
 
@@ -1865,7 +1901,7 @@ namespace SSH_Helper
             };
             var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
             using var brush = new SolidBrush(Color.FromArgb(108, 117, 125));
-            e.Graphics.DrawString(rowIdx, grid.Font, brush, headerBounds, centerFormat);
+            SafeDrawString(e.Graphics, rowIdx, grid.Font, brush, headerBounds, centerFormat);
         }
 
         private void Dgv_Variables_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -3212,7 +3248,7 @@ namespace SSH_Helper
         private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             var previousCredentialManager = _configService.GetCurrent().Credentials.UseCredentialManager;
-            using var dialog = new SettingsDialog(_configService);
+            using var dialog = new SettingsDialog(_configService, _isDarkMode);
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 // Settings saved - default timeout only applies to new presets
@@ -3357,7 +3393,7 @@ namespace SSH_Helper
 
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            using var dlg = new AboutDialog(ApplicationName, ApplicationVersion);
+            using var dlg = new AboutDialog(ApplicationName, ApplicationVersion, _isDarkMode);
             dlg.ShowDialog(this);
         }
 
@@ -3943,7 +3979,7 @@ namespace SSH_Helper
                 var textRect = new Rectangle(e.Bounds.Left + 24, e.Bounds.Top, e.Bounds.Width - 28, e.Bounds.Height);
                 var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
                 using var textBrush = new SolidBrush(textColor);
-                e.Graphics.DrawString(hostEntry.HostAddress, e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
+                SafeDrawString(e.Graphics, hostEntry.HostAddress, e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
             }
         }
 
@@ -3997,7 +4033,7 @@ namespace SSH_Helper
                 {
                     var dateTimeSize = e.Graphics.MeasureString(dateTimePart + " - ", e.Font ?? lstOutput.Font);
                     var dateTimeRect = new RectangleF(currentX, e.Bounds.Top, dateTimeSize.Width, e.Bounds.Height);
-                    e.Graphics.DrawString(dateTimePart + " - ", e.Font ?? lstOutput.Font, textBrush, dateTimeRect, sf);
+                    SafeDrawString(e.Graphics, dateTimePart + " - ", e.Font ?? lstOutput.Font, textBrush, dateTimeRect, sf);
                     currentX += (int)dateTimeSize.Width;
                 }
 
@@ -4012,13 +4048,13 @@ namespace SSH_Helper
 
                 // Draw folder name
                 var nameRect = new Rectangle(currentX, e.Bounds.Top, e.Bounds.Width - currentX - 4, e.Bounds.Height);
-                e.Graphics.DrawString(folderName, e.Font ?? lstOutput.Font, textBrush, nameRect, sf);
+                SafeDrawString(e.Graphics, folderName, e.Font ?? lstOutput.Font, textBrush, nameRect, sf);
             }
             else
             {
                 // Regular entry - just draw the text
                 var textRect = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top, e.Bounds.Width - 8, e.Bounds.Height);
-                e.Graphics.DrawString(text, e.Font ?? lstOutput.Font, textBrush, textRect, sf);
+                SafeDrawString(e.Graphics, text, e.Font ?? lstOutput.Font, textBrush, textRect, sf);
             }
         }
 
@@ -4150,7 +4186,7 @@ namespace SSH_Helper
             var textBounds = new Rectangle(indent + iconWidth, e.Bounds.Y, treeView.ClientSize.Width - indent - iconWidth, e.Bounds.Height);
             using var textBrush = new SolidBrush(textColor);
             using var sf = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
-            e.Graphics.DrawString(nodeText, treeView.Font, textBrush, textBounds, sf);
+            SafeDrawString(e.Graphics, nodeText, treeView.Font, textBrush, textBounds, sf);
         }
 
         private void exportHostOutputToolStripMenuItem_Click(object? sender, EventArgs e)
@@ -5509,7 +5545,7 @@ namespace SSH_Helper
             if (ExecutionDialogPolicy.ShouldPromptForPresetExecutionOptions(hosts.Count))
             {
                 var hostAddresses = hosts.Select(h => h.ToString()).ToList();
-                using var dialog = new FolderExecutionDialog(presetDisplayName, new List<string> { presetDisplayName }, hostAddresses);
+                using var dialog = new FolderExecutionDialog(presetDisplayName, new List<string> { presetDisplayName }, hostAddresses, _isDarkMode);
                 if (dialog.ShowDialog(this) != DialogResult.OK)
                     return;
 
@@ -5758,7 +5794,7 @@ namespace SSH_Helper
                 .Select(r => GetCellValue(r, CsvManager.HostColumnName))
                 .Where(h => !string.IsNullOrWhiteSpace(h))
                 .ToList();
-            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses);
+            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses, _isDarkMode);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -5799,7 +5835,7 @@ namespace SSH_Helper
             }
 
             // Show folder execution dialog (single host selected)
-            using var dialog = new FolderExecutionDialog(folderName, presetNames, new List<string> { host });
+            using var dialog = new FolderExecutionDialog(folderName, presetNames, new List<string> { host }, _isDarkMode);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -5840,7 +5876,7 @@ namespace SSH_Helper
             var hostAddresses = checkedRows
                 .Select(r => GetCellValue(r, CsvManager.HostColumnName))
                 .ToList();
-            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses);
+            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses, _isDarkMode);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -6954,7 +6990,7 @@ namespace SSH_Helper
                 {
                     if (!silent)
                     {
-                        using var errorDialog = new UpdateErrorDialog(result.ErrorMessage);
+                        using var errorDialog = new UpdateErrorDialog(result.ErrorMessage, _isDarkMode);
                         errorDialog.ShowDialog(this);
                     }
                     UpdateStatusBar("Update check failed");
@@ -6973,14 +7009,14 @@ namespace SSH_Helper
                     using var updateDialog = new UpdateDialog(result, _updateService, skippedVersion =>
                     {
                         _configService.Update(c => c.UpdateSettings.SkippedVersion = skippedVersion);
-                    }, config.UpdateSettings.EnableUpdateLog);
+                    }, config.UpdateSettings.EnableUpdateLog, _isDarkMode);
                     updateDialog.ShowDialog(this);
                 }
                 else
                 {
                     if (!silent)
                     {
-                        using var noUpdateDialog = new NoUpdateDialog(ApplicationVersion);
+                        using var noUpdateDialog = new NoUpdateDialog(ApplicationVersion, _isDarkMode);
                         noUpdateDialog.ShowDialog(this);
                     }
                 }
@@ -6991,7 +7027,7 @@ namespace SSH_Helper
             {
                 if (!silent)
                 {
-                    using var errorDialog = new UpdateErrorDialog(ex.Message);
+                    using var errorDialog = new UpdateErrorDialog(ex.Message, _isDarkMode);
                     errorDialog.ShowDialog(this);
                 }
                 UpdateStatusBar("Update check failed");

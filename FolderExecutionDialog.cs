@@ -1,4 +1,5 @@
 using SSH_Helper.Models;
+using SSH_Helper.UI;
 
 namespace SSH_Helper
 {
@@ -11,6 +12,8 @@ namespace SSH_Helper
         private readonly List<string> _presetNames;
         private readonly List<string> _hostAddresses;
 
+        private readonly Panel _pnlPresets;
+        private readonly Panel _pnlHosts;
         private readonly CheckedListBox _lstPresets;
         private readonly CheckedListBox _lstHosts;
         private readonly Label _lblHosts;
@@ -28,7 +31,7 @@ namespace SSH_Helper
         /// </summary>
         public FolderExecutionOptions Options { get; private set; } = new();
 
-        public FolderExecutionDialog(string folderName, List<string> presetNames, List<string> hostAddresses)
+        public FolderExecutionDialog(string folderName, List<string> presetNames, List<string> hostAddresses, bool darkMode = false)
         {
             _folderName = folderName;
             _presetNames = presetNames;
@@ -50,12 +53,20 @@ namespace SSH_Helper
                 AutoSize = true
             };
 
-            _lstPresets = new CheckedListBox
+            _pnlPresets = new Panel
             {
                 Location = new Point(15, 38),
                 Size = new Size(375, 94),
-                CheckOnClick = true
+                Padding = new Padding(1)
             };
+
+            _lstPresets = new CheckedListBox
+            {
+                Dock = DockStyle.Fill,
+                CheckOnClick = true,
+                BorderStyle = BorderStyle.None
+            };
+            _pnlPresets.Controls.Add(_lstPresets);
 
             foreach (var preset in _presetNames)
             {
@@ -71,12 +82,20 @@ namespace SSH_Helper
                 AutoSize = true
             };
 
-            _lstHosts = new CheckedListBox
+            _pnlHosts = new Panel
             {
                 Location = new Point(15, 163),
                 Size = new Size(375, 94),
-                CheckOnClick = true
+                Padding = new Padding(1)
             };
+
+            _lstHosts = new CheckedListBox
+            {
+                Dock = DockStyle.Fill,
+                CheckOnClick = true,
+                BorderStyle = BorderStyle.None
+            };
+            _pnlHosts.Controls.Add(_lstHosts);
 
             foreach (var host in _hostAddresses)
             {
@@ -169,7 +188,7 @@ namespace SSH_Helper
                 Text = $"Run {_presetNames.Count} Presets",
                 AutoSize = true,
                 MinimumSize = new Size(0, 28),
-                Location = new Point(230, 498),
+                Location = new Point(185, 500),
                 DialogResult = DialogResult.OK
             };
             _btnRun.Click += BtnRun_Click;
@@ -178,15 +197,15 @@ namespace SSH_Helper
             {
                 Text = "Cancel",
                 Size = new Size(80, 28),
-                Location = new Point(320, 498),
+                Location = new Point(305, 500),
                 DialogResult = DialogResult.Cancel
             };
 
             // Add controls
             Controls.Add(lblPresets);
-            Controls.Add(_lstPresets);
+            Controls.Add(_pnlPresets);
             Controls.Add(_lblHosts);
-            Controls.Add(_lstHosts);
+            Controls.Add(_pnlHosts);
             Controls.Add(lblPresetSection);
             Controls.Add(lblRunMode);
             Controls.Add(_rbSequential);
@@ -202,6 +221,27 @@ namespace SSH_Helper
 
             AcceptButton = _btnRun;
             CancelButton = _btnCancel;
+
+            ApplyTheme(darkMode);
+        }
+
+        private void ApplyTheme(bool darkMode)
+        {
+            DialogTheme.ApplyTo(this, darkMode);
+
+            // Panel BackColor acts as the 1px border around each list
+            var borderColor = darkMode ? DialogTheme.DarkBorder : DialogTheme.LightBorder;
+            _pnlPresets.BackColor = borderColor;
+            _pnlHosts.BackColor = borderColor;
+
+            DialogTheme.StyleButton(_btnRun, darkMode);
+            DialogTheme.StyleButton(_btnCancel, darkMode);
+            DialogTheme.SetDarkTitleBar(this, darkMode);
+
+            if (darkMode)
+            {
+                Load += (_, _) => DialogTheme.ApplyNativeTheme(this, true);
+            }
         }
 
         private void LstPresets_ItemCheck(object? sender, ItemCheckEventArgs e)
