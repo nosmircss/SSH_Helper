@@ -13,9 +13,24 @@ namespace SSH_Helper
         /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
         protected override void Dispose(bool disposing)
         {
-            if (disposing && (components != null))
+            if (disposing)
             {
-                components.Dispose();
+                // Unsubscribe service event handlers to prevent leaks
+                if (_sshService != null)
+                {
+                    _sshService.OutputReceived -= SshService_OutputReceived;
+                    _sshService.ColumnUpdateRequested -= SshService_ColumnUpdateRequested;
+                    _sshService.CommandCompleted -= SshService_CommandCompleted;
+                    _sshService.ExecutionCompleted -= SshService_ExecutionCompleted;
+                }
+
+                // Dispose services and owned resources
+                _sshService?.Dispose();
+                _uiOutputThrottler?.Dispose();
+                _findDialog?.Dispose();
+                (_credentialProvider as IDisposable)?.Dispose();
+
+                components?.Dispose();
             }
             base.Dispose(disposing);
         }

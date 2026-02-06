@@ -38,6 +38,11 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (uri.Scheme != "http" && uri.Scheme != "https")
                     return CommandResult.Fail($"URL must use http or https scheme: {url}");
 
+                // NOTE: No private/internal IP filtering is applied. Scripts can target any
+                // reachable endpoint including localhost and private ranges (10.x, 172.16-31.x, 192.168.x).
+                // This is by design for infrastructure automation, but users should be aware that
+                // untrusted scripts could probe internal networks (SSRF risk).
+
                 // Create cancellation with timeout
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromSeconds(options.Timeout > 0 ? options.Timeout : 30));

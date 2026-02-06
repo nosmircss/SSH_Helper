@@ -50,7 +50,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             try
             {
-                var regex = new Regex(pattern, RegexOptions.Multiline | RegexOptions.IgnoreCase);
+                var regex = new Regex(pattern, RegexOptions.Multiline | RegexOptions.IgnoreCase, TimeSpan.FromSeconds(5));
                 var matches = regex.Matches(sourceText);
 
                 if (matches.Count == 0)

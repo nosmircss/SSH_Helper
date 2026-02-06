@@ -96,7 +96,7 @@ namespace SSH_Helper.Services.Scripting
                 var pattern = ExtractPattern(expression.Substring(matchesIndex + 9).Trim());
                 try
                 {
-                    return Regex.IsMatch(left, pattern, RegexOptions.IgnoreCase);
+                    return Regex.IsMatch(left, pattern, RegexOptions.IgnoreCase, TimeSpan.FromSeconds(5));
                 }
                 catch
                 {

@@ -180,6 +180,11 @@ namespace SSH_Helper
             _presetManager = new PresetManager(_configService);
             _csvManager = new CsvManager();
             var config = _configService.Load();
+            if (_configService.ConfigLoadError != null)
+            {
+                MessageBox.Show(_configService.ConfigLoadError, "Configuration Warning",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
             var poolTimeouts = SshTimeoutOptions.Create(config.Timeout, config.ConnectionTimeout);
             _sshService = new SshExecutionService(enablePooling: true, poolTimeouts);
             _sshService.UseConnectionPooling = config.UseConnectionPooling;
@@ -976,6 +981,17 @@ namespace SSH_Helper
             Refresh();
         }
 
+        /// <summary>
+        /// Safely replaces a control's font, disposing the old one if it was dynamically created.
+        /// </summary>
+        private static void SetFont(Control control, Font newFont)
+        {
+            var oldFont = control.Font;
+            control.Font = newFont;
+            if (oldFont != null && oldFont != newFont && !oldFont.IsSystemFont)
+                oldFont.Dispose();
+        }
+
         private void ApplyFontSettings(Models.FontSettings fontSettings)
         {
             SuspendLayout();
@@ -988,15 +1004,17 @@ namespace SSH_Helper
             float Scaled(float size) => size * scale;
 
             // Section titles (Semibold)
-            lblHostsTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
-            lblPresetsTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
-            lblScriptTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
-            lblHistoryTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
-            lblHostsListTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+            var sectionTitleFont = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+            SetFont(lblHostsTitle, sectionTitleFont);
+            SetFont(lblPresetsTitle, sectionTitleFont);
+            SetFont(lblScriptTitle, sectionTitleFont);
+            SetFont(lblHistoryTitle, sectionTitleFont);
+            SetFont(lblHostsListTitle, sectionTitleFont);
 
             // Tree views
-            trvPresets.Font = new Font(uiFont, Scaled(fontSettings.TreeViewFontSize));
-            trvFavorites.Font = new Font(uiFont, Scaled(fontSettings.TreeViewFontSize));
+            var treeFont = new Font(uiFont, Scaled(fontSettings.TreeViewFontSize));
+            SetFont(trvPresets, treeFont);
+            SetFont(trvFavorites, treeFont);
 
             // Apply custom row height for tree views if specified (0 = auto based on font)
             if (fontSettings.TreeViewRowHeight > 0)
@@ -1013,28 +1031,29 @@ namespace SSH_Helper
             }
 
             // Empty labels
-            lblFavoritesEmpty.Font = new Font(uiFont, Scaled(fontSettings.EmptyLabelFontSize));
+            SetFont(lblFavoritesEmpty, new Font(uiFont, Scaled(fontSettings.EmptyLabelFontSize)));
 
             // Execute buttons (Semibold)
-            btnExecuteAll.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
-            btnExecuteSelected.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
-            btnStopAll.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
+            var execButtonFont = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
+            SetFont(btnExecuteAll, execButtonFont);
+            SetFont(btnExecuteSelected, execButtonFont);
+            SetFont(btnStopAll, execButtonFont);
 
             // General buttons
-            btnSavePreset.Font = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+            SetFont(btnSavePreset, new Font(uiFont, Scaled(fontSettings.ButtonFontSize)));
 
             // Code editor
-            txtCommand.Font = new Font(codeFont, Scaled(fontSettings.CodeEditorFontSize));
+            SetFont(txtCommand, new Font(codeFont, Scaled(fontSettings.CodeEditorFontSize)));
             txtCommand.WordWrap = fontSettings.CodeEditorWordWrap;
 
             // Output area
-            txtOutput.Font = new Font(codeFont, Scaled(fontSettings.OutputAreaFontSize));
+            SetFont(txtOutput, new Font(codeFont, Scaled(fontSettings.OutputAreaFontSize)));
             txtOutput.WordWrap = fontSettings.OutputAreaWordWrap;
 
 
             // Tab controls
             var tabFont = new Font(uiFont, Scaled(fontSettings.TabFontSize));
-            presetsTabControl.Font = tabFont;
+            SetFont(presetsTabControl, tabFont);
 
             // Host list (DataGridView) - apply row height setting
             // Don't change font on DataGridView as it interferes with existing styling
@@ -1046,12 +1065,14 @@ namespace SSH_Helper
             }
 
             // History list boxes
-            lstOutput.Font = new Font(uiFont, Scaled(fontSettings.HostListFontSize));
-            lstHosts.Font = new Font(uiFont, Scaled(fontSettings.HostListFontSize));
+            var listFont = new Font(uiFont, Scaled(fontSettings.HostListFontSize));
+            SetFont(lstOutput, listFont);
+            SetFont(lstHosts, listFont);
 
             // Menu strip
-            menuStrip1.Font = new Font(uiFont, Scaled(fontSettings.MenuFontSize));
-            ApplyMenuFontRecursive(menuStrip1.Items, new Font(uiFont, Scaled(fontSettings.MenuFontSize)));
+            var menuFont = new Font(uiFont, Scaled(fontSettings.MenuFontSize));
+            SetFont(menuStrip1, menuFont);
+            ApplyMenuFontRecursive(menuStrip1.Items, menuFont);
 
             // Context menus
             ApplyContextMenuFont(contextMenuStrip1, uiFont, Scaled(fontSettings.MenuFontSize));
@@ -1061,11 +1082,12 @@ namespace SSH_Helper
             ApplyContextMenuFont(contextHostLst, uiFont, Scaled(fontSettings.MenuFontSize));
 
             // Toolstrips
-            mainToolStrip.Font = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
-            presetsToolStrip.Font = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+            var toolStripFont = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+            SetFont(mainToolStrip, toolStripFont);
+            SetFont(presetsToolStrip, toolStripFont);
 
             // Status bar
-            statusStrip.Font = new Font(uiFont, Scaled(fontSettings.StatusBarFontSize));
+            SetFont(statusStrip, new Font(uiFont, Scaled(fontSettings.StatusBarFontSize)));
 
             // Apply accent color if custom
             ApplyAccentColor(fontSettings.CustomAccentColor);
@@ -1138,12 +1160,15 @@ namespace SSH_Helper
         private void ApplyContextMenuFont(ContextMenuStrip? menu, string fontFamily, float fontSize)
         {
             if (menu == null) return;
+            var oldFont = menu.Font;
             var font = new Font(fontFamily, fontSize);
             menu.Font = font;
             foreach (ToolStripItem item in menu.Items)
             {
                 item.Font = font;
             }
+            if (oldFont != null && oldFont != font && !oldFont.IsSystemFont)
+                oldFont.Dispose();
         }
 
         private void ApplyAccentColor(int? accentColorArgb)
@@ -1679,7 +1704,7 @@ namespace SSH_Helper
             var textColor = isSelected ? Color.White : DarkTextSecondary;
             using (var textBrush = new SolidBrush(textColor))
             {
-                var sf = new StringFormat
+                using var sf = new StringFormat
                 {
                     Alignment = StringAlignment.Center,
                     LineAlignment = StringAlignment.Center
@@ -1816,7 +1841,7 @@ namespace SSH_Helper
             if (grid == null) return;
 
             var rowIdx = (e.RowIndex + 1).ToString();
-            var centerFormat = new StringFormat
+            using var centerFormat = new StringFormat
             {
                 Alignment = StringAlignment.Center,
                 LineAlignment = StringAlignment.Center
@@ -3935,7 +3960,7 @@ namespace SSH_Helper
             // Draw text with theme-aware color
             var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
             using var textBrush = new SolidBrush(textColor);
-            var sf = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+            using var sf = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
 
             if (isFolderEntry)
             {
@@ -3964,7 +3989,7 @@ namespace SSH_Helper
                 using var iconFont = new Font("Segoe UI Symbol", 9F);
                 using var iconBrush = new SolidBrush(iconColor);
                 var iconRect = new RectangleF(currentX, e.Bounds.Top, 18, e.Bounds.Height);
-                var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
+                using var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
                 e.Graphics.DrawString("\U0001F4C1", iconFont, iconBrush, iconRect, iconSf);
                 currentX += 18;
 
@@ -4100,14 +4125,14 @@ namespace SSH_Helper
                 using var iconFont = new Font("Segoe UI Symbol", 9F);
                 using var iconBrush = new SolidBrush(iconColor);
                 var iconRect = new RectangleF(indent, e.Bounds.Y, iconWidth, e.Bounds.Height);
-                var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
+                using var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
                 e.Graphics.DrawString("\U0001F4C1", iconFont, iconBrush, iconRect, iconSf);
             }
 
             // Draw text
             var textBounds = new Rectangle(indent + iconWidth, e.Bounds.Y, treeView.ClientSize.Width - indent - iconWidth, e.Bounds.Height);
             using var textBrush = new SolidBrush(textColor);
-            var sf = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
+            using var sf = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
             e.Graphics.DrawString(nodeText, treeView.Font, textBrush, textBounds, sf);
         }
 

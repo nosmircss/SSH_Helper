@@ -47,6 +47,7 @@ namespace SSH_Helper.Services
     public class SshConnectionPool : IDisposable
     {
         private readonly ConcurrentDictionary<string, PooledConnection> _connections = new();
+        private readonly ConcurrentDictionary<string, bool> _leasedKeys = new();
         private readonly SemaphoreSlim _creationLock = new(1, 1);
         private readonly SshTimeoutOptions _defaultTimeouts;
         private readonly TimeSpan _maxConnectionAge;
@@ -189,6 +190,8 @@ namespace SSH_Helper.Services
 
         /// <summary>
         /// Creates a shell session from a pooled connection.
+        /// The connection is leased exclusively until <see cref="ReleaseSession"/> is called.
+        /// Concurrent callers for the same host will get a new (non-pooled) connection.
         /// </summary>
         /// <param name="host">Host connection details</param>
         /// <param name="username">Username for authentication</param>
@@ -204,7 +207,19 @@ namespace SSH_Helper.Services
             CancellationToken cancellationToken = default)
         {
             var effectiveTimeouts = timeouts ?? _defaultTimeouts;
-            var client = await GetOrCreateAsync(host, username, password, effectiveTimeouts, cancellationToken);
+            var key = CreateConnectionKey(host, username);
+
+            Ssh client;
+            // Try to lease an existing pooled connection; if already leased, create a fresh one
+            if (_leasedKeys.TryAdd(key, true))
+            {
+                client = await GetOrCreateAsync(host, username, password, effectiveTimeouts, cancellationToken);
+            }
+            else
+            {
+                // Connection is already leased by another caller — create a standalone connection
+                client = await CreateConnectionAsync(host, username, password, effectiveTimeouts, cancellationToken);
+            }
 
             var terminalOptions = SshTerminalOptionsFactory.Create();
             RebexScripting scripting = client.StartScripting(terminalOptions);
@@ -214,6 +229,15 @@ namespace SSH_Helper.Services
             await session.InitializeAsync(cancellationToken);
 
             return (client, session);
+        }
+
+        /// <summary>
+        /// Releases a leased session, making the pooled connection available for reuse.
+        /// </summary>
+        public void ReleaseSession(HostConnection host, string username)
+        {
+            var key = CreateConnectionKey(host, username);
+            _leasedKeys.TryRemove(key, out _);
         }
 
         /// <summary>
