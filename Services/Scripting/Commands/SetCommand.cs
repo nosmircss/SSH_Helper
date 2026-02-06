@@ -44,7 +44,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             // Set the variable
             context.SetVariable(varName, value);
 
-            context.EmitOutput($"Set {varName} = {value}", ScriptOutputType.Debug);
+            context.EmitOutput($"Set {varName} = {FormatValueForDisplay(value)}", ScriptOutputType.Debug);
 
             return Task.FromResult(CommandResult.Ok());
         }
@@ -109,7 +109,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             // Store the updated root object
             context.SetVariable(rootName, rootObj);
 
-            context.EmitOutput($"Set {path} = {value}", ScriptOutputType.Debug);
+            context.EmitOutput($"Set {path} = {FormatValueForDisplay(value)}", ScriptOutputType.Debug);
 
             return Task.FromResult(CommandResult.Ok());
         }
@@ -171,8 +171,8 @@ namespace SSH_Helper.Services.Scripting.Commands
                         array = new List<string>();
                     }
 
-                    // Resolve and add the value
-                    var resolvedValue = context.SubstituteVariables(valueExpr);
+                    // Resolve and add the value (supports quoted strings, numbers, vars, etc.)
+                    var resolvedValue = EvaluateExpression(valueExpr, context)?.ToString() ?? string.Empty;
                     array.Add(resolvedValue);
 
                     // Update the array variable
@@ -349,6 +349,47 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return directValue;
 
             return expr;
+        }
+
+        private static string FormatValueForDisplay(object? value)
+        {
+            return value switch
+            {
+                null => "",
+                List<string> list => FormatListForDisplay(list),
+                JsonNode node => TruncateForDisplay(node.ToJsonString()),
+                _ => TruncateForDisplay(value.ToString() ?? string.Empty)
+            };
+        }
+
+        private static string FormatListForDisplay(List<string> values, int maxItems = 10)
+        {
+            if (values.Count == 0)
+                return "[]";
+
+            var displayCount = Math.Min(values.Count, maxItems);
+            var parts = new List<string>(displayCount);
+
+            for (int i = 0; i < displayCount; i++)
+            {
+                parts.Add(TruncateForDisplay(values[i], 30));
+            }
+
+            var suffix = values.Count > maxItems ? $", ... ({values.Count} items)" : "";
+            return $"[{string.Join(", ", parts)}{suffix}]";
+        }
+
+        private static string TruncateForDisplay(string value, int maxLength = 100)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "";
+
+            value = value.Replace("\r", "").Replace("\n", "\\n");
+
+            if (value.Length <= maxLength)
+                return value;
+
+            return value.Substring(0, maxLength) + "...";
         }
 
         private double ResolveNumeric(string expr, ScriptContext context)

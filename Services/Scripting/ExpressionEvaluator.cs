@@ -25,7 +25,7 @@ namespace SSH_Helper.Services.Scripting
             if (string.IsNullOrWhiteSpace(expression))
                 return false;
 
-            expression = expression.Trim();
+            expression = TrimEnclosingParentheses(expression.Trim());
 
             // Handle logical operators (split on lowest precedence first)
             // "or" has lower precedence than "and", so check "or" first
@@ -49,21 +49,6 @@ namespace SSH_Helper.Services.Scripting
             if (expression.StartsWith("not ", StringComparison.OrdinalIgnoreCase))
             {
                 return !Evaluate(expression.Substring(4));
-            }
-
-            // Handle parentheses - verify the outer parens actually match
-            if (expression.StartsWith("(") && expression.EndsWith(")"))
-            {
-                int depth = 0;
-                bool outerMatch = true;
-                for (int i = 0; i < expression.Length - 1; i++)
-                {
-                    if (expression[i] == '(') depth++;
-                    else if (expression[i] == ')') depth--;
-                    if (depth == 0) { outerMatch = false; break; }
-                }
-                if (outerMatch)
-                    return Evaluate(expression.Substring(1, expression.Length - 2));
             }
 
             // Now evaluate comparison operators
@@ -207,11 +192,12 @@ namespace SSH_Helper.Services.Scripting
 
         private int FindLogicalOperator(string expression, string op)
         {
-            // Find operator outside of quotes
+            // Find operator outside of quotes and parentheses.
             var inQuote = false;
             var quoteChar = '\0';
+            var parenDepth = 0;
 
-            for (int i = 0; i < expression.Length - op.Length; i++)
+            for (int i = 0; i <= expression.Length - op.Length; i++)
             {
                 var c = expression[i];
 
@@ -226,9 +212,26 @@ namespace SSH_Helper.Services.Scripting
                     {
                         inQuote = false;
                     }
+                    continue;
                 }
 
-                if (!inQuote && expression.Substring(i).StartsWith(op, StringComparison.OrdinalIgnoreCase))
+                if (inQuote)
+                    continue;
+
+                if (c == '(')
+                {
+                    parenDepth++;
+                    continue;
+                }
+
+                if (c == ')' && parenDepth > 0)
+                {
+                    parenDepth--;
+                    continue;
+                }
+
+                if (parenDepth == 0 &&
+                    string.Compare(expression, i, op, 0, op.Length, StringComparison.OrdinalIgnoreCase) == 0)
                 {
                     return i;
                 }
@@ -240,6 +243,66 @@ namespace SSH_Helper.Services.Scripting
         private int FindOperator(string expression, string op)
         {
             return FindLogicalOperator(expression, op);
+        }
+
+        private static string TrimEnclosingParentheses(string expression)
+        {
+            while (IsWrappedByOuterParentheses(expression))
+            {
+                expression = expression.Substring(1, expression.Length - 2).Trim();
+            }
+
+            return expression;
+        }
+
+        private static bool IsWrappedByOuterParentheses(string expression)
+        {
+            if (expression.Length < 2 || expression[0] != '(' || expression[^1] != ')')
+                return false;
+
+            var inQuote = false;
+            var quoteChar = '\0';
+            var depth = 0;
+
+            for (int i = 0; i < expression.Length; i++)
+            {
+                var c = expression[i];
+
+                if ((c == '"' || c == '\'') && (i == 0 || expression[i - 1] != '\\'))
+                {
+                    if (!inQuote)
+                    {
+                        inQuote = true;
+                        quoteChar = c;
+                    }
+                    else if (c == quoteChar)
+                    {
+                        inQuote = false;
+                    }
+
+                    continue;
+                }
+
+                if (inQuote)
+                    continue;
+
+                if (c == '(')
+                {
+                    depth++;
+                }
+                else if (c == ')')
+                {
+                    depth--;
+
+                    if (depth == 0 && i < expression.Length - 1)
+                        return false;
+
+                    if (depth < 0)
+                        return false;
+                }
+            }
+
+            return depth == 0;
         }
 
         private object? ResolveValue(string expr)

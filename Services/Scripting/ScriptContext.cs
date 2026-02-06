@@ -197,14 +197,8 @@ namespace SSH_Helper.Services.Scripting
             // Handle special _output variable
             var result = input.Replace("${_output}", _lastCommandOutput);
 
-            // Replace ${variable} and {{variable}} patterns
-            result = Regex.Replace(result, @"\$\{([^}]+)\}|\{\{([^}]+)\}\}", match =>
-            {
-                var expr = match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
-                return ResolveVariableExpression(expr);
-            });
-
-            return result;
+            // Replace ${variable} and {{variable}} patterns with support for nested ${...} expressions.
+            return SubstituteVariableTokens(result);
         }
 
         /// <summary>
@@ -224,7 +218,7 @@ namespace SSH_Helper.Services.Scripting
             if (arrayMatch.Success)
             {
                 var varName = arrayMatch.Groups[1].Value;
-                var indexExpr = arrayMatch.Groups[2].Value;
+                var indexExpr = arrayMatch.Groups[2].Value.Trim();
 
                 // Resolve the index (could be a number or variable name)
                 int index;
@@ -246,6 +240,82 @@ namespace SSH_Helper.Services.Scripting
 
             // Simple variable lookup
             return GetVariableString(expr);
+        }
+
+        private string SubstituteVariableTokens(string input)
+        {
+            var output = new StringBuilder(input.Length);
+
+            for (int i = 0; i < input.Length; i++)
+            {
+                // ${...} pattern with nested placeholder support.
+                if (input[i] == '$' && i + 1 < input.Length && input[i + 1] == '{')
+                {
+                    if (TryExtractDollarExpression(input, i, out var expr, out var endIndex))
+                    {
+                        var resolvedExpr = SubstituteVariableTokens(expr);
+                        output.Append(ResolveVariableExpression(resolvedExpr));
+                        i = endIndex;
+                        continue;
+                    }
+                }
+
+                // {{...}} pattern (CSV-style variable names).
+                if (input[i] == '{' && i + 1 < input.Length && input[i + 1] == '{')
+                {
+                    var endIndex = input.IndexOf("}}", i + 2, StringComparison.Ordinal);
+                    if (endIndex >= 0)
+                    {
+                        var expr = input.Substring(i + 2, endIndex - (i + 2));
+                        var resolvedExpr = SubstituteVariableTokens(expr);
+                        output.Append(ResolveVariableExpression(resolvedExpr));
+                        i = endIndex + 1;
+                        continue;
+                    }
+                }
+
+                output.Append(input[i]);
+            }
+
+            return output.ToString();
+        }
+
+        private static bool TryExtractDollarExpression(
+            string input,
+            int startIndex,
+            out string expression,
+            out int endIndex)
+        {
+            expression = string.Empty;
+            endIndex = startIndex;
+
+            if (startIndex + 1 >= input.Length || input[startIndex] != '$' || input[startIndex + 1] != '{')
+                return false;
+
+            var depth = 1;
+
+            for (int i = startIndex + 2; i < input.Length; i++)
+            {
+                if (input[i] == '$' && i + 1 < input.Length && input[i + 1] == '{')
+                {
+                    depth++;
+                    i++;
+                    continue;
+                }
+
+                if (input[i] == '}')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        expression = input.Substring(startIndex + 2, i - (startIndex + 2));
+                        endIndex = i;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

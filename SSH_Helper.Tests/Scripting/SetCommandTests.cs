@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Collections.Generic;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
@@ -43,5 +44,48 @@ public class SetCommandTests
 
         result.Success.Should().BeTrue();
         context.GetVariableString("status").Should().Be("QA Complete");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PushWithQuotedString_DoesNotStoreLiteralQuoteCharacters()
+    {
+        var step = new ScriptStep
+        {
+            Set = "services = push(services, \"sshd\")"
+        };
+
+        var context = new ScriptContext();
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var services = context.GetVariable("services").Should().BeOfType<List<string>>().Subject;
+        services.Should().ContainSingle().Which.Should().Be("sshd");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PushList_DebugOutputShowsReadableListValues()
+    {
+        var step = new ScriptStep
+        {
+            Set = "services = push(services, \"sshd\")"
+        };
+
+        var context = new ScriptContext
+        {
+            DebugMode = true
+        };
+
+        string? debugMessage = null;
+        context.OutputReceived += (_, args) =>
+        {
+            if (args.Type == ScriptOutputType.Debug)
+                debugMessage = args.Message;
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        debugMessage.Should().Be("Set services = [sshd]");
     }
 }
