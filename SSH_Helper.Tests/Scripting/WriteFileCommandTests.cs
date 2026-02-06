@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
@@ -99,6 +100,54 @@ public class WriteFileCommandTests : IDisposable
         lines.Should().Equal("First line", "Second line", "Third line");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_CsvFromJsonObjectRows_WithArrayValue_KeepsArrayInSingleCell()
+    {
+        var filePath = Path.Combine(_testDirectory, "admins.csv");
+        var context = new ScriptContext();
+        context.SetVariable("report", "[{\"username\":\"admin\",\"accprofile\":\"super_admin\",\"vdom\":[\"root\",\"vd2\"]}]");
+
+        var step = BuildCsvStep(
+            filePath,
+            "${report}",
+            "overwrite",
+            "username",
+            "accprofile",
+            "vdom");
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var lines = File.ReadAllLines(filePath);
+        lines.Should().HaveCount(2);
+        lines[0].Should().Be("username,accprofile,vdom");
+        lines[1].Should().Be("admin,super_admin,\"root, vd2\"");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CsvFromJsonObjectRows_WithStringifiedArrayValue_KeepsValueInSingleCell()
+    {
+        var filePath = Path.Combine(_testDirectory, "admins_stringified.csv");
+        var context = new ScriptContext();
+        context.SetVariable("report", "[{\"username\":\"admin\",\"accprofile\":\"super_admin\",\"vdom\":\"[\\\"root\\\",\\\"vd2\\\"]\"}]");
+
+        var step = BuildCsvStep(
+            filePath,
+            "${report}",
+            "overwrite",
+            "username",
+            "accprofile",
+            "vdom");
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var lines = File.ReadAllLines(filePath);
+        lines.Should().HaveCount(2);
+        lines[0].Should().Be("username,accprofile,vdom");
+        lines[1].Should().Be("admin,super_admin,\"root, vd2\"");
+    }
+
     private static ScriptStep BuildJsonlStep(string filePath, string content, string mode)
     {
         return new ScriptStep
@@ -123,6 +172,21 @@ public class WriteFileCommandTests : IDisposable
                 Content = content,
                 Format = "text",
                 Mode = mode
+            }
+        };
+    }
+
+    private static ScriptStep BuildCsvStep(string filePath, string content, string mode, params string[] headers)
+    {
+        return new ScriptStep
+        {
+            Writefile = new WritefileOptions
+            {
+                Path = filePath,
+                Content = content,
+                Format = "csv",
+                Mode = mode,
+                Headers = new List<string>(headers)
             }
         };
     }

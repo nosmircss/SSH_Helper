@@ -1692,6 +1692,29 @@ Variables are substituted using `${variable_name}`:
 - set: message = "Status: ${status}"
 ```
 
+### Quoting and Escaping
+
+Both single quotes (`'...'`) and double quotes (`"..."`) are valid string delimiters in script expressions. They usually evaluate to the same final string, but YAML escaping rules differ:
+
+- Double quotes process escape sequences like `\n`, `\t`, `\\`, and `\"`
+- Single quotes treat backslashes literally; to include a single quote, use `''`
+
+**Examples:**
+
+```yaml
+# 1) Newline escape (\n)
+- set: msg1 = "Line1\nLine2"   # newline between Line1 and Line2
+- set: msg2 = 'Line1\nLine2'   # literal backslash + n
+
+# 2) Regex with backslashes
+- if: output matches '^\d+\s+(\w+)$'
+- if: output matches "^\\d+\\s+(\\w+)$"
+
+# 3) Apostrophes
+- set: owner1 = "Bob's router"
+- set: owner2 = 'Bob''s router'
+```
+
 ### Array Access and Properties
 
 Lists support index-based access and properties:

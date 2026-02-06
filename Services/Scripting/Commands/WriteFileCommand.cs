@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -415,7 +416,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                                             var values = new List<string>();
                                             foreach (var header in headers)
                                             {
-                                                var val = obj[header]?.ToString() ?? "";
+                                                var val = GetCsvNodeValue(obj[header]);
                                                 values.Add(val);
                                             }
                                             rows.Add(string.Join(",", values.ConvertAll(EscapeCsvField)));
@@ -428,7 +429,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                                     }
                                     else if (element != null)
                                     {
-                                        rows.Add(element.ToString() ?? "");
+                                        rows.Add(GetCsvNodeValue(element));
                                     }
                                 }
                             }
@@ -482,6 +483,98 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// Converts a JSON node to a compact, CSV-safe string value.
+        /// Scalars are converted to plain strings; objects/arrays stay compact JSON.
+        /// </summary>
+        private static string GetCsvNodeValue(JsonNode? node)
+        {
+            if (node == null)
+                return string.Empty;
+
+            if (node is JsonArray array)
+            {
+                return FlattenCsvArray(array);
+            }
+
+            if (node is JsonValue value)
+            {
+                if (value.TryGetValue<string>(out var str))
+                {
+                    if (TryParseJsonArray(str, out var parsedArray))
+                    {
+                        return FlattenCsvArray(parsedArray);
+                    }
+
+                    return str;
+                }
+                if (value.TryGetValue<long>(out var lng))
+                    return lng.ToString(CultureInfo.InvariantCulture);
+                if (value.TryGetValue<double>(out var dbl))
+                    return dbl.ToString(CultureInfo.InvariantCulture);
+                if (value.TryGetValue<decimal>(out var dec))
+                    return dec.ToString(CultureInfo.InvariantCulture);
+                if (value.TryGetValue<bool>(out var bln))
+                    return bln ? "true" : "false";
+
+                return value.ToString();
+            }
+
+            // For arrays/objects, emit compact JSON (not pretty-printed).
+            return node.ToJsonString();
+        }
+
+        /// <summary>
+        /// Flattens JSON arrays for CSV cells using comma-space separators.
+        /// </summary>
+        private static string FlattenCsvArray(JsonArray array)
+        {
+            var items = new List<string>(array.Count);
+            foreach (var item in array)
+            {
+                if (item is JsonArray nestedArray)
+                {
+                    items.Add(nestedArray.ToJsonString());
+                }
+                else if (item is JsonObject nestedObject)
+                {
+                    items.Add(nestedObject.ToJsonString());
+                }
+                else
+                {
+                    items.Add(GetCsvNodeValue(item));
+                }
+            }
+
+            return string.Join(", ", items);
+        }
+
+        /// <summary>
+        /// Parses JSON array text.
+        /// </summary>
+        private static bool TryParseJsonArray(string value, out JsonArray array)
+        {
+            array = new JsonArray();
+            var trimmed = value.Trim();
+            if (!trimmed.StartsWith("[", StringComparison.Ordinal) || !trimmed.EndsWith("]", StringComparison.Ordinal))
+                return false;
+
+            try
+            {
+                if (JsonNode.Parse(trimmed) is JsonArray parsed)
+                {
+                    array = parsed;
+                    return true;
+                }
+            }
+            catch
+            {
+                // Not valid JSON array text.
+            }
+
+            return false;
         }
 
         /// <summary>
