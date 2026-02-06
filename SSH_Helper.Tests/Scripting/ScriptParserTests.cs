@@ -54,15 +54,34 @@ steps:
     }
 
     [Theory]
-    [InlineData("name: Test Script")]
-    [InlineData("description: A test")]
     [InlineData("vars:\n  test: value")]
     [InlineData("steps:\n  - send: test")]
-    [InlineData("version: 1")]
-    public void IsYamlScript_ScriptKeywords_ReturnsTrue(string input)
+    public void IsYamlScript_ScriptSections_ReturnsTrue(string input)
     {
         var result = ScriptParser.IsYamlScript(input);
         result.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("name: Test Script")]
+    [InlineData("description: Uplink to core")]
+    [InlineData("version: 1")]
+    public void IsYamlScript_MetadataOnlyKeywords_ReturnsFalse(string input)
+    {
+        var result = ScriptParser.IsYamlScript(input);
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsYamlScript_PlainCommandsWithNameAndDescription_ReturnsFalse()
+    {
+        var input = @"name: Ethernet1/1
+description: Uplink to core
+show interface status";
+
+        var result = ScriptParser.IsYamlScript(input);
+
+        result.Should().BeFalse();
     }
 
     [Theory]

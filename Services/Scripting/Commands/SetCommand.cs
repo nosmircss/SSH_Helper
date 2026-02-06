@@ -282,11 +282,17 @@ namespace SSH_Helper.Services.Scripting.Commands
                 case "pop":
                     result = JsonFunctions.Pop(args, context);
                     return true;
+                case "last":
+                    result = JsonFunctions.Last(args, context);
+                    return true;
                 case "unshift":
                     result = JsonFunctions.Unshift(args, context);
                     return true;
                 case "shift":
                     result = JsonFunctions.Shift(args, context);
+                    return true;
+                case "first":
+                    result = JsonFunctions.First(args, context);
                     return true;
                 case "slice":
                     result = JsonFunctions.Slice(args, context);

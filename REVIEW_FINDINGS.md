@@ -91,11 +91,12 @@ High-value improvements organized by area.
   - `ExecutionController` (~400 lines): SSH orchestration, folder execution, connection building
   - `HistoryController` (~200 lines): Output history, per-host results, history list drawing
 
-#### 2.2 Dialogs Don't Support Dark Mode
+#### 2.2 ~~Dialogs Don't Support Dark Mode~~ FIXED
 - **Effort:** Medium | **Impact:** Medium
 - **Files:** `UpdateDialog.cs`, `SettingsDialog.cs`, `FolderExecutionDialog.cs`, `AboutDialog.cs`
 - **Issue:** Only `FindDialog` supports dark mode. All other dialogs display with light backgrounds regardless of theme setting.
 - **Fix:** Extract theme colors into a shared `ThemeColors` class that all forms consume.
+- **Status:** FIXED
 
 #### 2.3 Duplicated Unsaved-Changes Check Logic
 - **Effort:** Small | **Impact:** Medium
@@ -172,11 +173,12 @@ High-value improvements organized by area.
 - **Issue:** Variables are substituted BEFORE the expression evaluator sees the condition. A variable containing spaces corrupts the expression. E.g., `${name} == "John Doe"` becomes `John Doe == "John Doe"` which misparsens.
 - **Fix:** Remove pre-substitution in `IfCommand.cs` and `WhileCommand.cs`. The `ExpressionEvaluator.ResolveValue` already handles `${var}` references.
 
-#### 2.15 `json.pop()` and `json.shift()` Don't Modify the Array
+#### 2.15 ~~`json.pop()` and `json.shift()` Don't Modify the Array~~ FIXED
 - **Effort:** Small | **Impact:** Medium
 - **Files:** `JsonFunctions.cs:445-456`, `496-504`
 - **Issue:** These return the element but don't remove it. The doc comment says "Remove and return" but implementation only returns. Semantic mismatch with JavaScript/Python conventions.
 - **Fix:** Make these destructive (modify and return updated array), or rename to `last()` and `first()`.
+- **Status:** FIXED — `json.pop()` / `json.shift()` are now destructive for writable top-level array references, and non-destructive `json.last()` / `json.first()` were added.
 
 #### 2.16 Duplicated JSON Function Dispatch
 - **Effort:** Small | **Impact:** Medium
@@ -196,11 +198,12 @@ High-value improvements organized by area.
 - **Issue:** When `on_error: continue` fires, there's no way for subsequent steps to detect that an error occurred.
 - **Fix:** Set a `_last_error` context variable when an error is caught, allowing `if: _last_error is not empty`.
 
-#### 2.19 `IsYamlScript` Detection False Positives
+#### 2.19 ~~`IsYamlScript` Detection False Positives~~ FIXED
 - **Effort:** Small | **Impact:** Medium
-- **Files:** `ScriptParser.cs:31-81`
+- **Files:** `ScriptParser.cs:49-93`
 - **Issue:** Commands containing `name:` or `description:` in the first 10 lines are misidentified as YAML scripts.
 - **Fix:** Require `---` YAML document marker, or a more distinctive indicator.
+- **Status:** FIXED - `IsYamlScript` now uses stronger indicators (`---`, `steps:`, `vars:`, known `- step:` entries) and no longer treats metadata-only keys like `name:` / `description:` / `version:` as YAML. Added unit tests for metadata false positives.
 
 ### Core Architecture
 

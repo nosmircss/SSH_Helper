@@ -186,4 +186,173 @@ public class SetCommandTests
         context.GetVariable("null_val").Should().BeNull();
         context.GetVariableString("null_val").Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonPop_RemovesLastElementAndReturnsRemovedValue()
+    {
+        var context = new ScriptContext();
+        var buildStep = new ScriptStep { Set = "arr = json([], 'one', 'two', 'three')" };
+        var popStep = new ScriptStep { Set = "last = json.pop(arr)" };
+
+        var buildResult = await _command.ExecuteAsync(buildStep, context, CancellationToken.None);
+        var popResult = await _command.ExecuteAsync(popStep, context, CancellationToken.None);
+
+        buildResult.Success.Should().BeTrue();
+        popResult.Success.Should().BeTrue();
+        context.GetVariableString("last").Should().Be("three");
+
+        var arr = GetArrayVariable(context, "arr");
+        arr.Should().HaveCount(2);
+        arr[0]!.GetValue<string>().Should().Be("one");
+        arr[1]!.GetValue<string>().Should().Be("two");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonShift_RemovesFirstElementAndReturnsRemovedValue()
+    {
+        var context = new ScriptContext();
+        var buildStep = new ScriptStep { Set = "arr = json([], 'one', 'two', 'three')" };
+        var shiftStep = new ScriptStep { Set = "first = json.shift(arr)" };
+
+        var buildResult = await _command.ExecuteAsync(buildStep, context, CancellationToken.None);
+        var shiftResult = await _command.ExecuteAsync(shiftStep, context, CancellationToken.None);
+
+        buildResult.Success.Should().BeTrue();
+        shiftResult.Success.Should().BeTrue();
+        context.GetVariableString("first").Should().Be("one");
+
+        var arr = GetArrayVariable(context, "arr");
+        arr.Should().HaveCount(2);
+        arr[0]!.GetValue<string>().Should().Be("two");
+        arr[1]!.GetValue<string>().Should().Be("three");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonLast_IsNonDestructive()
+    {
+        var context = new ScriptContext();
+        var buildStep = new ScriptStep { Set = "arr = json([], 'one', 'two')" };
+        var lastStep = new ScriptStep { Set = "last = json.last(arr)" };
+
+        var buildResult = await _command.ExecuteAsync(buildStep, context, CancellationToken.None);
+        var lastResult = await _command.ExecuteAsync(lastStep, context, CancellationToken.None);
+
+        buildResult.Success.Should().BeTrue();
+        lastResult.Success.Should().BeTrue();
+        context.GetVariableString("last").Should().Be("two");
+
+        var arr = GetArrayVariable(context, "arr");
+        arr.Should().HaveCount(2);
+        arr[0]!.GetValue<string>().Should().Be("one");
+        arr[1]!.GetValue<string>().Should().Be("two");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonFirst_IsNonDestructive()
+    {
+        var context = new ScriptContext();
+        var buildStep = new ScriptStep { Set = "arr = json([], 'one', 'two')" };
+        var firstStep = new ScriptStep { Set = "first = json.first(arr)" };
+
+        var buildResult = await _command.ExecuteAsync(buildStep, context, CancellationToken.None);
+        var firstResult = await _command.ExecuteAsync(firstStep, context, CancellationToken.None);
+
+        buildResult.Success.Should().BeTrue();
+        firstResult.Success.Should().BeTrue();
+        context.GetVariableString("first").Should().Be("one");
+
+        var arr = GetArrayVariable(context, "arr");
+        arr.Should().HaveCount(2);
+        arr[0]!.GetValue<string>().Should().Be("one");
+        arr[1]!.GetValue<string>().Should().Be("two");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonPopAndShift_OnEmptyArray_ReturnNullAndLeaveArrayUnchanged()
+    {
+        var context = new ScriptContext();
+        var buildStep = new ScriptStep { Set = "arr = json([])" };
+        var popStep = new ScriptStep { Set = "popped = json.pop(arr)" };
+        var shiftStep = new ScriptStep { Set = "shifted = json.shift(arr)" };
+
+        var buildResult = await _command.ExecuteAsync(buildStep, context, CancellationToken.None);
+        var popResult = await _command.ExecuteAsync(popStep, context, CancellationToken.None);
+        var shiftResult = await _command.ExecuteAsync(shiftStep, context, CancellationToken.None);
+
+        buildResult.Success.Should().BeTrue();
+        popResult.Success.Should().BeTrue();
+        shiftResult.Success.Should().BeTrue();
+        context.GetVariable("popped").Should().BeNull();
+        context.GetVariable("shifted").Should().BeNull();
+        GetArrayVariable(context, "arr").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonPopAndShift_WithNonWritableExpression_ReturnNullAndEmitWarning()
+    {
+        var context = new ScriptContext();
+        var warnings = new List<string>();
+        context.OutputReceived += (_, args) =>
+        {
+            if (args.Type == ScriptOutputType.Warning)
+                warnings.Add(args.Message);
+        };
+
+        var buildStep = new ScriptStep { Set = "arr = json([], 'one', 'two', 'three')" };
+        var popStep = new ScriptStep { Set = "pop_result = json.pop(json.slice(arr, 0, 2))" };
+        var shiftStep = new ScriptStep { Set = "shift_result = json.shift(json.slice(arr, 0, 2))" };
+
+        var buildResult = await _command.ExecuteAsync(buildStep, context, CancellationToken.None);
+        var popResult = await _command.ExecuteAsync(popStep, context, CancellationToken.None);
+        var shiftResult = await _command.ExecuteAsync(shiftStep, context, CancellationToken.None);
+
+        buildResult.Success.Should().BeTrue();
+        popResult.Success.Should().BeTrue();
+        shiftResult.Success.Should().BeTrue();
+        context.GetVariable("pop_result").Should().BeNull();
+        context.GetVariable("shift_result").Should().BeNull();
+        warnings.Should().Contain(message => message.Contains("json.pop requires writable top-level array variable reference"));
+        warnings.Should().Contain(message => message.Contains("json.shift requires writable top-level array variable reference"));
+
+        var arr = GetArrayVariable(context, "arr");
+        arr.Should().HaveCount(3);
+        arr[0]!.GetValue<string>().Should().Be("one");
+        arr[1]!.GetValue<string>().Should().Be("two");
+        arr[2]!.GetValue<string>().Should().Be("three");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonPopAndShift_WithDollarBraceArrayReference_MutatesSourceArray()
+    {
+        var context = new ScriptContext();
+        var buildStep = new ScriptStep { Set = "arr = json([], 'one', 'two', 'three')" };
+        var popStep = new ScriptStep { Set = "popped = json.pop(${arr})" };
+        var shiftStep = new ScriptStep { Set = "shifted = json.shift(${arr})" };
+
+        var buildResult = await _command.ExecuteAsync(buildStep, context, CancellationToken.None);
+        var popResult = await _command.ExecuteAsync(popStep, context, CancellationToken.None);
+        var shiftResult = await _command.ExecuteAsync(shiftStep, context, CancellationToken.None);
+
+        buildResult.Success.Should().BeTrue();
+        popResult.Success.Should().BeTrue();
+        shiftResult.Success.Should().BeTrue();
+        context.GetVariableString("popped").Should().Be("three");
+        context.GetVariableString("shifted").Should().Be("one");
+
+        var arr = GetArrayVariable(context, "arr");
+        arr.Should().HaveCount(1);
+        arr[0]!.GetValue<string>().Should().Be("two");
+    }
+
+    private static JsonArray GetArrayVariable(ScriptContext context, string variableName)
+    {
+        var value = context.GetVariable(variableName);
+        value.Should().NotBeNull();
+        if (value is JsonArray jsonArray)
+            return jsonArray;
+
+        var parsed = JsonNode.Parse(value!.ToString() ?? string.Empty);
+        parsed.Should().NotBeNull();
+        return parsed!.AsArray();
+    }
 }

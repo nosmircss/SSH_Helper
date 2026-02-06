@@ -212,9 +212,11 @@ Sets or modifies variable values with expression support.
 | json.values() | `vals = json.values(obj)` | Get object values as list |
 | json.items() | `items = json.items(data, "path")` | Extract array/object entries |
 | json.push() | `arr = json.push(arr, value)` | Append to JSON array |
-| json.pop() | `last = json.pop(arr)` | Get last element |
+| json.pop() | `last = json.pop(arr)` | Remove and return last element |
+| json.last() | `last = json.last(arr)` | Get last element (non-destructive) |
 | json.unshift() | `arr = json.unshift(arr, value)` | Prepend to JSON array |
-| json.shift() | `first = json.shift(arr)` | Get first element |
+| json.shift() | `first = json.shift(arr)` | Remove and return first element |
+| json.first() | `first = json.first(arr)` | Get first element (non-destructive) |
 | json.slice() | `sub = json.slice(arr, 0, 3)` | Extract array subset |
 | json.concat() | `all = json.concat(arr1, arr2)` | Concatenate arrays |
 | json.indexOf() | `idx = json.indexOf(arr, value)` | Find element index |
@@ -487,14 +489,20 @@ For objects: returns `{"key": k, "value": v}` entries.
 - set: arr = json.push(arr, "new_item")
 - set: arr = json.push(arr, json("key", "value"))
 
-# Get last element
+# Remove and return last element (destructive)
 - set: last = json.pop(arr)
+
+# Get last element without modifying the array
+- set: last_view = json.last(arr)
 
 # Prepend to array
 - set: arr = json.unshift(arr, "first")
 
-# Get first element
+# Remove and return first element (destructive)
 - set: first = json.shift(arr)
+
+# Get first element without modifying the array
+- set: first_view = json.first(arr)
 
 # Slice array (supports negative indices)
 - set: first_three = json.slice(arr, 0, 3)
@@ -509,6 +517,9 @@ For objects: returns `{"key": k, "value": v}` entries.
   then:
     - print: "Found at index ${idx}"
 ```
+
+> Migration note: If older scripts used `json.pop()` or `json.shift()` as non-destructive reads, switch those calls to `json.last()` and `json.first()`.
+> Destructive note: `json.pop()` and `json.shift()` only mutate writable top-level array variables (`arr` or `${arr}`); non-writable expressions return `null` with a warning.
 
 **Nested Assignment (Dot Notation):**
 

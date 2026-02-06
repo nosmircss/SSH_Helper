@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -16,6 +15,25 @@ namespace SSH_Helper.Services.Scripting
     public class ScriptParser
     {
         private readonly IDeserializer _deserializer;
+        private static readonly string[] KnownStepKeys =
+        {
+            "send",
+            "print",
+            "wait",
+            "set",
+            "exit",
+            "extract",
+            "if",
+            "foreach",
+            "while",
+            "updatecolumn",
+            "readfile",
+            "writefile",
+            "input",
+            "log",
+            "webhook",
+            "parse"
+        };
 
         public ScriptParser()
         {
@@ -33,47 +51,41 @@ namespace SSH_Helper.Services.Scripting
             if (string.IsNullOrWhiteSpace(text))
                 return false;
 
-            var trimmed = text.TrimStart();
-
-            // Check for YAML document marker
-            if (trimmed.StartsWith("---"))
-                return true;
-
-            // Check for common script keywords at start of lines
-            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var line in lines.Take(10)) // Check first 10 lines
+            // Use strong script indicators only. Metadata keys like name:/description:
+            // are intentionally excluded because many plain CLI commands use them.
+            var lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            foreach (var line in lines)
             {
-                var trimmedLine = line.TrimStart();
-                if (trimmedLine.StartsWith("#")) continue; // Skip comments
+                var trimmedLine = line.Trim();
+                if (string.IsNullOrEmpty(trimmedLine) || trimmedLine.StartsWith("#", StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
-                if (trimmedLine.StartsWith("name:") ||
-                    trimmedLine.StartsWith("description:") ||
-                    trimmedLine.StartsWith("vars:") ||
-                    trimmedLine.StartsWith("steps:") ||
-                    trimmedLine.StartsWith("version:"))
+                // YAML document marker
+                if (trimmedLine.StartsWith("---", StringComparison.Ordinal))
                 {
                     return true;
                 }
 
-                // Check for step syntax: "- send:", "- print:", etc.
-                if (trimmedLine.StartsWith("- send:") ||
-                    trimmedLine.StartsWith("- print:") ||
-                    trimmedLine.StartsWith("- wait:") ||
-                    trimmedLine.StartsWith("- set:") ||
-                    trimmedLine.StartsWith("- exit:") ||
-                    trimmedLine.StartsWith("- extract:") ||
-                    trimmedLine.StartsWith("- if:") ||
-                    trimmedLine.StartsWith("- foreach:") ||
-                    trimmedLine.StartsWith("- while:") ||
-                    trimmedLine.StartsWith("- updatecolumn:") ||
-                    trimmedLine.StartsWith("- readfile:") ||
-                    trimmedLine.StartsWith("- writefile:") ||
-                    trimmedLine.StartsWith("- input:") ||
-                    trimmedLine.StartsWith("- log:") ||
-                    trimmedLine.StartsWith("- webhook:") ||
-                    trimmedLine.StartsWith("- parse:"))
+                // Distinctive top-level script sections
+                if (trimmedLine.StartsWith("steps:", StringComparison.OrdinalIgnoreCase) ||
+                    trimmedLine.StartsWith("vars:", StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
+                }
+
+                // Step syntax: "- send:", "- print:", etc.
+                if (trimmedLine.StartsWith("- ", StringComparison.Ordinal))
+                {
+                    var stepContent = trimmedLine.Substring(2);
+                    foreach (var stepKey in KnownStepKeys)
+                    {
+                        if (stepContent.StartsWith($"{stepKey}:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
                 }
             }
 

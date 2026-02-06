@@ -400,11 +400,17 @@ namespace SSH_Helper.Services.Scripting
                 case "pop":
                     value = NormalizeStructuredJsonResult(JsonFunctions.Pop(args, context));
                     return true;
+                case "last":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Last(args, context));
+                    return true;
                 case "unshift":
                     value = NormalizeStructuredJsonResult(JsonFunctions.Unshift(args, context));
                     return true;
                 case "shift":
                     value = NormalizeStructuredJsonResult(JsonFunctions.Shift(args, context));
+                    return true;
+                case "first":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.First(args, context));
                     return true;
                 case "slice":
                     value = NormalizeStructuredJsonResult(JsonFunctions.Slice(args, context));
