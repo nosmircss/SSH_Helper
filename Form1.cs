@@ -1767,6 +1767,7 @@ namespace SSH_Helper
                 deleteColumnToolStripMenuItem.Enabled = !isProtected;
                 renameColumnToolStripMenuItem.Enabled = !isProtected;
 
+                UpdateHostGridContextMenuSeparators();
                 contextMenuStrip1.Show(dgv_variables, location);
             }
             else
@@ -1778,7 +1779,24 @@ namespace SSH_Helper
                 renameColumnToolStripMenuItem.Visible = true;
                 renameColumnToolStripMenuItem.Enabled = true;
                 deleteRowToolStripMenuItem.Visible = true;
+                UpdateHostGridContextMenuSeparators();
             }
+        }
+
+        private void UpdateHostGridContextMenuSeparators()
+        {
+            bool hasColumnActions = addColumnToolStripMenuItem.Available ||
+                                    renameColumnToolStripMenuItem.Available ||
+                                    deleteColumnToolStripMenuItem.Available;
+            bool hasRowAction = deleteRowToolStripMenuItem.Available;
+            bool hasSelectionActions = selectAllHostsToolStripMenuItem.Available ||
+                                       deselectAllHostsToolStripMenuItem.Available ||
+                                       invertSelectionToolStripMenuItem.Available;
+
+            // Between column actions and row action.
+            toolStripSeparator5.Visible = hasColumnActions && hasRowAction;
+            // Between selection actions and whatever action group comes before them.
+            toolStripSeparatorSelection.Visible = hasSelectionActions && (hasColumnActions || hasRowAction);
         }
 
         private bool IsProtectedColumn(int columnIndex)
