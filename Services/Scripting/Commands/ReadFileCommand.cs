@@ -26,8 +26,9 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             try
             {
-                // Substitute variables in the path
-                var filePath = context.SubstituteVariables(step.Readfile.Path);
+                // Substitute variables in path and expand Windows env vars like %TEMP%
+                var filePath = Environment.ExpandEnvironmentVariables(
+                    context.SubstituteVariables(step.Readfile.Path));
 
                 // Validate path for security
                 if (!ScriptFileAccessValidator.ValidateReadPath(filePath, out var pathError))

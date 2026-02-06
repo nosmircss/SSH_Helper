@@ -186,7 +186,7 @@ namespace SSH_Helper.Services.Scripting
         }
 
         /// <summary>
-        /// Substitutes ${variable} placeholders in a string.
+        /// Substitutes ${variable} and {{variable}} placeholders in a string.
         /// Supports nested references and array indexing: ${array[0]} or ${array[index]}
         /// </summary>
         public string SubstituteVariables(string input)
@@ -197,10 +197,10 @@ namespace SSH_Helper.Services.Scripting
             // Handle special _output variable
             var result = input.Replace("${_output}", _lastCommandOutput);
 
-            // Replace ${variable} patterns
-            result = Regex.Replace(result, @"\$\{([^}]+)\}", match =>
+            // Replace ${variable} and {{variable}} patterns
+            result = Regex.Replace(result, @"\$\{([^}]+)\}|\{\{([^}]+)\}\}", match =>
             {
-                var expr = match.Groups[1].Value;
+                var expr = match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
                 return ResolveVariableExpression(expr);
             });
 

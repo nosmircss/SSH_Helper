@@ -33,6 +33,12 @@ namespace SSH_Helper.Utilities
             @"%[ ]*(?=\r)|(?<=\r)[ ]+\r+",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+        // Starship and similar prompts may prepend a timestamp/context line
+        // immediately before the final prompt symbol line.
+        private static readonly Regex PromptMetadataLineRegex = new(
+            @"^\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b.*$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
         /// <summary>
         /// Normalizes terminal output by processing ANSI escape sequences,
         /// carriage returns, tabs, backspaces, and cursor movements.
@@ -165,6 +171,62 @@ namespace SSH_Helper.Utilities
                 return chunk;
 
             return ZshPromptSpRegex.Replace(chunk, string.Empty);
+        }
+
+        /// <summary>
+        /// Strips trailing shell prompt artifacts from command output.
+        /// </summary>
+        /// <param name="output">Captured command output</param>
+        /// <param name="currentPrompt">Current detected shell prompt literal</param>
+        /// <returns>Output without trailing prompt lines</returns>
+        public static string StripTrailingPrompt(string output, string? currentPrompt)
+        {
+            if (string.IsNullOrEmpty(output) || string.IsNullOrWhiteSpace(currentPrompt))
+                return output;
+
+            var lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).ToList();
+            if (lines.Count == 0)
+                return output;
+
+            int last = lines.Count - 1;
+            while (last >= 0 && string.IsNullOrWhiteSpace(lines[last]))
+            {
+                last--;
+            }
+
+            if (last < 0)
+                return string.Empty;
+
+            var promptLiteral = currentPrompt.TrimEnd();
+            var promptRegex = PromptDetector.BuildPromptRegex(promptLiteral);
+            var lastLine = lines[last].TrimEnd();
+
+            bool isPromptLine =
+                lastLine.Equals(promptLiteral, StringComparison.Ordinal) ||
+                promptRegex.IsMatch(lastLine);
+
+            if (!isPromptLine)
+                return output;
+
+            // Remove final prompt line.
+            last--;
+
+            // Remove transient prompt metadata line if present (e.g., starship timestamp line).
+            if (last >= 0 && PromptMetadataLineRegex.IsMatch(lines[last]))
+            {
+                last--;
+            }
+
+            // Remove blank separator lines directly preceding the prompt block.
+            while (last >= 0 && string.IsNullOrWhiteSpace(lines[last]))
+            {
+                last--;
+            }
+
+            if (last < 0)
+                return string.Empty;
+
+            return string.Join("\r\n", lines.Take(last + 1));
         }
 
         /// <summary>

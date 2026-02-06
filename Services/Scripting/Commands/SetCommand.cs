@@ -211,18 +211,18 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return EvaluateArithmetic(expression, context);
             }
 
-            // Check for string concatenation with ${var}
-            if (expression.Contains("${"))
-            {
-                return context.SubstituteVariables(expression);
-            }
-
             // Check for quoted string literal
             if ((expression.StartsWith("\"") && expression.EndsWith("\"")) ||
                 (expression.StartsWith("'") && expression.EndsWith("'")))
             {
                 var literal = expression.Substring(1, expression.Length - 2);
                 return context.SubstituteVariables(literal);
+            }
+
+            // Check for string concatenation with ${var}
+            if (expression.Contains("${"))
+            {
+                return context.SubstituteVariables(expression);
             }
 
             // Try to parse as number

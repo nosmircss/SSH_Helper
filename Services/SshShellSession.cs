@@ -1043,7 +1043,7 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Substitutes ${variable} placeholders in the command string.
+        /// Substitutes ${variable} and {{variable}} placeholders in the command string.
         /// </summary>
         private static string SubstituteVariables(string command, Dictionary<string, string>? variables)
         {
@@ -1051,11 +1051,11 @@ namespace SSH_Helper.Services
                 return command;
 
             var result = command;
-            foreach (System.Text.RegularExpressions.Match match in Regex.Matches(command, @"\$\{([^}]+)\}"))
+            foreach (System.Text.RegularExpressions.Match match in Regex.Matches(command, @"\$\{([^}]+)\}|\{\{([^}]+)\}\}"))
             {
-                var variableName = match.Groups[1].Value;
+                var variableName = match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
                 var value = variables.TryGetValue(variableName, out var v) ? v : "";
-                result = result.Replace($"${{{variableName}}}", value);
+                result = result.Replace(match.Value, value);
             }
 
             return result;

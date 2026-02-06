@@ -16,7 +16,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (string.IsNullOrEmpty(step.Send))
                 return CommandResult.Fail("Send command has no command text");
 
-            if (context.Session == null)
+            var session = context.Session;
+            if (session == null)
                 return CommandResult.Fail("No SSH session available");
 
             try
@@ -27,16 +28,17 @@ namespace SSH_Helper.Services.Scripting.Commands
                 // Only show command if not suppressed
                 if (!step.Suppress)
                 {
-                    var prompt = context.Session?.CurrentPrompt ?? ">>>";
+                    var prompt = session.CurrentPrompt ?? ">>>";
                     context.EmitOutput($"{prompt} {command}", ScriptOutputType.Command);
                 }
 
                 // Execute the command
                 var timeoutSeconds = step.Timeout.HasValue && step.Timeout.Value > 0 ? step.Timeout.Value : (int?)null;
-                var output = await context.Session.ExecuteAsync(command, step.Expect, timeoutSeconds, cancellationToken);
+                var output = await session.ExecuteAsync(command, step.Expect, timeoutSeconds, cancellationToken);
 
                 // Strip the echoed command from output
                 output = TerminalOutputProcessor.StripCommandEcho(output, command);
+                output = TerminalOutputProcessor.StripTrailingPrompt(output, session.CurrentPrompt);
 
                 // Record the output
                 context.RecordCommandOutput(output, step.Capture);

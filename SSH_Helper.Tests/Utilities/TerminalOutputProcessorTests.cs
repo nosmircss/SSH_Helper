@@ -393,4 +393,35 @@ public class TerminalOutputProcessorTests
     }
 
     #endregion
+
+    #region StripTrailingPrompt Tests
+
+    [Fact]
+    public void StripTrailingPrompt_EmptyPrompt_ReturnsUnchanged()
+    {
+        var input = "kernel-6.8.0";
+        var result = TerminalOutputProcessor.StripTrailingPrompt(input, "");
+        result.Should().Be(input);
+    }
+
+    [Fact]
+    public void StripTrailingPrompt_SimplePrompt_StripsFinalPromptLine()
+    {
+        var input = "kernel-6.8.0\r\nuser@host:~$";
+        var result = TerminalOutputProcessor.StripTrailingPrompt(input, "user@host:~$");
+        result.Should().Be("kernel-6.8.0");
+    }
+
+    [Fact]
+    public void StripTrailingPrompt_StarshipStylePrompt_StripsPromptBlock()
+    {
+        var input =
+            "6.8.0-90-generic\r\n\r\n 2026-02-05 20:19:00 user@host in ~\r\nuser@host:~$";
+
+        var result = TerminalOutputProcessor.StripTrailingPrompt(input, "user@host:~$");
+
+        result.Should().Be("6.8.0-90-generic");
+    }
+
+    #endregion
 }
