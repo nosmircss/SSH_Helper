@@ -76,7 +76,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.17";
+        private const string ApplicationVersion = "0.50.18";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -1767,6 +1767,7 @@ namespace SSH_Helper
                 deleteColumnToolStripMenuItem.Enabled = !isProtected;
                 renameColumnToolStripMenuItem.Enabled = !isProtected;
 
+                UpdateHostGridContextMenuSeparators();
                 contextMenuStrip1.Show(dgv_variables, location);
             }
             else
@@ -1778,7 +1779,24 @@ namespace SSH_Helper
                 renameColumnToolStripMenuItem.Visible = true;
                 renameColumnToolStripMenuItem.Enabled = true;
                 deleteRowToolStripMenuItem.Visible = true;
+                UpdateHostGridContextMenuSeparators();
             }
+        }
+
+        private void UpdateHostGridContextMenuSeparators()
+        {
+            bool hasColumnActions = addColumnToolStripMenuItem.Available ||
+                                    renameColumnToolStripMenuItem.Available ||
+                                    deleteColumnToolStripMenuItem.Available;
+            bool hasRowAction = deleteRowToolStripMenuItem.Available;
+            bool hasSelectionActions = selectAllHostsToolStripMenuItem.Available ||
+                                       deselectAllHostsToolStripMenuItem.Available ||
+                                       invertSelectionToolStripMenuItem.Available;
+
+            // Between column actions and row action.
+            toolStripSeparator5.Visible = hasColumnActions && hasRowAction;
+            // Between selection actions and whatever action group comes before them.
+            toolStripSeparatorSelection.Visible = hasSelectionActions && (hasColumnActions || hasRowAction);
         }
 
         private bool IsProtectedColumn(int columnIndex)
@@ -3228,6 +3246,31 @@ namespace SSH_Helper
                 var message = ScriptValidationFormatter.FormatExceptionMessage(ex);
                 AppendOutputText(Environment.NewLine + message + Environment.NewLine);
                 MessageBox.Show(message, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ctxPrettyFormat_Click(object sender, EventArgs e)
+        {
+            var text = txtCommand.Text;
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            if (!Services.Scripting.ScriptParser.IsYamlScript(text))
+            {
+                MessageBox.Show("Current commands are not a YAML script.\nPretty Format only works with YAML scripts.",
+                    "Pretty Format", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                txtCommand.Text = ScriptPrettyFormatter.Format(text);
+                UpdateStatusBar("Script formatted");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to format: {ex.Message}", "Pretty Format",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -5443,16 +5486,20 @@ namespace SSH_Helper
             if (hosts.Count == 0)
                 return;
 
-            SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
-            SetExecutionMode(true);
-            ClearOutput();
-
             SshDebugLog("EXEC", "Preparing execution options", sw);
             int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
             var preparation = _executionCoordinator.PrepareExecution(txtCommand.Text, commandTimeout);
             SshDebugLog("EXEC", $"Timeouts configured - command: {preparation.CommandTimeoutSeconds}s, connection: {preparation.ConnectionTimeoutSeconds}s", sw);
 
             var preset = preparation.Preset;
+
+            // Validate column dependencies before entering execution mode
+            if (!ValidateColumnDependencies(preset))
+                return;
+
+            SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
+            SetExecutionMode(true);
+            ClearOutput();
             if (includeCommandPreview)
             {
                 var commandPreview = txtCommand.Text.Length > 50 ? txtCommand.Text.Substring(0, 50) + "..." : txtCommand.Text;
@@ -5509,6 +5556,70 @@ namespace SSH_Helper
                 SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
                 SetExecutionMode(false);
             }
+        }
+
+        /// <summary>
+        /// Validates that grid columns referenced by the preset exist before execution.
+        /// Returns true to proceed, false to cancel.
+        /// </summary>
+        private bool ValidateColumnDependencies(PresetInfo preset)
+        {
+            return ValidateColumnDependencies(new[] { preset });
+        }
+
+        /// <summary>
+        /// Validates that grid columns referenced by the presets exist before execution.
+        /// Returns true to proceed, false to cancel.
+        /// </summary>
+        private bool ValidateColumnDependencies(IEnumerable<PresetInfo> presets)
+        {
+            var analyzer = new ScriptDependencyAnalyzer();
+            ColumnDependencyResult result;
+
+            try
+            {
+                result = analyzer.AnalyzePresets(presets);
+            }
+            catch (Exception ex)
+            {
+                // If analysis fails (e.g., parse error), don't block execution.
+                // The actual execution path will report parse errors properly.
+                SshDebugLog("VALIDATE", $"Column dependency analysis failed: {ex.Message}");
+                return true;
+            }
+
+            if (result.ReferencedColumns.Count == 0)
+                return true;
+
+            // Collect existing grid column names
+            var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataGridViewColumn col in dgv_variables.Columns)
+            {
+                existingColumns.Add(col.Name);
+            }
+
+            // Find referenced columns that don't exist in the grid
+            var missingColumns = result.ReferencedColumns
+                .Where(c => !existingColumns.Contains(c) && !string.IsNullOrWhiteSpace(c))
+                .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (missingColumns.Count == 0)
+                return true;
+
+            var columnList = string.Join("\n", missingColumns.Select(c => $"  \u2022 {c}"));
+            var message = $"The following column(s) are referenced but do not exist in the grid:\n\n" +
+                          columnList +
+                          "\n\nThese references will resolve to empty values.\n\nContinue with execution?";
+
+            var dialogResult = MessageBox.Show(
+                this,
+                message,
+                "Missing Column References",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            return dialogResult == DialogResult.Yes;
         }
 
         private async void ExecuteOnAllHosts()
@@ -5724,6 +5835,10 @@ namespace SSH_Helper
             }
 
             if (presets.Count == 0)
+                return;
+
+            // Validate column dependencies before entering execution mode
+            if (!ValidateColumnDependencies(presets.Values))
                 return;
 
             var hosts = GetHostConnections(hostRows).ToList();

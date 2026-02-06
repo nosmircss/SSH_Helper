@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -73,7 +74,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (mode == "append")
                 {
                     // For JSON with append, the merging is handled in FormatAsJson
-                    // For JSONL, we always append a line
+                    // For JSONL, append one normalized line at a time
                     // For text/csv, append with newline
                     if (format == "json")
                     {
@@ -81,11 +82,19 @@ namespace SSH_Helper.Services.Scripting.Commands
                         File.WriteAllText(filePath, content);
                         context.EmitOutput($"Merged JSON to '{filePath}'", ScriptOutputType.Debug);
                     }
+                    else if (format == "jsonl")
+                    {
+                        AppendJsonLine(filePath, content);
+                        context.EmitOutput($"Appended to '{filePath}' ({format})", ScriptOutputType.Debug);
+                    }
                     else
                     {
-                        var contentToAppend = content;
-                        if (!contentToAppend.EndsWith(Environment.NewLine))
-                            contentToAppend += Environment.NewLine;
+                        if (File.Exists(filePath) && new FileInfo(filePath).Length > 0 && !FileEndsWithLineBreak(filePath))
+                        {
+                            File.AppendAllText(filePath, Environment.NewLine);
+                        }
+
+                        var contentToAppend = EnsureTrailingNewLine(content);
 
                         File.AppendAllText(filePath, contentToAppend);
                         context.EmitOutput($"Appended to '{filePath}' ({format})", ScriptOutputType.Debug);
@@ -94,7 +103,14 @@ namespace SSH_Helper.Services.Scripting.Commands
                 else
                 {
                     // Overwrite mode (default)
-                    File.WriteAllText(filePath, content);
+                    if (format == "jsonl")
+                    {
+                        File.WriteAllText(filePath, EnsureTrailingNewLine(content));
+                    }
+                    else
+                    {
+                        File.WriteAllText(filePath, content);
+                    }
                     context.EmitOutput($"Wrote to '{filePath}' (overwrite, {format})", ScriptOutputType.Debug);
                 }
 
@@ -134,24 +150,13 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (rawContent.StartsWith("${") && rawContent.EndsWith("}"))
             {
                 var varName = rawContent.Substring(2, rawContent.Length - 3);
-                newValue = context.GetVariable(varName);
+                newValue = NormalizeJsonLikeString(context.GetVariable(varName), context, "Content is not valid JSON", emitDebugOnInvalid: false);
             }
             else
             {
                 // Otherwise, substitute variables and try to parse as JSON
                 var substituted = context.SubstituteVariables(rawContent);
-
-                try
-                {
-                    using var doc = JsonDocument.Parse(substituted);
-                    newValue = doc.RootElement.Clone();
-                }
-                catch (JsonException ex)
-                {
-                    // Not valid JSON - emit a debug message explaining why
-                    context.EmitOutput($"Content is not valid JSON ({ex.Message}), wrapping as string", ScriptOutputType.Debug);
-                    newValue = substituted;
-                }
+                newValue = NormalizeJsonLikeString(substituted, context, "Content is not valid JSON", emitDebugOnInvalid: true);
             }
 
             // Handle append mode - merge with existing file content
@@ -185,7 +190,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             try
             {
                 var existingNode = JsonNode.Parse(existingContent);
-                var newNode = ConvertToJsonNode(newValue);
+                var newNode = JsonUtilities.ConvertToJsonNode(newValue);
 
                 if (existingNode is JsonArray existingArray)
                 {
@@ -210,7 +215,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     // Merge objects
                     if (newNode is JsonObject newObj)
                     {
-                        MergeJsonObjects(existingObj, newObj);
+                        JsonUtilities.MergeInto(existingObj, newObj);
                     }
                     else
                     {
@@ -227,120 +232,6 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Converts a value to a JsonNode for merging operations.
-        /// </summary>
-        private JsonNode? ConvertToJsonNode(object? value)
-        {
-            if (value == null) return null;
-
-            if (value is JsonNode node) return node;
-            if (value is JsonElement element)
-            {
-                return JsonNode.Parse(element.GetRawText());
-            }
-            if (value is JsonObject jsonObj) return jsonObj;
-            if (value is string str)
-            {
-                // Try to parse as JSON
-                if (str.TrimStart().StartsWith("{") || str.TrimStart().StartsWith("["))
-                {
-                    try
-                    {
-                        return JsonNode.Parse(str);
-                    }
-                    catch { }
-                }
-                return JsonValue.Create(str);
-            }
-            if (value is List<string> list)
-            {
-                var arr = new JsonArray();
-                foreach (var item in list)
-                {
-                    arr.Add(ParseJsonValue(item));
-                }
-                return arr;
-            }
-            if (value is int i) return JsonValue.Create(i);
-            if (value is long l) return JsonValue.Create(l);
-            if (value is double d) return JsonValue.Create(d);
-            if (value is bool b) return JsonValue.Create(b);
-
-            // Fallback: serialize and parse
-            try
-            {
-                var json = JsonSerializer.Serialize(value);
-                return JsonNode.Parse(json);
-            }
-            catch
-            {
-                return JsonValue.Create(value.ToString());
-            }
-        }
-
-        /// <summary>
-        /// Parses a string value into the appropriate JSON type.
-        /// </summary>
-        private JsonNode? ParseJsonValue(string item)
-        {
-            if (string.IsNullOrEmpty(item))
-                return JsonValue.Create(item);
-
-            var trimmed = item.Trim();
-
-            // Check for boolean
-            if (trimmed.Equals("true", StringComparison.OrdinalIgnoreCase))
-                return JsonValue.Create(true);
-            if (trimmed.Equals("false", StringComparison.OrdinalIgnoreCase))
-                return JsonValue.Create(false);
-
-            // Check for null
-            if (trimmed.Equals("null", StringComparison.OrdinalIgnoreCase))
-                return null;
-
-            // Check for integer
-            if (long.TryParse(trimmed, out var longVal))
-                return JsonValue.Create(longVal);
-
-            // Check for floating point
-            if (double.TryParse(trimmed, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var doubleVal))
-                return JsonValue.Create(doubleVal);
-
-            // Check if it looks like JSON
-            if (trimmed.StartsWith("{") || trimmed.StartsWith("["))
-            {
-                try
-                {
-                    return JsonNode.Parse(trimmed);
-                }
-                catch { }
-            }
-
-            return JsonValue.Create(item);
-        }
-
-        /// <summary>
-        /// Deep merges source object into target object (modifies target in place).
-        /// </summary>
-        private void MergeJsonObjects(JsonObject target, JsonObject source)
-        {
-            foreach (var prop in source)
-            {
-                if (prop.Value is JsonObject sourceChild && target[prop.Key] is JsonObject targetChild)
-                {
-                    // Recursively merge nested objects
-                    MergeJsonObjects(targetChild, sourceChild);
-                }
-                else
-                {
-                    // Override or add the value
-                    target[prop.Key] = prop.Value?.DeepClone();
-                }
-            }
         }
 
         /// <summary>
@@ -364,25 +255,81 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (rawContent.StartsWith("${") && rawContent.EndsWith("}"))
             {
                 var varName = rawContent.Substring(2, rawContent.Length - 3);
-                value = context.GetVariable(varName);
+                value = NormalizeJsonLikeString(context.GetVariable(varName), context, "JSONL content is not valid JSON", emitDebugOnInvalid: false);
             }
             else
             {
                 var substituted = context.SubstituteVariables(rawContent);
-                try
-                {
-                    using var doc = JsonDocument.Parse(substituted);
-                    value = doc.RootElement.Clone();
-                }
-                catch (JsonException ex)
-                {
-                    context.EmitOutput($"JSONL content is not valid JSON ({ex.Message}), wrapping as string", ScriptOutputType.Debug);
-                    value = substituted;
-                }
+                value = NormalizeJsonLikeString(substituted, context, "JSONL content is not valid JSON", emitDebugOnInvalid: true);
             }
 
             // Serialize as compact single line (never pretty for JSONL)
             return SerializeToJson(value, pretty: false);
+        }
+
+        /// <summary>
+        /// Parses JSON-like strings into JsonElement so structured JSON is not serialized as a quoted string.
+        /// </summary>
+        private object? NormalizeJsonLikeString(object? value, ScriptContext context, string debugPrefix, bool emitDebugOnInvalid)
+        {
+            if (value is not string strValue)
+                return value;
+
+            var trimmed = strValue.Trim();
+            if (trimmed.Length == 0)
+                return strValue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(trimmed);
+                return doc.RootElement.Clone();
+            }
+            catch (JsonException ex)
+            {
+                if (emitDebugOnInvalid)
+                {
+                    context.EmitOutput($"{debugPrefix} ({ex.Message}), wrapping as string", ScriptOutputType.Debug);
+                }
+            }
+
+            return strValue;
+        }
+
+        /// <summary>
+        /// Ensures text ends with a single platform newline.
+        /// </summary>
+        private static string EnsureTrailingNewLine(string content)
+        {
+            var normalized = content.TrimEnd('\r', '\n');
+            return normalized + Environment.NewLine;
+        }
+
+        /// <summary>
+        /// Appends a single JSONL record while preserving line boundaries in existing files.
+        /// </summary>
+        private static void AppendJsonLine(string filePath, string content)
+        {
+            if (File.Exists(filePath) && new FileInfo(filePath).Length > 0 && !FileEndsWithLineBreak(filePath))
+            {
+                File.AppendAllText(filePath, Environment.NewLine);
+            }
+
+            var line = EnsureTrailingNewLine(content);
+            File.AppendAllText(filePath, line);
+        }
+
+        /// <summary>
+        /// Returns true when the file's final byte is a newline terminator.
+        /// </summary>
+        private static bool FileEndsWithLineBreak(string filePath)
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (stream.Length == 0)
+                return false;
+
+            stream.Seek(-1, SeekOrigin.End);
+            int lastByte = stream.ReadByte();
+            return lastByte == '\n' || lastByte == '\r';
         }
 
         /// <summary>
@@ -469,7 +416,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                                             var values = new List<string>();
                                             foreach (var header in headers)
                                             {
-                                                var val = obj[header]?.ToString() ?? "";
+                                                var val = GetCsvNodeValue(obj[header]);
                                                 values.Add(val);
                                             }
                                             rows.Add(string.Join(",", values.ConvertAll(EscapeCsvField)));
@@ -482,7 +429,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                                     }
                                     else if (element != null)
                                     {
-                                        rows.Add(element.ToString() ?? "");
+                                        rows.Add(GetCsvNodeValue(element));
                                     }
                                 }
                             }
@@ -536,6 +483,98 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// Converts a JSON node to a compact, CSV-safe string value.
+        /// Scalars are converted to plain strings; objects/arrays stay compact JSON.
+        /// </summary>
+        private static string GetCsvNodeValue(JsonNode? node)
+        {
+            if (node == null)
+                return string.Empty;
+
+            if (node is JsonArray array)
+            {
+                return FlattenCsvArray(array);
+            }
+
+            if (node is JsonValue value)
+            {
+                if (value.TryGetValue<string>(out var str))
+                {
+                    if (TryParseJsonArray(str, out var parsedArray))
+                    {
+                        return FlattenCsvArray(parsedArray);
+                    }
+
+                    return str;
+                }
+                if (value.TryGetValue<long>(out var lng))
+                    return lng.ToString(CultureInfo.InvariantCulture);
+                if (value.TryGetValue<double>(out var dbl))
+                    return dbl.ToString(CultureInfo.InvariantCulture);
+                if (value.TryGetValue<decimal>(out var dec))
+                    return dec.ToString(CultureInfo.InvariantCulture);
+                if (value.TryGetValue<bool>(out var bln))
+                    return bln ? "true" : "false";
+
+                return value.ToString();
+            }
+
+            // For arrays/objects, emit compact JSON (not pretty-printed).
+            return node.ToJsonString();
+        }
+
+        /// <summary>
+        /// Flattens JSON arrays for CSV cells using comma-space separators.
+        /// </summary>
+        private static string FlattenCsvArray(JsonArray array)
+        {
+            var items = new List<string>(array.Count);
+            foreach (var item in array)
+            {
+                if (item is JsonArray nestedArray)
+                {
+                    items.Add(nestedArray.ToJsonString());
+                }
+                else if (item is JsonObject nestedObject)
+                {
+                    items.Add(nestedObject.ToJsonString());
+                }
+                else
+                {
+                    items.Add(GetCsvNodeValue(item));
+                }
+            }
+
+            return string.Join(", ", items);
+        }
+
+        /// <summary>
+        /// Parses JSON array text.
+        /// </summary>
+        private static bool TryParseJsonArray(string value, out JsonArray array)
+        {
+            array = new JsonArray();
+            var trimmed = value.Trim();
+            if (!trimmed.StartsWith("[", StringComparison.Ordinal) || !trimmed.EndsWith("]", StringComparison.Ordinal))
+                return false;
+
+            try
+            {
+                if (JsonNode.Parse(trimmed) is JsonArray parsed)
+                {
+                    array = parsed;
+                    return true;
+                }
+            }
+            catch
+            {
+                // Not valid JSON array text.
+            }
+
+            return false;
         }
 
         /// <summary>

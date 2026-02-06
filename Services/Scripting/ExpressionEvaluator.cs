@@ -25,18 +25,10 @@ namespace SSH_Helper.Services.Scripting
             if (string.IsNullOrWhiteSpace(expression))
                 return false;
 
-            expression = expression.Trim();
+            expression = TrimEnclosingParentheses(expression.Trim());
 
-            // Handle logical operators (lowest precedence)
-            // Check for " and " or " or " (with spaces to avoid matching within words)
-            var andIndex = FindLogicalOperator(expression, " and ");
-            if (andIndex > 0)
-            {
-                var left = expression.Substring(0, andIndex);
-                var right = expression.Substring(andIndex + 5);
-                return Evaluate(left) && Evaluate(right);
-            }
-
+            // Handle logical operators (split on lowest precedence first)
+            // "or" has lower precedence than "and", so check "or" first
             var orIndex = FindLogicalOperator(expression, " or ");
             if (orIndex > 0)
             {
@@ -45,16 +37,18 @@ namespace SSH_Helper.Services.Scripting
                 return Evaluate(left) || Evaluate(right);
             }
 
+            var andIndex = FindLogicalOperator(expression, " and ");
+            if (andIndex > 0)
+            {
+                var left = expression.Substring(0, andIndex);
+                var right = expression.Substring(andIndex + 5);
+                return Evaluate(left) && Evaluate(right);
+            }
+
             // Handle "not " prefix
             if (expression.StartsWith("not ", StringComparison.OrdinalIgnoreCase))
             {
                 return !Evaluate(expression.Substring(4));
-            }
-
-            // Handle parentheses
-            if (expression.StartsWith("(") && expression.EndsWith(")"))
-            {
-                return Evaluate(expression.Substring(1, expression.Length - 2));
             }
 
             // Now evaluate comparison operators
@@ -198,11 +192,12 @@ namespace SSH_Helper.Services.Scripting
 
         private int FindLogicalOperator(string expression, string op)
         {
-            // Find operator outside of quotes
+            // Find operator outside of quotes and parentheses.
             var inQuote = false;
             var quoteChar = '\0';
+            var parenDepth = 0;
 
-            for (int i = 0; i < expression.Length - op.Length; i++)
+            for (int i = 0; i <= expression.Length - op.Length; i++)
             {
                 var c = expression[i];
 
@@ -217,9 +212,26 @@ namespace SSH_Helper.Services.Scripting
                     {
                         inQuote = false;
                     }
+                    continue;
                 }
 
-                if (!inQuote && expression.Substring(i).StartsWith(op, StringComparison.OrdinalIgnoreCase))
+                if (inQuote)
+                    continue;
+
+                if (c == '(')
+                {
+                    parenDepth++;
+                    continue;
+                }
+
+                if (c == ')' && parenDepth > 0)
+                {
+                    parenDepth--;
+                    continue;
+                }
+
+                if (parenDepth == 0 &&
+                    string.Compare(expression, i, op, 0, op.Length, StringComparison.OrdinalIgnoreCase) == 0)
                 {
                     return i;
                 }
@@ -233,23 +245,75 @@ namespace SSH_Helper.Services.Scripting
             return FindLogicalOperator(expression, op);
         }
 
+        private static string TrimEnclosingParentheses(string expression)
+        {
+            while (IsWrappedByOuterParentheses(expression))
+            {
+                expression = expression.Substring(1, expression.Length - 2).Trim();
+            }
+
+            return expression;
+        }
+
+        private static bool IsWrappedByOuterParentheses(string expression)
+        {
+            if (expression.Length < 2 || expression[0] != '(' || expression[^1] != ')')
+                return false;
+
+            var inQuote = false;
+            var quoteChar = '\0';
+            var depth = 0;
+
+            for (int i = 0; i < expression.Length; i++)
+            {
+                var c = expression[i];
+
+                if ((c == '"' || c == '\'') && (i == 0 || expression[i - 1] != '\\'))
+                {
+                    if (!inQuote)
+                    {
+                        inQuote = true;
+                        quoteChar = c;
+                    }
+                    else if (c == quoteChar)
+                    {
+                        inQuote = false;
+                    }
+
+                    continue;
+                }
+
+                if (inQuote)
+                    continue;
+
+                if (c == '(')
+                {
+                    depth++;
+                }
+                else if (c == ')')
+                {
+                    depth--;
+
+                    if (depth == 0 && i < expression.Length - 1)
+                        return false;
+
+                    if (depth < 0)
+                        return false;
+                }
+            }
+
+            return depth == 0;
+        }
+
         private object? ResolveValue(string expr)
         {
             expr = expr.Trim();
 
             // Handle list length property: numbers.length
-            var lengthMatch = Regex.Match(expr, @"^(\w+)\.length$", RegexOptions.IgnoreCase);
-            if (lengthMatch.Success)
+            var (lengthHandled, lengthValue) = ValueResolver.TryResolveLengthExpression(expr, _context.GetVariable);
+            if (lengthHandled)
             {
-                var baseName = lengthMatch.Groups[1].Value;
-                var value = _context.GetVariable(baseName);
-                return value switch
-                {
-                    List<string> list => list.Count,
-                    string str => str.Length,
-                    System.Collections.ICollection collection => collection.Count,
-                    _ => 0
-                };
+                return lengthValue;
             }
 
             // Handle quoted strings

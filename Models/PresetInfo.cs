@@ -24,7 +24,13 @@ namespace SSH_Helper.Models
     /// </summary>
     public class PresetInfo
     {
-        public string Commands { get; set; } = string.Empty;
+        private string _commands = string.Empty;
+
+        public string Commands
+        {
+            get => _commands;
+            set => _commands = NormalizeToWindowsLineEndings(value);
+        }
         public int? Timeout { get; set; }
         public bool IsFavorite { get; set; }
 
@@ -58,6 +64,20 @@ namespace SSH_Helper.Models
                 IsFavorite = IsFavorite,
                 Folder = Folder
             };
+        }
+
+        private static string NormalizeToWindowsLineEndings(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            // Normalize any newline style to LF first, then convert to Windows CRLF.
+            return value
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n')
+                .Replace("\n", "\r\n", StringComparison.Ordinal);
         }
     }
 }
