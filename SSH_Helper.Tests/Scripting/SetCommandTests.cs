@@ -48,6 +48,23 @@ public class SetCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_EmptyRightHandSide_SetsEmptyString()
+    {
+        var step = new ScriptStep
+        {
+            Set = "empty_src = "
+        };
+
+        var context = new ScriptContext();
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.HasVariable("empty_src").Should().BeTrue();
+        context.GetVariableString("empty_src").Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_PushWithQuotedString_DoesNotStoreLiteralQuoteCharacters()
     {
         var step = new ScriptStep
