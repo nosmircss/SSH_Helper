@@ -33,7 +33,6 @@ public class FontSettingsTests
     [InlineData(nameof(FontSettings.ButtonFontSize), 9f)]
     [InlineData(nameof(FontSettings.HostListFontSize), 9f)]
     [InlineData(nameof(FontSettings.MenuFontSize), 9f)]
-    [InlineData(nameof(FontSettings.TooltipFontSize), 9f)]
     [InlineData(nameof(FontSettings.StatusBarFontSize), 9f)]
     public void Default_FontSizes_HaveExpectedValues(string propertyName, float expected)
     {
@@ -55,9 +54,6 @@ public class FontSettingsTests
     public void Default_LayoutSettings_HaveExpectedValues()
     {
         var settings = new FontSettings();
-        settings.CodeEditorLineSpacing.Should().Be(1.0f);
-        settings.OutputAreaLineSpacing.Should().Be(1.0f);
-        settings.TabWidth.Should().Be(4);
         settings.CodeEditorWordWrap.Should().BeFalse();
         settings.OutputAreaWordWrap.Should().BeFalse();
     }
@@ -68,13 +64,6 @@ public class FontSettingsTests
         var settings = new FontSettings();
         settings.TreeViewRowHeight.Should().Be(0);
         settings.HostListRowHeight.Should().Be(28);
-    }
-
-    [Fact]
-    public void Default_IconSize_IsSmall()
-    {
-        var settings = new FontSettings();
-        settings.IconSize.Should().Be(IconSize.Small);
     }
 
     [Fact]
@@ -153,7 +142,6 @@ public class FontSettingsTests
             ButtonFontSize = value,
             HostListFontSize = value,
             MenuFontSize = value,
-            TooltipFontSize = value,
             StatusBarFontSize = value
         };
 
@@ -167,18 +155,7 @@ public class FontSettingsTests
         settings.ButtonFontSize.Should().Be(value);
         settings.HostListFontSize.Should().Be(value);
         settings.MenuFontSize.Should().Be(value);
-        settings.TooltipFontSize.Should().Be(value);
         settings.StatusBarFontSize.Should().Be(value);
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4)]
-    [InlineData(8)]
-    public void TabWidth_BoundaryValues_StoreCorrectly(int value)
-    {
-        var settings = new FontSettings { TabWidth = value };
-        settings.TabWidth.Should().Be(value);
     }
 
     [Theory]
@@ -199,19 +176,6 @@ public class FontSettingsTests
     {
         var settings = new FontSettings { TreeViewRowHeight = value };
         settings.TreeViewRowHeight.Should().Be(value);
-    }
-
-    #endregion
-
-    #region IconSize Enum Tests
-
-    [Theory]
-    [InlineData(IconSize.Small, 16)]
-    [InlineData(IconSize.Medium, 24)]
-    [InlineData(IconSize.Large, 32)]
-    public void IconSize_EnumValues_MatchPixelSizes(IconSize size, int expectedPixels)
-    {
-        ((int)size).Should().Be(expectedPixels);
     }
 
     #endregion

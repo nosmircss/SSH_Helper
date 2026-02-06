@@ -1123,11 +1123,23 @@ namespace SSH_Helper
             if (previousFonts.Count > 0)
             {
                 var fontsToDispose = previousFonts;
+                var currentFonts = _managedFonts;
                 BeginInvoke(() =>
                 {
                     foreach (var font in fontsToDispose)
                     {
-                        try { font.Dispose(); } catch { }
+                        // GDI+ may share native handles between Font objects with identical
+                        // parameters. Disposing an old font would invalidate any new font
+                        // that shares the same handle (e.g. when resetting to defaults
+                        // produces the same font settings that were already active).
+                        bool sharedHandle = currentFonts.Any(f =>
+                            f.Name == font.Name &&
+                            f.Size == font.Size &&
+                            f.Style == font.Style);
+                        if (!sharedHandle)
+                        {
+                            try { font.Dispose(); } catch { }
+                        }
                     }
                 });
             }
@@ -5301,8 +5313,9 @@ namespace SSH_Helper
             }
 
             // Reposition buttons based on text width
-            using (var g = btnExecuteSelected.CreateGraphics())
+            try
             {
+                using var g = btnExecuteSelected.CreateGraphics();
                 var selectedSize = g.MeasureString(btnExecuteSelected.Text, btnExecuteSelected.Font);
                 btnExecuteSelected.Width = (int)selectedSize.Width + 40;
 
@@ -5313,6 +5326,11 @@ namespace SSH_Helper
                 // Position Stop button with same spacing and ensure matching height
                 btnStopAll.Left = btnExecuteAll.Right + 8;
                 btnStopAll.Height = btnExecuteAll.Height;
+            }
+            catch (ArgumentException)
+            {
+                // Font may have an invalidated GDI+ handle during font transitions;
+                // skip measurement — layout will correct on the next stable call.
             }
         }
 

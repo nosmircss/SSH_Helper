@@ -208,20 +208,6 @@ public class SettingsDialogAppearanceTests : IDisposable
         reloaded.FontSettings.GlobalScaleFactor.Should().Be(1.3f);
     }
 
-    [WinFormsFact]
-    public void SaveButton_IconSize_MapsFromComboBoxCorrectly()
-    {
-        using var dialog = new SettingsDialog(_configService);
-
-        var cboIconSize = GetField<ComboBox>(dialog, "_cboIconSize");
-        cboIconSize.SelectedIndex = 1; // Medium
-
-        InvokeMethod(dialog, "BtnSave_Click", null!, EventArgs.Empty);
-
-        var reloaded = new ConfigurationService(_configPath).Load();
-        reloaded.FontSettings.IconSize.Should().Be(IconSize.Medium);
-    }
-
     #endregion
 
     #region Reset Defaults Tests

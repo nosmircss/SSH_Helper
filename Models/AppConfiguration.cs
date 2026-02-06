@@ -93,16 +93,6 @@ namespace SSH_Helper.Models
     }
 
     /// <summary>
-    /// Icon size options for toolbar and UI elements.
-    /// </summary>
-    public enum IconSize
-    {
-        Small = 16,
-        Medium = 24,
-        Large = 32
-    }
-
-    /// <summary>
     /// Font customization settings for different UI element categories.
     /// </summary>
     public class FontSettings
@@ -172,11 +162,6 @@ namespace SSH_Helper.Models
         public float MenuFontSize { get; set; } = 9f;
 
         /// <summary>
-        /// Font size for tooltips.
-        /// </summary>
-        public float TooltipFontSize { get; set; } = 9f;
-
-        /// <summary>
         /// Font size for status bar text.
         /// </summary>
         public float StatusBarFontSize { get; set; } = 9f;
@@ -189,21 +174,6 @@ namespace SSH_Helper.Models
         public float GlobalScaleFactor { get; set; } = 1.0f;
 
         // === Layout Settings ===
-
-        /// <summary>
-        /// Line spacing multiplier for code editor (1.0 = normal, 1.5 = 150% line height).
-        /// </summary>
-        public float CodeEditorLineSpacing { get; set; } = 1.0f;
-
-        /// <summary>
-        /// Line spacing multiplier for output area.
-        /// </summary>
-        public float OutputAreaLineSpacing { get; set; } = 1.0f;
-
-        /// <summary>
-        /// Tab width in spaces for code editor indentation.
-        /// </summary>
-        public int TabWidth { get; set; } = 4;
 
         /// <summary>
         /// Enable word wrap in code editor.
@@ -224,13 +194,6 @@ namespace SSH_Helper.Models
         /// Row height for host list in pixels.
         /// </summary>
         public int HostListRowHeight { get; set; } = 28;
-
-        // === Icon Settings ===
-
-        /// <summary>
-        /// Size of icons in the UI.
-        /// </summary>
-        public IconSize IconSize { get; set; } = IconSize.Small;
 
         // === Accent Color ===
 

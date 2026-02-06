@@ -54,17 +54,12 @@ public class ConfigurationServiceFontSettingsTests : IDisposable
         reloaded.FontSettings.ButtonFontSize.Should().Be(defaults.ButtonFontSize);
         reloaded.FontSettings.HostListFontSize.Should().Be(defaults.HostListFontSize);
         reloaded.FontSettings.MenuFontSize.Should().Be(defaults.MenuFontSize);
-        reloaded.FontSettings.TooltipFontSize.Should().Be(defaults.TooltipFontSize);
         reloaded.FontSettings.StatusBarFontSize.Should().Be(defaults.StatusBarFontSize);
         reloaded.FontSettings.GlobalScaleFactor.Should().Be(defaults.GlobalScaleFactor);
-        reloaded.FontSettings.CodeEditorLineSpacing.Should().Be(defaults.CodeEditorLineSpacing);
-        reloaded.FontSettings.OutputAreaLineSpacing.Should().Be(defaults.OutputAreaLineSpacing);
-        reloaded.FontSettings.TabWidth.Should().Be(defaults.TabWidth);
         reloaded.FontSettings.CodeEditorWordWrap.Should().Be(defaults.CodeEditorWordWrap);
         reloaded.FontSettings.OutputAreaWordWrap.Should().Be(defaults.OutputAreaWordWrap);
         reloaded.FontSettings.TreeViewRowHeight.Should().Be(defaults.TreeViewRowHeight);
         reloaded.FontSettings.HostListRowHeight.Should().Be(defaults.HostListRowHeight);
-        reloaded.FontSettings.IconSize.Should().Be(defaults.IconSize);
         reloaded.FontSettings.CustomAccentColor.Should().Be(defaults.CustomAccentColor);
     }
 
@@ -87,17 +82,12 @@ public class ConfigurationServiceFontSettingsTests : IDisposable
         fs.ButtonFontSize = 10f;
         fs.HostListFontSize = 11f;
         fs.MenuFontSize = 10f;
-        fs.TooltipFontSize = 8f;
         fs.StatusBarFontSize = 8.5f;
         fs.GlobalScaleFactor = 1.3f;
-        fs.CodeEditorLineSpacing = 1.5f;
-        fs.OutputAreaLineSpacing = 1.3f;
-        fs.TabWidth = 2;
         fs.CodeEditorWordWrap = true;
         fs.OutputAreaWordWrap = true;
         fs.TreeViewRowHeight = 30;
         fs.HostListRowHeight = 35;
-        fs.IconSize = IconSize.Large;
         fs.CustomAccentColor = System.Drawing.Color.CornflowerBlue.ToArgb();
 
         _configService.Save(config);
@@ -115,17 +105,12 @@ public class ConfigurationServiceFontSettingsTests : IDisposable
         reloaded.FontSettings.ButtonFontSize.Should().Be(10f);
         reloaded.FontSettings.HostListFontSize.Should().Be(11f);
         reloaded.FontSettings.MenuFontSize.Should().Be(10f);
-        reloaded.FontSettings.TooltipFontSize.Should().Be(8f);
         reloaded.FontSettings.StatusBarFontSize.Should().Be(8.5f);
         reloaded.FontSettings.GlobalScaleFactor.Should().Be(1.3f);
-        reloaded.FontSettings.CodeEditorLineSpacing.Should().Be(1.5f);
-        reloaded.FontSettings.OutputAreaLineSpacing.Should().Be(1.3f);
-        reloaded.FontSettings.TabWidth.Should().Be(2);
         reloaded.FontSettings.CodeEditorWordWrap.Should().BeTrue();
         reloaded.FontSettings.OutputAreaWordWrap.Should().BeTrue();
         reloaded.FontSettings.TreeViewRowHeight.Should().Be(30);
         reloaded.FontSettings.HostListRowHeight.Should().Be(35);
-        reloaded.FontSettings.IconSize.Should().Be(IconSize.Large);
         reloaded.FontSettings.CustomAccentColor.Should().Be(System.Drawing.Color.CornflowerBlue.ToArgb());
     }
 
@@ -146,7 +131,6 @@ public class ConfigurationServiceFontSettingsTests : IDisposable
             c.FontSettings.ButtonFontSize = fontSize;
             c.FontSettings.HostListFontSize = fontSize;
             c.FontSettings.MenuFontSize = fontSize;
-            c.FontSettings.TooltipFontSize = fontSize;
             c.FontSettings.StatusBarFontSize = fontSize;
         });
 
@@ -168,17 +152,6 @@ public class ConfigurationServiceFontSettingsTests : IDisposable
         _configService.Update(c => c.FontSettings.GlobalScaleFactor = scale);
         var reloaded = new ConfigurationService(_configPath).Load();
         reloaded.FontSettings.GlobalScaleFactor.Should().Be(scale);
-    }
-
-    [Theory]
-    [InlineData(IconSize.Small)]
-    [InlineData(IconSize.Medium)]
-    [InlineData(IconSize.Large)]
-    public void SaveAndLoad_IconSize_PreservesValue(IconSize iconSize)
-    {
-        _configService.Update(c => c.FontSettings.IconSize = iconSize);
-        var reloaded = new ConfigurationService(_configPath).Load();
-        reloaded.FontSettings.IconSize.Should().Be(iconSize);
     }
 
     [Fact]
