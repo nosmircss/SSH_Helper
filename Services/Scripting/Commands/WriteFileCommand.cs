@@ -73,7 +73,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (mode == "append")
                 {
                     // For JSON with append, the merging is handled in FormatAsJson
-                    // For JSONL, we always append a line
+                    // For JSONL, append one normalized line at a time
                     // For text/csv, append with newline
                     if (format == "json")
                     {
@@ -81,11 +81,19 @@ namespace SSH_Helper.Services.Scripting.Commands
                         File.WriteAllText(filePath, content);
                         context.EmitOutput($"Merged JSON to '{filePath}'", ScriptOutputType.Debug);
                     }
+                    else if (format == "jsonl")
+                    {
+                        AppendJsonLine(filePath, content);
+                        context.EmitOutput($"Appended to '{filePath}' ({format})", ScriptOutputType.Debug);
+                    }
                     else
                     {
-                        var contentToAppend = content;
-                        if (!contentToAppend.EndsWith(Environment.NewLine))
-                            contentToAppend += Environment.NewLine;
+                        if (File.Exists(filePath) && new FileInfo(filePath).Length > 0 && !FileEndsWithLineBreak(filePath))
+                        {
+                            File.AppendAllText(filePath, Environment.NewLine);
+                        }
+
+                        var contentToAppend = EnsureTrailingNewLine(content);
 
                         File.AppendAllText(filePath, contentToAppend);
                         context.EmitOutput($"Appended to '{filePath}' ({format})", ScriptOutputType.Debug);
@@ -94,7 +102,14 @@ namespace SSH_Helper.Services.Scripting.Commands
                 else
                 {
                     // Overwrite mode (default)
-                    File.WriteAllText(filePath, content);
+                    if (format == "jsonl")
+                    {
+                        File.WriteAllText(filePath, EnsureTrailingNewLine(content));
+                    }
+                    else
+                    {
+                        File.WriteAllText(filePath, content);
+                    }
                     context.EmitOutput($"Wrote to '{filePath}' (overwrite, {format})", ScriptOutputType.Debug);
                 }
 
@@ -134,24 +149,13 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (rawContent.StartsWith("${") && rawContent.EndsWith("}"))
             {
                 var varName = rawContent.Substring(2, rawContent.Length - 3);
-                newValue = context.GetVariable(varName);
+                newValue = NormalizeJsonLikeString(context.GetVariable(varName), context, "Content is not valid JSON", emitDebugOnInvalid: false);
             }
             else
             {
                 // Otherwise, substitute variables and try to parse as JSON
                 var substituted = context.SubstituteVariables(rawContent);
-
-                try
-                {
-                    using var doc = JsonDocument.Parse(substituted);
-                    newValue = doc.RootElement.Clone();
-                }
-                catch (JsonException ex)
-                {
-                    // Not valid JSON - emit a debug message explaining why
-                    context.EmitOutput($"Content is not valid JSON ({ex.Message}), wrapping as string", ScriptOutputType.Debug);
-                    newValue = substituted;
-                }
+                newValue = NormalizeJsonLikeString(substituted, context, "Content is not valid JSON", emitDebugOnInvalid: true);
             }
 
             // Handle append mode - merge with existing file content
@@ -250,25 +254,81 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (rawContent.StartsWith("${") && rawContent.EndsWith("}"))
             {
                 var varName = rawContent.Substring(2, rawContent.Length - 3);
-                value = context.GetVariable(varName);
+                value = NormalizeJsonLikeString(context.GetVariable(varName), context, "JSONL content is not valid JSON", emitDebugOnInvalid: false);
             }
             else
             {
                 var substituted = context.SubstituteVariables(rawContent);
-                try
-                {
-                    using var doc = JsonDocument.Parse(substituted);
-                    value = doc.RootElement.Clone();
-                }
-                catch (JsonException ex)
-                {
-                    context.EmitOutput($"JSONL content is not valid JSON ({ex.Message}), wrapping as string", ScriptOutputType.Debug);
-                    value = substituted;
-                }
+                value = NormalizeJsonLikeString(substituted, context, "JSONL content is not valid JSON", emitDebugOnInvalid: true);
             }
 
             // Serialize as compact single line (never pretty for JSONL)
             return SerializeToJson(value, pretty: false);
+        }
+
+        /// <summary>
+        /// Parses JSON-like strings into JsonElement so structured JSON is not serialized as a quoted string.
+        /// </summary>
+        private object? NormalizeJsonLikeString(object? value, ScriptContext context, string debugPrefix, bool emitDebugOnInvalid)
+        {
+            if (value is not string strValue)
+                return value;
+
+            var trimmed = strValue.Trim();
+            if (trimmed.Length == 0)
+                return strValue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(trimmed);
+                return doc.RootElement.Clone();
+            }
+            catch (JsonException ex)
+            {
+                if (emitDebugOnInvalid)
+                {
+                    context.EmitOutput($"{debugPrefix} ({ex.Message}), wrapping as string", ScriptOutputType.Debug);
+                }
+            }
+
+            return strValue;
+        }
+
+        /// <summary>
+        /// Ensures text ends with a single platform newline.
+        /// </summary>
+        private static string EnsureTrailingNewLine(string content)
+        {
+            var normalized = content.TrimEnd('\r', '\n');
+            return normalized + Environment.NewLine;
+        }
+
+        /// <summary>
+        /// Appends a single JSONL record while preserving line boundaries in existing files.
+        /// </summary>
+        private static void AppendJsonLine(string filePath, string content)
+        {
+            if (File.Exists(filePath) && new FileInfo(filePath).Length > 0 && !FileEndsWithLineBreak(filePath))
+            {
+                File.AppendAllText(filePath, Environment.NewLine);
+            }
+
+            var line = EnsureTrailingNewLine(content);
+            File.AppendAllText(filePath, line);
+        }
+
+        /// <summary>
+        /// Returns true when the file's final byte is a newline terminator.
+        /// </summary>
+        private static bool FileEndsWithLineBreak(string filePath)
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (stream.Length == 0)
+                return false;
+
+            stream.Seek(-1, SeekOrigin.End);
+            int lastByte = stream.ReadByte();
+            return lastByte == '\n' || lastByte == '\r';
         }
 
         /// <summary>
