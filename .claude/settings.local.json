@@ -13,7 +13,8 @@
       "Bash(openspec archive add-nested-preset-folders:*)",
       "Bash(Select-String -Pattern \"Passed|Failed|Total|error\")",
       "Bash(powershell.exe:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(wc:*)"
     ]
   }
 }
