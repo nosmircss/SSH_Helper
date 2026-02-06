@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using SSH_Helper.Services.Scripting.Commands;
 
 namespace SSH_Helper.Services.Scripting
 {
@@ -300,6 +301,12 @@ namespace SSH_Helper.Services.Scripting
                 return context.SubstituteVariables(inner);
             }
 
+            // Handle nested JSON expressions used as values, e.g. json("a", json("b", 1))
+            if (TryEvaluateJsonExpression(expr, context, out var nestedJsonValue))
+            {
+                return nestedJsonValue;
+            }
+
             // Handle plain variable name
             var varValue = context.GetVariable(expr);
             if (varValue != null)
@@ -317,6 +324,123 @@ namespace SSH_Helper.Services.Scripting
             // Substitute and parse
             var substituted = context.SubstituteVariables(expr);
             return ParseJsonValue(substituted);
+        }
+
+        private static bool TryEvaluateJsonExpression(string expr, ScriptContext context, out object? value)
+        {
+            value = null;
+
+            if (string.IsNullOrWhiteSpace(expr))
+                return false;
+
+            // json(...) constructor
+            if (expr.StartsWith("json(", StringComparison.OrdinalIgnoreCase) &&
+                expr.EndsWith(")", StringComparison.Ordinal))
+            {
+                var inner = expr.Substring(5, expr.Length - 6).Trim();
+                value = NormalizeStructuredJsonResult(JsonFunctions.Constructor(inner, context));
+                return true;
+            }
+
+            // json.*(...) function dispatch
+            if (expr.StartsWith("json.", StringComparison.OrdinalIgnoreCase))
+            {
+                var parenIdx = expr.IndexOf('(');
+                if (parenIdx > 5 && expr.EndsWith(")", StringComparison.Ordinal))
+                {
+                    var funcName = expr.Substring(5, parenIdx - 5);
+                    var inner = expr.Substring(parenIdx + 1, expr.Length - parenIdx - 2).Trim();
+                    return TryDispatchJsonFunction(funcName, inner, context, out value);
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryDispatchJsonFunction(string funcName, string args, ScriptContext context, out object? value)
+        {
+            switch (funcName.ToLowerInvariant())
+            {
+                case "get":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Get(args, context));
+                    return true;
+                case "set":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Set(args, context));
+                    return true;
+                case "delete":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Delete(args, context));
+                    return true;
+                case "merge":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.MergeVariadic(args, context));
+                    return true;
+                case "format":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Format(args, context));
+                    return true;
+                case "exists":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Exists(args, context));
+                    return true;
+                case "len":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Len(args, context));
+                    return true;
+                case "type":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Type(args, context));
+                    return true;
+                case "keys":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Keys(args, context));
+                    return true;
+                case "values":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Values(args, context));
+                    return true;
+                case "items":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Items(args, context));
+                    return true;
+                case "push":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Push(args, context));
+                    return true;
+                case "pop":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Pop(args, context));
+                    return true;
+                case "unshift":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Unshift(args, context));
+                    return true;
+                case "shift":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Shift(args, context));
+                    return true;
+                case "slice":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Slice(args, context));
+                    return true;
+                case "concat":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.Concat(args, context));
+                    return true;
+                case "indexof":
+                    value = NormalizeStructuredJsonResult(JsonFunctions.IndexOf(args, context));
+                    return true;
+                default:
+                    value = null;
+                    return false;
+            }
+        }
+
+        private static object? NormalizeStructuredJsonResult(object? value)
+        {
+            if (value is not string strValue)
+                return value;
+
+            var trimmed = strValue.Trim();
+            if ((trimmed.StartsWith("{") && trimmed.EndsWith("}")) ||
+                (trimmed.StartsWith("[") && trimmed.EndsWith("]")))
+            {
+                try
+                {
+                    return JsonSerializer.Deserialize<JsonElement>(trimmed);
+                }
+                catch
+                {
+                    // Keep original string if parsing fails.
+                }
+            }
+
+            return value;
         }
 
         /// <summary>
