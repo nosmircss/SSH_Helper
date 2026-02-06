@@ -197,8 +197,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 {
                     var funcName = expression.Substring(5, parenIdx - 5);
                     var inner = expression.Substring(parenIdx + 1, expression.Length - parenIdx - 2).Trim();
-                    var result = DispatchJsonFunction(funcName, inner, context);
-                    if (result != null)
+                    if (TryDispatchJsonFunction(funcName, inner, context, out var result))
                         return result;
                 }
             }
@@ -240,30 +239,68 @@ namespace SSH_Helper.Services.Scripting.Commands
             return context.SubstituteVariables(expression);
         }
 
-        private static object? DispatchJsonFunction(string funcName, string args, ScriptContext context)
+        private static bool TryDispatchJsonFunction(string funcName, string args, ScriptContext context, out object? result)
         {
-            return funcName switch
+            switch (funcName.ToLowerInvariant())
             {
-                "get" => JsonFunctions.Get(args, context),
-                "set" => JsonFunctions.Set(args, context),
-                "delete" => JsonFunctions.Delete(args, context),
-                "merge" => JsonFunctions.MergeVariadic(args, context),
-                "format" => JsonFunctions.Format(args, context),
-                "exists" => JsonFunctions.Exists(args, context),
-                "len" => JsonFunctions.Len(args, context),
-                "type" => JsonFunctions.Type(args, context),
-                "keys" => JsonFunctions.Keys(args, context),
-                "values" => JsonFunctions.Values(args, context),
-                "items" => JsonFunctions.Items(args, context),
-                "push" => JsonFunctions.Push(args, context),
-                "pop" => JsonFunctions.Pop(args, context),
-                "unshift" => JsonFunctions.Unshift(args, context),
-                "shift" => JsonFunctions.Shift(args, context),
-                "slice" => JsonFunctions.Slice(args, context),
-                "concat" => JsonFunctions.Concat(args, context),
-                "indexOf" => JsonFunctions.IndexOf(args, context),
-                _ => null
-            };
+                case "get":
+                    result = JsonFunctions.Get(args, context);
+                    return true;
+                case "set":
+                    result = JsonFunctions.Set(args, context);
+                    return true;
+                case "delete":
+                    result = JsonFunctions.Delete(args, context);
+                    return true;
+                case "merge":
+                    result = JsonFunctions.MergeVariadic(args, context);
+                    return true;
+                case "format":
+                    result = JsonFunctions.Format(args, context);
+                    return true;
+                case "exists":
+                    result = JsonFunctions.Exists(args, context);
+                    return true;
+                case "len":
+                    result = JsonFunctions.Len(args, context);
+                    return true;
+                case "type":
+                    result = JsonFunctions.Type(args, context);
+                    return true;
+                case "keys":
+                    result = JsonFunctions.Keys(args, context);
+                    return true;
+                case "values":
+                    result = JsonFunctions.Values(args, context);
+                    return true;
+                case "items":
+                    result = JsonFunctions.Items(args, context);
+                    return true;
+                case "push":
+                    result = JsonFunctions.Push(args, context);
+                    return true;
+                case "pop":
+                    result = JsonFunctions.Pop(args, context);
+                    return true;
+                case "unshift":
+                    result = JsonFunctions.Unshift(args, context);
+                    return true;
+                case "shift":
+                    result = JsonFunctions.Shift(args, context);
+                    return true;
+                case "slice":
+                    result = JsonFunctions.Slice(args, context);
+                    return true;
+                case "concat":
+                    result = JsonFunctions.Concat(args, context);
+                    return true;
+                case "indexof":
+                    result = JsonFunctions.IndexOf(args, context);
+                    return true;
+                default:
+                    result = null;
+                    return false;
+            }
         }
 
         private object? EvaluateArithmetic(string expression, ScriptContext context)

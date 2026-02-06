@@ -144,4 +144,29 @@ public class SetCommandTests
         keys.Should().HaveCount(2);
         keys.Should().BeEquivalentTo(new[] { "host", "port" });
     }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonGet_MissingPathWithoutDefault_StoresNullValue()
+    {
+        var context = new ScriptContext();
+
+        var buildJson = new ScriptStep
+        {
+            Set = "device = json('name', 'router1')"
+        };
+
+        var missingGet = new ScriptStep
+        {
+            Set = "null_val = json.get(device, 'nonexistent')"
+        };
+
+        var buildResult = await _command.ExecuteAsync(buildJson, context, CancellationToken.None);
+        var getResult = await _command.ExecuteAsync(missingGet, context, CancellationToken.None);
+
+        buildResult.Success.Should().BeTrue();
+        getResult.Success.Should().BeTrue();
+        context.HasVariable("null_val").Should().BeTrue();
+        context.GetVariable("null_val").Should().BeNull();
+        context.GetVariableString("null_val").Should().BeEmpty();
+    }
 }
