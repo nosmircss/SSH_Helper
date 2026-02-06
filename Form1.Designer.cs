@@ -30,6 +30,12 @@ namespace SSH_Helper
                 _findDialog?.Dispose();
                 (_credentialProvider as IDisposable)?.Dispose();
 
+                // Dispose tracked font objects
+                foreach (var font in _managedFonts)
+                {
+                    try { font.Dispose(); } catch { }
+                }
+
                 components?.Dispose();
             }
             base.Dispose(disposing);

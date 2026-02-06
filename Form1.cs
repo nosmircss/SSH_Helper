@@ -981,20 +981,16 @@ namespace SSH_Helper
             Refresh();
         }
 
-        /// <summary>
-        /// Safely replaces a control's font, disposing the old one if it was dynamically created.
-        /// </summary>
-        private static void SetFont(Control control, Font newFont)
-        {
-            var oldFont = control.Font;
-            control.Font = newFont;
-            if (oldFont != null && oldFont != newFont && !oldFont.IsSystemFont)
-                oldFont.Dispose();
-        }
+        // Fonts created by ApplyFontSettings — disposed on next call or in Form1.Dispose
+        private List<Font> _managedFonts = new();
 
         private void ApplyFontSettings(Models.FontSettings fontSettings)
         {
             SuspendLayout();
+
+            // Collect previous fonts for disposal after all controls are reassigned
+            var previousFonts = _managedFonts;
+            _managedFonts = new List<Font>();
 
             var uiFont = fontSettings.UIFontFamily;
             var codeFont = fontSettings.CodeFontFamily;
@@ -1005,16 +1001,18 @@ namespace SSH_Helper
 
             // Section titles (Semibold)
             var sectionTitleFont = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
-            SetFont(lblHostsTitle, sectionTitleFont);
-            SetFont(lblPresetsTitle, sectionTitleFont);
-            SetFont(lblScriptTitle, sectionTitleFont);
-            SetFont(lblHistoryTitle, sectionTitleFont);
-            SetFont(lblHostsListTitle, sectionTitleFont);
+            _managedFonts.Add(sectionTitleFont);
+            lblHostsTitle.Font = sectionTitleFont;
+            lblPresetsTitle.Font = sectionTitleFont;
+            lblScriptTitle.Font = sectionTitleFont;
+            lblHistoryTitle.Font = sectionTitleFont;
+            lblHostsListTitle.Font = sectionTitleFont;
 
             // Tree views
             var treeFont = new Font(uiFont, Scaled(fontSettings.TreeViewFontSize));
-            SetFont(trvPresets, treeFont);
-            SetFont(trvFavorites, treeFont);
+            _managedFonts.Add(treeFont);
+            trvPresets.Font = treeFont;
+            trvFavorites.Font = treeFont;
 
             // Apply custom row height for tree views if specified (0 = auto based on font)
             if (fontSettings.TreeViewRowHeight > 0)
@@ -1031,29 +1029,39 @@ namespace SSH_Helper
             }
 
             // Empty labels
-            SetFont(lblFavoritesEmpty, new Font(uiFont, Scaled(fontSettings.EmptyLabelFontSize)));
+            var emptyLabelFont = new Font(uiFont, Scaled(fontSettings.EmptyLabelFontSize));
+            _managedFonts.Add(emptyLabelFont);
+            lblFavoritesEmpty.Font = emptyLabelFont;
 
             // Execute buttons (Semibold)
             var execButtonFont = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
-            SetFont(btnExecuteAll, execButtonFont);
-            SetFont(btnExecuteSelected, execButtonFont);
-            SetFont(btnStopAll, execButtonFont);
+            _managedFonts.Add(execButtonFont);
+            btnExecuteAll.Font = execButtonFont;
+            btnExecuteSelected.Font = execButtonFont;
+            btnStopAll.Font = execButtonFont;
 
             // General buttons
-            SetFont(btnSavePreset, new Font(uiFont, Scaled(fontSettings.ButtonFontSize)));
+            var buttonFont = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+            _managedFonts.Add(buttonFont);
+            btnSavePreset.Font = buttonFont;
 
             // Code editor
-            SetFont(txtCommand, new Font(codeFont, Scaled(fontSettings.CodeEditorFontSize)));
+            var codeEditorFont = new Font(codeFont, Scaled(fontSettings.CodeEditorFontSize));
+            _managedFonts.Add(codeEditorFont);
+            txtCommand.Font = codeEditorFont;
             txtCommand.WordWrap = fontSettings.CodeEditorWordWrap;
 
             // Output area
-            SetFont(txtOutput, new Font(codeFont, Scaled(fontSettings.OutputAreaFontSize)));
+            var outputFont = new Font(codeFont, Scaled(fontSettings.OutputAreaFontSize));
+            _managedFonts.Add(outputFont);
+            txtOutput.Font = outputFont;
             txtOutput.WordWrap = fontSettings.OutputAreaWordWrap;
 
 
             // Tab controls
             var tabFont = new Font(uiFont, Scaled(fontSettings.TabFontSize));
-            SetFont(presetsTabControl, tabFont);
+            _managedFonts.Add(tabFont);
+            presetsTabControl.Font = tabFont;
 
             // Host list (DataGridView) - apply row height setting
             // Don't change font on DataGridView as it interferes with existing styling
@@ -1066,12 +1074,14 @@ namespace SSH_Helper
 
             // History list boxes
             var listFont = new Font(uiFont, Scaled(fontSettings.HostListFontSize));
-            SetFont(lstOutput, listFont);
-            SetFont(lstHosts, listFont);
+            _managedFonts.Add(listFont);
+            lstOutput.Font = listFont;
+            lstHosts.Font = listFont;
 
             // Menu strip
             var menuFont = new Font(uiFont, Scaled(fontSettings.MenuFontSize));
-            SetFont(menuStrip1, menuFont);
+            _managedFonts.Add(menuFont);
+            menuStrip1.Font = menuFont;
             ApplyMenuFontRecursive(menuStrip1.Items, menuFont);
 
             // Context menus
@@ -1083,16 +1093,25 @@ namespace SSH_Helper
 
             // Toolstrips
             var toolStripFont = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
-            SetFont(mainToolStrip, toolStripFont);
-            SetFont(presetsToolStrip, toolStripFont);
+            _managedFonts.Add(toolStripFont);
+            mainToolStrip.Font = toolStripFont;
+            presetsToolStrip.Font = toolStripFont;
 
             // Status bar
-            SetFont(statusStrip, new Font(uiFont, Scaled(fontSettings.StatusBarFontSize)));
+            var statusFont = new Font(uiFont, Scaled(fontSettings.StatusBarFontSize));
+            _managedFonts.Add(statusFont);
+            statusStrip.Font = statusFont;
 
             // Apply accent color if custom
             ApplyAccentColor(fontSettings.CustomAccentColor);
 
             ResumeLayout(true);
+
+            // Now safe to dispose previous fonts — all controls have been reassigned
+            foreach (var font in previousFonts)
+            {
+                try { font.Dispose(); } catch { }
+            }
         }
 
         private void ApplyColumnAutoResize(bool autoResize)
@@ -1160,15 +1179,13 @@ namespace SSH_Helper
         private void ApplyContextMenuFont(ContextMenuStrip? menu, string fontFamily, float fontSize)
         {
             if (menu == null) return;
-            var oldFont = menu.Font;
             var font = new Font(fontFamily, fontSize);
+            _managedFonts.Add(font);
             menu.Font = font;
             foreach (ToolStripItem item in menu.Items)
             {
                 item.Font = font;
             }
-            if (oldFont != null && oldFont != font && !oldFont.IsSystemFont)
-                oldFont.Dispose();
         }
 
         private void ApplyAccentColor(int? accentColorArgb)
