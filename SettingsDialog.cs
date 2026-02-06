@@ -84,6 +84,7 @@ namespace SSH_Helper
         private readonly Button _btnCancel;
 
         private Color _customAccentColor = Color.FromArgb(0, 120, 215);
+        private List<Font> _previewFonts = new();
 
         public SettingsDialog(ConfigurationService configService, bool darkMode = false)
         {
@@ -880,11 +881,31 @@ namespace SSH_Helper
                 var codeSize = (float)(_numCodeEditorSize?.Value ?? 9.75m) * scale;
                 var buttonSize = (float)(_numButtonFontSize?.Value ?? 9m) * scale;
 
-                _lblPreviewTitle.Font = new Font(uiFont + " Semibold", Math.Max(7f, titleSize), FontStyle.Bold);
-                _trvPreview.Font = new Font(uiFont, Math.Max(7f, treeSize));
-                _txtPreviewCode.Font = new Font(codeFont, Math.Max(7f, codeSize));
+                // Dispose previous preview fonts before creating new ones
+                var previousFonts = _previewFonts;
+                _previewFonts = new List<Font>();
+
+                var titleFont = new Font(uiFont + " Semibold", Math.Max(7f, titleSize), FontStyle.Bold);
+                _previewFonts.Add(titleFont);
+                _lblPreviewTitle.Font = titleFont;
+
+                var treeFont = new Font(uiFont, Math.Max(7f, treeSize));
+                _previewFonts.Add(treeFont);
+                _trvPreview.Font = treeFont;
+
+                var codePreviewFont = new Font(codeFont, Math.Max(7f, codeSize));
+                _previewFonts.Add(codePreviewFont);
+                _txtPreviewCode.Font = codePreviewFont;
                 _txtPreviewCode.WordWrap = _chkCodeEditorWordWrap?.Checked ?? false;
-                _btnPreviewButton.Font = new Font(uiFont, Math.Max(7f, buttonSize));
+
+                var buttonFont = new Font(uiFont, Math.Max(7f, buttonSize));
+                _previewFonts.Add(buttonFont);
+                _btnPreviewButton.Font = buttonFont;
+
+                foreach (var font in previousFonts)
+                {
+                    try { font.Dispose(); } catch { }
+                }
 
                 if (_chkUseCustomAccent?.Checked == true)
                 {
@@ -897,9 +918,10 @@ namespace SSH_Helper
                     _btnPreviewButton.ForeColor = SystemColors.ControlText;
                 }
             }
-            catch
+            catch (ArgumentException)
             {
-                // Ignore font errors during preview
+                // Font creation can fail with invalid family names or extreme sizes;
+                // safe to ignore since this only affects the live preview
             }
         }
 
@@ -1141,6 +1163,17 @@ namespace SSH_Helper
                     ? _customAccentColor.ToArgb()
                     : null;
             });
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (var font in _previewFonts)
+                {
+                    try { font.Dispose(); } catch { }
+                }
+            }
+            base.Dispose(disposing);
         }
     }
 }

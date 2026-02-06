@@ -14,7 +14,9 @@
       "Bash(Select-String -Pattern \"Passed|Failed|Total|error\")",
       "Bash(powershell.exe:*)",
       "Bash(python3:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(Select-String -Pattern \"\\(error|warning|Build succeeded|Build FAILED|^$\\)\" -NotMatch)",
+      "Bash(Select-Object -Last 5)"
     ]
   }
 }
