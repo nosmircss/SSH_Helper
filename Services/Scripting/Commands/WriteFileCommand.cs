@@ -185,7 +185,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             try
             {
                 var existingNode = JsonNode.Parse(existingContent);
-                var newNode = ConvertToJsonNode(newValue);
+                var newNode = JsonUtilities.ConvertToJsonNode(newValue);
 
                 if (existingNode is JsonArray existingArray)
                 {
@@ -210,7 +210,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     // Merge objects
                     if (newNode is JsonObject newObj)
                     {
-                        MergeJsonObjects(existingObj, newObj);
+                        JsonUtilities.MergeInto(existingObj, newObj);
                     }
                     else
                     {
@@ -227,120 +227,6 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Converts a value to a JsonNode for merging operations.
-        /// </summary>
-        private JsonNode? ConvertToJsonNode(object? value)
-        {
-            if (value == null) return null;
-
-            if (value is JsonNode node) return node;
-            if (value is JsonElement element)
-            {
-                return JsonNode.Parse(element.GetRawText());
-            }
-            if (value is JsonObject jsonObj) return jsonObj;
-            if (value is string str)
-            {
-                // Try to parse as JSON
-                if (str.TrimStart().StartsWith("{") || str.TrimStart().StartsWith("["))
-                {
-                    try
-                    {
-                        return JsonNode.Parse(str);
-                    }
-                    catch { }
-                }
-                return JsonValue.Create(str);
-            }
-            if (value is List<string> list)
-            {
-                var arr = new JsonArray();
-                foreach (var item in list)
-                {
-                    arr.Add(ParseJsonValue(item));
-                }
-                return arr;
-            }
-            if (value is int i) return JsonValue.Create(i);
-            if (value is long l) return JsonValue.Create(l);
-            if (value is double d) return JsonValue.Create(d);
-            if (value is bool b) return JsonValue.Create(b);
-
-            // Fallback: serialize and parse
-            try
-            {
-                var json = JsonSerializer.Serialize(value);
-                return JsonNode.Parse(json);
-            }
-            catch
-            {
-                return JsonValue.Create(value.ToString());
-            }
-        }
-
-        /// <summary>
-        /// Parses a string value into the appropriate JSON type.
-        /// </summary>
-        private JsonNode? ParseJsonValue(string item)
-        {
-            if (string.IsNullOrEmpty(item))
-                return JsonValue.Create(item);
-
-            var trimmed = item.Trim();
-
-            // Check for boolean
-            if (trimmed.Equals("true", StringComparison.OrdinalIgnoreCase))
-                return JsonValue.Create(true);
-            if (trimmed.Equals("false", StringComparison.OrdinalIgnoreCase))
-                return JsonValue.Create(false);
-
-            // Check for null
-            if (trimmed.Equals("null", StringComparison.OrdinalIgnoreCase))
-                return null;
-
-            // Check for integer
-            if (long.TryParse(trimmed, out var longVal))
-                return JsonValue.Create(longVal);
-
-            // Check for floating point
-            if (double.TryParse(trimmed, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var doubleVal))
-                return JsonValue.Create(doubleVal);
-
-            // Check if it looks like JSON
-            if (trimmed.StartsWith("{") || trimmed.StartsWith("["))
-            {
-                try
-                {
-                    return JsonNode.Parse(trimmed);
-                }
-                catch { }
-            }
-
-            return JsonValue.Create(item);
-        }
-
-        /// <summary>
-        /// Deep merges source object into target object (modifies target in place).
-        /// </summary>
-        private void MergeJsonObjects(JsonObject target, JsonObject source)
-        {
-            foreach (var prop in source)
-            {
-                if (prop.Value is JsonObject sourceChild && target[prop.Key] is JsonObject targetChild)
-                {
-                    // Recursively merge nested objects
-                    MergeJsonObjects(targetChild, sourceChild);
-                }
-                else
-                {
-                    // Override or add the value
-                    target[prop.Key] = prop.Value?.DeepClone();
-                }
-            }
         }
 
         /// <summary>

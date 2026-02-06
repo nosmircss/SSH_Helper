@@ -27,16 +27,8 @@ namespace SSH_Helper.Services.Scripting
 
             expression = expression.Trim();
 
-            // Handle logical operators (lowest precedence)
-            // Check for " and " or " or " (with spaces to avoid matching within words)
-            var andIndex = FindLogicalOperator(expression, " and ");
-            if (andIndex > 0)
-            {
-                var left = expression.Substring(0, andIndex);
-                var right = expression.Substring(andIndex + 5);
-                return Evaluate(left) && Evaluate(right);
-            }
-
+            // Handle logical operators (split on lowest precedence first)
+            // "or" has lower precedence than "and", so check "or" first
             var orIndex = FindLogicalOperator(expression, " or ");
             if (orIndex > 0)
             {
@@ -45,16 +37,33 @@ namespace SSH_Helper.Services.Scripting
                 return Evaluate(left) || Evaluate(right);
             }
 
+            var andIndex = FindLogicalOperator(expression, " and ");
+            if (andIndex > 0)
+            {
+                var left = expression.Substring(0, andIndex);
+                var right = expression.Substring(andIndex + 5);
+                return Evaluate(left) && Evaluate(right);
+            }
+
             // Handle "not " prefix
             if (expression.StartsWith("not ", StringComparison.OrdinalIgnoreCase))
             {
                 return !Evaluate(expression.Substring(4));
             }
 
-            // Handle parentheses
+            // Handle parentheses - verify the outer parens actually match
             if (expression.StartsWith("(") && expression.EndsWith(")"))
             {
-                return Evaluate(expression.Substring(1, expression.Length - 2));
+                int depth = 0;
+                bool outerMatch = true;
+                for (int i = 0; i < expression.Length - 1; i++)
+                {
+                    if (expression[i] == '(') depth++;
+                    else if (expression[i] == ')') depth--;
+                    if (depth == 0) { outerMatch = false; break; }
+                }
+                if (outerMatch)
+                    return Evaluate(expression.Substring(1, expression.Length - 2));
             }
 
             // Now evaluate comparison operators
@@ -238,18 +247,10 @@ namespace SSH_Helper.Services.Scripting
             expr = expr.Trim();
 
             // Handle list length property: numbers.length
-            var lengthMatch = Regex.Match(expr, @"^(\w+)\.length$", RegexOptions.IgnoreCase);
-            if (lengthMatch.Success)
+            var (lengthHandled, lengthValue) = ValueResolver.TryResolveLengthExpression(expr, _context.GetVariable);
+            if (lengthHandled)
             {
-                var baseName = lengthMatch.Groups[1].Value;
-                var value = _context.GetVariable(baseName);
-                return value switch
-                {
-                    List<string> list => list.Count,
-                    string str => str.Length,
-                    System.Collections.ICollection collection => collection.Count,
-                    _ => 0
-                };
+                return lengthValue;
             }
 
             // Handle quoted strings

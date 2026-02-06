@@ -10,7 +10,10 @@
       "Bash(openspec archive add-config-parsing:*)",
       "Bash(openspec show:*)",
       "Bash(openspec archive add-ui-output-throttling:*)",
-      "Bash(openspec archive add-nested-preset-folders:*)"
+      "Bash(openspec archive add-nested-preset-folders:*)",
+      "Bash(Select-String -Pattern \"Passed|Failed|Total|error\")",
+      "Bash(powershell.exe:*)",
+      "Bash(python3:*)"
     ]
   }
 }

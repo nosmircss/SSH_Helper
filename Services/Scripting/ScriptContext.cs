@@ -213,18 +213,10 @@ namespace SSH_Helper.Services.Scripting
         private string ResolveVariableExpression(string expr)
         {
             // Support list length property: ${list.length}
-            var lengthMatch = Regex.Match(expr, @"^(\w+)\.length$", RegexOptions.IgnoreCase);
-            if (lengthMatch.Success)
+            var (handled, length) = ValueResolver.TryResolveLengthExpression(expr, GetVariable);
+            if (handled)
             {
-                var baseName = lengthMatch.Groups[1].Value;
-                var value = GetVariable(baseName);
-                return value switch
-                {
-                    List<string> list => list.Count.ToString(),
-                    string str => str.Length.ToString(),
-                    System.Collections.ICollection collection => collection.Count.ToString(),
-                    _ => "0"
-                };
+                return length.ToString();
             }
 
             // Check for array indexing: varname[index]

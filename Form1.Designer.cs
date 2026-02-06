@@ -83,6 +83,14 @@ namespace SSH_Helper
             lblFavoritesEmpty = new Label();
             scriptPanel = new Panel();
             txtCommand = new TextBox();
+            contextCommandBox = new ContextMenuStrip(components);
+            ctxCut = new ToolStripMenuItem();
+            ctxCopy = new ToolStripMenuItem();
+            ctxPaste = new ToolStripMenuItem();
+            ctxSelectAll = new ToolStripMenuItem();
+            ctxSeparator1 = new ToolStripSeparator();
+            ctxPrettyFormat = new ToolStripMenuItem();
+            ctxValidateScript = new ToolStripMenuItem();
             scriptFooterPanel = new Panel();
             lblLinePosition = new Label();
             scriptHeaderPanel = new Panel();
@@ -201,6 +209,7 @@ namespace SSH_Helper
             historySplitContainer.Panel2.SuspendLayout();
             historySplitContainer.SuspendLayout();
             contextHistoryLst.SuspendLayout();
+            contextCommandBox.SuspendLayout();
             hostListPanel.SuspendLayout();
             contextHostLst.SuspendLayout();
             hostHeaderPanel.SuspendLayout();
@@ -745,6 +754,7 @@ namespace SSH_Helper
             txtCommand.AcceptsTab = true;
             txtCommand.BackColor = Color.FromArgb(253, 253, 253);
             txtCommand.BorderStyle = BorderStyle.None;
+            txtCommand.ContextMenuStrip = contextCommandBox;
             txtCommand.Dock = DockStyle.Fill;
             txtCommand.Font = new Font("Cascadia Code", 9.75F, FontStyle.Regular, GraphicsUnit.Point, 0);
             txtCommand.Location = new Point(0, 60);
@@ -754,7 +764,64 @@ namespace SSH_Helper
             txtCommand.Size = new Size(258, 208);
             txtCommand.TabIndex = 0;
             txtCommand.WordWrap = false;
-            // 
+            //
+            // contextCommandBox
+            //
+            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxSeparator1, ctxPrettyFormat, ctxValidateScript });
+            contextCommandBox.Name = "contextCommandBox";
+            contextCommandBox.Size = new Size(201, 142);
+            //
+            // ctxCut
+            //
+            ctxCut.Name = "ctxCut";
+            ctxCut.ShortcutKeyDisplayString = "Ctrl+X";
+            ctxCut.Size = new Size(200, 22);
+            ctxCut.Text = "Cu&t";
+            ctxCut.Click += (s, e) => txtCommand.Cut();
+            //
+            // ctxCopy
+            //
+            ctxCopy.Name = "ctxCopy";
+            ctxCopy.ShortcutKeyDisplayString = "Ctrl+C";
+            ctxCopy.Size = new Size(200, 22);
+            ctxCopy.Text = "&Copy";
+            ctxCopy.Click += (s, e) => txtCommand.Copy();
+            //
+            // ctxPaste
+            //
+            ctxPaste.Name = "ctxPaste";
+            ctxPaste.ShortcutKeyDisplayString = "Ctrl+V";
+            ctxPaste.Size = new Size(200, 22);
+            ctxPaste.Text = "&Paste";
+            ctxPaste.Click += (s, e) => txtCommand.Paste();
+            //
+            // ctxSelectAll
+            //
+            ctxSelectAll.Name = "ctxSelectAll";
+            ctxSelectAll.ShortcutKeyDisplayString = "Ctrl+A";
+            ctxSelectAll.Size = new Size(200, 22);
+            ctxSelectAll.Text = "Select &All";
+            ctxSelectAll.Click += (s, e) => txtCommand.SelectAll();
+            //
+            // ctxSeparator1
+            //
+            ctxSeparator1.Name = "ctxSeparator1";
+            ctxSeparator1.Size = new Size(197, 6);
+            //
+            // ctxPrettyFormat
+            //
+            ctxPrettyFormat.Name = "ctxPrettyFormat";
+            ctxPrettyFormat.Size = new Size(200, 22);
+            ctxPrettyFormat.Text = "Pretty &Format";
+            ctxPrettyFormat.Click += ctxPrettyFormat_Click;
+            //
+            // ctxValidateScript
+            //
+            ctxValidateScript.Name = "ctxValidateScript";
+            ctxValidateScript.Size = new Size(200, 22);
+            ctxValidateScript.Text = "&Validate Script";
+            ctxValidateScript.Click += validateScriptToolStripMenuItem_Click;
+            //
             // scriptFooterPanel
             // 
             scriptFooterPanel.BackColor = Color.FromArgb(248, 249, 250);
@@ -1543,6 +1610,7 @@ namespace SSH_Helper
             ((System.ComponentModel.ISupportInitialize)historySplitContainer).EndInit();
             historySplitContainer.ResumeLayout(false);
             contextHistoryLst.ResumeLayout(false);
+            contextCommandBox.ResumeLayout(false);
             hostListPanel.ResumeLayout(false);
             contextHostLst.ResumeLayout(false);
             hostHeaderPanel.ResumeLayout(false);
@@ -1621,6 +1689,14 @@ namespace SSH_Helper
         private TextBox txtPreset;
         private Button btnSavePreset;
         private TextBox txtCommand;
+        private ContextMenuStrip contextCommandBox;
+        private ToolStripMenuItem ctxCut;
+        private ToolStripMenuItem ctxCopy;
+        private ToolStripMenuItem ctxPaste;
+        private ToolStripMenuItem ctxSelectAll;
+        private ToolStripSeparator ctxSeparator1;
+        private ToolStripMenuItem ctxPrettyFormat;
+        private ToolStripMenuItem ctxValidateScript;
 
         // Execute panel
         private Panel executePanel;
