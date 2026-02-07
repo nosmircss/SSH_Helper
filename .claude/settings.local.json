@@ -15,7 +15,9 @@
       "Bash(npm run *)",
       "Bash(git *)",
       "WebFetch(domain:*)",
-      "mcp__*"
+      "mcp__*",
+      "mcp__codex__codex",
+      "Bash(codex:*)"
     ],
     "deny": [
       "Read(.env)",
