@@ -3,7 +3,6 @@
     "allow": [
       "Bash(dotnet nuget search:*)",
       "Bash(dotnet list:*)",
-      "Bash(git add:*)",
       "Bash(gh pr create:*)",
       "Bash(openspec validate:*)",
       "Bash(openspec show:*)",
