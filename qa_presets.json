@@ -187,6 +187,12 @@
                                                      "timeout":  60,
                                                      "isFavorite":  false,
                                                      "folder":  "QA/ControlFlow"
+                                                 },
+                    "QA String Array Functions":  {
+                                                     "commands":  "---\nname: QA String Array Functions\ndescription: Tests replace, split, join, substring, and sort expression functions\nversion: 1\ndebug: true\nsteps:\n  - print: \"=== replace ===\"\n  - set: \"msg = \u0027ssh-helper-alpha\u0027\"\n  - set: \"replaced = replace(msg, \u0027helper\u0027, \u0027tool\u0027)\"\n  - if: \"replaced == \u0027ssh-tool-alpha\u0027\"\n    then:\n      - print: \"replace(): PASS\"\n    else:\n      - exit: \"failure replace() result mismatch\"\n\n  - print: \"=== split/join ===\"\n  - set: \"csv = \u0027gamma,beta,alpha\u0027\"\n  - set: \"parts = split(csv, \u0027,\u0027)\"\n  - set: \"parts_len = length(parts)\"\n  - if: \"parts_len == 3\"\n    then:\n      - print: \"split() length: PASS\"\n    else:\n      - exit: \"failure split() should create 3 elements\"\n\n  - set: \"joined = join(parts, \u0027|\u0027)\"\n  - if: \"joined == \u0027gamma|beta|alpha\u0027\"\n    then:\n      - print: \"join(): PASS\"\n    else:\n      - exit: \"failure join() result mismatch\"\n\n  - print: \"=== substring ===\"\n  - set: \"sub1 = substring(\u0027abcdef\u0027, 2)\"\n  - set: \"sub2 = substring(\u0027abcdef\u0027, 2, 3)\"\n  - if: \"sub1 == \u0027cdef\u0027 and sub2 == \u0027cde\u0027\"\n    then:\n      - print: \"substring(): PASS\"\n    else:\n      - exit: \"failure substring() result mismatch\"\n\n  - print: \"=== sort ===\"\n  - set: \"asc = sort(parts)\"\n  - set: \"desc = sort(parts, \u0027desc\u0027)\"\n  - set: \"asc_join = join(asc, \u0027,\u0027)\"\n  - set: \"desc_join = join(desc, \u0027,\u0027)\"\n  - if: \"asc_join == \u0027alpha,beta,gamma\u0027 and desc_join == \u0027gamma,beta,alpha\u0027\"\n    then:\n      - print: \"sort(): PASS\"\n    else:\n      - exit: \"failure sort() order mismatch\"\n\n  - log:\n      message: \"String/array function preset complete\"\n      level: success",
+                                                     "timeout":  60,
+                                                     "isFavorite":  false,
+                                                     "folder":  "QA/Variables"
                                                  }
                 },
     "folders":  {

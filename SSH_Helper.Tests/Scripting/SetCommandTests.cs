@@ -344,6 +344,70 @@ public class SetCommandTests
         arr[0]!.GetValue<string>().Should().Be("two");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ArithmeticHonorsOperatorPrecedence()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("a", 2);
+        context.SetVariable("b", 3);
+        context.SetVariable("c", 4);
+
+        var step = new ScriptStep { Set = "result = a + b * c" };
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariable("result").Should().Be(14d);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ArithmeticHonorsParentheses()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("a", 2);
+        context.SetVariable("b", 3);
+        context.SetVariable("c", 4);
+
+        var step = new ScriptStep { Set = "result = (a + b) * c" };
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariable("result").Should().Be(20d);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_StringFunctions_WorkAsExpected()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "replaced = replace('ssh-helper', 'helper', 'tool')" }, context, CancellationToken.None)).Success.Should().BeTrue();
+        context.GetVariableString("replaced").Should().Be("ssh-tool");
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "parts = split('c,b,a', ',')" }, context, CancellationToken.None)).Success.Should().BeTrue();
+        var parts = context.GetVariable("parts").Should().BeOfType<List<string>>().Subject;
+        parts.Should().Equal("c", "b", "a");
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "joined = join(parts, '|')" }, context, CancellationToken.None)).Success.Should().BeTrue();
+        context.GetVariableString("joined").Should().Be("c|b|a");
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "slice = substring('abcdef', 2, 3)" }, context, CancellationToken.None)).Success.Should().BeTrue();
+        context.GetVariableString("slice").Should().Be("cde");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SortFunction_SortsAscendingAndDescending()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "arr = split('b,a,c', ',')" }, context, CancellationToken.None)).Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "asc = sort(arr)" }, context, CancellationToken.None)).Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "desc = sort(arr, 'desc')" }, context, CancellationToken.None)).Success.Should().BeTrue();
+
+        var asc = context.GetVariable("asc").Should().BeOfType<List<string>>().Subject;
+        var desc = context.GetVariable("desc").Should().BeOfType<List<string>>().Subject;
+        asc.Should().Equal("a", "b", "c");
+        desc.Should().Equal("c", "b", "a");
+    }
+
     private static JsonArray GetArrayVariable(ScriptContext context, string variableName)
     {
         var value = context.GetVariable(variableName);
