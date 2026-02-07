@@ -63,7 +63,7 @@ These items affect reliability, security, or data integrity and should be addres
 - **Files:** `WebhookCommand.cs:35-39`
 - **Issue:** URL validation checks for `http`/`https` scheme but does not restrict internal/private IP ranges (127.0.0.1, 10.x.x.x, 169.254.x.x). Scripts could probe internal networks.
 - **Fix:** Add private IP range validation, or document the risk prominently.
-- **Status:** DOCUMENTED — Added prominent code comment in `WebhookCommand.cs` noting the SSRF risk and design rationale.
+- **Status:** DOCUMENTED - Kept runtime behavior as-is by design; added explicit risk notes in `WebhookCommand.cs` and `SCRIPTING.md`.
 
 ### 1.8 ~~Silent Config Loss on Parse Error~~ FIXED
 - **Area:** Core
@@ -167,11 +167,12 @@ High-value improvements organized by area.
 
 ### Scripting Engine
 
-#### 2.14 IfCommand Pre-Substitution Bug
+#### 2.14 ~~IfCommand/WhileCommand Pre-Substitution Bug~~ FIXED
 - **Effort:** Small | **Impact:** High
 - **Files:** `IfCommand.cs:25`
 - **Issue:** Variables are substituted BEFORE the expression evaluator sees the condition. A variable containing spaces corrupts the expression. E.g., `${name} == "John Doe"` becomes `John Doe == "John Doe"` which misparsens.
 - **Fix:** Remove pre-substitution in `IfCommand.cs` and `WhileCommand.cs`. The `ExpressionEvaluator.ResolveValue` already handles `${var}` references.
+- **Status:** FIXED - Removed pre-substitution in both commands and evaluate raw expressions through `ExpressionEvaluator`.
 
 #### 2.15 ~~`json.pop()` and `json.shift()` Don't Modify the Array~~ FIXED
 - **Effort:** Small | **Impact:** Medium
@@ -180,23 +181,26 @@ High-value improvements organized by area.
 - **Fix:** Make these destructive (modify and return updated array), or rename to `last()` and `first()`.
 - **Status:** FIXED — `json.pop()` / `json.shift()` are now destructive for writable top-level array references, and non-destructive `json.last()` / `json.first()` were added.
 
-#### 2.16 Duplicated JSON Function Dispatch
+#### 2.16 ~~Duplicated JSON Function Dispatch~~ FIXED
 - **Effort:** Small | **Impact:** Medium
 - **Files:** `SetCommand.cs:242-303` vs `JsonUtilities.cs:360-421`
 - **Issue:** `TryDispatchJsonFunction` switch statement is duplicated. Adding a new JSON function requires updating both.
 - **Fix:** Remove the duplicate in `SetCommand.cs` and delegate to `JsonUtilities.TryDispatchJsonFunction`.
+- **Status:** FIXED - Removed local duplicate dispatch in `SetCommand` and routed JSON expression handling through shared `JsonUtilities`.
 
-#### 2.17 Single-Operator Arithmetic with No Warning
+#### 2.17 ~~Single-Operator Arithmetic with No Warning~~ FIXED
 - **Effort:** Medium | **Impact:** Medium
 - **Files:** `SetCommand.cs:206-211`, `306-366`
 - **Issue:** `a + b * c` silently evaluates incorrectly (splits on `*` first). No warning when multi-operator expression is used.
 - **Fix:** Detect multiple operators and emit a warning, or implement proper operator precedence parsing.
+- **Status:** FIXED - Replaced split-based arithmetic with precedence parsing for `+ - * / %` and parentheses (with divide/mod-by-zero warnings preserved).
 
-#### 2.18 Error Swallowing with `on_error: continue`
+#### 2.18 ~~Error Swallowing with `on_error: continue`~~ FIXED
 - **Effort:** Small | **Impact:** Medium
 - **Files:** `ScriptExecutor.cs:188-189`
 - **Issue:** When `on_error: continue` fires, there's no way for subsequent steps to detect that an error occurred.
 - **Fix:** Set a `_last_error` context variable when an error is caught, allowing `if: _last_error is not empty`.
+- **Status:** FIXED - Added `_last_error` lifecycle in executor/context: set on suppressed error, clear on subsequent success.
 
 #### 2.19 ~~`IsYamlScript` Detection False Positives~~ FIXED
 - **Effort:** Small | **Impact:** Medium
@@ -276,16 +280,16 @@ Lower priority polish and feature items.
 ### Scripting
 | # | Item | Effort | Impact | Files |
 |---|------|--------|--------|-------|
-| 3.17 | Add `break` and `continue` as explicit step types | S | Med | `ScriptStep.cs`, `ScriptParser.cs` |
-| 3.18 | Add `elif` support | M | Med | `ScriptStep.cs`, `IfCommand.cs` |
-| 3.19 | Add string functions: `replace()`, `split()`, `join()`, `substring()` | M | Med | `SetCommand.cs` |
-| 3.20 | Add `sort()` function for arrays | S | Med | `SetCommand.cs` |
-| 3.21 | Warn on unknown YAML keys (typo detection) | S | Med | `ScriptParser.cs:141`, `315` |
-| 3.22 | Fix ForEach JSON string quoting (`ToJsonString` → `JsonNodeToStringValue`) | S | Med | `ForeachCommand.cs:121` |
-| 3.23 | Make WhileCommand max iterations configurable per-step | S | Low | `WhileCommand.cs:14` |
-| 3.24 | Make `_timestamp` resolve dynamically instead of at context creation | S | Low | `ScriptContext.cs:131` |
-| 3.25 | Cache regex in `SubstituteVariables` hot path | S | Low | `ScriptContext.cs:217` |
-| 3.26 | Add `try/catch` block structure for scripts | L | Med | Scripting subsystem |
+| 3.17 | ~~Add `break` and `continue` as explicit step types~~ IMPLEMENTED | S | Med | `ScriptStep.cs`, `ScriptParser.cs`, `BreakCommand.cs`, `ContinueCommand.cs` |
+| 3.18 | ~~Add `elif` support~~ IMPLEMENTED | M | Med | `ScriptStep.cs`, `IfCommand.cs`, `ScriptParser.cs` |
+| 3.19 | ~~Add string functions: `replace()`, `split()`, `join()`, `substring()`~~ IMPLEMENTED | M | Med | `SetCommand.cs` |
+| 3.20 | ~~Add `sort()` function for arrays~~ IMPLEMENTED | S | Med | `SetCommand.cs` |
+| 3.21 | ~~Warn on unknown YAML keys (typo detection)~~ IMPLEMENTED | S | Med | `ScriptParser.cs`, `Form1.cs` |
+| 3.22 | ~~Fix ForEach JSON string quoting (`ToJsonString` -> `JsonNodeToStringValue`)~~ IMPLEMENTED | S | Med | `ForeachCommand.cs` |
+| 3.23 | ~~Make WhileCommand max iterations configurable per-step~~ IMPLEMENTED | S | Low | `WhileCommand.cs`, `ScriptParser.cs` |
+| 3.24 | ~~Make `_timestamp` resolve dynamically instead of at context creation~~ IMPLEMENTED | S | Low | `ScriptContext.cs` |
+| 3.25 | ~~Cache regex in `SubstituteVariables` hot path~~ IMPLEMENTED | S | Low | `ScriptContext.cs` |
+| 3.26 | ~~Add `try/catch` block structure for scripts~~ IMPLEMENTED | L | Med | `ScriptStep.cs`, `ScriptParser.cs`, `TryCommand.cs`, `ScriptExecutor.cs` |
 
 ### Core
 | # | Item | Effort | Impact | Files |
@@ -308,7 +312,7 @@ Lower priority polish and feature items.
 | 2 | Font disposal on theme changes | Frontend | S | FIXED |
 | 3 | Silent config loss on parse error | Core | S | FIXED |
 | 4 | ReDoS in user-provided regex patterns | Scripting | S | FIXED |
-| 5 | IfCommand pre-substitution bug | Scripting | S | Open |
+| 5 | IfCommand pre-substitution bug | Scripting | S | FIXED |
 | 6 | Ctrl+S ambiguous behavior | UX | S | Open |
 | 7 | Add execute keyboard shortcut (F5) | UX | S | Open |
 | 8 | Form1 Dispose pattern incomplete | Frontend | S | FIXED |
