@@ -12,7 +12,15 @@
       "Bash(powershell.exe:*)",
       "Bash(python3:*)",
       "Bash(wc:*)",
-      "Bash(Select-Object *)"
+      "Bash(Select-Object *)",
+      "Bash(npm run *)",
+      "Bash(git *)",
+      "WebFetch(domain:*)",
+      "mcp__*"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(./secrets/**)"
     ]
   }
 }
