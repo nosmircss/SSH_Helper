@@ -3975,11 +3975,33 @@ namespace SSH_Helper
 
         private void lstHosts_SelectedIndexChanged(object? sender, EventArgs e)
         {
-            if (lstHosts.SelectedItem is HostHistoryEntry hostEntry)
+            SetOutputText(BuildSelectedHostOutput());
+        }
+
+        private string BuildSelectedHostOutput()
+        {
+            if (lstHosts.SelectedIndices.Count == 0)
+                return string.Empty;
+
+            var combinedOutput = new StringBuilder();
+            bool isFirstSelectedHost = true;
+
+            for (int i = 0; i < lstHosts.Items.Count; i++)
             {
-                // Trim leading blank lines for cleaner display
-                SetOutputText(hostEntry.Output.TrimStart('\r', '\n'));
+                if (!lstHosts.GetSelected(i) || lstHosts.Items[i] is not HostHistoryEntry hostEntry)
+                    continue;
+
+                var output = hostEntry.Output ?? string.Empty;
+                if (isFirstSelectedHost)
+                {
+                    output = output.TrimStart('\r', '\n');
+                    isFirstSelectedHost = false;
+                }
+
+                combinedOutput.Append(output);
             }
+
+            return combinedOutput.ToString();
         }
 
         private void lstHosts_DrawItem(object? sender, DrawItemEventArgs e)

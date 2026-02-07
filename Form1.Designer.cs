@@ -1174,6 +1174,7 @@ namespace SSH_Helper
             lstHosts.ItemHeight = 20;
             lstHosts.Location = new Point(0, 28);
             lstHosts.Name = "lstHosts";
+            lstHosts.SelectionMode = SelectionMode.MultiExtended;
             lstHosts.Size = new Size(257, 106);
             lstHosts.TabIndex = 0;
             lstHosts.DrawItem += lstHosts_DrawItem;
