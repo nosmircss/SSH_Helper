@@ -3317,16 +3317,25 @@ namespace SSH_Helper
             {
                 var script = parser.Parse(scriptText);
                 var errors = parser.Validate(script, scriptText);
+                var warnings = parser.Warnings;
 
-                if (errors.Count == 0)
+                if (errors.Count == 0 && warnings.Count == 0)
                 {
                     var successMessage = ScriptValidationFormatter.FormatSuccessMessage();
                     AppendOutputText(Environment.NewLine + successMessage + Environment.NewLine);
                     MessageBox.Show(successMessage, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
+                else if (errors.Count == 0)
+                {
+                    var warningMessage = "Script validation succeeded with warnings:" + Environment.NewLine + string.Join(Environment.NewLine, warnings);
+                    AppendOutputText(Environment.NewLine + warningMessage + Environment.NewLine);
+                    MessageBox.Show(warningMessage, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 else
                 {
                     var message = ScriptValidationFormatter.FormatFailureMessage(errors);
+                    if (warnings.Count > 0)
+                        message += Environment.NewLine + Environment.NewLine + "Warnings:" + Environment.NewLine + string.Join(Environment.NewLine, warnings);
                     AppendOutputText(Environment.NewLine + message + Environment.NewLine);
                     MessageBox.Show(message, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
