@@ -181,7 +181,13 @@
                                                     "timeout":  60,
                                                     "isFavorite":  false,
                                                     "folder":  "QA/ControlFlow"
-                                                }
+                                                },
+                    "QA Control Flow Primitives":  {
+                                                     "commands":  "---\nname: QA Control Flow Primitives\ndescription: Tests break/continue, elif branch chaining, and try/catch/finally control flow\nversion: 1\ndebug: true\nsteps:\n  - print: \"=== break/continue in loops ===\"\n  - set: \"i = 0\"\n  - set: \"sum = 0\"\n  - while: \"i \u003c 6\"\n    do:\n      - set: \"i = i + 1\"\n      - if: \"i == 2\"\n        then:\n          - continue: true\n      - if: \"i == 5\"\n        then:\n          - break: true\n      - set: \"sum = sum + i\"\n  - if: \"sum == 8\"\n    then:\n      - print: \"break/continue behavior: PASS\"\n    else:\n      - exit: \"failure break/continue loop result mismatch\"\n\n  - print: \"=== elif ordered evaluation ===\"\n  - set: \"branch = 2\"\n  - set: \"label = none\"\n  - if: \"branch == 1\"\n    then:\n      - set: \"label = one\"\n    elif:\n      - if: \"branch == 2\"\n        then:\n          - set: \"label = two\"\n      - if: \"branch == 3\"\n        then:\n          - set: \"label = three\"\n    else:\n      - set: \"label = other\"\n  - if: \"label == \u0027two\u0027\"\n    then:\n      - print: \"elif branch evaluation: PASS\"\n    else:\n      - exit: \"failure elif branch evaluation mismatch\"\n\n  - print: \"=== try/catch/finally ===\"\n  - set: \"caught = false\"\n  - set: \"finalized = false\"\n  - try:\n      - send: \"definitely_not_a_command_qa_try_12345\"\n    catch:\n      - set: \"caught = true\"\n      - set: \"caught_message = _last_error\"\n    finally:\n      - set: \"finalized = true\"\n  - if: \"caught == true and finalized == true\"\n    then:\n      - print: \"try/catch/finally execution: PASS\"\n    else:\n      - exit: \"failure try/catch/finally did not execute expected branches\"\n  - if: \"caught_message is not empty\"\n    then:\n      - print: \"catch received _last_error: PASS\"\n    else:\n      - exit: \"failure catch should see _last_error\"\n\n  - log:\n      message: \"Control-flow primitives preset complete\"\n      level: success",
+                                                     "timeout":  60,
+                                                     "isFavorite":  false,
+                                                     "folder":  "QA/ControlFlow"
+                                                 }
                 },
     "folders":  {
                     "QA":  {

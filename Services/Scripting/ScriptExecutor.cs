@@ -28,6 +28,9 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.If, new IfCommand(this) },
                 { StepType.Foreach, new ForeachCommand(this) },
                 { StepType.While, new WhileCommand(this) },
+                { StepType.Try, new TryCommand(this) },
+                { StepType.Break, new BreakCommand() },
+                { StepType.Continue, new ContinueCommand() },
                 { StepType.Readfile, new ReadFileCommand() },
                 { StepType.Writefile, new WriteFileCommand() },
                 { StepType.Input, new InputCommand() },
@@ -66,9 +69,10 @@ namespace SSH_Helper.Services.Scripting
 
                 // Reset debug state
                 context.DebugState.Reset();
+                context.RemoveVariable("_last_error");
 
                 // Execute all steps
-                var result = await ExecuteStepsAsync(script.Steps, context, cancellationToken);
+                var result = await ExecuteStepsAsync(script.Steps, context, cancellationToken, 0);
 
                 // Determine final status
                 if (result.ShouldExit)
@@ -127,28 +131,63 @@ namespace SSH_Helper.Services.Scripting
             ScriptContext context,
             CancellationToken cancellationToken)
         {
-            foreach (var step in steps)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
+            return await ExecuteStepsAsync(steps, context, cancellationToken, context.LoopDepth);
+        }
 
-                // Handle debug pausing
-                if (context.DebugState.ShouldPauseAt(step.LineNumber))
+        /// <summary>
+        /// Executes a list of steps at a specific loop depth.
+        /// </summary>
+        public async Task<CommandResult> ExecuteStepsAsync(
+            List<ScriptStep> steps,
+            ScriptContext context,
+            CancellationToken cancellationToken,
+            int loopDepth)
+        {
+            var previousDepth = context.LoopDepth;
+            context.LoopDepth = loopDepth;
+
+            try
+            {
+                foreach (var step in steps)
                 {
-                    await HandleDebugPauseAsync(step, context, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    // Handle debug pausing
+                    if (context.DebugState.ShouldPauseAt(step.LineNumber))
+                    {
+                        await HandleDebugPauseAsync(step, context, cancellationToken);
+                    }
+
+                    var result = await ExecuteStepAsync(step, context, cancellationToken);
+
+                    if (result.SuppressedError)
+                    {
+                        context.SetVariable("_last_error", result.Message ?? string.Empty);
+                    }
+                    else if (result.Success)
+                    {
+                        context.RemoveVariable("_last_error");
+                    }
+
+                    // Propagate control flow signals
+                    if (result.ShouldExit || result.ShouldBreak || result.ShouldContinue)
+                        return result;
+
+                    // Stop on error (unless on_error: continue)
+                    if (!result.Success)
+                    {
+                        if (!string.IsNullOrEmpty(result.Message))
+                            context.SetVariable("_last_error", result.Message);
+                        return result;
+                    }
                 }
 
-                var result = await ExecuteStepAsync(step, context, cancellationToken);
-
-                // Propagate control flow signals
-                if (result.ShouldExit || result.ShouldBreak || result.ShouldContinue)
-                    return result;
-
-                // Stop on error (unless on_error: continue)
-                if (!result.Success)
-                    return result;
+                return CommandResult.Ok();
             }
-
-            return CommandResult.Ok();
+            finally
+            {
+                context.LoopDepth = previousDepth;
+            }
         }
 
         /// <summary>
@@ -186,7 +225,7 @@ namespace SSH_Helper.Services.Scripting
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return CommandResult.Ok(errorMsg);
+                    return CommandResult.Suppressed(errorMsg);
 
                 return CommandResult.Fail(errorMsg);
             }

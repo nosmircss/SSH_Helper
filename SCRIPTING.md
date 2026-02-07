@@ -12,8 +12,11 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [set](#set---variable-assignment)
    - [extract](#extract---regex-data-extraction)
    - [if](#if---conditional-execution)
+   - [break](#break---exit-current-loop)
+   - [continue](#continue---next-loop-iteration)
    - [foreach](#foreach---loop-over-collections)
    - [while](#while---conditional-loop)
+   - [try](#try---structured-error-handling)
    - [exit](#exit---terminate-script)
    - [readfile](#readfile---read-text-files)
    - [writefile](#writefile---write-text-files)
@@ -56,8 +59,10 @@ steps:                           # Required: list of execution steps
 
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
-- Keywords: `name:`, `description:`, `vars:`, `steps:`, `version:`, `nobanner:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- foreach:`, `- while:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- log:`, `- webhook:`, `- parse:`
+- Distinctive top-level sections: `vars:`, `steps:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- log:`, `- webhook:`, `- parse:`
+
+Metadata-only keys (for example `name:` or `description:`) are not treated as strong YAML indicators by themselves.
 
 Plain text (without YAML markers) is treated as simple commands to execute line by line.
 
@@ -198,6 +203,11 @@ Sets or modifies variable values with expression support.
 | trim() | `clean = trim(input)` | Remove whitespace |
 | upper() | `caps = upper(text)` | Convert to uppercase |
 | lower() | `small = lower(text)` | Convert to lowercase |
+| replace() | `out = replace(text, "old", "new")` | Replace string content |
+| split() | `arr = split(text, ",")` | Split string into list |
+| join() | `text = join(arr, ",")` | Join list into string |
+| substring() | `part = substring(text, 0, 5)` | Extract string segment |
+| sort() | `sorted = sort(arr, "desc")` | Sort list values |
 | push() | `arr = push(arr, item)` | Add item to array |
 | json() | `obj = json("k1", v1, "k2", v2)` | Create JSON object or array |
 | json.get() | `val = json.get(data, "path", default)` | Extract value with optional default |
@@ -663,8 +673,12 @@ Executes a block conditionally based on an expression.
   then:
     - step1
     - step2
+  elif:           # Optional ordered list
+    - if: other_condition
+      then:
+        - step3
   else:           # Optional
-    - step3
+    - step4
 ```
 
 **Condition Operators:**
@@ -801,7 +815,9 @@ Repeatedly executes a block while a condition is true.
 **Features:**
 - Condition re-evaluated each iteration
 - Maximum 10,000 iterations (safety limit)
+- Optional per-loop override: `max_iterations`
 - `${_iteration}` variable tracks iteration count (0-based)
+- Supports explicit `break` and `continue` loop control
 
 **Examples:**
 ```yaml
@@ -816,6 +832,7 @@ Repeatedly executes a block while a condition is true.
 - set: retry = 0
 - set: success = ""
 - while: retry < 3 and success is empty
+  max_iterations: 20
   do:
     - send: ping 192.168.1.1 count 1
       capture: result
@@ -841,6 +858,48 @@ Repeatedly executes a block while a condition is true.
     - if: _iteration > 60
       then:
         - exit: failure "Timeout waiting for ready state"
+```
+
+---
+
+### break - Exit Current Loop
+
+Exits the current `foreach` or `while` loop immediately.
+
+**Syntax:**
+```yaml
+- break: true
+```
+
+`break` is only valid inside loop bodies.
+
+---
+
+### continue - Next Loop Iteration
+
+Skips the rest of the current `foreach` or `while` iteration.
+
+**Syntax:**
+```yaml
+- continue: true
+```
+
+`continue` is only valid inside loop bodies.
+
+---
+
+### try - Structured Error Handling
+
+Runs steps in a `try` block, optionally handles failures in `catch`, and always runs `finally`.
+
+**Syntax:**
+```yaml
+- try:
+    - send: risky command
+  catch:
+    - print: "Caught error: ${_last_error}"
+  finally:
+    - log: "Cleanup complete"
 ```
 
 ---
@@ -1361,6 +1420,8 @@ Makes HTTP requests to external APIs and captures responses. Useful for integrat
 | `timeout` | No | `30` | Request timeout in seconds |
 | `on_error` | No | `stop` | Error handling: `continue` or `stop` |
 
+**Security note:** URL scheme is restricted to `http`/`https`, but internal/private destination filtering is intentionally not enforced. Only run trusted scripts when webhook targets are user-controlled.
+
 **Response Capture:**
 
 When using the `into` parameter, two variables are created:
@@ -1685,7 +1746,7 @@ These are accessible via nested paths:
 | Variable | Description | Available |
 |----------|-------------|-----------|
 | `${_output}` | Last command output | After any `send` command |
-| `${_timestamp}` | Script start time (yyyy-MM-dd HH:mm:ss) | Always |
+| `${_timestamp}` | Current timestamp at substitution time (yyyy-MM-dd HH:mm:ss) | Always |
 | `${_iteration}` | Current iteration count (0-based) | Inside `while` loops |
 | `${item_index}` | Current item index (0-based) | Inside `foreach` loops |
 | `${Host_IP}` | Current host IP address | Always (from grid) |

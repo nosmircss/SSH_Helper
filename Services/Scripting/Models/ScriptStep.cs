@@ -101,6 +101,16 @@ namespace SSH_Helper.Services.Scripting.Models
         /// </summary>
         public ParseOptions? Parse { get; set; }
 
+        /// <summary>
+        /// Break command - exits the current loop.
+        /// </summary>
+        public bool BreakLoop { get; set; }
+
+        /// <summary>
+        /// Continue command - skips to the next loop iteration.
+        /// </summary>
+        public bool ContinueLoop { get; set; }
+
         // ===== Command Options =====
 
         /// <summary>
@@ -140,6 +150,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public List<ScriptStep>? Else { get; set; }
 
         /// <summary>
+        /// Ordered else-if branches evaluated when the primary if condition is false.
+        /// </summary>
+        public List<ElifBranch>? Elif { get; set; }
+
+        /// <summary>
         /// Steps to execute in loop body (for foreach/while).
         /// </summary>
         public List<ScriptStep>? Do { get; set; }
@@ -148,6 +163,26 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Filter condition for foreach (optional).
         /// </summary>
         public string? When { get; set; }
+
+        /// <summary>
+        /// Maximum iteration cap for while loops (optional).
+        /// </summary>
+        public int? MaxIterations { get; set; }
+
+        /// <summary>
+        /// Steps to execute inside a structured try block.
+        /// </summary>
+        public List<ScriptStep>? Try { get; set; }
+
+        /// <summary>
+        /// Steps to execute when the try block fails.
+        /// </summary>
+        public List<ScriptStep>? Catch { get; set; }
+
+        /// <summary>
+        /// Steps to execute after try/catch regardless of outcome.
+        /// </summary>
+        public List<ScriptStep>? Finally { get; set; }
 
         /// <summary>
         /// Returns the type of command this step represents.
@@ -163,6 +198,9 @@ namespace SSH_Helper.Services.Scripting.Models
             if (!string.IsNullOrEmpty(If)) return StepType.If;
             if (!string.IsNullOrEmpty(Foreach)) return StepType.Foreach;
             if (!string.IsNullOrEmpty(While)) return StepType.While;
+            if (Try != null || Catch != null || Finally != null) return StepType.Try;
+            if (BreakLoop) return StepType.Break;
+            if (ContinueLoop) return StepType.Continue;
             if (Readfile != null) return StepType.Readfile;
             if (Writefile != null) return StepType.Writefile;
             if (Input != null) return StepType.Input;
@@ -172,6 +210,27 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Parse != null) return StepType.Parse;
             return StepType.Unknown;
         }
+    }
+
+    /// <summary>
+    /// Represents a single elif branch under an if step.
+    /// </summary>
+    public class ElifBranch
+    {
+        /// <summary>
+        /// Line number in the original YAML for error reporting.
+        /// </summary>
+        public int LineNumber { get; set; }
+
+        /// <summary>
+        /// The elif condition expression.
+        /// </summary>
+        public string If { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Steps to execute when the elif condition is true.
+        /// </summary>
+        public List<ScriptStep> Then { get; set; } = new();
     }
 
     /// <summary>
@@ -424,6 +483,9 @@ namespace SSH_Helper.Services.Scripting.Models
         If,
         Foreach,
         While,
+        Try,
+        Break,
+        Continue,
         Readfile,
         Writefile,
         Input,

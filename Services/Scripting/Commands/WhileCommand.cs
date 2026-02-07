@@ -11,7 +11,7 @@ namespace SSH_Helper.Services.Scripting.Commands
     public class WhileCommand : IScriptCommand
     {
         private readonly ScriptExecutor _executor;
-        private const int MaxIterations = 10000; // Safety limit to prevent infinite loops
+        private const int DefaultMaxIterations = 10000; // Safety limit to prevent infinite loops
 
         public WhileCommand(ScriptExecutor executor)
         {
@@ -27,14 +27,17 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return CommandResult.Fail("While requires 'do' block");
 
             var evaluator = new ExpressionEvaluator(context);
+            var maxIterations = step.MaxIterations.GetValueOrDefault(DefaultMaxIterations);
+            if (maxIterations <= 0)
+                maxIterations = DefaultMaxIterations;
             int iteration = 0;
 
-            while (iteration < MaxIterations)
+            while (iteration < maxIterations)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Substitute variables in condition and evaluate
-                var condition = context.SubstituteVariables(step.While);
+                // Evaluate expression directly; ExpressionEvaluator resolves variables.
+                var condition = step.While;
                 var result = evaluator.Evaluate(condition);
 
                 if (!result)
@@ -52,7 +55,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.SetVariable("_iteration", iteration);
 
                 // Execute the 'do' block
-                var execResult = await _executor.ExecuteStepsAsync(step.Do, context, cancellationToken);
+                var execResult = await _executor.ExecuteStepsAsync(step.Do, context, cancellationToken, context.LoopDepth + 1);
 
                 // Handle control flow
                 if (execResult.ShouldExit)
@@ -76,9 +79,9 @@ namespace SSH_Helper.Services.Scripting.Commands
                 iteration++;
             }
 
-            if (iteration >= MaxIterations)
+            if (iteration >= maxIterations)
             {
-                context.EmitOutput($"While: reached maximum iterations ({MaxIterations}), stopping", ScriptOutputType.Warning);
+                context.EmitOutput($"While: reached maximum iterations ({maxIterations}), stopping", ScriptOutputType.Warning);
             }
 
             return CommandResult.Ok();
