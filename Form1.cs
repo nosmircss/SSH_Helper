@@ -3928,7 +3928,25 @@ namespace SSH_Helper
 
         private void contextHistoryLst_Opening(object sender, CancelEventArgs e)
         {
-            // Can be used for dynamic menu state
+            var hasSelection = lstOutput.SelectedItem is HistoryListItem;
+            saveAsToolStripMenuItem.Enabled = hasSelection;
+            deleteEntryToolStripMenuItem.Enabled = hasSelection;
+
+            if (hasSelection && lstOutput.SelectedItem is HistoryListItem entry && _historyResults.HasDetails(entry.Id))
+            {
+                viewDetailsToolStripMenuItem.Enabled = true;
+                viewDetailsToolStripMenuItem.Text = "View Details...";
+            }
+            else
+            {
+                viewDetailsToolStripMenuItem.Enabled = false;
+                viewDetailsToolStripMenuItem.Text = "View Details (not available)";
+            }
+        }
+
+        private void viewDetailsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ViewExecutionDetails();
         }
 
         private void LstOutput_MouseDown(object? sender, MouseEventArgs e)
@@ -5616,6 +5634,7 @@ namespace SSH_Helper
             }
 
             UpdateStatusBar(startStatus(hosts.Count), true, 0, hosts.Count);
+            var executionStartUtc = DateTime.UtcNow;
 
             try
             {
@@ -5647,7 +5666,24 @@ namespace SSH_Helper
                         tsbPassword.Text);
                     SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
                 }
-                StoreExecutionHistory(results);
+                var executionDetails = BuildExecutionDetails(
+                    presetDisplayName,
+                    preset.Commands,
+                    preset.Type.ToString(),
+                    executionStartUtc,
+                    DateTime.UtcNow,
+                    tsbUsername.Text,
+                    preparation.CommandTimeoutSeconds,
+                    preparation.ConnectionTimeoutSeconds,
+                    _sshService.UseConnectionPooling,
+                    BuildRunModeDescription(dialogOptions, isFolderExecution: false),
+                    isFolderExecution: false,
+                    string.Empty,
+                    new[] { presetDisplayName },
+                    hosts,
+                    results);
+
+                StoreExecutionHistory(results, executionDetails);
                 UpdateStatusBar(completionStatus(results.Count));
             }
             catch (Exception ex)
@@ -5959,6 +5995,7 @@ namespace SSH_Helper
             // Use default timeout from first preset or config
             int commandTimeout = presets.Values.FirstOrDefault()?.Timeout ?? config.Timeout;
             var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
+            var executionStartUtc = DateTime.UtcNow;
 
             // Progress reporter
             var progress = new Progress<FolderExecutionProgress>(p =>
@@ -5981,8 +6018,25 @@ namespace SSH_Helper
                     options,
                     progress);
 
+                var executionDetails = BuildExecutionDetails(
+                    folderName,
+                    BuildFolderCommandSnapshot(options.SelectedPresets, presets),
+                    "Folder",
+                    executionStartUtc,
+                    DateTime.UtcNow,
+                    tsbUsername.Text,
+                    commandTimeout,
+                    connectionTimeout,
+                    _sshService.UseConnectionPooling,
+                    BuildRunModeDescription(options, isFolderExecution: true),
+                    isFolderExecution: true,
+                    folderName,
+                    options.SelectedPresets,
+                    hosts,
+                    results);
+
                 // Store single history entry for the entire folder execution
-                StoreFolderExecutionHistory(folderName, results);
+                StoreFolderExecutionHistory(folderName, results, executionDetails);
 
                 int successCount = results.Count(r => r.Success);
                 int failCount = results.Count - successCount;
@@ -6002,28 +6056,14 @@ namespace SSH_Helper
             }
         }
 
-        private void StoreFolderExecutionHistory(string folderName, List<ExecutionResult> results)
+        private string StoreFolderExecutionHistory(string folderName, List<ExecutionResult> results, ExecutionDetails? details = null)
         {
-            // Build per-host history entries
-            var hostResults = new List<HostHistoryEntry>();
+            var hostResults = BuildHostHistoryEntries(results);
             var combinedOutput = new StringBuilder();
 
-            for (int i = 0; i < results.Count; i++)
+            for (int i = 0; i < hostResults.Count; i++)
             {
-                var result = results[i];
-                var output = result.Output;
-                // Trim leading newlines only from first result
-                if (i == 0)
-                    output = output.TrimStart('\r', '\n');
-
-                hostResults.Add(new HostHistoryEntry
-                {
-                    HostAddress = result.Host.ToString(),
-                    Output = output,
-                    Success = result.Success,
-                    Timestamp = result.Timestamp
-                });
-                combinedOutput.Append(output);
+                combinedOutput.Append(hostResults[i].Output);
             }
 
             string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {FolderIcon} {folderName}";
@@ -6034,12 +6074,143 @@ namespace SSH_Helper
             {
                 _outputHistory.Insert(0, entry);
 
-                // Store host results by entry ID
-                StoreHostResultsForEntry(entryId, hostResults);
+                if (hostResults.Count > 0)
+                {
+                    StoreHostResultsForEntry(entryId, hostResults);
+                }
+
+                if (details != null)
+                {
+                    StoreExecutionDetailsForEntry(entryId, details);
+                }
 
                 lstOutput.SelectedIndex = 0;
                 SaveConfiguration();
             });
+
+            return entryId;
+        }
+
+        private ExecutionDetails BuildExecutionDetails(
+            string presetName,
+            string commands,
+            string presetType,
+            DateTime startTimeUtc,
+            DateTime endTimeUtc,
+            string username,
+            int commandTimeoutSeconds,
+            int connectionTimeoutSeconds,
+            bool useConnectionPooling,
+            string runMode,
+            bool isFolderExecution,
+            string folderName,
+            IEnumerable<string> executedPresetNames,
+            IReadOnlyList<HostConnection> hosts,
+            IReadOnlyList<ExecutionResult> results)
+        {
+            return new ExecutionDetails
+            {
+                PresetName = presetName,
+                Commands = commands ?? string.Empty,
+                PresetType = presetType,
+                StartTimeUtc = startTimeUtc,
+                EndTimeUtc = endTimeUtc,
+                Username = username ?? string.Empty,
+                CommandTimeoutSeconds = commandTimeoutSeconds,
+                ConnectionTimeoutSeconds = connectionTimeoutSeconds,
+                UseConnectionPooling = useConnectionPooling,
+                RunMode = runMode,
+                IsFolderExecution = isFolderExecution,
+                FolderName = folderName ?? string.Empty,
+                ExecutedPresetNames = executedPresetNames?.ToList() ?? new List<string>(),
+                Hosts = BuildHostExecutionContexts(hosts, results, endTimeUtc)
+            };
+        }
+
+        private static List<SSH_Helper.Models.HostExecutionContext> BuildHostExecutionContexts(
+            IReadOnlyList<HostConnection> hosts,
+            IReadOnlyList<ExecutionResult> results,
+            DateTime fallbackTimestampUtc)
+        {
+            var hostResultLookup = (results ?? Array.Empty<ExecutionResult>())
+                .GroupBy(r => r.Host.ToString(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+            var contexts = new List<SSH_Helper.Models.HostExecutionContext>();
+            if (hosts == null || hosts.Count == 0)
+                return contexts;
+
+            foreach (var host in hosts)
+            {
+                hostResultLookup.TryGetValue(host.ToString(), out var hostResults);
+                var hostSuccess = hostResults != null && hostResults.Count > 0 && hostResults.All(r => r.Success);
+                var hostTimestampUtc = hostResults != null && hostResults.Count > 0
+                    ? hostResults.Max(r => r.Timestamp.ToUniversalTime())
+                    : fallbackTimestampUtc;
+
+                var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kvp in host.Variables)
+                {
+                    if (string.Equals(kvp.Key, "password", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (string.IsNullOrWhiteSpace(kvp.Key))
+                        continue;
+
+                    variables[kvp.Key] = kvp.Value ?? string.Empty;
+                }
+
+                contexts.Add(new SSH_Helper.Models.HostExecutionContext
+                {
+                    HostAddress = host.ToString(),
+                    Success = hostSuccess,
+                    TimestampUtc = hostTimestampUtc,
+                    Variables = variables
+                });
+            }
+
+            return contexts;
+        }
+
+        private static string BuildRunModeDescription(FolderExecutionOptions? options, bool isFolderExecution)
+        {
+            if (options == null)
+            {
+                return isFolderExecution ? "Sequential presets, 1 host at a time" : "Single preset";
+            }
+
+            var presetMode = options.RunPresetsInParallel ? "Parallel presets" : "Sequential presets";
+            var hostMode = options.ParallelHostCount > 1
+                ? $"{options.ParallelHostCount} hosts in parallel"
+                : "1 host at a time";
+            var errorBehavior = options.StopOnFirstError ? "Stop on first error" : "Continue on error";
+            return $"{presetMode}, {hostMode}, {errorBehavior}";
+        }
+
+        private static string BuildFolderCommandSnapshot(
+            IReadOnlyList<string> selectedPresetNames,
+            IReadOnlyDictionary<string, PresetInfo> presets)
+        {
+            if (selectedPresetNames == null || selectedPresetNames.Count == 0 || presets == null || presets.Count == 0)
+                return string.Empty;
+
+            var sb = new StringBuilder();
+            foreach (var presetName in selectedPresetNames)
+            {
+                if (!presets.TryGetValue(presetName, out var preset))
+                    continue;
+
+                if (sb.Length > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine();
+                }
+
+                sb.AppendLine($"[{presetName}]");
+                sb.Append(preset.Commands ?? string.Empty);
+            }
+
+            return sb.ToString();
         }
 
         private static List<HostHistoryEntry> BuildHostHistoryEntries(List<ExecutionResult> results)
@@ -6081,6 +6252,19 @@ namespace SSH_Helper
         private List<HostHistoryEntry>? GetHostResultsForEntry(string entryId)
         {
             return _historyResults.TryGetResults(entryId, out var results) ? results : null;
+        }
+
+        private void StoreExecutionDetailsForEntry(string entryId, ExecutionDetails details)
+        {
+            if (string.IsNullOrWhiteSpace(entryId) || details == null)
+                return;
+
+            _historyResults.SetDetails(entryId, details);
+        }
+
+        private ExecutionDetails? GetExecutionDetailsForEntry(string entryId)
+        {
+            return _historyResults.TryGetDetails(entryId, out var details) ? details : null;
         }
 
         private void StopExecution()
@@ -6355,7 +6539,7 @@ namespace SSH_Helper
             }
         }
 
-        private void StoreExecutionHistory(List<ExecutionResult> results)
+        private string StoreExecutionHistory(List<ExecutionResult> results, ExecutionDetails? details = null)
         {
             // Use output buffer as the source of truth - includes all debug output
             string output;
@@ -6378,9 +6562,17 @@ namespace SSH_Helper
                 {
                     StoreHostResultsForEntry(entryId, hostResults);
                 }
+
+                if (details != null)
+                {
+                    StoreExecutionDetailsForEntry(entryId, details);
+                }
+
                 lstOutput.SelectedIndex = 0;
                 SaveConfiguration();
             });
+
+            return entryId;
         }
 
         #endregion
@@ -6479,6 +6671,25 @@ namespace SSH_Helper
             _outputHistory.Clear();
             _historyResults.Clear();
             ClearOutput();
+        }
+
+        private void ViewExecutionDetails()
+        {
+            if (lstOutput.SelectedItem is not HistoryListItem entry)
+                return;
+
+            var details = GetExecutionDetailsForEntry(entry.Id);
+            if (details == null)
+            {
+                MessageBox.Show("Execution details are not available for this history entry.",
+                    "Details Not Available",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            using var dialog = new ExecutionDetailsDialog(details, _isDarkMode);
+            dialog.ShowDialog(this);
         }
 
         #endregion
