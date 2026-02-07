@@ -96,7 +96,7 @@ namespace SSH_Helper.Services.Scripting
                 var pattern = ExtractPattern(expression.Substring(matchesIndex + 9).Trim());
                 try
                 {
-                    return Regex.IsMatch(left, pattern, RegexOptions.IgnoreCase, TimeSpan.FromSeconds(5));
+                    return Regex.IsMatch(left, pattern, RegexOptions.IgnoreCase, ScriptRegexDefaults.UserPatternTimeout);
                 }
                 catch
                 {
@@ -324,7 +324,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // Handle variable substitution
-            if (expr.Contains("${"))
+            if (expr.Contains("${") || expr.Contains("{{"))
             {
                 return _context.SubstituteVariables(expr);
             }

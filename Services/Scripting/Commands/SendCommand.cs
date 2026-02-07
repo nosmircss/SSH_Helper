@@ -61,7 +61,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return CommandResult.Ok(errorMsg);
+                    return CommandResult.Suppressed(errorMsg);
 
                 return CommandResult.Fail(errorMsg);
             }

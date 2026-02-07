@@ -55,6 +55,12 @@ namespace SSH_Helper.Services.Scripting.Commands
         public bool ShouldContinue { get; set; }
 
         /// <summary>
+        /// If true, the command encountered an error that was explicitly suppressed
+        /// (for example, via on_error: continue).
+        /// </summary>
+        public bool SuppressedError { get; set; }
+
+        /// <summary>
         /// Creates a success result.
         /// </summary>
         public static CommandResult Ok(string? message = null) => new() { Success = true, Message = message };
@@ -84,5 +90,15 @@ namespace SSH_Helper.Services.Scripting.Commands
         /// Creates a continue result (next loop iteration).
         /// </summary>
         public static CommandResult Continue() => new() { Success = true, ShouldContinue = true };
+
+        /// <summary>
+        /// Creates a success result that carries a suppressed error message.
+        /// </summary>
+        public static CommandResult Suppressed(string message) => new()
+        {
+            Success = true,
+            Message = message,
+            SuppressedError = true
+        };
     }
 }

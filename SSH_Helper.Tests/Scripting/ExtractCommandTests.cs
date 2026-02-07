@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
@@ -56,5 +57,29 @@ public class ExtractCommandTests
         result.Success.Should().BeTrue();
         context.GetVariableString("disk_pct").Should().BeEmpty();
         context.GetVariableString("disk_mount").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CatastrophicPattern_IsBoundedByTimeout()
+    {
+        var step = new ScriptStep
+        {
+            Extract = new ExtractOptions
+            {
+                From = "payload",
+                Pattern = "(a+)+$",
+                Into = "result"
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("payload", new string('a', 6000) + "!");
+        var stopwatch = Stopwatch.StartNew();
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(7));
+        result.Should().NotBeNull();
     }
 }

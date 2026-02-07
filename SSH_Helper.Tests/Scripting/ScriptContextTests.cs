@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
 using Xunit;
@@ -40,5 +41,25 @@ public class ScriptContextTests
         var result = context.SubstituteVariables("Host={{Host_IP}}");
 
         result.Should().Be("Host=10.0.0.5");
+    }
+
+    [Fact]
+    public void TimestampVariable_IsAvailableThroughHasVariable()
+    {
+        var context = new ScriptContext();
+
+        context.HasVariable("_timestamp").Should().BeTrue();
+    }
+
+    [Fact]
+    public void TimestampVariable_ResolvesDynamically()
+    {
+        var context = new ScriptContext();
+
+        var first = context.SubstituteVariables("${_timestamp}");
+        Thread.Sleep(1100);
+        var second = context.SubstituteVariables("${_timestamp}");
+
+        second.Should().NotBe(first);
     }
 }
