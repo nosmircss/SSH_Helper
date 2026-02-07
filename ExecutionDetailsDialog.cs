@@ -78,7 +78,7 @@ namespace SSH_Helper
             {
                 Text = "Copy to Clipboard",
                 Size = new Size(130, 30),
-                Location = new Point(12, 604),
+                Location = new Point(18, 604),
                 Anchor = AnchorStyles.Left | AnchorStyles.Bottom
             };
             _btnCopyToClipboard.Click += BtnCopyToClipboard_Click;
@@ -87,7 +87,7 @@ namespace SSH_Helper
             {
                 Text = "Save to File...",
                 Size = new Size(110, 30),
-                Location = new Point(150, 604),
+                Location = new Point(156, 604),
                 Anchor = AnchorStyles.Left | AnchorStyles.Bottom
             };
             _btnSaveToFile.Click += BtnSaveToFile_Click;
@@ -96,7 +96,7 @@ namespace SSH_Helper
             {
                 Text = "Close",
                 Size = new Size(80, 30),
-                Location = new Point(872, 604),
+                Location = new Point(866, 604),
                 Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
                 DialogResult = DialogResult.OK
             };
@@ -167,6 +167,7 @@ namespace SSH_Helper
             sb.AppendLine($"Start Time: {FormatTimestamp(_details.StartTimeUtc)}");
             sb.AppendLine($"End Time: {FormatTimestamp(_details.EndTimeUtc)}");
             sb.AppendLine($"Duration: {duration:hh\\:mm\\:ss}");
+            sb.AppendLine($"Environment: {_details.EnvironmentName}");
             sb.AppendLine($"Hosts: {hostCount} total ({successCount} succeeded, {failedCount} failed)");
             sb.AppendLine();
             sb.AppendLine("Executed Presets:");
@@ -206,6 +207,7 @@ namespace SSH_Helper
         private void PopulateSettingsTab()
         {
             var sb = new StringBuilder();
+            sb.AppendLine($"Environment: {_details.EnvironmentName}");
             sb.AppendLine($"Username: {_details.Username}");
             sb.AppendLine($"Command Timeout: {_details.CommandTimeoutSeconds} sec");
             sb.AppendLine($"Connection Timeout: {_details.ConnectionTimeoutSeconds} sec");
@@ -331,6 +333,7 @@ namespace SSH_Helper
 
             sb.AppendLine($"Start Time: {FormatTimestamp(_details.StartTimeUtc)}");
             sb.AppendLine($"End Time: {FormatTimestamp(_details.EndTimeUtc)}");
+            sb.AppendLine($"Environment: {_details.EnvironmentName}");
             sb.AppendLine($"Username: {_details.Username}");
             sb.AppendLine($"Command Timeout: {_details.CommandTimeoutSeconds} sec");
             sb.AppendLine($"Connection Timeout: {_details.ConnectionTimeoutSeconds} sec");

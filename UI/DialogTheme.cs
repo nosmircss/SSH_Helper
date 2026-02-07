@@ -163,6 +163,12 @@ namespace SSH_Helper.UI
                 btn.ForeColor = Color.White;
                 btn.FlatStyle = FlatStyle.Flat;
                 btn.FlatAppearance.BorderSize = 0;
+                btn.FlatAppearance.BorderColor = darkMode ? DarkAccent : LightAccent;
+                if (darkMode)
+                {
+                    btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(28, 140, 232);
+                    btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(0, 100, 190);
+                }
             }
             else
             {
@@ -171,8 +177,10 @@ namespace SSH_Helper.UI
                 btn.FlatStyle = darkMode ? FlatStyle.Flat : FlatStyle.Standard;
                 if (darkMode)
                 {
-                    btn.FlatAppearance.BorderColor = DarkBorder;
-                    btn.FlatAppearance.BorderSize = 1;
+                    btn.FlatAppearance.BorderSize = 0;
+                    btn.FlatAppearance.BorderColor = DarkSurface2;
+                    btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(55, 55, 56);
+                    btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(65, 65, 66);
                 }
             }
         }

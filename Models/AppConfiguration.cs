@@ -57,6 +57,8 @@ namespace SSH_Helper.Models
         // Remember state settings
         public bool RememberState { get; set; } = true;
         public ApplicationState? SavedState { get; set; }
+        public Dictionary<string, EnvironmentConfig> Environments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public string? ActiveEnvironment { get; set; }
 
         // History settings
         public int MaxHistoryEntries { get; set; } = 30;

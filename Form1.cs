@@ -90,6 +90,7 @@ namespace SSH_Helper
         #region Services
 
         private readonly ConfigurationService _configService;
+        private readonly EnvironmentService _environmentService;
         private readonly PresetManager _presetManager;
         private readonly CsvManager _csvManager;
         private readonly SshExecutionService _sshService;
@@ -103,9 +104,11 @@ namespace SSH_Helper
 
         private string? _loadedFilePath;
         private string? _activePresetName;
+        private string _activeEnvironmentName = EnvironmentConfig.DefaultName;
         private bool _csvDirty;
         private bool _exitConfirmed;
         private bool _suppressPresetSelectionChange;
+        private bool _suppressEnvironmentSelectionChange;
         private bool _suppressExpandCollapseEvents;
         private bool _pendingColumnAutoSize;
         private int _rightClickedColumnIndex = -1;
@@ -177,6 +180,7 @@ namespace SSH_Helper
 
             // Initialize services
             _configService = new ConfigurationService();
+            _environmentService = new EnvironmentService(_configService);
             _presetManager = new PresetManager(_configService);
             _csvManager = new CsvManager();
             var config = _configService.Load();
@@ -197,6 +201,7 @@ namespace SSH_Helper
             _sshService.ColumnUpdateRequested += SshService_ColumnUpdateRequested;
             _sshService.CommandCompleted += SshService_CommandCompleted;
             _sshService.ExecutionCompleted += SshService_ExecutionCompleted;
+            _environmentService.EnvironmentChanged += EnvironmentService_EnvironmentChanged;
 
             // Initialize update service
             _updateService = new UpdateService(
@@ -210,6 +215,7 @@ namespace SSH_Helper
             InitializeOutputHistory();
             InitializeEventHandlers();
             InitializeToolbarSync();
+            InitializeEnvironmentToolbar();
             InitializePasswordMasking();
             EnableDoubleBuffering();
             RestoreWindowState();
@@ -275,6 +281,9 @@ namespace SSH_Helper
         private void InitializeFromConfiguration()
         {
             var config = _configService.Load();
+            _activeEnvironmentName = string.IsNullOrWhiteSpace(config.ActiveEnvironment)
+                ? EnvironmentConfig.DefaultName
+                : config.ActiveEnvironment;
             _presetManager.Load();
 
             // Populate UI from config
@@ -677,6 +686,8 @@ namespace SSH_Helper
             // Preset TreeView events are wired up in Designer
             trvPresets.NodeMouseClick += TrvPresets_NodeMouseClick;
             contextPresetLst.Opening += ContextPresetLst_Opening;
+            tsbEnvironment.SelectedIndexChanged += TsbEnvironment_SelectedIndexChanged;
+            tsbManageEnvironments.Click += TsbManageEnvironments_Click;
 
             // History and host list right-click selection and custom drawing
             lstOutput.MouseDown += LstOutput_MouseDown;
@@ -704,6 +715,12 @@ namespace SSH_Helper
                     e.Handled = true;
                 }
             };
+        }
+
+        private void InitializeEnvironmentToolbar()
+        {
+            _activeEnvironmentName = _environmentService.GetActiveEnvironmentName();
+            RefreshEnvironmentSelector(_activeEnvironmentName);
         }
 
         private void InitializePasswordMasking()
@@ -785,12 +802,275 @@ namespace SSH_Helper
                     catch { /* Ignore invalid splitter distances */ }
                 }
 
-                // Restore application state if enabled
+                RestoreInitialEnvironmentState(config);
+            };
+        }
+
+        private void RestoreInitialEnvironmentState(AppConfiguration config)
+        {
+            if (config.Environments != null && config.Environments.Count > 0)
+            {
+                _activeEnvironmentName = _environmentService.GetActiveEnvironmentName();
+                var environment = _environmentService.GetEnvironment(_activeEnvironmentName);
                 if (config.RememberState && config.SavedState != null)
                 {
-                    RestoreApplicationState(config.SavedState);
+                    var mergedState = MergeEnvironmentIntoSavedState(config.SavedState, environment);
+                    RestoreApplicationState(mergedState);
                 }
+                else
+                {
+                    LoadEnvironmentIntoGrid(environment);
+                }
+            }
+            else if (config.RememberState && config.SavedState != null)
+            {
+                RestoreApplicationState(config.SavedState);
+            }
+
+            RefreshEnvironmentSelector(_activeEnvironmentName);
+        }
+
+        private static ApplicationState MergeEnvironmentIntoSavedState(ApplicationState savedState, EnvironmentConfig environment)
+        {
+            return new ApplicationState
+            {
+                HostColumns = environment.HostColumns?.ToList() ?? new List<string>(),
+                Hosts = environment.Hosts?
+                    .Select(row => new Dictionary<string, string>(row, StringComparer.OrdinalIgnoreCase))
+                    .ToList()
+                    ?? new List<Dictionary<string, string>>(),
+                SelectedHostIndices = environment.SelectedHostIndices?.ToList() ?? new List<int>(),
+                LastCsvPath = environment.LastCsvPath,
+                SelectedPreset = savedState.SelectedPreset,
+                SelectedFolder = savedState.SelectedFolder,
+                Username = savedState.Username,
+                History = savedState.History?
+                    .Select(entry => new HistoryEntry
+                    {
+                        Id = entry.Id,
+                        Timestamp = entry.Timestamp,
+                        Output = entry.Output,
+                        HostResults = entry.HostResults?
+                            .Select(host => new HostHistoryEntry
+                            {
+                                HostAddress = host.HostAddress,
+                                Output = host.Output,
+                                Success = host.Success,
+                                Timestamp = host.Timestamp
+                            })
+                            .ToList()
+                    })
+                    .ToList()
+                    ?? new List<HistoryEntry>()
             };
+        }
+
+        private void RefreshEnvironmentSelector(string? preferredEnvironment = null)
+        {
+            var names = _environmentService.GetEnvironmentNames();
+            var target = string.IsNullOrWhiteSpace(preferredEnvironment)
+                ? _environmentService.GetActiveEnvironmentName()
+                : preferredEnvironment;
+
+            _suppressEnvironmentSelectionChange = true;
+            tsbEnvironment.Items.Clear();
+            foreach (var name in names)
+            {
+                tsbEnvironment.Items.Add(name);
+            }
+
+            int index = names.FindIndex(name => string.Equals(name, target, StringComparison.OrdinalIgnoreCase));
+            tsbEnvironment.SelectedIndex = index >= 0 ? index : 0;
+            _activeEnvironmentName = tsbEnvironment.SelectedItem as string ?? EnvironmentConfig.DefaultName;
+            _suppressEnvironmentSelectionChange = false;
+
+            UpdateWindowTitle();
+        }
+
+        private void UpdateWindowTitle()
+        {
+            Text = $"{ApplicationName} {ApplicationVersion} - [{_activeEnvironmentName}]";
+        }
+
+        private void EnvironmentService_EnvironmentChanged(object? sender, EnvironmentChangedEventArgs e)
+        {
+            _activeEnvironmentName = e.CurrentEnvironment;
+            UpdateWindowTitle();
+        }
+
+        private void TsbEnvironment_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            if (_suppressEnvironmentSelectionChange)
+                return;
+
+            if (tsbEnvironment.SelectedItem is not string targetEnvironment)
+                return;
+
+            if (string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true))
+            {
+                RefreshEnvironmentSelector(_activeEnvironmentName);
+            }
+        }
+
+        private void TsbManageEnvironments_Click(object? sender, EventArgs e)
+        {
+            EnsureDefaultEnvironmentForFirstAdoption();
+
+            using var dialog = new EnvironmentDialog(_environmentService, _isDarkMode);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            var targetEnvironment = dialog.SelectedEnvironmentName ?? _environmentService.GetActiveEnvironmentName();
+            if (!string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true))
+                {
+                    RefreshEnvironmentSelector(_activeEnvironmentName);
+                    return;
+                }
+            }
+            else
+            {
+                RefreshEnvironmentSelector(_activeEnvironmentName);
+            }
+
+            UpdateStatusBar($"Active environment: {_activeEnvironmentName}");
+        }
+
+        private bool TrySwitchEnvironment(string targetEnvironment, bool promptIfDirty)
+        {
+            if (dgv_variables.IsCurrentCellInEditMode)
+                dgv_variables.EndEdit();
+
+            bool saveCurrent = true;
+            if (promptIfDirty && _csvDirty)
+            {
+                var result = MessageBox.Show(
+                    "You have unsaved host-grid changes. Save to the current environment before switching?",
+                    "Switch Environment",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Cancel)
+                    return false;
+
+                saveCurrent = result == DialogResult.Yes;
+            }
+
+            if (saveCurrent)
+            {
+                SaveCurrentGridToEnvironment(_activeEnvironmentName);
+            }
+
+            var environment = _environmentService.SwitchEnvironment(targetEnvironment);
+            _activeEnvironmentName = environment.Name;
+            LoadEnvironmentIntoGrid(environment);
+            RefreshEnvironmentSelector(_activeEnvironmentName);
+            return true;
+        }
+
+        private void EnsureDefaultEnvironmentForFirstAdoption()
+        {
+            var config = _configService.GetCurrent();
+            if (config.Environments.Count > 0)
+                return;
+
+            SaveCurrentGridToEnvironment(EnvironmentConfig.DefaultName);
+            _activeEnvironmentName = EnvironmentConfig.DefaultName;
+            RefreshEnvironmentSelector(_activeEnvironmentName);
+        }
+
+        private void SaveCurrentGridToEnvironment(string environmentName)
+        {
+            var maxHistoryEntries = _configService.GetCurrent().MaxHistoryEntries;
+            var state = BuildApplicationState(maxHistoryEntries);
+            _environmentService.SaveCurrentGridToEnvironment(
+                environmentName,
+                state.HostColumns,
+                state.Hosts,
+                state.SelectedHostIndices,
+                state.LastCsvPath);
+        }
+
+        private void LoadEnvironmentIntoGrid(EnvironmentConfig environment)
+        {
+            if (dgv_variables.IsCurrentCellInEditMode)
+                dgv_variables.EndEdit();
+
+            dgv_variables.Rows.Clear();
+            dgv_variables.Columns.Clear();
+
+            var columns = (environment.HostColumns ?? new List<string>())
+                .Where(name => !string.IsNullOrWhiteSpace(name) && name != SelectColumnName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (!columns.Contains(CsvManager.HostColumnName, StringComparer.OrdinalIgnoreCase))
+            {
+                columns.Insert(0, CsvManager.HostColumnName);
+            }
+
+            foreach (var column in columns)
+            {
+                dgv_variables.Columns.Add(column, column);
+            }
+
+            EnsureSelectColumn();
+            dgv_variables.RowTemplate.Height = 28;
+
+            var useCredentialManager = _credentialProvider?.IsAvailable == true &&
+                                       _configService.GetCurrent().Credentials.UseCredentialManager;
+
+            foreach (var rowData in environment.Hosts ?? new List<Dictionary<string, string>>())
+            {
+                var rowCopy = rowData != null
+                    ? new Dictionary<string, string>(rowData, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                if (useCredentialManager)
+                {
+                    rowCopy.TryGetValue(CsvManager.HostColumnName, out var hostValue);
+                    rowCopy.TryGetValue("username", out var usernameValue);
+                    rowCopy.TryGetValue("password", out var passwordValue);
+
+                    var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
+                    if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
+                    {
+                        StoreHostPassword(hostValue, resolvedUsername, passwordValue);
+                        rowCopy["password"] = string.Empty;
+                    }
+                }
+
+                var rowIndex = dgv_variables.Rows.Add();
+                dgv_variables.Rows[rowIndex].Height = 28;
+
+                foreach (var kvp in rowCopy)
+                {
+                    if (dgv_variables.Columns.Contains(kvp.Key))
+                    {
+                        dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
+                    }
+                }
+            }
+
+            if (environment.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
+            {
+                foreach (var index in environment.SelectedHostIndices)
+                {
+                    if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
+                    {
+                        dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
+                    }
+                }
+            }
+
+            _loadedFilePath = environment.LastCsvPath;
+            _pendingColumnAutoSize = true;
+            _csvDirty = false;
+            UpdateHostCount();
         }
 
         #endregion
@@ -1508,6 +1788,11 @@ namespace SSH_Helper
                         textBox.TextBox.BackColor = inputBg;
                         textBox.TextBox.ForeColor = inputText;
                     }
+                }
+                else if (item is ToolStripComboBox comboBox)
+                {
+                    comboBox.BackColor = inputBg;
+                    comboBox.ForeColor = inputText;
                 }
                 else if (item is ToolStripLabel label)
                 {
@@ -6137,6 +6422,9 @@ namespace SSH_Helper
                 PresetType = presetType,
                 StartTimeUtc = startTimeUtc,
                 EndTimeUtc = endTimeUtc,
+                EnvironmentName = string.IsNullOrWhiteSpace(_activeEnvironmentName)
+                    ? EnvironmentConfig.DefaultName
+                    : _activeEnvironmentName,
                 Username = username ?? string.Empty,
                 CommandTimeoutSeconds = commandTimeoutSeconds,
                 ConnectionTimeoutSeconds = connectionTimeoutSeconds,
@@ -6346,6 +6634,16 @@ namespace SSH_Helper
                 if (!string.IsNullOrEmpty(host.Password))
                 {
                     host.Variables["password"] = host.Password;
+                }
+
+                var environmentVariables = _environmentService.GetActiveEnvironmentVariables();
+                foreach (var kvp in environmentVariables)
+                {
+                    if (!host.Variables.TryGetValue(kvp.Key, out var currentValue) ||
+                        string.IsNullOrWhiteSpace(currentValue))
+                    {
+                        host.Variables[kvp.Key] = kvp.Value;
+                    }
                 }
 
                 // Apply SSH config settings if enabled (grid values take precedence)
@@ -6889,10 +7187,19 @@ namespace SSH_Helper
         {
             try
             {
+                var currentConfig = _configService.GetCurrent();
+                if (currentConfig.Environments.Count > 0)
+                {
+                    SaveCurrentGridToEnvironment(_activeEnvironmentName);
+                }
+
                 _configService.Update(config =>
                 {
                     config.Username = tsbUsername.Text;
                     config.Timeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
+                    config.ActiveEnvironment = config.Environments.Count > 0
+                        ? _activeEnvironmentName
+                        : null;
 
                     // Save sort mode and manual order
                     config.PresetSortMode = _currentSortMode;

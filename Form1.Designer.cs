@@ -160,6 +160,10 @@ namespace SSH_Helper
             tsbUsername = new ToolStripTextBox();
             toolStripLabel2 = new ToolStripLabel();
             tsbPassword = new ToolStripTextBox();
+            toolStripSeparatorEnv = new ToolStripSeparator();
+            toolStripLabelEnvironment = new ToolStripLabel();
+            tsbEnvironment = new ToolStripComboBox();
+            tsbManageEnvironments = new ToolStripButton();
             statusStrip = new StatusStrip();
             statusLabel = new ToolStripStatusLabel();
             statusProgress = new ToolStripProgressBar();
@@ -1270,7 +1274,7 @@ namespace SSH_Helper
             // 
             mainToolStrip.BackColor = Color.FromArgb(248, 249, 250);
             mainToolStrip.GripStyle = ToolStripGripStyle.Hidden;
-            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword });
+            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword, toolStripSeparatorEnv, toolStripLabelEnvironment, tsbEnvironment, tsbManageEnvironments });
             mainToolStrip.Location = new Point(0, 24);
             mainToolStrip.Name = "mainToolStrip";
             mainToolStrip.Padding = new Padding(8, 0, 8, 0);
@@ -1346,6 +1350,30 @@ namespace SSH_Helper
             tsbPassword.BorderStyle = BorderStyle.FixedSingle;
             tsbPassword.Name = "tsbPassword";
             tsbPassword.Size = new Size(120, 25);
+            // 
+            // toolStripSeparatorEnv
+            // 
+            toolStripSeparatorEnv.Name = "toolStripSeparatorEnv";
+            toolStripSeparatorEnv.Size = new Size(6, 25);
+            // 
+            // toolStripLabelEnvironment
+            // 
+            toolStripLabelEnvironment.Name = "toolStripLabelEnvironment";
+            toolStripLabelEnvironment.Size = new Size(77, 22);
+            toolStripLabelEnvironment.Text = "Environment:";
+            // 
+            // tsbEnvironment
+            // 
+            tsbEnvironment.DropDownStyle = ComboBoxStyle.DropDownList;
+            tsbEnvironment.Name = "tsbEnvironment";
+            tsbEnvironment.Size = new Size(140, 25);
+            // 
+            // tsbManageEnvironments
+            // 
+            tsbManageEnvironments.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbManageEnvironments.Name = "tsbManageEnvironments";
+            tsbManageEnvironments.Size = new Size(54, 22);
+            tsbManageEnvironments.Text = "Manage";
             // 
             // statusStrip
             //
@@ -1683,6 +1711,10 @@ namespace SSH_Helper
         private ToolStripTextBox tsbUsername;
         private ToolStripLabel toolStripLabel2;
         private ToolStripTextBox tsbPassword;
+        private ToolStripSeparator toolStripSeparatorEnv;
+        private ToolStripLabel toolStripLabelEnvironment;
+        private ToolStripComboBox tsbEnvironment;
+        private ToolStripButton tsbManageEnvironments;
 
         // Hosts panel
         private Panel hostsPanel;
