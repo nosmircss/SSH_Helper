@@ -1,4 +1,5 @@
 using FluentAssertions;
+using System.Diagnostics;
 using SSH_Helper.Services.Scripting;
 using Xunit;
 
@@ -46,5 +47,34 @@ public class ExpressionEvaluatorTests
         var result = evaluator.Evaluate("(x > 10 and x < 50) or name == 'Other'");
 
         result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Evaluate_MatchesCatastrophicPattern_CompletesWithoutThrowing()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("payload", new string('a', 6000) + "!");
+
+        var evaluator = new ExpressionEvaluator(context);
+        var stopwatch = Stopwatch.StartNew();
+
+        var result = evaluator.Evaluate("payload matches '(a+)+$'");
+
+        stopwatch.Stop();
+        result.Should().BeFalse();
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(7));
+    }
+
+    [Fact]
+    public void Evaluate_VariableWithSpaces_ResolvesCorrectly()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("name", "John Doe");
+
+        var evaluator = new ExpressionEvaluator(context);
+
+        var result = evaluator.Evaluate("${name} == \"John Doe\"");
+
+        result.Should().BeTrue();
     }
 }

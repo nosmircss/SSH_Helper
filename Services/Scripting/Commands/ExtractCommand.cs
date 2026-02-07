@@ -50,7 +50,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             try
             {
-                var regex = new Regex(pattern, RegexOptions.Multiline | RegexOptions.IgnoreCase);
+                var regex = new Regex(pattern, RegexOptions.Multiline | RegexOptions.IgnoreCase, ScriptRegexDefaults.UserPatternTimeout);
                 var matches = regex.Matches(sourceText);
 
                 if (matches.Count == 0)
@@ -98,6 +98,10 @@ namespace SSH_Helper.Services.Scripting.Commands
             catch (RegexParseException ex)
             {
                 return Task.FromResult(CommandResult.Fail($"Invalid regex pattern: {ex.Message}"));
+            }
+            catch (RegexMatchTimeoutException ex)
+            {
+                return Task.FromResult(CommandResult.Fail($"Regex match timed out: {ex.Message}"));
             }
             catch (Exception ex)
             {

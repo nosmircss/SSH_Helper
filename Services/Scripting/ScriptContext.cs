@@ -72,6 +72,8 @@ namespace SSH_Helper.Services.Scripting
     /// </summary>
     public class ScriptContext
     {
+        private const string TimestampFormat = "yyyy-MM-dd HH:mm:ss";
+        private static readonly Regex ArrayExpressionRegex = new(@"^(\w+)\[([^\]]+)\]$", RegexOptions.Compiled);
         private readonly Dictionary<string, object?> _variables = new(StringComparer.OrdinalIgnoreCase);
         private readonly StringBuilder _output = new();
         private string _lastCommandOutput = string.Empty;
@@ -91,6 +93,11 @@ namespace SSH_Helper.Services.Scripting
         /// When false, debug output is suppressed.
         /// </summary>
         public bool DebugMode { get; set; }
+
+        /// <summary>
+        /// Current loop nesting depth. Managed by ScriptExecutor.
+        /// </summary>
+        public int LoopDepth { get; set; }
 
         /// <summary>
         /// Fired when script produces output.
@@ -126,9 +133,6 @@ namespace SSH_Helper.Services.Scripting
                     _variables[kvp.Key] = kvp.Value;
                 }
             }
-
-            // Add built-in variables
-            _variables["_timestamp"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         }
 
         /// <summary>
@@ -144,6 +148,9 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public object? GetVariable(string name)
         {
+            if (string.Equals(name, "_timestamp", StringComparison.OrdinalIgnoreCase))
+                return DateTime.Now.ToString(TimestampFormat);
+
             return _variables.TryGetValue(name, out var value) ? value : null;
         }
 
@@ -174,7 +181,18 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public bool HasVariable(string name)
         {
+            if (string.Equals(name, "_timestamp", StringComparison.OrdinalIgnoreCase))
+                return true;
+
             return _variables.ContainsKey(name);
+        }
+
+        /// <summary>
+        /// Removes a variable from context.
+        /// </summary>
+        public void RemoveVariable(string name)
+        {
+            _variables.Remove(name);
         }
 
         /// <summary>
@@ -182,7 +200,11 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public IReadOnlyDictionary<string, object?> GetAllVariables()
         {
-            return _variables;
+            var snapshot = new Dictionary<string, object?>(_variables, StringComparer.OrdinalIgnoreCase)
+            {
+                ["_timestamp"] = DateTime.Now.ToString(TimestampFormat)
+            };
+            return snapshot;
         }
 
         /// <summary>
@@ -214,7 +236,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // Check for array indexing: varname[index]
-            var arrayMatch = Regex.Match(expr, @"^(\w+)\[([^\]]+)\]$");
+            var arrayMatch = ArrayExpressionRegex.Match(expr);
             if (arrayMatch.Success)
             {
                 var varName = arrayMatch.Groups[1].Value;

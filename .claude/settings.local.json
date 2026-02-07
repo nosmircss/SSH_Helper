@@ -3,17 +3,23 @@
     "allow": [
       "Bash(dotnet nuget search:*)",
       "Bash(dotnet list:*)",
-      "Bash(git add:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\n## New Features\n- Add auto-resize columns option and clean up script output\n- Add \"Auto-resize columns to fit content\" setting in Settings > Host Grid\n- Columns automatically size to content when loading CSV files or restoring state\nEOF\n\\)\")",
       "Bash(gh pr create:*)",
       "Bash(openspec validate:*)",
-      "Bash(openspec archive add-config-parsing:*)",
       "Bash(openspec show:*)",
-      "Bash(openspec archive add-ui-output-throttling:*)",
-      "Bash(openspec archive add-nested-preset-folders:*)",
-      "Bash(Select-String -Pattern \"Passed|Failed|Total|error\")",
+      "Bash(openspec archive *)",
+      "Bash(Select-String *)",
       "Bash(powershell.exe:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(wc:*)",
+      "Bash(Select-Object *)",
+      "Bash(npm run *)",
+      "Bash(git *)",
+      "WebFetch(domain:*)",
+      "mcp__*"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(./secrets/**)"
     ]
   }
 }

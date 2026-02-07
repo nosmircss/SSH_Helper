@@ -444,15 +444,34 @@ namespace SSH_Helper.Services.Scripting.Commands
         /// </summary>
         public static object? Pop(string argsString, ScriptContext context)
         {
+            var arrExpr = argsString.Trim();
+            if (!TryResolveWritableTopLevelVariableName(arrExpr, out var variableName))
+            {
+                EmitNonWritableArrayWarning(context, "pop");
+                return null;
+            }
+
+            if (!TryGetArrayVariableClone(variableName, context, out var arr) || arr.Count == 0)
+                return null;
+
+            var lastIdx = arr.Count - 1;
+            var removedItem = arr[lastIdx];
+            arr.RemoveAt(lastIdx);
+
+            PersistArrayVariable(variableName, arr, context);
+            return JsonUtilities.JsonNodeToValue(removedItem);
+        }
+
+        /// <summary>
+        /// json.last(arr) - Return last element without modifying array
+        /// </summary>
+        public static object? Last(string argsString, ScriptContext context)
+        {
             var arrNode = JsonUtilities.GetJsonNode(argsString.Trim(), context);
             if (arrNode is not JsonArray arr || arr.Count == 0)
                 return null;
 
-            var lastIdx = arr.Count - 1;
-            var lastItem = arr[lastIdx];
-
-            // Return just the value (the array modification is not persisted - user must use json.delete or reassign)
-            return JsonUtilities.JsonNodeToValue(lastItem);
+            return JsonUtilities.JsonNodeToValue(arr[arr.Count - 1]);
         }
 
         /// <summary>
@@ -495,12 +514,33 @@ namespace SSH_Helper.Services.Scripting.Commands
         /// </summary>
         public static object? Shift(string argsString, ScriptContext context)
         {
+            var arrExpr = argsString.Trim();
+            if (!TryResolveWritableTopLevelVariableName(arrExpr, out var variableName))
+            {
+                EmitNonWritableArrayWarning(context, "shift");
+                return null;
+            }
+
+            if (!TryGetArrayVariableClone(variableName, context, out var arr) || arr.Count == 0)
+                return null;
+
+            var removedItem = arr[0];
+            arr.RemoveAt(0);
+
+            PersistArrayVariable(variableName, arr, context);
+            return JsonUtilities.JsonNodeToValue(removedItem);
+        }
+
+        /// <summary>
+        /// json.first(arr) - Return first element without modifying array
+        /// </summary>
+        public static object? First(string argsString, ScriptContext context)
+        {
             var arrNode = JsonUtilities.GetJsonNode(argsString.Trim(), context);
             if (arrNode is not JsonArray arr || arr.Count == 0)
                 return null;
 
-            var firstItem = arr[0];
-            return JsonUtilities.JsonNodeToValue(firstItem);
+            return JsonUtilities.JsonNodeToValue(arr[0]);
         }
 
         /// <summary>
@@ -601,6 +641,76 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             return -1;
+        }
+
+        /// <summary>
+        /// Helper: resolves writable top-level variable references for destructive operations.
+        /// Allowed forms: arr, ${arr}
+        /// </summary>
+        private static bool TryResolveWritableTopLevelVariableName(string expr, out string variableName)
+        {
+            variableName = string.Empty;
+            var trimmed = expr.Trim();
+
+            if (string.IsNullOrEmpty(trimmed))
+                return false;
+
+            if (trimmed.StartsWith("${", StringComparison.Ordinal) &&
+                trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                variableName = trimmed.Substring(2, trimmed.Length - 3).Trim();
+            }
+            else
+            {
+                variableName = trimmed;
+            }
+
+            if (string.IsNullOrWhiteSpace(variableName))
+                return false;
+
+            foreach (var c in variableName)
+            {
+                if (char.IsWhiteSpace(c) || c == '.' || c == '[' || c == ']' ||
+                    c == '(' || c == ')' || c == ',' || c == '"' || c == '\'' ||
+                    c == '{' || c == '}')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Helper: gets a cloned array for mutation so context is only updated on success.
+        /// </summary>
+        private static bool TryGetArrayVariableClone(string variableName, ScriptContext context, out JsonArray array)
+        {
+            array = new JsonArray();
+            var arrNode = JsonUtilities.GetJsonNode("${" + variableName + "}", context);
+            if (arrNode is not JsonArray existingArr)
+                return false;
+
+            array = JsonNode.Parse(existingArr.ToJsonString())!.AsArray();
+            return true;
+        }
+
+        /// <summary>
+        /// Helper: persists updated array value to script context.
+        /// </summary>
+        private static void PersistArrayVariable(string variableName, JsonArray array, ScriptContext context)
+        {
+            context.SetVariable(variableName, array.ToJsonString());
+        }
+
+        /// <summary>
+        /// Helper: emits consistent warning for non-writable destructive array calls.
+        /// </summary>
+        private static void EmitNonWritableArrayWarning(ScriptContext context, string functionName)
+        {
+            context.EmitOutput(
+                $"Warning: json.{functionName} requires writable top-level array variable reference (arr or ${{arr}}). Use json.last/json.first for non-destructive reads.",
+                ScriptOutputType.Warning);
         }
 
         /// <summary>

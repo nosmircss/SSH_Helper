@@ -1,5 +1,6 @@
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using SSH_Helper.UI;
 
 namespace SSH_Helper
 {
@@ -10,7 +11,7 @@ namespace SSH_Helper
     {
         private readonly ConfigurationService _configService;
 
-        private readonly TabControl _tabControl;
+        private readonly BorderlessTabControl _tabControl;
 
         // General tab controls
         private readonly CheckBox _chkRememberState;
@@ -45,7 +46,6 @@ namespace SSH_Helper
         private NumericUpDown _numButtonFontSize = null!;
         private NumericUpDown _numHostListFontSize = null!;
         private NumericUpDown _numMenuFontSize = null!;
-        private NumericUpDown _numTooltipFontSize = null!;
         private NumericUpDown _numStatusBarFontSize = null!;
 
         // Appearance tab controls - Global Scale
@@ -53,16 +53,10 @@ namespace SSH_Helper
         private Label _lblGlobalScaleValue = null!;
 
         // Appearance tab controls - Layout
-        private NumericUpDown _numCodeEditorLineSpacing = null!;
-        private NumericUpDown _numOutputAreaLineSpacing = null!;
-        private NumericUpDown _numTabWidth = null!;
         private CheckBox _chkCodeEditorWordWrap = null!;
         private CheckBox _chkOutputAreaWordWrap = null!;
         private NumericUpDown _numTreeViewRowHeight = null!;
         private NumericUpDown _numHostListRowHeight = null!;
-
-        // Appearance tab controls - Icons
-        private ComboBox _cboIconSize = null!;
 
         // Appearance tab controls - Accent Color
         private Panel _pnlAccentColor = null!;
@@ -76,15 +70,16 @@ namespace SSH_Helper
         private TextBox _txtPreviewCode = null!;
         private Button _btnPreviewButton = null!;
 
-        // Reset button
-        private readonly Button _btnResetDefaults;
+        // Reset button (lives inside the Appearance tab)
+        private Button _btnResetDefaults = null!;
 
         private readonly Button _btnSave;
         private readonly Button _btnCancel;
 
         private Color _customAccentColor = Color.FromArgb(0, 120, 215);
+        private List<Font> _previewFonts = new();
 
-        public SettingsDialog(ConfigurationService configService)
+        public SettingsDialog(ConfigurationService configService, bool darkMode = false)
         {
             _configService = configService;
 
@@ -100,7 +95,7 @@ namespace SSH_Helper
             MinimizeBox = false;
             ShowInTaskbar = false;
 
-            _tabControl = new TabControl
+            _tabControl = new BorderlessTabControl
             {
                 Location = new Point(12, 12),
                 Size = new Size(480, 520),
@@ -120,14 +115,6 @@ namespace SSH_Helper
             _tabControl.TabPages.Add(tabAppearance);
 
             // Buttons
-            _btnResetDefaults = new Button
-            {
-                Text = "Reset to Defaults",
-                Size = new Size(110, 28),
-                Location = new Point(12, 545)
-            };
-            _btnResetDefaults.Click += BtnResetDefaults_Click;
-
             _btnSave = new Button
             {
                 Text = "Save",
@@ -146,7 +133,6 @@ namespace SSH_Helper
             };
 
             Controls.Add(_tabControl);
-            Controls.Add(_btnResetDefaults);
             Controls.Add(_btnSave);
             Controls.Add(_btnCancel);
 
@@ -170,6 +156,44 @@ namespace SSH_Helper
 
             LoadSettings();
             UpdatePreview();
+            ApplyDialogTheme(darkMode);
+        }
+
+        private void ApplyDialogTheme(bool darkMode)
+        {
+            DialogTheme.ApplyTo(this, darkMode);
+            DialogTheme.StyleButton(_btnSave, darkMode, isPrimary: true);
+            DialogTheme.StyleButton(_btnCancel, darkMode);
+            DialogTheme.StyleButton(_btnResetDefaults, darkMode);
+            DialogTheme.StyleButton(_btnChooseAccentColor, darkMode);
+            DialogTheme.SetDarkTitleBar(this, darkMode);
+            DialogTheme.StyleTabControl(_tabControl, darkMode);
+
+            if (darkMode)
+            {
+                Load += (_, _) => DialogTheme.ApplyNativeTheme(this, true);
+
+                // Re-apply native theme when switching tabs. Controls on
+                // non-visible tab pages can lose their native dark rendering
+                // until they are actually shown.
+                _tabControl.Selected += (_, e) =>
+                {
+                    if (e.TabPage != null)
+                        BeginInvoke(() => DialogTheme.ApplyNativeTheme(e.TabPage, true));
+                };
+            }
+
+            // The preview panel should reflect theme
+            if (darkMode)
+            {
+                _pnlPreview.BackColor = DialogTheme.DarkSurface1;
+                _pnlPreview.ForeColor = DialogTheme.DarkText;
+            }
+            else
+            {
+                _pnlPreview.BackColor = Color.White;
+                _pnlPreview.ForeColor = DialogTheme.LightText;
+            }
         }
 
         private TabPage CreateGeneralTab()
@@ -563,8 +587,8 @@ namespace SSH_Helper
             // Row 5: Host list, Menus
             AddFontSizeRow(scrollPanel, ref y, "Host list:", out _numHostListFontSize, "Menus:", out _numMenuFontSize);
 
-            // Row 6: Tooltips, Status bar
-            AddFontSizeRow(scrollPanel, ref y, "Tooltips:", out _numTooltipFontSize, "Status bar:", out _numStatusBarFontSize);
+            // Row 6: Status bar
+            AddFontSizeRow(scrollPanel, ref y, "Status bar:", out _numStatusBarFontSize, null, out _);
 
             y += 10;
 
@@ -578,35 +602,6 @@ namespace SSH_Helper
             };
             scrollPanel.Controls.Add(lblLayoutSection);
             y += 25;
-
-            // Line spacing row
-            var lblCodeLineSpacing = new Label { Text = "Code line spacing:", Location = new Point(15, y), AutoSize = true };
-            _numCodeEditorLineSpacing = CreateNumericUpDown(120, y - 2, 1.0m, 1.0m, 2.0m, 0.1m, 1);
-            _numCodeEditorLineSpacing.ValueChanged += (s, e) => UpdatePreview();
-
-            var lblOutputLineSpacing = new Label { Text = "Output line spacing:", Location = new Point(220, y), AutoSize = true };
-            _numOutputAreaLineSpacing = CreateNumericUpDown(345, y - 2, 1.0m, 1.0m, 2.0m, 0.1m, 1);
-            _numOutputAreaLineSpacing.ValueChanged += (s, e) => UpdatePreview();
-
-            scrollPanel.Controls.Add(lblCodeLineSpacing);
-            scrollPanel.Controls.Add(_numCodeEditorLineSpacing);
-            scrollPanel.Controls.Add(lblOutputLineSpacing);
-            scrollPanel.Controls.Add(_numOutputAreaLineSpacing);
-            y += 30;
-
-            // Tab width
-            var lblTabWidth = new Label { Text = "Tab width (spaces):", Location = new Point(15, y), AutoSize = true };
-            _numTabWidth = new NumericUpDown
-            {
-                Location = new Point(135, y - 2),
-                Size = new Size(50, 23),
-                Minimum = 1,
-                Maximum = 8,
-                Value = 4
-            };
-            scrollPanel.Controls.Add(lblTabWidth);
-            scrollPanel.Controls.Add(_numTabWidth);
-            y += 30;
 
             // Word wrap checkboxes
             _chkCodeEditorWordWrap = new CheckBox
@@ -655,30 +650,6 @@ namespace SSH_Helper
             scrollPanel.Controls.Add(_numTreeViewRowHeight);
             scrollPanel.Controls.Add(lblHostListRowHeight);
             scrollPanel.Controls.Add(_numHostListRowHeight);
-            y += 35;
-
-            // === Icons Section ===
-            var lblIconsSection = new Label
-            {
-                Text = "Icons",
-                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
-                Location = new Point(15, y),
-                AutoSize = true
-            };
-            scrollPanel.Controls.Add(lblIconsSection);
-            y += 25;
-
-            var lblIconSize = new Label { Text = "Icon size:", Location = new Point(15, y), AutoSize = true };
-            _cboIconSize = new ComboBox
-            {
-                Location = new Point(80, y - 3),
-                Size = new Size(100, 23),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            _cboIconSize.Items.AddRange(new object[] { "Small (16px)", "Medium (24px)", "Large (32px)" });
-            _cboIconSize.SelectedIndex = 0;
-            scrollPanel.Controls.Add(lblIconSize);
-            scrollPanel.Controls.Add(_cboIconSize);
             y += 35;
 
             // === Accent Color Section ===
@@ -786,26 +757,45 @@ namespace SSH_Helper
             _pnlPreview.Controls.Add(_btnPreviewButton);
 
             scrollPanel.Controls.Add(_pnlPreview);
+            y += 130;
+
+            // Reset appearance defaults button — inside the Appearance tab
+            _btnResetDefaults = new Button
+            {
+                Text = "Reset Appearance to Defaults",
+                Size = new Size(190, 28),
+                Location = new Point(15, y)
+            };
+            _btnResetDefaults.Click += BtnResetDefaults_Click;
+            scrollPanel.Controls.Add(_btnResetDefaults);
 
             tabAppearance.Controls.Add(scrollPanel);
 
             return tabAppearance;
         }
 
-        private void AddFontSizeRow(Panel panel, ref int y, string label1, out NumericUpDown num1, string label2, out NumericUpDown num2)
+        private void AddFontSizeRow(Panel panel, ref int y, string label1, out NumericUpDown num1, string? label2, out NumericUpDown num2)
         {
             var lbl1 = new Label { Text = label1, Location = new Point(15, y), AutoSize = true };
             num1 = CreateNumericUpDown(120, y - 2, 9.5m, 7, 16, 0.5m, 1);
             num1.ValueChanged += (s, e) => UpdatePreview();
 
-            var lbl2 = new Label { Text = label2, Location = new Point(220, y), AutoSize = true };
-            num2 = CreateNumericUpDown(345, y - 2, 9.5m, 7, 16, 0.5m, 1);
-            num2.ValueChanged += (s, e) => UpdatePreview();
-
             panel.Controls.Add(lbl1);
             panel.Controls.Add(num1);
-            panel.Controls.Add(lbl2);
-            panel.Controls.Add(num2);
+
+            if (label2 != null)
+            {
+                var lbl2 = new Label { Text = label2, Location = new Point(220, y), AutoSize = true };
+                num2 = CreateNumericUpDown(345, y - 2, 9.5m, 7, 16, 0.5m, 1);
+                num2.ValueChanged += (s, e) => UpdatePreview();
+
+                panel.Controls.Add(lbl2);
+                panel.Controls.Add(num2);
+            }
+            else
+            {
+                num2 = null!;
+            }
 
             y += 28;
         }
@@ -839,11 +829,27 @@ namespace SSH_Helper
                 var codeSize = (float)(_numCodeEditorSize?.Value ?? 9.75m) * scale;
                 var buttonSize = (float)(_numButtonFontSize?.Value ?? 9m) * scale;
 
-                _lblPreviewTitle.Font = new Font(uiFont + " Semibold", Math.Max(7f, titleSize), FontStyle.Bold);
-                _trvPreview.Font = new Font(uiFont, Math.Max(7f, treeSize));
-                _txtPreviewCode.Font = new Font(codeFont, Math.Max(7f, codeSize));
+                // Track fonts for disposal when the dialog closes.
+                // Do NOT dispose previous fonts here — GDI+ may share native
+                // handles between Font objects with identical parameters, so
+                // disposing one can invalidate another that is still assigned
+                // to a control whose window handle hasn't been created yet.
+                var titleFont = new Font(uiFont + " Semibold", Math.Max(7f, titleSize), FontStyle.Bold);
+                _previewFonts.Add(titleFont);
+                _lblPreviewTitle.Font = titleFont;
+
+                var treeFont = new Font(uiFont, Math.Max(7f, treeSize));
+                _previewFonts.Add(treeFont);
+                _trvPreview.Font = treeFont;
+
+                var codePreviewFont = new Font(codeFont, Math.Max(7f, codeSize));
+                _previewFonts.Add(codePreviewFont);
+                _txtPreviewCode.Font = codePreviewFont;
                 _txtPreviewCode.WordWrap = _chkCodeEditorWordWrap?.Checked ?? false;
-                _btnPreviewButton.Font = new Font(uiFont, Math.Max(7f, buttonSize));
+
+                var buttonFont = new Font(uiFont, Math.Max(7f, buttonSize));
+                _previewFonts.Add(buttonFont);
+                _btnPreviewButton.Font = buttonFont;
 
                 if (_chkUseCustomAccent?.Checked == true)
                 {
@@ -856,9 +862,10 @@ namespace SSH_Helper
                     _btnPreviewButton.ForeColor = SystemColors.ControlText;
                 }
             }
-            catch
+            catch (ArgumentException)
             {
-                // Ignore font errors during preview
+                // Font creation can fail with invalid family names or extreme sizes;
+                // safe to ignore since this only affects the live preview
             }
         }
 
@@ -915,27 +922,15 @@ namespace SSH_Helper
             _numButtonFontSize.Value = (decimal)settings.ButtonFontSize;
             _numHostListFontSize.Value = (decimal)settings.HostListFontSize;
             _numMenuFontSize.Value = (decimal)settings.MenuFontSize;
-            _numTooltipFontSize.Value = (decimal)settings.TooltipFontSize;
             _numStatusBarFontSize.Value = (decimal)settings.StatusBarFontSize;
 
             _trkGlobalScale.Value = (int)(settings.GlobalScaleFactor * 100);
             _lblGlobalScaleValue.Text = $"{_trkGlobalScale.Value}%";
 
-            _numCodeEditorLineSpacing.Value = (decimal)settings.CodeEditorLineSpacing;
-            _numOutputAreaLineSpacing.Value = (decimal)settings.OutputAreaLineSpacing;
-            _numTabWidth.Value = settings.TabWidth;
             _chkCodeEditorWordWrap.Checked = settings.CodeEditorWordWrap;
             _chkOutputAreaWordWrap.Checked = settings.OutputAreaWordWrap;
             _numTreeViewRowHeight.Value = settings.TreeViewRowHeight;
             _numHostListRowHeight.Value = settings.HostListRowHeight;
-
-            _cboIconSize.SelectedIndex = settings.IconSize switch
-            {
-                IconSize.Small => 0,
-                IconSize.Medium => 1,
-                IconSize.Large => 2,
-                _ => 0
-            };
 
             _chkUseCustomAccent.Checked = settings.CustomAccentColor.HasValue;
             if (settings.CustomAccentColor.HasValue)
@@ -1071,35 +1066,33 @@ namespace SSH_Helper
                 config.FontSettings.ButtonFontSize = (float)_numButtonFontSize.Value;
                 config.FontSettings.HostListFontSize = (float)_numHostListFontSize.Value;
                 config.FontSettings.MenuFontSize = (float)_numMenuFontSize.Value;
-                config.FontSettings.TooltipFontSize = (float)_numTooltipFontSize.Value;
                 config.FontSettings.StatusBarFontSize = (float)_numStatusBarFontSize.Value;
 
                 // Appearance - Global Scale
                 config.FontSettings.GlobalScaleFactor = _trkGlobalScale.Value / 100f;
 
                 // Appearance - Layout
-                config.FontSettings.CodeEditorLineSpacing = (float)_numCodeEditorLineSpacing.Value;
-                config.FontSettings.OutputAreaLineSpacing = (float)_numOutputAreaLineSpacing.Value;
-                config.FontSettings.TabWidth = (int)_numTabWidth.Value;
                 config.FontSettings.CodeEditorWordWrap = _chkCodeEditorWordWrap.Checked;
                 config.FontSettings.OutputAreaWordWrap = _chkOutputAreaWordWrap.Checked;
                 config.FontSettings.TreeViewRowHeight = (int)_numTreeViewRowHeight.Value;
                 config.FontSettings.HostListRowHeight = (int)_numHostListRowHeight.Value;
-
-                // Appearance - Icons
-                config.FontSettings.IconSize = _cboIconSize.SelectedIndex switch
-                {
-                    0 => IconSize.Small,
-                    1 => IconSize.Medium,
-                    2 => IconSize.Large,
-                    _ => IconSize.Small
-                };
 
                 // Appearance - Accent Color
                 config.FontSettings.CustomAccentColor = _chkUseCustomAccent.Checked
                     ? _customAccentColor.ToArgb()
                     : null;
             });
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (var font in _previewFonts)
+                {
+                    try { font.Dispose(); } catch { }
+                }
+            }
+            base.Dispose(disposing);
         }
     }
 }

@@ -30,7 +30,7 @@ namespace SSH_Helper.Services.Scripting
 
         private static readonly HashSet<string> BuiltInVariables = new(StringComparer.OrdinalIgnoreCase)
         {
-            "_output", "_timestamp", "_iteration"
+            "_output", "_timestamp", "_iteration", "_last_error"
         };
 
         /// <summary>
@@ -146,6 +146,14 @@ namespace SSH_Helper.Services.Scripting
 
                     case StepType.If:
                         ExtractVarReferences(step.If, referencedVars);
+                        if (step.Elif != null)
+                        {
+                            foreach (var branch in step.Elif)
+                            {
+                                ExtractVarReferences(branch.If, referencedVars);
+                                AnalyzeSteps(branch.Then, definedVars, referencedVars);
+                            }
+                        }
                         // Analyze both branches - definitions from either are added conservatively
                         AnalyzeSteps(step.Then, definedVars, referencedVars);
                         AnalyzeSteps(step.Else, definedVars, referencedVars);
@@ -160,6 +168,16 @@ namespace SSH_Helper.Services.Scripting
                     case StepType.While:
                         ExtractVarReferences(step.While, referencedVars);
                         AnalyzeSteps(step.Do, definedVars, referencedVars);
+                        break;
+
+                    case StepType.Try:
+                        AnalyzeSteps(step.Try, definedVars, referencedVars);
+                        AnalyzeSteps(step.Catch, definedVars, referencedVars);
+                        AnalyzeSteps(step.Finally, definedVars, referencedVars);
+                        break;
+
+                    case StepType.Break:
+                    case StepType.Continue:
                         break;
 
                     case StepType.Readfile:

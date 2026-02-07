@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
 using SSH_Helper.Services;
+using SSH_Helper.UI;
 
 namespace SSH_Helper
 {
@@ -12,11 +15,14 @@ namespace SSH_Helper
         private readonly UpdateService _updateService;
         private readonly Action<string?> _onSkipVersion;
         private readonly bool _enableUpdateLog;
+        private readonly bool _darkMode;
 
         private readonly Label _lblTitle;
         private readonly Label _lblVersionInfo;
+        private readonly Label _lblReleaseNotesHeader;
+        private readonly RichTextBox _rtbReleaseNotes;
+        private readonly Panel _rtbBorderPanel;
         private readonly Label _lblQuestion;
-        private readonly TextBox _txtReleaseNotes;
         private readonly Button _btnYes;
         private readonly Button _btnNo;
         private readonly Button _btnSkip;
@@ -26,18 +32,20 @@ namespace SSH_Helper
 
         private CancellationTokenSource? _downloadCts;
 
-        public UpdateDialog(UpdateCheckResult updateResult, UpdateService updateService, Action<string?> onSkipVersion, bool enableUpdateLog = false)
+        public UpdateDialog(UpdateCheckResult updateResult, UpdateService updateService, Action<string?> onSkipVersion, bool enableUpdateLog = false, bool darkMode = false)
         {
             _updateResult = updateResult;
             _updateService = updateService;
             _onSkipVersion = onSkipVersion;
             _enableUpdateLog = enableUpdateLog;
+            _darkMode = darkMode;
 
             Text = "Update Available";
-            Size = new Size(520, 450);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
+            Size = new Size(680, 550);
+            MinimumSize = new Size(520, 400);
+            FormBorderStyle = FormBorderStyle.Sizable;
             StartPosition = FormStartPosition.CenterParent;
-            MaximizeBox = false;
+            MaximizeBox = true;
             MinimizeBox = false;
             ShowInTaskbar = false;
 
@@ -46,7 +54,8 @@ namespace SSH_Helper
                 Text = "A new version of SSH Helper is available!",
                 Font = new Font("Segoe UI Semibold", 12f, FontStyle.Bold),
                 Location = new Point(20, 18),
-                Size = new Size(460, 28),
+                Size = new Size(620, 28),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 ForeColor = Color.FromArgb(33, 37, 41)
             };
 
@@ -56,11 +65,12 @@ namespace SSH_Helper
                        $"Latest version:      {updateResult.LatestVersion}",
                 Font = new Font("Consolas", 9.5f),
                 Location = new Point(20, 50),
-                Size = new Size(460, 38),
+                Size = new Size(620, 38),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                 ForeColor = Color.FromArgb(70, 70, 70)
             };
 
-            var lblReleaseNotes = new Label
+            _lblReleaseNotesHeader = new Label
             {
                 Text = "What's New:",
                 Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
@@ -68,24 +78,32 @@ namespace SSH_Helper
                 Size = new Size(100, 20)
             };
 
-            _txtReleaseNotes = new TextBox
+            _rtbReleaseNotes = new RichTextBox
             {
-                Multiline = true,
                 ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical,
-                Text = FormatReleaseNotes(updateResult.ReleaseNotes),
+                ScrollBars = RichTextBoxScrollBars.Vertical,
                 Font = new Font("Segoe UI", 9f),
-                Location = new Point(20, 118),
-                Size = new Size(460, 170),
-                BackColor = Color.White,
-                BorderStyle = BorderStyle.FixedSingle
+                Dock = DockStyle.Fill,
+                BorderStyle = BorderStyle.None,
+                DetectUrls = true
             };
+            _rtbReleaseNotes.LinkClicked += RtbReleaseNotes_LinkClicked;
+
+            _rtbBorderPanel = new Panel
+            {
+                Location = new Point(20, 118),
+                Size = new Size(620, 270),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
+                Padding = new Padding(1)
+            };
+            _rtbBorderPanel.Controls.Add(_rtbReleaseNotes);
 
             _lnkViewOnGitHub = new LinkLabel
             {
                 Text = "View full release notes on GitHub",
-                Location = new Point(20, 295),
-                AutoSize = true
+                Location = new Point(20, 395),
+                AutoSize = true,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left
             };
             _lnkViewOnGitHub.LinkClicked += (_, _) =>
             {
@@ -103,32 +121,58 @@ namespace SSH_Helper
             {
                 Text = "Would you like to download and install this update now?",
                 Font = new Font("Segoe UI", 9.5f),
-                Location = new Point(20, 325),
-                Size = new Size(460, 20),
+                Location = new Point(20, 422),
+                Size = new Size(400, 20),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
                 ForeColor = Color.FromArgb(33, 37, 41)
             };
 
             _progressBar = new ProgressBar
             {
-                Location = new Point(20, 350),
-                Size = new Size(460, 22),
+                Location = new Point(20, 448),
+                Size = new Size(620, 22),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
                 Style = ProgressBarStyle.Continuous,
                 Visible = false
             };
 
             _lblProgress = new Label
             {
-                Location = new Point(20, 375),
-                Size = new Size(460, 20),
+                Location = new Point(20, 473),
+                Size = new Size(400, 20),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
                 Text = "",
                 Visible = false
             };
+
+            _btnSkip = new Button
+            {
+                Text = "Skip This Version",
+                Size = new Size(120, 34),
+                Location = new Point(520, 468),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                Font = new Font("Segoe UI", 9f),
+                DialogResult = DialogResult.Ignore
+            };
+            _btnSkip.Click += BtnSkip_Click;
+
+            _btnNo = new Button
+            {
+                Text = "Not Now",
+                Size = new Size(85, 34),
+                Location = new Point(428, 468),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                Font = new Font("Segoe UI", 9f),
+                DialogResult = DialogResult.Cancel
+            };
+            _btnNo.Click += BtnNo_Click;
 
             _btnYes = new Button
             {
                 Text = "Yes, Update Now",
                 Size = new Size(120, 34),
-                Location = new Point(130, 370),
+                Location = new Point(300, 468),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
                 Font = new Font("Segoe UI", 9f),
                 BackColor = Color.FromArgb(0, 120, 212),
                 ForeColor = Color.White,
@@ -138,30 +182,10 @@ namespace SSH_Helper
             _btnYes.FlatAppearance.BorderSize = 0;
             _btnYes.Click += BtnYes_Click;
 
-            _btnNo = new Button
-            {
-                Text = "Not Now",
-                Size = new Size(85, 34),
-                Location = new Point(258, 370),
-                Font = new Font("Segoe UI", 9f),
-                DialogResult = DialogResult.Cancel
-            };
-            _btnNo.Click += BtnNo_Click;
-
-            _btnSkip = new Button
-            {
-                Text = "Skip This Version",
-                Size = new Size(120, 34),
-                Location = new Point(351, 370),
-                Font = new Font("Segoe UI", 9f),
-                DialogResult = DialogResult.Ignore
-            };
-            _btnSkip.Click += BtnSkip_Click;
-
             Controls.Add(_lblTitle);
             Controls.Add(_lblVersionInfo);
-            Controls.Add(lblReleaseNotes);
-            Controls.Add(_txtReleaseNotes);
+            Controls.Add(_lblReleaseNotesHeader);
+            Controls.Add(_rtbBorderPanel);
             Controls.Add(_lnkViewOnGitHub);
             Controls.Add(_lblQuestion);
             Controls.Add(_progressBar);
@@ -175,13 +199,250 @@ namespace SSH_Helper
 
             FormClosing += UpdateDialog_FormClosing;
             Load += UpdateDialog_Load;
+
+            // Apply theme and populate release notes (RTF generation depends on theme colors)
+            ApplyTheme(darkMode);
+            PopulateReleaseNotes(updateResult.ReleaseNotes);
+        }
+
+        private void ApplyTheme(bool darkMode)
+        {
+            DialogTheme.ApplyTo(this, darkMode);
+            DialogTheme.StyleButton(_btnYes, darkMode, isPrimary: true);
+            DialogTheme.StyleButton(_btnNo, darkMode);
+            DialogTheme.StyleButton(_btnSkip, darkMode);
+            DialogTheme.SetDarkTitleBar(this, darkMode);
+
+            if (darkMode)
+            {
+                Load += (_, _) => DialogTheme.ApplyNativeTheme(this, true);
+            }
+
+            // RichTextBox border and background - must be set after ApplyTo which resets BorderStyle
+            _rtbReleaseNotes.BorderStyle = BorderStyle.None;
+            _rtbBorderPanel.BackColor = darkMode ? DialogTheme.DarkBorder : DialogTheme.LightBorder;
+            _rtbReleaseNotes.BackColor = darkMode ? DialogTheme.DarkInput : Color.White;
+            _rtbReleaseNotes.ForeColor = darkMode ? DialogTheme.DarkText : DialogTheme.LightText;
+        }
+
+        private void PopulateReleaseNotes(string? releaseNotes)
+        {
+            if (string.IsNullOrWhiteSpace(releaseNotes))
+            {
+                _rtbReleaseNotes.Text = "No release notes available.";
+                return;
+            }
+
+            try
+            {
+                _rtbReleaseNotes.Rtf = FormatReleaseNotesToRtf(releaseNotes);
+            }
+            catch
+            {
+                // Fallback to plain text if RTF generation fails
+                _rtbReleaseNotes.Text = FormatReleaseNotesPlainText(releaseNotes);
+            }
+        }
+
+        private string FormatReleaseNotesToRtf(string markdown)
+        {
+            var textColor = _darkMode ? DialogTheme.DarkText : DialogTheme.LightText;
+            var secondaryColor = _darkMode ? DialogTheme.DarkSecondaryText : DialogTheme.LightSecondaryText;
+
+            var sb = new StringBuilder();
+
+            // RTF header with color table
+            sb.Append(@"{\rtf1\ansi\deff0");
+
+            // Font table
+            sb.Append(@"{\fonttbl");
+            sb.Append(@"{\f0\fswiss Segoe UI;}");
+            sb.Append(@"{\f1\fmodern Consolas;}");
+            sb.Append('}');
+
+            // Color table
+            sb.Append(@"{\colortbl;");
+            sb.Append($@"\red{textColor.R}\green{textColor.G}\blue{textColor.B};"); // \cf1 - primary text
+            sb.Append($@"\red{secondaryColor.R}\green{secondaryColor.G}\blue{secondaryColor.B};"); // \cf2 - secondary text
+            sb.Append(@"\red0\green120\blue212;"); // \cf3 - accent/link color
+            sb.Append('}');
+
+            // Default formatting
+            sb.Append(@"\cf1\f0\fs18 "); // Segoe UI 9pt
+
+            var lines = markdown.Replace("\r\n", "\n").Split('\n');
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    sb.Append(@"\par ");
+                    continue;
+                }
+
+                // Headers: # or ## or ###
+                var headerMatch = Regex.Match(line, @"^(#{1,3})\s+(.+)$");
+                if (headerMatch.Success)
+                {
+                    var level = headerMatch.Groups[1].Value.Length;
+                    var headerText = headerMatch.Groups[2].Value;
+                    var fontSize = level switch
+                    {
+                        1 => 28, // 14pt
+                        2 => 24, // 12pt
+                        _ => 22  // 11pt
+                    };
+                    sb.Append($@"\par\b\fs{fontSize} ");
+                    AppendRtfInlineFormatted(sb, headerText);
+                    sb.Append(@"\b0\fs18\par ");
+                    continue;
+                }
+
+                // Bullet points: - item or * item
+                var bulletMatch = Regex.Match(line, @"^[\-\*]\s+(.+)$");
+                if (bulletMatch.Success)
+                {
+                    var bulletText = bulletMatch.Groups[1].Value;
+                    sb.Append(@"\par\li360\fi-180 \bullet\~");
+                    AppendRtfInlineFormatted(sb, bulletText);
+                    sb.Append(@"\li0\fi0 ");
+                    continue;
+                }
+
+                // Regular line
+                sb.Append(@"\par ");
+                AppendRtfInlineFormatted(sb, line);
+            }
+
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static void AppendRtfInlineFormatted(StringBuilder sb, string text)
+        {
+            int i = 0;
+            while (i < text.Length)
+            {
+                // Inline code: `code`
+                if (text[i] == '`' && i + 1 < text.Length)
+                {
+                    var endTick = text.IndexOf('`', i + 1);
+                    if (endTick > i)
+                    {
+                        var code = text.Substring(i + 1, endTick - i - 1);
+                        sb.Append(@"{\f1 ");
+                        AppendRtfEscaped(sb, code);
+                        sb.Append('}');
+                        i = endTick + 1;
+                        continue;
+                    }
+                }
+
+                // Bold: **text**
+                if (i + 1 < text.Length && text[i] == '*' && text[i + 1] == '*')
+                {
+                    var endBold = text.IndexOf("**", i + 2, StringComparison.Ordinal);
+                    if (endBold > i)
+                    {
+                        var boldText = text.Substring(i + 2, endBold - i - 2);
+                        sb.Append(@"\b ");
+                        AppendRtfEscaped(sb, boldText);
+                        sb.Append(@"\b0 ");
+                        i = endBold + 2;
+                        continue;
+                    }
+                }
+
+                // Italic: *text* or _text_ (single markers)
+                if ((text[i] == '*' || text[i] == '_') && i + 1 < text.Length && text[i + 1] != ' ')
+                {
+                    var marker = text[i];
+                    // Make sure it's not ** (bold)
+                    if (marker == '*' && i + 1 < text.Length && text[i + 1] == '*')
+                    {
+                        AppendRtfEscaped(sb, text[i]);
+                        i++;
+                        continue;
+                    }
+                    var endItalic = text.IndexOf(marker, i + 1);
+                    if (endItalic > i && endItalic - i > 1)
+                    {
+                        var italicText = text.Substring(i + 1, endItalic - i - 1);
+                        sb.Append(@"\i ");
+                        AppendRtfEscaped(sb, italicText);
+                        sb.Append(@"\i0 ");
+                        i = endItalic + 1;
+                        continue;
+                    }
+                }
+
+                // Regular character
+                AppendRtfEscaped(sb, text[i]);
+                i++;
+            }
+        }
+
+        private static void AppendRtfEscaped(StringBuilder sb, string text)
+        {
+            foreach (var ch in text)
+            {
+                AppendRtfEscaped(sb, ch);
+            }
+        }
+
+        private static void AppendRtfEscaped(StringBuilder sb, char ch)
+        {
+            switch (ch)
+            {
+                case '\\': sb.Append(@"\\"); break;
+                case '{': sb.Append(@"\{"); break;
+                case '}': sb.Append(@"\}"); break;
+                default:
+                    if (ch > 127)
+                        sb.Append($@"\u{(int)ch}?");
+                    else
+                        sb.Append(ch);
+                    break;
+            }
+        }
+
+        private static string FormatReleaseNotesPlainText(string releaseNotes)
+        {
+            var text = releaseNotes
+                .Replace("\r\n", "\n")
+                .Replace("\n", "\r\n")
+                .Trim();
+
+            text = Regex.Replace(text, @"^#{1,3}\s*", "", RegexOptions.Multiline);
+            text = text.Replace("**", "").Replace("__", "");
+            text = Regex.Replace(text, @"^\*\s+", "- ", RegexOptions.Multiline);
+
+            return text;
+        }
+
+        private void RtbReleaseNotes_LinkClicked(object? sender, LinkClickedEventArgs e)
+        {
+            if (!string.IsNullOrEmpty(e.LinkText))
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = e.LinkText,
+                        UseShellExecute = true
+                    });
+                }
+                catch { }
+            }
         }
 
         private void UpdateDialog_Load(object? sender, EventArgs e)
         {
             // Deselect text in release notes and set focus to Yes button
-            _txtReleaseNotes.SelectionStart = 0;
-            _txtReleaseNotes.SelectionLength = 0;
+            _rtbReleaseNotes.SelectionStart = 0;
+            _rtbReleaseNotes.SelectionLength = 0;
             _btnYes.Focus();
         }
 
@@ -409,29 +670,6 @@ namespace SSH_Helper
             var totalMb = e.TotalBytes / (1024.0 * 1024.0);
             _lblProgress.Text = $"Downloading: {downloadedMb:F1} MB / {totalMb:F1} MB ({e.ProgressPercent}%)";
         }
-
-        private static string FormatReleaseNotes(string? releaseNotes)
-        {
-            if (string.IsNullOrWhiteSpace(releaseNotes))
-                return "No release notes available.";
-
-            // Basic cleanup of markdown for display in a TextBox
-            var text = releaseNotes
-                .Replace("\r\n", "\n")
-                .Replace("\n", "\r\n")
-                .Trim();
-
-            // Remove common markdown headers (## or ###) but keep the text
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"^#{1,3}\s*", "", System.Text.RegularExpressions.RegexOptions.Multiline);
-
-            // Remove markdown bold/italic markers
-            text = text.Replace("**", "").Replace("__", "");
-
-            // Convert markdown bullet points to simple dashes
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"^\*\s+", "- ", System.Text.RegularExpressions.RegexOptions.Multiline);
-
-            return text;
-        }
     }
 
     /// <summary>
@@ -439,10 +677,10 @@ namespace SSH_Helper
     /// </summary>
     internal sealed class NoUpdateDialog : Form
     {
-        public NoUpdateDialog(string currentVersion)
+        public NoUpdateDialog(string currentVersion, bool darkMode = false)
         {
             Text = "Check for Updates";
-            Size = new Size(380, 170);
+            Size = new Size(380, 200);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -479,7 +717,7 @@ namespace SSH_Helper
             {
                 Text = "OK",
                 Size = new Size(90, 32),
-                Location = new Point(140, 95),
+                Location = new Point(140, 115),
                 DialogResult = DialogResult.OK
             };
 
@@ -489,6 +727,15 @@ namespace SSH_Helper
             Controls.Add(btnOk);
 
             AcceptButton = btnOk;
+
+            if (darkMode)
+            {
+                DialogTheme.ApplyTo(this, true);
+                DialogTheme.StyleButton(btnOk, true);
+                // Preserve green checkmark icon color
+                lblIcon.ForeColor = Color.FromArgb(40, 167, 69);
+                DialogTheme.SetDarkTitleBar(this, true);
+            }
         }
     }
 
@@ -497,7 +744,7 @@ namespace SSH_Helper
     /// </summary>
     internal sealed class UpdateErrorDialog : Form
     {
-        public UpdateErrorDialog(string errorMessage)
+        public UpdateErrorDialog(string errorMessage, bool darkMode = false)
         {
             Text = "Update Check Failed";
             Size = new Size(420, 190);
@@ -547,6 +794,16 @@ namespace SSH_Helper
             Controls.Add(btnOk);
 
             AcceptButton = btnOk;
+
+            // Apply theme
+            if (darkMode)
+            {
+                DialogTheme.ApplyTo(this, true);
+                DialogTheme.StyleButton(btnOk, true);
+                // Preserve icon colors
+                lblIcon.ForeColor = Color.FromArgb(255, 193, 7);
+                DialogTheme.SetDarkTitleBar(this, true);
+            }
         }
     }
 }

@@ -41,6 +41,12 @@ namespace SSH_Helper.Services
         public string ConfigFilePath => _configFilePath;
 
         /// <summary>
+        /// If non-null, contains a message describing a config load error (e.g., corrupt file).
+        /// The UI should check this after Load() and display a warning.
+        /// </summary>
+        public string? ConfigLoadError { get; private set; }
+
+        /// <summary>
         /// Loads the configuration, creating a default one if it doesn't exist.
         /// </summary>
         public AppConfiguration Load()
@@ -60,8 +66,22 @@ namespace SSH_Helper.Services
                 _cachedConfig = config;
                 return config;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Preserve the corrupt file so the user can recover data manually
+                try
+                {
+                    var backupPath = _configFilePath + ".corrupt";
+                    File.Copy(_configFilePath, backupPath, overwrite: true);
+                }
+                catch
+                {
+                    // If backup fails, continue with default config
+                }
+
+                System.Diagnostics.Debug.WriteLine($"Configuration parse error: {ex.Message}. A backup was saved to {_configFilePath}.corrupt");
+                ConfigLoadError = $"Configuration file was corrupted and could not be loaded. A backup was saved to config.json.corrupt. Default settings have been applied.";
+
                 var defaultConfig = CreateDefaultConfiguration();
                 _cachedConfig = defaultConfig;
                 return defaultConfig;
@@ -75,6 +95,13 @@ namespace SSH_Helper.Services
         {
             try
             {
+                // Keep a backup of the previous config in case the save is interrupted
+                if (File.Exists(_configFilePath))
+                {
+                    try { File.Copy(_configFilePath, _configFilePath + ".bak", overwrite: true); }
+                    catch { /* best-effort backup */ }
+                }
+
                 string json = JsonConvert.SerializeObject(config, Formatting.Indented);
                 File.WriteAllText(_configFilePath, json);
                 _cachedConfig = config;

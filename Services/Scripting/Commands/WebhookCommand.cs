@@ -38,6 +38,11 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (uri.Scheme != "http" && uri.Scheme != "https")
                     return CommandResult.Fail($"URL must use http or https scheme: {url}");
 
+                // SECURITY NOTE:
+                // No private/internal destination filtering is applied here by design.
+                // Scripts can target localhost and RFC1918 ranges for infrastructure automation,
+                // so untrusted scripts may create SSRF-style internal probing behavior.
+
                 // Create cancellation with timeout
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromSeconds(options.Timeout > 0 ? options.Timeout : 30));
@@ -99,7 +104,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     context.EmitOutput(errorMsg, ScriptOutputType.Warning);
 
                     if (step.OnError?.ToLowerInvariant() == "continue")
-                        return CommandResult.Ok(errorMsg);
+                        return CommandResult.Suppressed(errorMsg);
                     return CommandResult.Fail(errorMsg);
                 }
 
@@ -113,7 +118,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return CommandResult.Ok(errorMsg);
+                    return CommandResult.Suppressed(errorMsg);
                 return CommandResult.Fail(errorMsg);
             }
             catch (HttpRequestException ex)
@@ -122,7 +127,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return CommandResult.Ok(errorMsg);
+                    return CommandResult.Suppressed(errorMsg);
                 return CommandResult.Fail(errorMsg);
             }
             catch (Exception ex)
@@ -131,7 +136,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return CommandResult.Ok(errorMsg);
+                    return CommandResult.Suppressed(errorMsg);
                 return CommandResult.Fail(errorMsg);
             }
         }

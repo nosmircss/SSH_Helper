@@ -1,5 +1,6 @@
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
+using SSH_Helper.Services.Scripting.Models;
 using Xunit;
 
 namespace SSH_Helper.Tests.Scripting;
@@ -54,15 +55,34 @@ steps:
     }
 
     [Theory]
-    [InlineData("name: Test Script")]
-    [InlineData("description: A test")]
     [InlineData("vars:\n  test: value")]
     [InlineData("steps:\n  - send: test")]
-    [InlineData("version: 1")]
-    public void IsYamlScript_ScriptKeywords_ReturnsTrue(string input)
+    public void IsYamlScript_ScriptSections_ReturnsTrue(string input)
     {
         var result = ScriptParser.IsYamlScript(input);
         result.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("name: Test Script")]
+    [InlineData("description: Uplink to core")]
+    [InlineData("version: 1")]
+    public void IsYamlScript_MetadataOnlyKeywords_ReturnsFalse(string input)
+    {
+        var result = ScriptParser.IsYamlScript(input);
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsYamlScript_PlainCommandsWithNameAndDescription_ReturnsFalse()
+    {
+        var input = @"name: Ethernet1/1
+description: Uplink to core
+show interface status";
+
+        var result = ScriptParser.IsYamlScript(input);
+
+        result.Should().BeFalse();
     }
 
     [Theory]
@@ -75,6 +95,9 @@ steps:
     [InlineData("- if: condition\n  then:")]
     [InlineData("- foreach: item in items\n  do:")]
     [InlineData("- while: condition\n  do:")]
+    [InlineData("- break: true")]
+    [InlineData("- continue: true")]
+    [InlineData("- try:\n  - print: test")]
     [InlineData("- updatecolumn:\n    column: test")]
     public void IsYamlScript_StepSyntax_ReturnsTrue(string input)
     {
@@ -541,6 +564,22 @@ steps:
     }
 
     [Fact]
+    public void Validate_WhileWithInvalidMaxIterations_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - while: condition
+    max_iterations: 0
+    do:
+      - print: test";
+        var script = _parser.Parse(yaml);
+
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(e => e.Contains("max_iterations"));
+    }
+
+    [Fact]
     public void Validate_SetWithoutEquals_ReturnsError()
     {
         var yaml = @"---
@@ -698,6 +737,159 @@ steps:
         var errors = _parser.Validate(script, yaml);
 
         errors.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region Extended Control Flow Tests
+
+    [Fact]
+    public void Parse_IfWithElif_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - if: a == 1
+    then:
+      - print: one
+    elif:
+      - if: a == 2
+        then:
+          - print: two
+      - if: a == 3
+        then:
+          - print: three
+    else:
+      - print: other";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].If.Should().Be("a == 1");
+        script.Steps[0].Elif.Should().NotBeNull();
+        script.Steps[0].Elif!.Should().HaveCount(2);
+        script.Steps[0].Elif![0].If.Should().Be("a == 2");
+        script.Steps[0].Elif![0].Then.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Parse_WhileWithMaxIterations_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - while: i < 10
+    max_iterations: 25
+    do:
+      - set: i = i + 1";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].While.Should().Be("i < 10");
+        script.Steps[0].MaxIterations.Should().Be(25);
+    }
+
+    [Fact]
+    public void Parse_BreakAndContinue_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - break: true
+  - continue: true";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].GetStepType().Should().Be(StepType.Break);
+        script.Steps[1].GetStepType().Should().Be(StepType.Continue);
+    }
+
+    [Fact]
+    public void Parse_TryCatchFinally_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - try:
+      - print: inside
+    catch:
+      - print: caught
+    finally:
+      - print: done";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].GetStepType().Should().Be(StepType.Try);
+        script.Steps[0].Try.Should().ContainSingle();
+        script.Steps[0].Catch.Should().ContainSingle();
+        script.Steps[0].Finally.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Validate_BreakOutsideLoop_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - break: true";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(e => e.Contains("break can only be used inside foreach/while"));
+    }
+
+    [Fact]
+    public void Validate_ContinueOutsideLoop_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - continue: true";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(e => e.Contains("continue can only be used inside foreach/while"));
+    }
+
+    [Fact]
+    public void Validate_BreakInsideLoop_NoError()
+    {
+        var yaml = @"---
+steps:
+  - while: i < 10
+    do:
+      - break: true";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Parse_UnknownKey_AddsWarningWithLineNumber()
+    {
+        var yaml = @"---
+steps:
+  - send: show version
+    typoo: yes";
+
+        _parser.Parse(yaml);
+
+        _parser.Warnings.Should().ContainSingle();
+        _parser.Warnings[0].Should().Contain("Line");
+        _parser.Warnings[0].Should().Contain("Unknown step key 'typoo'");
+    }
+
+    [Fact]
+    public void Parse_UnknownOptionKey_AddsWarningWithLineNumber()
+    {
+        var yaml = @"---
+steps:
+  - readfile:
+      path: C:\\temp\\x.txt
+      into: data
+      typoo: yes";
+
+        _parser.Parse(yaml);
+
+        _parser.Warnings.Should().ContainSingle();
+        _parser.Warnings[0].Should().Contain("Unknown readfile key 'typoo'");
     }
 
     #endregion

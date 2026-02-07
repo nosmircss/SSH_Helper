@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using SSH_Helper.UI;
 
 namespace SSH_Helper
 {
@@ -12,7 +13,7 @@ namespace SSH_Helper
         private readonly LinkLabel _lnkHomepage;
         private readonly TextBox _txtInfo;
 
-        public AboutDialog(string appName, string appVersion)
+        public AboutDialog(string appName, string appVersion, bool darkMode = false)
         {
             Text = $"About {appName}";
             StartPosition = FormStartPosition.CenterParent;
@@ -88,6 +89,15 @@ Use responsibly.";
             // Prevent manual resize larger/smaller than computed
             MinimumSize = Size;
             MaximumSize = new Size(Size.Width + 2, Size.Height + 2);
+
+            ApplyTheme(darkMode);
+        }
+
+        private void ApplyTheme(bool darkMode)
+        {
+            DialogTheme.ApplyTo(this, darkMode);
+            DialogTheme.StyleButton(_btnOk, darkMode);
+            DialogTheme.SetDarkTitleBar(this, darkMode);
         }
 
         private void FitToContent()

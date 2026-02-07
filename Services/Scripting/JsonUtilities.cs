@@ -326,7 +326,10 @@ namespace SSH_Helper.Services.Scripting
             return ParseJsonValue(substituted);
         }
 
-        private static bool TryEvaluateJsonExpression(string expr, ScriptContext context, out object? value)
+        /// <summary>
+        /// Evaluates json(...) and json.*(...) expressions into structured values.
+        /// </summary>
+        public static bool TryEvaluateJsonExpression(string expr, ScriptContext context, out object? value, bool normalizeStructured = true)
         {
             value = null;
 
@@ -338,7 +341,7 @@ namespace SSH_Helper.Services.Scripting
                 expr.EndsWith(")", StringComparison.Ordinal))
             {
                 var inner = expr.Substring(5, expr.Length - 6).Trim();
-                value = NormalizeStructuredJsonResult(JsonFunctions.Constructor(inner, context));
+                value = MaybeNormalize(JsonFunctions.Constructor(inner, context), normalizeStructured);
                 return true;
             }
 
@@ -350,75 +353,86 @@ namespace SSH_Helper.Services.Scripting
                 {
                     var funcName = expr.Substring(5, parenIdx - 5);
                     var inner = expr.Substring(parenIdx + 1, expr.Length - parenIdx - 2).Trim();
-                    return TryDispatchJsonFunction(funcName, inner, context, out value);
+                    return TryDispatchJsonFunction(funcName, inner, context, out value, normalizeStructured);
                 }
             }
 
             return false;
         }
 
-        private static bool TryDispatchJsonFunction(string funcName, string args, ScriptContext context, out object? value)
+        private static bool TryDispatchJsonFunction(string funcName, string args, ScriptContext context, out object? value, bool normalizeStructured = true)
         {
             switch (funcName.ToLowerInvariant())
             {
                 case "get":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Get(args, context));
+                    value = MaybeNormalize(JsonFunctions.Get(args, context), normalizeStructured);
                     return true;
                 case "set":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Set(args, context));
+                    value = MaybeNormalize(JsonFunctions.Set(args, context), normalizeStructured);
                     return true;
                 case "delete":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Delete(args, context));
+                    value = MaybeNormalize(JsonFunctions.Delete(args, context), normalizeStructured);
                     return true;
                 case "merge":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.MergeVariadic(args, context));
+                    value = MaybeNormalize(JsonFunctions.MergeVariadic(args, context), normalizeStructured);
                     return true;
                 case "format":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Format(args, context));
+                    value = MaybeNormalize(JsonFunctions.Format(args, context), normalizeStructured);
                     return true;
                 case "exists":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Exists(args, context));
+                    value = MaybeNormalize(JsonFunctions.Exists(args, context), normalizeStructured);
                     return true;
                 case "len":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Len(args, context));
+                    value = MaybeNormalize(JsonFunctions.Len(args, context), normalizeStructured);
                     return true;
                 case "type":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Type(args, context));
+                    value = MaybeNormalize(JsonFunctions.Type(args, context), normalizeStructured);
                     return true;
                 case "keys":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Keys(args, context));
+                    value = MaybeNormalize(JsonFunctions.Keys(args, context), normalizeStructured);
                     return true;
                 case "values":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Values(args, context));
+                    value = MaybeNormalize(JsonFunctions.Values(args, context), normalizeStructured);
                     return true;
                 case "items":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Items(args, context));
+                    value = MaybeNormalize(JsonFunctions.Items(args, context), normalizeStructured);
                     return true;
                 case "push":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Push(args, context));
+                    value = MaybeNormalize(JsonFunctions.Push(args, context), normalizeStructured);
                     return true;
                 case "pop":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Pop(args, context));
+                    value = MaybeNormalize(JsonFunctions.Pop(args, context), normalizeStructured);
+                    return true;
+                case "last":
+                    value = MaybeNormalize(JsonFunctions.Last(args, context), normalizeStructured);
                     return true;
                 case "unshift":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Unshift(args, context));
+                    value = MaybeNormalize(JsonFunctions.Unshift(args, context), normalizeStructured);
                     return true;
                 case "shift":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Shift(args, context));
+                    value = MaybeNormalize(JsonFunctions.Shift(args, context), normalizeStructured);
+                    return true;
+                case "first":
+                    value = MaybeNormalize(JsonFunctions.First(args, context), normalizeStructured);
                     return true;
                 case "slice":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Slice(args, context));
+                    value = MaybeNormalize(JsonFunctions.Slice(args, context), normalizeStructured);
                     return true;
                 case "concat":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.Concat(args, context));
+                    value = MaybeNormalize(JsonFunctions.Concat(args, context), normalizeStructured);
                     return true;
                 case "indexof":
-                    value = NormalizeStructuredJsonResult(JsonFunctions.IndexOf(args, context));
+                    value = MaybeNormalize(JsonFunctions.IndexOf(args, context), normalizeStructured);
                     return true;
                 default:
                     value = null;
                     return false;
             }
+        }
+
+        private static object? MaybeNormalize(object? value, bool normalizeStructured)
+        {
+            return normalizeStructured ? NormalizeStructuredJsonResult(value) : value;
         }
 
         private static object? NormalizeStructuredJsonResult(object? value)

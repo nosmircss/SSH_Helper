@@ -79,7 +79,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return Task.FromResult(CommandResult.Ok(errorMsg));
+                    return Task.FromResult(CommandResult.Suppressed(errorMsg));
 
                 return Task.FromResult(CommandResult.Fail(errorMsg));
             }

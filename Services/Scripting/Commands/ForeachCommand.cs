@@ -68,7 +68,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 }
 
                 // Execute the 'do' block
-                var result = await _executor.ExecuteStepsAsync(step.Do, context, cancellationToken);
+                var result = await _executor.ExecuteStepsAsync(step.Do, context, cancellationToken, context.LoopDepth + 1);
 
                 // Handle control flow
                 if (result.ShouldExit)
@@ -118,7 +118,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                             {
                                 if (element != null)
                                 {
-                                    items.Add(element.ToJsonString());
+                                    items.Add(JsonUtilities.JsonNodeToStringValue(element));
                                 }
                             }
                             return items;

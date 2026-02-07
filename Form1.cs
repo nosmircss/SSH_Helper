@@ -76,7 +76,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.18";
+        private const string ApplicationVersion = "0.50.19";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -180,6 +180,11 @@ namespace SSH_Helper
             _presetManager = new PresetManager(_configService);
             _csvManager = new CsvManager();
             var config = _configService.Load();
+            if (_configService.ConfigLoadError != null)
+            {
+                MessageBox.Show(_configService.ConfigLoadError, "Configuration Warning",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
             var poolTimeouts = SshTimeoutOptions.Create(config.Timeout, config.ConnectionTimeout);
             _sshService = new SshExecutionService(enablePooling: true, poolTimeouts);
             _sshService.UseConnectionPooling = config.UseConnectionPooling;
@@ -976,9 +981,16 @@ namespace SSH_Helper
             Refresh();
         }
 
+        // Fonts created by ApplyFontSettings — disposed on next call or in Form1.Dispose
+        private List<Font> _managedFonts = new();
+
         private void ApplyFontSettings(Models.FontSettings fontSettings)
         {
             SuspendLayout();
+
+            // Collect previous fonts for disposal after all controls are reassigned
+            var previousFonts = _managedFonts;
+            _managedFonts = new List<Font>();
 
             var uiFont = fontSettings.UIFontFamily;
             var codeFont = fontSettings.CodeFontFamily;
@@ -988,15 +1000,19 @@ namespace SSH_Helper
             float Scaled(float size) => size * scale;
 
             // Section titles (Semibold)
-            lblHostsTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
-            lblPresetsTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
-            lblScriptTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
-            lblHistoryTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
-            lblHostsListTitle.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+            var sectionTitleFont = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+            _managedFonts.Add(sectionTitleFont);
+            lblHostsTitle.Font = sectionTitleFont;
+            lblPresetsTitle.Font = sectionTitleFont;
+            lblScriptTitle.Font = sectionTitleFont;
+            lblHistoryTitle.Font = sectionTitleFont;
+            lblHostsListTitle.Font = sectionTitleFont;
 
             // Tree views
-            trvPresets.Font = new Font(uiFont, Scaled(fontSettings.TreeViewFontSize));
-            trvFavorites.Font = new Font(uiFont, Scaled(fontSettings.TreeViewFontSize));
+            var treeFont = new Font(uiFont, Scaled(fontSettings.TreeViewFontSize));
+            _managedFonts.Add(treeFont);
+            trvPresets.Font = treeFont;
+            trvFavorites.Font = treeFont;
 
             // Apply custom row height for tree views if specified (0 = auto based on font)
             if (fontSettings.TreeViewRowHeight > 0)
@@ -1007,33 +1023,55 @@ namespace SSH_Helper
             else
             {
                 // Calculate height based on font (font height + padding)
-                var autoHeight = trvPresets.Font.Height + 4;
+                int fontHeight;
+                try
+                {
+                    fontHeight = treeFont.Height;
+                }
+                catch (ArgumentException)
+                {
+                    // GDI+ can fail with "Parameter is not valid" during font transitions;
+                    // approximate from point size (1pt ≈ 1.333px at 96 DPI, plus internal leading)
+                    fontHeight = (int)Math.Ceiling(Scaled(fontSettings.TreeViewFontSize) * 1.6f);
+                }
+                var autoHeight = fontHeight + 4;
                 trvPresets.ItemHeight = autoHeight;
                 trvFavorites.ItemHeight = autoHeight;
             }
 
             // Empty labels
-            lblFavoritesEmpty.Font = new Font(uiFont, Scaled(fontSettings.EmptyLabelFontSize));
+            var emptyLabelFont = new Font(uiFont, Scaled(fontSettings.EmptyLabelFontSize));
+            _managedFonts.Add(emptyLabelFont);
+            lblFavoritesEmpty.Font = emptyLabelFont;
 
             // Execute buttons (Semibold)
-            btnExecuteAll.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
-            btnExecuteSelected.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
-            btnStopAll.Font = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
+            var execButtonFont = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
+            _managedFonts.Add(execButtonFont);
+            btnExecuteAll.Font = execButtonFont;
+            btnExecuteSelected.Font = execButtonFont;
+            btnStopAll.Font = execButtonFont;
 
             // General buttons
-            btnSavePreset.Font = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+            var buttonFont = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+            _managedFonts.Add(buttonFont);
+            btnSavePreset.Font = buttonFont;
 
             // Code editor
-            txtCommand.Font = new Font(codeFont, Scaled(fontSettings.CodeEditorFontSize));
+            var codeEditorFont = new Font(codeFont, Scaled(fontSettings.CodeEditorFontSize));
+            _managedFonts.Add(codeEditorFont);
+            txtCommand.Font = codeEditorFont;
             txtCommand.WordWrap = fontSettings.CodeEditorWordWrap;
 
             // Output area
-            txtOutput.Font = new Font(codeFont, Scaled(fontSettings.OutputAreaFontSize));
+            var outputFont = new Font(codeFont, Scaled(fontSettings.OutputAreaFontSize));
+            _managedFonts.Add(outputFont);
+            txtOutput.Font = outputFont;
             txtOutput.WordWrap = fontSettings.OutputAreaWordWrap;
 
 
             // Tab controls
             var tabFont = new Font(uiFont, Scaled(fontSettings.TabFontSize));
+            _managedFonts.Add(tabFont);
             presetsTabControl.Font = tabFont;
 
             // Host list (DataGridView) - apply row height setting
@@ -1046,12 +1084,16 @@ namespace SSH_Helper
             }
 
             // History list boxes
-            lstOutput.Font = new Font(uiFont, Scaled(fontSettings.HostListFontSize));
-            lstHosts.Font = new Font(uiFont, Scaled(fontSettings.HostListFontSize));
+            var listFont = new Font(uiFont, Scaled(fontSettings.HostListFontSize));
+            _managedFonts.Add(listFont);
+            lstOutput.Font = listFont;
+            lstHosts.Font = listFont;
 
             // Menu strip
-            menuStrip1.Font = new Font(uiFont, Scaled(fontSettings.MenuFontSize));
-            ApplyMenuFontRecursive(menuStrip1.Items, new Font(uiFont, Scaled(fontSettings.MenuFontSize)));
+            var menuFont = new Font(uiFont, Scaled(fontSettings.MenuFontSize));
+            _managedFonts.Add(menuFont);
+            menuStrip1.Font = menuFont;
+            ApplyMenuFontRecursive(menuStrip1.Items, menuFont);
 
             // Context menus
             ApplyContextMenuFont(contextMenuStrip1, uiFont, Scaled(fontSettings.MenuFontSize));
@@ -1061,16 +1103,46 @@ namespace SSH_Helper
             ApplyContextMenuFont(contextHostLst, uiFont, Scaled(fontSettings.MenuFontSize));
 
             // Toolstrips
-            mainToolStrip.Font = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
-            presetsToolStrip.Font = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+            var toolStripFont = new Font(uiFont, Scaled(fontSettings.ButtonFontSize));
+            _managedFonts.Add(toolStripFont);
+            mainToolStrip.Font = toolStripFont;
+            presetsToolStrip.Font = toolStripFont;
 
             // Status bar
-            statusStrip.Font = new Font(uiFont, Scaled(fontSettings.StatusBarFontSize));
+            var statusFont = new Font(uiFont, Scaled(fontSettings.StatusBarFontSize));
+            _managedFonts.Add(statusFont);
+            statusStrip.Font = statusFont;
 
             // Apply accent color if custom
             ApplyAccentColor(fontSettings.CustomAccentColor);
 
             ResumeLayout(true);
+
+            // Defer disposal so any pending WM_PAINT messages (queued by ApplyTheme's
+            // Refresh or by ResumeLayout) are processed while old fonts are still valid.
+            if (previousFonts.Count > 0)
+            {
+                var fontsToDispose = previousFonts;
+                var currentFonts = _managedFonts;
+                BeginInvoke(() =>
+                {
+                    foreach (var font in fontsToDispose)
+                    {
+                        // GDI+ may share native handles between Font objects with identical
+                        // parameters. Disposing an old font would invalidate any new font
+                        // that shares the same handle (e.g. when resetting to defaults
+                        // produces the same font settings that were already active).
+                        bool sharedHandle = currentFonts.Any(f =>
+                            f.Name == font.Name &&
+                            f.Size == font.Size &&
+                            f.Style == font.Style);
+                        if (!sharedHandle)
+                        {
+                            try { font.Dispose(); } catch { }
+                        }
+                    }
+                });
+            }
         }
 
         private void ApplyColumnAutoResize(bool autoResize)
@@ -1139,6 +1211,7 @@ namespace SSH_Helper
         {
             if (menu == null) return;
             var font = new Font(fontFamily, fontSize);
+            _managedFonts.Add(font);
             menu.Font = font;
             foreach (ToolStripItem item in menu.Items)
             {
@@ -1679,16 +1752,33 @@ namespace SSH_Helper
             var textColor = isSelected ? Color.White : DarkTextSecondary;
             using (var textBrush = new SolidBrush(textColor))
             {
-                var sf = new StringFormat
+                using var sf = new StringFormat
                 {
                     Alignment = StringAlignment.Center,
                     LineAlignment = StringAlignment.Center
                 };
-                e.Graphics.DrawString(tabPage.Text, tabControl.Font, textBrush, tabRect, sf);
+                SafeDrawString(e.Graphics, tabPage.Text, tabControl.Font, textBrush, tabRect, sf);
             }
         }
 
         #endregion
+
+        /// <summary>
+        /// Draws text safely, catching ArgumentException from disposed fonts during
+        /// font-settings transitions. Silently skips the draw on failure — the control
+        /// will repaint correctly on the next cycle with valid fonts.
+        /// </summary>
+        private static void SafeDrawString(Graphics g, string? s, Font font, Brush brush, RectangleF rect, StringFormat? format)
+        {
+            try
+            {
+                g.DrawString(s, font, brush, rect, format);
+            }
+            catch (ArgumentException)
+            {
+                // Font disposed during a settings transition; skip this frame
+            }
+        }
 
         #endregion
 
@@ -1816,14 +1906,14 @@ namespace SSH_Helper
             if (grid == null) return;
 
             var rowIdx = (e.RowIndex + 1).ToString();
-            var centerFormat = new StringFormat
+            using var centerFormat = new StringFormat
             {
                 Alignment = StringAlignment.Center,
                 LineAlignment = StringAlignment.Center
             };
             var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
             using var brush = new SolidBrush(Color.FromArgb(108, 117, 125));
-            e.Graphics.DrawString(rowIdx, grid.Font, brush, headerBounds, centerFormat);
+            SafeDrawString(e.Graphics, rowIdx, grid.Font, brush, headerBounds, centerFormat);
         }
 
         private void Dgv_Variables_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -3170,7 +3260,7 @@ namespace SSH_Helper
         private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             var previousCredentialManager = _configService.GetCurrent().Credentials.UseCredentialManager;
-            using var dialog = new SettingsDialog(_configService);
+            using var dialog = new SettingsDialog(_configService, _isDarkMode);
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 // Settings saved - default timeout only applies to new presets
@@ -3227,16 +3317,25 @@ namespace SSH_Helper
             {
                 var script = parser.Parse(scriptText);
                 var errors = parser.Validate(script, scriptText);
+                var warnings = parser.Warnings;
 
-                if (errors.Count == 0)
+                if (errors.Count == 0 && warnings.Count == 0)
                 {
                     var successMessage = ScriptValidationFormatter.FormatSuccessMessage();
                     AppendOutputText(Environment.NewLine + successMessage + Environment.NewLine);
                     MessageBox.Show(successMessage, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
+                else if (errors.Count == 0)
+                {
+                    var warningMessage = "Script validation succeeded with warnings:" + Environment.NewLine + string.Join(Environment.NewLine, warnings);
+                    AppendOutputText(Environment.NewLine + warningMessage + Environment.NewLine);
+                    MessageBox.Show(warningMessage, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 else
                 {
                     var message = ScriptValidationFormatter.FormatFailureMessage(errors);
+                    if (warnings.Count > 0)
+                        message += Environment.NewLine + Environment.NewLine + "Warnings:" + Environment.NewLine + string.Join(Environment.NewLine, warnings);
                     AppendOutputText(Environment.NewLine + message + Environment.NewLine);
                     MessageBox.Show(message, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
@@ -3315,7 +3414,7 @@ namespace SSH_Helper
 
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            using var dlg = new AboutDialog(ApplicationName, ApplicationVersion);
+            using var dlg = new AboutDialog(ApplicationName, ApplicationVersion, _isDarkMode);
             dlg.ShowDialog(this);
         }
 
@@ -3829,7 +3928,25 @@ namespace SSH_Helper
 
         private void contextHistoryLst_Opening(object sender, CancelEventArgs e)
         {
-            // Can be used for dynamic menu state
+            var hasSelection = lstOutput.SelectedItem is HistoryListItem;
+            saveAsToolStripMenuItem.Enabled = hasSelection;
+            deleteEntryToolStripMenuItem.Enabled = hasSelection;
+
+            if (hasSelection && lstOutput.SelectedItem is HistoryListItem entry && _historyResults.HasDetails(entry.Id))
+            {
+                viewDetailsToolStripMenuItem.Enabled = true;
+                viewDetailsToolStripMenuItem.Text = "View Details...";
+            }
+            else
+            {
+                viewDetailsToolStripMenuItem.Enabled = false;
+                viewDetailsToolStripMenuItem.Text = "View Details (not available)";
+            }
+        }
+
+        private void viewDetailsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ViewExecutionDetails();
         }
 
         private void LstOutput_MouseDown(object? sender, MouseEventArgs e)
@@ -3858,11 +3975,33 @@ namespace SSH_Helper
 
         private void lstHosts_SelectedIndexChanged(object? sender, EventArgs e)
         {
-            if (lstHosts.SelectedItem is HostHistoryEntry hostEntry)
+            SetOutputText(BuildSelectedHostOutput());
+        }
+
+        private string BuildSelectedHostOutput()
+        {
+            if (lstHosts.SelectedIndices.Count == 0)
+                return string.Empty;
+
+            var combinedOutput = new StringBuilder();
+            bool isFirstSelectedHost = true;
+
+            for (int i = 0; i < lstHosts.Items.Count; i++)
             {
-                // Trim leading blank lines for cleaner display
-                SetOutputText(hostEntry.Output.TrimStart('\r', '\n'));
+                if (!lstHosts.GetSelected(i) || lstHosts.Items[i] is not HostHistoryEntry hostEntry)
+                    continue;
+
+                var output = hostEntry.Output ?? string.Empty;
+                if (isFirstSelectedHost)
+                {
+                    output = output.TrimStart('\r', '\n');
+                    isFirstSelectedHost = false;
+                }
+
+                combinedOutput.Append(output);
             }
+
+            return combinedOutput.ToString();
         }
 
         private void lstHosts_DrawItem(object? sender, DrawItemEventArgs e)
@@ -3901,7 +4040,7 @@ namespace SSH_Helper
                 var textRect = new Rectangle(e.Bounds.Left + 24, e.Bounds.Top, e.Bounds.Width - 28, e.Bounds.Height);
                 var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
                 using var textBrush = new SolidBrush(textColor);
-                e.Graphics.DrawString(hostEntry.HostAddress, e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
+                SafeDrawString(e.Graphics, hostEntry.HostAddress, e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
             }
         }
 
@@ -3935,7 +4074,7 @@ namespace SSH_Helper
             // Draw text with theme-aware color
             var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
             using var textBrush = new SolidBrush(textColor);
-            var sf = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+            using var sf = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
 
             if (isFolderEntry)
             {
@@ -3955,7 +4094,7 @@ namespace SSH_Helper
                 {
                     var dateTimeSize = e.Graphics.MeasureString(dateTimePart + " - ", e.Font ?? lstOutput.Font);
                     var dateTimeRect = new RectangleF(currentX, e.Bounds.Top, dateTimeSize.Width, e.Bounds.Height);
-                    e.Graphics.DrawString(dateTimePart + " - ", e.Font ?? lstOutput.Font, textBrush, dateTimeRect, sf);
+                    SafeDrawString(e.Graphics, dateTimePart + " - ", e.Font ?? lstOutput.Font, textBrush, dateTimeRect, sf);
                     currentX += (int)dateTimeSize.Width;
                 }
 
@@ -3964,19 +4103,19 @@ namespace SSH_Helper
                 using var iconFont = new Font("Segoe UI Symbol", 9F);
                 using var iconBrush = new SolidBrush(iconColor);
                 var iconRect = new RectangleF(currentX, e.Bounds.Top, 18, e.Bounds.Height);
-                var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
+                using var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
                 e.Graphics.DrawString("\U0001F4C1", iconFont, iconBrush, iconRect, iconSf);
                 currentX += 18;
 
                 // Draw folder name
                 var nameRect = new Rectangle(currentX, e.Bounds.Top, e.Bounds.Width - currentX - 4, e.Bounds.Height);
-                e.Graphics.DrawString(folderName, e.Font ?? lstOutput.Font, textBrush, nameRect, sf);
+                SafeDrawString(e.Graphics, folderName, e.Font ?? lstOutput.Font, textBrush, nameRect, sf);
             }
             else
             {
                 // Regular entry - just draw the text
                 var textRect = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top, e.Bounds.Width - 8, e.Bounds.Height);
-                e.Graphics.DrawString(text, e.Font ?? lstOutput.Font, textBrush, textRect, sf);
+                SafeDrawString(e.Graphics, text, e.Font ?? lstOutput.Font, textBrush, textRect, sf);
             }
         }
 
@@ -4100,15 +4239,15 @@ namespace SSH_Helper
                 using var iconFont = new Font("Segoe UI Symbol", 9F);
                 using var iconBrush = new SolidBrush(iconColor);
                 var iconRect = new RectangleF(indent, e.Bounds.Y, iconWidth, e.Bounds.Height);
-                var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
+                using var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
                 e.Graphics.DrawString("\U0001F4C1", iconFont, iconBrush, iconRect, iconSf);
             }
 
             // Draw text
             var textBounds = new Rectangle(indent + iconWidth, e.Bounds.Y, treeView.ClientSize.Width - indent - iconWidth, e.Bounds.Height);
             using var textBrush = new SolidBrush(textColor);
-            var sf = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
-            e.Graphics.DrawString(nodeText, treeView.Font, textBrush, textBounds, sf);
+            using var sf = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
+            SafeDrawString(e.Graphics, nodeText, treeView.Font, textBrush, textBounds, sf);
         }
 
         private void exportHostOutputToolStripMenuItem_Click(object? sender, EventArgs e)
@@ -5223,8 +5362,9 @@ namespace SSH_Helper
             }
 
             // Reposition buttons based on text width
-            using (var g = btnExecuteSelected.CreateGraphics())
+            try
             {
+                using var g = btnExecuteSelected.CreateGraphics();
                 var selectedSize = g.MeasureString(btnExecuteSelected.Text, btnExecuteSelected.Font);
                 btnExecuteSelected.Width = (int)selectedSize.Width + 40;
 
@@ -5235,6 +5375,11 @@ namespace SSH_Helper
                 // Position Stop button with same spacing and ensure matching height
                 btnStopAll.Left = btnExecuteAll.Right + 8;
                 btnStopAll.Height = btnExecuteAll.Height;
+            }
+            catch (ArgumentException)
+            {
+                // Font may have an invalidated GDI+ handle during font transitions;
+                // skip measurement — layout will correct on the next stable call.
             }
         }
 
@@ -5467,7 +5612,7 @@ namespace SSH_Helper
             if (ExecutionDialogPolicy.ShouldPromptForPresetExecutionOptions(hosts.Count))
             {
                 var hostAddresses = hosts.Select(h => h.ToString()).ToList();
-                using var dialog = new FolderExecutionDialog(presetDisplayName, new List<string> { presetDisplayName }, hostAddresses);
+                using var dialog = new FolderExecutionDialog(presetDisplayName, new List<string> { presetDisplayName }, hostAddresses, _isDarkMode);
                 if (dialog.ShowDialog(this) != DialogResult.OK)
                     return;
 
@@ -5511,6 +5656,7 @@ namespace SSH_Helper
             }
 
             UpdateStatusBar(startStatus(hosts.Count), true, 0, hosts.Count);
+            var executionStartUtc = DateTime.UtcNow;
 
             try
             {
@@ -5542,7 +5688,24 @@ namespace SSH_Helper
                         tsbPassword.Text);
                     SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
                 }
-                StoreExecutionHistory(results);
+                var executionDetails = BuildExecutionDetails(
+                    presetDisplayName,
+                    preset.Commands,
+                    preset.Type.ToString(),
+                    executionStartUtc,
+                    DateTime.UtcNow,
+                    tsbUsername.Text,
+                    preparation.CommandTimeoutSeconds,
+                    preparation.ConnectionTimeoutSeconds,
+                    _sshService.UseConnectionPooling,
+                    BuildRunModeDescription(dialogOptions, isFolderExecution: false),
+                    isFolderExecution: false,
+                    string.Empty,
+                    new[] { presetDisplayName },
+                    hosts,
+                    results);
+
+                StoreExecutionHistory(results, executionDetails);
                 UpdateStatusBar(completionStatus(results.Count));
             }
             catch (Exception ex)
@@ -5716,7 +5879,7 @@ namespace SSH_Helper
                 .Select(r => GetCellValue(r, CsvManager.HostColumnName))
                 .Where(h => !string.IsNullOrWhiteSpace(h))
                 .ToList();
-            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses);
+            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses, _isDarkMode);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -5757,7 +5920,7 @@ namespace SSH_Helper
             }
 
             // Show folder execution dialog (single host selected)
-            using var dialog = new FolderExecutionDialog(folderName, presetNames, new List<string> { host });
+            using var dialog = new FolderExecutionDialog(folderName, presetNames, new List<string> { host }, _isDarkMode);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -5798,7 +5961,7 @@ namespace SSH_Helper
             var hostAddresses = checkedRows
                 .Select(r => GetCellValue(r, CsvManager.HostColumnName))
                 .ToList();
-            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses);
+            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses, _isDarkMode);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -5854,6 +6017,7 @@ namespace SSH_Helper
             // Use default timeout from first preset or config
             int commandTimeout = presets.Values.FirstOrDefault()?.Timeout ?? config.Timeout;
             var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
+            var executionStartUtc = DateTime.UtcNow;
 
             // Progress reporter
             var progress = new Progress<FolderExecutionProgress>(p =>
@@ -5876,8 +6040,25 @@ namespace SSH_Helper
                     options,
                     progress);
 
+                var executionDetails = BuildExecutionDetails(
+                    folderName,
+                    BuildFolderCommandSnapshot(options.SelectedPresets, presets),
+                    "Folder",
+                    executionStartUtc,
+                    DateTime.UtcNow,
+                    tsbUsername.Text,
+                    commandTimeout,
+                    connectionTimeout,
+                    _sshService.UseConnectionPooling,
+                    BuildRunModeDescription(options, isFolderExecution: true),
+                    isFolderExecution: true,
+                    folderName,
+                    options.SelectedPresets,
+                    hosts,
+                    results);
+
                 // Store single history entry for the entire folder execution
-                StoreFolderExecutionHistory(folderName, results);
+                StoreFolderExecutionHistory(folderName, results, executionDetails);
 
                 int successCount = results.Count(r => r.Success);
                 int failCount = results.Count - successCount;
@@ -5897,28 +6078,14 @@ namespace SSH_Helper
             }
         }
 
-        private void StoreFolderExecutionHistory(string folderName, List<ExecutionResult> results)
+        private string StoreFolderExecutionHistory(string folderName, List<ExecutionResult> results, ExecutionDetails? details = null)
         {
-            // Build per-host history entries
-            var hostResults = new List<HostHistoryEntry>();
+            var hostResults = BuildHostHistoryEntries(results);
             var combinedOutput = new StringBuilder();
 
-            for (int i = 0; i < results.Count; i++)
+            for (int i = 0; i < hostResults.Count; i++)
             {
-                var result = results[i];
-                var output = result.Output;
-                // Trim leading newlines only from first result
-                if (i == 0)
-                    output = output.TrimStart('\r', '\n');
-
-                hostResults.Add(new HostHistoryEntry
-                {
-                    HostAddress = result.Host.ToString(),
-                    Output = output,
-                    Success = result.Success,
-                    Timestamp = result.Timestamp
-                });
-                combinedOutput.Append(output);
+                combinedOutput.Append(hostResults[i].Output);
             }
 
             string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {FolderIcon} {folderName}";
@@ -5929,12 +6096,143 @@ namespace SSH_Helper
             {
                 _outputHistory.Insert(0, entry);
 
-                // Store host results by entry ID
-                StoreHostResultsForEntry(entryId, hostResults);
+                if (hostResults.Count > 0)
+                {
+                    StoreHostResultsForEntry(entryId, hostResults);
+                }
+
+                if (details != null)
+                {
+                    StoreExecutionDetailsForEntry(entryId, details);
+                }
 
                 lstOutput.SelectedIndex = 0;
                 SaveConfiguration();
             });
+
+            return entryId;
+        }
+
+        private ExecutionDetails BuildExecutionDetails(
+            string presetName,
+            string commands,
+            string presetType,
+            DateTime startTimeUtc,
+            DateTime endTimeUtc,
+            string username,
+            int commandTimeoutSeconds,
+            int connectionTimeoutSeconds,
+            bool useConnectionPooling,
+            string runMode,
+            bool isFolderExecution,
+            string folderName,
+            IEnumerable<string> executedPresetNames,
+            IReadOnlyList<HostConnection> hosts,
+            IReadOnlyList<ExecutionResult> results)
+        {
+            return new ExecutionDetails
+            {
+                PresetName = presetName,
+                Commands = commands ?? string.Empty,
+                PresetType = presetType,
+                StartTimeUtc = startTimeUtc,
+                EndTimeUtc = endTimeUtc,
+                Username = username ?? string.Empty,
+                CommandTimeoutSeconds = commandTimeoutSeconds,
+                ConnectionTimeoutSeconds = connectionTimeoutSeconds,
+                UseConnectionPooling = useConnectionPooling,
+                RunMode = runMode,
+                IsFolderExecution = isFolderExecution,
+                FolderName = folderName ?? string.Empty,
+                ExecutedPresetNames = executedPresetNames?.ToList() ?? new List<string>(),
+                Hosts = BuildHostExecutionContexts(hosts, results, endTimeUtc)
+            };
+        }
+
+        private static List<SSH_Helper.Models.HostExecutionContext> BuildHostExecutionContexts(
+            IReadOnlyList<HostConnection> hosts,
+            IReadOnlyList<ExecutionResult> results,
+            DateTime fallbackTimestampUtc)
+        {
+            var hostResultLookup = (results ?? Array.Empty<ExecutionResult>())
+                .GroupBy(r => r.Host.ToString(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+            var contexts = new List<SSH_Helper.Models.HostExecutionContext>();
+            if (hosts == null || hosts.Count == 0)
+                return contexts;
+
+            foreach (var host in hosts)
+            {
+                hostResultLookup.TryGetValue(host.ToString(), out var hostResults);
+                var hostSuccess = hostResults != null && hostResults.Count > 0 && hostResults.All(r => r.Success);
+                var hostTimestampUtc = hostResults != null && hostResults.Count > 0
+                    ? hostResults.Max(r => r.Timestamp.ToUniversalTime())
+                    : fallbackTimestampUtc;
+
+                var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kvp in host.Variables)
+                {
+                    if (string.Equals(kvp.Key, "password", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (string.IsNullOrWhiteSpace(kvp.Key))
+                        continue;
+
+                    variables[kvp.Key] = kvp.Value ?? string.Empty;
+                }
+
+                contexts.Add(new SSH_Helper.Models.HostExecutionContext
+                {
+                    HostAddress = host.ToString(),
+                    Success = hostSuccess,
+                    TimestampUtc = hostTimestampUtc,
+                    Variables = variables
+                });
+            }
+
+            return contexts;
+        }
+
+        private static string BuildRunModeDescription(FolderExecutionOptions? options, bool isFolderExecution)
+        {
+            if (options == null)
+            {
+                return isFolderExecution ? "Sequential presets, 1 host at a time" : "Single preset";
+            }
+
+            var presetMode = options.RunPresetsInParallel ? "Parallel presets" : "Sequential presets";
+            var hostMode = options.ParallelHostCount > 1
+                ? $"{options.ParallelHostCount} hosts in parallel"
+                : "1 host at a time";
+            var errorBehavior = options.StopOnFirstError ? "Stop on first error" : "Continue on error";
+            return $"{presetMode}, {hostMode}, {errorBehavior}";
+        }
+
+        private static string BuildFolderCommandSnapshot(
+            IReadOnlyList<string> selectedPresetNames,
+            IReadOnlyDictionary<string, PresetInfo> presets)
+        {
+            if (selectedPresetNames == null || selectedPresetNames.Count == 0 || presets == null || presets.Count == 0)
+                return string.Empty;
+
+            var sb = new StringBuilder();
+            foreach (var presetName in selectedPresetNames)
+            {
+                if (!presets.TryGetValue(presetName, out var preset))
+                    continue;
+
+                if (sb.Length > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine();
+                }
+
+                sb.AppendLine($"[{presetName}]");
+                sb.Append(preset.Commands ?? string.Empty);
+            }
+
+            return sb.ToString();
         }
 
         private static List<HostHistoryEntry> BuildHostHistoryEntries(List<ExecutionResult> results)
@@ -5976,6 +6274,19 @@ namespace SSH_Helper
         private List<HostHistoryEntry>? GetHostResultsForEntry(string entryId)
         {
             return _historyResults.TryGetResults(entryId, out var results) ? results : null;
+        }
+
+        private void StoreExecutionDetailsForEntry(string entryId, ExecutionDetails details)
+        {
+            if (string.IsNullOrWhiteSpace(entryId) || details == null)
+                return;
+
+            _historyResults.SetDetails(entryId, details);
+        }
+
+        private ExecutionDetails? GetExecutionDetailsForEntry(string entryId)
+        {
+            return _historyResults.TryGetDetails(entryId, out var details) ? details : null;
         }
 
         private void StopExecution()
@@ -6250,7 +6561,7 @@ namespace SSH_Helper
             }
         }
 
-        private void StoreExecutionHistory(List<ExecutionResult> results)
+        private string StoreExecutionHistory(List<ExecutionResult> results, ExecutionDetails? details = null)
         {
             // Use output buffer as the source of truth - includes all debug output
             string output;
@@ -6273,9 +6584,17 @@ namespace SSH_Helper
                 {
                     StoreHostResultsForEntry(entryId, hostResults);
                 }
+
+                if (details != null)
+                {
+                    StoreExecutionDetailsForEntry(entryId, details);
+                }
+
                 lstOutput.SelectedIndex = 0;
                 SaveConfiguration();
             });
+
+            return entryId;
         }
 
         #endregion
@@ -6374,6 +6693,25 @@ namespace SSH_Helper
             _outputHistory.Clear();
             _historyResults.Clear();
             ClearOutput();
+        }
+
+        private void ViewExecutionDetails()
+        {
+            if (lstOutput.SelectedItem is not HistoryListItem entry)
+                return;
+
+            var details = GetExecutionDetailsForEntry(entry.Id);
+            if (details == null)
+            {
+                MessageBox.Show("Execution details are not available for this history entry.",
+                    "Details Not Available",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            using var dialog = new ExecutionDetailsDialog(details, _isDarkMode);
+            dialog.ShowDialog(this);
         }
 
         #endregion
@@ -6912,7 +7250,7 @@ namespace SSH_Helper
                 {
                     if (!silent)
                     {
-                        using var errorDialog = new UpdateErrorDialog(result.ErrorMessage);
+                        using var errorDialog = new UpdateErrorDialog(result.ErrorMessage, _isDarkMode);
                         errorDialog.ShowDialog(this);
                     }
                     UpdateStatusBar("Update check failed");
@@ -6931,14 +7269,14 @@ namespace SSH_Helper
                     using var updateDialog = new UpdateDialog(result, _updateService, skippedVersion =>
                     {
                         _configService.Update(c => c.UpdateSettings.SkippedVersion = skippedVersion);
-                    }, config.UpdateSettings.EnableUpdateLog);
+                    }, config.UpdateSettings.EnableUpdateLog, _isDarkMode);
                     updateDialog.ShowDialog(this);
                 }
                 else
                 {
                     if (!silent)
                     {
-                        using var noUpdateDialog = new NoUpdateDialog(ApplicationVersion);
+                        using var noUpdateDialog = new NoUpdateDialog(ApplicationVersion, _isDarkMode);
                         noUpdateDialog.ShowDialog(this);
                     }
                 }
@@ -6949,7 +7287,7 @@ namespace SSH_Helper
             {
                 if (!silent)
                 {
-                    using var errorDialog = new UpdateErrorDialog(ex.Message);
+                    using var errorDialog = new UpdateErrorDialog(ex.Message, _isDarkMode);
                     errorDialog.ShowDialog(this);
                 }
                 UpdateStatusBar("Update check failed");

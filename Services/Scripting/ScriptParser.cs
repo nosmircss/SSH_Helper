@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -16,6 +15,34 @@ namespace SSH_Helper.Services.Scripting
     public class ScriptParser
     {
         private readonly IDeserializer _deserializer;
+        private readonly List<string> _warnings = new();
+        private static readonly string[] KnownStepKeys =
+        {
+            "send",
+            "print",
+            "wait",
+            "set",
+            "exit",
+            "extract",
+            "if",
+            "foreach",
+            "while",
+            "updatecolumn",
+            "readfile",
+            "writefile",
+            "input",
+            "log",
+            "webhook",
+            "parse",
+            "break",
+            "continue",
+            "try"
+        };
+
+        /// <summary>
+        /// Parser warnings captured during the most recent parse operation.
+        /// </summary>
+        public IReadOnlyList<string> Warnings => _warnings;
 
         public ScriptParser()
         {
@@ -33,47 +60,41 @@ namespace SSH_Helper.Services.Scripting
             if (string.IsNullOrWhiteSpace(text))
                 return false;
 
-            var trimmed = text.TrimStart();
-
-            // Check for YAML document marker
-            if (trimmed.StartsWith("---"))
-                return true;
-
-            // Check for common script keywords at start of lines
-            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var line in lines.Take(10)) // Check first 10 lines
+            // Use strong script indicators only. Metadata keys like name:/description:
+            // are intentionally excluded because many plain CLI commands use them.
+            var lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            foreach (var line in lines)
             {
-                var trimmedLine = line.TrimStart();
-                if (trimmedLine.StartsWith("#")) continue; // Skip comments
+                var trimmedLine = line.Trim();
+                if (string.IsNullOrEmpty(trimmedLine) || trimmedLine.StartsWith("#", StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
-                if (trimmedLine.StartsWith("name:") ||
-                    trimmedLine.StartsWith("description:") ||
-                    trimmedLine.StartsWith("vars:") ||
-                    trimmedLine.StartsWith("steps:") ||
-                    trimmedLine.StartsWith("version:"))
+                // YAML document marker
+                if (trimmedLine.StartsWith("---", StringComparison.Ordinal))
                 {
                     return true;
                 }
 
-                // Check for step syntax: "- send:", "- print:", etc.
-                if (trimmedLine.StartsWith("- send:") ||
-                    trimmedLine.StartsWith("- print:") ||
-                    trimmedLine.StartsWith("- wait:") ||
-                    trimmedLine.StartsWith("- set:") ||
-                    trimmedLine.StartsWith("- exit:") ||
-                    trimmedLine.StartsWith("- extract:") ||
-                    trimmedLine.StartsWith("- if:") ||
-                    trimmedLine.StartsWith("- foreach:") ||
-                    trimmedLine.StartsWith("- while:") ||
-                    trimmedLine.StartsWith("- updatecolumn:") ||
-                    trimmedLine.StartsWith("- readfile:") ||
-                    trimmedLine.StartsWith("- writefile:") ||
-                    trimmedLine.StartsWith("- input:") ||
-                    trimmedLine.StartsWith("- log:") ||
-                    trimmedLine.StartsWith("- webhook:") ||
-                    trimmedLine.StartsWith("- parse:"))
+                // Distinctive top-level script sections
+                if (trimmedLine.StartsWith("steps:", StringComparison.OrdinalIgnoreCase) ||
+                    trimmedLine.StartsWith("vars:", StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
+                }
+
+                // Step syntax: "- send:", "- print:", etc.
+                if (trimmedLine.StartsWith("- ", StringComparison.Ordinal))
+                {
+                    var stepContent = trimmedLine.Substring(2);
+                    foreach (var stepKey in KnownStepKeys)
+                    {
+                        if (stepContent.StartsWith($"{stepKey}:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
                 }
             }
 
@@ -90,6 +111,8 @@ namespace SSH_Helper.Services.Scripting
         {
             try
             {
+                _warnings.Clear();
+
                 // Use a custom approach to handle the flexible step format
                 using var reader = new StringReader(yamlText);
                 var parser = new Parser(reader);
@@ -138,7 +161,7 @@ namespace SSH_Helper.Services.Scripting
                                 script.Steps = ParseSteps(parser);
                                 break;
                             default:
-                                // Skip unknown properties
+                                AddUnknownKeyWarning($"Unknown top-level key '{key.Value}'", (int)key.Start.Line);
                                 SkipValue(parser);
                                 break;
                         }
@@ -256,6 +279,15 @@ namespace SSH_Helper.Services.Scripting
                     case "while":
                         step.While = parser.Consume<Scalar>().Value;
                         break;
+                    case "break":
+                        step.BreakLoop = ParseBooleanish(parser);
+                        break;
+                    case "continue":
+                        step.ContinueLoop = ParseBooleanish(parser);
+                        break;
+                    case "try":
+                        step.Try = ParseSteps(parser);
+                        break;
                     case "capture":
                         step.Capture = parser.Consume<Scalar>().Value;
                         break;
@@ -276,6 +308,11 @@ namespace SSH_Helper.Services.Scripting
                         break;
                     case "when":
                         step.When = parser.Consume<Scalar>().Value;
+                        break;
+                    case "max_iterations":
+                    case "maxiterations":
+                        if (int.TryParse(parser.Consume<Scalar>().Value, out var maxIterations))
+                            step.MaxIterations = maxIterations;
                         break;
                     case "extract":
                         step.Extract = ParseExtractOptions(parser);
@@ -304,14 +341,23 @@ namespace SSH_Helper.Services.Scripting
                     case "then":
                         step.Then = ParseSteps(parser);
                         break;
+                    case "elif":
+                        step.Elif = ParseElifBranches(parser);
+                        break;
                     case "else":
                         step.Else = ParseSteps(parser);
                         break;
                     case "do":
                         step.Do = ParseSteps(parser);
                         break;
+                    case "catch":
+                        step.Catch = ParseSteps(parser);
+                        break;
+                    case "finally":
+                        step.Finally = ParseSteps(parser);
+                        break;
                     default:
-                        // Skip unknown properties
+                        AddUnknownKeyWarning($"Unknown step key '{key.Value}'", (int)key.Start.Line);
                         SkipValue(parser);
                         break;
                 }
@@ -319,6 +365,70 @@ namespace SSH_Helper.Services.Scripting
 
             parser.Consume<MappingEnd>();
             return step;
+        }
+
+        private bool ParseBooleanish(IParser parser)
+        {
+            if (parser.Accept<Scalar>(out _))
+            {
+                var value = parser.Consume<Scalar>().Value;
+                if (string.IsNullOrWhiteSpace(value))
+                    return true;
+
+                var lower = value.ToLowerInvariant();
+                return lower == "true" || lower == "yes" || lower == "1";
+            }
+
+            SkipValue(parser);
+            return true;
+        }
+
+        private List<ElifBranch> ParseElifBranches(IParser parser)
+        {
+            var branches = new List<ElifBranch>();
+            if (!parser.Accept<SequenceStart>(out _))
+            {
+                SkipValue(parser);
+                return branches;
+            }
+
+            parser.Consume<SequenceStart>();
+            while (!parser.Accept<SequenceEnd>(out _))
+            {
+                if (!parser.Accept<MappingStart>(out _))
+                {
+                    SkipValue(parser);
+                    continue;
+                }
+
+                var mapStart = parser.Consume<MappingStart>();
+                var branch = new ElifBranch { LineNumber = (int)mapStart.Start.Line };
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var key = parser.Consume<Scalar>();
+                    var keyName = key.Value.ToLowerInvariant();
+                    switch (keyName)
+                    {
+                        case "if":
+                            branch.If = parser.Consume<Scalar>().Value;
+                            break;
+                        case "then":
+                            branch.Then = ParseSteps(parser) ?? new List<ScriptStep>();
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown elif key '{key.Value}'", (int)key.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                branches.Add(branch);
+            }
+
+            parser.Consume<SequenceEnd>();
+            return branches;
         }
 
         private ExtractOptions ParseExtractOptions(IParser parser)
@@ -331,7 +441,8 @@ namespace SSH_Helper.Services.Scripting
 
                 while (!parser.Accept<MappingEnd>(out _))
                 {
-                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
 
                     switch (key)
                     {
@@ -348,6 +459,7 @@ namespace SSH_Helper.Services.Scripting
                             options.Match = parser.Consume<Scalar>().Value;
                             break;
                         default:
+                            AddUnknownKeyWarning($"Unknown extract key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -373,7 +485,8 @@ namespace SSH_Helper.Services.Scripting
 
                 while (!parser.Accept<MappingEnd>(out _))
                 {
-                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
 
                     switch (key)
                     {
@@ -384,6 +497,7 @@ namespace SSH_Helper.Services.Scripting
                             options.Value = parser.Consume<Scalar>().Value;
                             break;
                         default:
+                            AddUnknownKeyWarning($"Unknown updatecolumn key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -409,7 +523,8 @@ namespace SSH_Helper.Services.Scripting
 
                 while (!parser.Accept<MappingEnd>(out _))
                 {
-                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
 
                     switch (key)
                     {
@@ -438,6 +553,7 @@ namespace SSH_Helper.Services.Scripting
                             options.Encoding = parser.Consume<Scalar>().Value;
                             break;
                         default:
+                            AddUnknownKeyWarning($"Unknown readfile key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -463,7 +579,8 @@ namespace SSH_Helper.Services.Scripting
 
                 while (!parser.Accept<MappingEnd>(out _))
                 {
-                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
 
                     switch (key)
                     {
@@ -489,6 +606,7 @@ namespace SSH_Helper.Services.Scripting
                                 options.Headers = list;
                             break;
                         default:
+                            AddUnknownKeyWarning($"Unknown writefile key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -514,7 +632,8 @@ namespace SSH_Helper.Services.Scripting
 
                 while (!parser.Accept<MappingEnd>(out _))
                 {
-                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
 
                     switch (key)
                     {
@@ -539,6 +658,7 @@ namespace SSH_Helper.Services.Scripting
                             options.ValidationError = parser.Consume<Scalar>().Value;
                             break;
                         default:
+                            AddUnknownKeyWarning($"Unknown input key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -601,7 +721,8 @@ namespace SSH_Helper.Services.Scripting
 
                 while (!parser.Accept<MappingEnd>(out _))
                 {
-                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
 
                     switch (key)
                     {
@@ -612,6 +733,7 @@ namespace SSH_Helper.Services.Scripting
                             options.Level = parser.Consume<Scalar>().Value;
                             break;
                         default:
+                            AddUnknownKeyWarning($"Unknown log key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -637,7 +759,8 @@ namespace SSH_Helper.Services.Scripting
 
                 while (!parser.Accept<MappingEnd>(out _))
                 {
-                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
 
                     switch (key)
                     {
@@ -661,6 +784,7 @@ namespace SSH_Helper.Services.Scripting
                             options.Headers = ParseStringDictionary(parser);
                             break;
                         default:
+                            AddUnknownKeyWarning($"Unknown webhook key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -686,7 +810,8 @@ namespace SSH_Helper.Services.Scripting
 
                 while (!parser.Accept<MappingEnd>(out _))
                 {
-                    var key = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
 
                     switch (key)
                     {
@@ -707,6 +832,7 @@ namespace SSH_Helper.Services.Scripting
                                 options.Sections = new List<string> { singleSection };
                             break;
                         default:
+                            AddUnknownKeyWarning($"Unknown parse key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -786,13 +912,13 @@ namespace SSH_Helper.Services.Scripting
             }
             else
             {
-                ValidateSteps(script.Steps, errors, "", lines);
+                ValidateSteps(script.Steps, errors, "", lines, 0);
             }
 
             return errors;
         }
 
-        private void ValidateSteps(List<ScriptStep> steps, List<string> errors, string prefix, string[]? lines)
+        private void ValidateSteps(List<ScriptStep> steps, List<string> errors, string prefix, string[]? lines, int loopDepth)
         {
             foreach (var step in steps)
             {
@@ -833,9 +959,29 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: If requires 'then' block{lineContent}");
                         }
                         if (step.Then != null)
-                            ValidateSteps(step.Then, errors, prefix + "  ", lines);
+                            ValidateSteps(step.Then, errors, prefix + "  ", lines, loopDepth);
+                        if (step.Elif != null)
+                        {
+                            foreach (var branch in step.Elif)
+                            {
+                                if (string.IsNullOrWhiteSpace(branch.If))
+                                {
+                                    var lineContent = GetLineContent(lines, branch.LineNumber);
+                                    errors.Add($"{prefix}Line {branch.LineNumber}: Elif requires 'if' condition{lineContent}");
+                                }
+                                if (branch.Then == null || branch.Then.Count == 0)
+                                {
+                                    var lineContent = GetLineContent(lines, branch.LineNumber);
+                                    errors.Add($"{prefix}Line {branch.LineNumber}: Elif requires 'then' block{lineContent}");
+                                }
+                                else
+                                {
+                                    ValidateSteps(branch.Then, errors, prefix + "  ", lines, loopDepth);
+                                }
+                            }
+                        }
                         if (step.Else != null)
-                            ValidateSteps(step.Else, errors, prefix + "  ", lines);
+                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth);
                         break;
 
                     case StepType.Foreach:
@@ -845,7 +991,7 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: Foreach requires 'do' block{lineContent}");
                         }
                         if (step.Do != null)
-                            ValidateSteps(step.Do, errors, prefix + "  ", lines);
+                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1);
                         break;
 
                     case StepType.While:
@@ -854,8 +1000,43 @@ namespace SSH_Helper.Services.Scripting
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: While requires 'do' block{lineContent}");
                         }
+                        if (step.MaxIterations.HasValue && step.MaxIterations.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: max_iterations must be greater than 0{lineContent}");
+                        }
                         if (step.Do != null)
-                            ValidateSteps(step.Do, errors, prefix + "  ", lines);
+                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1);
+                        break;
+
+                    case StepType.Try:
+                        if (step.Try == null || step.Try.Count == 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Try requires 'try' block{lineContent}");
+                        }
+                        if (step.Try != null)
+                            ValidateSteps(step.Try, errors, prefix + "  ", lines, loopDepth);
+                        if (step.Catch != null)
+                            ValidateSteps(step.Catch, errors, prefix + "  ", lines, loopDepth);
+                        if (step.Finally != null)
+                            ValidateSteps(step.Finally, errors, prefix + "  ", lines, loopDepth);
+                        break;
+
+                    case StepType.Break:
+                        if (loopDepth <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: break can only be used inside foreach/while blocks{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Continue:
+                        if (loopDepth <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: continue can only be used inside foreach/while blocks{lineContent}");
+                        }
                         break;
 
                     case StepType.Set:
@@ -942,6 +1123,11 @@ namespace SSH_Helper.Services.Scripting
                 return "";
 
             return $"\n  > {content}";
+        }
+
+        private void AddUnknownKeyWarning(string message, int lineNumber)
+        {
+            _warnings.Add($"Line {lineNumber}: {message}");
         }
     }
 

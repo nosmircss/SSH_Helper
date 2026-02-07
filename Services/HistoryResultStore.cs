@@ -8,6 +8,7 @@ namespace SSH_Helper.Services
     public sealed class HistoryResultStore
     {
         private readonly Dictionary<string, List<HostHistoryEntry>> _results = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ExecutionDetails> _details = new(StringComparer.Ordinal);
 
         public void SetResults(string entryId, List<HostHistoryEntry> hostResults)
         {
@@ -31,12 +32,15 @@ namespace SSH_Helper.Services
             if (string.IsNullOrWhiteSpace(entryId))
                 return false;
 
-            return _results.Remove(entryId);
+            var removedResults = _results.Remove(entryId);
+            var removedDetails = _details.Remove(entryId);
+            return removedResults || removedDetails;
         }
 
         public void Clear()
         {
             _results.Clear();
+            _details.Clear();
         }
 
         public bool HasResults(string entryId)
@@ -45,6 +49,31 @@ namespace SSH_Helper.Services
                 return false;
 
             return _results.ContainsKey(entryId);
+        }
+
+        public void SetDetails(string entryId, ExecutionDetails details)
+        {
+            if (string.IsNullOrWhiteSpace(entryId) || details == null)
+                return;
+
+            _details[entryId] = details;
+        }
+
+        public bool TryGetDetails(string entryId, out ExecutionDetails? details)
+        {
+            details = null;
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            return _details.TryGetValue(entryId, out details);
+        }
+
+        public bool HasDetails(string entryId)
+        {
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            return _details.ContainsKey(entryId);
         }
     }
 }

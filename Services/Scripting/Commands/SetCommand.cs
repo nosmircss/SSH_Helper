@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -10,9 +12,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 {
     /// <summary>
     /// Sets or manipulates a variable value.
-    /// Supports: "var = value", "var = var + 1", "var = var - 1", "var = length(other)",
-    /// "var = push(array, value)", JSON functions with dot notation (json.get, json.set, etc.),
-    /// "var.path = value" (nested assignment)
+    /// Supports: assignment, nested assignment, arithmetic, string helpers, and JSON helpers.
     /// </summary>
     public class SetCommand : IScriptCommand
     {
@@ -21,7 +21,6 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (string.IsNullOrEmpty(step.Set))
                 return Task.FromResult(CommandResult.Fail("Set command has no assignment expression"));
 
-            // Parse the assignment: "variable = expression"
             var parts = step.Set.Split(new[] { '=' }, 2);
             if (parts.Length != 2)
                 return Task.FromResult(CommandResult.Fail($"Invalid set syntax: '{step.Set}'. Expected 'variable = value'"));
@@ -32,33 +31,21 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (string.IsNullOrEmpty(varName))
                 return Task.FromResult(CommandResult.Fail("Variable name cannot be empty"));
 
-            // Check for nested assignment (dot notation): "obj.key.subkey = value"
             if (varName.Contains('.'))
-            {
                 return HandleNestedAssignment(varName, expression, context);
-            }
 
-            // Evaluate the expression
             var value = EvaluateExpression(expression, context);
-
-            // Set the variable
             context.SetVariable(varName, value);
-
             context.EmitOutput($"Set {varName} = {FormatValueForDisplay(value)}", ScriptOutputType.Debug);
 
             return Task.FromResult(CommandResult.Ok());
         }
 
-        /// <summary>
-        /// Handles nested assignment using dot notation (e.g., "obj.key.subkey = value").
-        /// Creates intermediate objects as needed.
-        /// </summary>
         private Task<CommandResult> HandleNestedAssignment(string path, string expression, ScriptContext context)
         {
             var pathParts = path.Split('.');
             var rootName = pathParts[0];
 
-            // Get or create the root object
             var existingRoot = context.GetVariable(rootName);
             JsonObject rootObj;
 
@@ -66,7 +53,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 rootObj = existingJsonObj;
             }
-            else if (existingRoot is string jsonStr && jsonStr.TrimStart().StartsWith("{"))
+            else if (existingRoot is string jsonStr && jsonStr.TrimStart().StartsWith("{", StringComparison.Ordinal))
             {
                 try
                 {
@@ -82,7 +69,6 @@ namespace SSH_Helper.Services.Scripting.Commands
                 rootObj = new JsonObject();
             }
 
-            // Navigate to the parent of the target key, creating intermediate objects
             var current = rootObj;
             for (int i = 1; i < pathParts.Length - 1; i++)
             {
@@ -99,18 +85,12 @@ namespace SSH_Helper.Services.Scripting.Commands
                 }
             }
 
-            // Set the final value
             var finalKey = pathParts[pathParts.Length - 1];
             var value = EvaluateExpression(expression, context);
-
-            // Convert value to JsonNode
             current[finalKey] = JsonUtilities.ConvertToJsonNode(value);
-
-            // Store the updated root object
             context.SetVariable(rootName, rootObj);
 
             context.EmitOutput($"Set {path} = {FormatValueForDisplay(value)}", ScriptOutputType.Debug);
-
             return Task.FromResult(CommandResult.Ok());
         }
 
@@ -118,252 +98,219 @@ namespace SSH_Helper.Services.Scripting.Commands
         {
             expression = expression.Trim();
 
-            // Check for function calls: length(var), trim(var), etc.
-            if (expression.StartsWith("length(") && expression.EndsWith(")"))
+            if (TryParseFunctionCall(expression, "length", out var innerLength))
             {
-                var inner = expression.Substring(7, expression.Length - 8);
-                var resolved = ResolveValue(inner, context);
+                var resolved = ResolveValue(innerLength, context);
                 if (resolved is List<string> list)
                     return list.Count;
                 return resolved?.ToString()?.Length ?? 0;
             }
 
-            if (expression.StartsWith("trim(") && expression.EndsWith(")"))
+            if (TryParseFunctionCall(expression, "trim", out var innerTrim))
             {
-                var inner = expression.Substring(5, expression.Length - 6);
-                var resolved = ResolveValue(inner, context);
+                var resolved = ResolveValue(innerTrim, context);
                 return resolved?.ToString()?.Trim() ?? string.Empty;
             }
 
-            if (expression.StartsWith("upper(") && expression.EndsWith(")"))
+            if (TryParseFunctionCall(expression, "upper", out var innerUpper))
             {
-                var inner = expression.Substring(6, expression.Length - 7);
-                var resolved = ResolveValue(inner, context);
+                var resolved = ResolveValue(innerUpper, context);
                 return resolved?.ToString()?.ToUpperInvariant() ?? string.Empty;
             }
 
-            if (expression.StartsWith("lower(") && expression.EndsWith(")"))
+            if (TryParseFunctionCall(expression, "lower", out var innerLower))
             {
-                var inner = expression.Substring(6, expression.Length - 7);
-                var resolved = ResolveValue(inner, context);
+                var resolved = ResolveValue(innerLower, context);
                 return resolved?.ToString()?.ToLowerInvariant() ?? string.Empty;
             }
 
-            // push(array, value) - adds value to array and returns the array
-            if (expression.StartsWith("push(") && expression.EndsWith(")"))
+            if (TryParseFunctionCall(expression, "push", out var innerPush))
             {
-                var inner = expression.Substring(5, expression.Length - 6);
-                var commaIdx = JsonUtilities.FindTopLevelComma(inner);
+                var commaIdx = JsonUtilities.FindTopLevelComma(innerPush);
                 if (commaIdx > 0)
                 {
-                    var arrayName = inner.Substring(0, commaIdx).Trim();
-                    var valueExpr = inner.Substring(commaIdx + 1).Trim();
-
-                    // Get or create the array
+                    var arrayName = innerPush.Substring(0, commaIdx).Trim();
+                    var valueExpr = innerPush.Substring(commaIdx + 1).Trim();
                     var existing = context.GetVariable(arrayName);
-                    List<string> array;
-                    if (existing is List<string> existingList)
-                    {
-                        array = existingList;
-                    }
-                    else
-                    {
-                        array = new List<string>();
-                    }
-
-                    // Resolve and add the value (supports quoted strings, numbers, vars, etc.)
+                    var array = existing as List<string> ?? new List<string>();
                     var resolvedValue = EvaluateExpression(valueExpr, context)?.ToString() ?? string.Empty;
                     array.Add(resolvedValue);
-
-                    // Update the array variable
                     context.SetVariable(arrayName, array);
-
                     return array;
                 }
             }
 
-            // json(...) constructor
-            if (expression.StartsWith("json(") && expression.EndsWith(")"))
+            if (TryParseFunctionCall(expression, "replace", out var innerReplace))
             {
-                var inner = expression.Substring(5, expression.Length - 6).Trim();
-                return JsonFunctions.Constructor(inner, context);
-            }
-
-            // json.* function dispatch
-            if (expression.StartsWith("json."))
-            {
-                var parenIdx = expression.IndexOf('(');
-                if (parenIdx > 5 && expression.EndsWith(")"))
+                var args = JsonUtilities.SplitTopLevelCommas(innerReplace);
+                if (args.Count >= 3)
                 {
-                    var funcName = expression.Substring(5, parenIdx - 5);
-                    var inner = expression.Substring(parenIdx + 1, expression.Length - parenIdx - 2).Trim();
-                    if (TryDispatchJsonFunction(funcName, inner, context, out var result))
-                        return result;
+                    var source = ResolveValue(args[0], context)?.ToString() ?? string.Empty;
+                    var oldValue = JsonUtilities.ResolveStringValue(args[1], context);
+                    var newValue = JsonUtilities.ResolveStringValue(args[2], context);
+                    return source.Replace(oldValue, newValue, StringComparison.Ordinal);
                 }
             }
 
-            // Check for arithmetic: var + 1, var - 1, var * 2, var / 3, var % 10
-            if (expression.Contains(" + ") || expression.Contains(" - ") ||
-                expression.Contains(" * ") || expression.Contains(" / ") ||
-                expression.Contains(" % "))
+            if (TryParseFunctionCall(expression, "split", out var innerSplit))
             {
-                return EvaluateArithmetic(expression, context);
+                var args = JsonUtilities.SplitTopLevelCommas(innerSplit);
+                if (args.Count >= 1)
+                {
+                    var source = ResolveValue(args[0], context)?.ToString() ?? string.Empty;
+                    var delimiter = args.Count > 1 ? JsonUtilities.ResolveStringValue(args[1], context) : ",";
+                    if (delimiter.Length == 0)
+                    {
+                        var chars = new List<string>(source.Length);
+                        foreach (var c in source)
+                            chars.Add(c.ToString());
+                        return chars;
+                    }
+
+                    return new List<string>(source.Split(new[] { delimiter }, StringSplitOptions.None));
+                }
             }
 
-            // Check for quoted string literal
-            if ((expression.StartsWith("\"") && expression.EndsWith("\"")) ||
-                (expression.StartsWith("'") && expression.EndsWith("'")))
+            if (TryParseFunctionCall(expression, "join", out var innerJoin))
+            {
+                var args = JsonUtilities.SplitTopLevelCommas(innerJoin);
+                if (args.Count >= 1)
+                {
+                    var value = ResolveValue(args[0], context);
+                    var delimiter = args.Count > 1 ? JsonUtilities.ResolveStringValue(args[1], context) : ",";
+                    var list = ResolveToStringList(value);
+                    return string.Join(delimiter, list);
+                }
+            }
+
+            if (TryParseFunctionCall(expression, "substring", out var innerSubstring))
+            {
+                var args = JsonUtilities.SplitTopLevelCommas(innerSubstring);
+                if (args.Count >= 2)
+                {
+                    var source = ResolveValue(args[0], context)?.ToString() ?? string.Empty;
+                    var start = (int)ResolveNumeric(args[1], context);
+                    if (start < 0)
+                        start = 0;
+                    if (start >= source.Length)
+                        return string.Empty;
+
+                    if (args.Count >= 3)
+                    {
+                        var length = (int)ResolveNumeric(args[2], context);
+                        if (length <= 0)
+                            return string.Empty;
+                        if (start + length > source.Length)
+                            length = source.Length - start;
+                        return source.Substring(start, length);
+                    }
+
+                    return source.Substring(start);
+                }
+            }
+
+            if (TryParseFunctionCall(expression, "sort", out var innerSort))
+            {
+                var args = JsonUtilities.SplitTopLevelCommas(innerSort);
+                if (args.Count >= 1)
+                {
+                    var value = ResolveValue(args[0], context);
+                    var order = args.Count > 1 ? JsonUtilities.ResolveStringValue(args[1], context) : "asc";
+                    var list = ResolveToStringList(value);
+                    list.Sort(StringComparer.OrdinalIgnoreCase);
+                    if (order.Equals("desc", StringComparison.OrdinalIgnoreCase))
+                        list.Reverse();
+                    return list;
+                }
+            }
+
+            if (JsonUtilities.TryEvaluateJsonExpression(expression, context, out var jsonResult, normalizeStructured: false))
+                return jsonResult;
+
+            if (HasArithmeticOperator(expression))
+            {
+                try
+                {
+                    return EvaluateArithmetic(expression, context);
+                }
+                catch (FormatException)
+                {
+                    return context.SubstituteVariables(expression);
+                }
+            }
+
+            if ((expression.StartsWith("\"", StringComparison.Ordinal) && expression.EndsWith("\"", StringComparison.Ordinal)) ||
+                (expression.StartsWith("'", StringComparison.Ordinal) && expression.EndsWith("'", StringComparison.Ordinal)))
             {
                 var literal = expression.Substring(1, expression.Length - 2);
                 return context.SubstituteVariables(literal);
             }
 
-            // Check for string concatenation with ${var}
-            if (expression.Contains("${"))
-            {
+            if (expression.Contains("${", StringComparison.Ordinal))
                 return context.SubstituteVariables(expression);
-            }
 
-            // Try to parse as number
             if (int.TryParse(expression, out var intVal))
                 return intVal;
-            if (double.TryParse(expression, out var doubleVal))
+            if (double.TryParse(expression, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
                 return doubleVal;
 
-            // Check if it's a variable reference (without ${})
             var varValue = context.GetVariable(expression);
             if (varValue != null)
                 return varValue;
 
-            // Return as literal string
             return context.SubstituteVariables(expression);
         }
 
-        private static bool TryDispatchJsonFunction(string funcName, string args, ScriptContext context, out object? result)
+        private static bool TryParseFunctionCall(string expression, string functionName, out string inner)
         {
-            switch (funcName.ToLowerInvariant())
+            var prefix = functionName + "(";
+            if (expression.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                expression.EndsWith(")", StringComparison.Ordinal))
             {
-                case "get":
-                    result = JsonFunctions.Get(args, context);
-                    return true;
-                case "set":
-                    result = JsonFunctions.Set(args, context);
-                    return true;
-                case "delete":
-                    result = JsonFunctions.Delete(args, context);
-                    return true;
-                case "merge":
-                    result = JsonFunctions.MergeVariadic(args, context);
-                    return true;
-                case "format":
-                    result = JsonFunctions.Format(args, context);
-                    return true;
-                case "exists":
-                    result = JsonFunctions.Exists(args, context);
-                    return true;
-                case "len":
-                    result = JsonFunctions.Len(args, context);
-                    return true;
-                case "type":
-                    result = JsonFunctions.Type(args, context);
-                    return true;
-                case "keys":
-                    result = JsonFunctions.Keys(args, context);
-                    return true;
-                case "values":
-                    result = JsonFunctions.Values(args, context);
-                    return true;
-                case "items":
-                    result = JsonFunctions.Items(args, context);
-                    return true;
-                case "push":
-                    result = JsonFunctions.Push(args, context);
-                    return true;
-                case "pop":
-                    result = JsonFunctions.Pop(args, context);
-                    return true;
-                case "unshift":
-                    result = JsonFunctions.Unshift(args, context);
-                    return true;
-                case "shift":
-                    result = JsonFunctions.Shift(args, context);
-                    return true;
-                case "slice":
-                    result = JsonFunctions.Slice(args, context);
-                    return true;
-                case "concat":
-                    result = JsonFunctions.Concat(args, context);
-                    return true;
-                case "indexof":
-                    result = JsonFunctions.IndexOf(args, context);
-                    return true;
-                default:
-                    result = null;
-                    return false;
+                inner = expression.Substring(prefix.Length, expression.Length - prefix.Length - 1).Trim();
+                return true;
             }
+
+            inner = string.Empty;
+            return false;
         }
 
-        private object? EvaluateArithmetic(string expression, ScriptContext context)
+        private static bool HasArithmeticOperator(string expression)
         {
-            // Handle simple arithmetic: "var + 1", "var - 1", "var * 2", "var / 3", "var % 10"
-            // Note: Only single operator expressions supported. For complex math, chain multiple set commands.
+            var inQuote = false;
+            var quoteChar = '\0';
 
-            // Check multiplication first (higher precedence in typical usage)
-            string[] mulParts = expression.Split(new[] { " * " }, 2, StringSplitOptions.None);
-            if (mulParts.Length == 2)
+            for (int i = 0; i < expression.Length; i++)
             {
-                var left = ResolveNumeric(mulParts[0].Trim(), context);
-                var right = ResolveNumeric(mulParts[1].Trim(), context);
-                return left * right;
-            }
-
-            // Check division
-            string[] divParts = expression.Split(new[] { " / " }, 2, StringSplitOptions.None);
-            if (divParts.Length == 2)
-            {
-                var left = ResolveNumeric(divParts[0].Trim(), context);
-                var right = ResolveNumeric(divParts[1].Trim(), context);
-                if (right == 0)
+                var c = expression[i];
+                if ((c == '"' || c == '\'') && (i == 0 || expression[i - 1] != '\\'))
                 {
-                    context.EmitOutput("Warning: Division by zero, returning 0", ScriptOutputType.Warning);
-                    return 0;
+                    if (!inQuote)
+                    {
+                        inQuote = true;
+                        quoteChar = c;
+                    }
+                    else if (quoteChar == c)
+                    {
+                        inQuote = false;
+                    }
+                    continue;
                 }
-                return left / right;
+
+                if (inQuote)
+                    continue;
+
+                if (c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '(' || c == ')')
+                    return true;
             }
 
-            // Check modulo
-            string[] modParts = expression.Split(new[] { " % " }, 2, StringSplitOptions.None);
-            if (modParts.Length == 2)
-            {
-                var left = ResolveNumeric(modParts[0].Trim(), context);
-                var right = ResolveNumeric(modParts[1].Trim(), context);
-                if (right == 0)
-                {
-                    context.EmitOutput("Warning: Modulo by zero, returning 0", ScriptOutputType.Warning);
-                    return 0;
-                }
-                return left % right;
-            }
+            return false;
+        }
 
-            // Check addition
-            string[] addParts = expression.Split(new[] { " + " }, 2, StringSplitOptions.None);
-            if (addParts.Length == 2)
-            {
-                var left = ResolveNumeric(addParts[0].Trim(), context);
-                var right = ResolveNumeric(addParts[1].Trim(), context);
-                return left + right;
-            }
-
-            // Check subtraction
-            string[] subParts = expression.Split(new[] { " - " }, 2, StringSplitOptions.None);
-            if (subParts.Length == 2)
-            {
-                var left = ResolveNumeric(subParts[0].Trim(), context);
-                var right = ResolveNumeric(subParts[1].Trim(), context);
-                return left - right;
-            }
-
-            return 0;
+        private double EvaluateArithmetic(string expression, ScriptContext context)
+        {
+            var parser = new ArithmeticParser(expression, token => ResolveNumeric(token, context), context);
+            return parser.Parse();
         }
 
         private object? ResolveValue(string expr, ScriptContext context)
@@ -374,16 +321,18 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (handled)
                 return length;
 
-            // Variable substitution
-            if (expr.Contains("${"))
-            {
+            if (expr.Contains("${", StringComparison.Ordinal))
                 return context.SubstituteVariables(expr);
-            }
 
-            // Direct variable reference
             var directValue = context.GetVariable(expr);
             if (directValue != null)
                 return directValue;
+
+            if ((expr.StartsWith("\"", StringComparison.Ordinal) && expr.EndsWith("\"", StringComparison.Ordinal)) ||
+                (expr.StartsWith("'", StringComparison.Ordinal) && expr.EndsWith("'", StringComparison.Ordinal)))
+            {
+                return context.SubstituteVariables(expr.Substring(1, expr.Length - 2));
+            }
 
             return expr;
         }
@@ -421,12 +370,65 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (string.IsNullOrEmpty(value))
                 return "";
 
-            value = value.Replace("\r", "").Replace("\n", "\\n");
+            value = value.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
 
             if (value.Length <= maxLength)
                 return value;
 
             return value.Substring(0, maxLength) + "...";
+        }
+
+        private static List<string> ResolveToStringList(object? value)
+        {
+            if (value == null)
+                return new List<string>();
+
+            if (value is List<string> listValue)
+                return new List<string>(listValue);
+
+            if (value is JsonArray jsonArray)
+            {
+                var items = new List<string>(jsonArray.Count);
+                foreach (var item in jsonArray)
+                    items.Add(JsonUtilities.JsonNodeToStringValue(item));
+                return items;
+            }
+
+            if (value is IEnumerable enumerable && value is not string)
+            {
+                var items = new List<string>();
+                foreach (var item in enumerable)
+                    items.Add(item?.ToString() ?? string.Empty);
+                return items;
+            }
+
+            var text = value.ToString() ?? string.Empty;
+            var trimmed = text.Trim();
+            if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
+            {
+                try
+                {
+                    var parsed = JsonNode.Parse(trimmed) as JsonArray;
+                    if (parsed != null)
+                    {
+                        var items = new List<string>(parsed.Count);
+                        foreach (var item in parsed)
+                            items.Add(JsonUtilities.JsonNodeToStringValue(item));
+                        return items;
+                    }
+                }
+                catch
+                {
+                    // fall back to string handling
+                }
+            }
+
+            if (text.Contains('\n') || text.Contains('\r'))
+            {
+                return new List<string>(text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None));
+            }
+
+            return new List<string> { text };
         }
 
         private double ResolveNumeric(string expr, ScriptContext context)
@@ -437,21 +439,170 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (handled)
                 return length;
 
-            // Try direct numeric parse
-            if (double.TryParse(expr, out var num))
+            if (double.TryParse(expr, NumberStyles.Float, CultureInfo.InvariantCulture, out var num))
+                return num;
+            if (double.TryParse(expr, out num))
                 return num;
 
-            // Try variable lookup
             var directValue = context.GetVariable(expr);
-            if (directValue != null && double.TryParse(directValue.ToString(), out var varNum))
+            if (directValue != null && double.TryParse(directValue.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var varNum))
+                return varNum;
+            if (directValue != null && double.TryParse(directValue.ToString(), out varNum))
                 return varNum;
 
-            // Try with variable substitution
             var substituted = context.SubstituteVariables(expr);
-            if (double.TryParse(substituted, out var subNum))
+            if (double.TryParse(substituted, NumberStyles.Float, CultureInfo.InvariantCulture, out var subNum))
+                return subNum;
+            if (double.TryParse(substituted, out subNum))
                 return subNum;
 
-            return 0;
+            throw new FormatException($"Unable to resolve numeric value from '{expr}'");
+        }
+
+        private sealed class ArithmeticParser
+        {
+            private readonly string _expression;
+            private readonly Func<string, double> _resolveNumeric;
+            private readonly ScriptContext _context;
+            private int _position;
+
+            public ArithmeticParser(string expression, Func<string, double> resolveNumeric, ScriptContext context)
+            {
+                _expression = expression;
+                _resolveNumeric = resolveNumeric;
+                _context = context;
+            }
+
+            public double Parse()
+            {
+                _position = 0;
+                var value = ParseAddSubtract();
+                SkipWhitespace();
+                if (_position < _expression.Length)
+                    throw new FormatException("Unexpected trailing tokens in arithmetic expression");
+                return value;
+            }
+
+            private double ParseAddSubtract()
+            {
+                var value = ParseMultiplyDivideModulo();
+                while (true)
+                {
+                    SkipWhitespace();
+                    if (Match('+'))
+                    {
+                        value += ParseMultiplyDivideModulo();
+                        continue;
+                    }
+                    if (Match('-'))
+                    {
+                        value -= ParseMultiplyDivideModulo();
+                        continue;
+                    }
+                    return value;
+                }
+            }
+
+            private double ParseMultiplyDivideModulo()
+            {
+                var value = ParseUnary();
+                while (true)
+                {
+                    SkipWhitespace();
+                    if (Match('*'))
+                    {
+                        value *= ParseUnary();
+                        continue;
+                    }
+                    if (Match('/'))
+                    {
+                        var rhs = ParseUnary();
+                        if (rhs == 0)
+                        {
+                            _context.EmitOutput("Warning: Division by zero, returning 0", ScriptOutputType.Warning);
+                            return 0;
+                        }
+                        value /= rhs;
+                        continue;
+                    }
+                    if (Match('%'))
+                    {
+                        var rhs = ParseUnary();
+                        if (rhs == 0)
+                        {
+                            _context.EmitOutput("Warning: Modulo by zero, returning 0", ScriptOutputType.Warning);
+                            return 0;
+                        }
+                        value %= rhs;
+                        continue;
+                    }
+
+                    return value;
+                }
+            }
+
+            private double ParseUnary()
+            {
+                SkipWhitespace();
+                if (Match('+'))
+                    return ParseUnary();
+                if (Match('-'))
+                    return -ParseUnary();
+                return ParsePrimary();
+            }
+
+            private double ParsePrimary()
+            {
+                SkipWhitespace();
+                if (Match('('))
+                {
+                    var value = ParseAddSubtract();
+                    SkipWhitespace();
+                    if (!Match(')'))
+                        throw new FormatException("Missing closing parenthesis in arithmetic expression");
+                    return value;
+                }
+
+                var token = ReadToken();
+                return _resolveNumeric(token);
+            }
+
+            private string ReadToken()
+            {
+                SkipWhitespace();
+                if (_position >= _expression.Length)
+                    throw new FormatException("Unexpected end of arithmetic expression");
+
+                var start = _position;
+                while (_position < _expression.Length)
+                {
+                    var c = _expression[_position];
+                    if (char.IsWhiteSpace(c) || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '(' || c == ')')
+                        break;
+                    _position++;
+                }
+
+                if (start == _position)
+                    throw new FormatException("Invalid token in arithmetic expression");
+
+                return _expression.Substring(start, _position - start);
+            }
+
+            private void SkipWhitespace()
+            {
+                while (_position < _expression.Length && char.IsWhiteSpace(_expression[_position]))
+                    _position++;
+            }
+
+            private bool Match(char expected)
+            {
+                if (_position < _expression.Length && _expression[_position] == expected)
+                {
+                    _position++;
+                    return true;
+                }
+                return false;
+            }
         }
     }
 }

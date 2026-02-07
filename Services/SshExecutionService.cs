@@ -68,24 +68,31 @@ namespace SSH_Helper.Services
         private volatile bool _isRunning;
         private CancellationTokenSource? _cts;
         private bool _disposed;
+        private readonly object _executionLock = new();
 
         public bool IsRunning => _isRunning;
 
         private CancellationToken BeginExecution()
         {
-            _cts?.Cancel();
-            _cts?.Dispose();
-            _cts = new CancellationTokenSource();
-            _isRunning = true;
-            return _cts.Token;
+            lock (_executionLock)
+            {
+                _cts?.Cancel();
+                _cts?.Dispose();
+                _cts = new CancellationTokenSource();
+                _isRunning = true;
+                return _cts.Token;
+            }
         }
 
         private void EndExecution()
         {
-            _isRunning = false;
-            var cts = _cts;
-            _cts = null;
-            cts?.Dispose();
+            lock (_executionLock)
+            {
+                _isRunning = false;
+                var cts = _cts;
+                _cts = null;
+                cts?.Dispose();
+            }
             OnExecutionCompleted();
         }
 
@@ -652,7 +659,10 @@ namespace SSH_Helper.Services
         /// </summary>
         public void Stop()
         {
-            _cts?.Cancel();
+            lock (_executionLock)
+            {
+                _cts?.Cancel();
+            }
         }
 
         private ExecutionResult ExecuteSingleHost(
@@ -911,6 +921,7 @@ namespace SSH_Helper.Services
             finally
             {
                 session.Dispose();
+                _connectionPool!.ReleaseSession(host, username);
             }
         }
 
@@ -1123,6 +1134,7 @@ namespace SSH_Helper.Services
             finally
             {
                 session.Dispose();
+                _connectionPool!.ReleaseSession(host, username);
                 // Note: Connection stays in pool for reuse
             }
         }

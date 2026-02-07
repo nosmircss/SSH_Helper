@@ -13,9 +13,30 @@ namespace SSH_Helper
         /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
         protected override void Dispose(bool disposing)
         {
-            if (disposing && (components != null))
+            if (disposing)
             {
-                components.Dispose();
+                // Unsubscribe service event handlers to prevent leaks
+                if (_sshService != null)
+                {
+                    _sshService.OutputReceived -= SshService_OutputReceived;
+                    _sshService.ColumnUpdateRequested -= SshService_ColumnUpdateRequested;
+                    _sshService.CommandCompleted -= SshService_CommandCompleted;
+                    _sshService.ExecutionCompleted -= SshService_ExecutionCompleted;
+                }
+
+                // Dispose services and owned resources
+                _sshService?.Dispose();
+                _uiOutputThrottler?.Dispose();
+                _findDialog?.Dispose();
+                (_credentialProvider as IDisposable)?.Dispose();
+
+                // Dispose tracked font objects
+                foreach (var font in _managedFonts)
+                {
+                    try { font.Dispose(); } catch { }
+                }
+
+                components?.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -113,6 +134,8 @@ namespace SSH_Helper
             contextHistoryLst = new ContextMenuStrip(components);
             saveAsToolStripMenuItem = new ToolStripMenuItem();
             saveAllToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparatorHistoryDetails = new ToolStripSeparator();
+            viewDetailsToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator8 = new ToolStripSeparator();
             toolStripSeparator9 = new ToolStripSeparator();
             deleteEntryToolStripMenuItem = new ToolStripMenuItem();
@@ -1078,9 +1101,9 @@ namespace SSH_Helper
             // 
             // contextHistoryLst
             // 
-            contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, saveAllToolStripMenuItem, toolStripSeparator8, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
+            contextHistoryLst.Items.AddRange(new ToolStripItem[] { saveAsToolStripMenuItem, saveAllToolStripMenuItem, toolStripSeparatorHistoryDetails, viewDetailsToolStripMenuItem, toolStripSeparator8, deleteEntryToolStripMenuItem, deleteAllHistoryToolStripMenuItem });
             contextHistoryLst.Name = "contextHistoryLst";
-            contextHistoryLst.Size = new Size(201, 98);
+            contextHistoryLst.Size = new Size(227, 126);
             contextHistoryLst.Opening += contextHistoryLst_Opening;
             // 
             // saveAsToolStripMenuItem
@@ -1097,22 +1120,34 @@ namespace SSH_Helper
             saveAllToolStripMenuItem.Text = "Save A&ll History to File...";
             saveAllToolStripMenuItem.Click += saveAllToolStripMenuItem_Click;
             // 
+            // toolStripSeparatorHistoryDetails
+            // 
+            toolStripSeparatorHistoryDetails.Name = "toolStripSeparatorHistoryDetails";
+            toolStripSeparatorHistoryDetails.Size = new Size(223, 6);
+            // 
+            // viewDetailsToolStripMenuItem
+            // 
+            viewDetailsToolStripMenuItem.Name = "viewDetailsToolStripMenuItem";
+            viewDetailsToolStripMenuItem.Size = new Size(226, 22);
+            viewDetailsToolStripMenuItem.Text = "View Details...";
+            viewDetailsToolStripMenuItem.Click += viewDetailsToolStripMenuItem_Click;
+            // 
             // toolStripSeparator8
             // 
             toolStripSeparator8.Name = "toolStripSeparator8";
-            toolStripSeparator8.Size = new Size(197, 6);
+            toolStripSeparator8.Size = new Size(223, 6);
             // 
             // deleteEntryToolStripMenuItem
             // 
             deleteEntryToolStripMenuItem.Name = "deleteEntryToolStripMenuItem";
-            deleteEntryToolStripMenuItem.Size = new Size(200, 22);
+            deleteEntryToolStripMenuItem.Size = new Size(226, 22);
             deleteEntryToolStripMenuItem.Text = "&Delete Entry";
             deleteEntryToolStripMenuItem.Click += deleteEntryToolStripMenuItem_Click;
             //
             // deleteAllHistoryToolStripMenuItem
             //
             deleteAllHistoryToolStripMenuItem.Name = "deleteAllHistoryToolStripMenuItem";
-            deleteAllHistoryToolStripMenuItem.Size = new Size(200, 22);
+            deleteAllHistoryToolStripMenuItem.Size = new Size(226, 22);
             deleteAllHistoryToolStripMenuItem.Text = "Delete All &History";
             deleteAllHistoryToolStripMenuItem.Click += deleteAllHistoryToolStripMenuItem_Click;
             //
@@ -1139,6 +1174,7 @@ namespace SSH_Helper
             lstHosts.ItemHeight = 20;
             lstHosts.Location = new Point(0, 28);
             lstHosts.Name = "lstHosts";
+            lstHosts.SelectionMode = SelectionMode.MultiExtended;
             lstHosts.Size = new Size(257, 106);
             lstHosts.TabIndex = 0;
             lstHosts.DrawItem += lstHosts_DrawItem;
@@ -1791,6 +1827,8 @@ namespace SSH_Helper
         private ContextMenuStrip contextHistoryLst;
         private ToolStripMenuItem saveAsToolStripMenuItem;
         private ToolStripMenuItem saveAllToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparatorHistoryDetails;
+        private ToolStripMenuItem viewDetailsToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator8;
         private ToolStripMenuItem deleteEntryToolStripMenuItem;
         private ToolStripMenuItem deleteAllHistoryToolStripMenuItem;
