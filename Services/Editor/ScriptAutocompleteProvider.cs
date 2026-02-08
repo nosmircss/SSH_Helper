@@ -1,0 +1,404 @@
+using System.Text.RegularExpressions;
+using SSH_Helper.Services.Scripting;
+
+namespace SSH_Helper.Services.Editor
+{
+    public enum CompletionContextKind
+    {
+        None,
+        TopLevelKey,
+        StepCommand,
+        StepOptionKey,
+        OptionValue,
+        Interpolation
+    }
+
+    public sealed class CompletionItem
+    {
+        public CompletionItem(string label, string insertText, string kind, string? detail = null)
+        {
+            Label = label;
+            InsertText = insertText;
+            Kind = kind;
+            Detail = detail;
+        }
+
+        public string Label { get; }
+        public string InsertText { get; }
+        public string Kind { get; }
+        public string? Detail { get; }
+
+        public override string ToString() => Label;
+    }
+
+    public sealed class CompletionResult
+    {
+        public CompletionContextKind Context { get; init; } = CompletionContextKind.None;
+        public int ReplaceStart { get; init; }
+        public int ReplaceLength { get; init; }
+        public IReadOnlyList<CompletionItem> Items { get; init; } = Array.Empty<CompletionItem>();
+    }
+
+    public sealed class ScriptAutocompleteProvider
+    {
+        private static readonly Regex InterpolationPrefixRegex =
+            new(@"(?<trigger>\$\{|{{)(?<token>[A-Za-z0-9_.-]*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private static readonly Regex StepCommandRegex =
+            new(@"^\s*-\s*(?<token>[A-Za-z0-9_-]*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private static readonly Regex OptionValueRegex =
+            new(@"^\s*(?<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(?<token>[A-Za-z0-9_-]*)$",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private static readonly Regex OptionKeyRegex =
+            new(@"^\s+(?<token>[A-Za-z0-9_-]*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private static readonly Regex SetAssignmentRegex =
+            new(@"^\s*-\s*set:\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+        private static readonly Regex CaptureRegex =
+            new(@"^\s*capture:\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*$",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+        private static readonly Regex IntoRegex =
+            new(@"^\s*into:\s*(?<value>.+?)\s*$",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+        private static readonly HashSet<string> BuiltInSymbols = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "_output",
+            "_timestamp",
+            "_iteration",
+            "_last_error",
+            "_host",
+            "_port",
+            "_username",
+            "_password"
+        };
+
+        private static readonly string[] IntoDerivedSuffixes =
+        [
+            "_status",
+            "_headers",
+            "_count",
+            "_avg",
+            "_min",
+            "_max"
+        ];
+
+        private readonly Func<IReadOnlyCollection<string>> _getHostColumns;
+        private readonly IReadOnlyList<string> _topLevelKeys;
+        private readonly IReadOnlyList<string> _stepCommands;
+        private readonly IReadOnlyList<string> _stepOptionKeys;
+        private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _enumLikeOptionValues;
+
+        public ScriptAutocompleteProvider(Func<IReadOnlyCollection<string>>? getHostColumns = null)
+        {
+            _getHostColumns = getHostColumns ?? (() => Array.Empty<string>());
+            _topLevelKeys = ScriptParser.GetKnownTopLevelKeys()
+                .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _stepCommands = ScriptParser.GetKnownStepCommands()
+                .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _stepOptionKeys = ScriptParser.GetKnownStepOptionKeys()
+                .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _enumLikeOptionValues = ScriptParser.GetEnumLikeOptionValues()
+                .ToDictionary(
+                    pair => CanonicalizeKey(pair.Key),
+                    pair => (IReadOnlyList<string>)pair.Value
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+        }
+
+        public IReadOnlyList<string> GetTopLevelKeys() => _topLevelKeys;
+
+        public IReadOnlyList<string> GetStepCommands() => _stepCommands;
+
+        public IReadOnlyList<string> GetStepOptionKeys() => _stepOptionKeys;
+
+        public IReadOnlyDictionary<string, IReadOnlyList<string>> GetEnumLikeOptionValues() => _enumLikeOptionValues;
+
+        public CompletionResult GetCompletion(string text, int caretIndex)
+        {
+            text ??= string.Empty;
+            var safeCaret = Math.Clamp(caretIndex, 0, text.Length);
+            var lineStart = FindLineStart(text, safeCaret);
+            var linePrefix = text.Substring(lineStart, safeCaret - lineStart);
+            var currentIndent = CountIndent(linePrefix);
+
+            var interpolation = BuildInterpolationCompletion(text, safeCaret, linePrefix);
+            if (interpolation != null)
+                return interpolation;
+
+            var commandMatch = StepCommandRegex.Match(linePrefix);
+            if (commandMatch.Success)
+            {
+                var token = commandMatch.Groups["token"].Value;
+                return BuildCompletion(
+                    CompletionContextKind.StepCommand,
+                    safeCaret - token.Length,
+                    token.Length,
+                    FilterValues(_stepCommands, token, kind: "command"));
+            }
+
+            var optionValueMatch = OptionValueRegex.Match(linePrefix);
+            if (optionValueMatch.Success)
+            {
+                var key = CanonicalizeKey(optionValueMatch.Groups["key"].Value);
+                var token = optionValueMatch.Groups["token"].Value;
+                if (_enumLikeOptionValues.TryGetValue(key, out var values))
+                {
+                    return BuildCompletion(
+                        CompletionContextKind.OptionValue,
+                        safeCaret - token.Length,
+                        token.Length,
+                        FilterValues(values, token, kind: "value"));
+                }
+            }
+
+            var optionKeyMatch = OptionKeyRegex.Match(linePrefix);
+            if (optionKeyMatch.Success && currentIndent > 0)
+            {
+                var token = optionKeyMatch.Groups["token"].Value;
+                return BuildCompletion(
+                    CompletionContextKind.StepOptionKey,
+                    safeCaret - token.Length,
+                    token.Length,
+                    FilterValues(_stepOptionKeys, token, kind: "option"));
+            }
+
+            if (currentIndent == 0)
+            {
+                var topLevelToken = linePrefix.Trim();
+                if (IsIdentifierLike(topLevelToken))
+                {
+                    return BuildCompletion(
+                        CompletionContextKind.TopLevelKey,
+                        safeCaret - topLevelToken.Length,
+                        topLevelToken.Length,
+                        FilterValues(_topLevelKeys, topLevelToken, kind: "top-level"));
+                }
+            }
+
+            return new CompletionResult();
+        }
+
+        public IReadOnlyList<string> GetInterpolationSymbols(string text)
+        {
+            var symbols = new HashSet<string>(BuiltInSymbols, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var symbol in ExtractDynamicSymbols(text))
+            {
+                symbols.Add(symbol);
+            }
+
+            foreach (var column in _getHostColumns())
+            {
+                if (!string.IsNullOrWhiteSpace(column))
+                {
+                    symbols.Add(column.Trim());
+                }
+            }
+
+            return symbols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        public IReadOnlyList<string> ExtractDynamicSymbols(string text)
+        {
+            text ??= string.Empty;
+            var symbols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var lines = SplitLines(text);
+
+            var inVarsSection = false;
+            var varsIndent = 0;
+
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#'))
+                    continue;
+
+                var indent = CountIndent(line);
+                if (!inVarsSection && trimmed.StartsWith("vars:", StringComparison.OrdinalIgnoreCase))
+                {
+                    inVarsSection = true;
+                    varsIndent = indent;
+                    continue;
+                }
+
+                if (inVarsSection && indent <= varsIndent)
+                {
+                    inVarsSection = false;
+                }
+
+                if (inVarsSection)
+                {
+                    var varsMatch = Regex.Match(line, @"^\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*:");
+                    if (varsMatch.Success)
+                    {
+                        symbols.Add(varsMatch.Groups["name"].Value);
+                    }
+                }
+
+                var setMatch = SetAssignmentRegex.Match(line);
+                if (setMatch.Success)
+                {
+                    symbols.Add(setMatch.Groups["name"].Value);
+                }
+
+                var captureMatch = CaptureRegex.Match(line);
+                if (captureMatch.Success)
+                {
+                    symbols.Add(captureMatch.Groups["name"].Value);
+                }
+
+                var intoMatch = IntoRegex.Match(line);
+                if (intoMatch.Success)
+                {
+                    foreach (var intoTarget in ParseIntoTargets(intoMatch.Groups["value"].Value))
+                    {
+                        symbols.Add(intoTarget);
+                        foreach (var suffix in IntoDerivedSuffixes)
+                        {
+                            symbols.Add(intoTarget + suffix);
+                        }
+                    }
+                }
+            }
+
+            return symbols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        private CompletionResult? BuildInterpolationCompletion(string text, int safeCaret, string linePrefix)
+        {
+            var interpolationMatch = InterpolationPrefixRegex.Match(linePrefix);
+            if (!interpolationMatch.Success)
+                return null;
+
+            var token = interpolationMatch.Groups["token"].Value;
+            return BuildCompletion(
+                CompletionContextKind.Interpolation,
+                safeCaret - token.Length,
+                token.Length,
+                FilterValues(GetInterpolationSymbols(text), token, kind: "symbol"));
+        }
+
+        private static CompletionResult BuildCompletion(
+            CompletionContextKind context,
+            int replaceStart,
+            int replaceLength,
+            IReadOnlyList<CompletionItem> items)
+        {
+            if (items.Count == 0)
+                return new CompletionResult();
+
+            return new CompletionResult
+            {
+                Context = context,
+                ReplaceStart = Math.Max(0, replaceStart),
+                ReplaceLength = Math.Max(0, replaceLength),
+                Items = items
+            };
+        }
+
+        private static IReadOnlyList<CompletionItem> FilterValues(
+            IEnumerable<string> values,
+            string token,
+            string kind)
+        {
+            var safeToken = token ?? string.Empty;
+            return values
+                .Where(value => value.StartsWith(safeToken, StringComparison.OrdinalIgnoreCase))
+                .Select(value => new CompletionItem(value, value, kind))
+                .ToList();
+        }
+
+        private static IEnumerable<string> ParseIntoTargets(string value)
+        {
+            var trimmed = value.Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+            {
+                var inner = trimmed.Substring(1, trimmed.Length - 2);
+                foreach (var part in inner.Split(','))
+                {
+                    var candidate = SanitizeSymbolName(part);
+                    if (!string.IsNullOrEmpty(candidate))
+                        yield return candidate;
+                }
+                yield break;
+            }
+
+            var single = SanitizeSymbolName(trimmed);
+            if (!string.IsNullOrEmpty(single))
+                yield return single;
+        }
+
+        private static string SanitizeSymbolName(string raw)
+        {
+            var trimmed = raw.Trim().Trim('"', '\'');
+            if (Regex.IsMatch(trimmed, @"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant))
+                return trimmed;
+
+            return string.Empty;
+        }
+
+        private static bool IsIdentifierLike(string token)
+        {
+            if (string.IsNullOrEmpty(token))
+                return true;
+
+            return Regex.IsMatch(token, @"^[A-Za-z0-9_-]+$", RegexOptions.CultureInvariant);
+        }
+
+        private static int FindLineStart(string text, int index)
+        {
+            var i = Math.Clamp(index, 0, text.Length);
+            while (i > 0)
+            {
+                if (text[i - 1] == '\n')
+                    break;
+                i--;
+            }
+            return i;
+        }
+
+        private static int CountIndent(string line)
+        {
+            var count = 0;
+            foreach (var ch in line)
+            {
+                if (ch == ' ')
+                {
+                    count++;
+                    continue;
+                }
+                if (ch == '\t')
+                {
+                    count += 2;
+                    continue;
+                }
+                break;
+            }
+            return count;
+        }
+
+        private static string[] SplitLines(string text)
+        {
+            return text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+        }
+
+        private static string CanonicalizeKey(string key)
+        {
+            return (key ?? string.Empty).Trim().ToLowerInvariant().Replace("-", "_", StringComparison.Ordinal);
+        }
+    }
+}

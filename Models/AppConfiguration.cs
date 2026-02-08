@@ -81,6 +81,11 @@ namespace SSH_Helper.Models
         /// </summary>
         public FontSettings FontSettings { get; set; } = new();
 
+        /// <summary>
+        /// Script editor behavior and diagnostics settings.
+        /// </summary>
+        public CommandEditorSettings CommandEditor { get; set; } = new();
+
         // SSH config settings
         /// <summary>
         /// Settings for SSH config file integration.
@@ -92,6 +97,44 @@ namespace SSH_Helper.Models
         /// </summary>
         public CredentialSettings Credentials { get; set; } = new();
 
+    }
+
+    /// <summary>
+    /// Persisted settings for the script editor experience.
+    /// </summary>
+    public class CommandEditorSettings
+    {
+        public const int MinValidationDebounceMs = 150;
+        public const int MaxValidationDebounceMs = 2000;
+        public const int MinIndentSize = 2;
+        public const int MaxIndentSize = 8;
+
+        public bool EnableSyntaxHighlighting { get; set; } = true;
+        public bool EnableAutocomplete { get; set; } = true;
+        public bool AutocompleteShowOnTyping { get; set; } = true;
+        public bool EnableInlineValidation { get; set; } = true;
+        public int ValidationDebounceMs { get; set; } = 400;
+        public bool ShowInlineWarnings { get; set; } = true;
+        public bool EnableDiagnosticTooltips { get; set; } = true;
+        public bool EnableVariableInspectorTooltips { get; set; } = true;
+        public bool EnableYamlHygieneWarnings { get; set; } = true;
+        public bool UseSpacesForTab { get; set; } = true;
+        public int IndentSize { get; set; } = 2;
+        public bool EnableSmartEnter { get; set; } = true;
+        public bool PreserveBlankLineBetweenSteps { get; set; } = true;
+
+        public void Normalize()
+        {
+            ValidationDebounceMs = Math.Clamp(ValidationDebounceMs, MinValidationDebounceMs, MaxValidationDebounceMs);
+            IndentSize = Math.Clamp(IndentSize, MinIndentSize, MaxIndentSize);
+        }
+
+        public CommandEditorSettings CloneNormalized()
+        {
+            var clone = (CommandEditorSettings)MemberwiseClone();
+            clone.Normalize();
+            return clone;
+        }
     }
 
     /// <summary>

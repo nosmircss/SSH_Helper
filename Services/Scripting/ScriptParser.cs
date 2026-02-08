@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -44,11 +45,90 @@ namespace SSH_Helper.Services.Scripting
             "continue",
             "try"
         };
+        private static readonly string[] KnownTopLevelKeys =
+        {
+            "name",
+            "description",
+            "version",
+            "debug",
+            "nobanner",
+            "vars",
+            "steps"
+        };
+        private static readonly string[] CommonStepOptionKeys =
+        {
+            "capture",
+            "suppress",
+            "expect",
+            "timeout",
+            "on_error",
+            "when",
+            "max_iterations",
+            "then",
+            "elif",
+            "else",
+            "do",
+            "catch",
+            "finally"
+        };
+        private static readonly IReadOnlyDictionary<string, string[]> CommandOptionKeys =
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["extract"] = ["from", "pattern", "into", "match"],
+                ["readfile"] = ["path", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"],
+                ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers"],
+                ["input"] = ["prompt", "into", "default", "password", "validate", "validation_error"],
+                ["updatecolumn"] = ["column", "value"],
+                ["updateenvironment"] = ["variable", "value"],
+                ["log"] = ["message", "level"],
+                ["http"] = ["url", "method", "body", "headers", "into", "timeout", "follow_redirects", "allow_failure", "verify_tls", "auth", "username", "password", "token", "content_type", "on_error"],
+                ["ping"] = ["host", "count", "timeout", "into", "on_error"],
+                ["dns"] = ["host", "type", "timeout", "into", "on_error"],
+                ["portcheck"] = ["host", "port", "timeout", "into", "on_error"],
+                ["sftp"] = ["action", "local_path", "remote_path", "host", "port", "username", "password", "overwrite", "timeout", "into", "on_error"],
+                ["webhook"] = ["url", "method", "body", "headers", "into", "timeout", "on_error"],
+                ["parse"] = ["format", "from", "into", "sections"]
+            };
+        private static readonly string[] KnownStepOptionKeys = CommonStepOptionKeys
+            .Concat(CommandOptionKeys.Values.SelectMany(values => values))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        private static readonly IReadOnlyDictionary<string, string[]> EnumLikeOptionValues =
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["on_error"] = ["continue", "stop"],
+                ["method"] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+                ["auth"] = ["none", "basic", "bearer"],
+                ["content_type"] = ["json", "form", "text", "xml"],
+                ["type"] = ["A", "AAAA", "PTR"],
+                ["action"] = ["upload", "download"],
+                ["mode"] = ["overwrite", "append"],
+                ["format"] = ["text", "json", "jsonl", "csv"],
+                ["level"] = ["info", "debug", "warning", "error", "success"],
+                ["encoding"] = ["utf-8", "ascii", "utf-16", "utf-32"],
+                ["follow_redirects"] = ["true", "false"],
+                ["allow_failure"] = ["true", "false"],
+                ["verify_tls"] = ["true", "false"]
+            };
 
         /// <summary>
         /// Parser warnings captured during the most recent parse operation.
         /// </summary>
         public IReadOnlyList<string> Warnings => _warnings;
+
+        public static IReadOnlyList<string> GetKnownTopLevelKeys() => KnownTopLevelKeys;
+
+        public static IReadOnlyList<string> GetKnownStepCommands() => KnownStepKeys;
+
+        public static IReadOnlyList<string> GetKnownStepOptionKeys() => KnownStepOptionKeys;
+
+        public static IReadOnlyDictionary<string, IReadOnlyList<string>> GetEnumLikeOptionValues()
+        {
+            return EnumLikeOptionValues.ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyList<string>)pair.Value,
+                StringComparer.OrdinalIgnoreCase);
+        }
 
         public ScriptParser()
         {

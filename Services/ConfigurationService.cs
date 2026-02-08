@@ -95,6 +95,9 @@ namespace SSH_Helper.Services
         {
             try
             {
+                NormalizeEnvironmentData(config);
+                NormalizeCommandEditorSettings(config);
+
                 // Keep a backup of the previous config in case the save is interrupted
                 if (File.Exists(_configFilePath))
                 {
@@ -192,6 +195,7 @@ namespace SSH_Helper.Services
             }
 
             NormalizeEnvironmentData(config);
+            NormalizeCommandEditorSettings(config);
             return config;
         }
 
@@ -224,6 +228,12 @@ namespace SSH_Helper.Services
             {
                 config.ActiveEnvironment = null;
             }
+        }
+
+        private static void NormalizeCommandEditorSettings(AppConfiguration config)
+        {
+            config.CommandEditor ??= new CommandEditorSettings();
+            config.CommandEditor.Normalize();
         }
 
         private static Dictionary<string, EnvironmentConfig> CloneEnvironmentMap(Dictionary<string, EnvironmentConfig> source)
