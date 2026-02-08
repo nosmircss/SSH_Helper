@@ -235,8 +235,8 @@ namespace SSH_Helper
             _btnSave = new Button { Text = "Save", Width = 90, Height = 28, DialogResult = DialogResult.OK };
             _btnCancel = new Button { Text = "Cancel", Width = 90, Height = 28, DialogResult = DialogResult.Cancel };
             _btnSave.Click += BtnSave_Click;
-            bottomPanel.Controls.Add(_btnSave);
             bottomPanel.Controls.Add(_btnCancel);
+            bottomPanel.Controls.Add(_btnSave);
 
             rightPanel.Controls.Add(_gridVariables);
             rightPanel.Controls.Add(lblVariables);

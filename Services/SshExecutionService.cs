@@ -908,6 +908,7 @@ namespace SSH_Helper.Services
                 var context = new ScriptContext(host.Variables);
                 context.Session = session;
                 context.DebugMode = DebugMode;
+                SeedConnectionVariables(context, host, username, password);
 
                 // Wire up context output to our events
                 context.OutputReceived += (s, e) =>
@@ -1050,6 +1051,7 @@ namespace SSH_Helper.Services
             var context = new ScriptContext(host.Variables);
             context.Session = session;
             context.DebugMode = DebugMode;
+            SeedConnectionVariables(context, host, username, password);
 
             // Wire up context output to our events
             context.OutputReceived += (s, e) =>
@@ -1076,6 +1078,19 @@ namespace SSH_Helper.Services
                 .GetAwaiter().GetResult();
 
             client.Disconnect();
+        }
+
+        private static void SeedConnectionVariables(ScriptContext context, HostConnection host, string username, string password)
+        {
+            // Keep runtime context aligned with the credentials/endpoints actually used for SSH.
+            if (string.IsNullOrWhiteSpace(context.GetVariableString("Host_IP")))
+                context.SetVariable("Host_IP", host.ToString());
+
+            if (!string.IsNullOrWhiteSpace(username))
+                context.SetVariable("username", username);
+
+            if (!string.IsNullOrWhiteSpace(password))
+                context.SetVariable("password", password);
         }
 
         /// <summary>

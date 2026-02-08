@@ -3871,17 +3871,17 @@ namespace SSH_Helper
 
         private void duplicatePresetToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            DuplicatePreset();
+            DuplicatePreset(preferContextSource: sender == ctxDuplicatePreset);
         }
 
         private void renameToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            RenamePreset();
+            RenamePreset(preferContextSource: sender == ctxRenamePreset);
         }
 
         private void deleteToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            DeletePreset();
+            DeletePreset(preferContextSource: sender == ctxDeletePreset);
         }
 
         private void toggleSortingToolStripMenuItem_Click(object sender, EventArgs e)
@@ -3919,7 +3919,7 @@ namespace SSH_Helper
 
         private void ExportPreset_Click(object? sender, EventArgs e)
         {
-            ExportPreset();
+            ExportPreset(preferContextSource: sender == ctxExportPreset);
         }
 
         private void ImportPreset_Click(object? sender, EventArgs e)
@@ -5072,8 +5072,75 @@ namespace SSH_Helper
                 return;
             }
 
-            // Preserve existing IsFavorite and Folder status if updating
+            var preActionExpandState = CapturePresetTreeExpandState();
+            bool refreshPresetList = false;
+
+            string? originalPresetName = _activePresetName;
+            bool hasActivePreset = !string.IsNullOrWhiteSpace(originalPresetName) &&
+                _presetManager.Get(originalPresetName) != null;
+            bool nameChanged = hasActivePreset &&
+                !string.Equals(presetName, originalPresetName, StringComparison.Ordinal);
+
+            if (nameChanged)
+            {
+                var choice = MessageBox.Show(
+                    $"Preset name changed from '{originalPresetName}' to '{presetName}'.\n\n" +
+                    "Yes = Rename the existing preset\n" +
+                    "No = Create a new preset\n" +
+                    "Cancel = Keep editing",
+                    "Save Preset",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (choice == DialogResult.Cancel)
+                {
+                    return;
+                }
+
+                if (choice == DialogResult.Yes)
+                {
+                    if (_presetManager.Presets.ContainsKey(presetName))
+                    {
+                        MessageBox.Show("This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    if (!_presetManager.Rename(originalPresetName!, presetName))
+                    {
+                        MessageBox.Show("Unable to rename preset.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    int orderIndex = _manualPresetOrder.IndexOf(originalPresetName!);
+                    if (orderIndex >= 0)
+                    {
+                        _manualPresetOrder[orderIndex] = presetName;
+                    }
+
+                    refreshPresetList = true;
+                }
+                else
+                {
+                    if (_presetManager.Presets.ContainsKey(presetName))
+                    {
+                        MessageBox.Show(
+                            "A preset with this name already exists. Choose a different name to create a new preset.",
+                            "Save Preset",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        return;
+                    }
+                }
+            }
+
+            // Preserve IsFavorite/Folder from the target preset, or from the currently active preset
+            // when user chooses "Create new" from a renamed active preset.
             var existingPreset = _presetManager.Get(presetName);
+            if (existingPreset == null && hasActivePreset && !string.IsNullOrWhiteSpace(originalPresetName))
+            {
+                existingPreset = _presetManager.Get(originalPresetName);
+            }
+
             var preset = new PresetInfo
             {
                 Commands = commands,
@@ -5092,7 +5159,25 @@ namespace SSH_Helper
                 {
                     _manualPresetOrder.Add(presetName);
                 }
-                RefreshPresetList();
+                refreshPresetList = true;
+            }
+
+            if (refreshPresetList)
+            {
+                // Align active preset before programmatic selection to avoid false
+                // unsaved prompts in AfterSelect handlers.
+                _activePresetName = presetName;
+                RefreshPresetList(expandStatesOverride: preActionExpandState);
+
+                _suppressPresetSelectionChange = true;
+                try
+                {
+                    SelectPresetByName(presetName, ensureVisible: false);
+                }
+                finally
+                {
+                    _suppressPresetSelectionChange = false;
+                }
             }
 
             _activePresetName = presetName;
@@ -5175,12 +5260,101 @@ namespace SSH_Helper
             _activePresetName = presetName;
         }
 
-        private void DuplicatePreset()
+        private string? ResolvePresetNameForActions(bool preferContextSource)
         {
-            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+            // Context-menu actions should follow the tree where the menu was opened.
+            if (preferContextSource &&
+                _contextMenuSourceTreeView?.SelectedNode?.Tag is PresetNodeTag contextTag &&
+                !contextTag.IsFolder)
+            {
+                return contextTag.Name;
+            }
+
+            // Toolbar actions follow the active tab selection first.
+            if (presetsTabControl.SelectedTab == tabFavorites)
+            {
+                if (trvFavorites.SelectedNode?.Tag is PresetNodeTag favoritesTag && !favoritesTag.IsFolder)
+                {
+                    return favoritesTag.Name;
+                }
+            }
+            else
+            {
+                if (trvPresets.SelectedNode?.Tag is PresetNodeTag presetsTag && !presetsTag.IsFolder)
+                {
+                    return presetsTag.Name;
+                }
+            }
+
+            // Fallback to active preset loaded in the editor.
+            if (!string.IsNullOrWhiteSpace(_activePresetName) && _presetManager.Get(_activePresetName) != null)
+            {
+                return _activePresetName;
+            }
+
+            return null;
+        }
+
+        private TreeView ResolvePresetTreeViewForActions(bool preferContextSource)
+        {
+            if (preferContextSource && _contextMenuSourceTreeView != null)
+            {
+                return _contextMenuSourceTreeView;
+            }
+
+            return presetsTabControl.SelectedTab == tabFavorites ? trvFavorites : trvPresets;
+        }
+
+        private TreeNode? FindPresetNodeByName(TreeNodeCollection nodes, string presetName)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if (node.Tag is PresetNodeTag tag &&
+                    !tag.IsFolder &&
+                    string.Equals(tag.Name, presetName, StringComparison.Ordinal))
+                {
+                    return node;
+                }
+
+                var found = FindPresetNodeByName(node.Nodes, presetName);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+
+            return null;
+        }
+
+        private PresetNodeTag? GetSelectionTargetAboveDeletedPreset(string presetName, bool preferContextSource)
+        {
+            var sourceTree = ResolvePresetTreeViewForActions(preferContextSource);
+            var nodeToDelete = FindPresetNodeByName(sourceTree.Nodes, presetName);
+            var targetNode = nodeToDelete?.PrevVisibleNode ?? nodeToDelete?.NextVisibleNode;
+
+            if (targetNode?.Tag is not PresetNodeTag targetTag)
+            {
+                return null;
+            }
+
+            return new PresetNodeTag
+            {
+                IsFolder = targetTag.IsFolder,
+                Name = targetTag.Name
+            };
+        }
+
+        private void DuplicatePreset(bool preferContextSource = false)
+        {
+            string? sourceName = ResolvePresetNameForActions(preferContextSource);
+            if (string.IsNullOrWhiteSpace(sourceName))
                 return;
 
-            string sourceName = tag.Name;
+            var sourcePreset = _presetManager.Get(sourceName);
+            if (sourcePreset == null)
+                return;
+
+            var preActionExpandState = CapturePresetTreeExpandState();
             string suggested = _presetManager.GetUniqueName(sourceName + "_Copy");
 
             string newName = Microsoft.VisualBasic.Interaction.InputBox(
@@ -5199,6 +5373,15 @@ namespace SSH_Helper
             try
             {
                 string finalName = _presetManager.Duplicate(sourceName, newName);
+                var duplicatedPreset = _presetManager.Get(finalName);
+
+                // Defensive guard: duplicate should stay in the source folder.
+                if (duplicatedPreset != null &&
+                    !string.Equals(duplicatedPreset.Folder, sourcePreset.Folder, StringComparison.Ordinal))
+                {
+                    duplicatedPreset.Folder = sourcePreset.Folder;
+                    _presetManager.Save(finalName, duplicatedPreset);
+                }
 
                 // Add to manual order after the source
                 int sourceIndex = _manualPresetOrder.IndexOf(sourceName);
@@ -5211,8 +5394,8 @@ namespace SSH_Helper
                     _manualPresetOrder.Add(finalName);
                 }
 
-                RefreshPresetList();
-                SelectPresetByName(finalName);
+                RefreshPresetList(expandStatesOverride: preActionExpandState);
+                SelectPresetByName(finalName, ensureVisible: false);
 
                 var preset = _presetManager.Get(finalName);
                 txtPreset.Text = finalName;
@@ -5225,12 +5408,12 @@ namespace SSH_Helper
             }
         }
 
-        private void RenamePreset()
+        private void RenamePreset(bool preferContextSource = false)
         {
-            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+            string? selectedPreset = ResolvePresetNameForActions(preferContextSource);
+            if (string.IsNullOrWhiteSpace(selectedPreset))
                 return;
 
-            string selectedPreset = tag.Name;
             string newName = Microsoft.VisualBasic.Interaction.InputBox(
                 $"Enter a new name for the preset '{selectedPreset}':",
                 "Rename Preset",
@@ -5244,6 +5427,8 @@ namespace SSH_Helper
                 return;
             }
 
+            var preActionExpandState = CapturePresetTreeExpandState();
+
             // Update manual order list
             int orderIndex = _manualPresetOrder.IndexOf(selectedPreset);
             if (orderIndex >= 0)
@@ -5251,18 +5436,20 @@ namespace SSH_Helper
                 _manualPresetOrder[orderIndex] = newName;
             }
 
-            RefreshPresetList();
-            SelectPresetByName(newName);
+            RefreshPresetList(expandStatesOverride: preActionExpandState);
+            SelectPresetByName(newName, ensureVisible: false);
             txtPreset.Text = newName;
             _activePresetName = newName;
         }
 
-        private void DeletePreset()
+        private void DeletePreset(bool preferContextSource = false)
         {
-            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+            string? selectedPreset = ResolvePresetNameForActions(preferContextSource);
+            if (string.IsNullOrWhiteSpace(selectedPreset))
                 return;
 
-            string selectedPreset = tag.Name;
+            var preActionExpandState = CapturePresetTreeExpandState();
+            var selectionTarget = GetSelectionTargetAboveDeletedPreset(selectedPreset, preferContextSource);
 
             // Check if this is the currently active preset being deleted
             bool isDeletingActivePreset = string.Equals(selectedPreset, _activePresetName, StringComparison.Ordinal);
@@ -5280,7 +5467,26 @@ namespace SSH_Helper
                     txtTimeoutHeader.Clear();
                 }
 
-                RefreshPresetList();
+                RefreshPresetList(expandStatesOverride: preActionExpandState);
+
+                if (selectionTarget != null)
+                {
+                    if (selectionTarget.IsFolder)
+                    {
+                        SelectFolderByName(selectionTarget.Name, ensureVisible: false);
+                    }
+                    else
+                    {
+                        SelectPresetByName(selectionTarget.Name, ensureVisible: false);
+                    }
+
+                    if (trvPresets.SelectedNode?.Tag is PresetNodeTag selectedTag &&
+                        selectedTag.IsFolder == selectionTarget.IsFolder &&
+                        string.Equals(selectedTag.Name, selectionTarget.Name, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+                }
 
                 // Select another preset if any exist
                 if (_presetManager.Presets.Count > 0)
@@ -5288,7 +5494,7 @@ namespace SSH_Helper
                     var firstPreset = _presetManager.Presets.Keys.FirstOrDefault();
                     if (!string.IsNullOrEmpty(firstPreset))
                     {
-                        SelectPresetByName(firstPreset);
+                        SelectPresetByName(firstPreset, ensureVisible: false);
                         var preset = _presetManager.Get(firstPreset);
                         if (preset != null)
                         {
@@ -5304,9 +5510,10 @@ namespace SSH_Helper
             }
         }
 
-        private void ExportPreset()
+        private void ExportPreset(bool preferContextSource = false)
         {
-            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+            string? presetName = ResolvePresetNameForActions(preferContextSource);
+            if (string.IsNullOrWhiteSpace(presetName))
             {
                 MessageBox.Show("No preset selected to export.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
@@ -5314,7 +5521,6 @@ namespace SSH_Helper
 
             try
             {
-                string presetName = tag.Name;
                 string exportString = _presetManager.Export(presetName);
                 Clipboard.SetText(exportString);
                 MessageBox.Show("Preset exported to clipboard.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -5341,7 +5547,7 @@ namespace SSH_Helper
                 string finalName = _presetManager.Import(input, defaultTimeout);
 
                 RefreshPresetList();
-                SelectPresetByName(finalName);
+                SelectPresetByName(finalName, ensureVisible: false);
 
                 var preset = _presetManager.Get(finalName);
                 if (preset != null)
@@ -5486,12 +5692,47 @@ namespace SSH_Helper
             return folderName; // Empty string = root, non-empty = folder name
         }
 
-        private void RefreshPresetList(bool restoreExpandState = true)
+        private Dictionary<string, bool> CapturePresetTreeExpandState()
+        {
+            var states = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+            void Capture(TreeNodeCollection nodes)
+            {
+                foreach (TreeNode node in nodes)
+                {
+                    if (node.Tag is PresetNodeTag tag && tag.IsFolder)
+                    {
+                        states[tag.Name] = node.IsExpanded;
+                        Capture(node.Nodes);
+                    }
+                }
+            }
+
+            Capture(trvPresets.Nodes);
+            return states;
+        }
+
+        private void RefreshPresetList(
+            bool restoreExpandState = true,
+            IReadOnlyDictionary<string, bool>? expandStatesOverride = null)
         {
             string? currentSelection = null;
             if (trvPresets.SelectedNode?.Tag is PresetNodeTag selectedTag && !selectedTag.IsFolder)
             {
                 currentSelection = selectedTag.Name;
+            }
+
+            IReadOnlyDictionary<string, bool>? runtimeExpandStates = null;
+            if (restoreExpandState)
+            {
+                if (expandStatesOverride != null && expandStatesOverride.Count > 0)
+                {
+                    runtimeExpandStates = expandStatesOverride;
+                }
+                else if (trvPresets.Nodes.Count > 0)
+                {
+                    runtimeExpandStates = CapturePresetTreeExpandState();
+                }
             }
 
             _suppressPresetSelectionChange = true;
@@ -5510,9 +5751,9 @@ namespace SSH_Helper
             // Build nested folder hierarchy
             foreach (var folderPath in allFolders)
             {
-                var folderInfo = _presetManager.Folders.GetValueOrDefault(folderPath);
                 var folderName = FolderPathUtility.GetFolderName(folderPath);
                 var parentPath = FolderPathUtility.GetParentPath(folderPath);
+                var folderInfo = _presetManager.Folders.GetValueOrDefault(folderPath);
 
                 string folderDisplay = folderInfo?.IsFavorite == true
                     ? $"{StarIcon} {FolderIcon} {folderName}"
@@ -5549,11 +5790,6 @@ namespace SSH_Helper
                     folderNode.Nodes.Add(presetNode);
                 }
 
-                // Restore expand state immediately while still in BeginUpdate block
-                if (restoreExpandState && folderInfo?.IsExpanded == true)
-                {
-                    folderNode.Expand();
-                }
             }
 
             // Add root-level presets (no folder)
@@ -5569,12 +5805,45 @@ namespace SSH_Helper
                 trvPresets.Nodes.Add(presetNode);
             }
 
+            // Final pass for expand/collapse state after the full hierarchy exists.
+            // This avoids branch state drift when nodes are added after earlier Expand calls.
+            if (restoreExpandState)
+            {
+                foreach (var folderPath in allFolders)
+                {
+                    if (!folderNodes.TryGetValue(folderPath, out var folderNode))
+                    {
+                        continue;
+                    }
+
+                    bool shouldExpand = false;
+                    if (runtimeExpandStates != null &&
+                        runtimeExpandStates.TryGetValue(folderPath, out var expandedFromRuntime))
+                    {
+                        shouldExpand = expandedFromRuntime;
+                    }
+                    else if (_presetManager.Folders.TryGetValue(folderPath, out var folderInfo))
+                    {
+                        shouldExpand = folderInfo.IsExpanded;
+                    }
+
+                    if (shouldExpand)
+                    {
+                        folderNode.Expand();
+                    }
+                    else
+                    {
+                        folderNode.Collapse();
+                    }
+                }
+            }
+
             trvPresets.EndUpdate();
 
             // Restore selection
             if (!string.IsNullOrEmpty(currentSelection))
             {
-                SelectPresetByName(currentSelection);
+                SelectPresetByName(currentSelection, ensureVisible: false);
             }
 
             _suppressPresetSelectionChange = false;
@@ -5779,7 +6048,7 @@ namespace SSH_Helper
             }
         }
 
-        private void SelectPresetByName(string? presetName)
+        private void SelectPresetByName(string? presetName, bool ensureVisible = true)
         {
             if (string.IsNullOrEmpty(presetName))
                 return;
@@ -5801,30 +6070,64 @@ namespace SSH_Helper
             var targetNode = FindNode(trvPresets.Nodes);
             if (targetNode != null)
             {
+                // In state-preserving flows, avoid selecting hidden nodes because
+                // SelectedNode itself can auto-expand ancestor folders.
+                if (!ensureVisible && !targetNode.IsVisible)
+                {
+                    return;
+                }
+
                 // Suppress expand events while making the node visible
                 // to avoid overwriting saved expand/collapse state
                 _suppressExpandCollapseEvents = true;
                 trvPresets.SelectedNode = targetNode;
-                targetNode.EnsureVisible();
+                if (ensureVisible)
+                {
+                    targetNode.EnsureVisible();
+                }
                 _suppressExpandCollapseEvents = false;
             }
         }
 
-        private void SelectFolderByName(string? folderName)
+        private void SelectFolderByName(string? folderName, bool ensureVisible = true)
         {
             if (string.IsNullOrEmpty(folderName))
                 return;
 
-            foreach (TreeNode node in trvPresets.Nodes)
+            TreeNode? FindNode(TreeNodeCollection nodes)
             {
-                if (node.Tag is PresetNodeTag tag && tag.IsFolder && tag.Name == folderName)
+                foreach (TreeNode node in nodes)
                 {
-                    _suppressExpandCollapseEvents = true;
-                    trvPresets.SelectedNode = node;
-                    node.EnsureVisible();
-                    _suppressExpandCollapseEvents = false;
+                    if (node.Tag is PresetNodeTag tag && tag.IsFolder && tag.Name == folderName)
+                    {
+                        return node;
+                    }
+
+                    var found = FindNode(node.Nodes);
+                    if (found != null)
+                    {
+                        return found;
+                    }
+                }
+
+                return null;
+            }
+
+            var targetNode = FindNode(trvPresets.Nodes);
+            if (targetNode != null)
+            {
+                if (!ensureVisible && !targetNode.IsVisible)
+                {
                     return;
                 }
+
+                _suppressExpandCollapseEvents = true;
+                trvPresets.SelectedNode = targetNode;
+                if (ensureVisible)
+                {
+                    targetNode.EnsureVisible();
+                }
+                _suppressExpandCollapseEvents = false;
             }
         }
 
