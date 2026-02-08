@@ -28,6 +28,7 @@ namespace SSH_Helper.Services.Scripting
             "foreach",
             "while",
             "updatecolumn",
+            "updateenvironment",
             "readfile",
             "writefile",
             "input",
@@ -329,6 +330,9 @@ namespace SSH_Helper.Services.Scripting
                     case "updatecolumn":
                         step.UpdateColumn = ParseUpdateColumnOptions(parser);
                         break;
+                    case "updateenvironment":
+                        step.UpdateEnvironment = ParseUpdateEnvironmentOptions(parser);
+                        break;
                     case "log":
                         step.Log = ParseLogValue(parser);
                         break;
@@ -498,6 +502,45 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown updatecolumn key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private UpdateEnvironmentOptions ParseUpdateEnvironmentOptions(IParser parser)
+        {
+            var options = new UpdateEnvironmentOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "variable":
+                        case "name":
+                            options.Variable = parser.Consume<Scalar>().Value;
+                            break;
+                        case "value":
+                            options.Value = parser.Consume<Scalar>().Value;
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown updateenvironment key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -1059,6 +1102,22 @@ namespace SSH_Helper.Services.Scripting
                             {
                                 var lineContent = GetLineContent(lines, step.LineNumber);
                                 errors.Add($"{prefix}Line {step.LineNumber}: UpdateColumn requires 'value'{lineContent}");
+                            }
+                        }
+                        break;
+
+                    case StepType.UpdateEnvironment:
+                        if (step.UpdateEnvironment != null)
+                        {
+                            if (string.IsNullOrWhiteSpace(step.UpdateEnvironment.Variable))
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: UpdateEnvironment requires 'variable' name{lineContent}");
+                            }
+                            if (step.UpdateEnvironment.Value == null)
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: UpdateEnvironment requires 'value'{lineContent}");
                             }
                         }
                         break;

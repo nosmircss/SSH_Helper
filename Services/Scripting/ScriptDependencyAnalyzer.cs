@@ -101,6 +101,28 @@ namespace SSH_Helper.Services.Scripting
             return combined;
         }
 
+        /// <summary>
+        /// Analyzes multiple presets and removes references that are resolved
+        /// by external variable sources (for example active environment variables).
+        /// </summary>
+        public ColumnDependencyResult AnalyzePresets(
+            IEnumerable<PresetInfo> presets,
+            IEnumerable<string>? externallyResolvedVariables)
+        {
+            var combined = AnalyzePresets(presets);
+            if (externallyResolvedVariables == null)
+                return combined;
+
+            var resolvedSet = new HashSet<string>(
+                externallyResolvedVariables
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Select(v => v.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+
+            combined.ReferencedColumns.ExceptWith(resolvedSet);
+            return combined;
+        }
+
         private void AnalyzeSteps(List<ScriptStep>? steps, HashSet<string> definedVars, HashSet<string> referencedVars)
         {
             if (steps == null) return;
@@ -211,6 +233,15 @@ namespace SSH_Helper.Services.Scripting
                         if (step.UpdateColumn != null)
                         {
                             ExtractVarReferences(step.UpdateColumn.Value, referencedVars);
+                        }
+                        break;
+
+                    case StepType.UpdateEnvironment:
+                        if (step.UpdateEnvironment != null)
+                        {
+                            ExtractVarReferences(step.UpdateEnvironment.Value, referencedVars);
+                            if (!string.IsNullOrWhiteSpace(step.UpdateEnvironment.Variable))
+                                definedVars.Add(step.UpdateEnvironment.Variable.Trim());
                         }
                         break;
 

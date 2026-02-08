@@ -193,8 +193,14 @@
                                                      "timeout":  60,
                                                      "isFavorite":  false,
                                                      "folder":  "QA/Variables"
-                                                 }
-                },
+                                                 },
+                    "QA UpdateEnvironment":  {
+                                                 "commands":  "---\nname: QA UpdateEnvironment\ndescription: Tests updateenvironment persistence and immediate runtime variable availability\nversion: 1\ndebug: true\nsteps:\n  - print: \"=== updateenvironment smoke test ===\"\n\n  # Seed a value and persist it into the active environment\n  - set: \"seed = ${_timestamp}\"\n  - updateenvironment:\n      variable: qa_updateenvironment_value\n      value: \"${seed}\"\n\n  # Verify the variable is available immediately after updateenvironment\n  - if: \"qa_updateenvironment_value == seed\"\n    then:\n      - print: \"Immediate context update: PASS\"\n    else:\n      - exit: \"failure updateenvironment did not update runtime variable\"\n\n  # Update the same key again using substitution from current value\n  - updateenvironment:\n      variable: qa_updateenvironment_value\n      value: \"${qa_updateenvironment_value}-rotated\"\n\n  - if: \"qa_updateenvironment_value contains '-rotated'\"\n    then:\n      - print: \"Second update + substitution: PASS\"\n    else:\n      - exit: \"failure second updateenvironment write failed\"\n\n  - print: \"Final value: ${qa_updateenvironment_value}\"\n  - log:\n      message: \"UpdateEnvironment command test complete\"\n      level: success",
+                                                 "timeout":  30,
+                                                 "isFavorite":  false,
+                                                 "folder":  "QA/Variables"
+                                             }
+                 },
     "folders":  {
                     "QA":  {
                                "isExpanded":  true,

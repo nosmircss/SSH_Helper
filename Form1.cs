@@ -7,6 +7,7 @@ using System.Threading;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
+using SSH_Helper.UI;
 using SSH_Helper.Utilities;
 
 namespace SSH_Helper
@@ -199,6 +200,7 @@ namespace SSH_Helper
             // Wire up SSH service events
             _sshService.OutputReceived += SshService_OutputReceived;
             _sshService.ColumnUpdateRequested += SshService_ColumnUpdateRequested;
+            _sshService.EnvironmentVariableUpdateRequested += SshService_EnvironmentVariableUpdateRequested;
             _sshService.CommandCompleted += SshService_CommandCompleted;
             _sshService.ExecutionCompleted += SshService_ExecutionCompleted;
             _environmentService.EnvironmentChanged += EnvironmentService_EnvironmentChanged;
@@ -686,7 +688,7 @@ namespace SSH_Helper
             // Preset TreeView events are wired up in Designer
             trvPresets.NodeMouseClick += TrvPresets_NodeMouseClick;
             contextPresetLst.Opening += ContextPresetLst_Opening;
-            tsbEnvironment.SelectedIndexChanged += TsbEnvironment_SelectedIndexChanged;
+            tsbEnvironment.DropDownItemClicked += TsbEnvironment_DropDownItemClicked;
             tsbManageEnvironments.Click += TsbManageEnvironments_Click;
 
             // History and host list right-click selection and custom drawing
@@ -858,10 +860,46 @@ namespace SSH_Helper
                                 Success = host.Success,
                                 Timestamp = host.Timestamp
                             })
-                            .ToList()
+                            .ToList(),
+                        Details = entry.Details == null
+                            ? null
+                            : CloneExecutionDetails(entry.Details)
                     })
                     .ToList()
                     ?? new List<HistoryEntry>()
+            };
+        }
+
+        private static ExecutionDetails CloneExecutionDetails(ExecutionDetails details)
+        {
+            return new ExecutionDetails
+            {
+                PresetName = details.PresetName ?? string.Empty,
+                Commands = details.Commands ?? string.Empty,
+                PresetType = details.PresetType ?? string.Empty,
+                StartTimeUtc = details.StartTimeUtc,
+                EndTimeUtc = details.EndTimeUtc,
+                EnvironmentName = details.EnvironmentName ?? EnvironmentConfig.DefaultName,
+                Username = details.Username ?? string.Empty,
+                CommandTimeoutSeconds = details.CommandTimeoutSeconds,
+                ConnectionTimeoutSeconds = details.ConnectionTimeoutSeconds,
+                UseConnectionPooling = details.UseConnectionPooling,
+                RunMode = details.RunMode ?? string.Empty,
+                IsFolderExecution = details.IsFolderExecution,
+                FolderName = details.FolderName ?? string.Empty,
+                ExecutedPresetNames = details.ExecutedPresetNames?.ToList() ?? new List<string>(),
+                Hosts = details.Hosts?
+                    .Select(host => new SSH_Helper.Models.HostExecutionContext
+                    {
+                        HostAddress = host.HostAddress ?? string.Empty,
+                        Success = host.Success,
+                        TimestampUtc = host.TimestampUtc,
+                        Variables = host.Variables == null
+                            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            : new Dictionary<string, string>(host.Variables, StringComparer.OrdinalIgnoreCase)
+                    })
+                    .ToList()
+                    ?? new List<SSH_Helper.Models.HostExecutionContext>()
             };
         }
 
@@ -873,18 +911,73 @@ namespace SSH_Helper
                 : preferredEnvironment;
 
             _suppressEnvironmentSelectionChange = true;
-            tsbEnvironment.Items.Clear();
+            tsbEnvironment.DropDownItems.Clear();
+            tsbEnvironment.DropDown.MinimumSize = new Size(tsbEnvironment.Width, 0);
             foreach (var name in names)
             {
-                tsbEnvironment.Items.Add(name);
+                var item = new ToolStripMenuItem(name)
+                {
+                    Tag = name,
+                    Checked = string.Equals(name, target, StringComparison.OrdinalIgnoreCase)
+                };
+                ApplyEnvironmentMenuItemColor(item, GetEnvironmentLabelColor(name));
+                tsbEnvironment.DropDownItems.Add(item);
             }
 
             int index = names.FindIndex(name => string.Equals(name, target, StringComparison.OrdinalIgnoreCase));
-            tsbEnvironment.SelectedIndex = index >= 0 ? index : 0;
-            _activeEnvironmentName = tsbEnvironment.SelectedItem as string ?? EnvironmentConfig.DefaultName;
+            _activeEnvironmentName = index >= 0 ? names[index] : EnvironmentConfig.DefaultName;
+            foreach (ToolStripItem item in tsbEnvironment.DropDownItems)
+            {
+                if (item is ToolStripMenuItem menuItem && menuItem.Tag is string name)
+                {
+                    menuItem.Checked = string.Equals(name, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            tsbEnvironment.Text = _activeEnvironmentName;
+            ApplyActiveEnvironmentLabelColor();
             _suppressEnvironmentSelectionChange = false;
 
             UpdateWindowTitle();
+        }
+
+        private int? GetEnvironmentLabelColor(string environmentName)
+        {
+            try
+            {
+                return _environmentService.GetEnvironment(environmentName).LabelColor;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void ApplyEnvironmentMenuItemColor(ToolStripMenuItem item, int? labelColorArgb)
+        {
+            if (!labelColorArgb.HasValue)
+                return;
+
+            var color = Color.FromArgb(labelColorArgb.Value);
+            item.ForeColor = Color.FromArgb(255, color.R, color.G, color.B);
+        }
+
+        private void ApplyActiveEnvironmentLabelColor()
+        {
+            var defaultColor = _isDarkMode ? DarkTextPrimary : LightTextColor;
+            var labelColor = GetEnvironmentLabelColor(_activeEnvironmentName);
+            var swatchColor = labelColor.HasValue
+                ? Color.FromArgb(labelColor.Value)
+                : (_isDarkMode ? DarkSurface2 : LightControlBackground);
+
+            tsbEnvironment.Tag = swatchColor.ToArgb();
+            tsbEnvironment.Invalidate();
+            if (labelColor.HasValue)
+            {
+                tsbEnvironment.ForeColor = GetContrastColor(swatchColor);
+                return;
+            }
+
+            tsbEnvironment.ForeColor = defaultColor;
         }
 
         private void UpdateWindowTitle()
@@ -895,15 +988,17 @@ namespace SSH_Helper
         private void EnvironmentService_EnvironmentChanged(object? sender, EnvironmentChangedEventArgs e)
         {
             _activeEnvironmentName = e.CurrentEnvironment;
+            ApplyActiveEnvironmentLabelColor();
             UpdateWindowTitle();
         }
 
-        private void TsbEnvironment_SelectedIndexChanged(object? sender, EventArgs e)
+        private void TsbEnvironment_DropDownItemClicked(object? sender, ToolStripItemClickedEventArgs e)
         {
             if (_suppressEnvironmentSelectionChange)
                 return;
 
-            if (tsbEnvironment.SelectedItem is not string targetEnvironment)
+            var clickedItem = e.ClickedItem;
+            if (clickedItem?.Tag is not string targetEnvironment)
                 return;
 
             if (string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
@@ -919,7 +1014,8 @@ namespace SSH_Helper
         {
             EnsureDefaultEnvironmentForFirstAdoption();
 
-            using var dialog = new EnvironmentDialog(_environmentService, _isDarkMode);
+            using var dialog = new EnvironmentDialog(_environmentService, _configService, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -1194,7 +1290,7 @@ namespace SSH_Helper
         private static readonly Color LightControlBackground = Color.FromArgb(253, 253, 253);
         private static readonly Color LightAlternateRow = Color.FromArgb(248, 249, 250);
         private static readonly Color LightFormBackground = Color.FromArgb(233, 236, 239);
-        private static readonly Color LightAccent = Color.FromArgb(13, 110, 253);
+        private static readonly Color LightAccent = DialogTheme.GridLightSelection;
         private static readonly Color LightSelectionBorder = Color.FromArgb(10, 88, 202);  // Darker accent for border
 
         // Dark theme colors (VS Code inspired - professional and easy on the eyes)
@@ -1205,7 +1301,7 @@ namespace SSH_Helper
         private static readonly Color DarkTextPrimary = Color.FromArgb(204, 204, 204);    // Primary text
         private static readonly Color DarkTextSecondary = Color.FromArgb(128, 128, 128);  // Secondary/muted text
         private static readonly Color DarkBorder = Color.FromArgb(48, 48, 48);            // Subtle borders
-        private static readonly Color DarkSelectionBg = Color.FromArgb(4, 57, 94);        // Subtle selection (VS Code style)
+        private static readonly Color DarkSelectionBg = DialogTheme.GridDarkSelection;     // Shared selection color
         private static readonly Color DarkSelectionBorder = Color.FromArgb(0, 122, 204); // Selection border accent
         private static readonly Color DarkInputBackground = Color.FromArgb(60, 60, 60);   // Input fields
         private static readonly Color DarkInputText = Color.FromArgb(220, 220, 220);      // Input text
@@ -1256,6 +1352,7 @@ namespace SSH_Helper
 
             // Update custom DataGridView scrollbar colors
             ApplyScrollbarColors();
+            ApplyActiveEnvironmentLabelColor();
 
             ResumeLayout(true);
             Refresh();
@@ -1263,6 +1360,7 @@ namespace SSH_Helper
 
         // Fonts created by ApplyFontSettings — disposed on next call or in Form1.Dispose
         private List<Font> _managedFonts = new();
+        private Font? _dialogFont;
 
         private void ApplyFontSettings(Models.FontSettings fontSettings)
         {
@@ -1392,6 +1490,10 @@ namespace SSH_Helper
             var statusFont = new Font(uiFont, Scaled(fontSettings.StatusBarFontSize));
             _managedFonts.Add(statusFont);
             statusStrip.Font = statusFont;
+
+            // Dialog font (used by themed confirmation dialogs)
+            _dialogFont = new Font(uiFont, Scaled(fontSettings.DialogFontSize));
+            _managedFonts.Add(_dialogFont);
 
             // Apply accent color if custom
             ApplyAccentColor(fontSettings.CustomAccentColor);
@@ -1797,6 +1899,10 @@ namespace SSH_Helper
                 else if (item is ToolStripLabel label)
                 {
                     label.ForeColor = darkMode ? DarkTextSecondary : LightSecondaryText;
+                }
+                else if (item is ToolStripButton button)
+                {
+                    button.Margin = new Padding(2, 1, 2, 2);
                 }
             }
         }
@@ -3394,6 +3500,9 @@ namespace SSH_Helper
 
         private void btnClear_Click(object sender, EventArgs e)
         {
+            if (!DialogTheme.Confirm(this, "Are you sure you want to clear all hosts?", "Clear Grid", _isDarkMode, _dialogFont))
+                return;
+
             ClearGrid();
         }
 
@@ -3546,6 +3655,7 @@ namespace SSH_Helper
         {
             var previousCredentialManager = _configService.GetCurrent().Credentials.UseCredentialManager;
             using var dialog = new SettingsDialog(_configService, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 // Settings saved - default timeout only applies to new presets
@@ -3588,13 +3698,13 @@ namespace SSH_Helper
 
         private void validateScriptToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            if (_selectedFolderName != null)
+                return;
+
             var scriptText = txtCommand.Text ?? string.Empty;
 
             if (!Services.Scripting.ScriptParser.IsYamlScript(scriptText))
-            {
-                MessageBox.Show("Current commands are not a YAML script.", "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
-            }
 
             var parser = new Services.Scripting.ScriptParser();
 
@@ -3608,13 +3718,13 @@ namespace SSH_Helper
                 {
                     var successMessage = ScriptValidationFormatter.FormatSuccessMessage();
                     AppendOutputText(Environment.NewLine + successMessage + Environment.NewLine);
-                    MessageBox.Show(successMessage, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    DialogTheme.ShowMessage(this, successMessage, "Validate Script", MessageBoxIcon.Information, _isDarkMode, _dialogFont);
                 }
                 else if (errors.Count == 0)
                 {
                     var warningMessage = "Script validation succeeded with warnings:" + Environment.NewLine + string.Join(Environment.NewLine, warnings);
                     AppendOutputText(Environment.NewLine + warningMessage + Environment.NewLine);
-                    MessageBox.Show(warningMessage, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    DialogTheme.ShowMessage(this, warningMessage, "Validate Script", MessageBoxIcon.Warning, _isDarkMode, _dialogFont);
                 }
                 else
                 {
@@ -3622,14 +3732,14 @@ namespace SSH_Helper
                     if (warnings.Count > 0)
                         message += Environment.NewLine + Environment.NewLine + "Warnings:" + Environment.NewLine + string.Join(Environment.NewLine, warnings);
                     AppendOutputText(Environment.NewLine + message + Environment.NewLine);
-                    MessageBox.Show(message, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    DialogTheme.ShowMessage(this, message, "Validate Script", MessageBoxIcon.Warning, _isDarkMode, _dialogFont);
                 }
             }
             catch (Exception ex)
             {
                 var message = ScriptValidationFormatter.FormatExceptionMessage(ex);
                 AppendOutputText(Environment.NewLine + message + Environment.NewLine);
-                MessageBox.Show(message, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.ShowMessage(this, message, "Validate Script", MessageBoxIcon.Error, _isDarkMode, _dialogFont);
             }
         }
 
@@ -3700,6 +3810,7 @@ namespace SSH_Helper
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
             using var dlg = new AboutDialog(ApplicationName, ApplicationVersion, _isDarkMode);
+            DialogTheme.SetDialogFont(dlg, _dialogFont);
             dlg.ShowDialog(this);
         }
 
@@ -5898,6 +6009,7 @@ namespace SSH_Helper
             {
                 var hostAddresses = hosts.Select(h => h.ToString()).ToList();
                 using var dialog = new FolderExecutionDialog(presetDisplayName, new List<string> { presetDisplayName }, hostAddresses, _isDarkMode);
+                DialogTheme.SetDialogFont(dialog, _dialogFont);
                 if (dialog.ShowDialog(this) != DialogResult.OK)
                     return;
 
@@ -6026,7 +6138,8 @@ namespace SSH_Helper
 
             try
             {
-                result = analyzer.AnalyzePresets(presets);
+                var environmentVariableNames = _environmentService.GetActiveEnvironmentVariables().Keys;
+                result = analyzer.AnalyzePresets(presets, environmentVariableNames);
             }
             catch (Exception ex)
             {
@@ -6165,6 +6278,7 @@ namespace SSH_Helper
                 .Where(h => !string.IsNullOrWhiteSpace(h))
                 .ToList();
             using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -6206,6 +6320,7 @@ namespace SSH_Helper
 
             // Show folder execution dialog (single host selected)
             using var dialog = new FolderExecutionDialog(folderName, presetNames, new List<string> { host }, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -6247,6 +6362,7 @@ namespace SSH_Helper
                 .Select(r => GetCellValue(r, CsvManager.HostColumnName))
                 .ToList();
             using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -6832,6 +6948,30 @@ namespace SSH_Helper
             }
         }
 
+        private void SshService_EnvironmentVariableUpdateRequested(object? sender, SshEnvironmentVariableUpdateEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(() => UpdateActiveEnvironmentVariable(e.Variable, e.Value));
+            }
+            else
+            {
+                UpdateActiveEnvironmentVariable(e.Variable, e.Value);
+            }
+        }
+
+        private void UpdateActiveEnvironmentVariable(string variable, string value)
+        {
+            try
+            {
+                _environmentService.UpdateActiveEnvironmentVariable(variable, value);
+            }
+            catch (Exception ex)
+            {
+                AppendOutputText($"[WARNING] Failed to persist environment variable '{variable}': {ex.Message}{Environment.NewLine}");
+            }
+        }
+
         private void UpdateHostColumn(HostConnection host, string columnName, string value)
         {
             // Find the row for this host
@@ -7009,6 +7149,7 @@ namespace SSH_Helper
             }
 
             using var dialog = new ExecutionDetailsDialog(details, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             dialog.ShowDialog(this);
         }
 
@@ -7050,6 +7191,7 @@ namespace SSH_Helper
             if (_findDialog == null || _findDialog.IsDisposed)
             {
                 _findDialog = new FindDialog(this, seed, _lastFindMatchCase);
+                DialogTheme.SetDialogFont(_findDialog, _dialogFont);
                 _findDialog.AnchorTo(txtOutput);
             }
 
@@ -7359,6 +7501,11 @@ namespace SSH_Helper
                     historyEntry.HostResults = hostResults;
                 }
 
+                if (_historyResults.TryGetDetails(entryId, out var details) && details != null)
+                {
+                    historyEntry.Details = CloneExecutionDetails(details);
+                }
+
                 state.History.Add(historyEntry);
             }
 
@@ -7463,6 +7610,11 @@ namespace SSH_Helper
                     if (entry.HostResults != null && entry.HostResults.Count > 0)
                     {
                         _historyResults.SetResults(entryId, entry.HostResults);
+                    }
+
+                    if (entry.Details != null)
+                    {
+                        _historyResults.SetDetails(entryId, CloneExecutionDetails(entry.Details));
                     }
                 }
 
@@ -7577,6 +7729,7 @@ namespace SSH_Helper
                     {
                         _configService.Update(c => c.UpdateSettings.SkippedVersion = skippedVersion);
                     }, config.UpdateSettings.EnableUpdateLog, _isDarkMode);
+                    DialogTheme.SetDialogFont(updateDialog, _dialogFont);
                     updateDialog.ShowDialog(this);
                 }
                 else

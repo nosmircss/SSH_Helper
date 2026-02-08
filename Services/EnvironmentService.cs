@@ -232,6 +232,32 @@ namespace SSH_Helper.Services
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
+        public void UpdateActiveEnvironmentVariable(string variableName, string value)
+        {
+            if (string.IsNullOrWhiteSpace(variableName))
+                throw new ArgumentException("Environment variable name is required.", nameof(variableName));
+
+            var variableKey = variableName.Trim();
+            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var active = ResolveActiveName(activeEnvironment, environments);
+
+            // Ensure a persisted default exists before mutating active Default.
+            if (IsDefaultName(active) && !environments.ContainsKey(EnvironmentConfig.DefaultName))
+            {
+                environments[EnvironmentConfig.DefaultName] = _configService.BuildLegacyDefaultEnvironment();
+            }
+
+            if (!environments.TryGetValue(active, out var environment))
+                throw new KeyNotFoundException($"Environment '{active}' was not found.");
+
+            environment.Variables ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            environment.Variables[variableKey] = value ?? string.Empty;
+            environment.Normalize(active);
+            environments[active] = environment;
+
+            _configService.SaveEnvironmentState(environments, active);
+        }
+
         public void UpdateEnvironmentDetails(string name, string? description, int? labelColor, Dictionary<string, string> variables)
         {
             var environmentName = NormalizeName(name);
@@ -254,6 +280,32 @@ namespace SSH_Helper.Services
             environments[environmentName] = environment;
 
             _configService.SaveEnvironmentState(environments, ResolveActiveName(activeEnvironment, environments));
+        }
+
+        public EnvironmentConfig ImportEnvironment(EnvironmentConfig environment, bool overwriteExisting = false)
+        {
+            if (environment == null)
+                throw new ArgumentNullException(nameof(environment));
+
+            var environmentName = NormalizeName(environment.Name);
+            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+
+            // First explicit environment adoption: capture legacy state into Default.
+            if (environments.Count == 0 && !IsDefaultName(environmentName))
+            {
+                environments[EnvironmentConfig.DefaultName] = _configService.BuildLegacyDefaultEnvironment();
+            }
+
+            if (environments.ContainsKey(environmentName) && !overwriteExisting)
+                throw new InvalidOperationException($"Environment '{environmentName}' already exists.");
+
+            var imported = environment.Clone();
+            imported.Name = environmentName;
+            imported.Normalize(environmentName);
+            environments[environmentName] = imported;
+
+            _configService.SaveEnvironmentState(environments, ResolveActiveName(activeEnvironment, environments));
+            return imported.Clone();
         }
 
         private static EnvironmentConfig BuildSnapshot(

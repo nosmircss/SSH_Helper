@@ -42,6 +42,16 @@ namespace SSH_Helper.Services
     }
 
     /// <summary>
+    /// Event arguments for environment variable update requests from scripts.
+    /// </summary>
+    public class SshEnvironmentVariableUpdateEventArgs : EventArgs
+    {
+        public HostConnection Host { get; set; } = new();
+        public string Variable { get; set; } = string.Empty;
+        public string Value { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Event arguments for completed command execution.
     /// </summary>
     public class SshCommandCompletedEventArgs : EventArgs
@@ -62,6 +72,7 @@ namespace SSH_Helper.Services
         public event EventHandler<SshProgressEventArgs>? ProgressChanged;
         public event EventHandler<SshOutputEventArgs>? OutputReceived;
         public event EventHandler<SshColumnUpdateEventArgs>? ColumnUpdateRequested;
+        public event EventHandler<SshEnvironmentVariableUpdateEventArgs>? EnvironmentVariableUpdateRequested;
         public event EventHandler<SshCommandCompletedEventArgs>? CommandCompleted;
         public event EventHandler? ExecutionCompleted;
 
@@ -912,6 +923,11 @@ namespace SSH_Helper.Services
                     OnColumnUpdateRequested(host, e.ColumnName, e.Value);
                 };
 
+                context.EnvironmentUpdateRequested += (s, e) =>
+                {
+                    OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
+                };
+
                 // Execute the script
                 var executor = new ScriptExecutor();
                 var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
@@ -1047,6 +1063,11 @@ namespace SSH_Helper.Services
             context.ColumnUpdateRequested += (s, e) =>
             {
                 OnColumnUpdateRequested(host, e.ColumnName, e.Value);
+            };
+
+            context.EnvironmentUpdateRequested += (s, e) =>
+            {
+                OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
             };
 
             // Execute the script
@@ -1367,6 +1388,16 @@ namespace SSH_Helper.Services
             {
                 Host = host,
                 ColumnName = columnName,
+                Value = value
+            });
+        }
+
+        protected virtual void OnEnvironmentVariableUpdateRequested(HostConnection host, string variable, string value)
+        {
+            EnvironmentVariableUpdateRequested?.Invoke(this, new SshEnvironmentVariableUpdateEventArgs
+            {
+                Host = host,
+                Variable = variable,
                 Value = value
             });
         }

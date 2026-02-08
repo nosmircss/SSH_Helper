@@ -35,6 +35,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Writefile, new WriteFileCommand() },
                 { StepType.Input, new InputCommand() },
                 { StepType.UpdateColumn, new UpdateColumnCommand() },
+                { StepType.UpdateEnvironment, new UpdateEnvironmentCommand() },
                 { StepType.Log, new LogCommand() },
                 { StepType.Webhook, new WebhookCommand() },
                 { StepType.Parse, new ParseCommand() },

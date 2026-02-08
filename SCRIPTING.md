@@ -22,6 +22,7 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [writefile](#writefile---write-text-files)
    - [input](#input---prompt-for-user-input)
    - [updatecolumn](#updatecolumn---update-host-table-column)
+   - [updateenvironment](#updateenvironment---update-active-environment-variable)
    - [log](#log---output-with-log-level)
    - [webhook](#webhook---http-requests)
    - [parse](#parse---configuration-parsing)
@@ -60,7 +61,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- log:`, `- webhook:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- webhook:`, `- parse:`
 
 Metadata-only keys (for example `name:` or `description:`) are not treated as strong YAML indicators by themselves.
 
@@ -1318,6 +1319,52 @@ Writes a value back to a column in the host table for the current host. This all
 
 ---
 
+### updateenvironment - Update Active Environment Variable
+
+Persists a value into the active environment profile's variable set. The updated value is also available immediately for later steps in the same script execution.
+
+**Syntax:**
+```yaml
+- updateenvironment:
+    variable: "variable_name"
+    value: "value_or_${variable}"
+```
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `variable` | Yes | Environment variable name to update |
+| `value` | Yes | Value to persist (supports variable substitution) |
+
+**Behavior:**
+- Updates the active environment profile (for example `Default`, `prod`, `staging`)
+- Persists immediately to configuration
+- Makes the new value available to later steps in the same script
+- Affects subsequent executions that use the same active environment
+- If multiple hosts update the same variable in one run, the last processed update wins
+
+**Examples:**
+```yaml
+# Save a refreshed token
+- send: refresh-token
+  capture: token_output
+- extract:
+    from: token_output
+    pattern: 'token=(\S+)'
+    into: new_token
+- updateenvironment:
+    variable: api_token
+    value: ${new_token}
+
+# Persist last successful scan time
+- updateenvironment:
+    variable: last_scan_utc
+    value: ${_timestamp}
+```
+
+---
+
 ### log - Output with Log Level
 
 Outputs a message with a specific log level for categorized output. Unlike `print`, log messages are styled based on their level and can be filtered.
@@ -1710,7 +1757,12 @@ These are accessible via nested paths:
    - print: "User: ${username}"     # Custom column
    ```
 
-2. **Script Variables** (from `vars:` section):
+2. **Active Environment Variables**: Variables from the currently selected environment profile
+   ```yaml
+   - print: "Token: ${api_token}"
+   ```
+
+3. **Script Variables** (from `vars:` section):
    ```yaml
    vars:
      timeout: 30
@@ -1719,14 +1771,14 @@ These are accessible via nested paths:
      - print: "Timeout: ${timeout}"
    ```
 
-3. **Captured Variables**:
+4. **Captured Variables**:
    ```yaml
    - send: show version
      capture: version_output
    - print: "${version_output}"
    ```
 
-4. **Extracted Variables**:
+5. **Extracted Variables**:
    ```yaml
    - extract:
        from: output
@@ -1735,7 +1787,7 @@ These are accessible via nested paths:
    - print: "IP: ${ip_address}"
    ```
 
-5. **Set Variables**:
+6. **Set Variables**:
    ```yaml
    - set: counter = 0
    - print: "Counter: ${counter}"
@@ -1829,11 +1881,13 @@ When multiple sources define the same variable name, the following precedence ap
 
 1. **CSV Grid Columns** - Values from the host table (highest priority)
 2. **Set/Extract/Captured Variables** - Variables modified during script execution
-3. **Script `vars:` Section** - Default values (only set if not already defined)
+3. **Active Environment Variables** - Fallback values from the selected environment profile
+4. **Script `vars:` Section** - Default values (only set if not already defined)
 
 This means:
 - A column named `timeout` in your CSV will override a `timeout` defined in `vars:`
-- Using `set: myvar = value` during execution will override the `vars:` default
+- A value from `set`, `extract`, `capture`, or `updateenvironment` will override the earlier runtime value
+- Environment variables fill missing host values before `vars:` defaults are applied
 - You can use `vars:` to provide fallback defaults when columns don't exist
 
 **Example:**

@@ -32,6 +32,22 @@ namespace SSH_Helper.Services.Scripting
     }
 
     /// <summary>
+    /// Event arguments for environment variable update requests from scripts.
+    /// </summary>
+    public class EnvironmentUpdateEventArgs : EventArgs
+    {
+        /// <summary>
+        /// The environment variable name to update.
+        /// </summary>
+        public string Variable { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The value to persist.
+        /// </summary>
+        public string Value { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Types of script output.
     /// </summary>
     public enum ScriptOutputType
@@ -108,6 +124,11 @@ namespace SSH_Helper.Services.Scripting
         /// Fired when script requests a column update for the current host.
         /// </summary>
         public event EventHandler<ColumnUpdateEventArgs>? ColumnUpdateRequested;
+
+        /// <summary>
+        /// Fired when script requests an environment variable update.
+        /// </summary>
+        public event EventHandler<EnvironmentUpdateEventArgs>? EnvironmentUpdateRequested;
 
         /// <summary>
         /// Gets the last command output.
@@ -390,6 +411,20 @@ namespace SSH_Helper.Services.Scripting
             ColumnUpdateRequested?.Invoke(this, new ColumnUpdateEventArgs
             {
                 ColumnName = columnName,
+                Value = value
+            });
+        }
+
+        /// <summary>
+        /// Requests a persisted update to an environment variable.
+        /// </summary>
+        /// <param name="variable">The variable name to update.</param>
+        /// <param name="value">The value to persist.</param>
+        public void RequestEnvironmentUpdate(string variable, string value)
+        {
+            EnvironmentUpdateRequested?.Invoke(this, new EnvironmentUpdateEventArgs
+            {
+                Variable = variable,
                 Value = value
             });
         }

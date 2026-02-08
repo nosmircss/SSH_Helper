@@ -168,6 +168,11 @@ namespace SSH_Helper.Models
         /// </summary>
         public float StatusBarFontSize { get; set; } = 9f;
 
+        /// <summary>
+        /// Font size for dialog windows (confirmations, environment manager, etc.).
+        /// </summary>
+        public float DialogFontSize { get; set; } = 9f;
+
         // === Global Scaling ===
 
         /// <summary>
@@ -281,6 +286,12 @@ namespace SSH_Helper.Models
         /// Per-host results for folder executions. Null for single preset executions.
         /// </summary>
         public List<HostHistoryEntry>? HostResults { get; set; }
+
+        /// <summary>
+        /// Optional execution metadata used by the "View Details" dialog.
+        /// Null for legacy entries and entries created before details capture.
+        /// </summary>
+        public ExecutionDetails? Details { get; set; }
     }
 
     /// <summary>
@@ -347,6 +358,11 @@ namespace SSH_Helper.Models
         public int? CommandSplitterDistance { get; set; } = 350;
         public int? OutputSplitterDistance { get; set; } = 300;
         public int? HistorySplitterDistance { get; set; } = 137;
+
+        // Manage Environments dialog layout
+        public int? EnvironmentDialogWidth { get; set; } = 920;
+        public int? EnvironmentDialogHeight { get; set; } = 620;
+        public int? EnvironmentDialogSplitterDistance { get; set; } = 270;
     }
 
     /// <summary>

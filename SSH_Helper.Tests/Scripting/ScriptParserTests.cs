@@ -99,6 +99,7 @@ show interface status";
     [InlineData("- continue: true")]
     [InlineData("- try:\n  - print: test")]
     [InlineData("- updatecolumn:\n    column: test")]
+    [InlineData("- updateenvironment:\n    variable: token")]
     public void IsYamlScript_StepSyntax_ReturnsTrue(string input)
     {
         var result = ScriptParser.IsYamlScript(input);
@@ -732,6 +733,85 @@ steps:
   - updatecolumn:
       column: status
       value: active";
+        var script = _parser.Parse(yaml);
+
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region Parse UpdateEnvironment Tests
+
+    [Fact]
+    public void Parse_UpdateEnvironmentStep_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - updateenvironment:
+      variable: api_token
+      value: ""abc123""";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].UpdateEnvironment.Should().NotBeNull();
+        script.Steps[0].UpdateEnvironment!.Variable.Should().Be("api_token");
+        script.Steps[0].UpdateEnvironment.Value.Should().Be("abc123");
+    }
+
+    [Fact]
+    public void Parse_UpdateEnvironmentWithVariable_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - updateenvironment:
+      variable: api_token
+      value: ""${new_token}""";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].UpdateEnvironment.Should().NotBeNull();
+        script.Steps[0].UpdateEnvironment!.Variable.Should().Be("api_token");
+        script.Steps[0].UpdateEnvironment.Value.Should().Be("${new_token}");
+    }
+
+    [Fact]
+    public void Validate_UpdateEnvironmentMissingVariable_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - updateenvironment:
+      value: ""test""";
+        var script = _parser.Parse(yaml);
+
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(e => e.Contains("variable"));
+    }
+
+    [Fact]
+    public void Validate_UpdateEnvironmentMissingValue_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - updateenvironment:
+      variable: token";
+        var script = _parser.Parse(yaml);
+
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(e => e.Contains("value"));
+    }
+
+    [Fact]
+    public void Validate_UpdateEnvironmentValid_NoErrors()
+    {
+        var yaml = @"---
+steps:
+  - updateenvironment:
+      variable: token
+      value: refreshed";
         var script = _parser.Parse(yaml);
 
         var errors = _parser.Validate(script, yaml);

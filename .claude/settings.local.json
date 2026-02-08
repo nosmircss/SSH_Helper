@@ -23,5 +23,8 @@
       "Read(.env)",
       "Read(./secrets/**)"
     ]
-  }
+  },
+  "disabledMcpjsonServers": [
+    "codex"
+  ]
 }

@@ -7,14 +7,14 @@ namespace SSH_Helper.Services.Scripting
     {
         public static string FormatSuccessMessage()
         {
-            return "Script validation succeeded (no errors found).";
+            return "Script validation succeeded with no errors.";
         }
 
         public static string FormatFailureMessage(IEnumerable<string> errors)
         {
             var errorList = errors?.ToList() ?? new List<string>();
             if (errorList.Count == 0)
-                return "Script validation failed.";
+                return "Script validation failed with unknown errors.";
 
             return "Script validation failed:" + Environment.NewLine + string.Join(Environment.NewLine, errorList);
         }

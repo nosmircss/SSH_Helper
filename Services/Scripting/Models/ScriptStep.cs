@@ -85,6 +85,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public UpdateColumnOptions? UpdateColumn { get; set; }
 
         /// <summary>
+        /// UpdateEnvironment command - updates an environment variable with a value.
+        /// </summary>
+        public UpdateEnvironmentOptions? UpdateEnvironment { get; set; }
+
+        /// <summary>
         /// Log command - outputs a message with a specific log level.
         /// Simple form: "log: message" (defaults to info level)
         /// Options form: log: { message: "text", level: "warning" }
@@ -205,6 +210,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Writefile != null) return StepType.Writefile;
             if (Input != null) return StepType.Input;
             if (UpdateColumn != null) return StepType.UpdateColumn;
+            if (UpdateEnvironment != null) return StepType.UpdateEnvironment;
             if (Log != null) return StepType.Log;
             if (Webhook != null) return StepType.Webhook;
             if (Parse != null) return StepType.Parse;
@@ -389,6 +395,23 @@ namespace SSH_Helper.Services.Scripting.Models
     }
 
     /// <summary>
+    /// Options for the updateenvironment command.
+    /// </summary>
+    public class UpdateEnvironmentOptions
+    {
+        /// <summary>
+        /// The environment variable key to update.
+        /// </summary>
+        public string Variable { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The value to persist. Can be a literal string or a variable reference like ${varname}.
+        /// Null means the value was not specified in the script.
+        /// </summary>
+        public string? Value { get; set; }
+    }
+
+    /// <summary>
     /// Options for the log command.
     /// </summary>
     public class LogOptions
@@ -490,6 +513,7 @@ namespace SSH_Helper.Services.Scripting.Models
         Writefile,
         Input,
         UpdateColumn,
+        UpdateEnvironment,
         Log,
         Webhook,
         Parse

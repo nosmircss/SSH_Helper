@@ -131,4 +131,198 @@ public class EnvironmentServiceTests : IDisposable
         Action act = () => _environmentService.DeleteEnvironment(EnvironmentConfig.DefaultName);
         act.Should().Throw<InvalidOperationException>();
     }
+
+    [Fact]
+    public void SaveCurrentGridToEnvironment_PreservesLabelColor()
+    {
+        _environmentService.CreateEnvironment("prod");
+        const int labelColor = unchecked((int)0xFF1E90FF);
+
+        _environmentService.UpdateEnvironmentDetails(
+            "prod",
+            "Production",
+            labelColor,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["region"] = "us-east-1"
+            });
+
+        _environmentService.SaveCurrentGridToEnvironment(
+            "prod",
+            new List<string> { CsvManager.HostColumnName },
+            new List<Dictionary<string, string>>
+            {
+                new() { [CsvManager.HostColumnName] = "203.0.113.10" }
+            },
+            new List<int> { 0 },
+            @"C:\tmp\prod.csv");
+
+        var environment = _environmentService.GetEnvironment("prod");
+        environment.LabelColor.Should().Be(labelColor);
+        environment.Hosts.Should().HaveCount(1);
+        environment.Hosts[0][CsvManager.HostColumnName].Should().Be("203.0.113.10");
+    }
+
+    [Fact]
+    public void ImportEnvironment_WhenEnvironmentExistsWithoutOverwrite_Throws()
+    {
+        _environmentService.CreateEnvironment("prod");
+
+        var imported = new EnvironmentConfig
+        {
+            Name = "prod",
+            Description = "Imported profile"
+        };
+
+        Action act = () => _environmentService.ImportEnvironment(imported, overwriteExisting: false);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*already exists*");
+    }
+
+    [Fact]
+    public void ImportEnvironment_WhenOverwriteEnabled_ReplacesEnvironmentSnapshot()
+    {
+        _environmentService.CreateEnvironment("prod");
+        _environmentService.SaveCurrentGridToEnvironment(
+            "prod",
+            new List<string> { CsvManager.HostColumnName, "username" },
+            new List<Dictionary<string, string>>
+            {
+                new()
+                {
+                    [CsvManager.HostColumnName] = "198.51.100.10",
+                    ["username"] = "before"
+                }
+            },
+            new List<int> { 0 },
+            @"C:\tmp\before.csv");
+
+        var imported = new EnvironmentConfig
+        {
+            Name = "prod",
+            Description = "Imported production",
+            HostColumns = new List<string> { CsvManager.HostColumnName, "port" },
+            Hosts = new List<Dictionary<string, string>>
+            {
+                new()
+                {
+                    [CsvManager.HostColumnName] = "198.51.100.77",
+                    ["port"] = "2222"
+                }
+            },
+            SelectedHostIndices = new List<int> { 0 },
+            LastCsvPath = @"C:\tmp\imported.csv",
+            Variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["region"] = "us-west-2"
+            }
+        };
+
+        var saved = _environmentService.ImportEnvironment(imported, overwriteExisting: true);
+
+        saved.Name.Should().Be("prod");
+        saved.Description.Should().Be("Imported production");
+
+        var current = _environmentService.GetEnvironment("prod");
+        current.HostColumns.Should().ContainInOrder(CsvManager.HostColumnName, "port");
+        current.Hosts.Should().ContainSingle();
+        current.Hosts[0][CsvManager.HostColumnName].Should().Be("198.51.100.77");
+        current.Hosts[0]["port"].Should().Be("2222");
+        current.LastCsvPath.Should().Be(@"C:\tmp\imported.csv");
+        current.Variables.Should().ContainKey("region").WhoseValue.Should().Be("us-west-2");
+    }
+
+    [Fact]
+    public void ImportEnvironment_InLegacyProfile_CapturesDefaultSnapshotBeforeImport()
+    {
+        _configService.Update(config =>
+        {
+            config.SavedState = new ApplicationState
+            {
+                HostColumns = new List<string> { CsvManager.HostColumnName },
+                Hosts = new List<Dictionary<string, string>>
+                {
+                    new() { [CsvManager.HostColumnName] = "203.0.113.50" }
+                }
+            };
+            config.Environments.Clear();
+            config.ActiveEnvironment = null;
+        });
+
+        _environmentService.ImportEnvironment(new EnvironmentConfig
+        {
+            Name = "staging",
+            HostColumns = new List<string> { CsvManager.HostColumnName },
+            Hosts = new List<Dictionary<string, string>>
+            {
+                new() { [CsvManager.HostColumnName] = "203.0.113.60" }
+            }
+        });
+
+        var persisted = _configService.GetCurrent();
+        persisted.Environments.Should().ContainKey(EnvironmentConfig.DefaultName);
+        persisted.Environments.Should().ContainKey("staging");
+        persisted.Environments[EnvironmentConfig.DefaultName].Hosts.Should().ContainSingle();
+        persisted.Environments[EnvironmentConfig.DefaultName].Hosts[0][CsvManager.HostColumnName].Should().Be("203.0.113.50");
+    }
+
+    [Fact]
+    public void UpdateActiveEnvironmentVariable_UpdatesOnlyActiveEnvironment()
+    {
+        var map = new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase)
+        {
+            [EnvironmentConfig.DefaultName] = new EnvironmentConfig
+            {
+                Name = EnvironmentConfig.DefaultName,
+                Variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["api_token"] = "default-token"
+                }
+            },
+            ["prod"] = new EnvironmentConfig
+            {
+                Name = "prod",
+                Variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["api_token"] = "old-token"
+                }
+            }
+        };
+        _configService.SaveEnvironmentState(map, "prod");
+
+        _environmentService.UpdateActiveEnvironmentVariable("api_token", "new-token");
+
+        _environmentService.GetEnvironment("prod")
+            .Variables.Should().ContainKey("api_token").WhoseValue.Should().Be("new-token");
+        _environmentService.GetEnvironment(EnvironmentConfig.DefaultName)
+            .Variables.Should().ContainKey("api_token").WhoseValue.Should().Be("default-token");
+    }
+
+    [Fact]
+    public void UpdateActiveEnvironmentVariable_InLegacyProfile_CreatesDefaultAndPersistsVariable()
+    {
+        _configService.Update(config =>
+        {
+            config.SavedState = new ApplicationState
+            {
+                HostColumns = new List<string> { CsvManager.HostColumnName },
+                Hosts = new List<Dictionary<string, string>>
+                {
+                    new() { [CsvManager.HostColumnName] = "198.51.100.20" }
+                }
+            };
+            config.Environments.Clear();
+            config.ActiveEnvironment = null;
+        });
+
+        _environmentService.UpdateActiveEnvironmentVariable("api_token", "legacy-token");
+
+        var persisted = _configService.GetCurrent();
+        persisted.Environments.Should().ContainKey(EnvironmentConfig.DefaultName);
+        persisted.Environments[EnvironmentConfig.DefaultName].Hosts.Should().ContainSingle();
+        persisted.Environments[EnvironmentConfig.DefaultName].Hosts[0][CsvManager.HostColumnName].Should().Be("198.51.100.20");
+        persisted.Environments[EnvironmentConfig.DefaultName]
+            .Variables.Should().ContainKey("api_token").WhoseValue.Should().Be("legacy-token");
+    }
 }

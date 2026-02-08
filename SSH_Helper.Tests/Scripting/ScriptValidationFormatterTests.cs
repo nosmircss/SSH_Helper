@@ -11,7 +11,7 @@ public class ScriptValidationFormatterTests
     {
         var message = ScriptValidationFormatter.FormatSuccessMessage();
 
-        message.Should().Be("Script validation succeeded (no errors found).");
+        message.Should().Be("Script validation succeeded with no errors.");
     }
 
     [Fact]
