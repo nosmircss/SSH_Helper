@@ -33,6 +33,11 @@ namespace SSH_Helper.Services.Scripting
             "writefile",
             "input",
             "log",
+            "http",
+            "ping",
+            "dns",
+            "portcheck",
+            "sftp",
             "webhook",
             "parse",
             "break",
@@ -336,8 +341,23 @@ namespace SSH_Helper.Services.Scripting
                     case "log":
                         step.Log = ParseLogValue(parser);
                         break;
+                    case "http":
+                        step.Http = ParseHttpOptions(parser, step);
+                        break;
+                    case "ping":
+                        step.Ping = ParsePingOptions(parser, step);
+                        break;
+                    case "dns":
+                        step.Dns = ParseDnsOptions(parser, step);
+                        break;
+                    case "portcheck":
+                        step.Portcheck = ParsePortcheckOptions(parser, step);
+                        break;
+                    case "sftp":
+                        step.Sftp = ParseSftpOptions(parser, step);
+                        break;
                     case "webhook":
-                        step.Webhook = ParseWebhookOptions(parser);
+                        step.Webhook = ParseWebhookOptions(parser, step);
                         break;
                     case "parse":
                         step.Parse = ParseParseOptions(parser);
@@ -792,7 +812,330 @@ namespace SSH_Helper.Services.Scripting
             }
         }
 
-        private WebhookOptions ParseWebhookOptions(IParser parser)
+        private HttpOptions ParseHttpOptions(IParser parser, ScriptStep step)
+        {
+            var options = new HttpOptions();
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                // Shorthand: - http: "https://example.com"
+                options.Url = parser.Consume<Scalar>().Value;
+                return options;
+            }
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "url":
+                            options.Url = parser.Consume<Scalar>().Value;
+                            break;
+                        case "method":
+                            options.Method = NormalizeUpperLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "body":
+                            options.Body = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "timeout":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
+                                options.Timeout = timeout;
+                            break;
+                        case "follow_redirects":
+                        case "followredirects":
+                            options.FollowRedirects = ParseBooleanOrDefault(parser, options.FollowRedirects);
+                            break;
+                        case "allow_failure":
+                        case "allowfailure":
+                            options.AllowFailure = ParseBooleanOrDefault(parser, options.AllowFailure);
+                            break;
+                        case "verify_tls":
+                        case "verifytls":
+                            if (!TryParseBooleanStrict(parser, out var verifyTls))
+                            {
+                                options.VerifyTlsTypeValid = false;
+                            }
+                            else
+                            {
+                                options.VerifyTls = verifyTls;
+                            }
+                            break;
+                        case "auth":
+                            options.Auth = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "username":
+                            options.Username = parser.Consume<Scalar>().Value;
+                            break;
+                        case "password":
+                            options.Password = parser.Consume<Scalar>().Value;
+                            break;
+                        case "token":
+                            options.Token = parser.Consume<Scalar>().Value;
+                            break;
+                        case "content_type":
+                        case "contenttype":
+                            options.ContentType = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "headers":
+                            options.Headers = ParseStringDictionary(parser);
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown http key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private PingOptions ParsePingOptions(IParser parser, ScriptStep step)
+        {
+            var options = new PingOptions();
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                // Shorthand: - ping: "host-or-ip"
+                options.Host = parser.Consume<Scalar>().Value;
+                return options;
+            }
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "host":
+                            options.Host = parser.Consume<Scalar>().Value;
+                            break;
+                        case "count":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var count))
+                                options.Count = count;
+                            break;
+                        case "timeout":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
+                                options.Timeout = timeout;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown ping key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private DnsOptions ParseDnsOptions(IParser parser, ScriptStep step)
+        {
+            var options = new DnsOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "host":
+                            options.Host = parser.Consume<Scalar>().Value;
+                            break;
+                        case "type":
+                            options.Type = NormalizeUpperLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "timeout":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
+                                options.Timeout = timeout;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown dns key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private PortcheckOptions ParsePortcheckOptions(IParser parser, ScriptStep step)
+        {
+            var options = new PortcheckOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "host":
+                            options.Host = parser.Consume<Scalar>().Value;
+                            break;
+                        case "port":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var port))
+                                options.Port = port;
+                            break;
+                        case "timeout":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
+                                options.Timeout = timeout;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown portcheck key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private SftpOptions ParseSftpOptions(IParser parser, ScriptStep step)
+        {
+            var options = new SftpOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "action":
+                            options.Action = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "local_path":
+                        case "localpath":
+                            options.LocalPath = parser.Consume<Scalar>().Value;
+                            break;
+                        case "remote_path":
+                        case "remotepath":
+                            options.RemotePath = parser.Consume<Scalar>().Value;
+                            break;
+                        case "host":
+                            options.Host = parser.Consume<Scalar>().Value;
+                            break;
+                        case "port":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var port))
+                                options.Port = port;
+                            break;
+                        case "username":
+                            options.Username = parser.Consume<Scalar>().Value;
+                            break;
+                        case "password":
+                            options.Password = parser.Consume<Scalar>().Value;
+                            break;
+                        case "overwrite":
+                            options.Overwrite = ParseBooleanOrDefault(parser, options.Overwrite);
+                            break;
+                        case "timeout":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
+                                options.Timeout = timeout;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown sftp key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private WebhookOptions ParseWebhookOptions(IParser parser, ScriptStep step)
         {
             var options = new WebhookOptions();
 
@@ -825,6 +1168,10 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         case "headers":
                             options.Headers = ParseStringDictionary(parser);
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown webhook key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
@@ -891,6 +1238,15 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
+        private static void ApplyNestedOnErrorAlias(ScriptStep step, IParser parser)
+        {
+            var nestedOnError = parser.Consume<Scalar>().Value;
+            if (string.IsNullOrWhiteSpace(step.OnError))
+            {
+                step.OnError = nestedOnError;
+            }
+        }
+
         private Dictionary<string, string> ParseStringDictionary(IParser parser)
         {
             var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -914,6 +1270,70 @@ namespace SSH_Helper.Services.Scripting
             }
 
             return dict;
+        }
+
+        private bool ParseBooleanOrDefault(IParser parser, bool defaultValue)
+        {
+            if (TryParseBooleanStrict(parser, out var value))
+                return value;
+
+            return defaultValue;
+        }
+
+        private bool TryParseBooleanStrict(IParser parser, out bool value)
+        {
+            value = false;
+
+            if (!parser.Accept<Scalar>(out _))
+            {
+                SkipValue(parser);
+                return false;
+            }
+
+            var scalarValue = parser.Consume<Scalar>().Value;
+            if (TryParseBooleanToken(scalarValue, out value))
+                return true;
+
+            return false;
+        }
+
+        private static bool TryParseBooleanToken(string? raw, out bool value)
+        {
+            value = false;
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+
+            switch (raw.Trim().ToLowerInvariant())
+            {
+                case "true":
+                case "yes":
+                case "1":
+                    value = true;
+                    return true;
+                case "false":
+                case "no":
+                case "0":
+                    value = false;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static string NormalizeUpperLiteralEnum(string value)
+        {
+            if (ContainsVariableToken(value))
+                return value;
+
+            return value.ToUpperInvariant();
+        }
+
+        private static string NormalizeLowerLiteralEnum(string value)
+        {
+            if (ContainsVariableToken(value))
+                return value;
+
+            return value.ToLowerInvariant();
         }
 
         private void SkipValue(IParser parser)
@@ -972,6 +1392,12 @@ namespace SSH_Helper.Services.Scripting
                     var lineContent = GetLineContent(lines, step.LineNumber);
                     errors.Add($"{prefix}Line {step.LineNumber}: Step has no recognized command{lineContent}");
                     continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(step.OnError) && !IsValidOnErrorValue(step.OnError))
+                {
+                    var lineContent = GetLineContent(lines, step.LineNumber);
+                    errors.Add($"{prefix}Line {step.LineNumber}: on_error must be 'continue' or 'stop'{lineContent}");
                 }
 
                 // Validate specific step types
@@ -1151,6 +1577,119 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case StepType.Http:
+                        if (step.Http == null || string.IsNullOrWhiteSpace(step.Http.Url))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Http requires 'url'{lineContent}");
+                        }
+
+                        if (step.Http != null && !IsDynamicValue(step.Http.Method) && !IsValidHttpMethod(step.Http.Method))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Http 'method' must be one of GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS{lineContent}");
+                        }
+
+                        if (step.Http != null && !IsDynamicValue(step.Http.Auth) && !IsValidHttpAuth(step.Http.Auth))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Http 'auth' must be one of none, basic, bearer{lineContent}");
+                        }
+
+                        if (step.Http != null && !IsDynamicValue(step.Http.ContentType) && !IsValidHttpContentType(step.Http.ContentType))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Http 'content_type' must be one of json, form, text, xml{lineContent}");
+                        }
+
+                        if (step.Http != null && !step.Http.VerifyTlsTypeValid)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Http 'verify_tls' must be a boolean value{lineContent}");
+                        }
+
+                        if (step.Http != null && !IsDynamicValue(step.Http.Auth))
+                        {
+                            if (string.Equals(step.Http.Auth, "basic", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (string.IsNullOrWhiteSpace(step.Http.Username))
+                                {
+                                    var lineContent = GetLineContent(lines, step.LineNumber);
+                                    errors.Add($"{prefix}Line {step.LineNumber}: Http 'auth: basic' requires 'username'{lineContent}");
+                                }
+
+                                if (string.IsNullOrWhiteSpace(step.Http.Password))
+                                {
+                                    var lineContent = GetLineContent(lines, step.LineNumber);
+                                    errors.Add($"{prefix}Line {step.LineNumber}: Http 'auth: basic' requires 'password'{lineContent}");
+                                }
+                            }
+                            else if (string.Equals(step.Http.Auth, "bearer", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (string.IsNullOrWhiteSpace(step.Http.Token))
+                                {
+                                    var lineContent = GetLineContent(lines, step.LineNumber);
+                                    errors.Add($"{prefix}Line {step.LineNumber}: Http 'auth: bearer' requires 'token'{lineContent}");
+                                }
+                            }
+                        }
+                        break;
+
+                    case StepType.Ping:
+                        if (step.Ping == null || string.IsNullOrWhiteSpace(step.Ping.Host))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Ping requires 'host'{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Dns:
+                        if (step.Dns == null || string.IsNullOrWhiteSpace(step.Dns.Host))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Dns requires 'host'{lineContent}");
+                        }
+
+                        if (step.Dns != null && !IsDynamicValue(step.Dns.Type) && !IsValidDnsType(step.Dns.Type))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Dns 'type' must be one of A, AAAA, PTR{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Portcheck:
+                        if (step.Portcheck == null || string.IsNullOrWhiteSpace(step.Portcheck.Host))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Portcheck requires 'host'{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Sftp:
+                        if (step.Sftp == null || string.IsNullOrWhiteSpace(step.Sftp.Action))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Sftp requires 'action'{lineContent}");
+                        }
+                        else if (!IsDynamicValue(step.Sftp.Action) && !IsValidSftpAction(step.Sftp.Action))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Sftp 'action' must be 'upload' or 'download'{lineContent}");
+                        }
+
+                        if (step.Sftp == null || string.IsNullOrWhiteSpace(step.Sftp.LocalPath))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Sftp requires 'local_path'{lineContent}");
+                        }
+
+                        if (step.Sftp == null || string.IsNullOrWhiteSpace(step.Sftp.RemotePath))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Sftp requires 'remote_path'{lineContent}");
+                        }
+                        break;
+
                     case StepType.Parse:
                         if (step.Parse == null || string.IsNullOrEmpty(step.Parse.Format))
                         {
@@ -1170,6 +1709,68 @@ namespace SSH_Helper.Services.Scripting
                         break;
                 }
             }
+        }
+
+        private static bool IsValidOnErrorValue(string value)
+        {
+            return string.Equals(value, "continue", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(value, "stop", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsDynamicValue(string? value)
+        {
+            return ContainsVariableToken(value);
+        }
+
+        private static bool IsValidHttpMethod(string method)
+        {
+            return string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(method, "PUT", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(method, "PATCH", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(method, "OPTIONS", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidHttpAuth(string auth)
+        {
+            return string.Equals(auth, "none", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(auth, "basic", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(auth, "bearer", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidHttpContentType(string? contentType)
+        {
+            if (string.IsNullOrWhiteSpace(contentType))
+                return true;
+
+            return string.Equals(contentType, "json", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(contentType, "form", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(contentType, "text", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(contentType, "xml", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidDnsType(string dnsType)
+        {
+            return string.Equals(dnsType, "A", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(dnsType, "AAAA", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(dnsType, "PTR", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidSftpAction(string action)
+        {
+            return string.Equals(action, "upload", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(action, "download", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ContainsVariableToken(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            return value.Contains("${", StringComparison.Ordinal) ||
+                   value.Contains("{{", StringComparison.Ordinal);
         }
 
         private static string GetLineContent(string[]? lines, int lineNumber)

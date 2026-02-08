@@ -37,6 +37,11 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.UpdateColumn, new UpdateColumnCommand() },
                 { StepType.UpdateEnvironment, new UpdateEnvironmentCommand() },
                 { StepType.Log, new LogCommand() },
+                { StepType.Http, new HttpCommand() },
+                { StepType.Ping, new PingCommand() },
+                { StepType.Dns, new DnsCommand() },
+                { StepType.Portcheck, new PortcheckCommand() },
+                { StepType.Sftp, new SftpCommand() },
                 { StepType.Webhook, new WebhookCommand() },
                 { StepType.Parse, new ParseCommand() },
             };

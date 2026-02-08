@@ -24,7 +24,12 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [updatecolumn](#updatecolumn---update-host-table-column)
    - [updateenvironment](#updateenvironment---update-active-environment-variable)
    - [log](#log---output-with-log-level)
-   - [webhook](#webhook---http-requests)
+   - [http](#http---http-requests-preferred)
+   - [ping](#ping---icmp-reachability-checks)
+   - [dns](#dns---dns-lookups)
+   - [portcheck](#portcheck---tcp-port-checks)
+   - [sftp](#sftp---sftp-upload-and-download)
+   - [webhook](#webhook---legacy-http-requests)
    - [parse](#parse---configuration-parsing)
 3. [Variables](#variables)
 4. [Expressions and Conditions](#expressions-and-conditions)
@@ -61,7 +66,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- webhook:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- parse:`
 
 Metadata-only keys (for example `name:` or `description:`) are not treated as strong YAML indicators by themselves.
 
@@ -1437,9 +1442,235 @@ Outputs a message with a specific log level for categorized output. Unlike `prin
 
 ---
 
-### webhook - HTTP Requests
+### http - HTTP Requests (Preferred)
 
-Makes HTTP requests to external APIs and captures responses. Useful for integrating with webhooks, REST APIs, notification services, or logging platforms.
+Makes HTTP requests with explicit controls for authentication, redirect behavior, TLS verification, and response capture.
+
+**Syntax:**
+```yaml
+- http:
+    url: "https://api.example.com/endpoint"
+    method: GET
+    headers:
+      Accept: "application/json"
+    into: api_response
+    on_error: continue    # Optional alias for step-level on_error
+```
+
+`on_error` can be set either inside the `http` map or at step level. If both are provided, the step-level value wins.
+
+**Locked Defaults:**
+- `method: GET`
+- `timeout: 30`
+- `follow_redirects: true`
+- `allow_failure: false`
+- `verify_tls: true`
+- `auth: none`
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `url` | Yes | - | Target URL (`http://` or `https://`) |
+| `method` | No | `GET` | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS` |
+| `body` | No | - | Request body |
+| `headers` | No | - | HTTP headers map |
+| `into` | No | - | Variable prefix for response capture |
+| `timeout` | No | `30` | Request timeout in seconds |
+| `follow_redirects` | No | `true` | Follow HTTP redirects |
+| `allow_failure` | No | `false` | Treat non-2xx response as success |
+| `verify_tls` | No | `true` | Validate TLS certificates |
+| `auth` | No | `none` | `none`, `basic`, `bearer` |
+| `username` | No | - | Required for `auth: basic` |
+| `password` | No | - | Required for `auth: basic` |
+| `token` | No | - | Required for `auth: bearer` |
+| `content_type` | No | - | `json`, `form`, `text`, `xml` shorthand |
+
+**Capture Variables:**
+- `${into}`: response body
+- `${into}_status`: numeric status code
+- `${into}_headers`: response headers as JSON
+
+**Failure Semantics:**
+- Non-2xx responses: fail unless `allow_failure: true`
+- Transport/runtime failures: handled by `on_error` (`stop`/`continue`)
+- `into` variables are reset before execution to prevent stale values
+
+**Case-Insensitive Option Handling:**
+- `method`, `auth`, and `content_type` accept any case and are normalized internally.
+- Example: `method: post`, `auth: BEARER`, `content_type: XML` are valid.
+
+**Content-Type Rules:**
+- Shorthand mappings:
+  - `json` -> `application/json`
+  - `form` -> `application/x-www-form-urlencoded`
+  - `text` -> `text/plain`
+  - `xml` -> `application/xml`
+- If `headers.Content-Type` is provided, it overrides `content_type`.
+
+**TLS Certificate Behavior (Secure Default):**
+- `verify_tls: true` (default) enforces certificate validation.
+- `verify_tls: false` disables certificate validation for that step only.
+- Keep TLS validation enabled in production; disable only in controlled environments (for example lab/self-signed endpoints you trust).
+
+**Examples:**
+```yaml
+# Bearer auth with JSON response capture
+- http:
+    url: "https://api.example.com/devices/${Host_IP}"
+    method: get
+    auth: BEARER
+    token: "${api_token}"
+    into: api_result
+
+# Explicit Content-Type header overrides shorthand
+- http:
+    url: "https://api.example.com/submit"
+    method: POST
+    content_type: json
+    headers:
+      Content-Type: "text/plain"
+    body: "raw text payload"
+```
+
+---
+
+### ping - ICMP Reachability Checks
+
+Performs ICMP checks and captures availability metrics.
+
+**Syntax:**
+```yaml
+- ping: "8.8.8.8"     # Shorthand
+
+- ping:
+    host: "8.8.8.8"
+    count: 4
+    timeout: 3000
+    into: ping_state
+```
+
+**Defaults:**
+- `count: 4`
+- `timeout: 3000` (milliseconds per probe)
+
+**Capture Variables:**
+- `${into}`: `success` or `failure`
+- `${into}_avg`: average latency in ms (empty when complete failure)
+- `${into}_loss`: packet loss percentage
+
+**Notes:**
+- String fields support variable substitution.
+- Complete failure returns `${into}=failure`, `${into}_avg=""`, `${into}_loss=100`.
+
+---
+
+### dns - DNS Lookups
+
+Resolves DNS records and captures results as a list.
+
+**Syntax:**
+```yaml
+- dns:
+    host: "example.com"
+    type: A
+    timeout: 10
+    into: dns_records
+```
+
+**Defaults:**
+- `type: A`
+- `timeout: 10` (seconds)
+
+**Accepted `type` values:**
+- `A`
+- `AAAA`
+- `PTR`
+
+`type` is case-insensitive (`aaaa`, `Ptr`, etc. are accepted).
+
+**Capture Variables:**
+- `${into}`: `List<string>`
+- `${into}_count`: number of records
+
+**No-Record Behavior:**
+- No records is treated as success with:
+  - `${into}` = empty list
+  - `${into}_count` = `0`
+
+This enables safe indexing/length checks:
+```yaml
+- if: dns_records_count > 0
+  then:
+    - print: "First record: ${dns_records[0]}"
+```
+
+---
+
+### portcheck - TCP Port Checks
+
+Checks TCP reachability for a host/port.
+
+**Syntax:**
+```yaml
+- portcheck:
+    host: "10.0.0.10"
+    port: 22
+    timeout: 5
+    into: port_state
+```
+
+**Defaults:**
+- `port: 22`
+- `timeout: 5` (seconds)
+
+**Capture Variables:**
+- `${into}`: `open`, `closed`, or `timeout`
+- `${into}_latency`: connection latency in ms when available (empty on timeout)
+
+---
+
+### sftp - SFTP Upload and Download
+
+Transfers files using SFTP (SSH.NET backend).
+
+**Syntax:**
+```yaml
+- sftp:
+    action: upload
+    local_path: "C:\\exports\\report.txt"
+    remote_path: "/tmp/report.txt"
+    into: sftp_result
+```
+
+**Defaults:**
+- `overwrite: true`
+- `timeout: 120` (seconds)
+
+**Parameters:**
+- Required: `action`, `local_path`, `remote_path`
+- Optional overrides: `host`, `port`, `username`, `password`
+- Fallback host/credentials come from current host context when overrides are omitted
+
+**Accepted `action` values:**
+- `upload`
+- `download`
+
+`action` is case-insensitive (`UPLOAD`, `DoWnLoAd`, etc. are accepted).
+
+**Capture Variables:**
+- `${into}`: `success` or `failure`
+- `${into}_bytes`: transferred bytes (`0` on failure)
+
+**`overwrite: false` Behavior:**
+- Download fails if destination local file already exists.
+- Upload fails if destination remote path already exists.
+
+---
+
+### webhook - Legacy HTTP Requests
+
+Makes HTTP requests to external APIs and captures responses. `webhook` remains supported for compatibility, but `http` is the preferred command for new scripts.
 
 **Syntax:**
 ```yaml
@@ -1465,7 +1696,7 @@ Makes HTTP requests to external APIs and captures responses. Useful for integrat
 | `headers` | No | - | Custom HTTP headers as key-value pairs |
 | `into` | No | - | Variable to capture response body |
 | `timeout` | No | `30` | Request timeout in seconds |
-| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` (also accepted at step level) |
 
 **Security note:** URL scheme is restricted to `http`/`https`, but internal/private destination filtering is intentionally not enforced. Only run trusted scripts when webhook targets are user-controlled.
 
@@ -2057,7 +2288,18 @@ When using the `matches` operator:
 - send: optional_command
   on_error: continue
   capture: result
+
+# Map-style steps support both forms
+- http:
+    url: "https://api.example.com/status"
+    on_error: continue
+
+- http:
+    url: "https://api.example.com/status"
+  on_error: continue
 ```
+
+For map-style steps (`http`, `ping`, `dns`, `portcheck`, `sftp`, `webhook`), nested `on_error` is an alias for step-level `on_error`. If both are present, the step-level value is used.
 
 ### Checking for Errors
 
