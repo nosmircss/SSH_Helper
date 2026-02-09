@@ -22,8 +22,14 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [writefile](#writefile---write-text-files)
    - [input](#input---prompt-for-user-input)
    - [updatecolumn](#updatecolumn---update-host-table-column)
+   - [updateenvironment](#updateenvironment---update-active-environment-variable)
    - [log](#log---output-with-log-level)
-   - [webhook](#webhook---http-requests)
+   - [http](#http---http-requests-preferred)
+   - [ping](#ping---icmp-reachability-checks)
+   - [dns](#dns---dns-lookups)
+   - [portcheck](#portcheck---tcp-port-checks)
+   - [sftp](#sftp---sftp-upload-and-download)
+   - [webhook](#webhook---legacy-http-requests)
    - [parse](#parse---configuration-parsing)
 3. [Variables](#variables)
 4. [Expressions and Conditions](#expressions-and-conditions)
@@ -51,8 +57,10 @@ vars:                            # Optional: variable declarations
   timeout: 30
 
 steps:                           # Required: list of execution steps
-  - send: "command"
-  - print: "message"
+  - send:
+      command: "command"
+  - print:
+      message: "message"
 ```
 
 ### Auto-Detection
@@ -60,7 +68,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- log:`, `- webhook:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- parse:`
 
 Metadata-only keys (for example `name:` or `description:`) are not treated as strong YAML indicators by themselves.
 
@@ -76,18 +84,27 @@ Executes a command on the SSH session.
 
 **Basic Syntax:**
 ```yaml
+- send:
+    command: command_text
+```
+
+**Shorthand Syntax:**
+```yaml
 - send: command_text
 ```
 
 **With Options:**
 ```yaml
-- send: command_text
-  capture: variable_name      # Store output in variable
-  suppress: true              # Hide command and output from display
-  expect: '/regex_pattern/'   # Regex to wait for in output
-  timeout: 30                 # Timeout in seconds for this command
-  on_error: continue          # continue or stop (default)
+- send:
+    command: command_text
+    capture: variable_name      # Store output in variable
+    suppress: true              # Hide command and output from display
+    expect: '/regex_pattern/'   # Regex to wait for in output
+    timeout: 30                 # Timeout in seconds for this command
+    on_error: continue          # continue or stop (default)
 ```
+
+Use the map form when you need options (`capture`, `suppress`, `expect`, `timeout`, `on_error`).
 
 **Options:**
 
@@ -106,28 +123,34 @@ Executes a command on the SSH session.
 **Examples:**
 ```yaml
 # Simple command
-- send: show version
+- send:
+    command: show version
 
 # Capture output for later use
-- send: show ip interface brief
-  capture: interfaces
+- send:
+    command: show ip interface brief
+    capture: interfaces
 
 # Hide sensitive command
-- send: show running-config
-  suppress: true
-  capture: config
+- send:
+    command: show running-config
+    suppress: true
+    capture: config
 
 # Handle interactive prompts
-- send: enable
-  expect: '/Password:/'
+- send:
+    command: enable
+    expect: '/Password:/'
 
-- send: ${enable_password}
-  expect: '/#/'
+- send:
+    command: ${enable_password}
+    expect: '/#/'
 
 # Continue even if command fails
-- send: ping 192.168.1.1 count 3
-  on_error: continue
-  capture: ping_result
+- send:
+    command: ping 192.168.1.1 count 3
+    on_error: continue
+    capture: ping_result
 ```
 
 ---
@@ -138,6 +161,12 @@ Outputs a message to the script output.
 
 **Syntax:**
 ```yaml
+- print:
+    message: "message with ${variable} substitution"
+```
+
+**Shorthand Syntax:**
+```yaml
 - print: "message with ${variable} substitution"
 ```
 
@@ -147,10 +176,14 @@ Outputs a message to the script output.
 
 **Examples:**
 ```yaml
-- print: "Starting configuration..."
-- print: "Host: ${Host_IP}"
-- print: "Found ${count} interfaces"
-- print: "Status: ${status}"
+- print:
+    message: "Starting configuration..."
+- print:
+    message: "Host: ${Host_IP}"
+- print:
+    message: "Found ${count} interfaces"
+- print:
+    message: "Status: ${status}"
 ```
 
 ---
@@ -161,18 +194,28 @@ Pauses script execution for a specified number of seconds.
 
 **Syntax:**
 ```yaml
-- wait: seconds
+- wait:
+    seconds: seconds
+```
+
+**Shorthand Syntax:**
+```yaml
+- wait: 5
 ```
 
 **Examples:**
 ```yaml
 # Wait 5 seconds
-- wait: 5
+- wait:
+    seconds: 5
 
 # Wait after reboot command
-- send: reload
-- wait: 30
-- send: show version
+- send:
+    command: reload
+- wait:
+    seconds: 30
+- send:
+    command: show version
 ```
 
 ---
@@ -182,6 +225,12 @@ Pauses script execution for a specified number of seconds.
 Sets or modifies variable values with expression support.
 
 **Syntax:**
+```yaml
+- set:
+    expression: variable_name = expression
+```
+
+**Shorthand Syntax:**
 ```yaml
 - set: variable_name = expression
 ```
@@ -235,34 +284,49 @@ Sets or modifies variable values with expression support.
 **Basic Examples:**
 ```yaml
 # Literal values
-- set: timeout = 30
-- set: interface = "eth0"
+- set:
+    expression: timeout = 30
+- set:
+    expression: interface = "eth0"
 
 # Arithmetic
-- set: i = 0
-- set: i = i + 1
-- set: remaining = total - processed
-- set: doubled = count * 2
-- set: average = total / count
+- set:
+    expression: i = 0
+- set:
+    expression: i = i + 1
+- set:
+    expression: remaining = total - processed
+- set:
+    expression: doubled = count * 2
+- set:
+    expression: average = total / count
 
 # String manipulation
-- set: message = "Device: ${Host_IP}"
-- set: trimmed = trim(raw_input)
-- set: upper_name = upper(hostname)
+- set:
+    expression: message = "Device: ${Host_IP}"
+- set:
+    expression: trimmed = trim(raw_input)
+- set:
+    expression: upper_name = upper(hostname)
 
 # Get length
-- set: line_count = length(output)
-- set: num_items = length(items)
+- set:
+    expression: line_count = length(output)
+- set:
+    expression: num_items = length(items)
 ```
 
 **Array Functions:**
 ```yaml
 # Create and build an array
-- set: results = push(results, ${Host_IP})
-- set: results = push(results, ${status})
+- set:
+    expression: results = push(results, ${Host_IP})
+- set:
+    expression: results = push(results, ${status})
 
 # Get array length
-- set: count = length(results)
+- set:
+    expression: count = length(results)
 ```
 
 **JSON Functions:**
@@ -283,24 +347,31 @@ Creates JSON objects or arrays. Add `pretty` anywhere for formatted output.
 
 ```yaml
 # Create object from key-value pairs
-- set: data = json("host", ${Host_IP}, "status", "up", "port", 22)
+- set:
+    expression: data = json("host", ${Host_IP}, "status", "up", "port", 22)
 # Result: {"host":"192.168.1.1","status":"up","port":22}
 
 # Pretty-printed object
-- set: data = json("host", ${Host_IP}, "status", "up", pretty)
+- set:
+    expression: data = json("host", ${Host_IP}, "status", "up", pretty)
 
 # Create array from list variable
-- set: items = push(items, "a")
-- set: items = push(items, "b")
-- set: arr = json(items)
+- set:
+    expression: items = push(items, "a")
+- set:
+    expression: items = push(items, "b")
+- set:
+    expression: arr = json(items)
 # Result: ["a","b"]
 
 # Create array inline with []
-- set: arr = json([], "item1", "item2", "item3")
+- set:
+    expression: arr = json([], "item1", "item2", "item3")
 # Result: ["item1","item2","item3"]
 
 # Nested objects
-- set: data = json("server", json("host", ${ip}, "port", 22), "active", true)
+- set:
+    expression: data = json("server", json("host", ${ip}, "port", 22), "active", true)
 ```
 
 ---
@@ -311,16 +382,22 @@ Extracts a value using dot notation path. Supports optional default value.
 
 ```yaml
 # Basic extraction
-- set: name = json.get(response, "data.user.name")
-- set: email = json.get(response, "data.user.email")
+- set:
+    expression: name = json.get(response, "data.user.name")
+- set:
+    expression: email = json.get(response, "data.user.email")
 
 # With default value (returned if path doesn't exist)
-- set: port = json.get(config, "server.port", 22)
-- set: timeout = json.get(config, "settings.timeout", 30)
+- set:
+    expression: port = json.get(config, "server.port", 22)
+- set:
+    expression: timeout = json.get(config, "settings.timeout", 30)
 
 # Array indexing with [n] syntax
-- set: first = json.get(data, "items[0].name")
-- set: nested = json.get(data, "users[0].addresses[1].city")
+- set:
+    expression: first = json.get(data, "items[0].name")
+- set:
+    expression: nested = json.get(data, "users[0].addresses[1].city")
 ```
 
 ---
@@ -331,13 +408,16 @@ Sets a value at a path, creating intermediate objects as needed.
 
 ```yaml
 # Update a nested value
-- set: config = json.set(config, "server.port", 8080)
+- set:
+    expression: config = json.set(config, "server.port", 8080)
 
 # Add new keys
-- set: data = json.set(data, "metadata.created", ${_timestamp})
+- set:
+    expression: data = json.set(data, "metadata.created", ${_timestamp})
 
 # Set array element
-- set: data = json.set(data, "users[0].active", true)
+- set:
+    expression: data = json.set(data, "users[0].active", true)
 ```
 
 ---
@@ -348,11 +428,14 @@ Removes a key from an object or element from an array.
 
 ```yaml
 # Remove a key
-- set: user = json.delete(user, "password")
-- set: data = json.delete(data, "sensitive.ssn")
+- set:
+    expression: user = json.delete(user, "password")
+- set:
+    expression: data = json.delete(data, "sensitive.ssn")
 
 # Remove array element by index
-- set: arr = json.delete(arr, "items[2]")
+- set:
+    expression: arr = json.delete(arr, "items[2]")
 ```
 
 ---
@@ -363,13 +446,17 @@ Merges multiple objects. Later objects override earlier ones.
 
 ```yaml
 # Merge two objects
-- set: base = json("name", "server1", "type", "linux")
-- set: updates = json("status", "active", "type", "ubuntu")
-- set: merged = json.merge(base, updates)
+- set:
+    expression: base = json("name", "server1", "type", "linux")
+- set:
+    expression: updates = json("status", "active", "type", "ubuntu")
+- set:
+    expression: merged = json.merge(base, updates)
 # Result: {"name":"server1","type":"ubuntu","status":"active"}
 
 # Merge multiple objects (variadic)
-- set: final = json.merge(defaults, env_config, user_overrides)
+- set:
+    expression: final = json.merge(defaults, env_config, user_overrides)
 ```
 
 ---
@@ -380,11 +467,14 @@ Formats JSON for display. Default is pretty-printed.
 
 ```yaml
 # Pretty print (default)
-- set: formatted = json.format(data)
-- set: formatted = json.format(data, pretty)
+- set:
+    expression: formatted = json.format(data)
+- set:
+    expression: formatted = json.format(data, pretty)
 
 # Compact (single line)
-- set: compact = json.format(data, compact)
+- set:
+    expression: compact = json.format(data, compact)
 ```
 
 ---
@@ -395,16 +485,21 @@ Returns true/false indicating whether a path exists. Distinguishes between null 
 
 ```yaml
 # Check for error response
-- if: json.exists(response, "error.code")
-  then:
-    - set: err = json.get(response, "error.code")
-    - log: "Error: ${err}"
-      level: error
+- if:
+    condition: json.exists(response, "error.code")
+    then:
+      - set:
+          expression: err = json.get(response, "error.code")
+      - log:
+          message: "Error: ${err}"
+          level: error
 
 # Safer than checking for empty
-- if: json.exists(config, "optional") and json.get(config, "optional") != null
-  then:
-    - print: "Optional is set and not null"
+- if:
+    condition: json.exists(config, "optional") and json.get(config, "optional") != null
+    then:
+      - print:
+          message: "Optional is set and not null"
 ```
 
 ---
@@ -415,15 +510,19 @@ Returns array length or object key count.
 
 ```yaml
 # Array length
-- set: count = json.len(response, "data.items")
+- set:
+    expression: count = json.len(response, "data.items")
 
 # Object key count
-- set: num_keys = json.len(config)
+- set:
+    expression: num_keys = json.len(config)
 
 # Use in loops
-- if: json.len(users) > 0
-  then:
-    - print: "Found ${json.len(users)} users"
+- if:
+    condition: json.len(users) > 0
+    then:
+      - print:
+          message: "Found ${json.len(users)} users"
 ```
 
 ---
@@ -433,10 +532,13 @@ Returns array length or object key count.
 Returns the type: `"object"`, `"array"`, `"string"`, `"number"`, `"boolean"`, or `"null"`.
 
 ```yaml
-- set: t = json.type(response, "data")
-- if: t == "array"
-  then:
-    - print: "Data is an array"
+- set:
+    expression: t = json.type(response, "data")
+- if:
+    condition: t == "array"
+    then:
+      - print:
+          message: "Data is an array"
 ```
 
 ---
@@ -446,11 +548,15 @@ Returns the type: `"object"`, `"array"`, `"string"`, `"number"`, `"boolean"`, or
 Returns object keys as a list for iteration.
 
 ```yaml
-- set: fields = json.keys(user)
-- foreach: field in fields
-  do:
-    - set: val = json.get(user, field)
-    - print: "${field}: ${val}"
+- set:
+    expression: fields = json.keys(user)
+- foreach:
+    iterator: field in fields
+    do:
+      - set:
+          expression: val = json.get(user, field)
+      - print:
+          message: "${field}: ${val}"
 ```
 
 ---
@@ -460,10 +566,13 @@ Returns object keys as a list for iteration.
 Returns object values as a list.
 
 ```yaml
-- set: ips = json.values(servers)
-- foreach: ip in ips
-  do:
-    - send: ping ${ip} -c 1
+- set:
+    expression: ips = json.values(servers)
+- foreach:
+    iterator: ip in ips
+    do:
+      - send:
+          command: ping ${ip} -c 1
 ```
 
 ---
@@ -475,19 +584,28 @@ For objects: returns `{"key": k, "value": v}` entries.
 
 ```yaml
 # Array iteration
-- foreach: user in json.items(response, "data.users")
-  do:
-    - set: name = json.get(user, "name")
-    - set: email = json.get(user, "email")
-    - print: "User: ${name} (${email})"
+- foreach:
+    iterator: user in json.items(response, "data.users")
+    do:
+      - set:
+          expression: name = json.get(user, "name")
+      - set:
+          expression: email = json.get(user, "email")
+      - print:
+          message: "User: ${name} (${email})"
 
 # Object iteration (key-value pairs)
-- set: servers = json("web", "10.0.0.1", "db", "10.0.0.2")
-- foreach: entry in json.items(servers)
-  do:
-    - set: name = json.get(entry, "key")
-    - set: ip = json.get(entry, "value")
-    - print: "${name}: ${ip}"
+- set:
+    expression: servers = json("web", "10.0.0.1", "db", "10.0.0.2")
+- foreach:
+    iterator: entry in json.items(servers)
+    do:
+      - set:
+          expression: name = json.get(entry, "key")
+      - set:
+          expression: ip = json.get(entry, "value")
+      - print:
+          message: "${name}: ${ip}"
 ```
 
 ---
@@ -496,36 +614,49 @@ For objects: returns `{"key": k, "value": v}` entries.
 
 ```yaml
 # Append to array
-- set: arr = json.push(arr, "new_item")
-- set: arr = json.push(arr, json("key", "value"))
+- set:
+    expression: arr = json.push(arr, "new_item")
+- set:
+    expression: arr = json.push(arr, json("key", "value"))
 
 # Remove and return last element (destructive)
-- set: last = json.pop(arr)
+- set:
+    expression: last = json.pop(arr)
 
 # Get last element without modifying the array
-- set: last_view = json.last(arr)
+- set:
+    expression: last_view = json.last(arr)
 
 # Prepend to array
-- set: arr = json.unshift(arr, "first")
+- set:
+    expression: arr = json.unshift(arr, "first")
 
 # Remove and return first element (destructive)
-- set: first = json.shift(arr)
+- set:
+    expression: first = json.shift(arr)
 
 # Get first element without modifying the array
-- set: first_view = json.first(arr)
+- set:
+    expression: first_view = json.first(arr)
 
 # Slice array (supports negative indices)
-- set: first_three = json.slice(arr, 0, 3)
-- set: last_two = json.slice(arr, -2)
+- set:
+    expression: first_three = json.slice(arr, 0, 3)
+- set:
+    expression: last_two = json.slice(arr, -2)
 
 # Concatenate arrays
-- set: all = json.concat(arr1, arr2, arr3)
+- set:
+    expression: all = json.concat(arr1, arr2, arr3)
 
 # Find element index (-1 if not found)
-- set: idx = json.indexOf(arr, "search_value")
-- if: idx >= 0
-  then:
-    - print: "Found at index ${idx}"
+- set:
+    expression: idx = json.indexOf(arr, "search_value")
+- if:
+    condition: idx >= 0
+    then:
+      - print:
+          message: "Found at index ${idx}"
 ```
 
 > Migration note: If older scripts used `json.pop()` or `json.shift()` as non-destructive reads, switch those calls to `json.last()` and `json.first()`.
@@ -537,11 +668,16 @@ You can build nested JSON objects using dot notation. Intermediate objects are c
 
 ```yaml
 # Build a nested structure
-- set: data.server.name = ${hostname}
-- set: data.server.ip = ${Host_IP}
-- set: data.server.port = 22
-- set: data.metadata.timestamp = ${_timestamp}
-- set: data.metadata.scanned_by = "SSH Helper"
+- set:
+    expression: data.server.name = ${hostname}
+- set:
+    expression: data.server.ip = ${Host_IP}
+- set:
+    expression: data.server.port = 22
+- set:
+    expression: data.metadata.timestamp = ${_timestamp}
+- set:
+    expression: data.metadata.scanned_by = "SSH Helper"
 
 # The 'data' variable now contains:
 # {
@@ -625,16 +761,19 @@ Extracts data from a variable using regex patterns with capture groups.
     match: all
 
 # Loop over extracted list
-- foreach: ip in ip_addresses
-  do:
-    - print: "Found IP: ${ip}"
+- foreach:
+    iterator: ip in ip_addresses
+    do:
+      - print:
+          message: "Found IP: ${ip}"
 ```
 
 **Examples:**
 ```yaml
 # Extract version number
-- send: show version
-  capture: output
+- send:
+    command: show version
+    capture: output
 - extract:
     from: output
     pattern: 'Version (\d+\.\d+\.\d+)'
@@ -669,16 +808,25 @@ Executes a block conditionally based on an expression.
 
 **Syntax:**
 ```yaml
+- if:
+    condition: condition
+    then:
+      - step1
+      - step2
+    elif:           # Optional ordered list
+      - if:
+          condition: other_condition
+          then:
+            - step3
+    else:           # Optional
+      - step4
+```
+
+**Shorthand Header:**
+```yaml
 - if: condition
   then:
     - step1
-    - step2
-  elif:           # Optional ordered list
-    - if: other_condition
-      then:
-        - step3
-  else:           # Optional
-    - step4
 ```
 
 **Condition Operators:**
@@ -706,37 +854,51 @@ Executes a block conditionally based on an expression.
 **Examples:**
 ```yaml
 # Simple condition
-- if: status == "up"
-  then:
-    - print: "Interface is up"
-  else:
-    - print: "Interface is down"
+- if:
+    condition: status == "up"
+    then:
+      - print:
+          message: "Interface is up"
+    else:
+      - print:
+          message: "Interface is down"
 
 # Regex match
-- if: output matches 'error|failed'
-  then:
-    - exit: failure "Error detected in output"
+- if:
+    condition: output matches 'error|failed'
+    then:
+      - exit:
+          message: failure "Error detected in output"
 
 # Multiple conditions
-- if: count > threshold and status == "active"
-  then:
-    - print: "Threshold exceeded on active device"
+- if:
+    condition: count > threshold and status == "active"
+    then:
+      - print:
+          message: "Threshold exceeded on active device"
 
 # Check if variable is defined
-- if: custom_timeout is defined
-  then:
-    - set: timeout = custom_timeout
-  else:
-    - set: timeout = 30
+- if:
+    condition: custom_timeout is defined
+    then:
+      - set:
+          expression: timeout = custom_timeout
+    else:
+      - set:
+          expression: timeout = 30
 
 # Nested conditions
-- if: type == "router"
-  then:
-    - if: vendor == "cisco"
-      then:
-        - send: show ip route
-      else:
-        - send: get router info routing
+- if:
+    condition: type == "router"
+    then:
+      - if:
+          condition: vendor == "cisco"
+          then:
+            - send:
+                command: show ip route
+          else:
+            - send:
+                command: get router info routing
 ```
 
 ---
@@ -747,11 +909,19 @@ Iterates over items in a collection.
 
 **Syntax:**
 ```yaml
+- foreach:
+    iterator: item in collection
+    do:
+      - step1
+      - step2
+    when: optional_filter     # Optional filter condition
+```
+
+**Shorthand Header:**
+```yaml
 - foreach: item in collection
   do:
     - step1
-    - step2
-  when: optional_filter     # Optional filter condition
 ```
 
 **Collection Types:**
@@ -772,30 +942,40 @@ Iterates over items in a collection.
     into: interfaces
     match: all
 
-- foreach: iface in interfaces
-  do:
-    - send: show interface ${iface}
-    - print: "Checked ${iface}"
+- foreach:
+    iterator: iface in interfaces
+    do:
+      - send:
+          command: show interface ${iface}
+      - print:
+          message: "Checked ${iface}"
 
 # Loop with index (index variable uses your iterator name)
-- foreach: line in output
-  do:
-    - print: "Line ${line_index}: ${line}"
+- foreach:
+    iterator: line in output
+    do:
+      - print:
+          message: "Line ${line_index}: ${line}"
 
 # Loop with filter
-- foreach: iface in interfaces
-  when: iface startswith "eth"
-  do:
-    - print: "Ethernet interface: ${iface}"
+- foreach:
+    iterator: iface in interfaces
+    when: iface startswith "eth"
+    do:
+      - print:
+          message: "Ethernet interface: ${iface}"
 
 # Loop over lines in output
-- send: show ip interface brief
-  capture: output
+- send:
+    command: show ip interface brief
+    capture: output
 
-- foreach: line in output
-  when: line contains "up"
-  do:
-    - print: "Active: ${line}"
+- foreach:
+    iterator: line in output
+    when: line contains "up"
+    do:
+      - print:
+          message: "Active: ${line}"
 ```
 
 ---
@@ -806,10 +986,18 @@ Repeatedly executes a block while a condition is true.
 
 **Syntax:**
 ```yaml
+- while:
+    condition: condition
+    do:
+      - step1
+      - step2
+```
+
+**Shorthand Header:**
+```yaml
 - while: condition
   do:
     - step1
-    - step2
 ```
 
 **Features:**
@@ -822,42 +1010,62 @@ Repeatedly executes a block while a condition is true.
 **Examples:**
 ```yaml
 # Counter-based loop
-- set: i = 0
-- while: i < 5
-  do:
-    - print: "Iteration ${i}"
-    - set: i = i + 1
+- set:
+    expression: i = 0
+- while:
+    condition: i < 5
+    do:
+      - print:
+          message: "Iteration ${i}"
+      - set:
+          expression: i = i + 1
 
 # Retry loop
-- set: retry = 0
-- set: success = ""
-- while: retry < 3 and success is empty
-  max_iterations: 20
-  do:
-    - send: ping 192.168.1.1 count 1
-      capture: result
-      on_error: continue
-    - if: result contains "1 received"
-      then:
-        - set: success = "yes"
-      else:
-        - set: retry = retry + 1
-        - wait: 2
+- set:
+    expression: retry = 0
+- set:
+    expression: success = ""
+- while:
+    condition: retry < 3 and success is empty
+    max_iterations: 20
+    do:
+      - send:
+          command: ping 192.168.1.1 count 1
+          capture: result
+          on_error: continue
+      - if:
+          condition: result contains "1 received"
+          then:
+            - set:
+                expression: success = "yes"
+          else:
+            - set:
+                expression: retry = retry + 1
+            - wait:
+                seconds: 2
 
 # Poll for condition
-- set: ready = ""
-- while: ready is empty
-  do:
-    - send: show status
-      capture: status
-    - if: status contains "ready"
-      then:
-        - set: ready = "yes"
-      else:
-        - wait: 5
-    - if: _iteration > 60
-      then:
-        - exit: failure "Timeout waiting for ready state"
+- set:
+    expression: ready = ""
+- while:
+    condition: ready is empty
+    do:
+      - send:
+          command: show status
+          capture: status
+      - if:
+          condition: status contains "ready"
+          then:
+            - set:
+                expression: ready = "yes"
+          else:
+            - wait:
+                seconds: 5
+      - if:
+          condition: _iteration > 60
+          then:
+            - exit:
+                message: failure "Timeout waiting for ready state"
 ```
 
 ---
@@ -895,11 +1103,14 @@ Runs steps in a `try` block, optionally handles failures in `catch`, and always 
 **Syntax:**
 ```yaml
 - try:
-    - send: risky command
-  catch:
-    - print: "Caught error: ${_last_error}"
-  finally:
-    - log: "Cleanup complete"
+    do:
+      - send:
+          command: risky command
+      catch:
+        - print:
+            message: "Caught error: ${_last_error}"
+      finally:
+        - log: "Cleanup complete"
 ```
 
 ---
@@ -910,10 +1121,23 @@ Ends script execution with a status and message.
 
 **Syntax:**
 ```yaml
-- exit: "message"                    # Success (default)
-- exit: success "message"            # Explicit success
-- exit: failure "message"            # Failure status
-- exit: error "message"              # Error status
+- exit:
+    status: success
+    message: "message"
+- exit:
+    status: failure
+    message: "message"
+- exit:
+    status: error
+    message: "message"
+```
+
+**Shorthand Syntax:**
+```yaml
+- exit: "message"                 # Defaults to success
+- exit: success "message"
+- exit: failure "message"
+- exit: error "message"
 ```
 
 **Status Types:**
@@ -924,18 +1148,27 @@ Ends script execution with a status and message.
 **Examples:**
 ```yaml
 # Success exit
-- exit: success "Configuration applied successfully"
+- exit:
+    status: success
+    message: "Configuration applied successfully"
 
 # Failure exit
-- if: status != "up"
-  then:
-    - exit: failure "Interface failed to come up"
+- if:
+    condition: status != "up"
+    then:
+      - exit:
+          status: failure
+          message: "Interface failed to come up"
 
 # Error with variable
-- exit: error "Unexpected response: ${output}"
+- exit:
+    status: error
+    message: "Unexpected response: ${output}"
 
 # Simple exit (defaults to success)
-- exit: "Task completed"
+- exit:
+    status: success
+    message: "Task completed"
 ```
 
 ---
@@ -977,11 +1210,14 @@ Reads a text file line by line into a list variable. Useful for processing IP li
     path: "C:\\Users\\me\\blocklist.txt"
     into: blocked_ips
 
-- print: "Found ${blocked_ips.length} IPs to process"
+- print:
+    message: "Found ${blocked_ips.length} IPs to process"
 
-- foreach: ip in blocked_ips
-  do:
-    - print: "Processing: ${ip}"
+- foreach:
+    iterator: ip in blocked_ips
+    do:
+      - print:
+          message: "Processing: ${ip}"
 
 # Read with variable in path
 - readfile:
@@ -1055,12 +1291,13 @@ Writes content to a text file. Supports multiple formats including text, JSON, J
     mode: overwrite
 
 # Append multiple lines in a loop
-- foreach: ip in processed_ips
-  do:
-    - writefile:
-        path: "C:\\logs\\processed.txt"
-        content: "${ip} - completed"
-        mode: append
+- foreach:
+    iterator: ip in processed_ips
+    do:
+      - writefile:
+          path: "C:\\logs\\processed.txt"
+          content: "${ip} - completed"
+          mode: append
 
 # Create file with path from variable
 - writefile:
@@ -1078,8 +1315,10 @@ When using `format: json`, the content is automatically serialized with type det
 
 ```yaml
 # Write a JSON array from a list variable
-- set: hosts = push(hosts, ${Host_IP})
-- set: hosts = push(hosts, ${other_ip})
+- set:
+    expression: hosts = push(hosts, ${Host_IP})
+- set:
+    expression: hosts = push(hosts, ${other_ip})
 - writefile:
     path: "C:\\output\\hosts.json"
     format: json
@@ -1087,7 +1326,8 @@ When using `format: json`, the content is automatically serialized with type det
     pretty: true
 
 # Write a JSON object
-- set: data = json("host", ${Host_IP}, "status", "success", "port", 22)
+- set:
+    expression: data = json("host", ${Host_IP}, "status", "success", "port", 22)
 - writefile:
     path: "C:\\output\\result.json"
     format: json
@@ -1095,9 +1335,12 @@ When using `format: json`, the content is automatically serialized with type det
     pretty: true
 
 # Write nested object built with dot notation
-- set: result.server.ip = ${Host_IP}
-- set: result.server.hostname = ${hostname}
-- set: result.scan.timestamp = ${_timestamp}
+- set:
+    expression: result.server.ip = ${Host_IP}
+- set:
+    expression: result.server.hostname = ${hostname}
+- set:
+    expression: result.scan.timestamp = ${_timestamp}
 - writefile:
     path: "C:\\output\\scan.json"
     format: json
@@ -1113,7 +1356,8 @@ When using `format: json` with `mode: append`, the new content is intelligently 
 
 ```yaml
 # First write creates the file with an array
-- set: item = json("ip", "192.168.1.1", "status", "up")
+- set:
+    expression: item = json("ip", "192.168.1.1", "status", "up")
 - writefile:
     path: "C:\\output\\results.json"
     format: json
@@ -1121,7 +1365,8 @@ When using `format: json` with `mode: append`, the new content is intelligently 
     mode: overwrite
 
 # Subsequent writes append to the array
-- set: item = json("ip", "192.168.1.2", "status", "down")
+- set:
+    expression: item = json("ip", "192.168.1.2", "status", "down")
 - writefile:
     path: "C:\\output\\results.json"
     format: json
@@ -1136,7 +1381,8 @@ JSONL format writes one compact JSON object per line, ideal for log files and st
 
 ```yaml
 # Write events as JSON Lines
-- set: event = json("timestamp", ${_timestamp}, "host", ${Host_IP}, "action", "scanned")
+- set:
+    expression: event = json("timestamp", ${_timestamp}, "host", ${Host_IP}, "action", "scanned")
 - writefile:
     path: "C:\\logs\\events.jsonl"
     format: jsonl
@@ -1162,7 +1408,8 @@ CSV format with optional headers:
     mode: overwrite
 
 # Append data rows
-- set: row = "${Host_IP},${hostname},${version},${status}"
+- set:
+    expression: row = "${Host_IP},${hostname},${version},${status}"
 - writefile:
     path: "C:\\output\\inventory.csv"
     format: csv
@@ -1244,9 +1491,11 @@ Prompts the user for input during script execution with optional validation.
     validate: "^yes$"
     validation_error: "You must type 'yes' to proceed"
 
-- if: confirm != "yes"
-  then:
-    - exit: "Operation cancelled"
+- if:
+    condition: confirm != "yes"
+    then:
+      - exit:
+          message: "Operation cancelled"
 ```
 
 ---
@@ -1293,7 +1542,8 @@ Writes a value back to a column in the host table for the current host. This all
     value: ${_timestamp}
 
 # Store a computed or formatted value
-- set: status_msg = "OK - ${interface_count} interfaces"
+- set:
+    expression: status_msg = "OK - ${interface_count} interfaces"
 - updatecolumn:
     column: status
     value: ${status_msg}
@@ -1315,6 +1565,53 @@ Writes a value back to a column in the host table for the current host. This all
 - **Compliance checking**: Store pass/fail status in a "compliance" column
 - **Audit trails**: Record when each host was last checked
 - **Network discovery**: Store discovered interface names, IP addresses, or neighbor info
+
+---
+
+### updateenvironment - Update Active Environment Variable
+
+Persists a value into the active environment profile's variable set. The updated value is also available immediately for later steps in the same script execution.
+
+**Syntax:**
+```yaml
+- updateenvironment:
+    variable: "variable_name"
+    value: "value_or_${variable}"
+```
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `variable` | Yes | Environment variable name to update |
+| `value` | Yes | Value to persist (supports variable substitution) |
+
+**Behavior:**
+- Updates the active environment profile (for example `Default`, `prod`, `staging`)
+- Persists immediately to configuration
+- Makes the new value available to later steps in the same script
+- Affects subsequent executions that use the same active environment
+- If multiple hosts update the same variable in one run, the last processed update wins
+
+**Examples:**
+```yaml
+# Save a refreshed token
+- send:
+    command: refresh-token
+    capture: token_output
+- extract:
+    from: token_output
+    pattern: 'token=(\S+)'
+    into: new_token
+- updateenvironment:
+    variable: api_token
+    value: ${new_token}
+
+# Persist last successful scan time
+- updateenvironment:
+    variable: last_scan_utc
+    value: ${_timestamp}
+```
 
 ---
 
@@ -1390,9 +1687,237 @@ Outputs a message with a specific log level for categorized output. Unlike `prin
 
 ---
 
-### webhook - HTTP Requests
+### http - HTTP Requests (Preferred)
 
-Makes HTTP requests to external APIs and captures responses. Useful for integrating with webhooks, REST APIs, notification services, or logging platforms.
+Makes HTTP requests with explicit controls for authentication, redirect behavior, TLS verification, and response capture.
+
+**Syntax:**
+```yaml
+- http:
+    url: "https://api.example.com/endpoint"
+    method: GET
+    headers:
+      Accept: "application/json"
+    into: api_response
+    on_error: continue    # Optional alias for step-level on_error
+```
+
+`on_error` can be set either inside the `http` map or at step level. If both are provided, the step-level value wins.
+
+**Locked Defaults:**
+- `method: GET`
+- `timeout: 30`
+- `follow_redirects: true`
+- `allow_failure: false`
+- `verify_tls: true`
+- `auth: none`
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `url` | Yes | - | Target URL (`http://` or `https://`) |
+| `method` | No | `GET` | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS` |
+| `body` | No | - | Request body |
+| `headers` | No | - | HTTP headers map |
+| `into` | No | - | Variable prefix for response capture |
+| `timeout` | No | `30` | Request timeout in seconds |
+| `follow_redirects` | No | `true` | Follow HTTP redirects |
+| `allow_failure` | No | `false` | Treat non-2xx response as success |
+| `verify_tls` | No | `true` | Validate TLS certificates |
+| `auth` | No | `none` | `none`, `basic`, `bearer` |
+| `username` | No | - | Required for `auth: basic` |
+| `password` | No | - | Required for `auth: basic` |
+| `token` | No | - | Required for `auth: bearer` |
+| `content_type` | No | - | `json`, `form`, `text`, `xml` shorthand |
+
+**Capture Variables:**
+- `${into}`: response body
+- `${into}_status`: numeric status code
+- `${into}_headers`: response headers as JSON
+
+**Failure Semantics:**
+- Non-2xx responses: fail unless `allow_failure: true`
+- Transport/runtime failures: handled by `on_error` (`stop`/`continue`)
+- `into` variables are reset before execution to prevent stale values
+
+**Case-Insensitive Option Handling:**
+- `method`, `auth`, and `content_type` accept any case and are normalized internally.
+- Example: `method: post`, `auth: BEARER`, `content_type: XML` are valid.
+
+**Content-Type Rules:**
+- Shorthand mappings:
+  - `json` -> `application/json`
+  - `form` -> `application/x-www-form-urlencoded`
+  - `text` -> `text/plain`
+  - `xml` -> `application/xml`
+- If `headers.Content-Type` is provided, it overrides `content_type`.
+
+**TLS Certificate Behavior (Secure Default):**
+- `verify_tls: true` (default) enforces certificate validation.
+- `verify_tls: false` disables certificate validation for that step only.
+- Keep TLS validation enabled in production; disable only in controlled environments (for example lab/self-signed endpoints you trust).
+
+**Examples:**
+```yaml
+# Bearer auth with JSON response capture
+- http:
+    url: "https://api.example.com/devices/${Host_IP}"
+    method: get
+    auth: BEARER
+    token: "${api_token}"
+    into: api_result
+
+# Explicit Content-Type header overrides shorthand
+- http:
+    url: "https://api.example.com/submit"
+    method: POST
+    content_type: json
+    headers:
+      Content-Type: "text/plain"
+    body: "raw text payload"
+```
+
+---
+
+### ping - ICMP Reachability Checks
+
+Performs ICMP checks and captures availability metrics.
+
+**Syntax:**
+```yaml
+- ping: "8.8.8.8"     # Shorthand
+
+- ping:
+    host: "8.8.8.8"
+    count: 4
+    timeout: 3000
+    into: ping_state
+```
+
+**Defaults:**
+- `count: 4`
+- `timeout: 3000` (milliseconds per probe)
+
+**Capture Variables:**
+- `${into}`: `success` or `failure`
+- `${into}_avg`: average latency in ms (empty when complete failure)
+- `${into}_loss`: packet loss percentage
+
+**Notes:**
+- String fields support variable substitution.
+- Complete failure returns `${into}=failure`, `${into}_avg=""`, `${into}_loss=100`.
+
+---
+
+### dns - DNS Lookups
+
+Resolves DNS records and captures results as a list.
+
+**Syntax:**
+```yaml
+- dns:
+    host: "example.com"
+    type: A
+    timeout: 10
+    into: dns_records
+```
+
+**Defaults:**
+- `type: A`
+- `timeout: 10` (seconds)
+
+**Accepted `type` values:**
+- `A`
+- `AAAA`
+- `PTR`
+
+`type` is case-insensitive (`aaaa`, `Ptr`, etc. are accepted).
+
+**Capture Variables:**
+- `${into}`: `List<string>`
+- `${into}_count`: number of records
+
+**No-Record Behavior:**
+- No records is treated as success with:
+  - `${into}` = empty list
+  - `${into}_count` = `0`
+
+This enables safe indexing/length checks:
+```yaml
+- if:
+    condition: dns_records_count > 0
+    then:
+      - print:
+          message: "First record: ${dns_records[0]}"
+```
+
+---
+
+### portcheck - TCP Port Checks
+
+Checks TCP reachability for a host/port.
+
+**Syntax:**
+```yaml
+- portcheck:
+    host: "10.0.0.10"
+    port: 22
+    timeout: 5
+    into: port_state
+```
+
+**Defaults:**
+- `port: 22`
+- `timeout: 5` (seconds)
+
+**Capture Variables:**
+- `${into}`: `open`, `closed`, or `timeout`
+- `${into}_latency`: connection latency in ms when available (empty on timeout)
+
+---
+
+### sftp - SFTP Upload and Download
+
+Transfers files using SFTP (SSH.NET backend).
+
+**Syntax:**
+```yaml
+- sftp:
+    action: upload
+    local_path: "C:\\exports\\report.txt"
+    remote_path: "/tmp/report.txt"
+    into: sftp_result
+```
+
+**Defaults:**
+- `overwrite: true`
+- `timeout: 120` (seconds)
+
+**Parameters:**
+- Required: `action`, `local_path`, `remote_path`
+- Optional overrides: `host`, `port`, `username`, `password`
+- Fallback host/credentials come from current host context when overrides are omitted
+
+**Accepted `action` values:**
+- `upload`
+- `download`
+
+`action` is case-insensitive (`UPLOAD`, `DoWnLoAd`, etc. are accepted).
+
+**Capture Variables:**
+- `${into}`: `success` or `failure`
+- `${into}_bytes`: transferred bytes (`0` on failure)
+
+**`overwrite: false` Behavior:**
+- Download fails if destination local file already exists.
+- Upload fails if destination remote path already exists.
+
+---
+
+### webhook - Legacy HTTP Requests
+
+Makes HTTP requests to external APIs and captures responses. `webhook` remains supported for compatibility, but `http` is the preferred command for new scripts.
 
 **Syntax:**
 ```yaml
@@ -1418,7 +1943,7 @@ Makes HTTP requests to external APIs and captures responses. Useful for integrat
 | `headers` | No | - | Custom HTTP headers as key-value pairs |
 | `into` | No | - | Variable to capture response body |
 | `timeout` | No | `30` | Request timeout in seconds |
-| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` (also accepted at step level) |
 
 **Security note:** URL scheme is restricted to `http`/`https`, but internal/private destination filtering is intentionally not enforced. Only run trusted scripts when webhook targets are user-controlled.
 
@@ -1437,14 +1962,18 @@ When using the `into` parameter, two variables are created:
     method: GET
     into: api_response
 
-- if: api_response_status == 200
-  then:
-    - print: "API is healthy"
-  else:
-    - print: "API returned status: ${api_response_status}"
+- if:
+    condition: api_response_status == 200
+    then:
+      - print:
+          message: "API is healthy"
+    else:
+      - print:
+          message: "API returned status: ${api_response_status}"
 
 # POST with JSON body
-- set: payload = json("host", ${Host_IP}, "status", ${status})
+- set:
+    expression: payload = json("host", ${Host_IP}, "status", ${status})
 - webhook:
     url: "https://hooks.slack.com/services/xxx/yyy/zzz"
     method: POST
@@ -1465,7 +1994,8 @@ When using the `into` parameter, two variables are created:
     timeout: 10
 
 # Log events to external service
-- set: event = json("timestamp", ${_timestamp}, "host", ${Host_IP}, "event", "scan_complete")
+- set:
+    expression: event = json("timestamp", ${_timestamp}, "host", ${Host_IP}, "event", "scan_complete")
 - webhook:
     url: "https://logs.example.com/ingest"
     body: "${event}"
@@ -1490,19 +2020,22 @@ When using the `into` parameter, two variables are created:
     into: validation
     on_error: continue
 
-- if: validation_status == 200
-  then:
-    - print: "Validation successful"
-  else:
-    - if: validation_status is defined
-      then:
-        - log:
-            message: "Validation failed with status ${validation_status}"
-            level: warning
-      else:
-        - log:
-            message: "Webhook request failed (network error)"
-            level: error
+- if:
+    condition: validation_status == 200
+    then:
+      - print:
+          message: "Validation successful"
+    else:
+      - if:
+          condition: validation_status is defined
+          then:
+            - log:
+                message: "Validation failed with status ${validation_status}"
+                level: warning
+          else:
+            - log:
+                message: "Webhook request failed (network error)"
+                level: error
 ```
 
 **Security Notes:**
@@ -1590,39 +2123,48 @@ After parsing, use the `json.*` functions to access the data:
 
 ```yaml
 # Get a specific value
-- set: hostname = json.get(config, "system.global.hostname")
+- set:
+    expression: hostname = json.get(config, "system.global.hostname")
 
 # List all interface names
-- set: interfaces = json.keys(config, "system.interface")
+- set:
+    expression: interfaces = json.keys(config, "system.interface")
 
 # Iterate over interfaces
-- foreach: iface in json.keys(config, "system.interface")
-  do:
-    - set: ip = json.get(config, "system.interface.${iface}.ip", "N/A")
-    - print: "${iface}: ${ip}"
+- foreach:
+    iterator: iface in json.keys(config, "system.interface")
+    do:
+      - set:
+          expression: ip = json.get(config, "system.interface.${iface}.ip", "N/A")
+      - print:
+          message: "${iface}: ${ip}"
 ```
 
 **Examples:**
 
 ```yaml
 # Basic parsing
-- send: show full-configuration
-  capture: raw_config
-  suppress: true
-  timeout: 120
+- send:
+    command: show full-configuration
+    capture: raw_config
+    suppress: true
+    timeout: 120
 
 - parse:
     format: fortigate
     from: raw_config
     into: config
 
-- set: hostname = json.get(config, "system.global.hostname", "unknown")
-- print: "Hostname: ${hostname}"
+- set:
+    expression: hostname = json.get(config, "system.global.hostname", "unknown")
+- print:
+    message: "Hostname: ${hostname}"
 
 # Parse only specific sections (faster for large configs)
-- send: show full-configuration
-  capture: raw_config
-  suppress: true
+- send:
+    command: show full-configuration
+    capture: raw_config
+    suppress: true
 
 - parse:
     format: fortigate
@@ -1633,38 +2175,51 @@ After parsing, use the `json.*` functions to access the data:
       - system global
 
 # Get all interfaces as a list
-- set: interfaces = json.keys(config, "system.interface")
-- print: "Found ${interfaces.length} interfaces"
+- set:
+    expression: interfaces = json.keys(config, "system.interface")
+- print:
+    message: "Found ${interfaces.length} interfaces"
 
 # Check if a section exists
-- if: json.exists(config, "firewall.policy")
-  then:
-    - print: "Firewall policies configured"
+- if:
+    condition: json.exists(config, "firewall.policy")
+    then:
+      - print:
+          message: "Firewall policies configured"
 ```
 
 **Building Reports from Parsed Config:**
 
 ```yaml
 # Export interface inventory to CSV
-- send: show full-configuration system interface
-  capture: raw_config
-  suppress: true
+- send:
+    command: show full-configuration system interface
+    capture: raw_config
+    suppress: true
 
 - parse:
     format: fortigate
     from: raw_config
     into: config
 
-- set: interfaces = json.keys(config, "system.interface")
-- set: report = json([])
+- set:
+    expression: interfaces = json.keys(config, "system.interface")
+- set:
+    expression: report = json([])
 
-- foreach: iface in interfaces
-  do:
-    - set: ip = json.get(config, "system.interface.${iface}.ip", "N/A")
-    - set: vdom = json.get(config, "system.interface.${iface}.vdom", "root")
-    - set: type = json.get(config, "system.interface.${iface}.type", "unknown")
-    - set: row = json("name", "${iface}", "ip", "${ip}", "vdom", "${vdom}", "type", "${type}")
-    - set: report = json.push(report, ${row})
+- foreach:
+    iterator: iface in interfaces
+    do:
+      - set:
+          expression: ip = json.get(config, "system.interface.${iface}.ip", "N/A")
+      - set:
+          expression: vdom = json.get(config, "system.interface.${iface}.vdom", "root")
+      - set:
+          expression: type = json.get(config, "system.interface.${iface}.type", "unknown")
+      - set:
+          expression: row = json("name", "${iface}", "ip", "${ip}", "vdom", "${vdom}", "type", "${type}")
+      - set:
+          expression: report = json.push(report, ${row})
 
 - writefile:
     path: "C:\\reports\\${Host_IP}_interfaces.csv"
@@ -1672,7 +2227,8 @@ After parsing, use the `json.*` functions to access the data:
     headers: [name, ip, vdom, type]
     content: "${report}"
 
-- print: "Exported ${interfaces.length} interfaces to CSV"
+- print:
+    message: "Exported ${interfaces.length} interfaces to CSV"
 ```
 
 **Nested Config Blocks:**
@@ -1695,7 +2251,8 @@ end
 These are accessible via nested paths:
 
 ```yaml
-- set: addr = json.get(config, "firewall.policy.1.dstaddr.server1.ip")
+- set:
+    expression: addr = json.get(config, "firewall.policy.1.dstaddr.server1.ip")
 ```
 
 ---
@@ -1706,39 +2263,53 @@ These are accessible via nested paths:
 
 1. **CSV Grid Columns**: Any column in the host grid
    ```yaml
-   - print: "Host: ${Host_IP}"      # Required column
-   - print: "User: ${username}"     # Custom column
+   - print:
+       message: "Host: ${Host_IP}"      # Required column
+   - print:
+       message: "User: ${username}"     # Custom column
    ```
 
-2. **Script Variables** (from `vars:` section):
+2. **Active Environment Variables**: Variables from the currently selected environment profile
+   ```yaml
+   - print:
+       message: "Token: ${api_token}"
+   ```
+
+3. **Script Variables** (from `vars:` section):
    ```yaml
    vars:
      timeout: 30
      interface: "eth0"
    steps:
-     - print: "Timeout: ${timeout}"
+     - print:
+         message: "Timeout: ${timeout}"
    ```
 
-3. **Captured Variables**:
+4. **Captured Variables**:
    ```yaml
-   - send: show version
-     capture: version_output
-   - print: "${version_output}"
+   - send:
+       command: show version
+       capture: version_output
+   - print:
+       message: "${version_output}"
    ```
 
-4. **Extracted Variables**:
+5. **Extracted Variables**:
    ```yaml
    - extract:
        from: output
        pattern: 'IP: (.+?)$'
        into: ip_address
-   - print: "IP: ${ip_address}"
+   - print:
+       message: "IP: ${ip_address}"
    ```
 
-5. **Set Variables**:
+6. **Set Variables**:
    ```yaml
-   - set: counter = 0
-   - print: "Counter: ${counter}"
+   - set:
+       expression: counter = 0
+   - print:
+       message: "Counter: ${counter}"
    ```
 
 ### Built-in Variables
@@ -1759,9 +2330,12 @@ These are accessible via nested paths:
 Variables are substituted using `${variable_name}`:
 
 ```yaml
-- print: "Host ${Host_IP} has IP ${ip_address}"
-- send: show interface ${interface_name}
-- set: message = "Status: ${status}"
+- print:
+    message: "Host ${Host_IP} has IP ${ip_address}"
+- send:
+    command: show interface ${interface_name}
+- set:
+    expression: message = "Status: ${status}"
 ```
 
 ### Quoting and Escaping
@@ -1775,16 +2349,22 @@ Both single quotes (`'...'`) and double quotes (`"..."`) are valid string delimi
 
 ```yaml
 # 1) Newline escape (\n)
-- set: msg1 = "Line1\nLine2"   # newline between Line1 and Line2
-- set: msg2 = 'Line1\nLine2'   # literal backslash + n
+- set:
+    expression: msg1 = "Line1\nLine2"   # newline between Line1 and Line2
+- set:
+    expression: msg2 = 'Line1\nLine2'   # literal backslash + n
 
 # 2) Regex with backslashes
-- if: output matches '^\d+\s+(\w+)$'
-- if: output matches "^\\d+\\s+(\\w+)$"
+- if:
+    condition: output matches '^\d+\s+(\w+)$'
+- if:
+    condition: output matches "^\\d+\\s+(\\w+)$"
 
 # 3) Apostrophes
-- set: owner1 = "Bob's router"
-- set: owner2 = 'Bob''s router'
+- set:
+    expression: owner1 = "Bob's router"
+- set:
+    expression: owner2 = 'Bob''s router'
 ```
 
 ### Array Access and Properties
@@ -1799,20 +2379,27 @@ Lists support index-based access and properties:
     match: all
 
 # Access by index
-- print: "First: ${numbers[0]}"
-- print: "Second: ${numbers[1]}"
+- print:
+    message: "First: ${numbers[0]}"
+- print:
+    message: "Second: ${numbers[1]}"
 
 # Get list length
-- print: "Total count: ${numbers.length}"
+- print:
+    message: "Total count: ${numbers.length}"
 
 # Use length in conditions
-- if: numbers.length > 0
-  then:
-    - print: "Found ${numbers.length} items"
+- if:
+    condition: numbers.length > 0
+    then:
+      - print:
+          message: "Found ${numbers.length} items"
 
 # Dynamic index access
-- set: i = 0
-- print: "Item at index ${i}: ${numbers[i]}"
+- set:
+    expression: i = 0
+- print:
+    message: "Item at index ${i}: ${numbers[i]}"
 ```
 
 **Array Properties:**
@@ -1829,11 +2416,13 @@ When multiple sources define the same variable name, the following precedence ap
 
 1. **CSV Grid Columns** - Values from the host table (highest priority)
 2. **Set/Extract/Captured Variables** - Variables modified during script execution
-3. **Script `vars:` Section** - Default values (only set if not already defined)
+3. **Active Environment Variables** - Fallback values from the selected environment profile
+4. **Script `vars:` Section** - Default values (only set if not already defined)
 
 This means:
 - A column named `timeout` in your CSV will override a `timeout` defined in `vars:`
-- Using `set: myvar = value` during execution will override the `vars:` default
+- A value from `set`, `extract`, `capture`, or `updateenvironment` will override the earlier runtime value
+- Environment variables fill missing host values before `vars:` defaults are applied
 - You can use `vars:` to provide fallback defaults when columns don't exist
 
 **Example:**
@@ -1845,7 +2434,8 @@ vars:
 
 steps:
   # If CSV has a 'timeout' column with value 60, ${timeout} will be 60, not 30
-  - print: "Using timeout: ${timeout}"
+  - print:
+      message: "Using timeout: ${timeout}"
 ```
 
 ### Variable Type System
@@ -1910,9 +2500,11 @@ Variables can hold different types of data:
 Use parentheses for complex expressions:
 
 ```yaml
-- if: (status == "up" or status == "active") and count > 0
-  then:
-    - print: "System is operational"
+- if:
+    condition: (status == "up" or status == "active") and count > 0
+    then:
+      - print:
+          message: "System is operational"
 ```
 
 ### Truthy/Falsy Evaluation
@@ -1935,16 +2527,21 @@ When a condition has no comparison operator, it's evaluated as truthy or falsy:
 **Example:**
 ```yaml
 # These all evaluate as truthy
-- if: some_variable
-  then:
-    - print: "Variable has a value"
+- if:
+    condition: some_variable
+    then:
+      - print:
+          message: "Variable has a value"
 
 # Check if variable has content
-- if: output
-  then:
-    - print: "Got output: ${output}"
-  else:
-    - print: "No output received"
+- if:
+    condition: output
+    then:
+      - print:
+          message: "Got output: ${output}"
+    else:
+      - print:
+          message: "No output received"
 ```
 
 ### Numeric Comparison Details
@@ -1959,12 +2556,16 @@ When comparing values with `==`, `!=`, `>`, `>=`, `<`, `<=`:
 **Example:**
 ```yaml
 # These are numeric comparisons
-- if: count > 10
-- if: version >= 2.0
-- if: result == 0
+- if:
+    condition: count > 10
+- if:
+    condition: version >= 2.0
+- if:
+    condition: result == 0
 
 # These are string comparisons (because "active" isn't a number)
-- if: status == "active"
+- if:
+    condition: status == "active"
 ```
 
 ### Regex Pattern Syntax
@@ -1979,13 +2580,18 @@ When using the `matches` operator:
 **Example:**
 ```yaml
 # All these are equivalent
-- if: output matches '/error|warning/'
-- if: output matches "error|warning"
-- if: output matches 'error|warning'
+- if:
+    condition: output matches '/error|warning/'
+- if:
+    condition: output matches "error|warning"
+- if:
+    condition: output matches 'error|warning'
 
 # Using regex special characters
-- if: version matches '^\d+\.\d+\.\d+$'
-- if: line matches '^interface\s+\S+'
+- if:
+    condition: version matches '^\d+\.\d+\.\d+$'
+- if:
+    condition: line matches '^interface\s+\S+'
 ```
 
 ---
@@ -1996,49 +2602,75 @@ When using the `matches` operator:
 
 ```yaml
 # Stop on error (default)
-- send: critical_command
-  on_error: stop
+- send:
+    command: critical_command
+    on_error: stop
 
 # Continue on error
-- send: optional_command
-  on_error: continue
-  capture: result
+- send:
+    command: optional_command
+    on_error: continue
+    capture: result
+
+# Map-style steps support both forms
+- http:
+    url: "https://api.example.com/status"
+    on_error: continue
+
+- http:
+    url: "https://api.example.com/status"
+    on_error: continue
 ```
+
+For map-style steps (`http`, `ping`, `dns`, `portcheck`, `sftp`, `webhook`), nested `on_error` is an alias for step-level `on_error`. If both are present, the step-level value is used.
 
 ### Checking for Errors
 
 ```yaml
-- send: some_command
-  capture: output
-  on_error: continue
+- send:
+    command: some_command
+    capture: output
+    on_error: continue
 
-- if: output contains "error" or output is empty
-  then:
-    - exit: failure "Command failed"
+- if:
+    condition: output contains "error" or output is empty
+    then:
+      - exit:
+          message: failure "Command failed"
 ```
 
 ### Retry Pattern
 
 ```yaml
-- set: retry = 0
-- set: success = ""
+- set:
+    expression: retry = 0
+- set:
+    expression: success = ""
 
-- while: retry < 3 and success is empty
-  do:
-    - send: unreliable_command
-      capture: result
-      on_error: continue
+- while:
+    condition: retry < 3 and success is empty
+    do:
+      - send:
+          command: unreliable_command
+          capture: result
+          on_error: continue
 
-    - if: result contains "OK"
-      then:
-        - set: success = "yes"
-      else:
-        - set: retry = retry + 1
-        - wait: 5
+      - if:
+          condition: result contains "OK"
+          then:
+            - set:
+                expression: success = "yes"
+          else:
+            - set:
+                expression: retry = retry + 1
+            - wait:
+                seconds: 5
 
-- if: success is empty
-  then:
-    - exit: failure "Command failed after 3 retries"
+- if:
+    condition: success is empty
+    then:
+      - exit:
+          message: failure "Command failed after 3 retries"
 ```
 
 ---
@@ -2063,7 +2695,8 @@ name: Clean Output Script
 nobanner: true
 
 steps:
-  - send: show version
+  - send:
+      command: show version
 ```
 
 This is useful when:
@@ -2087,14 +2720,17 @@ name: Debug Example
 debug: true
 
 steps:
-  - send: show version
-    capture: output
+  - send:
+      command: show version
+      capture: output
   - extract:
       from: output
       pattern: 'Version (.+?)$'
       into: version
-  - set: msg = "Found version: ${version}"
-  - print: "${msg}"
+  - set:
+      expression: msg = "Found version: ${version}"
+  - print:
+      message: "${msg}"
 ```
 
 ### Global Debug Mode
@@ -2122,13 +2758,16 @@ There are two ways to build JSON objects:
 
 **1. Using `json()` function:**
 ```yaml
-- set: data = json("key1", value1, "key2", value2, ...)
+- set:
+    expression: data = json("key1", value1, "key2", value2, ...)
 ```
 
 **2. Using dot notation (nested assignment):**
 ```yaml
-- set: data.key1 = value1
-- set: data.nested.key2 = value2
+- set:
+    expression: data.key1 = value1
+- set:
+    expression: data.nested.key2 = value2
 ```
 
 ### Building JSON Arrays
@@ -2136,14 +2775,18 @@ There are two ways to build JSON objects:
 Use `push()` to build a list, then convert with `json()`:
 
 ```yaml
-- set: items = push(items, "first")
-- set: items = push(items, "second")
-- set: arr = json(items)
+- set:
+    expression: items = push(items, "first")
+- set:
+    expression: items = push(items, "second")
+- set:
+    expression: arr = json(items)
 ```
 
 Or create inline arrays:
 ```yaml
-- set: arr = json([], "item1", "item2", "item3")
+- set:
+    expression: arr = json([], "item1", "item2", "item3")
 ```
 
 ### Automatic Type Detection
@@ -2166,15 +2809,17 @@ When converting to JSON, values are automatically typed:
 name: Collect Host Inventory as JSON
 steps:
   # Gather data
-  - send: show version
-    capture: version_output
+  - send:
+      command: show version
+      capture: version_output
   - extract:
       from: version_output
       pattern: 'Version (\S+)'
       into: version
 
   # Build this host's record
-  - set: record = json("ip", ${Host_IP}, "version", ${version}, "timestamp", ${_timestamp})
+  - set:
+      expression: record = json("ip", ${Host_IP}, "version", ${version}, "timestamp", ${_timestamp})
 
   # Append as JSON Lines (one object per line)
   - writefile:
@@ -2191,22 +2836,29 @@ steps:
 ---
 name: Generate Nested JSON Report
 steps:
-  - send: show version
-    capture: version_out
+  - send:
+      command: show version
+      capture: version_out
   - extract:
       from: version_out
       pattern: 'Version (\S+)'
       into: sw_version
 
-  - send: show ip interface brief
-    capture: interfaces
+  - send:
+      command: show ip interface brief
+      capture: interfaces
 
   # Build nested structure using dot notation
-  - set: report.host.ip = ${Host_IP}
-  - set: report.host.port = ${port}
-  - set: report.software.version = ${sw_version}
-  - set: report.metadata.scanned_at = ${_timestamp}
-  - set: report.metadata.scanned_by = "SSH Helper"
+  - set:
+      expression: report.host.ip = ${Host_IP}
+  - set:
+      expression: report.host.port = ${port}
+  - set:
+      expression: report.software.version = ${sw_version}
+  - set:
+      expression: report.metadata.scanned_at = ${_timestamp}
+  - set:
+      expression: report.metadata.scanned_by = "SSH Helper"
 
   # Write the nested JSON
   - writefile:
@@ -2221,10 +2873,14 @@ steps:
 ---
 name: Structured Event Logging
 steps:
-  - set: event.type = "connection"
-  - set: event.host = ${Host_IP}
-  - set: event.timestamp = ${_timestamp}
-  - set: event.status = "started"
+  - set:
+      expression: event.type = "connection"
+  - set:
+      expression: event.host = ${Host_IP}
+  - set:
+      expression: event.timestamp = ${_timestamp}
+  - set:
+      expression: event.status = "started"
 
   - writefile:
       path: "C:\\logs\\events.jsonl"
@@ -2234,8 +2890,10 @@ steps:
 
   # ... do work ...
 
-  - set: event.status = "completed"
-  - set: event.result = "success"
+  - set:
+      expression: event.status = "completed"
+  - set:
+      expression: event.result = "success"
 
   - writefile:
       path: "C:\\logs\\events.jsonl"
@@ -2253,13 +2911,16 @@ vars:
 
 steps:
   # Build host-specific overrides
-  - set: overrides = json("host", ${Host_IP}, "timeout", 60)
+  - set:
+      expression: overrides = json("host", ${Host_IP}, "timeout", 60)
 
   # Merge defaults with overrides (supports multiple objects)
-  - set: config = json.merge(${defaults}, overrides)
+  - set:
+      expression: config = json.merge(${defaults}, overrides)
 
   # config now has: {"timeout": 60, "retries": 3, "debug": false, "host": "192.168.1.1"}
-  - print: "Using config: ${config}"
+  - print:
+      message: "Using config: ${config}"
 ```
 
 **Processing API Responses:**
@@ -2273,21 +2934,30 @@ steps:
       into: response
 
   # Check for errors first
-  - if: json.exists(response, "error")
-    then:
-      - set: err = json.get(response, "error.message", "Unknown error")
-      - exit: failure "API Error: ${err}"
+  - if:
+      condition: json.exists(response, "error")
+      then:
+        - set:
+            expression: err = json.get(response, "error.message", "Unknown error")
+        - exit:
+            message: failure "API Error: ${err}"
 
   # Get array length
-  - set: count = json.len(response, "data.users")
-  - print: "Found ${count} users"
+  - set:
+      expression: count = json.len(response, "data.users")
+  - print:
+      message: "Found ${count} users"
 
   # Iterate over users
-  - foreach: user in json.items(response, "data.users")
-    do:
-      - set: name = json.get(user, "name")
-      - set: email = json.get(user, "email", "no email")
-      - print: "${name}: ${email}"
+  - foreach:
+      iterator: user in json.items(response, "data.users")
+      do:
+        - set:
+            expression: name = json.get(user, "name")
+        - set:
+            expression: email = json.get(user, "email", "no email")
+        - print:
+            message: "${name}: ${email}"
 
 **Modifying JSON Data:**
 ```yaml
@@ -2295,15 +2965,20 @@ steps:
 name: Update Configuration
 steps:
   # Start with base config
-  - set: config = json("server", json("host", "localhost", "port", 8080))
+  - set:
+      expression: config = json("server", json("host", "localhost", "port", 8080))
 
   # Update values
-  - set: config = json.set(config, "server.port", 443)
-  - set: config = json.set(config, "server.ssl", true)
+  - set:
+      expression: config = json.set(config, "server.port", 443)
+  - set:
+      expression: config = json.set(config, "server.ssl", true)
 
   # Remove sensitive data before logging
-  - set: safe = json.delete(config, "server.password")
-  - print: "Config: ${safe}"
+  - set:
+      expression: safe = json.delete(config, "server.password")
+  - print:
+      message: "Config: ${safe}"
 ```
 
 ---
@@ -2318,28 +2993,36 @@ name: Device Info Collection
 description: Collects version and interface information
 
 steps:
-  - print: "=== Device: ${Host_IP} ==="
+  - print:
+      message: "=== Device: ${Host_IP} ==="
 
-  - send: show version
-    capture: version_output
+  - send:
+      command: show version
+      capture: version_output
 
   - extract:
       from: version_output
       pattern: 'Version (\S+)'
       into: version
 
-  - print: "Software Version: ${version}"
+  - print:
+      message: "Software Version: ${version}"
 
-  - send: show ip interface brief
-    capture: interfaces
+  - send:
+      command: show ip interface brief
+      capture: interfaces
 
-  - print: "Interface Status:"
-  - foreach: line in interfaces
-    when: line contains "up"
-    do:
-      - print: "  ${line}"
+  - print:
+      message: "Interface Status:"
+  - foreach:
+      iterator: line in interfaces
+      when: line contains "up"
+      do:
+        - print:
+            message: "  ${line}"
 
-  - exit: success "Information collected"
+  - exit:
+      message: success "Information collected"
 ```
 
 ### Example 2: Configuration Backup
@@ -2351,25 +3034,32 @@ vars:
   backup_cmd: "show running-config"
 
 steps:
-  - print: "Backing up ${Host_IP}..."
+  - print:
+      message: "Backing up ${Host_IP}..."
 
-  - send: terminal length 0
+  - send:
+      command: terminal length 0
 
-  - send: ${backup_cmd}
-    capture: config
-    timeout: 120
+  - send:
+      command: ${backup_cmd}
+      capture: config
+      timeout: 120
 
-  - if: config is empty
-    then:
-      - exit: failure "Failed to retrieve configuration"
+  - if:
+      condition: config is empty
+      then:
+        - exit:
+            message: failure "Failed to retrieve configuration"
 
   - extract:
       from: config
       pattern: 'hostname (\S+)'
       into: hostname
 
-  - print: "Backup complete for ${hostname}"
-  - exit: success "Configuration captured"
+  - print:
+      message: "Backup complete for ${hostname}"
+  - exit:
+      message: success "Configuration captured"
 ```
 
 ### Example 3: Interface Status Check with Retry
@@ -2382,30 +3072,44 @@ vars:
   max_retries: 3
 
 steps:
-  - print: "Checking ${target_interface} on ${Host_IP}"
+  - print:
+      message: "Checking ${target_interface} on ${Host_IP}"
 
-  - set: retry = 0
-  - set: is_up = ""
+  - set:
+      expression: retry = 0
+  - set:
+      expression: is_up = ""
 
-  - while: retry < max_retries and is_up is empty
-    do:
-      - send: show interface ${target_interface}
-        capture: status
+  - while:
+      condition: retry < max_retries and is_up is empty
+      do:
+        - send:
+            command: show interface ${target_interface}
+            capture: status
 
-      - if: status matches 'line protocol is up'
-        then:
-          - set: is_up = "yes"
-          - print: "Interface is UP"
-        else:
-          - print: "Interface down, retry ${retry}..."
-          - set: retry = retry + 1
-          - wait: 10
+        - if:
+            condition: status matches 'line protocol is up'
+            then:
+              - set:
+                  expression: is_up = "yes"
+              - print:
+                  message: "Interface is UP"
+            else:
+              - print:
+                  message: "Interface down, retry ${retry}..."
+              - set:
+                  expression: retry = retry + 1
+              - wait:
+                  seconds: 10
 
-  - if: is_up is empty
-    then:
-      - exit: failure "${target_interface} failed to come up"
-    else:
-      - exit: success "Interface verified"
+  - if:
+      condition: is_up is empty
+      then:
+        - exit:
+            message: failure "${target_interface} failed to come up"
+      else:
+        - exit:
+            message: success "Interface verified"
 ```
 
 ### Example 4: Bulk IP Block (FortiGate)
@@ -2416,27 +3120,40 @@ name: Block IP Address
 description: Adds IP to firewall block list
 
 steps:
-  - if: block is not defined or block is empty
-    then:
-      - exit: error "No IP address specified in 'block' column"
+  - if:
+      condition: block is not defined or block is empty
+      then:
+        - exit:
+            message: error "No IP address specified in 'block' column"
 
-  - print: "Blocking ${block} on ${Host_IP}"
+  - print:
+      message: "Blocking ${block} on ${Host_IP}"
 
-  - send: config firewall address
-  - send: edit "BLOCK_${block}"
-  - send: set subnet ${block} 255.255.255.255
-  - send: set comment "Blocked by SSH Helper"
-  - send: next
-  - send: end
+  - send:
+      command: config firewall address
+  - send:
+      command: edit "BLOCK_${block}"
+  - send:
+      command: set subnet ${block} 255.255.255.255
+  - send:
+      command: set comment "Blocked by SSH Helper"
+  - send:
+      command: next
+  - send:
+      command: end
 
-  - send: show firewall address BLOCK_${block}
-    capture: verify
+  - send:
+      command: show firewall address BLOCK_${block}
+      capture: verify
 
-  - if: verify contains "BLOCK_${block}"
-    then:
-      - exit: success "IP ${block} blocked successfully"
-    else:
-      - exit: failure "Failed to verify block for ${block}"
+  - if:
+      condition: verify contains "BLOCK_${block}"
+      then:
+        - exit:
+            message: success "IP ${block} blocked successfully"
+      else:
+        - exit:
+            message: failure "Failed to verify block for ${block}"
 ```
 
 ### Example 5: Multi-Vendor Support
@@ -2448,38 +3165,47 @@ vars:
   vendor: "cisco"
 
 steps:
-  - if: vendor == "cisco"
-    then:
-      - send: show version
-        capture: output
-      - extract:
-          from: output
-          pattern: 'Version (\S+)'
-          into: version
+  - if:
+      condition: vendor == "cisco"
+      then:
+        - send:
+            command: show version
+            capture: output
+        - extract:
+            from: output
+            pattern: 'Version (\S+)'
+            into: version
 
-  - if: vendor == "juniper"
-    then:
-      - send: show version
-        capture: output
-      - extract:
-          from: output
-          pattern: 'Junos: (\S+)'
-          into: version
+  - if:
+      condition: vendor == "juniper"
+      then:
+        - send:
+            command: show version
+            capture: output
+        - extract:
+            from: output
+            pattern: 'Junos: (\S+)'
+            into: version
 
-  - if: vendor == "fortigate"
-    then:
-      - send: get system status
-        capture: output
-      - extract:
-          from: output
-          pattern: 'Version: (.+?)$'
-          into: version
+  - if:
+      condition: vendor == "fortigate"
+      then:
+        - send:
+            command: get system status
+            capture: output
+        - extract:
+            from: output
+            pattern: 'Version: (.+?)$'
+            into: version
 
-  - if: version is defined
-    then:
-      - print: "Version: ${version}"
-    else:
-      - print: "Could not determine version"
+  - if:
+      condition: version is defined
+      then:
+        - print:
+            message: "Version: ${version}"
+      else:
+        - print:
+            message: "Could not determine version"
 ```
 
 ### Example 6: Block IPs from File
@@ -2501,28 +3227,39 @@ steps:
       path: "${blocklist_path}"
       into: blocked_ips
 
-  - if: blocked_ips is empty
-    then:
-      - exit: failure "No IPs found in file"
+  - if:
+      condition: blocked_ips is empty
+      then:
+        - exit:
+            message: failure "No IPs found in file"
 
-  - print: "Found ${blocked_ips.length} IPs to block"
+  - print:
+      message: "Found ${blocked_ips.length} IPs to block"
 
   # Process each IP
-  - foreach: ip in blocked_ips
-    do:
-      - print: "Blocking: ${ip}"
-      - send: config firewall address
-      - send: edit "BLOCK_${ip}"
-      - send: set subnet ${ip} 255.255.255.255
-      - send: next
-      - send: end
+  - foreach:
+      iterator: ip in blocked_ips
+      do:
+        - print:
+            message: "Blocking: ${ip}"
+        - send:
+            command: config firewall address
+        - send:
+            command: edit "BLOCK_${ip}"
+        - send:
+            command: set subnet ${ip} 255.255.255.255
+        - send:
+            command: next
+        - send:
+            command: end
 
-      # Log result
-      - writefile:
-          path: "C:\\logs\\blocked_ips.log"
-          content: "${_timestamp} - Blocked ${ip} on ${Host_IP}"
+        # Log result
+        - writefile:
+            path: "C:\\logs\\blocked_ips.log"
+            content: "${_timestamp} - Blocked ${ip} on ${Host_IP}"
 
-  - exit: success "Blocked ${blocked_ips.length} IPs"
+  - exit:
+      message: success "Blocked ${blocked_ips.length} IPs"
 ```
 
 ### Example 7: Interactive Configuration with Validation
@@ -2562,19 +3299,28 @@ steps:
       validate: "^(yes|no)$"
       validation_error: "Please type 'yes' or 'no'"
 
-  - if: confirm != "yes"
-    then:
-      - exit: "Configuration cancelled by user"
+  - if:
+      condition: confirm != "yes"
+      then:
+        - exit:
+            message: "Configuration cancelled by user"
 
   # Apply configuration
-  - print: "Configuring ${interface}..."
-  - send: configure terminal
-  - send: interface ${interface}
-  - send: ip address ${ip_address} ${subnet_mask}
-  - send: no shutdown
-  - send: end
+  - print:
+      message: "Configuring ${interface}..."
+  - send:
+      command: configure terminal
+  - send:
+      command: interface ${interface}
+  - send:
+      command: ip address ${ip_address} ${subnet_mask}
+  - send:
+      command: no shutdown
+  - send:
+      command: end
 
-  - print: "Interface ${interface} configured with ${ip_address}"
+  - print:
+      message: "Interface ${interface} configured with ${ip_address}"
 ```
 
 ### Example 8: Extract and Store Data to Host Table
@@ -2585,11 +3331,13 @@ name: Extract Device Info to Columns
 description: Extracts device information and stores it back to the host table
 
 steps:
-  - print: "Collecting info from ${Host_IP}..."
+  - print:
+      message: "Collecting info from ${Host_IP}..."
 
   # Get version info
-  - send: show version
-    capture: version_output
+  - send:
+      command: show version
+      capture: version_output
 
   - extract:
       from: version_output
@@ -2602,8 +3350,9 @@ steps:
       into: uptime
 
   # Get hostname
-  - send: show running-config | include hostname
-    capture: hostname_output
+  - send:
+      command: show running-config | include hostname
+      capture: hostname_output
 
   - extract:
       from: hostname_output
@@ -2627,8 +3376,10 @@ steps:
       column: last_checked
       value: ${_timestamp}
 
-  - print: "Updated columns for ${Host_IP}: version=${version}, hostname=${hostname}"
-  - exit: success "Device info collected and stored"
+  - print:
+      message: "Updated columns for ${Host_IP}: version=${version}, hostname=${hostname}"
+  - exit:
+      message: success "Device info collected and stored"
 ```
 
 ---
@@ -2641,8 +3392,9 @@ name: Interface Inventory
 description: Collects all interfaces and stores count in host table
 
 steps:
-  - send: show ip interface brief
-    capture: output
+  - send:
+      command: show ip interface brief
+      capture: output
 
   # Extract all interface names
   - extract:
@@ -2652,11 +3404,14 @@ steps:
       match: all
 
   # Check if we found any interfaces
-  - if: interfaces.length == 0
-    then:
-      - exit: failure "No interfaces found"
+  - if:
+      condition: interfaces.length == 0
+      then:
+        - exit:
+            message: failure "No interfaces found"
 
-  - print: "Found ${interfaces.length} interfaces"
+  - print:
+      message: "Found ${interfaces.length} interfaces"
 
   # Store count back to host table
   - updatecolumn:
@@ -2664,17 +3419,24 @@ steps:
       value: ${interfaces.length}
 
   # Process each interface
-  - set: up_count = 0
-  - foreach: iface in interfaces
-    do:
-      - send: show interface ${iface} | include line protocol
-        capture: status
-      - if: status contains "up"
-        then:
-          - set: up_count = up_count + 1
-          - print: "${iface}: UP"
+  - set:
+      expression: up_count = 0
+  - foreach:
+      iterator: iface in interfaces
+      do:
+        - send:
+            command: show interface ${iface} | include line protocol
+            capture: status
+        - if:
+            condition: status contains "up"
+            then:
+              - set:
+                  expression: up_count = up_count + 1
+              - print:
+                  message: "${iface}: UP"
 
-  - print: "${up_count} of ${interfaces.length} interfaces are up"
+  - print:
+      message: "${up_count} of ${interfaces.length} interfaces are up"
 
   # Store results
   - updatecolumn:
@@ -2693,8 +3455,9 @@ description: Collects device info and exports to a structured JSON file
 
 steps:
   # Gather device information
-  - send: show version
-    capture: version_output
+  - send:
+      command: show version
+      capture: version_output
 
   - extract:
       from: version_output
@@ -2706,8 +3469,9 @@ steps:
       pattern: 'uptime is (.+?)$'
       into: uptime
 
-  - send: show running-config | include hostname
-    capture: hostname_output
+  - send:
+      command: show running-config | include hostname
+      capture: hostname_output
 
   - extract:
       from: hostname_output
@@ -2715,15 +3479,22 @@ steps:
       into: hostname
 
   # Build nested JSON structure using dot notation
-  - set: device.identity.hostname = ${hostname}
-  - set: device.identity.ip = ${Host_IP}
-  - set: device.identity.port = ${port}
+  - set:
+      expression: device.identity.hostname = ${hostname}
+  - set:
+      expression: device.identity.ip = ${Host_IP}
+  - set:
+      expression: device.identity.port = ${port}
 
-  - set: device.software.version = ${sw_version}
-  - set: device.software.uptime = ${uptime}
+  - set:
+      expression: device.software.version = ${sw_version}
+  - set:
+      expression: device.software.uptime = ${uptime}
 
-  - set: device.metadata.scanned_at = ${_timestamp}
-  - set: device.metadata.scanned_by = "SSH Helper"
+  - set:
+      expression: device.metadata.scanned_at = ${_timestamp}
+  - set:
+      expression: device.metadata.scanned_by = "SSH Helper"
 
   # Write individual device JSON file
   - writefile:
@@ -2733,7 +3504,8 @@ steps:
       pretty: true
 
   # Also append to master inventory (JSON array)
-  - set: summary = json("ip", ${Host_IP}, "hostname", ${hostname}, "version", ${sw_version})
+  - set:
+      expression: summary = json("ip", ${Host_IP}, "hostname", ${hostname}, "version", ${sw_version})
   - writefile:
       path: "C:\\inventory\\all_devices.json"
       format: json
@@ -2741,14 +3513,16 @@ steps:
       mode: append
 
   # Log the event
-  - set: log_entry = json("timestamp", ${_timestamp}, "host", ${Host_IP}, "action", "inventory_collected")
+  - set:
+      expression: log_entry = json("timestamp", ${_timestamp}, "host", ${Host_IP}, "action", "inventory_collected")
   - writefile:
       path: "C:\\inventory\\audit.jsonl"
       format: jsonl
       content: "${log_entry}"
       mode: append
 
-  - print: "Exported ${hostname} (${Host_IP}) to JSON"
+  - print:
+      message: "Exported ${hostname} (${Host_IP}) to JSON"
 ```
 
 ---
@@ -2765,54 +3539,79 @@ vars:
 
 steps:
   # Initialize compliance status
-  - set: checks_passed = 0
-  - set: checks_failed = 0
+  - set:
+      expression: checks_passed = 0
+  - set:
+      expression: checks_failed = 0
 
   # Check 1: Software version
-  - send: show version
-    capture: version_output
+  - send:
+      command: show version
+      capture: version_output
   - extract:
       from: version_output
       pattern: 'Version (\d+\.\d+)'
       into: current_version
 
-  - set: result.checks.version.current = ${current_version}
-  - set: result.checks.version.required = ${required_version}
+  - set:
+      expression: result.checks.version.current = ${current_version}
+  - set:
+      expression: result.checks.version.required = ${required_version}
 
-  - if: current_version >= required_version
-    then:
-      - set: result.checks.version.status = "PASS"
-      - set: checks_passed = checks_passed + 1
-    else:
-      - set: result.checks.version.status = "FAIL"
-      - set: checks_failed = checks_failed + 1
+  - if:
+      condition: current_version >= required_version
+      then:
+        - set:
+            expression: result.checks.version.status = "PASS"
+        - set:
+            expression: checks_passed = checks_passed + 1
+      else:
+        - set:
+            expression: result.checks.version.status = "FAIL"
+        - set:
+            expression: checks_failed = checks_failed + 1
 
   # Check 2: SSH enabled
-  - send: show ip ssh
-    capture: ssh_output
-    on_error: continue
+  - send:
+      command: show ip ssh
+      capture: ssh_output
+      on_error: continue
 
-  - if: ssh_output contains "SSH Enabled"
-    then:
-      - set: result.checks.ssh.status = "PASS"
-      - set: result.checks.ssh.detail = "SSH is enabled"
-      - set: checks_passed = checks_passed + 1
-    else:
-      - set: result.checks.ssh.status = "FAIL"
-      - set: result.checks.ssh.detail = "SSH not enabled or not available"
-      - set: checks_failed = checks_failed + 1
+  - if:
+      condition: ssh_output contains "SSH Enabled"
+      then:
+        - set:
+            expression: result.checks.ssh.status = "PASS"
+        - set:
+            expression: result.checks.ssh.detail = "SSH is enabled"
+        - set:
+            expression: checks_passed = checks_passed + 1
+      else:
+        - set:
+            expression: result.checks.ssh.status = "FAIL"
+        - set:
+            expression: result.checks.ssh.detail = "SSH not enabled or not available"
+        - set:
+            expression: checks_failed = checks_failed + 1
 
   # Build final report
-  - set: result.host = ${Host_IP}
-  - set: result.timestamp = ${_timestamp}
-  - set: result.summary.passed = ${checks_passed}
-  - set: result.summary.failed = ${checks_failed}
+  - set:
+      expression: result.host = ${Host_IP}
+  - set:
+      expression: result.timestamp = ${_timestamp}
+  - set:
+      expression: result.summary.passed = ${checks_passed}
+  - set:
+      expression: result.summary.failed = ${checks_failed}
 
-  - if: checks_failed == 0
-    then:
-      - set: result.summary.overall = "COMPLIANT"
-    else:
-      - set: result.summary.overall = "NON-COMPLIANT"
+  - if:
+      condition: checks_failed == 0
+      then:
+        - set:
+            expression: result.summary.overall = "COMPLIANT"
+      else:
+        - set:
+            expression: result.summary.overall = "NON-COMPLIANT"
 
   # Write compliance report
   - writefile:
@@ -2826,7 +3625,8 @@ steps:
       column: compliance_status
       value: ${result.summary.overall}
 
-  - print: "${Host_IP}: ${result.summary.overall} (${checks_passed} passed, ${checks_failed} failed)"
+  - print:
+      message: "${Host_IP}: ${result.summary.overall} (${checks_passed} passed, ${checks_failed} failed)"
 ```
 
 ---
@@ -2839,13 +3639,15 @@ name: FortiGate Interface Report
 description: Parses FortiGate config and exports interface inventory to CSV
 
 steps:
-  - print: "Collecting interface configuration from ${Host_IP}..."
+  - print:
+      message: "Collecting interface configuration from ${Host_IP}..."
 
   # Capture the full interface configuration
-  - send: show full-configuration system interface
-    capture: raw_config
-    suppress: true
-    timeout: 120
+  - send:
+      command: show full-configuration system interface
+      capture: raw_config
+      suppress: true
+      timeout: 120
 
   # Parse the FortiGate configuration
   - parse:
@@ -2854,9 +3656,10 @@ steps:
       into: config
 
   # Get hostname for report
-  - send: get system status
-    capture: status_output
-    suppress: true
+  - send:
+      command: get system status
+      capture: status_output
+      suppress: true
 
   - extract:
       from: status_output
@@ -2864,34 +3667,47 @@ steps:
       into: hostname
 
   # Get list of all interfaces
-  - set: interfaces = json.keys(config, "system.interface")
+  - set:
+      expression: interfaces = json.keys(config, "system.interface")
 
-  - if: interfaces.length == 0
-    then:
-      - exit: failure "No interfaces found in configuration"
+  - if:
+      condition: interfaces.length == 0
+      then:
+        - exit:
+            message: failure "No interfaces found in configuration"
 
-  - print: "Found ${interfaces.length} interfaces on ${hostname}"
+  - print:
+      message: "Found ${interfaces.length} interfaces on ${hostname}"
 
   # Build report data as JSON array
-  - set: report = json([])
+  - set:
+      expression: report = json([])
 
-  - foreach: iface in interfaces
-    do:
-      # Extract interface properties with defaults
-      - set: ip = json.get(config, "system.interface.${iface}.ip", "N/A")
-      - set: vdom = json.get(config, "system.interface.${iface}.vdom", "root")
-      - set: type = json.get(config, "system.interface.${iface}.type", "unknown")
-      - set: status = json.get(config, "system.interface.${iface}.status", "up")
-      - set: allowaccess = json.get(config, "system.interface.${iface}.allowaccess", "")
+  - foreach:
+      iterator: iface in interfaces
+      do:
+        # Extract interface properties with defaults
+        - set:
+            expression: ip = json.get(config, "system.interface.${iface}.ip", "N/A")
+        - set:
+            expression: vdom = json.get(config, "system.interface.${iface}.vdom", "root")
+        - set:
+            expression: type = json.get(config, "system.interface.${iface}.type", "unknown")
+        - set:
+            expression: status = json.get(config, "system.interface.${iface}.status", "up")
+        - set:
+            expression: allowaccess = json.get(config, "system.interface.${iface}.allowaccess", "")
 
-      # Create row object
-      - set: row = json("hostname", "${hostname}", "interface", "${iface}", "ip", "${ip}", "vdom", "${vdom}", "type", "${type}", "status", "${status}", "access", "${allowaccess}")
-      - set: report = json.push(report, ${row})
+        # Create row object
+        - set:
+            expression: row = json("hostname", "${hostname}", "interface", "${iface}", "ip", "${ip}", "vdom", "${vdom}", "type", "${type}", "status", "${status}", "access", "${allowaccess}")
+        - set:
+            expression: report = json.push(report, ${row})
 
-      # Log each interface
-      - log:
-          message: "  ${iface}: ${ip} (${type})"
-          level: debug
+        # Log each interface
+        - log:
+            message: "  ${iface}: ${ip} (${type})"
+            level: debug
 
   # Write CSV report
   - writefile:
@@ -2916,8 +3732,10 @@ steps:
       column: last_scanned
       value: ${_timestamp}
 
-  - print: "Exported ${interfaces.length} interfaces to CSV and JSON"
-  - exit: success "Interface report generated for ${hostname}"
+  - print:
+      message: "Exported ${interfaces.length} interfaces to CSV and JSON"
+  - exit:
+      message: success "Interface report generated for ${hostname}"
 ```
 
 ---
@@ -2930,13 +3748,15 @@ name: Firewall Policy Audit
 description: Parses FortiGate firewall policies and identifies potential issues
 
 steps:
-  - print: "Auditing firewall policies on ${Host_IP}..."
+  - print:
+      message: "Auditing firewall policies on ${Host_IP}..."
 
   # Capture firewall policy configuration
-  - send: show full-configuration firewall policy
-    capture: raw_config
-    suppress: true
-    timeout: 180
+  - send:
+      command: show full-configuration firewall policy
+      capture: raw_config
+      suppress: true
+      timeout: 180
 
   - parse:
       format: fortigate
@@ -2944,72 +3764,107 @@ steps:
       into: config
 
   # Get all policy IDs
-  - set: policies = json.keys(config, "firewall.policy")
+  - set:
+      expression: policies = json.keys(config, "firewall.policy")
 
-  - if: policies.length == 0
-    then:
-      - log:
-          message: "No firewall policies found"
-          level: warning
-      - exit: success "No policies to audit"
+  - if:
+      condition: policies.length == 0
+      then:
+        - log:
+            message: "No firewall policies found"
+            level: warning
+        - exit:
+            message: success "No policies to audit"
 
-  - print: "Analyzing ${policies.length} firewall policies..."
+  - print:
+      message: "Analyzing ${policies.length} firewall policies..."
 
   # Initialize counters
-  - set: any_any_count = 0
-  - set: disabled_count = 0
-  - set: no_logging_count = 0
-  - set: issues = json([])
+  - set:
+      expression: any_any_count = 0
+  - set:
+      expression: disabled_count = 0
+  - set:
+      expression: no_logging_count = 0
+  - set:
+      expression: issues = json([])
 
   # Analyze each policy
-  - foreach: pid in policies
-    do:
-      - set: policy_path = "firewall.policy.${pid}"
+  - foreach:
+      iterator: pid in policies
+      do:
+        - set:
+            expression: policy_path = "firewall.policy.${pid}"
 
-      # Get policy attributes
-      - set: srcaddr = json.get(config, "${policy_path}.srcaddr", "")
-      - set: dstaddr = json.get(config, "${policy_path}.dstaddr", "")
-      - set: service = json.get(config, "${policy_path}.service", "")
-      - set: action = json.get(config, "${policy_path}.action", "deny")
-      - set: status = json.get(config, "${policy_path}.status", "enable")
-      - set: logtraffic = json.get(config, "${policy_path}.logtraffic", "")
-      - set: name = json.get(config, "${policy_path}.name", "Policy ${pid}")
+        # Get policy attributes
+        - set:
+            expression: srcaddr = json.get(config, "${policy_path}.srcaddr", "")
+        - set:
+            expression: dstaddr = json.get(config, "${policy_path}.dstaddr", "")
+        - set:
+            expression: service = json.get(config, "${policy_path}.service", "")
+        - set:
+            expression: action = json.get(config, "${policy_path}.action", "deny")
+        - set:
+            expression: status = json.get(config, "${policy_path}.status", "enable")
+        - set:
+            expression: logtraffic = json.get(config, "${policy_path}.logtraffic", "")
+        - set:
+            expression: name = json.get(config, "${policy_path}.name", "Policy ${pid}")
 
-      # Check for any-any rules
-      - if: srcaddr contains "all" and dstaddr contains "all" and action == "accept"
-        then:
-          - set: any_any_count = any_any_count + 1
-          - set: issue = json("policy", "${pid}", "name", "${name}", "issue", "any-any-accept", "severity", "high")
-          - set: issues = json.push(issues, ${issue})
-          - log:
-              message: "Policy ${pid} (${name}): ANY-ANY ACCEPT rule detected"
-              level: warning
+        # Check for any-any rules
+        - if:
+            condition: srcaddr contains "all" and dstaddr contains "all" and action == "accept"
+            then:
+              - set:
+                  expression: any_any_count = any_any_count + 1
+              - set:
+                  expression: issue = json("policy", "${pid}", "name", "${name}", "issue", "any-any-accept", "severity", "high")
+              - set:
+                  expression: issues = json.push(issues, ${issue})
+              - log:
+                  message: "Policy ${pid} (${name}): ANY-ANY ACCEPT rule detected"
+                  level: warning
 
-      # Check for disabled rules
-      - if: status == "disable"
-        then:
-          - set: disabled_count = disabled_count + 1
+        # Check for disabled rules
+        - if:
+            condition: status == "disable"
+            then:
+              - set:
+                  expression: disabled_count = disabled_count + 1
 
-      # Check for no logging
-      - if: logtraffic is empty or logtraffic == "disable"
-        then:
-          - set: no_logging_count = no_logging_count + 1
+        # Check for no logging
+        - if:
+            condition: logtraffic is empty or logtraffic == "disable"
+            then:
+              - set:
+                  expression: no_logging_count = no_logging_count + 1
 
   # Build audit report
-  - set: audit.host = ${Host_IP}
-  - set: audit.timestamp = ${_timestamp}
-  - set: audit.summary.total_policies = ${policies.length}
-  - set: audit.summary.any_any_rules = ${any_any_count}
-  - set: audit.summary.disabled_rules = ${disabled_count}
-  - set: audit.summary.no_logging = ${no_logging_count}
-  - set: audit.issues = ${issues}
+  - set:
+      expression: audit.host = ${Host_IP}
+  - set:
+      expression: audit.timestamp = ${_timestamp}
+  - set:
+      expression: audit.summary.total_policies = ${policies.length}
+  - set:
+      expression: audit.summary.any_any_rules = ${any_any_count}
+  - set:
+      expression: audit.summary.disabled_rules = ${disabled_count}
+  - set:
+      expression: audit.summary.no_logging = ${no_logging_count}
+  - set:
+      expression: audit.issues = ${issues}
 
   # Determine overall status
-  - if: any_any_count > 0
-    then:
-      - set: audit.status = "NEEDS_REVIEW"
-    else:
-      - set: audit.status = "OK"
+  - if:
+      condition: any_any_count > 0
+      then:
+        - set:
+            expression: audit.status = "NEEDS_REVIEW"
+      else:
+        - set:
+            expression: audit.status = "OK"
 
   # Write audit report
   - writefile:
@@ -3028,18 +3883,24 @@ steps:
       value: ${policies.length}
 
   # Summary output
-  - print: "Audit complete: ${policies.length} policies analyzed"
-  - print: "  - Any-Any Accept rules: ${any_any_count}"
-  - print: "  - Disabled rules: ${disabled_count}"
-  - print: "  - Rules without logging: ${no_logging_count}"
+  - print:
+      message: "Audit complete: ${policies.length} policies analyzed"
+  - print:
+      message: "  - Any-Any Accept rules: ${any_any_count}"
+  - print:
+      message: "  - Disabled rules: ${disabled_count}"
+  - print:
+      message: "  - Rules without logging: ${no_logging_count}"
 
-  - if: any_any_count > 0
-    then:
-      - log:
-          message: "Review required: ${any_any_count} any-any rules found"
-          level: warning
+  - if:
+      condition: any_any_count > 0
+      then:
+        - log:
+            message: "Review required: ${any_any_count} any-any rules found"
+            level: warning
 
-  - exit: success "Policy audit complete"
+  - exit:
+      message: success "Policy audit complete"
 ```
 
 ---

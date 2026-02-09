@@ -6,11 +6,13 @@ description: Displays the running configuration (can be captured to history/expo
 
 steps:
   # Disable paging to get full output
-  - send: terminal length 0
+  - send:
+      command: terminal length 0
 
   # Show running config
-  - send: show running-config
-    capture: config
+  - send:
+      command: show running-config
+      capture: config
 
   # Extract hostname from config
   - extract:
@@ -18,12 +20,19 @@ steps:
       pattern: 'hostname (\S+)'
       into: device_hostname
 
-  - print: "=========================================="
-  - print: "Configuration backup for: ${device_hostname}"
-  - print: "Host IP: ${Host_IP}"
-  - print: "Timestamp: ${_timestamp}"
-  - print: "=========================================="
+  - print:
+      message: "=========================================="
+  - print:
+      message: "Configuration backup for: ${device_hostname}"
+  - print:
+      message: "Host IP: ${Host_IP}"
+  - print:
+      message: "Timestamp: ${_timestamp}"
+  - print:
+      message: "=========================================="
 
   # The full config is in the output - can be exported from history
 
-  - exit: success "Config displayed for ${device_hostname}"
+  - exit:
+      status: success
+      message: "Config displayed for ${device_hostname}"

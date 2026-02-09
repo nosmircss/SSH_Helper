@@ -101,6 +101,28 @@ namespace SSH_Helper.Services.Scripting
             return combined;
         }
 
+        /// <summary>
+        /// Analyzes multiple presets and removes references that are resolved
+        /// by external variable sources (for example active environment variables).
+        /// </summary>
+        public ColumnDependencyResult AnalyzePresets(
+            IEnumerable<PresetInfo> presets,
+            IEnumerable<string>? externallyResolvedVariables)
+        {
+            var combined = AnalyzePresets(presets);
+            if (externallyResolvedVariables == null)
+                return combined;
+
+            var resolvedSet = new HashSet<string>(
+                externallyResolvedVariables
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Select(v => v.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+
+            combined.ReferencedColumns.ExceptWith(resolvedSet);
+            return combined;
+        }
+
         private void AnalyzeSteps(List<ScriptStep>? steps, HashSet<string> definedVars, HashSet<string> referencedVars)
         {
             if (steps == null) return;
@@ -214,6 +236,15 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case StepType.UpdateEnvironment:
+                        if (step.UpdateEnvironment != null)
+                        {
+                            ExtractVarReferences(step.UpdateEnvironment.Value, referencedVars);
+                            if (!string.IsNullOrWhiteSpace(step.UpdateEnvironment.Variable))
+                                definedVars.Add(step.UpdateEnvironment.Variable.Trim());
+                        }
+                        break;
+
                     case StepType.Log:
                         if (step.Log is string logStr)
                         {
@@ -222,6 +253,87 @@ namespace SSH_Helper.Services.Scripting
                         else if (step.Log is LogOptions logOpts)
                         {
                             ExtractVarReferences(logOpts.Message, referencedVars);
+                        }
+                        break;
+
+                    case StepType.Http:
+                        if (step.Http != null)
+                        {
+                            ExtractVarReferences(step.Http.Url, referencedVars);
+                            ExtractVarReferences(step.Http.Method, referencedVars);
+                            ExtractVarReferences(step.Http.Body, referencedVars);
+                            ExtractVarReferences(step.Http.Auth, referencedVars);
+                            ExtractVarReferences(step.Http.Username, referencedVars);
+                            ExtractVarReferences(step.Http.Password, referencedVars);
+                            ExtractVarReferences(step.Http.Token, referencedVars);
+                            ExtractVarReferences(step.Http.ContentType, referencedVars);
+                            if (step.Http.Headers != null)
+                            {
+                                foreach (var headerValue in step.Http.Headers.Values)
+                                    ExtractVarReferences(headerValue, referencedVars);
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(step.Http.Into))
+                            {
+                                definedVars.Add(step.Http.Into);
+                                definedVars.Add(step.Http.Into + "_status");
+                                definedVars.Add(step.Http.Into + "_headers");
+                            }
+                        }
+                        break;
+
+                    case StepType.Ping:
+                        if (step.Ping != null)
+                        {
+                            ExtractVarReferences(step.Ping.Host, referencedVars);
+                            if (!string.IsNullOrWhiteSpace(step.Ping.Into))
+                            {
+                                definedVars.Add(step.Ping.Into);
+                                definedVars.Add(step.Ping.Into + "_avg");
+                                definedVars.Add(step.Ping.Into + "_loss");
+                            }
+                        }
+                        break;
+
+                    case StepType.Dns:
+                        if (step.Dns != null)
+                        {
+                            ExtractVarReferences(step.Dns.Host, referencedVars);
+                            ExtractVarReferences(step.Dns.Type, referencedVars);
+                            if (!string.IsNullOrWhiteSpace(step.Dns.Into))
+                            {
+                                definedVars.Add(step.Dns.Into);
+                                definedVars.Add(step.Dns.Into + "_count");
+                            }
+                        }
+                        break;
+
+                    case StepType.Portcheck:
+                        if (step.Portcheck != null)
+                        {
+                            ExtractVarReferences(step.Portcheck.Host, referencedVars);
+                            if (!string.IsNullOrWhiteSpace(step.Portcheck.Into))
+                            {
+                                definedVars.Add(step.Portcheck.Into);
+                                definedVars.Add(step.Portcheck.Into + "_latency");
+                            }
+                        }
+                        break;
+
+                    case StepType.Sftp:
+                        if (step.Sftp != null)
+                        {
+                            ExtractVarReferences(step.Sftp.Action, referencedVars);
+                            ExtractVarReferences(step.Sftp.LocalPath, referencedVars);
+                            ExtractVarReferences(step.Sftp.RemotePath, referencedVars);
+                            ExtractVarReferences(step.Sftp.Host, referencedVars);
+                            ExtractVarReferences(step.Sftp.Username, referencedVars);
+                            ExtractVarReferences(step.Sftp.Password, referencedVars);
+                            if (!string.IsNullOrWhiteSpace(step.Sftp.Into))
+                            {
+                                definedVars.Add(step.Sftp.Into);
+                                definedVars.Add(step.Sftp.Into + "_bytes");
+                            }
                         }
                         break;
 

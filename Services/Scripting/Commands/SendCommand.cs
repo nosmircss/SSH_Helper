@@ -18,7 +18,15 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             var session = context.Session;
             if (session == null)
-                return CommandResult.Fail("No SSH session available");
+            {
+                const string errorMsg = "No SSH session available";
+                context.EmitOutput(errorMsg, ScriptOutputType.Error);
+
+                if (step.OnError?.ToLowerInvariant() == "continue")
+                    return CommandResult.Suppressed(errorMsg);
+
+                return CommandResult.Fail(errorMsg);
+            }
 
             try
             {

@@ -29,6 +29,21 @@ namespace SSH_Helper
         private readonly CheckBox _chkCheckForUpdatesOnStartup;
         private readonly CheckBox _chkEnableUpdateLog;
 
+        // Command Editor tab controls
+        private readonly CheckBox _chkEnableSyntaxHighlighting;
+        private readonly CheckBox _chkEnableAutocomplete;
+        private readonly CheckBox _chkAutocompleteShowOnTyping;
+        private readonly CheckBox _chkEnableInlineValidation;
+        private readonly NumericUpDown _numValidationDebounceMs;
+        private readonly CheckBox _chkShowInlineWarnings;
+        private readonly CheckBox _chkEnableDiagnosticTooltips;
+        private readonly CheckBox _chkEnableVariableInspectorTooltips;
+        private readonly CheckBox _chkEnableYamlHygieneWarnings;
+        private readonly CheckBox _chkUseSpacesForTab;
+        private readonly NumericUpDown _numIndentSize;
+        private readonly CheckBox _chkEnableSmartEnter;
+        private readonly CheckBox _chkPreserveBlankLineBetweenSteps;
+
         // Appearance tab controls - Font Families
         private ComboBox _cboUIFont = null!;
         private ComboBox _cboCodeFont = null!;
@@ -47,6 +62,7 @@ namespace SSH_Helper
         private NumericUpDown _numHostListFontSize = null!;
         private NumericUpDown _numMenuFontSize = null!;
         private NumericUpDown _numStatusBarFontSize = null!;
+        private NumericUpDown _numDialogFontSize = null!;
 
         // Appearance tab controls - Global Scale
         private TrackBar _trkGlobalScale = null!;
@@ -75,6 +91,7 @@ namespace SSH_Helper
 
         private readonly Button _btnSave;
         private readonly Button _btnCancel;
+        private readonly List<FlowLayoutPanel> _scrollableFlowPanels = new();
 
         private Color _customAccentColor = Color.FromArgb(0, 120, 215);
         private List<Font> _previewFonts = new();
@@ -110,6 +127,10 @@ namespace SSH_Helper
             var tabUpdates = CreateUpdatesTab();
             _tabControl.TabPages.Add(tabUpdates);
 
+            // === Command Editor Tab ===
+            var tabCommandEditor = CreateCommandEditorTab();
+            _tabControl.TabPages.Add(tabCommandEditor);
+
             // === Appearance Tab (with scrollable panel) ===
             var tabAppearance = CreateAppearanceTab();
             _tabControl.TabPages.Add(tabAppearance);
@@ -139,24 +160,41 @@ namespace SSH_Helper
             AcceptButton = _btnSave;
             CancelButton = _btnCancel;
 
-            // Initialize controls that need constructor
-            _chkRememberState = (CheckBox)tabGeneral.Controls["chkRememberState"]!;
-            _numMaxHistory = (NumericUpDown)tabGeneral.Controls["numMaxHistory"]!;
-            _numDefaultTimeout = (NumericUpDown)tabGeneral.Controls["numDefaultTimeout"]!;
-            _numConnectionTimeout = (NumericUpDown)tabGeneral.Controls["numConnectionTimeout"]!;
-            _chkDarkMode = (CheckBox)tabGeneral.Controls["chkDarkMode"]!;
-            _chkAutoResizeHostColumns = (CheckBox)tabGeneral.Controls["chkAutoResizeHostColumns"]!;
-            _chkEnableSshConfig = (CheckBox)tabGeneral.Controls["chkEnableSshConfig"]!;
-            _chkUseConnectionPooling = (CheckBox)tabGeneral.Controls["chkUseConnectionPooling"]!;
-            _chkUseCredentialManager = (CheckBox)tabGeneral.Controls["chkUseCredentialManager"]!;
-            _chkPreferSshAgent = (CheckBox)tabGeneral.Controls["chkPreferSshAgent"]!;
+            // Initialize controls — use recursive find since controls are nested in layout panels
+            _chkRememberState = FindControl<CheckBox>(tabGeneral, "chkRememberState");
+            _numMaxHistory = FindControl<NumericUpDown>(tabGeneral, "numMaxHistory");
+            _numDefaultTimeout = FindControl<NumericUpDown>(tabGeneral, "numDefaultTimeout");
+            _numConnectionTimeout = FindControl<NumericUpDown>(tabGeneral, "numConnectionTimeout");
+            _chkDarkMode = FindControl<CheckBox>(tabGeneral, "chkDarkMode");
+            _chkAutoResizeHostColumns = FindControl<CheckBox>(tabGeneral, "chkAutoResizeHostColumns");
+            _chkEnableSshConfig = FindControl<CheckBox>(tabGeneral, "chkEnableSshConfig");
+            _chkUseConnectionPooling = FindControl<CheckBox>(tabGeneral, "chkUseConnectionPooling");
+            _chkUseCredentialManager = FindControl<CheckBox>(tabGeneral, "chkUseCredentialManager");
+            _chkPreferSshAgent = FindControl<CheckBox>(tabGeneral, "chkPreferSshAgent");
 
-            _chkCheckForUpdatesOnStartup = (CheckBox)tabUpdates.Controls["chkCheckForUpdatesOnStartup"]!;
-            _chkEnableUpdateLog = (CheckBox)tabUpdates.Controls["chkEnableUpdateLog"]!;
+            _chkCheckForUpdatesOnStartup = FindControl<CheckBox>(tabUpdates, "chkCheckForUpdatesOnStartup");
+            _chkEnableUpdateLog = FindControl<CheckBox>(tabUpdates, "chkEnableUpdateLog");
+            _chkEnableSyntaxHighlighting = FindControl<CheckBox>(tabCommandEditor, "chkEnableSyntaxHighlighting");
+            _chkEnableAutocomplete = FindControl<CheckBox>(tabCommandEditor, "chkEnableAutocomplete");
+            _chkAutocompleteShowOnTyping = FindControl<CheckBox>(tabCommandEditor, "chkAutocompleteShowOnTyping");
+            _chkEnableInlineValidation = FindControl<CheckBox>(tabCommandEditor, "chkEnableInlineValidation");
+            _numValidationDebounceMs = FindControl<NumericUpDown>(tabCommandEditor, "numValidationDebounceMs");
+            _chkShowInlineWarnings = FindControl<CheckBox>(tabCommandEditor, "chkShowInlineWarnings");
+            _chkEnableDiagnosticTooltips = FindControl<CheckBox>(tabCommandEditor, "chkEnableDiagnosticTooltips");
+            _chkEnableVariableInspectorTooltips = FindControl<CheckBox>(tabCommandEditor, "chkEnableVariableInspectorTooltips");
+            _chkEnableYamlHygieneWarnings = FindControl<CheckBox>(tabCommandEditor, "chkEnableYamlHygieneWarnings");
+            _chkUseSpacesForTab = FindControl<CheckBox>(tabCommandEditor, "chkUseSpacesForTab");
+            _numIndentSize = FindControl<NumericUpDown>(tabCommandEditor, "numIndentSize");
+            _chkEnableSmartEnter = FindControl<CheckBox>(tabCommandEditor, "chkEnableSmartEnter");
+            _chkPreserveBlankLineBetweenSteps = FindControl<CheckBox>(tabCommandEditor, "chkPreserveBlankLineBetweenSteps");
 
             LoadSettings();
             UpdatePreview();
             ApplyDialogTheme(darkMode);
+
+            FontChanged += (_, _) => RefreshScrollableFlowExtents();
+            Shown += (_, _) => RefreshScrollableFlowExtents();
+            RefreshScrollableFlowExtents();
         }
 
         private void ApplyDialogTheme(bool darkMode)
@@ -198,221 +236,93 @@ namespace SSH_Helper
 
         private TabPage CreateGeneralTab()
         {
-            var tabGeneral = new TabPage("General")
+            var tabGeneral = new TabPage("General") { AutoScroll = true };
+
+            var flow = new FlowLayoutPanel
             {
-                AutoScroll = true
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(12, 12, 12, 12),
+            };
+            _scrollableFlowPanels.Add(flow);
+
+            var sectionFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            var noteFont = new Font("Segoe UI", 8f);
+
+            // Helper: section header with top margin
+            Label SectionHeader(string text, int topMargin = 8) => new()
+            {
+                Text = text, Font = sectionFont, AutoSize = true,
+                Margin = new Padding(0, topMargin, 0, 4)
             };
 
-            var lblStateSection = new Label
+            // Helper: label+spinner row using a 2-column table
+            TableLayoutPanel LabelSpinnerRow(string labelText, string numName, decimal value, decimal min, decimal max)
             {
-                Text = "Application State",
-                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
-                Location = new Point(15, 15),
-                AutoSize = true
+                var row = new TableLayoutPanel
+                {
+                    AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 2, 0, 2),
+                };
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
+                row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                var lbl = new Label { Text = labelText, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) };
+                var num = new NumericUpDown
+                {
+                    Name = numName, Size = new Size(70, 23),
+                    Minimum = min, Maximum = max, Value = value,
+                    TextAlign = HorizontalAlignment.Right
+                };
+                row.Controls.Add(lbl, 0, 0);
+                row.Controls.Add(num, 1, 0);
+                return row;
+            }
+
+            // Helper: indented note label
+            Label NoteLabel(string text) => new()
+            {
+                Text = text, AutoSize = true, ForeColor = Color.Gray, Font = noteFont,
+                Margin = new Padding(17, 0, 0, 2)
             };
 
-            var chkRememberState = new CheckBox
-            {
-                Name = "chkRememberState",
-                Text = "Remember state on exit (hosts, preset, history)",
-                Location = new Point(15, 40),
-                AutoSize = true
-            };
+            // === Application State ===
+            flow.Controls.Add(SectionHeader("Application State", 0));
+            flow.Controls.Add(new CheckBox { Name = "chkRememberState", Text = "Remember state on exit (hosts, preset, history)", AutoSize = true });
+            flow.Controls.Add(LabelSpinnerRow("Maximum history entries to keep:", "numMaxHistory", 30, 1, 500));
 
-            var lblMaxHistory = new Label
-            {
-                Text = "Maximum history entries to keep:",
-                Location = new Point(15, 70),
-                AutoSize = true
-            };
+            // === Default Values ===
+            flow.Controls.Add(SectionHeader("Default Values"));
+            flow.Controls.Add(LabelSpinnerRow("Default command timeout (seconds):", "numDefaultTimeout", 10, 1, 300));
+            flow.Controls.Add(LabelSpinnerRow("Connection timeout (seconds):", "numConnectionTimeout", 30, 5, 120));
 
-            var numMaxHistory = new NumericUpDown
-            {
-                Name = "numMaxHistory",
-                Location = new Point(220, 68),
-                Size = new Size(80, 23),
-                Minimum = 1,
-                Maximum = 500,
-                Value = 30,
-                TextAlign = HorizontalAlignment.Right
-            };
+            // === Theme ===
+            flow.Controls.Add(SectionHeader("Theme"));
+            flow.Controls.Add(new CheckBox { Name = "chkDarkMode", Text = "Dark mode (output window is always dark)", AutoSize = true });
 
-            var lblDefaultsSection = new Label
-            {
-                Text = "Default Values",
-                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
-                Location = new Point(15, 105),
-                AutoSize = true
-            };
+            // === Host Grid ===
+            flow.Controls.Add(SectionHeader("Host Grid"));
+            flow.Controls.Add(new CheckBox { Name = "chkAutoResizeHostColumns", Text = "Auto-resize columns to fit content", AutoSize = true });
 
-            var lblDefaultTimeout = new Label
-            {
-                Text = "Default command timeout (seconds):",
-                Location = new Point(15, 135),
-                AutoSize = true
-            };
+            // === SSH Config ===
+            flow.Controls.Add(SectionHeader("SSH Config"));
+            flow.Controls.Add(new CheckBox { Name = "chkEnableSshConfig", Text = "Use SSH config file (~/.ssh/config)", AutoSize = true });
+            var sshConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "config");
+            flow.Controls.Add(NoteLabel($"Path: {sshConfigPath}"));
 
-            var numDefaultTimeout = new NumericUpDown
-            {
-                Name = "numDefaultTimeout",
-                Location = new Point(250, 133),
-                Size = new Size(80, 23),
-                Minimum = 1,
-                Maximum = 300,
-                Value = 10,
-                TextAlign = HorizontalAlignment.Right
-            };
+            // === Connection Pooling ===
+            flow.Controls.Add(SectionHeader("Connection Pooling"));
+            flow.Controls.Add(new CheckBox { Name = "chkUseConnectionPooling", Text = "Reuse SSH connections across executions", AutoSize = true });
+            flow.Controls.Add(NoteLabel("May improve performance for repeated runs on the same hosts."));
 
-            var lblConnectionTimeout = new Label
-            {
-                Text = "Connection timeout (seconds):",
-                Location = new Point(15, 165),
-                AutoSize = true
-            };
+            // === Credentials ===
+            flow.Controls.Add(SectionHeader("Credentials"));
+            flow.Controls.Add(new CheckBox { Name = "chkUseCredentialManager", Text = "Store passwords in Windows Credential Manager", AutoSize = true });
+            flow.Controls.Add(new CheckBox { Name = "chkPreferSshAgent", Text = "Prefer SSH agent when available", AutoSize = true });
 
-            var numConnectionTimeout = new NumericUpDown
-            {
-                Name = "numConnectionTimeout",
-                Location = new Point(250, 163),
-                Size = new Size(80, 23),
-                Minimum = 5,
-                Maximum = 120,
-                Value = 30,
-                TextAlign = HorizontalAlignment.Right
-            };
-
-            var lblAppearanceSection = new Label
-            {
-                Text = "Theme",
-                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
-                Location = new Point(15, 200),
-                AutoSize = true
-            };
-
-            var chkDarkMode = new CheckBox
-            {
-                Name = "chkDarkMode",
-                Text = "Dark mode (output window is always dark)",
-                Location = new Point(15, 225),
-                AutoSize = true
-            };
-
-            var lblHostGridSection = new Label
-            {
-                Text = "Host Grid",
-                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
-                Location = new Point(15, 260),
-                AutoSize = true
-            };
-
-            var chkAutoResizeHostColumns = new CheckBox
-            {
-                Name = "chkAutoResizeHostColumns",
-                Text = "Auto-resize columns to fit content",
-                Location = new Point(15, 285),
-                AutoSize = true
-            };
-
-            var lblSshConfigSection = new Label
-            {
-                Text = "SSH Config",
-                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
-                Location = new Point(15, 320),
-                AutoSize = true
-            };
-
-            var chkEnableSshConfig = new CheckBox
-            {
-                Name = "chkEnableSshConfig",
-                Text = "Use SSH config file (~/.ssh/config)",
-                Location = new Point(15, 345),
-                AutoSize = true
-            };
-
-            var sshConfigPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".ssh", "config");
-            var lblSshConfigPath = new Label
-            {
-                Text = $"Path: {sshConfigPath}",
-                Location = new Point(32, 368),
-                AutoSize = true,
-                ForeColor = Color.Gray,
-                Font = new Font("Segoe UI", 8f)
-            };
-
-            var lblPoolingSection = new Label
-            {
-                Text = "Connection Pooling",
-                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
-                Location = new Point(15, 395),
-                AutoSize = true
-            };
-
-            var chkUseConnectionPooling = new CheckBox
-            {
-                Name = "chkUseConnectionPooling",
-                Text = "Reuse SSH connections across executions",
-                Location = new Point(15, 420),
-                AutoSize = true
-            };
-
-            var lblPoolingNote = new Label
-            {
-                Text = "May improve performance for repeated runs on the same hosts.",
-                Location = new Point(32, 442),
-                AutoSize = true,
-                ForeColor = Color.Gray,
-                Font = new Font("Segoe UI", 8f)
-            };
-
-            var lblCredentialsSection = new Label
-            {
-                Text = "Credentials",
-                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
-                Location = new Point(15, 470),
-                AutoSize = true
-            };
-
-            var chkUseCredentialManager = new CheckBox
-            {
-                Name = "chkUseCredentialManager",
-                Text = "Store passwords in Windows Credential Manager",
-                Location = new Point(15, 495),
-                AutoSize = true
-            };
-
-            var chkPreferSshAgent = new CheckBox
-            {
-                Name = "chkPreferSshAgent",
-                Text = "Prefer SSH agent when available",
-                Location = new Point(15, 520),
-                AutoSize = true
-            };
-
-            tabGeneral.Controls.Add(lblStateSection);
-            tabGeneral.Controls.Add(chkRememberState);
-            tabGeneral.Controls.Add(lblMaxHistory);
-            tabGeneral.Controls.Add(numMaxHistory);
-            tabGeneral.Controls.Add(lblDefaultsSection);
-            tabGeneral.Controls.Add(lblDefaultTimeout);
-            tabGeneral.Controls.Add(numDefaultTimeout);
-            tabGeneral.Controls.Add(lblConnectionTimeout);
-            tabGeneral.Controls.Add(numConnectionTimeout);
-            tabGeneral.Controls.Add(lblAppearanceSection);
-            tabGeneral.Controls.Add(chkDarkMode);
-            tabGeneral.Controls.Add(lblHostGridSection);
-            tabGeneral.Controls.Add(chkAutoResizeHostColumns);
-            tabGeneral.Controls.Add(lblSshConfigSection);
-            tabGeneral.Controls.Add(chkEnableSshConfig);
-            tabGeneral.Controls.Add(lblSshConfigPath);
-            tabGeneral.Controls.Add(lblPoolingSection);
-            tabGeneral.Controls.Add(chkUseConnectionPooling);
-            tabGeneral.Controls.Add(lblPoolingNote);
-            tabGeneral.Controls.Add(lblCredentialsSection);
-            tabGeneral.Controls.Add(chkUseCredentialManager);
-            tabGeneral.Controls.Add(chkPreferSshAgent);
-
+            tabGeneral.Controls.Add(flow);
             return tabGeneral;
         }
 
@@ -420,54 +330,202 @@ namespace SSH_Helper
         {
             var tabUpdates = new TabPage("Updates");
 
-            var lblUpdateSection = new Label
+            var flow = new FlowLayoutPanel
             {
-                Text = "Automatic Updates",
-                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
-                Location = new Point(15, 15),
-                AutoSize = true
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(12, 12, 12, 12),
             };
+            _scrollableFlowPanels.Add(flow);
 
-            var chkCheckForUpdatesOnStartup = new CheckBox
+            var sectionFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            var noteFont = new Font("Segoe UI", 8f);
+
+            flow.Controls.Add(new Label
+            {
+                Text = "Automatic Updates", Font = sectionFont, AutoSize = true,
+                Margin = new Padding(0, 0, 0, 4)
+            });
+            flow.Controls.Add(new CheckBox
             {
                 Name = "chkCheckForUpdatesOnStartup",
                 Text = "Check for updates when application starts",
-                Location = new Point(15, 40),
                 AutoSize = true
-            };
+            });
 
-            var lblTroubleshooting = new Label
+            flow.Controls.Add(new Label
             {
-                Text = "Troubleshooting",
-                Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold),
-                Location = new Point(15, 80),
-                AutoSize = true
-            };
-
-            var chkEnableUpdateLog = new CheckBox
+                Text = "Troubleshooting", Font = sectionFont, AutoSize = true,
+                Margin = new Padding(0, 12, 0, 4)
+            });
+            flow.Controls.Add(new CheckBox
             {
                 Name = "chkEnableUpdateLog",
                 Text = "Enable update log file (for troubleshooting update failures)",
-                Location = new Point(15, 105),
                 AutoSize = true
-            };
-
-            var lblLogPath = new Label
+            });
+            flow.Controls.Add(new Label
             {
                 Text = "Log file: %TEMP%\\SSH_Helper_Update\\update.log",
-                Location = new Point(32, 128),
+                AutoSize = true, ForeColor = Color.Gray, Font = noteFont,
+                Margin = new Padding(17, 0, 0, 2)
+            });
+
+            tabUpdates.Controls.Add(flow);
+            return tabUpdates;
+        }
+
+        private TabPage CreateCommandEditorTab()
+        {
+            var tabCommandEditor = new TabPage("Command Editor");
+
+            var flow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(12, 12, 12, 12)
+            };
+            _scrollableFlowPanels.Add(flow);
+
+            var sectionFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            Label SectionHeader(string text, int topMargin = 10) => new()
+            {
+                Text = text,
+                Font = sectionFont,
                 AutoSize = true,
-                ForeColor = Color.Gray,
-                Font = new Font("Segoe UI", 8f)
+                Margin = new Padding(0, topMargin, 0, 4)
             };
 
-            tabUpdates.Controls.Add(lblUpdateSection);
-            tabUpdates.Controls.Add(chkCheckForUpdatesOnStartup);
-            tabUpdates.Controls.Add(lblTroubleshooting);
-            tabUpdates.Controls.Add(chkEnableUpdateLog);
-            tabUpdates.Controls.Add(lblLogPath);
+            TableLayoutPanel LabeledNumeric(string label, string name, decimal min, decimal max, decimal value)
+            {
+                var row = new TableLayoutPanel
+                {
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    ColumnCount = 2,
+                    RowCount = 1,
+                    Margin = new Padding(0, 2, 0, 2)
+                };
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+                row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            return tabUpdates;
+                row.Controls.Add(new Label
+                {
+                    Text = label,
+                    AutoSize = true,
+                    Anchor = AnchorStyles.Left,
+                    Margin = new Padding(0, 4, 4, 0)
+                }, 0, 0);
+
+                row.Controls.Add(new NumericUpDown
+                {
+                    Name = name,
+                    Minimum = min,
+                    Maximum = max,
+                    Value = value,
+                    TextAlign = HorizontalAlignment.Right,
+                    Size = new Size(80, 23)
+                }, 1, 0);
+
+                return row;
+            }
+
+            // Features
+            flow.Controls.Add(SectionHeader("Features", 0));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableSyntaxHighlighting",
+                Text = "Enable syntax highlighting",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableAutocomplete",
+                Text = "Enable autocomplete",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkAutocompleteShowOnTyping",
+                Text = "Show autocomplete while typing",
+                AutoSize = true,
+                Margin = new Padding(18, 0, 0, 2)
+            });
+
+            // Validation and diagnostics
+            flow.Controls.Add(SectionHeader("Validation & Diagnostics"));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableInlineValidation",
+                Text = "Enable inline validation",
+                AutoSize = true
+            });
+            flow.Controls.Add(LabeledNumeric(
+                "Inline validation debounce (ms):",
+                "numValidationDebounceMs",
+                CommandEditorSettings.MinValidationDebounceMs,
+                CommandEditorSettings.MaxValidationDebounceMs,
+                400));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkShowInlineWarnings",
+                Text = "Show inline warnings",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableDiagnosticTooltips",
+                Text = "Enable diagnostic hover tooltips",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableVariableInspectorTooltips",
+                Text = "Enable variable inspector tooltips",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableYamlHygieneWarnings",
+                Text = "Enable YAML hygiene warnings",
+                AutoSize = true
+            });
+
+            // Indentation/newline behavior
+            flow.Controls.Add(SectionHeader("Indentation & Newline"));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkUseSpacesForTab",
+                Text = "Use spaces for Tab indentation",
+                AutoSize = true
+            });
+            flow.Controls.Add(LabeledNumeric(
+                "Indent size (spaces):",
+                "numIndentSize",
+                CommandEditorSettings.MinIndentSize,
+                CommandEditorSettings.MaxIndentSize,
+                2));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableSmartEnter",
+                Text = "Enable smart Enter indentation",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkPreserveBlankLineBetweenSteps",
+                Text = "Preserve blank lines between YAML steps",
+                AutoSize = true,
+                Margin = new Padding(18, 0, 0, 2)
+            });
+
+            tabCommandEditor.Controls.Add(flow);
+            return tabCommandEditor;
         }
 
         private TabPage CreateAppearanceTab()
@@ -572,25 +630,16 @@ namespace SSH_Helper
             scrollPanel.Controls.Add(lblSizesSection);
             y += 25;
 
-            // Row 1: Section titles, Tree views
-            AddFontSizeRow(scrollPanel, ref y, "Section titles:", out _numSectionTitleSize, "Tree views:", out _numTreeViewSize);
-
-            // Row 2: Empty labels, Execute buttons
-            AddFontSizeRow(scrollPanel, ref y, "Empty labels:", out _numEmptyLabelSize, "Execute buttons:", out _numExecuteButtonSize);
-
-            // Row 3: Code editor, Output area
-            AddFontSizeRow(scrollPanel, ref y, "Code editor:", out _numCodeEditorSize, "Output area:", out _numOutputAreaSize);
-
-            // Row 4: Tab headers, General buttons
-            AddFontSizeRow(scrollPanel, ref y, "Tab headers:", out _numTabFontSize, "Buttons:", out _numButtonFontSize);
-
-            // Row 5: Host list, Menus
-            AddFontSizeRow(scrollPanel, ref y, "Host list:", out _numHostListFontSize, "Menus:", out _numMenuFontSize);
-
-            // Row 6: Status bar
-            AddFontSizeRow(scrollPanel, ref y, "Status bar:", out _numStatusBarFontSize, null, out _);
-
-            y += 10;
+            var fontSizesTable = CreateLabelSpinnerTable(6, scrollPanel.ClientSize.Width - 30);
+            fontSizesTable.Location = new Point(15, y);
+            AddTableRow(fontSizesTable, 0, "Section titles:", out _numSectionTitleSize, 9.5m, "Tree views:", out _numTreeViewSize, 9.5m);
+            AddTableRow(fontSizesTable, 1, "Empty labels:", out _numEmptyLabelSize, 9.5m, "Execute buttons:", out _numExecuteButtonSize, 9.5m);
+            AddTableRow(fontSizesTable, 2, "Code editor:", out _numCodeEditorSize, 9.75m, "Output area:", out _numOutputAreaSize, 9.75m);
+            AddTableRow(fontSizesTable, 3, "Tab headers:", out _numTabFontSize, 9m, "Buttons:", out _numButtonFontSize, 9m);
+            AddTableRow(fontSizesTable, 4, "Host list:", out _numHostListFontSize, 9m, "Menus:", out _numMenuFontSize, 9m);
+            AddTableRow(fontSizesTable, 5, "Status bar:", out _numStatusBarFontSize, 9m, "Dialogs:", out _numDialogFontSize, 9m);
+            scrollPanel.Controls.Add(fontSizesTable);
+            y += fontSizesTable.PreferredSize.Height + 10;
 
             // === Layout Section ===
             var lblLayoutSection = new Label
@@ -604,53 +653,34 @@ namespace SSH_Helper
             y += 25;
 
             // Word wrap checkboxes
-            _chkCodeEditorWordWrap = new CheckBox
-            {
-                Text = "Word wrap in code editor",
-                Location = new Point(15, y),
-                AutoSize = true
-            };
+            _chkCodeEditorWordWrap = new CheckBox { Text = "Word wrap in code editor", AutoSize = true };
             _chkCodeEditorWordWrap.CheckedChanged += (s, e) => UpdatePreview();
-
-            _chkOutputAreaWordWrap = new CheckBox
-            {
-                Text = "Word wrap in output area",
-                Location = new Point(220, y),
-                AutoSize = true,
-                Checked = false
-            };
+            _chkOutputAreaWordWrap = new CheckBox { Text = "Word wrap in output area", AutoSize = true, Checked = false };
             _chkOutputAreaWordWrap.CheckedChanged += (s, e) => UpdatePreview();
 
-            scrollPanel.Controls.Add(_chkCodeEditorWordWrap);
-            scrollPanel.Controls.Add(_chkOutputAreaWordWrap);
-            y += 30;
+            var layoutTable = CreateLabelSpinnerTable(2, scrollPanel.ClientSize.Width - 30);
+            layoutTable.Location = new Point(15, y);
+
+            // Word wrap row
+            layoutTable.Controls.Add(_chkCodeEditorWordWrap, 0, 0);
+            layoutTable.SetColumnSpan(_chkCodeEditorWordWrap, 2);
+            layoutTable.Controls.Add(_chkOutputAreaWordWrap, 2, 0);
+            layoutTable.SetColumnSpan(_chkOutputAreaWordWrap, 2);
 
             // Row heights
-            var lblTreeViewRowHeight = new Label { Text = "Tree row height (0=auto):", Location = new Point(15, y), AutoSize = true };
-            _numTreeViewRowHeight = new NumericUpDown
-            {
-                Location = new Point(155, y - 2),
-                Size = new Size(50, 23),
-                Minimum = 0,
-                Maximum = 50,
-                Value = 0
-            };
+            _numTreeViewRowHeight = CreateNumericUpDown(0, 0, 0, 0, 50, 1, 0);
+            _numHostListRowHeight = CreateNumericUpDown(0, 0, 28, 16, 50, 1, 0);
+            _numTreeViewRowHeight.Size = new Size(50, 23);
+            _numHostListRowHeight.Size = new Size(50, 23);
+            var lblTreeRowHeight = new Label { Text = "Tree row height (0=auto):", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 0, 0) };
+            var lblHostListRowHeight = new Label { Text = "Host list row height:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 0, 0) };
+            layoutTable.Controls.Add(lblTreeRowHeight, 0, 1);
+            layoutTable.Controls.Add(_numTreeViewRowHeight, 1, 1);
+            layoutTable.Controls.Add(lblHostListRowHeight, 2, 1);
+            layoutTable.Controls.Add(_numHostListRowHeight, 3, 1);
 
-            var lblHostListRowHeight = new Label { Text = "Host list row height:", Location = new Point(220, y), AutoSize = true };
-            _numHostListRowHeight = new NumericUpDown
-            {
-                Location = new Point(350, y - 2),
-                Size = new Size(50, 23),
-                Minimum = 16,
-                Maximum = 50,
-                Value = 28
-            };
-
-            scrollPanel.Controls.Add(lblTreeViewRowHeight);
-            scrollPanel.Controls.Add(_numTreeViewRowHeight);
-            scrollPanel.Controls.Add(lblHostListRowHeight);
-            scrollPanel.Controls.Add(_numHostListRowHeight);
-            y += 35;
+            scrollPanel.Controls.Add(layoutTable);
+            y += layoutTable.PreferredSize.Height + 10;
 
             // === Accent Color Section ===
             var lblAccentSection = new Label
@@ -774,30 +804,84 @@ namespace SSH_Helper
             return tabAppearance;
         }
 
-        private void AddFontSizeRow(Panel panel, ref int y, string label1, out NumericUpDown num1, string? label2, out NumericUpDown num2)
+        private void RefreshScrollableFlowExtents()
         {
-            var lbl1 = new Label { Text = label1, Location = new Point(15, y), AutoSize = true };
-            num1 = CreateNumericUpDown(120, y - 2, 9.5m, 7, 16, 0.5m, 1);
+            foreach (var flow in _scrollableFlowPanels)
+            {
+                if (flow.IsDisposed)
+                {
+                    continue;
+                }
+
+                flow.PerformLayout();
+
+                int contentBottom = flow.Padding.Top;
+                foreach (Control control in flow.Controls)
+                {
+                    if (!control.Visible)
+                    {
+                        continue;
+                    }
+
+                    int candidateBottom = control.Bottom + control.Margin.Bottom;
+                    if (candidateBottom > contentBottom)
+                    {
+                        contentBottom = candidateBottom;
+                    }
+                }
+
+                // Reserve a small buffer so the last row is never clipped by
+                // rounding, DPI scaling, or scrollbar metrics.
+                flow.AutoScrollMinSize = new Size(0, contentBottom + flow.Padding.Bottom + 8);
+            }
+        }
+
+        private static TableLayoutPanel CreateLabelSpinnerTable(int rows, int width)
+        {
+            var table = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 4,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+            };
+            // Label columns auto-size to content, spinner columns are fixed width
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
+            for (int i = 0; i < rows; i++)
+                table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            return table;
+        }
+
+        private void AddTableRow(TableLayoutPanel table, int row,
+            string label1, out NumericUpDown num1, decimal default1,
+            string label2, out NumericUpDown num2, decimal default2)
+        {
+            var lbl1 = new Label { Text = label1, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 0, 0) };
+            num1 = CreateNumericUpDown(0, 0, default1, 7, 16, 0.5m, 1);
             num1.ValueChanged += (s, e) => UpdatePreview();
+            table.Controls.Add(lbl1, 0, row);
+            table.Controls.Add(num1, 1, row);
 
-            panel.Controls.Add(lbl1);
-            panel.Controls.Add(num1);
+            var lbl2 = new Label { Text = label2, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(8, 4, 0, 0) };
+            num2 = CreateNumericUpDown(0, 0, default2, 7, 16, 0.5m, 1);
+            num2.ValueChanged += (s, e) => UpdatePreview();
+            table.Controls.Add(lbl2, 2, row);
+            table.Controls.Add(num2, 3, row);
+        }
 
-            if (label2 != null)
+        private static T FindControl<T>(Control parent, string name) where T : Control
+        {
+            if (parent.Controls[name] is T direct) return direct;
+            foreach (Control child in parent.Controls)
             {
-                var lbl2 = new Label { Text = label2, Location = new Point(220, y), AutoSize = true };
-                num2 = CreateNumericUpDown(345, y - 2, 9.5m, 7, 16, 0.5m, 1);
-                num2.ValueChanged += (s, e) => UpdatePreview();
-
-                panel.Controls.Add(lbl2);
-                panel.Controls.Add(num2);
+                var found = FindControl<T>(child, name);
+                if (found != null) return found;
             }
-            else
-            {
-                num2 = null!;
-            }
-
-            y += 28;
+            return null!;
         }
 
         private static NumericUpDown CreateNumericUpDown(int x, int y, decimal value, decimal min, decimal max, decimal increment, int decimalPlaces)
@@ -814,6 +898,18 @@ namespace SSH_Helper
             };
         }
 
+        private static string ResolveSemiboldFontFamily(string? uiFontFamily)
+        {
+            if (string.IsNullOrWhiteSpace(uiFontFamily))
+            {
+                return FontSettings.DefaultUIFontFamily;
+            }
+
+            return uiFontFamily.EndsWith("Semibold", StringComparison.OrdinalIgnoreCase)
+                ? uiFontFamily
+                : $"{uiFontFamily} Semibold";
+        }
+
         private void UpdatePreview()
         {
             if (_pnlPreview == null || _lblPreviewTitle == null) return;
@@ -821,8 +917,9 @@ namespace SSH_Helper
             try
             {
                 var scale = _trkGlobalScale?.Value / 100f ?? 1f;
-                var uiFont = _cboUIFont?.SelectedItem?.ToString() ?? "Segoe UI";
+                var uiFont = _cboUIFont?.SelectedItem?.ToString() ?? FontSettings.DefaultUIFontFamily;
                 var codeFont = _cboCodeFont?.SelectedItem?.ToString() ?? "Cascadia Code";
+                var semiboldUiFont = ResolveSemiboldFontFamily(uiFont);
 
                 var titleSize = (float)(_numSectionTitleSize?.Value ?? 9.5m) * scale;
                 var treeSize = (float)(_numTreeViewSize?.Value ?? 9.5m) * scale;
@@ -834,7 +931,7 @@ namespace SSH_Helper
                 // handles between Font objects with identical parameters, so
                 // disposing one can invalidate another that is still assigned
                 // to a control whose window handle hasn't been created yet.
-                var titleFont = new Font(uiFont + " Semibold", Math.Max(7f, titleSize), FontStyle.Bold);
+                var titleFont = new Font(semiboldUiFont, Math.Max(7f, titleSize), FontStyle.Bold);
                 _previewFonts.Add(titleFont);
                 _lblPreviewTitle.Font = titleFont;
 
@@ -923,6 +1020,7 @@ namespace SSH_Helper
             _numHostListFontSize.Value = (decimal)settings.HostListFontSize;
             _numMenuFontSize.Value = (decimal)settings.MenuFontSize;
             _numStatusBarFontSize.Value = (decimal)settings.StatusBarFontSize;
+            _numDialogFontSize.Value = (decimal)settings.DialogFontSize;
 
             _trkGlobalScale.Value = (int)(settings.GlobalScaleFactor * 100);
             _lblGlobalScaleValue.Text = $"{_trkGlobalScale.Value}%";
@@ -964,6 +1062,22 @@ namespace SSH_Helper
             // Updates
             _chkCheckForUpdatesOnStartup.Checked = config.UpdateSettings.CheckOnStartup;
             _chkEnableUpdateLog.Checked = config.UpdateSettings.EnableUpdateLog;
+
+            // Command editor
+            var editor = config.CommandEditor?.CloneNormalized() ?? new CommandEditorSettings();
+            _chkEnableSyntaxHighlighting.Checked = editor.EnableSyntaxHighlighting;
+            _chkEnableAutocomplete.Checked = editor.EnableAutocomplete;
+            _chkAutocompleteShowOnTyping.Checked = editor.AutocompleteShowOnTyping;
+            _chkEnableInlineValidation.Checked = editor.EnableInlineValidation;
+            _numValidationDebounceMs.Value = editor.ValidationDebounceMs;
+            _chkShowInlineWarnings.Checked = editor.ShowInlineWarnings;
+            _chkEnableDiagnosticTooltips.Checked = editor.EnableDiagnosticTooltips;
+            _chkEnableVariableInspectorTooltips.Checked = editor.EnableVariableInspectorTooltips;
+            _chkEnableYamlHygieneWarnings.Checked = editor.EnableYamlHygieneWarnings;
+            _chkUseSpacesForTab.Checked = editor.UseSpacesForTab;
+            _numIndentSize.Value = editor.IndentSize;
+            _chkEnableSmartEnter.Checked = editor.EnableSmartEnter;
+            _chkPreserveBlankLineBetweenSteps.Checked = editor.PreserveBlankLineBetweenSteps;
 
             // Appearance
             ApplyFontSettingsToControls(config.FontSettings);
@@ -1049,8 +1163,31 @@ namespace SSH_Helper
                 config.UpdateSettings.CheckOnStartup = _chkCheckForUpdatesOnStartup.Checked;
                 config.UpdateSettings.EnableUpdateLog = _chkEnableUpdateLog.Checked;
 
+                // Command editor
+                config.CommandEditor ??= new CommandEditorSettings();
+                config.CommandEditor.EnableSyntaxHighlighting = _chkEnableSyntaxHighlighting.Checked;
+                config.CommandEditor.EnableAutocomplete = _chkEnableAutocomplete.Checked;
+                config.CommandEditor.AutocompleteShowOnTyping = _chkAutocompleteShowOnTyping.Checked;
+                config.CommandEditor.EnableInlineValidation = _chkEnableInlineValidation.Checked;
+                config.CommandEditor.ValidationDebounceMs = Math.Clamp(
+                    (int)_numValidationDebounceMs.Value,
+                    CommandEditorSettings.MinValidationDebounceMs,
+                    CommandEditorSettings.MaxValidationDebounceMs);
+                config.CommandEditor.ShowInlineWarnings = _chkShowInlineWarnings.Checked;
+                config.CommandEditor.EnableDiagnosticTooltips = _chkEnableDiagnosticTooltips.Checked;
+                config.CommandEditor.EnableVariableInspectorTooltips = _chkEnableVariableInspectorTooltips.Checked;
+                config.CommandEditor.EnableYamlHygieneWarnings = _chkEnableYamlHygieneWarnings.Checked;
+                config.CommandEditor.UseSpacesForTab = _chkUseSpacesForTab.Checked;
+                config.CommandEditor.IndentSize = Math.Clamp(
+                    (int)_numIndentSize.Value,
+                    CommandEditorSettings.MinIndentSize,
+                    CommandEditorSettings.MaxIndentSize);
+                config.CommandEditor.EnableSmartEnter = _chkEnableSmartEnter.Checked;
+                config.CommandEditor.PreserveBlankLineBetweenSteps = _chkPreserveBlankLineBetweenSteps.Checked;
+                config.CommandEditor.Normalize();
+
                 // Appearance - Font Families
-                config.FontSettings.UIFontFamily = _cboUIFont.SelectedItem?.ToString() ?? "Segoe UI";
+                config.FontSettings.UIFontFamily = _cboUIFont.SelectedItem?.ToString() ?? FontSettings.DefaultUIFontFamily;
                 config.FontSettings.CodeFontFamily = _cboCodeFont.SelectedItem?.ToString() ?? "Cascadia Code";
 
                 // Appearance - Font Sizes (existing)
@@ -1067,6 +1204,7 @@ namespace SSH_Helper
                 config.FontSettings.HostListFontSize = (float)_numHostListFontSize.Value;
                 config.FontSettings.MenuFontSize = (float)_numMenuFontSize.Value;
                 config.FontSettings.StatusBarFontSize = (float)_numStatusBarFontSize.Value;
+                config.FontSettings.DialogFontSize = (float)_numDialogFontSize.Value;
 
                 // Appearance - Global Scale
                 config.FontSettings.GlobalScaleFactor = _trkGlobalScale.Value / 100f;

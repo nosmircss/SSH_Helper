@@ -17,25 +17,41 @@ vars:
 
 steps:
   # Create address object for the blocked IP
-  - send: config firewall address
-  - send: edit GDGBLOCK_${block}
-  - send: set subnet ${block} 255.255.255.255
-  - send: set comment GDG_FSM_BLOCK
-  - send: end
+  - send:
+      command: config firewall address
+  - send:
+      command: edit GDGBLOCK_${block}
+  - send:
+      command: set subnet ${block} 255.255.255.255
+  - send:
+      command: set comment GDG_FSM_BLOCK
+  - send:
+      command: end
 
   # Add to address group
-  - send: config firewall addrgrp
-  - send: edit FSM_BLOCK_GROUP
-  - send: append member GDGBLOCK_${block}
-  - send: set comment GDG_BLOCKING_GROUP
-  - send: end
+  - send:
+      command: config firewall addrgrp
+  - send:
+      command: edit FSM_BLOCK_GROUP
+  - send:
+      command: append member GDGBLOCK_${block}
+  - send:
+      command: set comment GDG_BLOCKING_GROUP
+  - send:
+      command: end
 
   # Verify block was added to the group
-  - send: sh firewall addrgrp FSM_BLOCK_GROUP
-    capture: verify_output
+  - send:
+      command: sh firewall addrgrp FSM_BLOCK_GROUP
+      capture: verify_output
 
-  - if: verify_output matches 'GDGBLOCK_${block}'
-    then:
-      - exit: success "Block set (${block}/32)"
-    else:
-      - exit: failure "Block NOT set (${block}/32)"
+  - if:
+      condition: verify_output matches 'GDGBLOCK_${block}'
+      then:
+        - exit:
+            status: success
+            message: "Block set (${block}/32)"
+      else:
+        - exit:
+            status: failure
+            message: "Block NOT set (${block}/32)"

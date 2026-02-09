@@ -5,8 +5,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using SSH_Helper.Models;
+using SSH_Helper.Services.Editor;
 using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
+using SSH_Helper.UI;
 using SSH_Helper.Utilities;
 
 namespace SSH_Helper
@@ -76,7 +78,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.50.19";
+        private const string ApplicationVersion = "0.51.1";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -90,6 +92,7 @@ namespace SSH_Helper
         #region Services
 
         private readonly ConfigurationService _configService;
+        private readonly EnvironmentService _environmentService;
         private readonly PresetManager _presetManager;
         private readonly CsvManager _csvManager;
         private readonly SshExecutionService _sshService;
@@ -103,9 +106,11 @@ namespace SSH_Helper
 
         private string? _loadedFilePath;
         private string? _activePresetName;
+        private string _activeEnvironmentName = EnvironmentConfig.DefaultName;
         private bool _csvDirty;
         private bool _exitConfirmed;
         private bool _suppressPresetSelectionChange;
+        private bool _suppressEnvironmentSelectionChange;
         private bool _suppressExpandCollapseEvents;
         private bool _pendingColumnAutoSize;
         private int _rightClickedColumnIndex = -1;
@@ -147,6 +152,12 @@ namespace SSH_Helper
         // SSH startup debug mode - logs timing from button click through SSH connection
         private bool _sshDebugMode;
 
+        // Script editor services
+        private ScriptAutocompleteProvider? _scriptAutocompleteProvider;
+        private readonly YamlSshSyntaxHighlighter _scriptSyntaxHighlighter = new();
+        private readonly ScriptEditorValidationService _scriptValidationService = new();
+        private CommandEditorSettings _commandEditorSettings = new();
+
         // Custom scrollbars for DataGridView (to support dark mode theming)
         private VScrollBar? _dgvVScrollBar;
         private HScrollBar? _dgvHScrollBar;
@@ -173,10 +184,15 @@ namespace SSH_Helper
 
             var uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
             _uiOutputThrottler = new OutputThrottler(TimeSpan.FromMilliseconds(UiOutputThrottleMs), AppendOutputToUi, uiContext);
-            FormClosed += (_, __) => _uiOutputThrottler.Dispose();
+            FormClosed += (_, __) =>
+            {
+                _uiOutputThrottler.Dispose();
+                _scriptValidationService.Dispose();
+            };
 
             // Initialize services
             _configService = new ConfigurationService();
+            _environmentService = new EnvironmentService(_configService);
             _presetManager = new PresetManager(_configService);
             _csvManager = new CsvManager();
             var config = _configService.Load();
@@ -195,8 +211,10 @@ namespace SSH_Helper
             // Wire up SSH service events
             _sshService.OutputReceived += SshService_OutputReceived;
             _sshService.ColumnUpdateRequested += SshService_ColumnUpdateRequested;
+            _sshService.EnvironmentVariableUpdateRequested += SshService_EnvironmentVariableUpdateRequested;
             _sshService.CommandCompleted += SshService_CommandCompleted;
             _sshService.ExecutionCompleted += SshService_ExecutionCompleted;
+            _environmentService.EnvironmentChanged += EnvironmentService_EnvironmentChanged;
 
             // Initialize update service
             _updateService = new UpdateService(
@@ -207,9 +225,11 @@ namespace SSH_Helper
             InitializeFromConfiguration();
             InitializeCredentials();
             InitializeDataGridView();
+            InitializeScriptEditor();
             InitializeOutputHistory();
             InitializeEventHandlers();
             InitializeToolbarSync();
+            InitializeEnvironmentToolbar();
             InitializePasswordMasking();
             EnableDoubleBuffering();
             RestoreWindowState();
@@ -275,6 +295,9 @@ namespace SSH_Helper
         private void InitializeFromConfiguration()
         {
             var config = _configService.Load();
+            _activeEnvironmentName = string.IsNullOrWhiteSpace(config.ActiveEnvironment)
+                ? EnvironmentConfig.DefaultName
+                : config.ActiveEnvironment;
             _presetManager.Load();
 
             // Populate UI from config
@@ -353,6 +376,125 @@ namespace SSH_Helper
 
             // Set up custom scrollbars for dark mode support
             SetupDataGridViewScrollbars();
+        }
+
+        private void InitializeScriptEditor()
+        {
+            _scriptAutocompleteProvider = new ScriptAutocompleteProvider(GetEditorHostColumns);
+            txtCommand.SetAutocompleteProvider(_scriptAutocompleteProvider);
+            txtCommand.SetSyntaxHighlighter(_scriptSyntaxHighlighter);
+            txtCommand.SetValidationService(_scriptValidationService);
+            txtCommand.SetVariableTooltipResolvers(ResolveEditorVariableValue, ResolveEditorColumnValue);
+            ApplyCommandEditorSettings(_configService.GetCurrent().CommandEditor);
+        }
+
+        private void ApplyCommandEditorSettings(CommandEditorSettings? settings)
+        {
+            _commandEditorSettings = (settings ?? new CommandEditorSettings()).CloneNormalized();
+            txtCommand.ApplyCommandEditorSettings(_commandEditorSettings);
+        }
+
+        private IReadOnlyCollection<string> GetEditorHostColumns()
+        {
+            return dgv_variables.Columns
+                .Cast<DataGridViewColumn>()
+                .Select(column => column.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name) && !string.Equals(name, SelectColumnName, StringComparison.Ordinal))
+                .ToList();
+        }
+
+        private string? ResolveEditorVariableValue(string variableName)
+        {
+            if (string.IsNullOrWhiteSpace(variableName))
+                return null;
+
+            var key = variableName.Trim();
+            if (TryGetBuiltInEditorVariable(key, out var builtIn))
+            {
+                return builtIn;
+            }
+
+            if (ScriptParser.IsYamlScript(txtCommand.Text))
+            {
+                try
+                {
+                    var parser = new ScriptParser();
+                    var script = parser.Parse(txtCommand.Text);
+                    if (script.Vars.TryGetValue(key, out var value) && value != null)
+                    {
+                        return value is IEnumerable<string> values
+                            ? string.Join(", ", values)
+                            : value.ToString();
+                    }
+                }
+                catch
+                {
+                    // Ignore parser issues for hover preview.
+                }
+            }
+
+            var environmentVariables = _environmentService.GetActiveEnvironmentVariables();
+            if (environmentVariables.TryGetValue(key, out var environmentValue))
+            {
+                return environmentValue;
+            }
+
+            if (_scriptAutocompleteProvider != null)
+            {
+                var symbols = _scriptAutocompleteProvider.ExtractDynamicSymbols(txtCommand.Text);
+                if (symbols.Contains(key, StringComparer.OrdinalIgnoreCase))
+                {
+                    return "[declared in script]";
+                }
+            }
+
+            return null;
+        }
+
+        private bool TryGetBuiltInEditorVariable(string key, out string? value)
+        {
+            value = key.ToLowerInvariant() switch
+            {
+                "_timestamp" => DateTime.Now.ToString("O"),
+                "_iteration" => "0",
+                "_last_error" => string.Empty,
+                "_output" => string.Empty,
+                "_host" => ResolveEditorColumnValue(CsvManager.HostColumnName),
+                "_port" => ResolveEditorColumnValue("port"),
+                "_username" => ResolveEditorColumnValue("username") ?? tsbUsername.Text,
+                "_password" => ResolveEditorColumnValue("password"),
+                _ => null
+            };
+
+            return value != null;
+        }
+
+        private string? ResolveEditorColumnValue(string columnName)
+        {
+            if (string.IsNullOrWhiteSpace(columnName) || !dgv_variables.Columns.Contains(columnName))
+                return null;
+
+            var row = GetSelectedHostPreviewRow();
+            if (row == null)
+                return null;
+
+            return row.Cells[columnName].Value?.ToString();
+        }
+
+        private DataGridViewRow? GetSelectedHostPreviewRow()
+        {
+            if (dgv_variables.CurrentRow != null && !dgv_variables.CurrentRow.IsNewRow)
+            {
+                return dgv_variables.CurrentRow;
+            }
+
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (!row.IsNewRow)
+                    return row;
+            }
+
+            return null;
         }
 
         private void SetupDataGridViewScrollbars()
@@ -677,6 +819,8 @@ namespace SSH_Helper
             // Preset TreeView events are wired up in Designer
             trvPresets.NodeMouseClick += TrvPresets_NodeMouseClick;
             contextPresetLst.Opening += ContextPresetLst_Opening;
+            tsbEnvironment.DropDownItemClicked += TsbEnvironment_DropDownItemClicked;
+            tsbManageEnvironments.Click += TsbManageEnvironments_Click;
 
             // History and host list right-click selection and custom drawing
             lstOutput.MouseDown += LstOutput_MouseDown;
@@ -704,6 +848,12 @@ namespace SSH_Helper
                     e.Handled = true;
                 }
             };
+        }
+
+        private void InitializeEnvironmentToolbar()
+        {
+            _activeEnvironmentName = _environmentService.GetActiveEnvironmentName();
+            RefreshEnvironmentSelector(_activeEnvironmentName);
         }
 
         private void InitializePasswordMasking()
@@ -785,12 +935,369 @@ namespace SSH_Helper
                     catch { /* Ignore invalid splitter distances */ }
                 }
 
-                // Restore application state if enabled
+                RestoreInitialEnvironmentState(config);
+            };
+        }
+
+        private void RestoreInitialEnvironmentState(AppConfiguration config)
+        {
+            if (config.Environments != null && config.Environments.Count > 0)
+            {
+                _activeEnvironmentName = _environmentService.GetActiveEnvironmentName();
+                var environment = _environmentService.GetEnvironment(_activeEnvironmentName);
                 if (config.RememberState && config.SavedState != null)
                 {
-                    RestoreApplicationState(config.SavedState);
+                    var mergedState = MergeEnvironmentIntoSavedState(config.SavedState, environment);
+                    RestoreApplicationState(mergedState);
                 }
+                else
+                {
+                    LoadEnvironmentIntoGrid(environment);
+                }
+            }
+            else if (config.RememberState && config.SavedState != null)
+            {
+                RestoreApplicationState(config.SavedState);
+            }
+
+            RefreshEnvironmentSelector(_activeEnvironmentName);
+        }
+
+        private static ApplicationState MergeEnvironmentIntoSavedState(ApplicationState savedState, EnvironmentConfig environment)
+        {
+            return new ApplicationState
+            {
+                HostColumns = environment.HostColumns?.ToList() ?? new List<string>(),
+                Hosts = environment.Hosts?
+                    .Select(row => new Dictionary<string, string>(row, StringComparer.OrdinalIgnoreCase))
+                    .ToList()
+                    ?? new List<Dictionary<string, string>>(),
+                SelectedHostIndices = environment.SelectedHostIndices?.ToList() ?? new List<int>(),
+                LastCsvPath = environment.LastCsvPath,
+                SelectedPreset = savedState.SelectedPreset,
+                SelectedFolder = savedState.SelectedFolder,
+                Username = savedState.Username,
+                History = savedState.History?
+                    .Select(entry => new HistoryEntry
+                    {
+                        Id = entry.Id,
+                        Timestamp = entry.Timestamp,
+                        Output = entry.Output,
+                        HostResults = entry.HostResults?
+                            .Select(host => new HostHistoryEntry
+                            {
+                                HostAddress = host.HostAddress,
+                                Output = host.Output,
+                                Success = host.Success,
+                                Timestamp = host.Timestamp
+                            })
+                            .ToList(),
+                        Details = entry.Details == null
+                            ? null
+                            : CloneExecutionDetails(entry.Details)
+                    })
+                    .ToList()
+                    ?? new List<HistoryEntry>()
             };
+        }
+
+        private static ExecutionDetails CloneExecutionDetails(ExecutionDetails details)
+        {
+            return new ExecutionDetails
+            {
+                PresetName = details.PresetName ?? string.Empty,
+                Commands = details.Commands ?? string.Empty,
+                PresetType = details.PresetType ?? string.Empty,
+                StartTimeUtc = details.StartTimeUtc,
+                EndTimeUtc = details.EndTimeUtc,
+                EnvironmentName = details.EnvironmentName ?? EnvironmentConfig.DefaultName,
+                Username = details.Username ?? string.Empty,
+                CommandTimeoutSeconds = details.CommandTimeoutSeconds,
+                ConnectionTimeoutSeconds = details.ConnectionTimeoutSeconds,
+                UseConnectionPooling = details.UseConnectionPooling,
+                RunMode = details.RunMode ?? string.Empty,
+                IsFolderExecution = details.IsFolderExecution,
+                FolderName = details.FolderName ?? string.Empty,
+                ExecutedPresetNames = details.ExecutedPresetNames?.ToList() ?? new List<string>(),
+                Hosts = details.Hosts?
+                    .Select(host => new SSH_Helper.Models.HostExecutionContext
+                    {
+                        HostAddress = host.HostAddress ?? string.Empty,
+                        Success = host.Success,
+                        TimestampUtc = host.TimestampUtc,
+                        Variables = host.Variables == null
+                            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            : new Dictionary<string, string>(host.Variables, StringComparer.OrdinalIgnoreCase)
+                    })
+                    .ToList()
+                    ?? new List<SSH_Helper.Models.HostExecutionContext>()
+            };
+        }
+
+        private void RefreshEnvironmentSelector(string? preferredEnvironment = null)
+        {
+            var names = _environmentService.GetEnvironmentNames();
+            var target = string.IsNullOrWhiteSpace(preferredEnvironment)
+                ? _environmentService.GetActiveEnvironmentName()
+                : preferredEnvironment;
+
+            _suppressEnvironmentSelectionChange = true;
+            tsbEnvironment.DropDownItems.Clear();
+            tsbEnvironment.DropDown.MinimumSize = new Size(tsbEnvironment.Width, 0);
+            foreach (var name in names)
+            {
+                var item = new ToolStripMenuItem(name)
+                {
+                    Tag = name,
+                    Checked = string.Equals(name, target, StringComparison.OrdinalIgnoreCase)
+                };
+                ApplyEnvironmentMenuItemColor(item, GetEnvironmentLabelColor(name));
+                tsbEnvironment.DropDownItems.Add(item);
+            }
+
+            int index = names.FindIndex(name => string.Equals(name, target, StringComparison.OrdinalIgnoreCase));
+            _activeEnvironmentName = index >= 0 ? names[index] : EnvironmentConfig.DefaultName;
+            foreach (ToolStripItem item in tsbEnvironment.DropDownItems)
+            {
+                if (item is ToolStripMenuItem menuItem && menuItem.Tag is string name)
+                {
+                    menuItem.Checked = string.Equals(name, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            tsbEnvironment.Text = _activeEnvironmentName;
+            ApplyActiveEnvironmentLabelColor();
+            _suppressEnvironmentSelectionChange = false;
+
+            UpdateWindowTitle();
+        }
+
+        private int? GetEnvironmentLabelColor(string environmentName)
+        {
+            try
+            {
+                return _environmentService.GetEnvironment(environmentName).LabelColor;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void ApplyEnvironmentMenuItemColor(ToolStripMenuItem item, int? labelColorArgb)
+        {
+            if (!labelColorArgb.HasValue)
+                return;
+
+            var color = Color.FromArgb(labelColorArgb.Value);
+            item.ForeColor = Color.FromArgb(255, color.R, color.G, color.B);
+        }
+
+        private void ApplyActiveEnvironmentLabelColor()
+        {
+            var defaultColor = _isDarkMode ? DarkTextPrimary : LightTextColor;
+            var labelColor = GetEnvironmentLabelColor(_activeEnvironmentName);
+            var swatchColor = labelColor.HasValue
+                ? Color.FromArgb(labelColor.Value)
+                : (_isDarkMode ? DarkSurface2 : LightControlBackground);
+
+            tsbEnvironment.Tag = swatchColor.ToArgb();
+            tsbEnvironment.Invalidate();
+            if (labelColor.HasValue)
+            {
+                tsbEnvironment.ForeColor = GetContrastColor(swatchColor);
+                return;
+            }
+
+            tsbEnvironment.ForeColor = defaultColor;
+        }
+
+        private void UpdateWindowTitle()
+        {
+            Text = $"{ApplicationName} {ApplicationVersion} - [{_activeEnvironmentName}]";
+        }
+
+        private void EnvironmentService_EnvironmentChanged(object? sender, EnvironmentChangedEventArgs e)
+        {
+            _activeEnvironmentName = e.CurrentEnvironment;
+            ApplyActiveEnvironmentLabelColor();
+            UpdateWindowTitle();
+        }
+
+        private void TsbEnvironment_DropDownItemClicked(object? sender, ToolStripItemClickedEventArgs e)
+        {
+            if (_suppressEnvironmentSelectionChange)
+                return;
+
+            var clickedItem = e.ClickedItem;
+            if (clickedItem?.Tag is not string targetEnvironment)
+                return;
+
+            if (string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true))
+            {
+                RefreshEnvironmentSelector(_activeEnvironmentName);
+            }
+        }
+
+        private void TsbManageEnvironments_Click(object? sender, EventArgs e)
+        {
+            EnsureDefaultEnvironmentForFirstAdoption();
+
+            using var dialog = new EnvironmentDialog(_environmentService, _configService, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            var targetEnvironment = dialog.SelectedEnvironmentName ?? _environmentService.GetActiveEnvironmentName();
+            if (!string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true))
+                {
+                    RefreshEnvironmentSelector(_activeEnvironmentName);
+                    return;
+                }
+            }
+            else
+            {
+                RefreshEnvironmentSelector(_activeEnvironmentName);
+            }
+
+            UpdateStatusBar($"Active environment: {_activeEnvironmentName}");
+        }
+
+        private bool TrySwitchEnvironment(string targetEnvironment, bool promptIfDirty)
+        {
+            if (dgv_variables.IsCurrentCellInEditMode)
+                dgv_variables.EndEdit();
+
+            bool saveCurrent = true;
+            if (promptIfDirty && _csvDirty)
+            {
+                var result = MessageBox.Show(
+                    "You have unsaved host-grid changes. Save to the current environment before switching?",
+                    "Switch Environment",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Cancel)
+                    return false;
+
+                saveCurrent = result == DialogResult.Yes;
+            }
+
+            if (saveCurrent)
+            {
+                SaveCurrentGridToEnvironment(_activeEnvironmentName);
+            }
+
+            var environment = _environmentService.SwitchEnvironment(targetEnvironment);
+            _activeEnvironmentName = environment.Name;
+            LoadEnvironmentIntoGrid(environment);
+            RefreshEnvironmentSelector(_activeEnvironmentName);
+            return true;
+        }
+
+        private void EnsureDefaultEnvironmentForFirstAdoption()
+        {
+            var config = _configService.GetCurrent();
+            if (config.Environments.Count > 0)
+                return;
+
+            SaveCurrentGridToEnvironment(EnvironmentConfig.DefaultName);
+            _activeEnvironmentName = EnvironmentConfig.DefaultName;
+            RefreshEnvironmentSelector(_activeEnvironmentName);
+        }
+
+        private void SaveCurrentGridToEnvironment(string environmentName)
+        {
+            var maxHistoryEntries = _configService.GetCurrent().MaxHistoryEntries;
+            var state = BuildApplicationState(maxHistoryEntries);
+            _environmentService.SaveCurrentGridToEnvironment(
+                environmentName,
+                state.HostColumns,
+                state.Hosts,
+                state.SelectedHostIndices,
+                state.LastCsvPath);
+        }
+
+        private void LoadEnvironmentIntoGrid(EnvironmentConfig environment)
+        {
+            if (dgv_variables.IsCurrentCellInEditMode)
+                dgv_variables.EndEdit();
+
+            dgv_variables.Rows.Clear();
+            dgv_variables.Columns.Clear();
+
+            var columns = (environment.HostColumns ?? new List<string>())
+                .Where(name => !string.IsNullOrWhiteSpace(name) && name != SelectColumnName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (!columns.Contains(CsvManager.HostColumnName, StringComparer.OrdinalIgnoreCase))
+            {
+                columns.Insert(0, CsvManager.HostColumnName);
+            }
+
+            foreach (var column in columns)
+            {
+                dgv_variables.Columns.Add(column, column);
+            }
+
+            EnsureSelectColumn();
+            dgv_variables.RowTemplate.Height = 28;
+
+            var useCredentialManager = _credentialProvider?.IsAvailable == true &&
+                                       _configService.GetCurrent().Credentials.UseCredentialManager;
+
+            foreach (var rowData in environment.Hosts ?? new List<Dictionary<string, string>>())
+            {
+                var rowCopy = rowData != null
+                    ? new Dictionary<string, string>(rowData, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                if (useCredentialManager)
+                {
+                    rowCopy.TryGetValue(CsvManager.HostColumnName, out var hostValue);
+                    rowCopy.TryGetValue("username", out var usernameValue);
+                    rowCopy.TryGetValue("password", out var passwordValue);
+
+                    var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
+                    if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
+                    {
+                        StoreHostPassword(hostValue, resolvedUsername, passwordValue);
+                        rowCopy["password"] = string.Empty;
+                    }
+                }
+
+                var rowIndex = dgv_variables.Rows.Add();
+                dgv_variables.Rows[rowIndex].Height = 28;
+
+                foreach (var kvp in rowCopy)
+                {
+                    if (dgv_variables.Columns.Contains(kvp.Key))
+                    {
+                        dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
+                    }
+                }
+            }
+
+            if (environment.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
+            {
+                foreach (var index in environment.SelectedHostIndices)
+                {
+                    if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
+                    {
+                        dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
+                    }
+                }
+            }
+
+            _loadedFilePath = environment.LastCsvPath;
+            _pendingColumnAutoSize = true;
+            _csvDirty = false;
+            UpdateHostCount();
         }
 
         #endregion
@@ -914,7 +1421,7 @@ namespace SSH_Helper
         private static readonly Color LightControlBackground = Color.FromArgb(253, 253, 253);
         private static readonly Color LightAlternateRow = Color.FromArgb(248, 249, 250);
         private static readonly Color LightFormBackground = Color.FromArgb(233, 236, 239);
-        private static readonly Color LightAccent = Color.FromArgb(13, 110, 253);
+        private static readonly Color LightAccent = DialogTheme.GridLightSelection;
         private static readonly Color LightSelectionBorder = Color.FromArgb(10, 88, 202);  // Darker accent for border
 
         // Dark theme colors (VS Code inspired - professional and easy on the eyes)
@@ -925,7 +1432,7 @@ namespace SSH_Helper
         private static readonly Color DarkTextPrimary = Color.FromArgb(204, 204, 204);    // Primary text
         private static readonly Color DarkTextSecondary = Color.FromArgb(128, 128, 128);  // Secondary/muted text
         private static readonly Color DarkBorder = Color.FromArgb(48, 48, 48);            // Subtle borders
-        private static readonly Color DarkSelectionBg = Color.FromArgb(4, 57, 94);        // Subtle selection (VS Code style)
+        private static readonly Color DarkSelectionBg = DialogTheme.GridDarkSelection;     // Shared selection color
         private static readonly Color DarkSelectionBorder = Color.FromArgb(0, 122, 204); // Selection border accent
         private static readonly Color DarkInputBackground = Color.FromArgb(60, 60, 60);   // Input fields
         private static readonly Color DarkInputText = Color.FromArgb(220, 220, 220);      // Input text
@@ -976,6 +1483,7 @@ namespace SSH_Helper
 
             // Update custom DataGridView scrollbar colors
             ApplyScrollbarColors();
+            ApplyActiveEnvironmentLabelColor();
 
             ResumeLayout(true);
             Refresh();
@@ -983,6 +1491,19 @@ namespace SSH_Helper
 
         // Fonts created by ApplyFontSettings — disposed on next call or in Form1.Dispose
         private List<Font> _managedFonts = new();
+        private Font? _dialogFont;
+
+        private static string ResolveSemiboldFontFamily(string? uiFontFamily)
+        {
+            if (string.IsNullOrWhiteSpace(uiFontFamily))
+            {
+                return Models.FontSettings.DefaultUIFontFamily;
+            }
+
+            return uiFontFamily.EndsWith("Semibold", StringComparison.OrdinalIgnoreCase)
+                ? uiFontFamily
+                : $"{uiFontFamily} Semibold";
+        }
 
         private void ApplyFontSettings(Models.FontSettings fontSettings)
         {
@@ -995,12 +1516,13 @@ namespace SSH_Helper
             var uiFont = fontSettings.UIFontFamily;
             var codeFont = fontSettings.CodeFontFamily;
             var scale = fontSettings.GlobalScaleFactor;
+            var semiboldUiFont = ResolveSemiboldFontFamily(uiFont);
 
             // Helper to apply scaling
             float Scaled(float size) => size * scale;
 
             // Section titles (Semibold)
-            var sectionTitleFont = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+            var sectionTitleFont = new Font(semiboldUiFont, Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
             _managedFonts.Add(sectionTitleFont);
             lblHostsTitle.Font = sectionTitleFont;
             lblPresetsTitle.Font = sectionTitleFont;
@@ -1045,7 +1567,7 @@ namespace SSH_Helper
             lblFavoritesEmpty.Font = emptyLabelFont;
 
             // Execute buttons (Semibold)
-            var execButtonFont = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
+            var execButtonFont = new Font(semiboldUiFont, Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
             _managedFonts.Add(execButtonFont);
             btnExecuteAll.Font = execButtonFont;
             btnExecuteSelected.Font = execButtonFont;
@@ -1112,6 +1634,10 @@ namespace SSH_Helper
             var statusFont = new Font(uiFont, Scaled(fontSettings.StatusBarFontSize));
             _managedFonts.Add(statusFont);
             statusStrip.Font = statusFont;
+
+            // Dialog font (used by themed confirmation dialogs)
+            _dialogFont = new Font(uiFont, Scaled(fontSettings.DialogFontSize));
+            _managedFonts.Add(_dialogFont);
 
             // Apply accent color if custom
             ApplyAccentColor(fontSettings.CustomAccentColor);
@@ -1315,9 +1841,11 @@ namespace SSH_Helper
             txtTimeoutHeader.ForeColor = LightTextColor;
             txtCommand.BackColor = LightControlBackground;
             txtCommand.ForeColor = LightTextColor;
+            txtCommand.ApplyTheme(false);
             btnSavePreset.BackColor = LightAccent;
             btnSavePreset.FlatAppearance.BorderColor = LightSelectionBorder;
 
+            
             // Execute panel
             executePanel.BackColor = LightBackground;
 
@@ -1438,6 +1966,7 @@ namespace SSH_Helper
             txtTimeoutHeader.ForeColor = DarkInputText;
             txtCommand.BackColor = DarkSurface2;
             txtCommand.ForeColor = DarkInputText;
+            txtCommand.ApplyTheme(true);
             btnSavePreset.BackColor = DarkSelectionBg;
             btnSavePreset.FlatAppearance.BorderColor = DarkSelectionBorder;
 
@@ -1509,9 +2038,18 @@ namespace SSH_Helper
                         textBox.TextBox.ForeColor = inputText;
                     }
                 }
+                else if (item is ToolStripComboBox comboBox)
+                {
+                    comboBox.BackColor = inputBg;
+                    comboBox.ForeColor = inputText;
+                }
                 else if (item is ToolStripLabel label)
                 {
                     label.ForeColor = darkMode ? DarkTextSecondary : LightSecondaryText;
+                }
+                else if (item is ToolStripButton button)
+                {
+                    button.Margin = new Padding(2, 1, 2, 2);
                 }
             }
         }
@@ -3109,6 +3647,9 @@ namespace SSH_Helper
 
         private void btnClear_Click(object sender, EventArgs e)
         {
+            if (!DialogTheme.Confirm(this, "Are you sure you want to clear all hosts?", "Clear Grid", _isDarkMode, _dialogFont))
+                return;
+
             ClearGrid();
         }
 
@@ -3261,6 +3802,7 @@ namespace SSH_Helper
         {
             var previousCredentialManager = _configService.GetCurrent().Credentials.UseCredentialManager;
             using var dialog = new SettingsDialog(_configService, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 // Settings saved - default timeout only applies to new presets
@@ -3270,6 +3812,7 @@ namespace SSH_Helper
                 var config = _configService.GetCurrent();
                 ApplyTheme(config.DarkMode);
                 ApplyFontSettings(config.FontSettings);
+                ApplyCommandEditorSettings(config.CommandEditor);
                 ApplyColumnAutoResize(config.AutoResizeHostColumns);
                 _sshService.UseConnectionPooling = config.UseConnectionPooling;
                 _sshService.PreferSshAgent = config.Credentials.PreferSshAgent;
@@ -3303,33 +3846,33 @@ namespace SSH_Helper
 
         private void validateScriptToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            if (_selectedFolderName != null)
+                return;
+
             var scriptText = txtCommand.Text ?? string.Empty;
 
             if (!Services.Scripting.ScriptParser.IsYamlScript(scriptText))
-            {
-                MessageBox.Show("Current commands are not a YAML script.", "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
-            }
 
             var parser = new Services.Scripting.ScriptParser();
 
             try
             {
                 var script = parser.Parse(scriptText);
-                var errors = parser.Validate(script, scriptText);
+                var errors = parser.Validate(script, scriptText, enforceCanonicalSyntax: true);
                 var warnings = parser.Warnings;
 
                 if (errors.Count == 0 && warnings.Count == 0)
                 {
                     var successMessage = ScriptValidationFormatter.FormatSuccessMessage();
                     AppendOutputText(Environment.NewLine + successMessage + Environment.NewLine);
-                    MessageBox.Show(successMessage, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    DialogTheme.ShowMessage(this, successMessage, "Validate Script", MessageBoxIcon.Information, _isDarkMode, _dialogFont);
                 }
                 else if (errors.Count == 0)
                 {
                     var warningMessage = "Script validation succeeded with warnings:" + Environment.NewLine + string.Join(Environment.NewLine, warnings);
                     AppendOutputText(Environment.NewLine + warningMessage + Environment.NewLine);
-                    MessageBox.Show(warningMessage, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    DialogTheme.ShowMessage(this, warningMessage, "Validate Script", MessageBoxIcon.Warning, _isDarkMode, _dialogFont);
                 }
                 else
                 {
@@ -3337,39 +3880,14 @@ namespace SSH_Helper
                     if (warnings.Count > 0)
                         message += Environment.NewLine + Environment.NewLine + "Warnings:" + Environment.NewLine + string.Join(Environment.NewLine, warnings);
                     AppendOutputText(Environment.NewLine + message + Environment.NewLine);
-                    MessageBox.Show(message, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    DialogTheme.ShowMessage(this, message, "Validate Script", MessageBoxIcon.Warning, _isDarkMode, _dialogFont);
                 }
             }
             catch (Exception ex)
             {
                 var message = ScriptValidationFormatter.FormatExceptionMessage(ex);
                 AppendOutputText(Environment.NewLine + message + Environment.NewLine);
-                MessageBox.Show(message, "Validate Script", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        private void ctxPrettyFormat_Click(object sender, EventArgs e)
-        {
-            var text = txtCommand.Text;
-            if (string.IsNullOrWhiteSpace(text))
-                return;
-
-            if (!Services.Scripting.ScriptParser.IsYamlScript(text))
-            {
-                MessageBox.Show("Current commands are not a YAML script.\nPretty Format only works with YAML scripts.",
-                    "Pretty Format", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            try
-            {
-                txtCommand.Text = ScriptPrettyFormatter.Format(text);
-                UpdateStatusBar("Script formatted");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to format: {ex.Message}", "Pretty Format",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.ShowMessage(this, message, "Validate Script", MessageBoxIcon.Error, _isDarkMode, _dialogFont);
             }
         }
 
@@ -3415,6 +3933,7 @@ namespace SSH_Helper
         private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
             using var dlg = new AboutDialog(ApplicationName, ApplicationVersion, _isDarkMode);
+            DialogTheme.SetDialogFont(dlg, _dialogFont);
             dlg.ShowDialog(this);
         }
 
@@ -3475,17 +3994,17 @@ namespace SSH_Helper
 
         private void duplicatePresetToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            DuplicatePreset();
+            DuplicatePreset(preferContextSource: sender == ctxDuplicatePreset);
         }
 
         private void renameToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            RenamePreset();
+            RenamePreset(preferContextSource: sender == ctxRenamePreset);
         }
 
         private void deleteToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            DeletePreset();
+            DeletePreset(preferContextSource: sender == ctxDeletePreset);
         }
 
         private void toggleSortingToolStripMenuItem_Click(object sender, EventArgs e)
@@ -3523,7 +4042,7 @@ namespace SSH_Helper
 
         private void ExportPreset_Click(object? sender, EventArgs e)
         {
-            ExportPreset();
+            ExportPreset(preferContextSource: sender == ctxExportPreset);
         }
 
         private void ImportPreset_Click(object? sender, EventArgs e)
@@ -4676,8 +5195,75 @@ namespace SSH_Helper
                 return;
             }
 
-            // Preserve existing IsFavorite and Folder status if updating
+            var preActionExpandState = CapturePresetTreeExpandState();
+            bool refreshPresetList = false;
+
+            string? originalPresetName = _activePresetName;
+            bool hasActivePreset = !string.IsNullOrWhiteSpace(originalPresetName) &&
+                _presetManager.Get(originalPresetName) != null;
+            bool nameChanged = hasActivePreset &&
+                !string.Equals(presetName, originalPresetName, StringComparison.Ordinal);
+
+            if (nameChanged)
+            {
+                var choice = MessageBox.Show(
+                    $"Preset name changed from '{originalPresetName}' to '{presetName}'.\n\n" +
+                    "Yes = Rename the existing preset\n" +
+                    "No = Create a new preset\n" +
+                    "Cancel = Keep editing",
+                    "Save Preset",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (choice == DialogResult.Cancel)
+                {
+                    return;
+                }
+
+                if (choice == DialogResult.Yes)
+                {
+                    if (_presetManager.Presets.ContainsKey(presetName))
+                    {
+                        MessageBox.Show("This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    if (!_presetManager.Rename(originalPresetName!, presetName))
+                    {
+                        MessageBox.Show("Unable to rename preset.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    int orderIndex = _manualPresetOrder.IndexOf(originalPresetName!);
+                    if (orderIndex >= 0)
+                    {
+                        _manualPresetOrder[orderIndex] = presetName;
+                    }
+
+                    refreshPresetList = true;
+                }
+                else
+                {
+                    if (_presetManager.Presets.ContainsKey(presetName))
+                    {
+                        MessageBox.Show(
+                            "A preset with this name already exists. Choose a different name to create a new preset.",
+                            "Save Preset",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        return;
+                    }
+                }
+            }
+
+            // Preserve IsFavorite/Folder from the target preset, or from the currently active preset
+            // when user chooses "Create new" from a renamed active preset.
             var existingPreset = _presetManager.Get(presetName);
+            if (existingPreset == null && hasActivePreset && !string.IsNullOrWhiteSpace(originalPresetName))
+            {
+                existingPreset = _presetManager.Get(originalPresetName);
+            }
+
             var preset = new PresetInfo
             {
                 Commands = commands,
@@ -4696,7 +5282,25 @@ namespace SSH_Helper
                 {
                     _manualPresetOrder.Add(presetName);
                 }
-                RefreshPresetList();
+                refreshPresetList = true;
+            }
+
+            if (refreshPresetList)
+            {
+                // Align active preset before programmatic selection to avoid false
+                // unsaved prompts in AfterSelect handlers.
+                _activePresetName = presetName;
+                RefreshPresetList(expandStatesOverride: preActionExpandState);
+
+                _suppressPresetSelectionChange = true;
+                try
+                {
+                    SelectPresetByName(presetName, ensureVisible: false);
+                }
+                finally
+                {
+                    _suppressPresetSelectionChange = false;
+                }
             }
 
             _activePresetName = presetName;
@@ -4779,12 +5383,101 @@ namespace SSH_Helper
             _activePresetName = presetName;
         }
 
-        private void DuplicatePreset()
+        private string? ResolvePresetNameForActions(bool preferContextSource)
         {
-            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+            // Context-menu actions should follow the tree where the menu was opened.
+            if (preferContextSource &&
+                _contextMenuSourceTreeView?.SelectedNode?.Tag is PresetNodeTag contextTag &&
+                !contextTag.IsFolder)
+            {
+                return contextTag.Name;
+            }
+
+            // Toolbar actions follow the active tab selection first.
+            if (presetsTabControl.SelectedTab == tabFavorites)
+            {
+                if (trvFavorites.SelectedNode?.Tag is PresetNodeTag favoritesTag && !favoritesTag.IsFolder)
+                {
+                    return favoritesTag.Name;
+                }
+            }
+            else
+            {
+                if (trvPresets.SelectedNode?.Tag is PresetNodeTag presetsTag && !presetsTag.IsFolder)
+                {
+                    return presetsTag.Name;
+                }
+            }
+
+            // Fallback to active preset loaded in the editor.
+            if (!string.IsNullOrWhiteSpace(_activePresetName) && _presetManager.Get(_activePresetName) != null)
+            {
+                return _activePresetName;
+            }
+
+            return null;
+        }
+
+        private TreeView ResolvePresetTreeViewForActions(bool preferContextSource)
+        {
+            if (preferContextSource && _contextMenuSourceTreeView != null)
+            {
+                return _contextMenuSourceTreeView;
+            }
+
+            return presetsTabControl.SelectedTab == tabFavorites ? trvFavorites : trvPresets;
+        }
+
+        private TreeNode? FindPresetNodeByName(TreeNodeCollection nodes, string presetName)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if (node.Tag is PresetNodeTag tag &&
+                    !tag.IsFolder &&
+                    string.Equals(tag.Name, presetName, StringComparison.Ordinal))
+                {
+                    return node;
+                }
+
+                var found = FindPresetNodeByName(node.Nodes, presetName);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+
+            return null;
+        }
+
+        private PresetNodeTag? GetSelectionTargetAboveDeletedPreset(string presetName, bool preferContextSource)
+        {
+            var sourceTree = ResolvePresetTreeViewForActions(preferContextSource);
+            var nodeToDelete = FindPresetNodeByName(sourceTree.Nodes, presetName);
+            var targetNode = nodeToDelete?.PrevVisibleNode ?? nodeToDelete?.NextVisibleNode;
+
+            if (targetNode?.Tag is not PresetNodeTag targetTag)
+            {
+                return null;
+            }
+
+            return new PresetNodeTag
+            {
+                IsFolder = targetTag.IsFolder,
+                Name = targetTag.Name
+            };
+        }
+
+        private void DuplicatePreset(bool preferContextSource = false)
+        {
+            string? sourceName = ResolvePresetNameForActions(preferContextSource);
+            if (string.IsNullOrWhiteSpace(sourceName))
                 return;
 
-            string sourceName = tag.Name;
+            var sourcePreset = _presetManager.Get(sourceName);
+            if (sourcePreset == null)
+                return;
+
+            var preActionExpandState = CapturePresetTreeExpandState();
             string suggested = _presetManager.GetUniqueName(sourceName + "_Copy");
 
             string newName = Microsoft.VisualBasic.Interaction.InputBox(
@@ -4803,6 +5496,15 @@ namespace SSH_Helper
             try
             {
                 string finalName = _presetManager.Duplicate(sourceName, newName);
+                var duplicatedPreset = _presetManager.Get(finalName);
+
+                // Defensive guard: duplicate should stay in the source folder.
+                if (duplicatedPreset != null &&
+                    !string.Equals(duplicatedPreset.Folder, sourcePreset.Folder, StringComparison.Ordinal))
+                {
+                    duplicatedPreset.Folder = sourcePreset.Folder;
+                    _presetManager.Save(finalName, duplicatedPreset);
+                }
 
                 // Add to manual order after the source
                 int sourceIndex = _manualPresetOrder.IndexOf(sourceName);
@@ -4815,8 +5517,8 @@ namespace SSH_Helper
                     _manualPresetOrder.Add(finalName);
                 }
 
-                RefreshPresetList();
-                SelectPresetByName(finalName);
+                RefreshPresetList(expandStatesOverride: preActionExpandState);
+                SelectPresetByName(finalName, ensureVisible: false);
 
                 var preset = _presetManager.Get(finalName);
                 txtPreset.Text = finalName;
@@ -4829,12 +5531,12 @@ namespace SSH_Helper
             }
         }
 
-        private void RenamePreset()
+        private void RenamePreset(bool preferContextSource = false)
         {
-            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+            string? selectedPreset = ResolvePresetNameForActions(preferContextSource);
+            if (string.IsNullOrWhiteSpace(selectedPreset))
                 return;
 
-            string selectedPreset = tag.Name;
             string newName = Microsoft.VisualBasic.Interaction.InputBox(
                 $"Enter a new name for the preset '{selectedPreset}':",
                 "Rename Preset",
@@ -4848,6 +5550,8 @@ namespace SSH_Helper
                 return;
             }
 
+            var preActionExpandState = CapturePresetTreeExpandState();
+
             // Update manual order list
             int orderIndex = _manualPresetOrder.IndexOf(selectedPreset);
             if (orderIndex >= 0)
@@ -4855,18 +5559,20 @@ namespace SSH_Helper
                 _manualPresetOrder[orderIndex] = newName;
             }
 
-            RefreshPresetList();
-            SelectPresetByName(newName);
+            RefreshPresetList(expandStatesOverride: preActionExpandState);
+            SelectPresetByName(newName, ensureVisible: false);
             txtPreset.Text = newName;
             _activePresetName = newName;
         }
 
-        private void DeletePreset()
+        private void DeletePreset(bool preferContextSource = false)
         {
-            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+            string? selectedPreset = ResolvePresetNameForActions(preferContextSource);
+            if (string.IsNullOrWhiteSpace(selectedPreset))
                 return;
 
-            string selectedPreset = tag.Name;
+            var preActionExpandState = CapturePresetTreeExpandState();
+            var selectionTarget = GetSelectionTargetAboveDeletedPreset(selectedPreset, preferContextSource);
 
             // Check if this is the currently active preset being deleted
             bool isDeletingActivePreset = string.Equals(selectedPreset, _activePresetName, StringComparison.Ordinal);
@@ -4884,7 +5590,26 @@ namespace SSH_Helper
                     txtTimeoutHeader.Clear();
                 }
 
-                RefreshPresetList();
+                RefreshPresetList(expandStatesOverride: preActionExpandState);
+
+                if (selectionTarget != null)
+                {
+                    if (selectionTarget.IsFolder)
+                    {
+                        SelectFolderByName(selectionTarget.Name, ensureVisible: false);
+                    }
+                    else
+                    {
+                        SelectPresetByName(selectionTarget.Name, ensureVisible: false);
+                    }
+
+                    if (trvPresets.SelectedNode?.Tag is PresetNodeTag selectedTag &&
+                        selectedTag.IsFolder == selectionTarget.IsFolder &&
+                        string.Equals(selectedTag.Name, selectionTarget.Name, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+                }
 
                 // Select another preset if any exist
                 if (_presetManager.Presets.Count > 0)
@@ -4892,7 +5617,7 @@ namespace SSH_Helper
                     var firstPreset = _presetManager.Presets.Keys.FirstOrDefault();
                     if (!string.IsNullOrEmpty(firstPreset))
                     {
-                        SelectPresetByName(firstPreset);
+                        SelectPresetByName(firstPreset, ensureVisible: false);
                         var preset = _presetManager.Get(firstPreset);
                         if (preset != null)
                         {
@@ -4908,9 +5633,10 @@ namespace SSH_Helper
             }
         }
 
-        private void ExportPreset()
+        private void ExportPreset(bool preferContextSource = false)
         {
-            if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || tag.IsFolder)
+            string? presetName = ResolvePresetNameForActions(preferContextSource);
+            if (string.IsNullOrWhiteSpace(presetName))
             {
                 MessageBox.Show("No preset selected to export.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
@@ -4918,7 +5644,6 @@ namespace SSH_Helper
 
             try
             {
-                string presetName = tag.Name;
                 string exportString = _presetManager.Export(presetName);
                 Clipboard.SetText(exportString);
                 MessageBox.Show("Preset exported to clipboard.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -4945,7 +5670,7 @@ namespace SSH_Helper
                 string finalName = _presetManager.Import(input, defaultTimeout);
 
                 RefreshPresetList();
-                SelectPresetByName(finalName);
+                SelectPresetByName(finalName, ensureVisible: false);
 
                 var preset = _presetManager.Get(finalName);
                 if (preset != null)
@@ -5090,12 +5815,47 @@ namespace SSH_Helper
             return folderName; // Empty string = root, non-empty = folder name
         }
 
-        private void RefreshPresetList(bool restoreExpandState = true)
+        private Dictionary<string, bool> CapturePresetTreeExpandState()
+        {
+            var states = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+            void Capture(TreeNodeCollection nodes)
+            {
+                foreach (TreeNode node in nodes)
+                {
+                    if (node.Tag is PresetNodeTag tag && tag.IsFolder)
+                    {
+                        states[tag.Name] = node.IsExpanded;
+                        Capture(node.Nodes);
+                    }
+                }
+            }
+
+            Capture(trvPresets.Nodes);
+            return states;
+        }
+
+        private void RefreshPresetList(
+            bool restoreExpandState = true,
+            IReadOnlyDictionary<string, bool>? expandStatesOverride = null)
         {
             string? currentSelection = null;
             if (trvPresets.SelectedNode?.Tag is PresetNodeTag selectedTag && !selectedTag.IsFolder)
             {
                 currentSelection = selectedTag.Name;
+            }
+
+            IReadOnlyDictionary<string, bool>? runtimeExpandStates = null;
+            if (restoreExpandState)
+            {
+                if (expandStatesOverride != null && expandStatesOverride.Count > 0)
+                {
+                    runtimeExpandStates = expandStatesOverride;
+                }
+                else if (trvPresets.Nodes.Count > 0)
+                {
+                    runtimeExpandStates = CapturePresetTreeExpandState();
+                }
             }
 
             _suppressPresetSelectionChange = true;
@@ -5114,9 +5874,9 @@ namespace SSH_Helper
             // Build nested folder hierarchy
             foreach (var folderPath in allFolders)
             {
-                var folderInfo = _presetManager.Folders.GetValueOrDefault(folderPath);
                 var folderName = FolderPathUtility.GetFolderName(folderPath);
                 var parentPath = FolderPathUtility.GetParentPath(folderPath);
+                var folderInfo = _presetManager.Folders.GetValueOrDefault(folderPath);
 
                 string folderDisplay = folderInfo?.IsFavorite == true
                     ? $"{StarIcon} {FolderIcon} {folderName}"
@@ -5153,11 +5913,6 @@ namespace SSH_Helper
                     folderNode.Nodes.Add(presetNode);
                 }
 
-                // Restore expand state immediately while still in BeginUpdate block
-                if (restoreExpandState && folderInfo?.IsExpanded == true)
-                {
-                    folderNode.Expand();
-                }
             }
 
             // Add root-level presets (no folder)
@@ -5173,12 +5928,45 @@ namespace SSH_Helper
                 trvPresets.Nodes.Add(presetNode);
             }
 
+            // Final pass for expand/collapse state after the full hierarchy exists.
+            // This avoids branch state drift when nodes are added after earlier Expand calls.
+            if (restoreExpandState)
+            {
+                foreach (var folderPath in allFolders)
+                {
+                    if (!folderNodes.TryGetValue(folderPath, out var folderNode))
+                    {
+                        continue;
+                    }
+
+                    bool shouldExpand = false;
+                    if (runtimeExpandStates != null &&
+                        runtimeExpandStates.TryGetValue(folderPath, out var expandedFromRuntime))
+                    {
+                        shouldExpand = expandedFromRuntime;
+                    }
+                    else if (_presetManager.Folders.TryGetValue(folderPath, out var folderInfo))
+                    {
+                        shouldExpand = folderInfo.IsExpanded;
+                    }
+
+                    if (shouldExpand)
+                    {
+                        folderNode.Expand();
+                    }
+                    else
+                    {
+                        folderNode.Collapse();
+                    }
+                }
+            }
+
             trvPresets.EndUpdate();
 
             // Restore selection
             if (!string.IsNullOrEmpty(currentSelection))
             {
-                SelectPresetByName(currentSelection);
+                SelectPresetByName(currentSelection, ensureVisible: false);
             }
 
             _suppressPresetSelectionChange = false;
@@ -5383,7 +6171,7 @@ namespace SSH_Helper
             }
         }
 
-        private void SelectPresetByName(string? presetName)
+        private void SelectPresetByName(string? presetName, bool ensureVisible = true)
         {
             if (string.IsNullOrEmpty(presetName))
                 return;
@@ -5405,30 +6193,64 @@ namespace SSH_Helper
             var targetNode = FindNode(trvPresets.Nodes);
             if (targetNode != null)
             {
+                // In state-preserving flows, avoid selecting hidden nodes because
+                // SelectedNode itself can auto-expand ancestor folders.
+                if (!ensureVisible && !targetNode.IsVisible)
+                {
+                    return;
+                }
+
                 // Suppress expand events while making the node visible
                 // to avoid overwriting saved expand/collapse state
                 _suppressExpandCollapseEvents = true;
                 trvPresets.SelectedNode = targetNode;
-                targetNode.EnsureVisible();
+                if (ensureVisible)
+                {
+                    targetNode.EnsureVisible();
+                }
                 _suppressExpandCollapseEvents = false;
             }
         }
 
-        private void SelectFolderByName(string? folderName)
+        private void SelectFolderByName(string? folderName, bool ensureVisible = true)
         {
             if (string.IsNullOrEmpty(folderName))
                 return;
 
-            foreach (TreeNode node in trvPresets.Nodes)
+            TreeNode? FindNode(TreeNodeCollection nodes)
             {
-                if (node.Tag is PresetNodeTag tag && tag.IsFolder && tag.Name == folderName)
+                foreach (TreeNode node in nodes)
                 {
-                    _suppressExpandCollapseEvents = true;
-                    trvPresets.SelectedNode = node;
-                    node.EnsureVisible();
-                    _suppressExpandCollapseEvents = false;
+                    if (node.Tag is PresetNodeTag tag && tag.IsFolder && tag.Name == folderName)
+                    {
+                        return node;
+                    }
+
+                    var found = FindNode(node.Nodes);
+                    if (found != null)
+                    {
+                        return found;
+                    }
+                }
+
+                return null;
+            }
+
+            var targetNode = FindNode(trvPresets.Nodes);
+            if (targetNode != null)
+            {
+                if (!ensureVisible && !targetNode.IsVisible)
+                {
                     return;
                 }
+
+                _suppressExpandCollapseEvents = true;
+                trvPresets.SelectedNode = targetNode;
+                if (ensureVisible)
+                {
+                    targetNode.EnsureVisible();
+                }
+                _suppressExpandCollapseEvents = false;
             }
         }
 
@@ -5499,6 +6321,19 @@ namespace SSH_Helper
             return displayName.StartsWith($"{StarIcon} ", StringComparison.Ordinal) ? displayName.Substring(2) : displayName;
         }
 
+        private static string NormalizeCommandTextForComparison(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            // Compare command text independent of newline representation (LF/CRLF/CR).
+            return value
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
+        }
+
         private bool IsPresetDirty()
         {
             // When viewing a folder (not a preset), there's nothing to save
@@ -5510,7 +6345,9 @@ namespace SSH_Helper
             if (preset == null) return InputValidator.IsNotEmpty(txtPreset.Text) || InputValidator.IsNotEmpty(txtCommand.Text);
 
             bool nameChanged = !string.Equals(txtPreset.Text?.Trim(), _activePresetName, StringComparison.Ordinal);
-            bool commandsChanged = !string.Equals(txtCommand.Text, preset.Commands ?? "", StringComparison.Ordinal);
+            var currentCommands = NormalizeCommandTextForComparison(txtCommand.Text);
+            var savedCommands = NormalizeCommandTextForComparison(preset.Commands);
+            bool commandsChanged = !string.Equals(currentCommands, savedCommands, StringComparison.Ordinal);
 
             bool timeoutDiffers = int.TryParse(txtTimeoutHeader.Text, out var t)
                 ? preset.Timeout != t
@@ -5555,14 +6392,18 @@ namespace SSH_Helper
                 sb.AppendLine($"    Current: \"{txtPreset.Text?.Trim()}\"");
             }
 
-            bool commandsChanged = !string.Equals(txtCommand.Text, preset.Commands ?? "", StringComparison.Ordinal);
+            var savedCmd = preset.Commands ?? string.Empty;
+            var currentCmd = txtCommand.Text ?? string.Empty;
+            var normalizedSavedCmd = NormalizeCommandTextForComparison(savedCmd);
+            var normalizedCurrentCmd = NormalizeCommandTextForComparison(currentCmd);
+            bool commandsChanged = !string.Equals(normalizedCurrentCmd, normalizedSavedCmd, StringComparison.Ordinal);
             sb.AppendLine($"[{(commandsChanged ? "X" : " ")}] Commands changed:");
             if (commandsChanged)
             {
-                var savedCmd = preset.Commands ?? "";
-                var currentCmd = txtCommand.Text ?? "";
                 sb.AppendLine($"    Saved length: {savedCmd.Length} chars");
                 sb.AppendLine($"    Current length: {currentCmd.Length} chars");
+                sb.AppendLine($"    Saved normalized length: {normalizedSavedCmd.Length} chars");
+                sb.AppendLine($"    Current normalized length: {normalizedCurrentCmd.Length} chars");
                 if (savedCmd.Length < 100 && currentCmd.Length < 100)
                 {
                     sb.AppendLine($"    Saved: \"{savedCmd.Replace("\r\n", "\\n").Replace("\n", "\\n")}\"");
@@ -5613,6 +6454,7 @@ namespace SSH_Helper
             {
                 var hostAddresses = hosts.Select(h => h.ToString()).ToList();
                 using var dialog = new FolderExecutionDialog(presetDisplayName, new List<string> { presetDisplayName }, hostAddresses, _isDarkMode);
+                DialogTheme.SetDialogFont(dialog, _dialogFont);
                 if (dialog.ShowDialog(this) != DialogResult.OK)
                     return;
 
@@ -5741,7 +6583,8 @@ namespace SSH_Helper
 
             try
             {
-                result = analyzer.AnalyzePresets(presets);
+                var environmentVariableNames = _environmentService.GetActiveEnvironmentVariables().Keys;
+                result = analyzer.AnalyzePresets(presets, environmentVariableNames);
             }
             catch (Exception ex)
             {
@@ -5880,6 +6723,7 @@ namespace SSH_Helper
                 .Where(h => !string.IsNullOrWhiteSpace(h))
                 .ToList();
             using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -5921,6 +6765,7 @@ namespace SSH_Helper
 
             // Show folder execution dialog (single host selected)
             using var dialog = new FolderExecutionDialog(folderName, presetNames, new List<string> { host }, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -5962,6 +6807,7 @@ namespace SSH_Helper
                 .Select(r => GetCellValue(r, CsvManager.HostColumnName))
                 .ToList();
             using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
@@ -6137,6 +6983,9 @@ namespace SSH_Helper
                 PresetType = presetType,
                 StartTimeUtc = startTimeUtc,
                 EndTimeUtc = endTimeUtc,
+                EnvironmentName = string.IsNullOrWhiteSpace(_activeEnvironmentName)
+                    ? EnvironmentConfig.DefaultName
+                    : _activeEnvironmentName,
                 Username = username ?? string.Empty,
                 CommandTimeoutSeconds = commandTimeoutSeconds,
                 ConnectionTimeoutSeconds = connectionTimeoutSeconds,
@@ -6348,6 +7197,16 @@ namespace SSH_Helper
                     host.Variables["password"] = host.Password;
                 }
 
+                var environmentVariables = _environmentService.GetActiveEnvironmentVariables();
+                foreach (var kvp in environmentVariables)
+                {
+                    if (!host.Variables.TryGetValue(kvp.Key, out var currentValue) ||
+                        string.IsNullOrWhiteSpace(currentValue))
+                    {
+                        host.Variables[kvp.Key] = kvp.Value;
+                    }
+                }
+
                 // Apply SSH config settings if enabled (grid values take precedence)
                 if (sshConfigEnabled)
                 {
@@ -6534,6 +7393,30 @@ namespace SSH_Helper
             }
         }
 
+        private void SshService_EnvironmentVariableUpdateRequested(object? sender, SshEnvironmentVariableUpdateEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(() => UpdateActiveEnvironmentVariable(e.Variable, e.Value));
+            }
+            else
+            {
+                UpdateActiveEnvironmentVariable(e.Variable, e.Value);
+            }
+        }
+
+        private void UpdateActiveEnvironmentVariable(string variable, string value)
+        {
+            try
+            {
+                _environmentService.UpdateActiveEnvironmentVariable(variable, value);
+            }
+            catch (Exception ex)
+            {
+                AppendOutputText($"[WARNING] Failed to persist environment variable '{variable}': {ex.Message}{Environment.NewLine}");
+            }
+        }
+
         private void UpdateHostColumn(HostConnection host, string columnName, string value)
         {
             // Find the row for this host
@@ -6711,6 +7594,7 @@ namespace SSH_Helper
             }
 
             using var dialog = new ExecutionDetailsDialog(details, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
             dialog.ShowDialog(this);
         }
 
@@ -6752,6 +7636,7 @@ namespace SSH_Helper
             if (_findDialog == null || _findDialog.IsDisposed)
             {
                 _findDialog = new FindDialog(this, seed, _lastFindMatchCase);
+                DialogTheme.SetDialogFont(_findDialog, _dialogFont);
                 _findDialog.AnchorTo(txtOutput);
             }
 
@@ -6889,10 +7774,19 @@ namespace SSH_Helper
         {
             try
             {
+                var currentConfig = _configService.GetCurrent();
+                if (currentConfig.Environments.Count > 0)
+                {
+                    SaveCurrentGridToEnvironment(_activeEnvironmentName);
+                }
+
                 _configService.Update(config =>
                 {
                     config.Username = tsbUsername.Text;
                     config.Timeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
+                    config.ActiveEnvironment = config.Environments.Count > 0
+                        ? _activeEnvironmentName
+                        : null;
 
                     // Save sort mode and manual order
                     config.PresetSortMode = _currentSortMode;
@@ -7052,6 +7946,11 @@ namespace SSH_Helper
                     historyEntry.HostResults = hostResults;
                 }
 
+                if (_historyResults.TryGetDetails(entryId, out var details) && details != null)
+                {
+                    historyEntry.Details = CloneExecutionDetails(details);
+                }
+
                 state.History.Add(historyEntry);
             }
 
@@ -7156,6 +8055,11 @@ namespace SSH_Helper
                     if (entry.HostResults != null && entry.HostResults.Count > 0)
                     {
                         _historyResults.SetResults(entryId, entry.HostResults);
+                    }
+
+                    if (entry.Details != null)
+                    {
+                        _historyResults.SetDetails(entryId, CloneExecutionDetails(entry.Details));
                     }
                 }
 
@@ -7270,6 +8174,7 @@ namespace SSH_Helper
                     {
                         _configService.Update(c => c.UpdateSettings.SkippedVersion = skippedVersion);
                     }, config.UpdateSettings.EnableUpdateLog, _isDarkMode);
+                    DialogTheme.SetDialogFont(updateDialog, _dialogFont);
                     updateDialog.ShowDialog(this);
                 }
                 else
@@ -7314,6 +8219,7 @@ namespace SSH_Helper
         }
     }
 }
+
 
 
 

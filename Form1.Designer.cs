@@ -103,14 +103,13 @@ namespace SSH_Helper
             lblPresetsTitle = new Label();
             lblFavoritesEmpty = new Label();
             scriptPanel = new Panel();
-            txtCommand = new TextBox();
+            txtCommand = new SSH_Helper.UI.ScintillaScriptEditorControl();
             contextCommandBox = new ContextMenuStrip(components);
             ctxCut = new ToolStripMenuItem();
             ctxCopy = new ToolStripMenuItem();
             ctxPaste = new ToolStripMenuItem();
             ctxSelectAll = new ToolStripMenuItem();
             ctxSeparator1 = new ToolStripSeparator();
-            ctxPrettyFormat = new ToolStripMenuItem();
             ctxValidateScript = new ToolStripMenuItem();
             scriptFooterPanel = new Panel();
             lblLinePosition = new Label();
@@ -160,6 +159,10 @@ namespace SSH_Helper
             tsbUsername = new ToolStripTextBox();
             toolStripLabel2 = new ToolStripLabel();
             tsbPassword = new ToolStripTextBox();
+            toolStripSeparatorEnv = new ToolStripSeparator();
+            toolStripLabelEnvironment = new ToolStripLabel();
+            tsbEnvironment = new ToolStripDropDownButton();
+            tsbManageEnvironments = new ToolStripButton();
             statusStrip = new StatusStrip();
             statusLabel = new ToolStripStatusLabel();
             statusProgress = new ToolStripProgressBar();
@@ -173,6 +176,7 @@ namespace SSH_Helper
             exportAllPresetsToolStripMenuItem = new ToolStripMenuItem();
             importAllPresetsToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator9 = new ToolStripSeparator();
+            environmentsToolStripMenuItem = new ToolStripMenuItem();
             settingsToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator10 = new ToolStripSeparator();
             ExitMenuItem = new ToolStripMenuItem();
@@ -790,7 +794,7 @@ namespace SSH_Helper
             //
             // contextCommandBox
             //
-            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxSeparator1, ctxPrettyFormat, ctxValidateScript });
+            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxSeparator1, ctxValidateScript });
             contextCommandBox.Name = "contextCommandBox";
             contextCommandBox.Size = new Size(201, 142);
             //
@@ -830,13 +834,6 @@ namespace SSH_Helper
             //
             ctxSeparator1.Name = "ctxSeparator1";
             ctxSeparator1.Size = new Size(197, 6);
-            //
-            // ctxPrettyFormat
-            //
-            ctxPrettyFormat.Name = "ctxPrettyFormat";
-            ctxPrettyFormat.Size = new Size(200, 22);
-            ctxPrettyFormat.Text = "Pretty &Format";
-            ctxPrettyFormat.Click += ctxPrettyFormat_Click;
             //
             // ctxValidateScript
             //
@@ -1270,7 +1267,7 @@ namespace SSH_Helper
             // 
             mainToolStrip.BackColor = Color.FromArgb(248, 249, 250);
             mainToolStrip.GripStyle = ToolStripGripStyle.Hidden;
-            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword });
+            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword, toolStripSeparatorEnv, toolStripLabelEnvironment, tsbEnvironment, tsbManageEnvironments });
             mainToolStrip.Location = new Point(0, 24);
             mainToolStrip.Name = "mainToolStrip";
             mainToolStrip.Padding = new Padding(8, 0, 8, 0);
@@ -1347,6 +1344,37 @@ namespace SSH_Helper
             tsbPassword.Name = "tsbPassword";
             tsbPassword.Size = new Size(120, 25);
             // 
+            // toolStripSeparatorEnv
+            // 
+            toolStripSeparatorEnv.Alignment = ToolStripItemAlignment.Right;
+            toolStripSeparatorEnv.Name = "toolStripSeparatorEnv";
+            toolStripSeparatorEnv.Size = new Size(6, 25);
+            // 
+            // toolStripLabelEnvironment
+            // 
+            toolStripLabelEnvironment.Alignment = ToolStripItemAlignment.Right;
+            toolStripLabelEnvironment.Name = "toolStripLabelEnvironment";
+            toolStripLabelEnvironment.Size = new Size(77, 22);
+            toolStripLabelEnvironment.Text = "Environment:";
+            // 
+            // tsbEnvironment
+            // 
+            tsbEnvironment.Alignment = ToolStripItemAlignment.Right;
+            tsbEnvironment.AutoSize = false;
+            tsbEnvironment.AutoToolTip = false;
+            tsbEnvironment.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbEnvironment.Name = "tsbEnvironment";
+            tsbEnvironment.Size = new Size(188, 25);
+            tsbEnvironment.Text = "Default";
+            // 
+            // tsbManageEnvironments
+            // 
+            tsbManageEnvironments.Alignment = ToolStripItemAlignment.Right;
+            tsbManageEnvironments.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            tsbManageEnvironments.Name = "tsbManageEnvironments";
+            tsbManageEnvironments.Size = new Size(54, 22);
+            tsbManageEnvironments.Text = "Manage";
+            // 
             // statusStrip
             //
             statusStrip.AutoSize = false;
@@ -1389,7 +1417,7 @@ namespace SSH_Helper
             // 
             // fileToolStripMenuItem
             // 
-            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openCSVToolStripMenuItem, saveToolStripMenuItem, saveAsToolStripMenuItem1, toolStripSeparator4, exportAllPresetsToolStripMenuItem, importAllPresetsToolStripMenuItem, toolStripSeparator9, settingsToolStripMenuItem, toolStripSeparator10, ExitMenuItem });
+            fileToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { openCSVToolStripMenuItem, saveToolStripMenuItem, saveAsToolStripMenuItem1, toolStripSeparator4, exportAllPresetsToolStripMenuItem, importAllPresetsToolStripMenuItem, toolStripSeparator9, environmentsToolStripMenuItem, settingsToolStripMenuItem, toolStripSeparator10, ExitMenuItem });
             fileToolStripMenuItem.Name = "fileToolStripMenuItem";
             fileToolStripMenuItem.Size = new Size(37, 20);
             fileToolStripMenuItem.Text = "&File";
@@ -1441,9 +1469,16 @@ namespace SSH_Helper
             // 
             toolStripSeparator9.Name = "toolStripSeparator9";
             toolStripSeparator9.Size = new Size(192, 6);
-            // 
+            //
+            // environmentsToolStripMenuItem
+            //
+            environmentsToolStripMenuItem.Name = "environmentsToolStripMenuItem";
+            environmentsToolStripMenuItem.Size = new Size(195, 22);
+            environmentsToolStripMenuItem.Text = "E&nvironments...";
+            environmentsToolStripMenuItem.Click += TsbManageEnvironments_Click;
+            //
             // settingsToolStripMenuItem
-            // 
+            //
             settingsToolStripMenuItem.Name = "settingsToolStripMenuItem";
             settingsToolStripMenuItem.Size = new Size(195, 22);
             settingsToolStripMenuItem.Text = "&Settings...";
@@ -1683,6 +1718,10 @@ namespace SSH_Helper
         private ToolStripTextBox tsbUsername;
         private ToolStripLabel toolStripLabel2;
         private ToolStripTextBox tsbPassword;
+        private ToolStripSeparator toolStripSeparatorEnv;
+        private ToolStripLabel toolStripLabelEnvironment;
+        private ToolStripDropDownButton tsbEnvironment;
+        private ToolStripButton tsbManageEnvironments;
 
         // Hosts panel
         private Panel hostsPanel;
@@ -1724,14 +1763,13 @@ namespace SSH_Helper
         private TextBox txtTimeoutHeader;
         private TextBox txtPreset;
         private Button btnSavePreset;
-        private TextBox txtCommand;
+        private SSH_Helper.UI.ScintillaScriptEditorControl txtCommand;
         private ContextMenuStrip contextCommandBox;
         private ToolStripMenuItem ctxCut;
         private ToolStripMenuItem ctxCopy;
         private ToolStripMenuItem ctxPaste;
         private ToolStripMenuItem ctxSelectAll;
         private ToolStripSeparator ctxSeparator1;
-        private ToolStripMenuItem ctxPrettyFormat;
         private ToolStripMenuItem ctxValidateScript;
 
         // Execute panel
@@ -1775,6 +1813,7 @@ namespace SSH_Helper
         private ToolStripMenuItem exportAllPresetsToolStripMenuItem;
         private ToolStripMenuItem importAllPresetsToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator9;
+        private ToolStripMenuItem environmentsToolStripMenuItem;
         private ToolStripMenuItem settingsToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator10;
         private ToolStripMenuItem ExitMenuItem;
@@ -1847,16 +1886,70 @@ namespace SSH_Helper
 
         protected override void OnRenderButtonBackground(ToolStripItemRenderEventArgs e)
         {
-            if (e.Item.Selected || e.Item.Pressed)
+            var bounds = new Rectangle(Point.Empty, e.Item.Size);
+            if (e.Item.Pressed)
             {
-                using var brush = new SolidBrush(Color.FromArgb(229, 229, 229));
-                e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.Item.Size));
+                using var brush = new SolidBrush(Color.FromArgb(210, 212, 216));
+                e.Graphics.FillRectangle(brush, bounds);
+            }
+            else if (e.Item.Selected)
+            {
+                using var brush = new SolidBrush(Color.FromArgb(220, 222, 225));
+                e.Graphics.FillRectangle(brush, bounds);
+            }
+            else
+            {
+                // Default state: subtle fill so buttons are distinguishable from labels
+                using var brush = new SolidBrush(Color.FromArgb(230, 232, 235));
+                e.Graphics.FillRectangle(brush, bounds);
             }
         }
 
         protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
         {
             // No border
+        }
+
+        protected override void OnRenderDropDownButtonBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (string.Equals(e.Item.Name, "tsbEnvironment", StringComparison.Ordinal))
+            {
+                var bounds = new Rectangle(Point.Empty, e.Item.Size);
+                var accent = ResolveEnvironmentAccentColor(e.Item, Color.FromArgb(253, 253, 253));
+                using var brush = new SolidBrush(accent);
+                using var pen = new Pen(Color.FromArgb(222, 226, 230));
+                e.Graphics.FillRectangle(brush, bounds);
+                e.Graphics.DrawRectangle(pen, 0, 0, bounds.Width - 1, bounds.Height - 1);
+                if (e.Item.Selected || e.Item.Pressed)
+                {
+                    using var overlay = new SolidBrush(Color.FromArgb(20, Color.White));
+                    e.Graphics.FillRectangle(overlay, bounds);
+                }
+                return;
+            }
+
+            base.OnRenderDropDownButtonBackground(e);
+        }
+
+        private static Color ResolveEnvironmentAccentColor(ToolStripItem item, Color fallback)
+        {
+            if (item.Tag is int argb)
+                return Color.FromArgb(argb);
+
+            if (item.Tag is Color color)
+                return color;
+
+            return fallback;
+        }
+
+        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+        {
+            if (string.Equals(e.Item.Name, "tsbEnvironment", StringComparison.Ordinal) &&
+                e.Item.ForeColor != Color.Empty)
+            {
+                e.ArrowColor = e.Item.ForeColor;
+            }
+            base.OnRenderArrow(e);
         }
     }
 
@@ -1905,6 +1998,12 @@ namespace SSH_Helper
                 using var brush = new SolidBrush(HoverBg);
                 e.Graphics.FillRectangle(brush, bounds);
             }
+            else
+            {
+                // Default state: subtle fill so buttons are distinguishable from labels
+                using var brush = new SolidBrush(Color.FromArgb(55, 55, 57));
+                e.Graphics.FillRectangle(brush, bounds);
+            }
         }
 
         protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
@@ -1932,7 +2031,15 @@ namespace SSH_Helper
 
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
-            e.TextColor = e.Item.Enabled ? TextPrimary : Color.FromArgb(100, 100, 100);
+            if (string.Equals(e.Item.Name, "tsbEnvironment", StringComparison.Ordinal) &&
+                e.Item.ForeColor != Color.Empty)
+            {
+                e.TextColor = e.Item.ForeColor;
+            }
+            else
+            {
+                e.TextColor = e.Item.Enabled ? TextPrimary : Color.FromArgb(100, 100, 100);
+            }
             base.OnRenderItemText(e);
         }
 
@@ -1945,7 +2052,49 @@ namespace SSH_Helper
 
         protected override void OnRenderDropDownButtonBackground(ToolStripItemRenderEventArgs e)
         {
+            if (string.Equals(e.Item.Name, "tsbEnvironment", StringComparison.Ordinal))
+            {
+                var bounds = new Rectangle(Point.Empty, e.Item.Size);
+                var accent = ResolveEnvironmentAccentColor(e.Item, Color.FromArgb(60, 60, 60));
+                using var brush = new SolidBrush(accent);
+                using var pen = new Pen(Border);
+                e.Graphics.FillRectangle(brush, bounds);
+                e.Graphics.DrawRectangle(pen, 0, 0, bounds.Width - 1, bounds.Height - 1);
+
+                if (e.Item.Selected)
+                {
+                    using var overlay = new SolidBrush(Color.FromArgb(22, Color.White));
+                    e.Graphics.FillRectangle(overlay, bounds);
+                }
+                return;
+            }
+
             OnRenderButtonBackground(e);
+        }
+
+        private static Color ResolveEnvironmentAccentColor(ToolStripItem item, Color fallback)
+        {
+            if (item.Tag is int argb)
+                return Color.FromArgb(argb);
+
+            if (item.Tag is Color color)
+                return color;
+
+            return fallback;
+        }
+
+        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+        {
+            if (string.Equals(e.Item.Name, "tsbEnvironment", StringComparison.Ordinal) &&
+                e.Item.ForeColor != Color.Empty)
+            {
+                e.ArrowColor = e.Item.ForeColor;
+            }
+            else
+            {
+                e.ArrowColor = TextPrimary;
+            }
+            base.OnRenderArrow(e);
         }
 
         protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)

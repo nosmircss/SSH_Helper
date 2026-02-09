@@ -5,14 +5,18 @@ name: Cisco IOS Interface Status
 description: Checks all interfaces and reports their status (up/down)
 
 steps:
-  - send: terminal length 0
+  - send:
+      command: terminal length 0
 
   # Get interface brief
-  - send: show ip interface brief
-    capture: brief_output
+  - send:
+      command: show ip interface brief
+      capture: brief_output
 
-  - print: "========== Interface Status Report =========="
-  - print: ""
+  - print:
+      message: "========== Interface Status Report =========="
+  - print:
+      message: ""
 
   # Extract all interfaces with their status
   # Pattern captures: interface name, IP, OK?, Method, Status, Protocol
@@ -23,30 +27,46 @@ steps:
       match: all
 
   # Count up and down interfaces
-  - set: up_count = 0
-  - set: down_count = 0
+  - set:
+      expression: up_count = 0
+  - set:
+      expression: down_count = 0
 
   # Process each line from the brief output
-  - foreach: line in brief_output
-    when: line matches '^\S+\s+\d'
-    do:
-      # Check if line indicates interface is up
-      - if: line matches '\s+up\s+up'
-        then:
-          - set: up_count = up_count + 1
-        else:
-          - if: line matches 'administratively down'
+  - foreach:
+      iterator: line in brief_output
+      when: line matches '^\S+\s+\d'
+      do:
+        # Check if line indicates interface is up
+        - if:
+            condition: line matches '\s+up\s+up'
             then:
-              - set: down_count = down_count + 1
+              - set:
+                  expression: up_count = up_count + 1
             else:
-              - if: line matches '\s+down\s'
-                then:
-                  - set: down_count = down_count + 1
+              - if:
+                  condition: line matches 'administratively down'
+                  then:
+                    - set:
+                        expression: down_count = down_count + 1
+                  else:
+                    - if:
+                        condition: line matches '\s+down\s'
+                        then:
+                          - set:
+                              expression: down_count = down_count + 1
 
-  - print: ""
-  - print: "========== Summary =========="
-  - print: "Interfaces UP: ${up_count}"
-  - print: "Interfaces DOWN: ${down_count}"
-  - print: "============================="
+  - print:
+      message: ""
+  - print:
+      message: "========== Summary =========="
+  - print:
+      message: "Interfaces UP: ${up_count}"
+  - print:
+      message: "Interfaces DOWN: ${down_count}"
+  - print:
+      message: "============================="
 
-  - exit: success "Interface check complete"
+  - exit:
+      status: success
+      message: "Interface check complete"

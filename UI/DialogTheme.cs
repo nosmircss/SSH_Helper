@@ -25,6 +25,10 @@ namespace SSH_Helper.UI
         public static readonly Color DarkBorder = Color.FromArgb(48, 48, 48);
         public static readonly Color DarkInput = Color.FromArgb(60, 60, 60);
         public static readonly Color DarkAccent = Color.FromArgb(0, 120, 212);
+        public static readonly Color GridLightSelection = Color.FromArgb(13, 110, 253);
+        public static readonly Color GridDarkBackground = Color.FromArgb(30, 30, 30);
+        public static readonly Color GridDarkHeader = Color.FromArgb(37, 37, 38);
+        public static readonly Color GridDarkSelection = Color.FromArgb(4, 57, 94);
 
         /// <summary>
         /// Recursively applies theme colors to a control and all its children.
@@ -163,6 +167,12 @@ namespace SSH_Helper.UI
                 btn.ForeColor = Color.White;
                 btn.FlatStyle = FlatStyle.Flat;
                 btn.FlatAppearance.BorderSize = 0;
+                btn.FlatAppearance.BorderColor = darkMode ? DarkAccent : LightAccent;
+                if (darkMode)
+                {
+                    btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(28, 140, 232);
+                    btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(0, 100, 190);
+                }
             }
             else
             {
@@ -171,10 +181,64 @@ namespace SSH_Helper.UI
                 btn.FlatStyle = darkMode ? FlatStyle.Flat : FlatStyle.Standard;
                 if (darkMode)
                 {
-                    btn.FlatAppearance.BorderColor = DarkBorder;
-                    btn.FlatAppearance.BorderSize = 1;
+                    btn.FlatAppearance.BorderSize = 0;
+                    btn.FlatAppearance.BorderColor = DarkSurface2;
+                    btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(55, 55, 56);
+                    btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(65, 65, 66);
                 }
             }
+        }
+
+        /// <summary>
+        /// Applies shared grid styling so dialog tables stay visually consistent with the main hosts grid.
+        /// </summary>
+        public static void StyleDataGridView(DataGridView grid, bool darkMode, bool flattenHeaderBevel = false)
+        {
+            grid.BorderStyle = BorderStyle.None;
+            grid.EnableHeadersVisualStyles = false;
+            grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+            grid.RowHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+
+            if (flattenHeaderBevel)
+            {
+                grid.AdvancedColumnHeadersBorderStyle.All = DataGridViewAdvancedCellBorderStyle.Single;
+                grid.AdvancedColumnHeadersBorderStyle.Top = DataGridViewAdvancedCellBorderStyle.None;
+                grid.AdvancedColumnHeadersBorderStyle.Left = DataGridViewAdvancedCellBorderStyle.None;
+            }
+
+            if (darkMode)
+            {
+                grid.BackgroundColor = GridDarkBackground;
+                grid.GridColor = DarkBorder;
+                grid.DefaultCellStyle.BackColor = GridDarkBackground;
+                grid.DefaultCellStyle.ForeColor = DarkText;
+                grid.DefaultCellStyle.SelectionBackColor = GridDarkSelection;
+                grid.DefaultCellStyle.SelectionForeColor = Color.White;
+                grid.AlternatingRowsDefaultCellStyle.BackColor = GridDarkHeader;
+                grid.AlternatingRowsDefaultCellStyle.ForeColor = DarkText;
+                grid.AlternatingRowsDefaultCellStyle.SelectionBackColor = GridDarkSelection;
+                grid.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
+                grid.ColumnHeadersDefaultCellStyle.BackColor = GridDarkHeader;
+                grid.ColumnHeadersDefaultCellStyle.ForeColor = DarkText;
+                grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = GridDarkHeader;
+                grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = DarkText;
+                return;
+            }
+
+            grid.BackgroundColor = LightPanel;
+            grid.GridColor = LightBorder;
+            grid.DefaultCellStyle.BackColor = LightPanel;
+            grid.DefaultCellStyle.ForeColor = LightText;
+            grid.DefaultCellStyle.SelectionBackColor = GridLightSelection;
+            grid.DefaultCellStyle.SelectionForeColor = Color.White;
+            grid.AlternatingRowsDefaultCellStyle.BackColor = LightBackground;
+            grid.AlternatingRowsDefaultCellStyle.ForeColor = LightText;
+            grid.AlternatingRowsDefaultCellStyle.SelectionBackColor = GridLightSelection;
+            grid.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
+            grid.ColumnHeadersDefaultCellStyle.BackColor = LightBackground;
+            grid.ColumnHeadersDefaultCellStyle.ForeColor = LightText;
+            grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = LightBackground;
+            grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = LightText;
         }
 
         /// <summary>
@@ -407,6 +471,159 @@ namespace SSH_Helper.UI
                 };
                 e.Graphics.DrawString(tabPage.Text, tabControl.Font, textBrush, tabRect, sf);
             }
+        }
+
+        /// <summary>
+        /// Sets a dialog's font without triggering WinForms auto-scale relayout.
+        /// Dialogs use absolute pixel positions, so auto-scaling on font change breaks layout.
+        /// </summary>
+        public static void SetDialogFont(Form dialog, Font? font)
+        {
+            if (font == null) return;
+            var savedMode = dialog.AutoScaleMode;
+            dialog.AutoScaleMode = AutoScaleMode.None;
+            dialog.Font = font;
+            dialog.AutoScaleMode = savedMode;
+        }
+
+        /// <summary>
+        /// Shows a themed Yes/No confirmation dialog that respects dark mode.
+        /// Returns true if the user clicked Yes.
+        /// </summary>
+        public static bool Confirm(IWin32Window? owner, string message, string title, bool darkMode, Font? font = null)
+        {
+            using var dlg = new Form
+            {
+                Text = title,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = owner != null ? FormStartPosition.CenterParent : FormStartPosition.CenterScreen,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false,
+                AutoScaleMode = AutoScaleMode.Dpi,
+                Size = new Size(360, 160),
+            };
+
+            var lblMessage = new Label
+            {
+                Text = message,
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Location = new Point(20, 16),
+                Size = new Size(310, 56),
+            };
+
+            var btnYes = new Button
+            {
+                Text = "Yes",
+                DialogResult = DialogResult.Yes,
+                Size = new Size(80, 30),
+                Location = new Point(110, 82),
+            };
+
+            var btnNo = new Button
+            {
+                Text = "No",
+                DialogResult = DialogResult.No,
+                Size = new Size(80, 30),
+                Location = new Point(200, 82),
+            };
+
+            SetDialogFont(dlg, font);
+
+            dlg.Controls.AddRange([lblMessage, btnYes, btnNo]);
+            dlg.AcceptButton = btnNo;
+            dlg.CancelButton = btnNo;
+
+            ApplyTo(dlg, darkMode);
+            StyleButton(btnYes, darkMode);
+            StyleButton(btnNo, darkMode, isPrimary: true);
+            SetDarkTitleBar(dlg, darkMode);
+
+            return dlg.ShowDialog(owner) == DialogResult.Yes;
+        }
+
+        /// <summary>
+        /// Shows a themed message dialog (OK button only) that respects dark mode.
+        /// Replaces MessageBox.Show for contexts where dark mode is active.
+        /// </summary>
+        public static void ShowMessage(IWin32Window? owner, string message, string title, MessageBoxIcon icon, bool darkMode, Font? font = null)
+        {
+            using var dlg = new Form
+            {
+                Text = title,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = owner != null ? FormStartPosition.CenterParent : FormStartPosition.CenterScreen,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false,
+                AutoScaleMode = AutoScaleMode.Dpi,
+                Size = new Size(420, 180),
+            };
+
+            var iconImage = GetSystemIcon(icon);
+            PictureBox? picIcon = null;
+            var textLeft = 20;
+
+            if (iconImage != null)
+            {
+                picIcon = new PictureBox
+                {
+                    Image = iconImage,
+                    SizeMode = PictureBoxSizeMode.AutoSize,
+                    Location = new Point(20, 20),
+                };
+                textLeft = 20 + 32 + 12;
+            }
+
+            var lblMessage = new Label
+            {
+                Text = message,
+                AutoSize = false,
+                TextAlign = ContentAlignment.TopLeft,
+                Location = new Point(textLeft, 20),
+                Size = new Size(420 - textLeft - 20, 80),
+            };
+
+            var btnOk = new Button
+            {
+                Text = "OK",
+                DialogResult = DialogResult.OK,
+                Size = new Size(80, 30),
+                Location = new Point(420 - 80 - 20, 110),
+            };
+
+            SetDialogFont(dlg, font);
+
+            if (picIcon != null)
+                dlg.Controls.Add(picIcon);
+            dlg.Controls.AddRange([lblMessage, btnOk]);
+            dlg.AcceptButton = btnOk;
+            dlg.CancelButton = btnOk;
+
+            ApplyTo(dlg, darkMode);
+            if (picIcon != null)
+                picIcon.BackColor = Color.Transparent;
+            StyleButton(btnOk, darkMode, isPrimary: true);
+            SetDarkTitleBar(dlg, darkMode);
+
+            dlg.ShowDialog(owner);
+        }
+
+        private static Bitmap? GetSystemIcon(MessageBoxIcon icon)
+        {
+            var sysIcon = icon switch
+            {
+                MessageBoxIcon.Error => SystemIcons.Error,
+                MessageBoxIcon.Warning => SystemIcons.Warning,
+                MessageBoxIcon.Information => SystemIcons.Information,
+                MessageBoxIcon.Question => SystemIcons.Question,
+                _ => null,
+            };
+
+            if (sysIcon == null) return null;
+
+            return new Bitmap(sysIcon.ToBitmap(), 32, 32);
         }
 
         private static void ApplyScrollbarThemeToHandle(IntPtr handle, bool dark)

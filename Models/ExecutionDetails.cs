@@ -10,6 +10,7 @@ namespace SSH_Helper.Models
         public string PresetType { get; set; } = string.Empty;
         public DateTime StartTimeUtc { get; set; }
         public DateTime EndTimeUtc { get; set; }
+        public string EnvironmentName { get; set; } = EnvironmentConfig.DefaultName;
         public string Username { get; set; } = string.Empty;
         public int CommandTimeoutSeconds { get; set; }
         public int ConnectionTimeoutSeconds { get; set; }

@@ -78,7 +78,7 @@ namespace SSH_Helper
             {
                 Text = "Copy to Clipboard",
                 Size = new Size(130, 30),
-                Location = new Point(12, 604),
+                Location = new Point(18, 604),
                 Anchor = AnchorStyles.Left | AnchorStyles.Bottom
             };
             _btnCopyToClipboard.Click += BtnCopyToClipboard_Click;
@@ -87,7 +87,7 @@ namespace SSH_Helper
             {
                 Text = "Save to File...",
                 Size = new Size(110, 30),
-                Location = new Point(150, 604),
+                Location = new Point(156, 604),
                 Anchor = AnchorStyles.Left | AnchorStyles.Bottom
             };
             _btnSaveToFile.Click += BtnSaveToFile_Click;
@@ -96,7 +96,7 @@ namespace SSH_Helper
             {
                 Text = "Close",
                 Size = new Size(80, 30),
-                Location = new Point(872, 604),
+                Location = new Point(866, 604),
                 Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
                 DialogResult = DialogResult.OK
             };
@@ -132,18 +132,125 @@ namespace SSH_Helper
 
         private static DataGridView CreateReadOnlyGrid()
         {
-            return new DataGridView
+            var grid = new DataGridView
             {
                 Dock = DockStyle.Fill,
-                ReadOnly = true,
+                // Keep values non-editable while still allowing in-cell text selection for copy.
+                ReadOnly = false,
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
                 AllowUserToResizeRows = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                SelectionMode = DataGridViewSelectionMode.CellSelect,
                 MultiSelect = false,
-                RowHeadersVisible = false
+                RowHeadersVisible = false,
+                EditMode = DataGridViewEditMode.EditOnEnter,
+                ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText
             };
+
+            grid.CellMouseDown += ReadOnlyGrid_CellMouseDown;
+            grid.EditingControlShowing += ReadOnlyGrid_EditingControlShowing;
+            grid.KeyDown += ReadOnlyGrid_KeyDown;
+            grid.ContextMenuStrip = CreateGridContextMenu(grid);
+            return grid;
+        }
+
+        private static ContextMenuStrip CreateGridContextMenu(DataGridView grid)
+        {
+            var contextMenu = new ContextMenuStrip();
+            var copyMenuItem = new ToolStripMenuItem("Copy");
+            copyMenuItem.Click += (_, _) => CopyGridSelection(grid);
+            contextMenu.Items.Add(copyMenuItem);
+            contextMenu.Opening += (_, _) =>
+            {
+                copyMenuItem.Enabled = grid.CurrentCell is not null;
+            };
+            return contextMenu;
+        }
+
+        private static void ReadOnlyGrid_CellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (sender is not DataGridView grid || e.Button != MouseButtons.Right)
+                return;
+
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+                return;
+
+            var clickedCell = grid[e.ColumnIndex, e.RowIndex];
+            if (clickedCell.Selected)
+                return;
+
+            grid.ClearSelection();
+            grid.CurrentCell = clickedCell;
+            clickedCell.Selected = true;
+        }
+
+        private static void ReadOnlyGrid_EditingControlShowing(object? sender, DataGridViewEditingControlShowingEventArgs e)
+        {
+            if (e.Control is not TextBox textBox)
+                return;
+
+            // Read-only textbox keeps data immutable while still allowing mouse text selection + Ctrl+C.
+            textBox.ReadOnly = true;
+            textBox.ShortcutsEnabled = true;
+            textBox.KeyDown -= EditingTextBox_KeyDown;
+            textBox.KeyDown += EditingTextBox_KeyDown;
+            if (sender is DataGridView grid)
+            {
+                textBox.ContextMenuStrip = grid.ContextMenuStrip;
+            }
+        }
+
+        private static void EditingTextBox_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (!e.Control || e.KeyCode != Keys.A || sender is not TextBox textBox)
+                return;
+
+            textBox.SelectAll();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+
+        private static void ReadOnlyGrid_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (sender is not DataGridView grid)
+                return;
+
+            if (e.Control && e.KeyCode == Keys.C)
+            {
+                CopyGridSelection(grid);
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
+            // Keep grid data immutable.
+            if (e.KeyCode == Keys.Delete || e.KeyCode == Keys.Back || (e.Control && (e.KeyCode == Keys.V || e.KeyCode == Keys.X)))
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        }
+
+        private static void CopyGridSelection(DataGridView grid)
+        {
+            if (grid.EditingControl is TextBox textBox && textBox.SelectionLength > 0)
+            {
+                Clipboard.SetText(textBox.SelectedText);
+                return;
+            }
+
+            var clipboardData = grid.GetClipboardContent();
+            if (clipboardData is not null)
+            {
+                Clipboard.SetDataObject(clipboardData);
+                return;
+            }
+
+            if (grid.CurrentCell?.Value is not null)
+            {
+                Clipboard.SetText(Convert.ToString(grid.CurrentCell.Value) ?? string.Empty);
+            }
         }
 
         private void PopulateSummaryTab()
@@ -167,6 +274,7 @@ namespace SSH_Helper
             sb.AppendLine($"Start Time: {FormatTimestamp(_details.StartTimeUtc)}");
             sb.AppendLine($"End Time: {FormatTimestamp(_details.EndTimeUtc)}");
             sb.AppendLine($"Duration: {duration:hh\\:mm\\:ss}");
+            sb.AppendLine($"Environment: {_details.EnvironmentName}");
             sb.AppendLine($"Hosts: {hostCount} total ({successCount} succeeded, {failedCount} failed)");
             sb.AppendLine();
             sb.AppendLine("Executed Presets:");
@@ -206,6 +314,7 @@ namespace SSH_Helper
         private void PopulateSettingsTab()
         {
             var sb = new StringBuilder();
+            sb.AppendLine($"Environment: {_details.EnvironmentName}");
             sb.AppendLine($"Username: {_details.Username}");
             sb.AppendLine($"Command Timeout: {_details.CommandTimeoutSeconds} sec");
             sb.AppendLine($"Connection Timeout: {_details.ConnectionTimeoutSeconds} sec");
@@ -255,21 +364,7 @@ namespace SSH_Helper
 
         private static void ApplyGridTheme(DataGridView grid, bool darkMode)
         {
-            if (!darkMode)
-                return;
-
-            grid.BackgroundColor = DialogTheme.DarkInput;
-            grid.BorderStyle = BorderStyle.None;
-            grid.GridColor = DialogTheme.DarkBorder;
-            grid.DefaultCellStyle.BackColor = DialogTheme.DarkInput;
-            grid.DefaultCellStyle.ForeColor = DialogTheme.DarkText;
-            grid.DefaultCellStyle.SelectionBackColor = DialogTheme.DarkSurface2;
-            grid.DefaultCellStyle.SelectionForeColor = DialogTheme.DarkText;
-            grid.ColumnHeadersDefaultCellStyle.BackColor = DialogTheme.DarkSurface2;
-            grid.ColumnHeadersDefaultCellStyle.ForeColor = DialogTheme.DarkText;
-            grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = DialogTheme.DarkSurface2;
-            grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = DialogTheme.DarkText;
-            grid.EnableHeadersVisualStyles = false;
+            DialogTheme.StyleDataGridView(grid, darkMode, flattenHeaderBevel: true);
         }
 
         private void BtnCopyToClipboard_Click(object? sender, EventArgs e)
@@ -331,6 +426,7 @@ namespace SSH_Helper
 
             sb.AppendLine($"Start Time: {FormatTimestamp(_details.StartTimeUtc)}");
             sb.AppendLine($"End Time: {FormatTimestamp(_details.EndTimeUtc)}");
+            sb.AppendLine($"Environment: {_details.EnvironmentName}");
             sb.AppendLine($"Username: {_details.Username}");
             sb.AppendLine($"Command Timeout: {_details.CommandTimeoutSeconds} sec");
             sb.AppendLine($"Connection Timeout: {_details.ConnectionTimeoutSeconds} sec");

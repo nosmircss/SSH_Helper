@@ -52,7 +52,7 @@ public class ApplyFontSettingsTests
         settings.UIFontFamily = "Arial";
         harness.ApplyFontSettings(settings);
 
-        // Font constructor may map family names; just verify it's not the default "Segoe UI"
+        // Font constructor may map family names; just verify controls share the same font instance
         // and that labels share the same font instance
         harness.lblHostsTitle.Font.Should().BeSameAs(harness.lblPresetsTitle.Font);
         harness.lblHostsTitle.Font.Should().BeSameAs(harness.lblScriptTitle.Font);

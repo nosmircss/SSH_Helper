@@ -12,6 +12,22 @@ namespace SSH_Helper.Services.Scripting.Models
         /// </summary>
         public int LineNumber { get; set; }
 
+        /// <summary>
+        /// Step command key discovered during parse, even when required payload fields are missing.
+        /// Enables precise validation errors instead of generic "unknown step" diagnostics.
+        /// </summary>
+        public StepType DeclaredStepType { get; set; } = StepType.Unknown;
+
+        /// <summary>
+        /// Indicates whether this step used deprecated root-level on_error syntax.
+        /// </summary>
+        public bool UsesStepRootOnError { get; set; }
+
+        /// <summary>
+        /// Parser-originated validation issues for this step.
+        /// </summary>
+        public List<string> ParseErrors { get; } = new();
+
         // ===== Command Types =====
         // Only one of these should be set per step
 
@@ -85,11 +101,41 @@ namespace SSH_Helper.Services.Scripting.Models
         public UpdateColumnOptions? UpdateColumn { get; set; }
 
         /// <summary>
+        /// UpdateEnvironment command - updates an environment variable with a value.
+        /// </summary>
+        public UpdateEnvironmentOptions? UpdateEnvironment { get; set; }
+
+        /// <summary>
         /// Log command - outputs a message with a specific log level.
         /// Simple form: "log: message" (defaults to info level)
         /// Options form: log: { message: "text", level: "warning" }
         /// </summary>
         public object? Log { get; set; }
+
+        /// <summary>
+        /// Http command - makes HTTP requests with auth, headers, and response capture.
+        /// </summary>
+        public HttpOptions? Http { get; set; }
+
+        /// <summary>
+        /// Ping command - performs ICMP reachability checks.
+        /// </summary>
+        public PingOptions? Ping { get; set; }
+
+        /// <summary>
+        /// Dns command - resolves DNS records.
+        /// </summary>
+        public DnsOptions? Dns { get; set; }
+
+        /// <summary>
+        /// Portcheck command - checks TCP port availability.
+        /// </summary>
+        public PortcheckOptions? Portcheck { get; set; }
+
+        /// <summary>
+        /// Sftp command - uploads/downloads files via SFTP.
+        /// </summary>
+        public SftpOptions? Sftp { get; set; }
 
         /// <summary>
         /// Webhook command - makes an HTTP request to a URL.
@@ -205,9 +251,16 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Writefile != null) return StepType.Writefile;
             if (Input != null) return StepType.Input;
             if (UpdateColumn != null) return StepType.UpdateColumn;
+            if (UpdateEnvironment != null) return StepType.UpdateEnvironment;
             if (Log != null) return StepType.Log;
+            if (Http != null) return StepType.Http;
+            if (Ping != null) return StepType.Ping;
+            if (Dns != null) return StepType.Dns;
+            if (Portcheck != null) return StepType.Portcheck;
+            if (Sftp != null) return StepType.Sftp;
             if (Webhook != null) return StepType.Webhook;
             if (Parse != null) return StepType.Parse;
+            if (DeclaredStepType != StepType.Unknown) return DeclaredStepType;
             return StepType.Unknown;
         }
     }
@@ -389,6 +442,23 @@ namespace SSH_Helper.Services.Scripting.Models
     }
 
     /// <summary>
+    /// Options for the updateenvironment command.
+    /// </summary>
+    public class UpdateEnvironmentOptions
+    {
+        /// <summary>
+        /// The environment variable key to update.
+        /// </summary>
+        public string Variable { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The value to persist. Can be a literal string or a variable reference like ${varname}.
+        /// Null means the value was not specified in the script.
+        /// </summary>
+        public string? Value { get; set; }
+    }
+
+    /// <summary>
     /// Options for the log command.
     /// </summary>
     public class LogOptions
@@ -402,6 +472,221 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Log level: "info" (default), "debug", "warning", "error", "success".
         /// </summary>
         public string Level { get; set; } = "info";
+    }
+
+    /// <summary>
+    /// Options for the http command.
+    /// </summary>
+    public class HttpOptions
+    {
+        /// <summary>
+        /// Target URL (must be absolute http:// or https://).
+        /// </summary>
+        public string Url { get; set; } = string.Empty;
+
+        /// <summary>
+        /// HTTP method.
+        /// </summary>
+        public string Method { get; set; } = "GET";
+
+        /// <summary>
+        /// Request body. Supports variable substitution.
+        /// </summary>
+        public string? Body { get; set; }
+
+        /// <summary>
+        /// Optional HTTP headers.
+        /// </summary>
+        public Dictionary<string, string>? Headers { get; set; }
+
+        /// <summary>
+        /// Variable name to capture response body into.
+        /// </summary>
+        public string? Into { get; set; }
+
+        /// <summary>
+        /// Request timeout in seconds.
+        /// </summary>
+        public int Timeout { get; set; } = 30;
+
+        /// <summary>
+        /// Whether to follow HTTP redirects.
+        /// </summary>
+        public bool FollowRedirects { get; set; } = true;
+
+        /// <summary>
+        /// If true, non-2xx responses do not fail the step.
+        /// </summary>
+        public bool AllowFailure { get; set; }
+
+        /// <summary>
+        /// Whether to validate TLS certificates.
+        /// </summary>
+        public bool VerifyTls { get; set; } = true;
+
+        /// <summary>
+        /// Set false by parser when verify_tls value type is invalid.
+        /// </summary>
+        public bool VerifyTlsTypeValid { get; set; } = true;
+
+        /// <summary>
+        /// Auth mode: none, basic, bearer.
+        /// </summary>
+        public string Auth { get; set; } = "none";
+
+        /// <summary>
+        /// Basic auth username (required when auth is basic).
+        /// </summary>
+        public string? Username { get; set; }
+
+        /// <summary>
+        /// Basic auth password (required when auth is basic).
+        /// </summary>
+        public string? Password { get; set; }
+
+        /// <summary>
+        /// Bearer token (required when auth is bearer).
+        /// </summary>
+        public string? Token { get; set; }
+
+        /// <summary>
+        /// Optional content-type shorthand (json/form/text/xml).
+        /// </summary>
+        public string? ContentType { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the ping command.
+    /// </summary>
+    public class PingOptions
+    {
+        /// <summary>
+        /// Target host or IP.
+        /// </summary>
+        public string Host { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Number of probes.
+        /// </summary>
+        public int Count { get; set; } = 4;
+
+        /// <summary>
+        /// Timeout in milliseconds per probe.
+        /// </summary>
+        public int Timeout { get; set; } = 3000;
+
+        /// <summary>
+        /// Variable name to capture status/metrics into.
+        /// </summary>
+        public string? Into { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the dns command.
+    /// </summary>
+    public class DnsOptions
+    {
+        /// <summary>
+        /// Target host, record name, or IP (for PTR).
+        /// </summary>
+        public string Host { get; set; } = string.Empty;
+
+        /// <summary>
+        /// DNS type: A, AAAA, PTR.
+        /// </summary>
+        public string Type { get; set; } = "A";
+
+        /// <summary>
+        /// Lookup timeout in seconds.
+        /// </summary>
+        public int Timeout { get; set; } = 10;
+
+        /// <summary>
+        /// Variable name to capture DNS results into.
+        /// </summary>
+        public string? Into { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the portcheck command.
+    /// </summary>
+    public class PortcheckOptions
+    {
+        /// <summary>
+        /// Target host or IP.
+        /// </summary>
+        public string Host { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Target TCP port.
+        /// </summary>
+        public int Port { get; set; } = 22;
+
+        /// <summary>
+        /// Connection timeout in seconds.
+        /// </summary>
+        public int Timeout { get; set; } = 5;
+
+        /// <summary>
+        /// Variable name to capture check result into.
+        /// </summary>
+        public string? Into { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the sftp command.
+    /// </summary>
+    public class SftpOptions
+    {
+        /// <summary>
+        /// Transfer action: upload or download.
+        /// </summary>
+        public string Action { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Local source/destination path.
+        /// </summary>
+        public string LocalPath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Remote source/destination path.
+        /// </summary>
+        public string RemotePath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Optional host override (defaults to current host context).
+        /// </summary>
+        public string? Host { get; set; }
+
+        /// <summary>
+        /// Optional port override (defaults to current host port or 22).
+        /// </summary>
+        public int? Port { get; set; }
+
+        /// <summary>
+        /// Optional username override (defaults to current host context).
+        /// </summary>
+        public string? Username { get; set; }
+
+        /// <summary>
+        /// Optional password override (defaults to current host context).
+        /// </summary>
+        public string? Password { get; set; }
+
+        /// <summary>
+        /// Whether existing destination files may be overwritten.
+        /// </summary>
+        public bool Overwrite { get; set; } = true;
+
+        /// <summary>
+        /// Transfer timeout in seconds.
+        /// </summary>
+        public int Timeout { get; set; } = 120;
+
+        /// <summary>
+        /// Variable name to capture transfer result into.
+        /// </summary>
+        public string? Into { get; set; }
     }
 
     /// <summary>
@@ -490,7 +775,13 @@ namespace SSH_Helper.Services.Scripting.Models
         Writefile,
         Input,
         UpdateColumn,
+        UpdateEnvironment,
         Log,
+        Http,
+        Ping,
+        Dns,
+        Portcheck,
+        Sftp,
         Webhook,
         Parse
     }

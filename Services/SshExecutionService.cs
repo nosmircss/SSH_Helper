@@ -42,6 +42,16 @@ namespace SSH_Helper.Services
     }
 
     /// <summary>
+    /// Event arguments for environment variable update requests from scripts.
+    /// </summary>
+    public class SshEnvironmentVariableUpdateEventArgs : EventArgs
+    {
+        public HostConnection Host { get; set; } = new();
+        public string Variable { get; set; } = string.Empty;
+        public string Value { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Event arguments for completed command execution.
     /// </summary>
     public class SshCommandCompletedEventArgs : EventArgs
@@ -62,6 +72,7 @@ namespace SSH_Helper.Services
         public event EventHandler<SshProgressEventArgs>? ProgressChanged;
         public event EventHandler<SshOutputEventArgs>? OutputReceived;
         public event EventHandler<SshColumnUpdateEventArgs>? ColumnUpdateRequested;
+        public event EventHandler<SshEnvironmentVariableUpdateEventArgs>? EnvironmentVariableUpdateRequested;
         public event EventHandler<SshCommandCompletedEventArgs>? CommandCompleted;
         public event EventHandler? ExecutionCompleted;
 
@@ -321,7 +332,7 @@ namespace SSH_Helper.Services
             try
             {
                 script = parser.Parse(scriptText);
-                var validationErrors = parser.Validate(script, scriptText);
+                var validationErrors = parser.Validate(script, scriptText, enforceCanonicalSyntax: true);
                 if (validationErrors.Count > 0)
                 {
                     throw new ScriptParseException("Script validation failed:\n" + string.Join("\n", validationErrors));
@@ -630,7 +641,7 @@ namespace SSH_Helper.Services
             try
             {
                 script = parser.Parse(scriptText);
-                var validationErrors = parser.Validate(script, scriptText);
+                var validationErrors = parser.Validate(script, scriptText, enforceCanonicalSyntax: true);
                 if (validationErrors.Count > 0)
                 {
                     throw new ScriptParseException("Script validation failed:\n" + string.Join("\n", validationErrors));
@@ -897,6 +908,7 @@ namespace SSH_Helper.Services
                 var context = new ScriptContext(host.Variables);
                 context.Session = session;
                 context.DebugMode = DebugMode;
+                SeedConnectionVariables(context, host, username, password);
 
                 // Wire up context output to our events
                 context.OutputReceived += (s, e) =>
@@ -910,6 +922,11 @@ namespace SSH_Helper.Services
                 context.ColumnUpdateRequested += (s, e) =>
                 {
                     OnColumnUpdateRequested(host, e.ColumnName, e.Value);
+                };
+
+                context.EnvironmentUpdateRequested += (s, e) =>
+                {
+                    OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
                 };
 
                 // Execute the script
@@ -1034,6 +1051,7 @@ namespace SSH_Helper.Services
             var context = new ScriptContext(host.Variables);
             context.Session = session;
             context.DebugMode = DebugMode;
+            SeedConnectionVariables(context, host, username, password);
 
             // Wire up context output to our events
             context.OutputReceived += (s, e) =>
@@ -1049,12 +1067,30 @@ namespace SSH_Helper.Services
                 OnColumnUpdateRequested(host, e.ColumnName, e.Value);
             };
 
+            context.EnvironmentUpdateRequested += (s, e) =>
+            {
+                OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
+            };
+
             // Execute the script
             var executor = new ScriptExecutor();
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
 
             client.Disconnect();
+        }
+
+        private static void SeedConnectionVariables(ScriptContext context, HostConnection host, string username, string password)
+        {
+            // Keep runtime context aligned with the credentials/endpoints actually used for SSH.
+            if (string.IsNullOrWhiteSpace(context.GetVariableString("Host_IP")))
+                context.SetVariable("Host_IP", host.ToString());
+
+            if (!string.IsNullOrWhiteSpace(username))
+                context.SetVariable("username", username);
+
+            if (!string.IsNullOrWhiteSpace(password))
+                context.SetVariable("password", password);
         }
 
         /// <summary>
@@ -1367,6 +1403,16 @@ namespace SSH_Helper.Services
             {
                 Host = host,
                 ColumnName = columnName,
+                Value = value
+            });
+        }
+
+        protected virtual void OnEnvironmentVariableUpdateRequested(HostConnection host, string variable, string value)
+        {
+            EnvironmentVariableUpdateRequested?.Invoke(this, new SshEnvironmentVariableUpdateEventArgs
+            {
+                Host = host,
+                Variable = variable,
                 Value = value
             });
         }

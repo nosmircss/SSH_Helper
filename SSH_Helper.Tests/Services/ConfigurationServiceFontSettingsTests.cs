@@ -204,7 +204,7 @@ public class ConfigurationServiceFontSettingsTests : IDisposable
 
         // Should use default FontSettings values
         config.FontSettings.Should().NotBeNull();
-        config.FontSettings.UIFontFamily.Should().Be("Segoe UI");
+        config.FontSettings.UIFontFamily.Should().Be("Segoe UI Semibold");
         config.FontSettings.GlobalScaleFactor.Should().Be(1.0f);
     }
 

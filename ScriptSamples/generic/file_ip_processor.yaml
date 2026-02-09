@@ -10,22 +10,28 @@ vars:
   output_file: "C:\\Users\\me\\ping_results.txt"
 
 steps:
-  - print: "=== Bulk IP Ping Test ==="
+  - print:
+      message: "=== Bulk IP Ping Test ==="
 
   # Read list of IPs from file
   - readfile:
       path: "${input_file}"
       into: ip_list
 
-  - if: ip_list is empty
-    then:
-      - exit: failure "No IPs found in ${input_file}"
-
-  - print: "Loaded ${ip_list.length} IPs to test"
+  - if:
+      condition: ip_list is empty
+      then:
+        - exit:
+            status: failure
+            message: "No IPs found in ${input_file}"
+  - print:
+      message: "Loaded ${ip_list.length} IPs to test"
 
   # Initialize counters
-  - set: success_count = 0
-  - set: fail_count = 0
+  - set:
+      expression: success_count = 0
+  - set:
+      expression: fail_count = 0
 
   # Write header to output file
   - writefile:
@@ -34,27 +40,35 @@ steps:
       mode: overwrite
 
   # Process each IP
-  - foreach: target_ip in ip_list
-    do:
-      - print: "Testing ${target_ip}..."
+  - foreach:
+      iterator: target_ip in ip_list
+      do:
+        - print:
+            message: "Testing ${target_ip}..."
 
-      - send: ping -c 1 -W 2 ${target_ip} 2>&1
-        capture: ping_result
-        on_error: continue
+        - send:
+            command: ping -c 1 -W 2 ${target_ip} 2>&1
+            capture: ping_result
+            on_error: continue
 
-      - if: ping_result contains "1 received" or ping_result contains "1 packets received"
-        then:
-          - set: status = "REACHABLE"
-          - set: success_count = success_count + 1
-        else:
-          - set: status = "UNREACHABLE"
-          - set: fail_count = fail_count + 1
+        - if:
+            condition: ping_result contains "1 received" or ping_result contains "1 packets received"
+            then:
+              - set:
+                  expression: status = "REACHABLE"
+              - set:
+                  expression: success_count = success_count + 1
+            else:
+              - set:
+                  expression: status = "UNREACHABLE"
+              - set:
+                  expression: fail_count = fail_count + 1
 
-      # Append result to file
-      - writefile:
-          path: "${output_file}"
-          content: "${target_ip} - ${status}"
-          mode: append
+        # Append result to file
+        - writefile:
+            path: "${output_file}"
+            content: "${target_ip} - ${status}"
+            mode: append
 
   # Write summary
   - writefile:
@@ -62,7 +76,11 @@ steps:
       content: "\n==============================\nTotal: ${ip_list.length} | Success: ${success_count} | Failed: ${fail_count}"
       mode: append
 
-  - print: "Results saved to ${output_file}"
-  - print: "Success: ${success_count} | Failed: ${fail_count}"
+  - print:
+      message: "Results saved to ${output_file}"
+  - print:
+      message: "Success: ${success_count} | Failed: ${fail_count}"
 
-  - exit: success "Ping test complete"
+  - exit:
+      status: success
+      message: "Ping test complete"

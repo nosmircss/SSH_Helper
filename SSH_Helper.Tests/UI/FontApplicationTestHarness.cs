@@ -59,11 +59,12 @@ internal sealed class FontApplicationTestHarness : IDisposable
         var uiFont = fontSettings.UIFontFamily;
         var codeFont = fontSettings.CodeFontFamily;
         var scale = fontSettings.GlobalScaleFactor;
+        var semiboldUiFont = ResolveSemiboldFontFamily(uiFont);
 
         float Scaled(float size) => size * scale;
 
         // Section titles (Semibold)
-        var sectionTitleFont = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+        var sectionTitleFont = new Font(semiboldUiFont, Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
         ManagedFonts.Add(sectionTitleFont);
         lblHostsTitle.Font = sectionTitleFont;
         lblPresetsTitle.Font = sectionTitleFont;
@@ -105,7 +106,7 @@ internal sealed class FontApplicationTestHarness : IDisposable
         lblFavoritesEmpty.Font = emptyLabelFont;
 
         // Execute buttons (Semibold)
-        var execButtonFont = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
+        var execButtonFont = new Font(semiboldUiFont, Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
         ManagedFonts.Add(execButtonFont);
         btnExecuteAll.Font = execButtonFont;
         btnExecuteSelected.Font = execButtonFont;
@@ -170,6 +171,18 @@ internal sealed class FontApplicationTestHarness : IDisposable
 
         // Accent color
         LastAppliedAccentColor = fontSettings.CustomAccentColor;
+    }
+
+    private static string ResolveSemiboldFontFamily(string? uiFontFamily)
+    {
+        if (string.IsNullOrWhiteSpace(uiFontFamily))
+        {
+            return FontSettings.DefaultUIFontFamily;
+        }
+
+        return uiFontFamily.EndsWith("Semibold", StringComparison.OrdinalIgnoreCase)
+            ? uiFontFamily
+            : $"{uiFontFamily} Semibold";
     }
 
     /// <summary>

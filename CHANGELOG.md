@@ -1,5 +1,152 @@
 # Changelog
 
+## Changes Since `f34fb7c` (0.51.0)
+
+### Environment Management
+
+A full environment system allows managing multiple named profiles (e.g., dev, staging, prod), each with independent host grids, variables, and visual identity.
+
+- **Environment profiles** — Each environment stores its own host grid columns, host entries, selected host indices, last CSV path, and a set of key-value variables
+- **Toolbar integration** — A dropdown button on the toolbar shows the active environment name with an optional color swatch; switching environments swaps the entire host grid and variable context
+- **Management dialog** — A dedicated resizable dialog provides CRUD operations: create, duplicate, rename, delete, and edit description, label color, and variables per environment
+- **Import/Export** — Environments serialize to `.sshenv.json` files for sharing across machines or teams, with conflict resolution on import (overwrite or rename)
+- **Variable scoping** — Each environment has its own variable dictionary; active environment variables are injected into SSH execution context and script runtime
+- **Script integration** — A new `updateenvironment:` command allows YAML scripts to persist variable updates back to the active environment during execution, with the updated value immediately available to subsequent steps
+- **Label colors** — Optional ARGB color per environment provides at-a-glance identification in the toolbar dropdown and management dialog list
+- **Window title** — The application title bar now shows the active environment name
+- **Default environment** — A reserved "Default" environment is always present and cannot be renamed or deleted; legacy state is automatically captured into Default on first use
+
+### Multi-Protocol Network Commands
+
+Six new scripting commands extend workflow capabilities beyond SSH:
+
+| Command | Protocol | Captures | Key Capabilities |
+|---------|----------|----------|------------------|
+| `http:` | HTTP/HTTPS | body, status code, headers | GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS, Basic/Bearer auth, custom headers, TLS control, redirect following |
+| `dns:` | DNS | record list, count | A/AAAA/PTR lookups, returns empty list (not error) when no records found |
+| `ping:` | ICMP | status, avg latency, packet loss % | Multi-probe aggregation with per-probe timeout |
+| `portcheck:` | TCP | status (open/closed/timeout), latency | Connection timing with configurable timeout |
+| `sftp:` | SFTP over SSH | status, bytes transferred | Upload/download with endpoint override, environment variable expansion in paths |
+| `updateenvironment:` | N/A | N/A | Persists a variable to the active environment and updates the running script context |
+
+All network commands support:
+- **Variable capture** via `into:` with command-specific suffixed derivatives (e.g., `${result}_status`, `${result}_count`, `${result}_avg`, `${result}_loss`)
+- **Error handling** via step-level `on_error: continue` to suppress failures
+- **Variable substitution** in all user-provided fields (`${var}` and `{{var}}`)
+- **Cancellation** through linked cancellation tokens respecting both script-level and per-command timeouts
+
+### SFTP Backend: SSH.NET
+
+The SFTP runtime backend has been switched from Rebex SFTP to SSH.NET (`Renci.SshNet`). SFTP operations no longer depend on the Rebex SFTP package or its licensing. Endpoint resolution follows a priority chain: explicit `host`/`port`/`username`/`password` options, then host context variables from the grid, then toolbar defaults.
+
+### Scintilla5.NET Script Editor
+
+The command editor has been replaced with a Scintilla5.NET-powered control, providing a code-editor-grade authoring experience for YAML scripts.
+
+**Syntax highlighting** — Eight token types with dual color palettes for light and dark themes: top-level keys, step commands, step options, variables (`${...}` / `{{...}}`), string literals, numbers, booleans/null, and comments. Highlighting is scoped to known parser keywords and re-paints only changed lines for performance.
+
+**Context-aware autocomplete** — Suggestions adapt to structural position in the YAML document:
+
+| Context | Trigger | Suggestions |
+|---------|---------|-------------|
+| Root level | Typing at indent 0 | `steps`, `vars`, `description`, `timeout`, etc. |
+| Step command | After `- ` at step indent | `send`, `capture`, `set`, `http`, `ping`, `dns`, etc. |
+| Step option | Indented under a command | Command-specific options (e.g., `capture`, `timeout`, `on_error` for `send`) |
+| Option value | After `key: ` | Enum-like values (e.g., `continue`/`stop` for `on_error`) |
+| Interpolation | Inside `${...}` or `{{...}}` | Built-in symbols, script-declared variables, grid column names |
+
+Autocomplete commits with Enter/Tab and auto-appends `: ` after key completions. The popup is non-activating so typing is never interrupted.
+
+**Inline diagnostics** — Real-time validation with debounced re-parsing surfaces errors (red squiggle underlines) and warnings (yellow squiggles) directly in the editor. Hover tooltips show the diagnostic message. Optional YAML hygiene warnings flag tab indentation, mixed indent styles, and duplicate keys within the same scope.
+
+**Variable inspector tooltips** — Hovering over `${var}` or `{{column}}` tokens shows a tooltip with the resolved value from vars, environment variables, or grid preview data.
+
+**Smart editing** — Tab/Shift+Tab indent/outdent selected lines by configurable spaces. Enter inserts context-aware indentation based on YAML structure (deeper after `:`, sibling after `-`). Blank-line preservation between steps is supported.
+
+**Theme support** — Full dark and light mode theming for the editor, autocomplete popup, diagnostic indicators, and native scrollbars via Windows UX theme APIs.
+
+### Command Editor Settings
+
+A new "Command Editor" tab in Settings provides granular control over the script editor:
+
+- **Features** — Toggle syntax highlighting, autocomplete, and auto-show-on-typing
+- **Validation & Diagnostics** — Toggle inline validation, adjust debounce timing (150–2000ms), control warning visibility, enable/disable diagnostic and variable inspector tooltips, toggle YAML hygiene warnings
+- **Indentation** — Choose spaces vs. tabs, set indent size (2–8), toggle smart-enter and blank-line preservation between steps
+
+All settings persist in `config.json` under `CommandEditor` and apply immediately.
+
+### Unified Command Map Syntax
+
+All script commands now use a canonical map syntax where the command name is a YAML key and its options are nested underneath:
+
+```yaml
+# Canonical syntax (new default)
+- send:
+    command: show version
+    capture: version_output
+    on_error: continue
+
+# Inline shorthand still accepted
+- send: show version
+```
+
+The parser accepts both forms. All 26 bundled script samples and QA presets have been migrated to the canonical format.
+
+### Context-Aware Preset Operations
+
+Preset actions (duplicate, rename, delete, export) now resolve the target preset based on invocation context. Actions triggered from the context menu operate on the right-clicked item; toolbar actions operate on the active tab or tree selection. This prevents stale tree selection from causing operations to target the wrong preset.
+
+After deleting a preset, the nearest item above the deleted entry is selected instead of clearing context.
+
+### Execution Details Persistence
+
+View Details metadata attached to history entries is now persisted in the configuration and restored into the history store at startup. Execution details survive application restart.
+
+### Dialog Theming Improvements
+
+- **Tab control styling** — Owner-drawn tab rendering with accent lines for dark and light modes
+- **Themed message dialogs** — `DialogTheme.Confirm()` and `DialogTheme.ShowMessage()` provide dark-mode-aware confirmation and message dialogs with consistent fonts
+- **Native scrollbar theming** — Recursive Windows UX theme application for scrollbars, checkboxes, radio buttons, combo boxes, and other native controls in dialogs
+- **Dialog font propagation** — `DialogTheme.SetDialogFont()` applies fonts without triggering auto-scale relayout
+
+### Font Settings
+
+The Semibold font family resolution has been improved. `ResolveSemiboldFontFamily()` properly handles font names that already end with "Semibold" to prevent double-suffixing. A dedicated dialog font is now created and managed alongside other UI fonts.
+
+### Pretty Format Removal
+
+The Pretty Format feature (YAML reformatting via `ScriptPrettyFormatter`) has been removed along with its associated tests. The Scintilla-based editor with inline validation and smart editing replaces the need for bulk reformatting.
+
+### Dependency Changes
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| **Scintilla5.NET** | 6.1.1 | Script editor control (new) |
+| **SSH.NET** | 2024.1.0 | SFTP backend, replacing Rebex for file transfers (new) |
+
+### Script Samples
+
+All 26 bundled script samples across bash, Cisco, Check Point, FortiGate, and generic categories have been migrated to the canonical command map syntax.
+
+### Documentation
+
+SCRIPTING.md has been substantially expanded with documentation for the new network commands (`http`, `dns`, `ping`, `portcheck`, `sftp`, `updateenvironment`), unified command map syntax, and updated examples throughout.
+
+### License
+
+An MIT license has been added to the repository.
+
+### Test Coverage
+
+New test suites added:
+
+- **Editor** — `EditorTextUtilitiesTests`, `ScriptAutocompleteProviderTests`, `ScriptEditorValidationServiceTests`, `YamlSshSyntaxHighlighterTests`, `ScintillaScriptEditorControlTests`, `ScintillaScriptEditorPerformanceTests`
+- **Scripting** — `CanonicalCommandMapSyntaxTests`, `ExitCommandTests`, `NetworkCommandTests`, `NetworkStepParserTests`, `ScriptDependencyAnalyzerTests`, `UpdateEnvironmentCommandTests`
+- **Services** — `ConfigurationServiceCommandEditorSettingsTests`, `ConfigurationServiceExecutionDetailsTests`, `ConfigurationServiceWindowStateTests`, `EnvironmentServiceTests`
+- **UI** — `SettingsDialogAppearanceTests` (expanded)
+
+---
+
 ## Changes Since `cc99f52` (0.50.18)
 
 ### JSON Scripting Engine
@@ -35,7 +182,6 @@ A new static analysis system inspects scripts before execution to identify which
 The command text box now has a right-click context menu with:
 
 - Standard editing operations (Cut, Copy, Paste, Select All)
-- **Pretty Format** — Reformats YAML scripts while preserving user-placed comments, blank lines, and document markers
 - **Validate Script** — Checks script syntax before execution
 
 ### Terminal Output Improvements
@@ -72,7 +218,6 @@ New unit tests added across the scripting subsystem covering:
 - ExtractCommand with multiple capture groups
 - ReadFileCommand with environment variable expansion
 - ScriptContext dynamic array indexing and nested interpolation
-- ScriptPrettyFormatter comment and whitespace preservation
 - SetCommand JSON construction, list operations, and interpolation
 - WriteFileCommand JSONL, CSV, and append-mode behavior
 - TerminalOutputProcessor ANSI handling, cursor operations, and pager artifacts

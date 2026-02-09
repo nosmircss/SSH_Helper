@@ -10,11 +10,16 @@ vars:
 
 steps:
   # Log connection event
-  - set: event.type = "connection"
-  - set: event.host = ${Host_IP}
-  - set: event.port = ${port}
-  - set: event.timestamp = ${_timestamp}
-  - set: event.status = "started"
+  - set:
+      expression: event.type = "connection"
+  - set:
+      expression: event.host = ${Host_IP}
+  - set:
+      expression: event.port = ${port}
+  - set:
+      expression: event.timestamp = ${_timestamp}
+  - set:
+      expression: event.status = "started"
 
   - writefile:
       path: "${log_file}"
@@ -25,8 +30,9 @@ steps:
   - log: "Audit: Connected to ${Host_IP}"
 
   # Perform some action
-  - send: whoami
-    capture: current_user
+  - send:
+      command: whoami
+      capture: current_user
 
   - extract:
       from: current_user
@@ -34,7 +40,8 @@ steps:
       into: username
 
   # Log command execution event
-  - set: cmd_event = json("type", "command", "host", ${Host_IP}, "command", "whoami", "result", ${username}, "timestamp", ${_timestamp})
+  - set:
+      expression: cmd_event = json("type", "command", "host", ${Host_IP}, "command", "whoami", "result", ${username}, "timestamp", ${_timestamp})
 
   - writefile:
       path: "${log_file}"
@@ -43,18 +50,23 @@ steps:
       mode: append
 
   # Check sudo access
-  - send: sudo -n true 2>&1
-    capture: sudo_check
-    on_error: continue
+  - send:
+      command: sudo -n true 2>&1
+      capture: sudo_check
+      on_error: continue
 
-  - if: sudo_check is empty
-    then:
-      - set: has_sudo = "true"
-    else:
-      - set: has_sudo = "false"
+  - if:
+      condition: sudo_check is empty
+      then:
+        - set:
+            expression: has_sudo = "true"
+      else:
+        - set:
+            expression: has_sudo = "false"
 
   # Log privilege check
-  - set: priv_event = json("type", "privilege_check", "host", ${Host_IP}, "user", ${username}, "sudo_access", ${has_sudo}, "timestamp", ${_timestamp})
+  - set:
+      expression: priv_event = json("type", "privilege_check", "host", ${Host_IP}, "user", ${username}, "sudo_access", ${has_sudo}, "timestamp", ${_timestamp})
 
   - writefile:
       path: "${log_file}"
@@ -67,7 +79,8 @@ steps:
       level: info
 
   # Log completion event
-  - set: complete_event = json("type", "connection", "host", ${Host_IP}, "status", "completed", "timestamp", ${_timestamp})
+  - set:
+      expression: complete_event = json("type", "connection", "host", ${Host_IP}, "status", "completed", "timestamp", ${_timestamp})
 
   - writefile:
       path: "${log_file}"
@@ -79,4 +92,6 @@ steps:
       message: "Audit log written to ${log_file}"
       level: success
 
-  - exit: success "Audit complete"
+  - exit:
+      status: success
+      message: "Audit complete"

@@ -57,6 +57,8 @@ namespace SSH_Helper.Models
         // Remember state settings
         public bool RememberState { get; set; } = true;
         public ApplicationState? SavedState { get; set; }
+        public Dictionary<string, EnvironmentConfig> Environments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public string? ActiveEnvironment { get; set; }
 
         // History settings
         public int MaxHistoryEntries { get; set; } = 30;
@@ -65,7 +67,7 @@ namespace SSH_Helper.Models
         /// <summary>
         /// When true, the application uses dark theme. Output window is always dark.
         /// </summary>
-        public bool DarkMode { get; set; } = false;
+        public bool DarkMode { get; set; } = true;
 
         // Host grid settings
         /// <summary>
@@ -78,6 +80,11 @@ namespace SSH_Helper.Models
         /// Font customization settings for UI elements.
         /// </summary>
         public FontSettings FontSettings { get; set; } = new();
+
+        /// <summary>
+        /// Script editor behavior and diagnostics settings.
+        /// </summary>
+        public CommandEditorSettings CommandEditor { get; set; } = new();
 
         // SSH config settings
         /// <summary>
@@ -93,16 +100,56 @@ namespace SSH_Helper.Models
     }
 
     /// <summary>
+    /// Persisted settings for the script editor experience.
+    /// </summary>
+    public class CommandEditorSettings
+    {
+        public const int MinValidationDebounceMs = 150;
+        public const int MaxValidationDebounceMs = 2000;
+        public const int MinIndentSize = 2;
+        public const int MaxIndentSize = 8;
+
+        public bool EnableSyntaxHighlighting { get; set; } = true;
+        public bool EnableAutocomplete { get; set; } = true;
+        public bool AutocompleteShowOnTyping { get; set; } = true;
+        public bool EnableInlineValidation { get; set; } = true;
+        public int ValidationDebounceMs { get; set; } = 400;
+        public bool ShowInlineWarnings { get; set; } = true;
+        public bool EnableDiagnosticTooltips { get; set; } = true;
+        public bool EnableVariableInspectorTooltips { get; set; } = true;
+        public bool EnableYamlHygieneWarnings { get; set; } = true;
+        public bool UseSpacesForTab { get; set; } = true;
+        public int IndentSize { get; set; } = 2;
+        public bool EnableSmartEnter { get; set; } = true;
+        public bool PreserveBlankLineBetweenSteps { get; set; } = true;
+
+        public void Normalize()
+        {
+            ValidationDebounceMs = Math.Clamp(ValidationDebounceMs, MinValidationDebounceMs, MaxValidationDebounceMs);
+            IndentSize = Math.Clamp(IndentSize, MinIndentSize, MaxIndentSize);
+        }
+
+        public CommandEditorSettings CloneNormalized()
+        {
+            var clone = (CommandEditorSettings)MemberwiseClone();
+            clone.Normalize();
+            return clone;
+        }
+    }
+
+    /// <summary>
     /// Font customization settings for different UI element categories.
     /// </summary>
     public class FontSettings
     {
+        public const string DefaultUIFontFamily = "Segoe UI Semibold";
+
         // === Font Families ===
 
         /// <summary>
-        /// Font family for UI elements (e.g., "Segoe UI").
+        /// Font family for UI elements (e.g., "Segoe UI Semibold").
         /// </summary>
-        public string UIFontFamily { get; set; } = "Segoe UI";
+        public string UIFontFamily { get; set; } = DefaultUIFontFamily;
 
         /// <summary>
         /// Font family for code/monospace elements (e.g., "Cascadia Code").
@@ -165,6 +212,11 @@ namespace SSH_Helper.Models
         /// Font size for status bar text.
         /// </summary>
         public float StatusBarFontSize { get; set; } = 9f;
+
+        /// <summary>
+        /// Font size for dialog windows (confirmations, environment manager, etc.).
+        /// </summary>
+        public float DialogFontSize { get; set; } = 9f;
 
         // === Global Scaling ===
 
@@ -279,6 +331,12 @@ namespace SSH_Helper.Models
         /// Per-host results for folder executions. Null for single preset executions.
         /// </summary>
         public List<HostHistoryEntry>? HostResults { get; set; }
+
+        /// <summary>
+        /// Optional execution metadata used by the "View Details" dialog.
+        /// Null for legacy entries and entries created before details capture.
+        /// </summary>
+        public ExecutionDetails? Details { get; set; }
     }
 
     /// <summary>
@@ -345,6 +403,11 @@ namespace SSH_Helper.Models
         public int? CommandSplitterDistance { get; set; } = 350;
         public int? OutputSplitterDistance { get; set; } = 300;
         public int? HistorySplitterDistance { get; set; } = 137;
+
+        // Manage Environments dialog layout
+        public int? EnvironmentDialogWidth { get; set; } = 920;
+        public int? EnvironmentDialogHeight { get; set; } = 620;
+        public int? EnvironmentDialogSplitterDistance { get; set; } = 270;
     }
 
     /// <summary>

@@ -95,6 +95,9 @@ namespace SSH_Helper.Services
         {
             try
             {
+                NormalizeEnvironmentData(config);
+                NormalizeCommandEditorSettings(config);
+
                 // Keep a backup of the previous config in case the save is interrupted
                 if (File.Exists(_configFilePath))
                 {
@@ -130,6 +133,40 @@ namespace SSH_Helper.Services
             return _cachedConfig ?? Load();
         }
 
+        /// <summary>
+        /// Returns a deep-cloned snapshot of persisted environments and active environment name.
+        /// </summary>
+        public (Dictionary<string, EnvironmentConfig> Environments, string? ActiveEnvironment) LoadEnvironmentState()
+        {
+            var config = GetCurrent();
+            NormalizeEnvironmentData(config);
+            return (CloneEnvironmentMap(config.Environments), config.ActiveEnvironment);
+        }
+
+        /// <summary>
+        /// Persists the complete environment state in one update operation.
+        /// </summary>
+        public void SaveEnvironmentState(Dictionary<string, EnvironmentConfig> environments, string? activeEnvironment)
+        {
+            environments ??= new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase);
+
+            Update(config =>
+            {
+                config.Environments = CloneEnvironmentMap(environments);
+                config.ActiveEnvironment = string.IsNullOrWhiteSpace(activeEnvironment) ? null : activeEnvironment;
+                NormalizeEnvironmentData(config);
+            });
+        }
+
+        /// <summary>
+        /// Creates the synthetic legacy "Default" environment from SavedState.
+        /// </summary>
+        public EnvironmentConfig BuildLegacyDefaultEnvironment()
+        {
+            var config = GetCurrent();
+            return EnvironmentConfig.FromApplicationState(EnvironmentConfig.DefaultName, config.SavedState);
+        }
+
         private AppConfiguration ParseConfiguration(string json)
         {
             // First, deserialize all fields using standard deserialization
@@ -157,7 +194,62 @@ namespace SSH_Helper.Services
                 }
             }
 
+            NormalizeEnvironmentData(config);
+            NormalizeCommandEditorSettings(config);
             return config;
+        }
+
+        private static void NormalizeEnvironmentData(AppConfiguration config)
+        {
+            config.Environments ??= new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase);
+
+            // Guarantee case-insensitive lookup for environment keys.
+            if (config.Environments.Comparer != StringComparer.OrdinalIgnoreCase)
+            {
+                config.Environments = new Dictionary<string, EnvironmentConfig>(config.Environments, StringComparer.OrdinalIgnoreCase);
+            }
+
+            var normalized = new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in config.Environments)
+            {
+                if (string.IsNullOrWhiteSpace(kvp.Key))
+                    continue;
+
+                var environment = kvp.Value ?? new EnvironmentConfig();
+                environment.Normalize(kvp.Key);
+                normalized[kvp.Key] = environment;
+            }
+
+            config.Environments = normalized;
+
+            if (!string.IsNullOrWhiteSpace(config.ActiveEnvironment) &&
+                !string.Equals(config.ActiveEnvironment, EnvironmentConfig.DefaultName, StringComparison.OrdinalIgnoreCase) &&
+                !config.Environments.ContainsKey(config.ActiveEnvironment))
+            {
+                config.ActiveEnvironment = null;
+            }
+        }
+
+        private static void NormalizeCommandEditorSettings(AppConfiguration config)
+        {
+            config.CommandEditor ??= new CommandEditorSettings();
+            config.CommandEditor.Normalize();
+        }
+
+        private static Dictionary<string, EnvironmentConfig> CloneEnvironmentMap(Dictionary<string, EnvironmentConfig> source)
+        {
+            var result = new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in source)
+            {
+                if (string.IsNullOrWhiteSpace(kvp.Key))
+                    continue;
+
+                var environment = kvp.Value?.Clone() ?? new EnvironmentConfig { Name = kvp.Key };
+                environment.Normalize(kvp.Key);
+                result[kvp.Key] = environment;
+            }
+
+            return result;
         }
 
         private static AppConfiguration CreateDefaultConfiguration()

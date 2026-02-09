@@ -1,6 +1,8 @@
-# SSH Helper
+# SSH Helper 
 
 A Windows Forms application for executing SSH commands across multiple hosts with support for YAML-based scripting automation.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
 
@@ -180,7 +182,7 @@ dotnet run
 
 ## License
 
-This project is provided as-is for personal and internal use.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
