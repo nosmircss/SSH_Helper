@@ -3878,31 +3878,6 @@ namespace SSH_Helper
             }
         }
 
-        private void ctxPrettyFormat_Click(object sender, EventArgs e)
-        {
-            var text = txtCommand.Text;
-            if (string.IsNullOrWhiteSpace(text))
-                return;
-
-            if (!Services.Scripting.ScriptParser.IsYamlScript(text))
-            {
-                MessageBox.Show("Current commands are not a YAML script.\nPretty Format only works with YAML scripts.",
-                    "Pretty Format", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            try
-            {
-                txtCommand.Text = ScriptPrettyFormatter.Format(text);
-                UpdateStatusBar("Script formatted");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to format: {ex.Message}", "Pretty Format",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        }
-
         private void debugModeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
         {
             _sshService.DebugMode = debugModeToolStripMenuItem.Checked;
