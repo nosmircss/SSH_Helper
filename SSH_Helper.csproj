@@ -11,6 +11,15 @@
     <RebexLicenseKey Condition="'$(REBEX_LICENSE_KEY)' != ''">$(REBEX_LICENSE_KEY)</RebexLicenseKey>
   </PropertyGroup>
 
+  <!-- Single-file publish configuration -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
   <!-- Build timestamp embedded at compile time -->
   <PropertyGroup>
     <BuildTimestamp>$([System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))</BuildTimestamp>
