@@ -91,6 +91,7 @@ namespace SSH_Helper
 
         private readonly Button _btnSave;
         private readonly Button _btnCancel;
+        private readonly List<FlowLayoutPanel> _scrollableFlowPanels = new();
 
         private Color _customAccentColor = Color.FromArgb(0, 120, 215);
         private List<Font> _previewFonts = new();
@@ -190,6 +191,10 @@ namespace SSH_Helper
             LoadSettings();
             UpdatePreview();
             ApplyDialogTheme(darkMode);
+
+            FontChanged += (_, _) => RefreshScrollableFlowExtents();
+            Shown += (_, _) => RefreshScrollableFlowExtents();
+            RefreshScrollableFlowExtents();
         }
 
         private void ApplyDialogTheme(bool darkMode)
@@ -241,6 +246,7 @@ namespace SSH_Helper
                 AutoScroll = true,
                 Padding = new Padding(12, 12, 12, 12),
             };
+            _scrollableFlowPanels.Add(flow);
 
             var sectionFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             var noteFont = new Font("Segoe UI", 8f);
@@ -332,6 +338,7 @@ namespace SSH_Helper
                 AutoScroll = true,
                 Padding = new Padding(12, 12, 12, 12),
             };
+            _scrollableFlowPanels.Add(flow);
 
             var sectionFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             var noteFont = new Font("Segoe UI", 8f);
@@ -382,6 +389,7 @@ namespace SSH_Helper
                 AutoScroll = true,
                 Padding = new Padding(12, 12, 12, 12)
             };
+            _scrollableFlowPanels.Add(flow);
 
             var sectionFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             Label SectionHeader(string text, int topMargin = 10) => new()
@@ -796,6 +804,38 @@ namespace SSH_Helper
             return tabAppearance;
         }
 
+        private void RefreshScrollableFlowExtents()
+        {
+            foreach (var flow in _scrollableFlowPanels)
+            {
+                if (flow.IsDisposed)
+                {
+                    continue;
+                }
+
+                flow.PerformLayout();
+
+                int contentBottom = flow.Padding.Top;
+                foreach (Control control in flow.Controls)
+                {
+                    if (!control.Visible)
+                    {
+                        continue;
+                    }
+
+                    int candidateBottom = control.Bottom + control.Margin.Bottom;
+                    if (candidateBottom > contentBottom)
+                    {
+                        contentBottom = candidateBottom;
+                    }
+                }
+
+                // Reserve a small buffer so the last row is never clipped by
+                // rounding, DPI scaling, or scrollbar metrics.
+                flow.AutoScrollMinSize = new Size(0, contentBottom + flow.Padding.Bottom + 8);
+            }
+        }
+
         private static TableLayoutPanel CreateLabelSpinnerTable(int rows, int width)
         {
             var table = new TableLayoutPanel
@@ -858,6 +898,18 @@ namespace SSH_Helper
             };
         }
 
+        private static string ResolveSemiboldFontFamily(string? uiFontFamily)
+        {
+            if (string.IsNullOrWhiteSpace(uiFontFamily))
+            {
+                return FontSettings.DefaultUIFontFamily;
+            }
+
+            return uiFontFamily.EndsWith("Semibold", StringComparison.OrdinalIgnoreCase)
+                ? uiFontFamily
+                : $"{uiFontFamily} Semibold";
+        }
+
         private void UpdatePreview()
         {
             if (_pnlPreview == null || _lblPreviewTitle == null) return;
@@ -865,8 +917,9 @@ namespace SSH_Helper
             try
             {
                 var scale = _trkGlobalScale?.Value / 100f ?? 1f;
-                var uiFont = _cboUIFont?.SelectedItem?.ToString() ?? "Segoe UI";
+                var uiFont = _cboUIFont?.SelectedItem?.ToString() ?? FontSettings.DefaultUIFontFamily;
                 var codeFont = _cboCodeFont?.SelectedItem?.ToString() ?? "Cascadia Code";
+                var semiboldUiFont = ResolveSemiboldFontFamily(uiFont);
 
                 var titleSize = (float)(_numSectionTitleSize?.Value ?? 9.5m) * scale;
                 var treeSize = (float)(_numTreeViewSize?.Value ?? 9.5m) * scale;
@@ -878,7 +931,7 @@ namespace SSH_Helper
                 // handles between Font objects with identical parameters, so
                 // disposing one can invalidate another that is still assigned
                 // to a control whose window handle hasn't been created yet.
-                var titleFont = new Font(uiFont + " Semibold", Math.Max(7f, titleSize), FontStyle.Bold);
+                var titleFont = new Font(semiboldUiFont, Math.Max(7f, titleSize), FontStyle.Bold);
                 _previewFonts.Add(titleFont);
                 _lblPreviewTitle.Font = titleFont;
 
@@ -1134,7 +1187,7 @@ namespace SSH_Helper
                 config.CommandEditor.Normalize();
 
                 // Appearance - Font Families
-                config.FontSettings.UIFontFamily = _cboUIFont.SelectedItem?.ToString() ?? "Segoe UI";
+                config.FontSettings.UIFontFamily = _cboUIFont.SelectedItem?.ToString() ?? FontSettings.DefaultUIFontFamily;
                 config.FontSettings.CodeFontFamily = _cboCodeFont.SelectedItem?.ToString() ?? "Cascadia Code";
 
                 // Appearance - Font Sizes (existing)

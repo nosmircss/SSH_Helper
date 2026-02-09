@@ -1493,6 +1493,18 @@ namespace SSH_Helper
         private List<Font> _managedFonts = new();
         private Font? _dialogFont;
 
+        private static string ResolveSemiboldFontFamily(string? uiFontFamily)
+        {
+            if (string.IsNullOrWhiteSpace(uiFontFamily))
+            {
+                return Models.FontSettings.DefaultUIFontFamily;
+            }
+
+            return uiFontFamily.EndsWith("Semibold", StringComparison.OrdinalIgnoreCase)
+                ? uiFontFamily
+                : $"{uiFontFamily} Semibold";
+        }
+
         private void ApplyFontSettings(Models.FontSettings fontSettings)
         {
             SuspendLayout();
@@ -1504,12 +1516,13 @@ namespace SSH_Helper
             var uiFont = fontSettings.UIFontFamily;
             var codeFont = fontSettings.CodeFontFamily;
             var scale = fontSettings.GlobalScaleFactor;
+            var semiboldUiFont = ResolveSemiboldFontFamily(uiFont);
 
             // Helper to apply scaling
             float Scaled(float size) => size * scale;
 
             // Section titles (Semibold)
-            var sectionTitleFont = new Font(uiFont + " Semibold", Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
+            var sectionTitleFont = new Font(semiboldUiFont, Scaled(fontSettings.SectionTitleFontSize), FontStyle.Bold);
             _managedFonts.Add(sectionTitleFont);
             lblHostsTitle.Font = sectionTitleFont;
             lblPresetsTitle.Font = sectionTitleFont;
@@ -1554,7 +1567,7 @@ namespace SSH_Helper
             lblFavoritesEmpty.Font = emptyLabelFont;
 
             // Execute buttons (Semibold)
-            var execButtonFont = new Font(uiFont + " Semibold", Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
+            var execButtonFont = new Font(semiboldUiFont, Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
             _managedFonts.Add(execButtonFont);
             btnExecuteAll.Font = execButtonFont;
             btnExecuteSelected.Font = execButtonFont;

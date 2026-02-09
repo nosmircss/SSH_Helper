@@ -9,10 +9,10 @@ public class FontSettingsTests
     #region Default Value Tests
 
     [Fact]
-    public void Default_UIFontFamily_IsSegoeUI()
+    public void Default_UIFontFamily_IsSegoeUISemibold()
     {
         var settings = new FontSettings();
-        settings.UIFontFamily.Should().Be("Segoe UI");
+        settings.UIFontFamily.Should().Be("Segoe UI Semibold");
     }
 
     [Fact]

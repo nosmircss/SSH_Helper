@@ -4,6 +4,7 @@ using System.Windows.Forms;
 using FluentAssertions;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using SSH_Helper.UI;
 using Xunit;
 
 namespace SSH_Helper.Tests.UI;
@@ -114,6 +115,46 @@ public class SettingsDialogAppearanceTests : IDisposable
             using var dialog = new SettingsDialog(_configService, darkMode: false);
         };
         action.Should().NotThrow();
+    }
+
+    [WinFormsFact]
+    public void GeneralTab_ScrollExtent_ContainsLastCredentialOption_AfterFontChange()
+    {
+        using var dialog = new SettingsDialog(_configService);
+        using var font = new Font("Segoe UI Semibold", 9f);
+        DialogTheme.SetDialogFont(dialog, font);
+
+        dialog.Show();
+        Application.DoEvents();
+        InvokeMethod(dialog, "RefreshScrollableFlowExtents");
+
+        var tabControl = GetField<TabControl>(dialog, "_tabControl");
+        FlowLayoutPanel? generalFlow = null;
+        foreach (TabPage tabPage in tabControl.TabPages)
+        {
+            if (!string.Equals(tabPage.Text, "General", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (Control control in tabPage.Controls)
+            {
+                if (control is FlowLayoutPanel flowPanel)
+                {
+                    generalFlow = flowPanel;
+                    break;
+                }
+            }
+
+            break;
+        }
+
+        generalFlow.Should().NotBeNull();
+
+        var preferSshAgent = GetField<CheckBox>(dialog, "_chkPreferSshAgent");
+        var expectedBottom = preferSshAgent.Bottom + preferSshAgent.Margin.Bottom;
+
+        generalFlow!.AutoScrollMinSize.Height.Should().BeGreaterOrEqualTo(expectedBottom);
     }
 
     #endregion

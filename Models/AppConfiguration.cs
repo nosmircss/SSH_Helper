@@ -67,7 +67,7 @@ namespace SSH_Helper.Models
         /// <summary>
         /// When true, the application uses dark theme. Output window is always dark.
         /// </summary>
-        public bool DarkMode { get; set; } = false;
+        public bool DarkMode { get; set; } = true;
 
         // Host grid settings
         /// <summary>
@@ -142,12 +142,14 @@ namespace SSH_Helper.Models
     /// </summary>
     public class FontSettings
     {
+        public const string DefaultUIFontFamily = "Segoe UI Semibold";
+
         // === Font Families ===
 
         /// <summary>
-        /// Font family for UI elements (e.g., "Segoe UI").
+        /// Font family for UI elements (e.g., "Segoe UI Semibold").
         /// </summary>
-        public string UIFontFamily { get; set; } = "Segoe UI";
+        public string UIFontFamily { get; set; } = DefaultUIFontFamily;
 
         /// <summary>
         /// Font family for code/monospace elements (e.g., "Cascadia Code").
