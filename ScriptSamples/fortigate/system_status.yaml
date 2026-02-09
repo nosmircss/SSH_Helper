@@ -6,9 +6,10 @@ description: Gathers system status, resource usage, and license info
 
 steps:
   # Get system status
-  - send: get system status
-    capture: status
-    suppress: true
+  - send:
+      command: get system status
+      capture: status
+      suppress: true
 
   # Extract version info
   - extract:
@@ -26,14 +27,19 @@ steps:
       pattern: 'Serial-Number:\s*(\S+)'
       into: serial
 
-  - print: "========== FortiGate Status =========="
-  - print: "Hostname: ${hostname}"
-  - print: "Serial: ${serial}"
-  - print: "Version: ${version}"
+  - print:
+      message: "========== FortiGate Status =========="
+  - print:
+      message: "Hostname: ${hostname}"
+  - print:
+      message: "Serial: ${serial}"
+  - print:
+      message: "Version: ${version}"
 
   # Get system performance
-  - send: get system performance status
-    capture: perf
+  - send:
+      command: get system performance status
+      capture: perf
 
   # Extract CPU and memory
   - extract:
@@ -46,38 +52,54 @@ steps:
       pattern: 'Memory:\s*(\d+)%'
       into: mem_usage
 
-  - print: " "
-  - print: "=== Resource Usage ==="
-  - print: "CPU: ${cpu_usage}%"
-  - print: "Memory: ${mem_usage}%"
+  - print:
+      message: " "
+  - print:
+      message: "=== Resource Usage ==="
+  - print:
+      message: "CPU: ${cpu_usage}%"
+  - print:
+      message: "Memory: ${mem_usage}%"
 
   # Get session count
-  - send: get system session status
-    capture: sessions
+  - send:
+      command: get system session status
+      capture: sessions
 
   - extract:
       from: sessions
       pattern: 'active\s+(\d+)'
       into: active_sessions
 
-  - print: "Active Sessions: ${active_sessions}"
+  - print:
+      message: "Active Sessions: ${active_sessions}"
 
   # Check HA status
-  - send: get system ha status
-    capture: ha_status
+  - send:
+      command: get system ha status
+      capture: ha_status
 
-  - if: ha_status matches 'standalone'
-    then:
-      - print: "HA Mode: Standalone"
-    else:
-      - if: ha_status matches 'master'
-        then:
-          - print: "HA Mode: Master"
-        else:
-          - if: ha_status matches 'slave'
+  - if:
+      condition: ha_status matches 'standalone'
+      then:
+        - print:
+            message: "HA Mode: Standalone"
+      else:
+        - if:
+            condition: ha_status matches 'master'
             then:
-              - print: "HA Mode: Slave"
+              - print:
+                  message: "HA Mode: Master"
+            else:
+              - if:
+                  condition: ha_status matches 'slave'
+                  then:
+                    - print:
+                        message: "HA Mode: Slave"
 
-  - print: "======================================"
+  - print:
+      message: "======================================"
 
-  - exit: success "Status check complete for ${hostname}"
+  - exit:
+      status: success
+      message: "Status check complete for ${hostname}"

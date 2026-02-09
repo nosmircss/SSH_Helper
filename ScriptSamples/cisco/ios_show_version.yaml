@@ -7,11 +7,13 @@ description: Retrieves and displays the IOS version from a Cisco device
 
 steps:
   # Disable paging
-  - send: terminal length 0
+  - send:
+      command: terminal length 0
 
   # Get version info
-  - send: show ver
-    capture: output
+  - send:
+      command: show ver
+      capture: output
 
   # Extract the version line
   - extract:
@@ -19,6 +21,9 @@ steps:
       pattern: '(Version.+?)$'
       into: version
 
-  - print: "version is ${version}"
+  - print:
+      message: "version is ${version}"
 
-  - exit: success "Version check complete"
+  - exit:
+      status: success
+      message: "Version check complete"

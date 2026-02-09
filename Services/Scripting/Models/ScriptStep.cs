@@ -12,6 +12,22 @@ namespace SSH_Helper.Services.Scripting.Models
         /// </summary>
         public int LineNumber { get; set; }
 
+        /// <summary>
+        /// Step command key discovered during parse, even when required payload fields are missing.
+        /// Enables precise validation errors instead of generic "unknown step" diagnostics.
+        /// </summary>
+        public StepType DeclaredStepType { get; set; } = StepType.Unknown;
+
+        /// <summary>
+        /// Indicates whether this step used deprecated root-level on_error syntax.
+        /// </summary>
+        public bool UsesStepRootOnError { get; set; }
+
+        /// <summary>
+        /// Parser-originated validation issues for this step.
+        /// </summary>
+        public List<string> ParseErrors { get; } = new();
+
         // ===== Command Types =====
         // Only one of these should be set per step
 
@@ -244,6 +260,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Sftp != null) return StepType.Sftp;
             if (Webhook != null) return StepType.Webhook;
             if (Parse != null) return StepType.Parse;
+            if (DeclaredStepType != StepType.Unknown) return DeclaredStepType;
             return StepType.Unknown;
         }
     }

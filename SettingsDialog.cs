@@ -29,6 +29,21 @@ namespace SSH_Helper
         private readonly CheckBox _chkCheckForUpdatesOnStartup;
         private readonly CheckBox _chkEnableUpdateLog;
 
+        // Command Editor tab controls
+        private readonly CheckBox _chkEnableSyntaxHighlighting;
+        private readonly CheckBox _chkEnableAutocomplete;
+        private readonly CheckBox _chkAutocompleteShowOnTyping;
+        private readonly CheckBox _chkEnableInlineValidation;
+        private readonly NumericUpDown _numValidationDebounceMs;
+        private readonly CheckBox _chkShowInlineWarnings;
+        private readonly CheckBox _chkEnableDiagnosticTooltips;
+        private readonly CheckBox _chkEnableVariableInspectorTooltips;
+        private readonly CheckBox _chkEnableYamlHygieneWarnings;
+        private readonly CheckBox _chkUseSpacesForTab;
+        private readonly NumericUpDown _numIndentSize;
+        private readonly CheckBox _chkEnableSmartEnter;
+        private readonly CheckBox _chkPreserveBlankLineBetweenSteps;
+
         // Appearance tab controls - Font Families
         private ComboBox _cboUIFont = null!;
         private ComboBox _cboCodeFont = null!;
@@ -111,6 +126,10 @@ namespace SSH_Helper
             var tabUpdates = CreateUpdatesTab();
             _tabControl.TabPages.Add(tabUpdates);
 
+            // === Command Editor Tab ===
+            var tabCommandEditor = CreateCommandEditorTab();
+            _tabControl.TabPages.Add(tabCommandEditor);
+
             // === Appearance Tab (with scrollable panel) ===
             var tabAppearance = CreateAppearanceTab();
             _tabControl.TabPages.Add(tabAppearance);
@@ -154,6 +173,19 @@ namespace SSH_Helper
 
             _chkCheckForUpdatesOnStartup = FindControl<CheckBox>(tabUpdates, "chkCheckForUpdatesOnStartup");
             _chkEnableUpdateLog = FindControl<CheckBox>(tabUpdates, "chkEnableUpdateLog");
+            _chkEnableSyntaxHighlighting = FindControl<CheckBox>(tabCommandEditor, "chkEnableSyntaxHighlighting");
+            _chkEnableAutocomplete = FindControl<CheckBox>(tabCommandEditor, "chkEnableAutocomplete");
+            _chkAutocompleteShowOnTyping = FindControl<CheckBox>(tabCommandEditor, "chkAutocompleteShowOnTyping");
+            _chkEnableInlineValidation = FindControl<CheckBox>(tabCommandEditor, "chkEnableInlineValidation");
+            _numValidationDebounceMs = FindControl<NumericUpDown>(tabCommandEditor, "numValidationDebounceMs");
+            _chkShowInlineWarnings = FindControl<CheckBox>(tabCommandEditor, "chkShowInlineWarnings");
+            _chkEnableDiagnosticTooltips = FindControl<CheckBox>(tabCommandEditor, "chkEnableDiagnosticTooltips");
+            _chkEnableVariableInspectorTooltips = FindControl<CheckBox>(tabCommandEditor, "chkEnableVariableInspectorTooltips");
+            _chkEnableYamlHygieneWarnings = FindControl<CheckBox>(tabCommandEditor, "chkEnableYamlHygieneWarnings");
+            _chkUseSpacesForTab = FindControl<CheckBox>(tabCommandEditor, "chkUseSpacesForTab");
+            _numIndentSize = FindControl<NumericUpDown>(tabCommandEditor, "numIndentSize");
+            _chkEnableSmartEnter = FindControl<CheckBox>(tabCommandEditor, "chkEnableSmartEnter");
+            _chkPreserveBlankLineBetweenSteps = FindControl<CheckBox>(tabCommandEditor, "chkPreserveBlankLineBetweenSteps");
 
             LoadSettings();
             UpdatePreview();
@@ -336,6 +368,156 @@ namespace SSH_Helper
 
             tabUpdates.Controls.Add(flow);
             return tabUpdates;
+        }
+
+        private TabPage CreateCommandEditorTab()
+        {
+            var tabCommandEditor = new TabPage("Command Editor");
+
+            var flow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(12, 12, 12, 12)
+            };
+
+            var sectionFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            Label SectionHeader(string text, int topMargin = 10) => new()
+            {
+                Text = text,
+                Font = sectionFont,
+                AutoSize = true,
+                Margin = new Padding(0, topMargin, 0, 4)
+            };
+
+            TableLayoutPanel LabeledNumeric(string label, string name, decimal min, decimal max, decimal value)
+            {
+                var row = new TableLayoutPanel
+                {
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    ColumnCount = 2,
+                    RowCount = 1,
+                    Margin = new Padding(0, 2, 0, 2)
+                };
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+                row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+                row.Controls.Add(new Label
+                {
+                    Text = label,
+                    AutoSize = true,
+                    Anchor = AnchorStyles.Left,
+                    Margin = new Padding(0, 4, 4, 0)
+                }, 0, 0);
+
+                row.Controls.Add(new NumericUpDown
+                {
+                    Name = name,
+                    Minimum = min,
+                    Maximum = max,
+                    Value = value,
+                    TextAlign = HorizontalAlignment.Right,
+                    Size = new Size(80, 23)
+                }, 1, 0);
+
+                return row;
+            }
+
+            // Features
+            flow.Controls.Add(SectionHeader("Features", 0));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableSyntaxHighlighting",
+                Text = "Enable syntax highlighting",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableAutocomplete",
+                Text = "Enable autocomplete",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkAutocompleteShowOnTyping",
+                Text = "Show autocomplete while typing",
+                AutoSize = true,
+                Margin = new Padding(18, 0, 0, 2)
+            });
+
+            // Validation and diagnostics
+            flow.Controls.Add(SectionHeader("Validation & Diagnostics"));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableInlineValidation",
+                Text = "Enable inline validation",
+                AutoSize = true
+            });
+            flow.Controls.Add(LabeledNumeric(
+                "Inline validation debounce (ms):",
+                "numValidationDebounceMs",
+                CommandEditorSettings.MinValidationDebounceMs,
+                CommandEditorSettings.MaxValidationDebounceMs,
+                400));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkShowInlineWarnings",
+                Text = "Show inline warnings",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableDiagnosticTooltips",
+                Text = "Enable diagnostic hover tooltips",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableVariableInspectorTooltips",
+                Text = "Enable variable inspector tooltips",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableYamlHygieneWarnings",
+                Text = "Enable YAML hygiene warnings",
+                AutoSize = true
+            });
+
+            // Indentation/newline behavior
+            flow.Controls.Add(SectionHeader("Indentation & Newline"));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkUseSpacesForTab",
+                Text = "Use spaces for Tab indentation",
+                AutoSize = true
+            });
+            flow.Controls.Add(LabeledNumeric(
+                "Indent size (spaces):",
+                "numIndentSize",
+                CommandEditorSettings.MinIndentSize,
+                CommandEditorSettings.MaxIndentSize,
+                2));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableSmartEnter",
+                Text = "Enable smart Enter indentation",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkPreserveBlankLineBetweenSteps",
+                Text = "Preserve blank lines between YAML steps",
+                AutoSize = true,
+                Margin = new Padding(18, 0, 0, 2)
+            });
+
+            tabCommandEditor.Controls.Add(flow);
+            return tabCommandEditor;
         }
 
         private TabPage CreateAppearanceTab()
@@ -828,6 +1010,22 @@ namespace SSH_Helper
             _chkCheckForUpdatesOnStartup.Checked = config.UpdateSettings.CheckOnStartup;
             _chkEnableUpdateLog.Checked = config.UpdateSettings.EnableUpdateLog;
 
+            // Command editor
+            var editor = config.CommandEditor?.CloneNormalized() ?? new CommandEditorSettings();
+            _chkEnableSyntaxHighlighting.Checked = editor.EnableSyntaxHighlighting;
+            _chkEnableAutocomplete.Checked = editor.EnableAutocomplete;
+            _chkAutocompleteShowOnTyping.Checked = editor.AutocompleteShowOnTyping;
+            _chkEnableInlineValidation.Checked = editor.EnableInlineValidation;
+            _numValidationDebounceMs.Value = editor.ValidationDebounceMs;
+            _chkShowInlineWarnings.Checked = editor.ShowInlineWarnings;
+            _chkEnableDiagnosticTooltips.Checked = editor.EnableDiagnosticTooltips;
+            _chkEnableVariableInspectorTooltips.Checked = editor.EnableVariableInspectorTooltips;
+            _chkEnableYamlHygieneWarnings.Checked = editor.EnableYamlHygieneWarnings;
+            _chkUseSpacesForTab.Checked = editor.UseSpacesForTab;
+            _numIndentSize.Value = editor.IndentSize;
+            _chkEnableSmartEnter.Checked = editor.EnableSmartEnter;
+            _chkPreserveBlankLineBetweenSteps.Checked = editor.PreserveBlankLineBetweenSteps;
+
             // Appearance
             ApplyFontSettingsToControls(config.FontSettings);
         }
@@ -911,6 +1109,29 @@ namespace SSH_Helper
                 // Updates
                 config.UpdateSettings.CheckOnStartup = _chkCheckForUpdatesOnStartup.Checked;
                 config.UpdateSettings.EnableUpdateLog = _chkEnableUpdateLog.Checked;
+
+                // Command editor
+                config.CommandEditor ??= new CommandEditorSettings();
+                config.CommandEditor.EnableSyntaxHighlighting = _chkEnableSyntaxHighlighting.Checked;
+                config.CommandEditor.EnableAutocomplete = _chkEnableAutocomplete.Checked;
+                config.CommandEditor.AutocompleteShowOnTyping = _chkAutocompleteShowOnTyping.Checked;
+                config.CommandEditor.EnableInlineValidation = _chkEnableInlineValidation.Checked;
+                config.CommandEditor.ValidationDebounceMs = Math.Clamp(
+                    (int)_numValidationDebounceMs.Value,
+                    CommandEditorSettings.MinValidationDebounceMs,
+                    CommandEditorSettings.MaxValidationDebounceMs);
+                config.CommandEditor.ShowInlineWarnings = _chkShowInlineWarnings.Checked;
+                config.CommandEditor.EnableDiagnosticTooltips = _chkEnableDiagnosticTooltips.Checked;
+                config.CommandEditor.EnableVariableInspectorTooltips = _chkEnableVariableInspectorTooltips.Checked;
+                config.CommandEditor.EnableYamlHygieneWarnings = _chkEnableYamlHygieneWarnings.Checked;
+                config.CommandEditor.UseSpacesForTab = _chkUseSpacesForTab.Checked;
+                config.CommandEditor.IndentSize = Math.Clamp(
+                    (int)_numIndentSize.Value,
+                    CommandEditorSettings.MinIndentSize,
+                    CommandEditorSettings.MaxIndentSize);
+                config.CommandEditor.EnableSmartEnter = _chkEnableSmartEnter.Checked;
+                config.CommandEditor.PreserveBlankLineBetweenSteps = _chkPreserveBlankLineBetweenSteps.Checked;
+                config.CommandEditor.Normalize();
 
                 // Appearance - Font Families
                 config.FontSettings.UIFontFamily = _cboUIFont.SelectedItem?.ToString() ?? "Segoe UI";

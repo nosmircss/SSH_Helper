@@ -7,8 +7,9 @@ description: Lists all interfaces and shows their IP addresses (or "No IP" if no
 
 steps:
   # Get interface list
-  - send: ifconfig
-    capture: output
+  - send:
+      command: ifconfig
+      capture: output
 
   # Extract interface names (e.g., eth0, lo, wlan0)
   - extract:
@@ -18,23 +19,31 @@ steps:
       match: all
 
   # Loop through each interface
-  - foreach: iface in interfaces
-    do:
-      - print: "Interface: ${iface}"
+  - foreach:
+      iterator: iface in interfaces
+      do:
+        - print:
+            message: "Interface: ${iface}"
 
-      # Get details for this interface
-      - send: ifconfig ${iface}
-        capture: iface_details
+        # Get details for this interface
+        - send:
+            command: ifconfig ${iface}
+            capture: iface_details
 
-      # Check if it has an IP address
-      - if: iface_details matches 'inet addr:'
-        then:
-          - extract:
-              from: iface_details
-              pattern: 'inet addr:(.+?)\s'
-              into: ipaddr
-          - print: "  IP: ${ipaddr}"
-        else:
-          - print: "  No IP"
+        # Check if it has an IP address
+        - if:
+            condition: iface_details matches 'inet addr:'
+            then:
+              - extract:
+                  from: iface_details
+                  pattern: 'inet addr:(.+?)\s'
+                  into: ipaddr
+              - print:
+                  message: "  IP: ${ipaddr}"
+            else:
+              - print:
+                  message: "  No IP"
 
-  - exit: success "Interface check complete"
+  - exit:
+      status: success
+      message: "Interface check complete"

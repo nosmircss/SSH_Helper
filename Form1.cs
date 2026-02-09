@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using SSH_Helper.Models;
+using SSH_Helper.Services.Editor;
 using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.UI;
@@ -151,6 +152,12 @@ namespace SSH_Helper
         // SSH startup debug mode - logs timing from button click through SSH connection
         private bool _sshDebugMode;
 
+        // Script editor services
+        private ScriptAutocompleteProvider? _scriptAutocompleteProvider;
+        private readonly YamlSshSyntaxHighlighter _scriptSyntaxHighlighter = new();
+        private readonly ScriptEditorValidationService _scriptValidationService = new();
+        private CommandEditorSettings _commandEditorSettings = new();
+
         // Custom scrollbars for DataGridView (to support dark mode theming)
         private VScrollBar? _dgvVScrollBar;
         private HScrollBar? _dgvHScrollBar;
@@ -177,7 +184,11 @@ namespace SSH_Helper
 
             var uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
             _uiOutputThrottler = new OutputThrottler(TimeSpan.FromMilliseconds(UiOutputThrottleMs), AppendOutputToUi, uiContext);
-            FormClosed += (_, __) => _uiOutputThrottler.Dispose();
+            FormClosed += (_, __) =>
+            {
+                _uiOutputThrottler.Dispose();
+                _scriptValidationService.Dispose();
+            };
 
             // Initialize services
             _configService = new ConfigurationService();
@@ -214,6 +225,7 @@ namespace SSH_Helper
             InitializeFromConfiguration();
             InitializeCredentials();
             InitializeDataGridView();
+            InitializeScriptEditor();
             InitializeOutputHistory();
             InitializeEventHandlers();
             InitializeToolbarSync();
@@ -364,6 +376,125 @@ namespace SSH_Helper
 
             // Set up custom scrollbars for dark mode support
             SetupDataGridViewScrollbars();
+        }
+
+        private void InitializeScriptEditor()
+        {
+            _scriptAutocompleteProvider = new ScriptAutocompleteProvider(GetEditorHostColumns);
+            txtCommand.SetAutocompleteProvider(_scriptAutocompleteProvider);
+            txtCommand.SetSyntaxHighlighter(_scriptSyntaxHighlighter);
+            txtCommand.SetValidationService(_scriptValidationService);
+            txtCommand.SetVariableTooltipResolvers(ResolveEditorVariableValue, ResolveEditorColumnValue);
+            ApplyCommandEditorSettings(_configService.GetCurrent().CommandEditor);
+        }
+
+        private void ApplyCommandEditorSettings(CommandEditorSettings? settings)
+        {
+            _commandEditorSettings = (settings ?? new CommandEditorSettings()).CloneNormalized();
+            txtCommand.ApplyCommandEditorSettings(_commandEditorSettings);
+        }
+
+        private IReadOnlyCollection<string> GetEditorHostColumns()
+        {
+            return dgv_variables.Columns
+                .Cast<DataGridViewColumn>()
+                .Select(column => column.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name) && !string.Equals(name, SelectColumnName, StringComparison.Ordinal))
+                .ToList();
+        }
+
+        private string? ResolveEditorVariableValue(string variableName)
+        {
+            if (string.IsNullOrWhiteSpace(variableName))
+                return null;
+
+            var key = variableName.Trim();
+            if (TryGetBuiltInEditorVariable(key, out var builtIn))
+            {
+                return builtIn;
+            }
+
+            if (ScriptParser.IsYamlScript(txtCommand.Text))
+            {
+                try
+                {
+                    var parser = new ScriptParser();
+                    var script = parser.Parse(txtCommand.Text);
+                    if (script.Vars.TryGetValue(key, out var value) && value != null)
+                    {
+                        return value is IEnumerable<string> values
+                            ? string.Join(", ", values)
+                            : value.ToString();
+                    }
+                }
+                catch
+                {
+                    // Ignore parser issues for hover preview.
+                }
+            }
+
+            var environmentVariables = _environmentService.GetActiveEnvironmentVariables();
+            if (environmentVariables.TryGetValue(key, out var environmentValue))
+            {
+                return environmentValue;
+            }
+
+            if (_scriptAutocompleteProvider != null)
+            {
+                var symbols = _scriptAutocompleteProvider.ExtractDynamicSymbols(txtCommand.Text);
+                if (symbols.Contains(key, StringComparer.OrdinalIgnoreCase))
+                {
+                    return "[declared in script]";
+                }
+            }
+
+            return null;
+        }
+
+        private bool TryGetBuiltInEditorVariable(string key, out string? value)
+        {
+            value = key.ToLowerInvariant() switch
+            {
+                "_timestamp" => DateTime.Now.ToString("O"),
+                "_iteration" => "0",
+                "_last_error" => string.Empty,
+                "_output" => string.Empty,
+                "_host" => ResolveEditorColumnValue(CsvManager.HostColumnName),
+                "_port" => ResolveEditorColumnValue("port"),
+                "_username" => ResolveEditorColumnValue("username") ?? tsbUsername.Text,
+                "_password" => ResolveEditorColumnValue("password"),
+                _ => null
+            };
+
+            return value != null;
+        }
+
+        private string? ResolveEditorColumnValue(string columnName)
+        {
+            if (string.IsNullOrWhiteSpace(columnName) || !dgv_variables.Columns.Contains(columnName))
+                return null;
+
+            var row = GetSelectedHostPreviewRow();
+            if (row == null)
+                return null;
+
+            return row.Cells[columnName].Value?.ToString();
+        }
+
+        private DataGridViewRow? GetSelectedHostPreviewRow()
+        {
+            if (dgv_variables.CurrentRow != null && !dgv_variables.CurrentRow.IsNewRow)
+            {
+                return dgv_variables.CurrentRow;
+            }
+
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (!row.IsNewRow)
+                    return row;
+            }
+
+            return null;
         }
 
         private void SetupDataGridViewScrollbars()
@@ -1697,9 +1828,11 @@ namespace SSH_Helper
             txtTimeoutHeader.ForeColor = LightTextColor;
             txtCommand.BackColor = LightControlBackground;
             txtCommand.ForeColor = LightTextColor;
+            txtCommand.ApplyTheme(false);
             btnSavePreset.BackColor = LightAccent;
             btnSavePreset.FlatAppearance.BorderColor = LightSelectionBorder;
 
+            
             // Execute panel
             executePanel.BackColor = LightBackground;
 
@@ -1820,6 +1953,7 @@ namespace SSH_Helper
             txtTimeoutHeader.ForeColor = DarkInputText;
             txtCommand.BackColor = DarkSurface2;
             txtCommand.ForeColor = DarkInputText;
+            txtCommand.ApplyTheme(true);
             btnSavePreset.BackColor = DarkSelectionBg;
             btnSavePreset.FlatAppearance.BorderColor = DarkSelectionBorder;
 
@@ -3665,6 +3799,7 @@ namespace SSH_Helper
                 var config = _configService.GetCurrent();
                 ApplyTheme(config.DarkMode);
                 ApplyFontSettings(config.FontSettings);
+                ApplyCommandEditorSettings(config.CommandEditor);
                 ApplyColumnAutoResize(config.AutoResizeHostColumns);
                 _sshService.UseConnectionPooling = config.UseConnectionPooling;
                 _sshService.PreferSshAgent = config.Credentials.PreferSshAgent;
@@ -3711,7 +3846,7 @@ namespace SSH_Helper
             try
             {
                 var script = parser.Parse(scriptText);
-                var errors = parser.Validate(script, scriptText);
+                var errors = parser.Validate(script, scriptText, enforceCanonicalSyntax: true);
                 var warnings = parser.Warnings;
 
                 if (errors.Count == 0 && warnings.Count == 0)
@@ -3740,31 +3875,6 @@ namespace SSH_Helper
                 var message = ScriptValidationFormatter.FormatExceptionMessage(ex);
                 AppendOutputText(Environment.NewLine + message + Environment.NewLine);
                 DialogTheme.ShowMessage(this, message, "Validate Script", MessageBoxIcon.Error, _isDarkMode, _dialogFont);
-            }
-        }
-
-        private void ctxPrettyFormat_Click(object sender, EventArgs e)
-        {
-            var text = txtCommand.Text;
-            if (string.IsNullOrWhiteSpace(text))
-                return;
-
-            if (!Services.Scripting.ScriptParser.IsYamlScript(text))
-            {
-                MessageBox.Show("Current commands are not a YAML script.\nPretty Format only works with YAML scripts.",
-                    "Pretty Format", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            try
-            {
-                txtCommand.Text = ScriptPrettyFormatter.Format(text);
-                UpdateStatusBar("Script formatted");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to format: {ex.Message}", "Pretty Format",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -6198,6 +6308,19 @@ namespace SSH_Helper
             return displayName.StartsWith($"{StarIcon} ", StringComparison.Ordinal) ? displayName.Substring(2) : displayName;
         }
 
+        private static string NormalizeCommandTextForComparison(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            // Compare command text independent of newline representation (LF/CRLF/CR).
+            return value
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
+        }
+
         private bool IsPresetDirty()
         {
             // When viewing a folder (not a preset), there's nothing to save
@@ -6209,7 +6332,9 @@ namespace SSH_Helper
             if (preset == null) return InputValidator.IsNotEmpty(txtPreset.Text) || InputValidator.IsNotEmpty(txtCommand.Text);
 
             bool nameChanged = !string.Equals(txtPreset.Text?.Trim(), _activePresetName, StringComparison.Ordinal);
-            bool commandsChanged = !string.Equals(txtCommand.Text, preset.Commands ?? "", StringComparison.Ordinal);
+            var currentCommands = NormalizeCommandTextForComparison(txtCommand.Text);
+            var savedCommands = NormalizeCommandTextForComparison(preset.Commands);
+            bool commandsChanged = !string.Equals(currentCommands, savedCommands, StringComparison.Ordinal);
 
             bool timeoutDiffers = int.TryParse(txtTimeoutHeader.Text, out var t)
                 ? preset.Timeout != t
@@ -6254,14 +6379,18 @@ namespace SSH_Helper
                 sb.AppendLine($"    Current: \"{txtPreset.Text?.Trim()}\"");
             }
 
-            bool commandsChanged = !string.Equals(txtCommand.Text, preset.Commands ?? "", StringComparison.Ordinal);
+            var savedCmd = preset.Commands ?? string.Empty;
+            var currentCmd = txtCommand.Text ?? string.Empty;
+            var normalizedSavedCmd = NormalizeCommandTextForComparison(savedCmd);
+            var normalizedCurrentCmd = NormalizeCommandTextForComparison(currentCmd);
+            bool commandsChanged = !string.Equals(normalizedCurrentCmd, normalizedSavedCmd, StringComparison.Ordinal);
             sb.AppendLine($"[{(commandsChanged ? "X" : " ")}] Commands changed:");
             if (commandsChanged)
             {
-                var savedCmd = preset.Commands ?? "";
-                var currentCmd = txtCommand.Text ?? "";
                 sb.AppendLine($"    Saved length: {savedCmd.Length} chars");
                 sb.AppendLine($"    Current length: {currentCmd.Length} chars");
+                sb.AppendLine($"    Saved normalized length: {normalizedSavedCmd.Length} chars");
+                sb.AppendLine($"    Current normalized length: {normalizedCurrentCmd.Length} chars");
                 if (savedCmd.Length < 100 && currentCmd.Length < 100)
                 {
                     sb.AppendLine($"    Saved: \"{savedCmd.Replace("\r\n", "\\n").Replace("\n", "\\n")}\"");
@@ -8077,6 +8206,7 @@ namespace SSH_Helper
         }
     }
 }
+
 
 
 

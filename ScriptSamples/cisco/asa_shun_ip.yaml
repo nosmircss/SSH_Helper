@@ -16,26 +16,38 @@ vars:
 
 steps:
   # Login sequence (ASA may require explicit login)
-  - send: login
-    expect: '/[Uu]sername: ?$/'
+  - send:
+      command: login
+      expect: '/[Uu]sername: ?$/'
 
-  - send: ${username}
-    expect: '/[Pp]assword: ?$/'
+  - send:
+      command: ${username}
+      expect: '/[Pp]assword: ?$/'
 
-  - send: ${password}
-    expect: '/# ?$/'
+  - send:
+      command: ${password}
+      expect: '/# ?$/'
 
   # Execute the shun command
-  - send: shun ${block}
+  - send:
+      command: shun ${block}
 
   # Verify the shun was applied
-  - send: sh shun | i ${block}
-    capture: result
+  - send:
+      command: sh shun | i ${block}
+      capture: result
 
-  - if: result matches '${block}'
-    then:
-      - print: "Successfully shunned ${block}"
-      - exit: success "IP ${block} shunned"
-    else:
-      - print: "Shun may have failed - IP not found in shun list"
-      - exit: failure "Could not verify shun for ${block}"
+  - if:
+      condition: result matches '${block}'
+      then:
+        - print:
+            message: "Successfully shunned ${block}"
+        - exit:
+            status: success
+            message: "IP ${block} shunned"
+      else:
+        - print:
+            message: "Shun may have failed - IP not found in shun list"
+        - exit:
+            status: failure
+            message: "Could not verify shun for ${block}"

@@ -21,56 +21,84 @@ vars:
 
 steps:
   # Check current state of the blocking group
-  - send: sh firewall addrgrp FSM_BLOCK_GROUP
-    capture: group_info
+  - send:
+      command: sh firewall addrgrp FSM_BLOCK_GROUP
+      capture: group_info
 
   # Check if group exists
-  - if: group_info matches 'entry is not found'
-    then:
-      - exit: failure "Block group FSM_BLOCK_GROUP not found - no blocks to remove"
-
+  - if:
+      condition: group_info matches 'entry is not found'
+      then:
+        - exit:
+            status: failure
+            message: "Block group FSM_BLOCK_GROUP not found - no blocks to remove"
   # Check if this is the ONLY block in the group (last one)
   # Pattern: if member ends with just this block (no other members after it)
-  - if: group_info matches 'set member "GDGBLOCK_${block}"$'
-    then:
-      # This is the last block - need to remove policy, group, and address
-      - print: "Last block detected - removing policy and cleaning up"
+  - if:
+      condition: group_info matches 'set member "GDGBLOCK_${block}"$'
+      then:
+        # This is the last block - need to remove policy, group, and address
+        - print:
+            message: "Last block detected - removing policy and cleaning up"
 
-      # Remove the firewall policy
-      - send: config firewall policy
-      - send: delete ${policy_id}
-      - send: end
+        # Remove the firewall policy
+        - send:
+            command: config firewall policy
+        - send:
+            command: delete ${policy_id}
+        - send:
+            command: end
 
-      # Remove the address group
-      - send: config firewall addrgrp
-      - send: delete FSM_BLOCK_GROUP
-      - send: end
+        # Remove the address group
+        - send:
+            command: config firewall addrgrp
+        - send:
+            command: delete FSM_BLOCK_GROUP
+        - send:
+            command: end
 
-      # Remove the address object
-      - send: config firewall address
-      - send: delete GDGBLOCK_${block}
-      - send: end
+        # Remove the address object
+        - send:
+            command: config firewall address
+        - send:
+            command: delete GDGBLOCK_${block}
+        - send:
+            command: end
 
-      - exit: success "Deleted block - no blocks remaining (policy deleted)"
+        - exit:
+            status: success
+            message: "Deleted block - no blocks remaining (policy deleted)"
+      else:
+        # Check if block exists in the group at all
+        - if:
+            condition: group_info matches 'GDGBLOCK_${block}'
+            then:
+              # Not the last block - just remove this member from the group
+              - print:
+                  message: "Other blocks exist - removing only this member"
 
-    else:
-      # Check if block exists in the group at all
-      - if: group_info matches 'GDGBLOCK_${block}'
-        then:
-          # Not the last block - just remove this member from the group
-          - print: "Other blocks exist - removing only this member"
+              # Remove from address group
+              - send:
+                  command: config firewall addrgrp
+              - send:
+                  command: edit FSM_BLOCK_GROUP
+              - send:
+                  command: unselect member GDGBLOCK_${block}
+              - send:
+                  command: end
 
-          # Remove from address group
-          - send: config firewall addrgrp
-          - send: edit FSM_BLOCK_GROUP
-          - send: unselect member GDGBLOCK_${block}
-          - send: end
+              # Remove the address object
+              - send:
+                  command: config firewall address
+              - send:
+                  command: delete GDGBLOCK_${block}
+              - send:
+                  command: end
 
-          # Remove the address object
-          - send: config firewall address
-          - send: delete GDGBLOCK_${block}
-          - send: end
-
-          - exit: success "Deleted block - other blocks remaining"
-        else:
-          - exit: failure "Block ${block} not found in FSM_BLOCK_GROUP"
+              - exit:
+                  status: success
+                  message: "Deleted block - other blocks remaining"
+            else:
+              - exit:
+                  status: failure
+                  message: "Block ${block} not found in FSM_BLOCK_GROUP"

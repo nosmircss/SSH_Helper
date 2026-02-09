@@ -8,29 +8,43 @@ description: Shows all IPs currently in the FSM_BLOCK_GROUP
 
 steps:
   # Check if block group exists and show members
-  - send: sh firewall addrgrp FSM_BLOCK_GROUP
-    capture: group_info
+  - send:
+      command: sh firewall addrgrp FSM_BLOCK_GROUP
+      capture: group_info
 
-  - if: group_info matches 'entry is not found'
-    then:
-      - print: "No blocks found - FSM_BLOCK_GROUP does not exist"
-      - exit: success "No current blocks"
-    else:
-      - print: "========== Current Blocks =========="
-      - print: "${group_info}"
-      - print: "===================================="
+  - if:
+      condition: group_info matches 'entry is not found'
+      then:
+        - print:
+            message: "No blocks found - FSM_BLOCK_GROUP does not exist"
+        - exit:
+            status: success
+            message: "No current blocks"
+      else:
+        - print:
+            message: "========== Current Blocks =========="
+        - print:
+            message: "${group_info}"
+        - print:
+            message: "===================================="
 
-      # Try to extract and count members
-      - extract:
-          from: group_info
-          pattern: 'GDGBLOCK_(\S+)'
-          into: blocks
-          match: all
+        # Try to extract and count members
+        - extract:
+            from: group_info
+            pattern: 'GDGBLOCK_(\S+)'
+            into: blocks
+            match: all
 
-      - print: ""
-      - print: "Blocked IPs found:"
-      - foreach: ip in blocks
-        do:
-          - print: "  - ${ip}"
+        - print:
+            message: ""
+        - print:
+            message: "Blocked IPs found:"
+        - foreach:
+            iterator: ip in blocks
+            do:
+              - print:
+                  message: "  - ${ip}"
 
-      - exit: success "Block list retrieved"
+        - exit:
+            status: success
+            message: "Block list retrieved"

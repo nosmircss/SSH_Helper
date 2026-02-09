@@ -103,14 +103,13 @@ namespace SSH_Helper
             lblPresetsTitle = new Label();
             lblFavoritesEmpty = new Label();
             scriptPanel = new Panel();
-            txtCommand = new TextBox();
+            txtCommand = new SSH_Helper.UI.ScintillaScriptEditorControl();
             contextCommandBox = new ContextMenuStrip(components);
             ctxCut = new ToolStripMenuItem();
             ctxCopy = new ToolStripMenuItem();
             ctxPaste = new ToolStripMenuItem();
             ctxSelectAll = new ToolStripMenuItem();
             ctxSeparator1 = new ToolStripSeparator();
-            ctxPrettyFormat = new ToolStripMenuItem();
             ctxValidateScript = new ToolStripMenuItem();
             scriptFooterPanel = new Panel();
             lblLinePosition = new Label();
@@ -795,7 +794,7 @@ namespace SSH_Helper
             //
             // contextCommandBox
             //
-            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxSeparator1, ctxPrettyFormat, ctxValidateScript });
+            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxSeparator1, ctxValidateScript });
             contextCommandBox.Name = "contextCommandBox";
             contextCommandBox.Size = new Size(201, 142);
             //
@@ -835,13 +834,6 @@ namespace SSH_Helper
             //
             ctxSeparator1.Name = "ctxSeparator1";
             ctxSeparator1.Size = new Size(197, 6);
-            //
-            // ctxPrettyFormat
-            //
-            ctxPrettyFormat.Name = "ctxPrettyFormat";
-            ctxPrettyFormat.Size = new Size(200, 22);
-            ctxPrettyFormat.Text = "Pretty &Format";
-            ctxPrettyFormat.Click += ctxPrettyFormat_Click;
             //
             // ctxValidateScript
             //
@@ -1771,14 +1763,13 @@ namespace SSH_Helper
         private TextBox txtTimeoutHeader;
         private TextBox txtPreset;
         private Button btnSavePreset;
-        private TextBox txtCommand;
+        private SSH_Helper.UI.ScintillaScriptEditorControl txtCommand;
         private ContextMenuStrip contextCommandBox;
         private ToolStripMenuItem ctxCut;
         private ToolStripMenuItem ctxCopy;
         private ToolStripMenuItem ctxPaste;
         private ToolStripMenuItem ctxSelectAll;
         private ToolStripSeparator ctxSeparator1;
-        private ToolStripMenuItem ctxPrettyFormat;
         private ToolStripMenuItem ctxValidateScript;
 
         // Execute panel

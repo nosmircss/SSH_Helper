@@ -6,9 +6,13 @@ name: FortiGate Show Local Users
 description: Displays the local user accounts configured on the FortiGate
 
 steps:
-  - send: sh user local
-    capture: users
+  - send:
+      command: sh user local
+      capture: users
 
-  - print: "Local users displayed above"
+  - print:
+      message: "Local users displayed above"
 
-  - exit: success "User list retrieved"
+  - exit:
+      status: success
+      message: "User list retrieved"

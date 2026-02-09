@@ -6,8 +6,10 @@ name: Interactive Service Config
 description: Prompts user for settings and applies configuration
 
 steps:
-  - print: "=== Interactive Service Configuration ==="
-  - print: "Target: ${Host_IP}"
+  - print:
+      message: "=== Interactive Service Configuration ==="
+  - print:
+      message: "Target: ${Host_IP}"
 
   # Get service name with validation
   - input:
@@ -25,10 +27,12 @@ steps:
       validation_error: "Port must be a number"
 
   # Validate port range in script
-  - if: port_number < 1024 or port_number > 65535
-    then:
-      - exit: failure "Port ${port_number} is outside valid range (1024-65535)"
-
+  - if:
+      condition: port_number < 1024 or port_number > 65535
+      then:
+        - exit:
+            status: failure
+            message: "Port ${port_number} is outside valid range (1024-65535)"
   # Get action choice
   - input:
       prompt: "Action (start/stop/restart):"
@@ -44,21 +48,30 @@ steps:
       validate: "^(yes|no)$"
       validation_error: "Please type 'yes' or 'no'"
 
-  - if: confirm != "yes"
-    then:
-      - exit: "Configuration cancelled by user"
+  - if:
+      condition: confirm != "yes"
+      then:
+        - exit:
+            message: "Configuration cancelled by user"
 
   # Apply configuration
-  - print: "Applying configuration..."
+  - print:
+      message: "Applying configuration..."
 
-  - send: systemctl ${action} ${service_name}
-    capture: result
-    on_error: continue
+  - send:
+      command: systemctl ${action} ${service_name}
+      capture: result
+      on_error: continue
 
-  - if: result contains "error" or result contains "failed"
-    then:
-      - exit: failure "Failed to ${action} ${service_name}: ${result}"
+  - if:
+      condition: result contains "error" or result contains "failed"
+      then:
+        - exit:
+            status: failure
+            message: "Failed to ${action} ${service_name}: ${result}"
+  - print:
+      message: "Service ${service_name} ${action} completed successfully"
 
-  - print: "Service ${service_name} ${action} completed successfully"
-
-  - exit: success "Configuration applied"
+  - exit:
+      status: success
+      message: "Configuration applied"

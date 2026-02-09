@@ -11,23 +11,30 @@ vars:
   memory_threshold: 90
 
 steps:
-  - print: "=========================================="
-  - print: "Health Check for ${Host_IP}"
-  - print: "Timestamp: ${_timestamp}"
-  - print: "=========================================="
+  - print:
+      message: "=========================================="
+  - print:
+      message: "Health Check for ${Host_IP}"
+  - print:
+      message: "Timestamp: ${_timestamp}"
+  - print:
+      message: "=========================================="
 
   #
   # SECTION 1: Basic Connectivity (already proven if we get here)
   #
-  - print: "[OK] SSH Connection successful"
+  - print:
+      message: "[OK] SSH Connection successful"
 
   #
   # SECTION 2: Example - Get and display a command
   #
-  - send: uptime
-    capture: uptime_output
+  - send:
+      command: uptime
+      capture: uptime_output
 
-  - print: "Uptime: ${uptime_output}"
+  - print:
+      message: "Uptime: ${uptime_output}"
 
   #
   # SECTION 3: Example - Extract and check a value
@@ -91,9 +98,15 @@ steps:
   #             - print: "Ping failed, retrying..."
   #             - wait: 2
 
-  - print: ""
-  - print: "=========================================="
-  - print: "Health check complete"
-  - print: "=========================================="
+  - print:
+      message: ""
+  - print:
+      message: "=========================================="
+  - print:
+      message: "Health check complete"
+  - print:
+      message: "=========================================="
 
-  - exit: success "Health check passed"
+  - exit:
+      status: success
+      message: "Health check passed"

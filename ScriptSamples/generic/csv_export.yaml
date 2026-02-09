@@ -10,51 +10,62 @@ vars:
   write_header: "true"
 
 steps:
-  - print: "Collecting metrics from ${Host_IP}..."
+  - print:
+      message: "Collecting metrics from ${Host_IP}..."
 
   # Get hostname
-  - send: hostname
-    capture: hostname_out
+  - send:
+      command: hostname
+      capture: hostname_out
   - extract:
       from: hostname_out
       pattern: '(\S+)'
       into: device_name
 
   # Get OS info
-  - send: cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2
-    capture: os_out
-    on_error: continue
-  - set: os_name = trim(os_out)
+  - send:
+      command: cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2
+      capture: os_out
+      on_error: continue
+  - set:
+      expression: os_name = trim(os_out)
 
   # Get CPU count
-  - send: nproc
-    capture: cpu_count
+  - send:
+      command: nproc
+      capture: cpu_count
 
   # Get memory total (GB)
-  - send: free -g | grep Mem | awk '{print $2}'
-    capture: mem_total
+  - send:
+      command: free -g | grep Mem | awk '{print $2}'
+      capture: mem_total
 
   # Get disk usage percentage
-  - send: df -h / | tail -1 | awk '{print $5}' | tr -d '%'
-    capture: disk_pct
+  - send:
+      command: df -h / | tail -1 | awk '{print $5}' | tr -d '%'
+      capture: disk_pct
 
   # Get load average (1 min)
-  - send: cat /proc/loadavg | awk '{print $1}'
-    capture: load_avg
+  - send:
+      command: cat /proc/loadavg | awk '{print $1}'
+      capture: load_avg
 
   # Write CSV header on first run (controlled by variable)
-  - if: write_header == "true"
-    then:
-      - writefile:
-          path: "${output_file}"
-          format: csv
-          content: ""
-          headers: [Timestamp, Host_IP, Hostname, OS, CPUs, Memory_GB, Disk_Pct, Load_1min]
-          mode: overwrite
-      - print: "CSV header written"
+  - if:
+      condition: write_header == "true"
+      then:
+        - writefile:
+            path: "${output_file}"
+            format: csv
+            content: ""
+            headers: [Timestamp, Host_IP, Hostname, OS, CPUs, Memory_GB, Disk_Pct, Load_1min]
+            mode: overwrite
+        - print:
+            message: "CSV header written"
 
   # Build CSV row
-  - set: csv_row = "${_timestamp},${Host_IP},${device_name},${os_name},${cpu_count},${mem_total},${disk_pct},${load_avg}"
+  - set:
+      expression: csv_row = "${_timestamp},${Host_IP},${device_name},${os_name},${cpu_count},${mem_total},${disk_pct},${load_avg}"
 
   # Append data row
   - writefile:
@@ -63,12 +74,21 @@ steps:
       content: "${csv_row}"
       mode: append
 
-  - print: "Metrics exported:"
-  - print: "  Host: ${device_name}"
-  - print: "  OS: ${os_name}"
-  - print: "  CPUs: ${cpu_count}"
-  - print: "  Memory: ${mem_total} GB"
-  - print: "  Disk: ${disk_pct}%"
-  - print: "  Load: ${load_avg}"
+  - print:
+      message: "Metrics exported:"
+  - print:
+      message: "  Host: ${device_name}"
+  - print:
+      message: "  OS: ${os_name}"
+  - print:
+      message: "  CPUs: ${cpu_count}"
+  - print:
+      message: "  Memory: ${mem_total} GB"
+  - print:
+      message: "  Disk: ${disk_pct}%"
+  - print:
+      message: "  Load: ${load_avg}"
 
-  - exit: success "Metrics exported to CSV"
+  - exit:
+      status: success
+      message: "Metrics exported to CSV"
