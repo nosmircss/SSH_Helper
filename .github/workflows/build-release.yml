@@ -26,7 +26,7 @@ jobs:
         dotnet-version: 8.0.x
 
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore ./SSH_Helper.csproj -r win-x64 /p:Configuration=Release
 
     - name: Publish
       run: dotnet publish ./SSH_Helper.csproj -c Release -o ./publish --no-restore
