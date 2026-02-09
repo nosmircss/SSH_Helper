@@ -13,6 +13,9 @@ jobs:
   build:
     runs-on: windows-latest
 
+    env:
+      REBEX_LICENSE_KEY: ${{ secrets.REBEX_LICENSE_KEY }}
+
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -25,15 +28,8 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore
 
-    - name: Build
-      run: dotnet build --configuration Release --no-restore
-      env:
-        REBEX_LICENSE_KEY: ${{ secrets.REBEX_LICENSE_KEY }}
-
     - name: Publish
-      run: dotnet publish -c Release -o ./publish --self-contained true -r win-x64 -p:PublishSingleFile=true
-      env:
-        REBEX_LICENSE_KEY: ${{ secrets.REBEX_LICENSE_KEY }}
+      run: dotnet publish ./SSH_Helper.csproj -c Release -o ./publish --no-restore
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
