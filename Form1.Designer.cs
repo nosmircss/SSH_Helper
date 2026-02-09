@@ -103,7 +103,7 @@ namespace SSH_Helper
             lblPresetsTitle = new Label();
             lblFavoritesEmpty = new Label();
             scriptPanel = new Panel();
-            txtCommand = new SSH_Helper.UI.ScriptEditorControl();
+            txtCommand = new SSH_Helper.UI.ScintillaScriptEditorControl();
             contextCommandBox = new ContextMenuStrip(components);
             ctxCut = new ToolStripMenuItem();
             ctxCopy = new ToolStripMenuItem();
@@ -1771,7 +1771,7 @@ namespace SSH_Helper
         private TextBox txtTimeoutHeader;
         private TextBox txtPreset;
         private Button btnSavePreset;
-        private SSH_Helper.UI.ScriptEditorControl txtCommand;
+        private SSH_Helper.UI.ScintillaScriptEditorControl txtCommand;
         private ContextMenuStrip contextCommandBox;
         private ToolStripMenuItem ctxCut;
         private ToolStripMenuItem ctxCopy;

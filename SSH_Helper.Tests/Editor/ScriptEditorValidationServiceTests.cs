@@ -42,9 +42,9 @@ public class ScriptEditorValidationServiceTests
             }
         };
 
-        service.RequestValidation("steps:\n  - send: show version");
+        service.RequestValidation("steps:\n  - send:\n      command: show version");
         await Task.Delay(10);
-        service.RequestValidation("steps:\n  - if: condition");
+        service.RequestValidation("steps:\n  - if:\n      condition: condition");
 
         var finalDiagnostics = await completion.Task.WaitAsync(TimeSpan.FromSeconds(2));
         finalDiagnostics.Should().Contain(d => d.Message.Contains("then", StringComparison.OrdinalIgnoreCase));
@@ -110,12 +110,14 @@ public class ScriptEditorValidationServiceTests
 
         var text = """
                    steps:
-                     - send: whoami
-                       suppress: true
-                       capture: current_user
-                     - send: uname -a
-                       timeout: 15
-                       capture: system_info
+                     - send:
+                         command: whoami
+                         suppress: true
+                         capture: current_user
+                     - send:
+                         command: uname -a
+                         timeout: 15
+                         capture: system_info
                    """;
 
         var diagnostics = await service.ValidateNowAsync(text);
@@ -135,8 +137,9 @@ public class ScriptEditorValidationServiceTests
 
         var text = """
                    steps:
-                     - send: show version
-                       typoo: true
+                     - send:
+                         command: show version
+                         typoo: true
                    """;
 
         var diagnostics = await service.ValidateNowAsync(text);
@@ -154,7 +157,7 @@ public class ScriptEditorValidationServiceTests
         };
 
         var steps = Enumerable.Range(1, 550)
-            .Select(index => $"  - send: show version {index}");
+            .Select(index => $"  - send:\n      command: show version {index}");
         var text = "steps:\n" + string.Join("\n", steps);
 
         var stopwatch = Stopwatch.StartNew();

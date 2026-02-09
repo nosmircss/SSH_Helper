@@ -16,12 +16,18 @@ vars:
 steps:
   # Execute the SAM block command
   # -v = verbose, -t = timeout, -f = forward to, -J = any direction
-  - send: fw sam -v -t ${expire} -f localhost -J any ${block}
-    capture: result
+  - send:
+      command: fw sam -v -t ${expire} -f localhost -J any ${block}
+      capture: result
 
   # Check if the block was successful
-  - if: result matches 'successfully completed'
-    then:
-      - exit: success "Successfully blocked ${block}"
-    else:
-      - exit: failure "Failed to block ${block}"
+  - if:
+      condition: result matches 'successfully completed'
+      then:
+        - exit:
+            status: success
+            message: "Successfully blocked ${block}"
+      else:
+        - exit:
+            status: failure
+            message: "Failed to block ${block}"

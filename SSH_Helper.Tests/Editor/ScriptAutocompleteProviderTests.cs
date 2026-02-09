@@ -20,6 +20,30 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_BareDash_DoesNotTriggerStepCommandSuggestions()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  -";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.None);
+        completion.Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GetCompletion_DashFollowedBySpace_TriggersStepCommandSuggestions()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Select(item => item.Label).Should().Contain("send");
+    }
+
+    [Fact]
     public void GetCompletion_TopLevelPrefix_SuggestsTopLevelKeys()
     {
         var provider = new ScriptAutocompleteProvider();
@@ -44,19 +68,72 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_LogBlockOptionKey_SuggestsOnlyLogOptions()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - log:\n      message: done\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().BeEquivalentTo(["level", "message"]);
+    }
+
+    [Fact]
+    public void GetCompletion_StepLevelOptionKey_ExcludesCommandScopedKeys()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - send:\n      command: show version\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain("capture");
+        completion.Items.Select(item => item.Label).Should().NotContain("action");
+        completion.Items.Select(item => item.Label).Should().NotContain("max_iterations");
+    }
+
+    [Fact]
+    public void GetCompletion_WhileStepLevelOptionKey_IncludesMaxIterations()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - while:\n      condition: retries < 3\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["do", "max_iterations"]);
+        completion.Items.Select(item => item.Label).Should().NotContain("on_error");
+    }
+
+    [Fact]
+    public void GetCompletion_PrintStepOptionKey_SuggestsMessageOnly()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - print:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().BeEquivalentTo(["message"]);
+    }
+
+    [Fact]
     public void InterpolationTriggers_DollarAndBraces_AreSymmetric()
     {
         var provider = new ScriptAutocompleteProvider(() => new[] { "hostname", "ip" });
         var prelude = """
-                      vars:
-                        api_token: abc123
-                      steps:
-                        - set: dynamic_var = 1
-                        - send: show version
-                          capture: output
-                        - http:
-                            into: response
-                      """;
+                       vars:
+                         api_token: abc123
+                       steps:
+                         - set:
+                             expression: dynamic_var = 1
+                         - send:
+                             command: show version
+                             capture: output
+                         - http:
+                             into: response
+                       """;
 
         var dollarText = prelude + Environment.NewLine + "  - print: ${";
         var braceText = prelude + Environment.NewLine + "  - print: {{";
@@ -80,9 +157,11 @@ public class ScriptAutocompleteProviderTests
                    vars:
                      static_var: abc
                    steps:
-                     - set: generated = 1
-                     - send: show version
-                       capture: command_output
+                     - set:
+                         expression: generated = 1
+                     - send:
+                         command: show version
+                         capture: command_output
                      - http:
                          into: response
                      - extract:

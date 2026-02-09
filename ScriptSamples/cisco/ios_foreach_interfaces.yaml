@@ -7,11 +7,13 @@ description: Gets interface brief, extracts interface names, loops through them
 
 steps:
   # Disable paging
-  - send: terminal length 0
+  - send:
+      command: terminal length 0
 
   # Get interface summary
-  - send: sh ip int br
-    capture: output
+  - send:
+      command: sh ip int br
+      capture: output
 
   # Extract interface names (captures text after "net" like "Ethernet0/0")
   - extract:
@@ -21,13 +23,20 @@ steps:
       match: all
 
   # Loop through interfaces
-  - foreach: iface in interfaces
-    do:
-      - print: "found: ${iface}"
+  - foreach:
+      iterator: iface in interfaces
+      do:
+        - print:
+            message: "found: ${iface}"
 
   # Demonstrate wait command
-  - print: "start sleep"
-  - wait: 2
-  - print: "end sleep"
+  - print:
+      message: "start sleep"
+  - wait:
+      seconds: 2
+  - print:
+      message: "end sleep"
 
-  - exit: success "Completed interface iteration"
+  - exit:
+      status: success
+      message: "Completed interface iteration"

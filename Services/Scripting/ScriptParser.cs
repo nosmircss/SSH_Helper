@@ -74,7 +74,16 @@ namespace SSH_Helper.Services.Scripting
         private static readonly IReadOnlyDictionary<string, string[]> CommandOptionKeys =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
+                ["send"] = ["command", "capture", "suppress", "expect", "timeout", "on_error"],
+                ["print"] = ["message"],
+                ["wait"] = ["seconds"],
+                ["set"] = ["expression"],
+                ["exit"] = ["status", "message"],
                 ["extract"] = ["from", "pattern", "into", "match"],
+                ["if"] = ["condition", "then", "elif", "else"],
+                ["foreach"] = ["iterator", "when", "do"],
+                ["while"] = ["condition", "max_iterations", "do"],
+                ["try"] = ["do", "catch", "finally"],
                 ["readfile"] = ["path", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"],
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers"],
                 ["input"] = ["prompt", "into", "default", "password", "validate", "validation_error"],
@@ -89,7 +98,69 @@ namespace SSH_Helper.Services.Scripting
                 ["webhook"] = ["url", "method", "body", "headers", "into", "timeout", "on_error"],
                 ["parse"] = ["format", "from", "into", "sections"]
             };
+        private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["send"] = [],
+                ["print"] = [],
+                ["wait"] = [],
+                ["set"] = [],
+                ["exit"] = [],
+                ["extract"] = [],
+                ["if"] = [],
+                ["foreach"] = [],
+                ["while"] = [],
+                ["updatecolumn"] = [],
+                ["updateenvironment"] = [],
+                ["readfile"] = [],
+                ["writefile"] = [],
+                ["input"] = [],
+                ["log"] = [],
+                ["http"] = [],
+                ["ping"] = [],
+                ["dns"] = [],
+                ["portcheck"] = [],
+                ["sftp"] = [],
+                ["webhook"] = [],
+                ["parse"] = [],
+                ["break"] = [],
+                ["continue"] = [],
+                ["try"] = []
+            };
+        private static readonly HashSet<string> CanonicalMapCommands = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "send",
+            "print",
+            "wait",
+            "set",
+            "exit",
+            "if",
+            "foreach",
+            "while",
+            "try"
+        };
+        private static readonly HashSet<StepType> CommandMapOnErrorStepTypes =
+        [
+            StepType.Send,
+            StepType.Readfile,
+            StepType.Writefile,
+            StepType.Input,
+            StepType.Http,
+            StepType.Ping,
+            StepType.Dns,
+            StepType.Portcheck,
+            StepType.Sftp,
+            StepType.Webhook
+        ];
+        private static readonly HashSet<string> ExitStatusTokens = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "success",
+            "failure",
+            "fail",
+            "error"
+        };
         private static readonly string[] KnownStepOptionKeys = CommonStepOptionKeys
+            .Concat(StepRootOptionKeysByCommand.Values.SelectMany(values => values))
             .Concat(CommandOptionKeys.Values.SelectMany(values => values))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -119,6 +190,36 @@ namespace SSH_Helper.Services.Scripting
         public static IReadOnlyList<string> GetKnownTopLevelKeys() => KnownTopLevelKeys;
 
         public static IReadOnlyList<string> GetKnownStepCommands() => KnownStepKeys;
+
+        public static IReadOnlyList<string> GetKnownCommonStepOptionKeys()
+        {
+            return CommonStepOptionKeys
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        public static IReadOnlyDictionary<string, IReadOnlyList<string>> GetKnownStepOptionKeysByCommand()
+        {
+            return CommandOptionKeys.ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyList<string>)pair.Value
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        public static IReadOnlyDictionary<string, IReadOnlyList<string>> GetKnownStepRootOptionKeysByCommand()
+        {
+            return StepRootOptionKeysByCommand.ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyList<string>)pair.Value
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                StringComparer.OrdinalIgnoreCase);
+        }
 
         public static IReadOnlyList<string> GetKnownStepOptionKeys() => KnownStepOptionKeys;
 
@@ -341,38 +442,48 @@ namespace SSH_Helper.Services.Scripting
                 switch (keyName)
                 {
                     case "send":
-                        step.Send = parser.Consume<Scalar>().Value;
+                        step.DeclaredStepType = StepType.Send;
+                        ParseSendStep(parser, step);
                         break;
                     case "print":
-                        step.Print = parser.Consume<Scalar>().Value;
+                        step.DeclaredStepType = StepType.Print;
+                        ParsePrintStep(parser, step);
                         break;
                     case "wait":
-                        if (int.TryParse(parser.Consume<Scalar>().Value, out var wait))
-                            step.Wait = wait;
+                        step.DeclaredStepType = StepType.Wait;
+                        ParseWaitStep(parser, step);
                         break;
                     case "set":
-                        step.Set = parser.Consume<Scalar>().Value;
+                        step.DeclaredStepType = StepType.Set;
+                        ParseSetStep(parser, step);
                         break;
                     case "exit":
-                        step.Exit = parser.Consume<Scalar>().Value;
+                        step.DeclaredStepType = StepType.Exit;
+                        ParseExitStep(parser, step);
                         break;
                     case "if":
-                        step.If = parser.Consume<Scalar>().Value;
+                        step.DeclaredStepType = StepType.If;
+                        ParseIfStep(parser, step);
                         break;
                     case "foreach":
-                        step.Foreach = parser.Consume<Scalar>().Value;
+                        step.DeclaredStepType = StepType.Foreach;
+                        ParseForeachStep(parser, step);
                         break;
                     case "while":
-                        step.While = parser.Consume<Scalar>().Value;
+                        step.DeclaredStepType = StepType.While;
+                        ParseWhileStep(parser, step);
                         break;
                     case "break":
+                        step.DeclaredStepType = StepType.Break;
                         step.BreakLoop = ParseBooleanish(parser);
                         break;
                     case "continue":
+                        step.DeclaredStepType = StepType.Continue;
                         step.ContinueLoop = ParseBooleanish(parser);
                         break;
                     case "try":
-                        step.Try = ParseSteps(parser);
+                        step.DeclaredStepType = StepType.Try;
+                        ParseTryStep(parser, step);
                         break;
                     case "capture":
                         step.Capture = parser.Consume<Scalar>().Value;
@@ -390,6 +501,7 @@ namespace SSH_Helper.Services.Scripting
                         break;
                     case "on_error":
                     case "onerror":
+                        step.UsesStepRootOnError = true;
                         step.OnError = parser.Consume<Scalar>().Value;
                         break;
                     case "when":
@@ -401,45 +513,59 @@ namespace SSH_Helper.Services.Scripting
                             step.MaxIterations = maxIterations;
                         break;
                     case "extract":
+                        step.DeclaredStepType = StepType.Extract;
                         step.Extract = ParseExtractOptions(parser);
                         break;
                     case "readfile":
+                        step.DeclaredStepType = StepType.Readfile;
                         step.Readfile = ParseReadfileOptions(parser);
                         break;
                     case "writefile":
+                        step.DeclaredStepType = StepType.Writefile;
                         step.Writefile = ParseWritefileOptions(parser);
                         break;
                     case "input":
+                        step.DeclaredStepType = StepType.Input;
                         step.Input = ParseInputOptions(parser);
                         break;
                     case "updatecolumn":
+                        step.DeclaredStepType = StepType.UpdateColumn;
                         step.UpdateColumn = ParseUpdateColumnOptions(parser);
                         break;
                     case "updateenvironment":
+                        step.DeclaredStepType = StepType.UpdateEnvironment;
                         step.UpdateEnvironment = ParseUpdateEnvironmentOptions(parser);
                         break;
                     case "log":
+                        step.DeclaredStepType = StepType.Log;
                         step.Log = ParseLogValue(parser);
                         break;
                     case "http":
+                        step.DeclaredStepType = StepType.Http;
                         step.Http = ParseHttpOptions(parser, step);
                         break;
                     case "ping":
+                        step.DeclaredStepType = StepType.Ping;
                         step.Ping = ParsePingOptions(parser, step);
                         break;
                     case "dns":
+                        step.DeclaredStepType = StepType.Dns;
                         step.Dns = ParseDnsOptions(parser, step);
                         break;
                     case "portcheck":
+                        step.DeclaredStepType = StepType.Portcheck;
                         step.Portcheck = ParsePortcheckOptions(parser, step);
                         break;
                     case "sftp":
+                        step.DeclaredStepType = StepType.Sftp;
                         step.Sftp = ParseSftpOptions(parser, step);
                         break;
                     case "webhook":
+                        step.DeclaredStepType = StepType.Webhook;
                         step.Webhook = ParseWebhookOptions(parser, step);
                         break;
                     case "parse":
+                        step.DeclaredStepType = StepType.Parse;
                         step.Parse = ParseParseOptions(parser);
                         break;
                     case "then":
@@ -487,6 +613,515 @@ namespace SSH_Helper.Services.Scripting
             return true;
         }
 
+        private void ParseSendStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var hasCommand = false;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "command":
+                            step.Send = parser.Consume<Scalar>().Value;
+                            hasCommand = !string.IsNullOrWhiteSpace(step.Send);
+                            break;
+                        case "capture":
+                            step.Capture = parser.Consume<Scalar>().Value;
+                            break;
+                        case "suppress":
+                            step.Suppress = ParseBooleanOrDefault(parser, step.Suppress);
+                            break;
+                        case "expect":
+                            step.Expect = parser.Consume<Scalar>().Value;
+                            break;
+                        case "timeout":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
+                                step.Timeout = timeout;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            step.OnError = parser.Consume<Scalar>().Value;
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown send key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (!hasCommand)
+                {
+                    AddStepParseError(step, "send.command is required");
+                }
+                return;
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                step.Send = parser.Consume<Scalar>().Value;
+                if (string.IsNullOrWhiteSpace(step.Send))
+                {
+                    AddStepParseError(step, "send.command is required");
+                }
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "send must be a mapping with required key 'command'");
+        }
+
+        private void ParsePrintStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var hasMessage = false;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "message":
+                            step.Print = parser.Consume<Scalar>().Value;
+                            hasMessage = true;
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown print key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (!hasMessage)
+                {
+                    AddStepParseError(step, "print.message is required");
+                }
+                return;
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                step.Print = parser.Consume<Scalar>().Value;
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "print must be a mapping with required key 'message'");
+        }
+
+        private void ParseWaitStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var hasSeconds = false;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+                    switch (key)
+                    {
+                        case "seconds":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var seconds))
+                            {
+                                step.Wait = seconds;
+                                hasSeconds = true;
+                            }
+                            else
+                            {
+                                AddStepParseError(step, "wait.seconds must be an integer");
+                            }
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown wait key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (!hasSeconds)
+                {
+                    AddStepParseError(step, "wait.seconds is required");
+                }
+                return;
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                if (int.TryParse(parser.Consume<Scalar>().Value, out var seconds))
+                {
+                    step.Wait = seconds;
+                }
+                else
+                {
+                    AddStepParseError(step, "wait.seconds must be an integer");
+                }
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "wait must be a mapping with required key 'seconds'");
+        }
+
+        private void ParseSetStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var hasExpression = false;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+                    switch (key)
+                    {
+                        case "expression":
+                            step.Set = parser.Consume<Scalar>().Value;
+                            hasExpression = !string.IsNullOrWhiteSpace(step.Set);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown set key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (!hasExpression)
+                {
+                    AddStepParseError(step, "set.expression is required");
+                }
+                return;
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                step.Set = parser.Consume<Scalar>().Value;
+                if (string.IsNullOrWhiteSpace(step.Set))
+                {
+                    AddStepParseError(step, "set.expression is required");
+                }
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "set must be a mapping with required key 'expression'");
+        }
+
+        private void ParseExitStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                string? status = null;
+                string? message = null;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+                    switch (key)
+                    {
+                        case "status":
+                            status = parser.Consume<Scalar>().Value;
+                            break;
+                        case "message":
+                            message = parser.Consume<Scalar>().Value;
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown exit key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (string.IsNullOrWhiteSpace(status) && string.IsNullOrWhiteSpace(message))
+                {
+                    AddStepParseError(step, "exit requires at least one of 'status' or 'message'");
+                    return;
+                }
+
+                var parts = new[] { status, message }
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => value!.Trim());
+                step.Exit = string.Join(" ", parts);
+                return;
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                var scalar = parser.Consume<Scalar>().Value?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(scalar))
+                {
+                    AddStepParseError(step, "exit requires a message, status, or both");
+                    return;
+                }
+
+                var firstSpace = scalar.IndexOf(' ');
+                if (firstSpace > 0)
+                {
+                    var statusToken = scalar[..firstSpace];
+                    var remainder = scalar[(firstSpace + 1)..].Trim();
+                    if (ExitStatusTokens.Contains(statusToken))
+                    {
+                        step.Exit = string.IsNullOrWhiteSpace(remainder)
+                            ? statusToken
+                            : $"{statusToken} {remainder}";
+                        return;
+                    }
+                }
+
+                if (ExitStatusTokens.Contains(scalar))
+                {
+                    step.Exit = scalar;
+                    return;
+                }
+
+                // Shorthand form defaults to success status.
+                step.Exit = $"success {scalar}";
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "exit must be a mapping with key 'status' and/or 'message'");
+        }
+
+        private void ParseIfStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var hasCondition = false;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+                    switch (key)
+                    {
+                        case "condition":
+                            step.If = parser.Consume<Scalar>().Value;
+                            hasCondition = !string.IsNullOrWhiteSpace(step.If);
+                            break;
+                        case "then":
+                            step.Then = ParseSteps(parser);
+                            break;
+                        case "elif":
+                            step.Elif = ParseElifBranches(parser);
+                            break;
+                        case "else":
+                            step.Else = ParseSteps(parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown if key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (!hasCondition)
+                {
+                    AddStepParseError(step, "if.condition is required");
+                }
+                return;
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                step.If = parser.Consume<Scalar>().Value;
+                if (string.IsNullOrWhiteSpace(step.If))
+                {
+                    AddStepParseError(step, "if.condition is required");
+                }
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "if must be a mapping with required key 'condition'");
+        }
+
+        private void ParseForeachStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var hasIterator = false;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+                    switch (key)
+                    {
+                        case "iterator":
+                            step.Foreach = parser.Consume<Scalar>().Value;
+                            hasIterator = !string.IsNullOrWhiteSpace(step.Foreach);
+                            break;
+                        case "when":
+                            step.When = parser.Consume<Scalar>().Value;
+                            break;
+                        case "do":
+                            step.Do = ParseSteps(parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown foreach key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (!hasIterator)
+                {
+                    AddStepParseError(step, "foreach.iterator is required");
+                }
+                return;
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                step.Foreach = parser.Consume<Scalar>().Value;
+                if (string.IsNullOrWhiteSpace(step.Foreach))
+                {
+                    AddStepParseError(step, "foreach.iterator is required");
+                }
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "foreach must be a mapping with required key 'iterator'");
+        }
+
+        private void ParseWhileStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var hasCondition = false;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+                    switch (key)
+                    {
+                        case "condition":
+                            step.While = parser.Consume<Scalar>().Value;
+                            hasCondition = !string.IsNullOrWhiteSpace(step.While);
+                            break;
+                        case "do":
+                            step.Do = ParseSteps(parser);
+                            break;
+                        case "max_iterations":
+                        case "maxiterations":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var maxIterations))
+                                step.MaxIterations = maxIterations;
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown while key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (!hasCondition)
+                {
+                    AddStepParseError(step, "while.condition is required");
+                }
+                return;
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                step.While = parser.Consume<Scalar>().Value;
+                if (string.IsNullOrWhiteSpace(step.While))
+                {
+                    AddStepParseError(step, "while.condition is required");
+                }
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "while must be a mapping with required key 'condition'");
+        }
+
+        private void ParseTryStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var hasDo = false;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+                    switch (key)
+                    {
+                        case "do":
+                            step.Try = ParseSteps(parser);
+                            hasDo = step.Try != null;
+                            break;
+                        case "catch":
+                            step.Catch = ParseSteps(parser);
+                            break;
+                        case "finally":
+                            step.Finally = ParseSteps(parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown try key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (!hasDo)
+                {
+                    AddStepParseError(step, "try.do is required");
+                }
+                return;
+            }
+
+            if (parser.Accept<SequenceStart>(out _))
+            {
+                step.Try = ParseSteps(parser);
+                AddLegacyInlineError(step, "try", "do");
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "try must be a mapping with required key 'do'");
+        }
+
+        private static void AddStepParseError(ScriptStep step, string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            if (!step.ParseErrors.Contains(message, StringComparer.Ordinal))
+            {
+                step.ParseErrors.Add(message);
+            }
+        }
+
+        private static void AddLegacyInlineError(ScriptStep step, string command, string key)
+        {
+            AddStepParseError(
+                step,
+                $"Legacy inline syntax '{command}: ...' is not supported; use nested '{command}.{key}' format");
+        }
+
         private List<ElifBranch> ParseElifBranches(IParser parser)
         {
             var branches = new List<ElifBranch>();
@@ -514,6 +1149,7 @@ namespace SSH_Helper.Services.Scripting
                     var keyName = key.Value.ToLowerInvariant();
                     switch (keyName)
                     {
+                        case "condition":
                         case "if":
                             branch.If = parser.Consume<Scalar>().Value;
                             break;
@@ -1444,7 +2080,8 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         /// <param name="script">The parsed script to validate.</param>
         /// <param name="originalYaml">Optional original YAML text for including line content in errors.</param>
-        public List<string> Validate(Script script, string? originalYaml = null)
+        /// <param name="enforceCanonicalSyntax">Whether to enforce strict command-map requirements and command-map placement rules.</param>
+        public List<string> Validate(Script script, string? originalYaml = null, bool enforceCanonicalSyntax = false)
         {
             var errors = new List<string>();
             var lines = originalYaml?.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
@@ -1455,22 +2092,40 @@ namespace SSH_Helper.Services.Scripting
             }
             else
             {
-                ValidateSteps(script.Steps, errors, "", lines, 0);
+                ValidateSteps(script.Steps, errors, "", lines, 0, enforceCanonicalSyntax);
             }
 
             return errors;
         }
 
-        private void ValidateSteps(List<ScriptStep> steps, List<string> errors, string prefix, string[]? lines, int loopDepth)
+        private void ValidateSteps(
+            List<ScriptStep> steps,
+            List<string> errors,
+            string prefix,
+            string[]? lines,
+            int loopDepth,
+            bool enforceCanonicalSyntax)
         {
             foreach (var step in steps)
             {
                 var stepType = step.GetStepType();
 
-                if (stepType == StepType.Unknown)
+                if (enforceCanonicalSyntax && step.ParseErrors.Count > 0)
                 {
                     var lineContent = GetLineContent(lines, step.LineNumber);
-                    errors.Add($"{prefix}Line {step.LineNumber}: Step has no recognized command{lineContent}");
+                    foreach (var parseError in step.ParseErrors)
+                    {
+                        errors.Add($"{prefix}Line {step.LineNumber}: {parseError}{lineContent}");
+                    }
+                }
+
+                if (stepType == StepType.Unknown)
+                {
+                    if (!enforceCanonicalSyntax || step.ParseErrors.Count == 0)
+                    {
+                        var lineContent = GetLineContent(lines, step.LineNumber);
+                        errors.Add($"{prefix}Line {step.LineNumber}: Step has no recognized command{lineContent}");
+                    }
                     continue;
                 }
 
@@ -1478,6 +2133,17 @@ namespace SSH_Helper.Services.Scripting
                 {
                     var lineContent = GetLineContent(lines, step.LineNumber);
                     errors.Add($"{prefix}Line {step.LineNumber}: on_error must be 'continue' or 'stop'{lineContent}");
+                }
+
+                if (enforceCanonicalSyntax &&
+                    step.UsesStepRootOnError &&
+                    !string.IsNullOrWhiteSpace(step.OnError) &&
+                    CommandMapOnErrorStepTypes.Contains(stepType))
+                {
+                    var lineContent = GetLineContent(lines, step.LineNumber);
+                    var commandName = stepType.ToString().ToLowerInvariant();
+                    errors.Add(
+                        $"{prefix}Line {step.LineNumber}: step-level on_error is not supported for '{commandName}'; use '{commandName}.on_error' inside the command map{lineContent}");
                 }
 
                 // Validate specific step types
@@ -1508,7 +2174,7 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: If requires 'then' block{lineContent}");
                         }
                         if (step.Then != null)
-                            ValidateSteps(step.Then, errors, prefix + "  ", lines, loopDepth);
+                            ValidateSteps(step.Then, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
                         if (step.Elif != null)
                         {
                             foreach (var branch in step.Elif)
@@ -1516,7 +2182,7 @@ namespace SSH_Helper.Services.Scripting
                                 if (string.IsNullOrWhiteSpace(branch.If))
                                 {
                                     var lineContent = GetLineContent(lines, branch.LineNumber);
-                                    errors.Add($"{prefix}Line {branch.LineNumber}: Elif requires 'if' condition{lineContent}");
+                                    errors.Add($"{prefix}Line {branch.LineNumber}: Elif requires 'condition'{lineContent}");
                                 }
                                 if (branch.Then == null || branch.Then.Count == 0)
                                 {
@@ -1525,12 +2191,12 @@ namespace SSH_Helper.Services.Scripting
                                 }
                                 else
                                 {
-                                    ValidateSteps(branch.Then, errors, prefix + "  ", lines, loopDepth);
+                                    ValidateSteps(branch.Then, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
                                 }
                             }
                         }
                         if (step.Else != null)
-                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth);
+                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
                         break;
 
                     case StepType.Foreach:
@@ -1540,7 +2206,7 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: Foreach requires 'do' block{lineContent}");
                         }
                         if (step.Do != null)
-                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1);
+                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax);
                         break;
 
                     case StepType.While:
@@ -1555,21 +2221,21 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: max_iterations must be greater than 0{lineContent}");
                         }
                         if (step.Do != null)
-                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1);
+                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax);
                         break;
 
                     case StepType.Try:
                         if (step.Try == null || step.Try.Count == 0)
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: Try requires 'try' block{lineContent}");
+                            errors.Add($"{prefix}Line {step.LineNumber}: Try requires 'do' block{lineContent}");
                         }
                         if (step.Try != null)
-                            ValidateSteps(step.Try, errors, prefix + "  ", lines, loopDepth);
+                            ValidateSteps(step.Try, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
                         if (step.Catch != null)
-                            ValidateSteps(step.Catch, errors, prefix + "  ", lines, loopDepth);
+                            ValidateSteps(step.Catch, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
                         if (step.Finally != null)
-                            ValidateSteps(step.Finally, errors, prefix + "  ", lines, loopDepth);
+                            ValidateSteps(step.Finally, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
                         break;
 
                     case StepType.Break:

@@ -45,7 +45,11 @@ namespace SSH_Helper.Services.Editor
             new(@"(?<trigger>\$\{|{{)(?<token>[A-Za-z0-9_.-]*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
         private static readonly Regex StepCommandRegex =
-            new(@"^\s*-\s*(?<token>[A-Za-z0-9_-]*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+            new(@"^\s*-\s+(?<token>[A-Za-z0-9_-]*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private static readonly Regex StepCommandLineRegex =
+            new(@"^\s*-\s*(?<command>[A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(?<value>.*)$",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
         private static readonly Regex OptionValueRegex =
             new(@"^\s*(?<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(?<token>[A-Za-z0-9_-]*)$",
@@ -56,6 +60,10 @@ namespace SSH_Helper.Services.Editor
 
         private static readonly Regex SetAssignmentRegex =
             new(@"^\s*-\s*set:\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+        private static readonly Regex SetExpressionAssignmentRegex =
+            new(@"^\s*expression:\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=",
                 RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
         private static readonly Regex CaptureRegex =
@@ -91,6 +99,9 @@ namespace SSH_Helper.Services.Editor
         private readonly Func<IReadOnlyCollection<string>> _getHostColumns;
         private readonly IReadOnlyList<string> _topLevelKeys;
         private readonly IReadOnlyList<string> _stepCommands;
+        private readonly IReadOnlyList<string> _commonStepOptionKeys;
+        private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _stepRootOptionKeysByCommand;
+        private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _stepOptionKeysByCommand;
         private readonly IReadOnlyList<string> _stepOptionKeys;
         private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _enumLikeOptionValues;
 
@@ -104,6 +115,28 @@ namespace SSH_Helper.Services.Editor
             _stepCommands = ScriptParser.GetKnownStepCommands()
                 .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            _commonStepOptionKeys = ScriptParser.GetKnownCommonStepOptionKeys()
+                .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _stepRootOptionKeysByCommand = ScriptParser.GetKnownStepRootOptionKeysByCommand()
+                .ToDictionary(
+                    pair => CanonicalizeKey(pair.Key),
+                    pair => (IReadOnlyList<string>)pair.Value
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            _stepOptionKeysByCommand = ScriptParser.GetKnownStepOptionKeysByCommand()
+                .ToDictionary(
+                    pair => CanonicalizeKey(pair.Key),
+                    pair => (IReadOnlyList<string>)pair.Value
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    StringComparer.OrdinalIgnoreCase);
 
             _stepOptionKeys = ScriptParser.GetKnownStepOptionKeys()
                 .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
@@ -169,11 +202,12 @@ namespace SSH_Helper.Services.Editor
             if (optionKeyMatch.Success && currentIndent > 0)
             {
                 var token = optionKeyMatch.Groups["token"].Value;
+                var optionCandidates = ResolveOptionKeyCandidates(text, lineStart, currentIndent);
                 return BuildCompletion(
                     CompletionContextKind.StepOptionKey,
                     safeCaret - token.Length,
                     token.Length,
-                    FilterValues(_stepOptionKeys, token, kind: "option"));
+                    FilterValues(optionCandidates, token, kind: "option"));
             }
 
             if (currentIndent == 0)
@@ -255,6 +289,12 @@ namespace SSH_Helper.Services.Editor
                     symbols.Add(setMatch.Groups["name"].Value);
                 }
 
+                var setExpressionMatch = SetExpressionAssignmentRegex.Match(line);
+                if (setExpressionMatch.Success)
+                {
+                    symbols.Add(setExpressionMatch.Groups["name"].Value);
+                }
+
                 var captureMatch = CaptureRegex.Match(line);
                 if (captureMatch.Success)
                 {
@@ -290,6 +330,109 @@ namespace SSH_Helper.Services.Editor
                 safeCaret - token.Length,
                 token.Length,
                 FilterValues(GetInterpolationSymbols(text), token, kind: "symbol"));
+        }
+
+        private IReadOnlyList<string> ResolveOptionKeyCandidates(string text, int currentLineStart, int currentIndent)
+        {
+            if (!TryGetImmediateParentLine(text, currentLineStart, currentIndent, out var parentLine, out var parentIndent))
+                return Array.Empty<string>();
+
+            if (!TryParseStepCommandLine(parentLine, out var command, out var hasInlineValue))
+                return Array.Empty<string>();
+
+            var canonicalCommand = CanonicalizeKey(command);
+            if (!hasInlineValue &&
+                currentIndent > parentIndent + 2 &&
+                _stepOptionKeysByCommand.TryGetValue(canonicalCommand, out var commandOptions))
+            {
+                return commandOptions;
+            }
+
+            if (_stepRootOptionKeysByCommand.TryGetValue(canonicalCommand, out var stepRootOptions))
+            {
+                return stepRootOptions;
+            }
+
+            return _commonStepOptionKeys;
+        }
+
+        private static bool TryGetImmediateParentLine(
+            string text,
+            int currentLineStart,
+            int currentIndent,
+            out string parentLine,
+            out int parentIndent)
+        {
+            parentLine = string.Empty;
+            parentIndent = 0;
+
+            var searchEnd = Math.Clamp(currentLineStart, 0, text.Length);
+            while (TryReadPreviousLine(text, searchEnd, out var previousLineStart, out var previousLineEnd))
+            {
+                searchEnd = previousLineStart;
+                var candidate = text.Substring(previousLineStart, previousLineEnd - previousLineStart).TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(candidate))
+                    continue;
+
+                var trimmedStart = candidate.TrimStart();
+                if (trimmedStart.StartsWith('#'))
+                    continue;
+
+                var indent = CountIndent(candidate);
+                if (indent < currentIndent)
+                {
+                    parentLine = candidate;
+                    parentIndent = indent;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryReadPreviousLine(string text, int endExclusive, out int lineStart, out int lineEnd)
+        {
+            lineStart = 0;
+            lineEnd = 0;
+
+            var cursor = Math.Clamp(endExclusive, 0, text.Length);
+            if (cursor == 0)
+                return false;
+
+            if (cursor > 0 && text[cursor - 1] == '\n')
+                cursor--;
+
+            lineEnd = cursor;
+            while (cursor > 0 && text[cursor - 1] != '\n')
+            {
+                cursor--;
+            }
+
+            lineStart = cursor;
+            return lineEnd >= lineStart;
+        }
+
+        private static bool TryParseStepCommandLine(string line, out string command, out bool hasInlineValue)
+        {
+            command = string.Empty;
+            hasInlineValue = false;
+
+            var match = StepCommandLineRegex.Match(line);
+            if (!match.Success)
+                return false;
+
+            command = match.Groups["command"].Value;
+            hasInlineValue = HasInlineValue(match.Groups["value"].Value);
+            return true;
+        }
+
+        private static bool HasInlineValue(string rawValue)
+        {
+            if (string.IsNullOrWhiteSpace(rawValue))
+                return false;
+
+            var trimmed = rawValue.Trim();
+            return !trimmed.StartsWith('#');
         }
 
         private static CompletionResult BuildCompletion(

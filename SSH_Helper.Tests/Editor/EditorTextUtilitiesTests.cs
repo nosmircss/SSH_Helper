@@ -45,7 +45,7 @@ public class EditorTextUtilitiesTests
     }
 
     [Fact]
-    public void ApplySmartEnter_AfterStepLine_InsertsNewStepPrefix()
+    public void ApplySmartEnter_AfterStepLine_ContinuesOptionIndentation()
     {
         var text = "steps:\n  - send: show version";
 
@@ -56,7 +56,7 @@ public class EditorTextUtilitiesTests
             indentSize: 2,
             preserveBlankLineBetweenSteps: true);
 
-        NormalizeLineEndings(edit.Text).Should().EndWith("\n  - ");
+        NormalizeLineEndings(edit.Text).Should().EndWith("\n    ");
     }
 
     [Fact]
@@ -132,6 +132,37 @@ public class EditorTextUtilitiesTests
 
         var afterCaret = edit.Text.Substring(edit.SelectionStart);
         NormalizeLineEndings(afterCaret).Should().StartWith("\n  - print: done");
+    }
+
+    [Fact]
+    public void ApplyIndentation_OnBlankLine_DoesNotIndentFollowingStep()
+    {
+        var text = "steps:\n  - send: hostname\n    capture: host_result\n\n  - print: \"Captured hostname\"";
+        var blankLineStart = text.IndexOf("\n\n", StringComparison.Ordinal) + 1;
+
+        var edit = EditorTextUtilities.ApplyIndentation(
+            text,
+            blankLineStart,
+            selectionLength: 0,
+            indentSize: 2,
+            outdent: false,
+            useSpacesForTab: true);
+
+        NormalizeLineEndings(edit.Text).Should().Contain("capture: host_result\n  \n  - print:");
+    }
+
+    [Fact]
+    public void ApplySiblingStepEnter_FromCommandMapPayload_InsertsSiblingStepPrefix()
+    {
+        var text = "steps:\n  - send:\n      command: show version";
+
+        var edit = EditorTextUtilities.ApplySiblingStepEnter(
+            text,
+            text.Length,
+            selectionLength: 0,
+            indentSize: 2);
+
+        NormalizeLineEndings(edit.Text).Should().EndWith("\n  - ");
     }
 
     private static string NormalizeLineEndings(string value)

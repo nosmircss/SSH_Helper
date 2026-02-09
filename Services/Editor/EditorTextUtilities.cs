@@ -103,7 +103,7 @@ namespace SSH_Helper.Services.Editor
             {
                 if (trimmedBeforeCaret.StartsWith("- ", StringComparison.Ordinal))
                 {
-                    if (trimmedBeforeCaret.EndsWith(":", StringComparison.Ordinal))
+                    if (trimmedBeforeCaret.Contains(':'))
                     {
                         insertion += new string(' ', safeIndentSize);
                     }
@@ -122,6 +122,36 @@ namespace SSH_Helper.Services.Editor
                 insertion = lineEnding + lineIndent;
             }
 
+            var newText = baseText.Insert(caretIndex, insertion);
+            var newCaret = caretIndex + insertion.Length;
+            return new EditorTextEdit(newText, newCaret, 0);
+        }
+
+        public static EditorTextEdit ApplySiblingStepEnter(
+            string text,
+            int selectionStart,
+            int selectionLength,
+            int indentSize)
+        {
+            text ??= string.Empty;
+            var safeIndentSize = Math.Clamp(indentSize, 1, 8);
+            var safeSelectionStart = Math.Clamp(selectionStart, 0, text.Length);
+            var safeSelectionLength = Math.Max(0, selectionLength);
+
+            var baseText = text;
+            if (safeSelectionLength > 0)
+            {
+                baseText = text.Remove(safeSelectionStart, Math.Min(safeSelectionLength, text.Length - safeSelectionStart));
+            }
+
+            var caretIndex = safeSelectionStart;
+            var currentLineStart = FindLineStart(baseText, caretIndex);
+            var currentLineEnd = FindLineEnd(baseText, caretIndex);
+            var currentLine = baseText.Substring(currentLineStart, currentLineEnd - currentLineStart);
+            var lineEnding = ResolveLineEnding(baseText, currentLineEnd);
+            var stepIndent = ResolveSiblingStepIndent(baseText, currentLineStart, currentLine, safeIndentSize);
+
+            var insertion = lineEnding + new string(' ', stepIndent) + "- ";
             var newText = baseText.Insert(caretIndex, insertion);
             var newCaret = caretIndex + insertion.Length;
             return new EditorTextEdit(newText, newCaret, 0);
@@ -207,6 +237,62 @@ namespace SSH_Helper.Services.Editor
             return line.StartsWith("- ", StringComparison.Ordinal);
         }
 
+        private static int ResolveSiblingStepIndent(
+            string text,
+            int currentLineStart,
+            string currentLine,
+            int indentSize)
+        {
+            if (TryGetStepLineIndent(currentLine, out var currentStepIndent))
+            {
+                return currentStepIndent;
+            }
+
+            var currentIndent = CountIndent(currentLine);
+            var index = Math.Max(0, currentLineStart - 1);
+            while (index >= 0)
+            {
+                var lineStart = FindLineStart(text, index);
+                var lineEnd = FindLineEnd(text, lineStart);
+                var line = text.Substring(lineStart, lineEnd - lineStart);
+                var trimmed = line.Trim();
+                if (!string.IsNullOrEmpty(trimmed) && !trimmed.StartsWith("#", StringComparison.Ordinal))
+                {
+                    if (TryGetStepLineIndent(line, out var stepIndent))
+                    {
+                        return stepIndent;
+                    }
+                }
+
+                if (lineStart == 0)
+                {
+                    break;
+                }
+
+                index = lineStart - 1;
+            }
+
+            return Math.Max(0, currentIndent - indentSize);
+        }
+
+        private static bool TryGetStepLineIndent(string line, out int indent)
+        {
+            indent = 0;
+            if (line == null)
+            {
+                return false;
+            }
+
+            var trimmed = line.TrimStart();
+            if (!trimmed.StartsWith("- ", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            indent = CountIndent(line);
+            return true;
+        }
+
         private static string ResolveLineEnding(string text, int currentLineEnd)
         {
             if (!string.IsNullOrEmpty(text) && currentLineEnd >= 0 && currentLineEnd < text.Length)
@@ -276,6 +362,34 @@ namespace SSH_Helper.Services.Editor
             return builder.ToString();
         }
 
+        private static int CountIndent(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return 0;
+            }
+
+            var count = 0;
+            foreach (var c in line)
+            {
+                if (c == ' ')
+                {
+                    count++;
+                    continue;
+                }
+
+                if (c == '\t')
+                {
+                    count += 2;
+                    continue;
+                }
+
+                break;
+            }
+
+            return count;
+        }
+
         private static List<int> GetLineStartIndices(string text)
         {
             var starts = new List<int> { 0 };
@@ -321,10 +435,6 @@ namespace SSH_Helper.Services.Editor
             if (currentStart < block.Length)
             {
                 segments.Add(block.Substring(currentStart));
-            }
-            else if (block.EndsWith('\n'))
-            {
-                segments.Add(string.Empty);
             }
 
             return segments;

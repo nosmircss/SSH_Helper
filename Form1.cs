@@ -3846,7 +3846,7 @@ namespace SSH_Helper
             try
             {
                 var script = parser.Parse(scriptText);
-                var errors = parser.Validate(script, scriptText);
+                var errors = parser.Validate(script, scriptText, enforceCanonicalSyntax: true);
                 var warnings = parser.Warnings;
 
                 if (errors.Count == 0 && warnings.Count == 0)

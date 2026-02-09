@@ -332,7 +332,7 @@ namespace SSH_Helper.Services
             try
             {
                 script = parser.Parse(scriptText);
-                var validationErrors = parser.Validate(script, scriptText);
+                var validationErrors = parser.Validate(script, scriptText, enforceCanonicalSyntax: true);
                 if (validationErrors.Count > 0)
                 {
                     throw new ScriptParseException("Script validation failed:\n" + string.Join("\n", validationErrors));
@@ -641,7 +641,7 @@ namespace SSH_Helper.Services
             try
             {
                 script = parser.Parse(scriptText);
-                var validationErrors = parser.Validate(script, scriptText);
+                var validationErrors = parser.Validate(script, scriptText, enforceCanonicalSyntax: true);
                 if (validationErrors.Count > 0)
                 {
                     throw new ScriptParseException("Script validation failed:\n" + string.Join("\n", validationErrors));

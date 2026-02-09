@@ -149,7 +149,18 @@ namespace SSH_Helper.Services.Editor
             var starts = new List<int> { 0 };
             for (var i = 0; i < text.Length; i++)
             {
-                if (text[i] == '\n' && i + 1 < text.Length)
+                if (text[i] == '\r')
+                {
+                    if (i + 1 < text.Length && text[i + 1] == '\n')
+                    {
+                        i++;
+                    }
+
+                    starts.Add(i + 1);
+                    continue;
+                }
+
+                if (text[i] == '\n')
                 {
                     starts.Add(i + 1);
                 }

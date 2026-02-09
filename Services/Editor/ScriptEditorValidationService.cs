@@ -121,7 +121,7 @@ namespace SSH_Helper.Services.Editor
             try
             {
                 var script = parser.Parse(text);
-                var errors = parser.Validate(script, text);
+                var errors = parser.Validate(script, text, enforceCanonicalSyntax: true);
                 foreach (var error in errors)
                 {
                     diagnostics.Add(MapMessageToDiagnostic(error, DiagnosticSeverity.Error, lines));

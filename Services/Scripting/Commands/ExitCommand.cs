@@ -22,7 +22,23 @@ namespace SSH_Helper.Services.Scripting.Commands
             var message = exitText;
 
             var trimmed = exitText.TrimStart();
-            if (trimmed.StartsWith("success ", System.StringComparison.OrdinalIgnoreCase))
+            if (trimmed.Equals("success", System.StringComparison.OrdinalIgnoreCase))
+            {
+                status = ScriptExitStatus.Success;
+                message = string.Empty;
+            }
+            else if (trimmed.Equals("failure", System.StringComparison.OrdinalIgnoreCase) ||
+                     trimmed.Equals("fail", System.StringComparison.OrdinalIgnoreCase))
+            {
+                status = ScriptExitStatus.Failure;
+                message = string.Empty;
+            }
+            else if (trimmed.Equals("error", System.StringComparison.OrdinalIgnoreCase))
+            {
+                status = ScriptExitStatus.Error;
+                message = string.Empty;
+            }
+            else if (trimmed.StartsWith("success ", System.StringComparison.OrdinalIgnoreCase))
             {
                 status = ScriptExitStatus.Success;
                 message = trimmed.Substring(8).Trim();
