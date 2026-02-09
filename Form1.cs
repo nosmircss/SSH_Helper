@@ -1227,6 +1227,11 @@ namespace SSH_Helper
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
 
+            if (dgv_variables.DataSource != null)
+            {
+                dgv_variables.DataSource = null;
+            }
+
             dgv_variables.Rows.Clear();
             dgv_variables.Columns.Clear();
 
@@ -7960,6 +7965,11 @@ namespace SSH_Helper
         private void RestoreApplicationState(ApplicationState state)
         {
             if (state == null) return;
+
+            if (dgv_variables.DataSource != null)
+            {
+                dgv_variables.DataSource = null;
+            }
 
             // Restore hosts data
             dgv_variables.Rows.Clear();
