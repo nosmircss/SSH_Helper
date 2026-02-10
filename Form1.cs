@@ -1634,6 +1634,7 @@ namespace SSH_Helper
             _managedFonts.Add(toolStripFont);
             mainToolStrip.Font = toolStripFont;
             presetsToolStrip.Font = toolStripFont;
+            ReflowTopBarsForCurrentFont();
 
             // Status bar
             var statusFont = new Font(uiFont, Scaled(fontSettings.StatusBarFontSize));
@@ -1674,6 +1675,43 @@ namespace SSH_Helper
                     }
                 });
             }
+        }
+
+        private void ReflowTopBarsForCurrentFont()
+        {
+            static int CalculateStripHeight(Font font, int minHeight, int verticalPadding)
+            {
+                var textHeight = TextRenderer.MeasureText("Hg", font).Height;
+                return Math.Max(minHeight, textHeight + verticalPadding);
+            }
+
+            menuStrip1.AutoSize = false;
+            menuStrip1.Height = CalculateStripHeight(menuStrip1.Font, minHeight: 24, verticalPadding: 8);
+
+            mainToolStrip.AutoSize = false;
+            mainToolStrip.Height = CalculateStripHeight(mainToolStrip.Font, minHeight: 25, verticalPadding: 10);
+            var mainItemHeight = Math.Max(22, mainToolStrip.Height - mainToolStrip.Padding.Vertical - 2);
+
+            tsbUsername.AutoSize = false;
+            tsbUsername.Size = new Size(tsbUsername.Width, mainItemHeight);
+            tsbPassword.AutoSize = false;
+            tsbPassword.Size = new Size(tsbPassword.Width, mainItemHeight);
+
+            tsbEnvironment.AutoSize = false;
+            tsbEnvironment.Size = new Size(tsbEnvironment.Width, mainItemHeight);
+
+            toolStripSeparator1.AutoSize = false;
+            toolStripSeparator1.Size = new Size(toolStripSeparator1.Width, mainItemHeight);
+            toolStripSeparator2.AutoSize = false;
+            toolStripSeparator2.Size = new Size(toolStripSeparator2.Width, mainItemHeight);
+            toolStripSeparatorEnv.AutoSize = false;
+            toolStripSeparatorEnv.Size = new Size(toolStripSeparatorEnv.Width, mainItemHeight);
+
+            presetsToolStrip.AutoSize = false;
+            presetsToolStrip.Height = CalculateStripHeight(presetsToolStrip.Font, minHeight: 25, verticalPadding: 10);
+            var presetItemHeight = Math.Max(22, presetsToolStrip.Height - presetsToolStrip.Padding.Vertical - 2);
+            tsbSeparatorFolders.AutoSize = false;
+            tsbSeparatorFolders.Size = new Size(tsbSeparatorFolders.Width, presetItemHeight);
         }
 
         private void ApplyColumnAutoResize(bool autoResize)
@@ -2054,7 +2092,7 @@ namespace SSH_Helper
                 }
                 else if (item is ToolStripButton button)
                 {
-                    button.Margin = new Padding(2, 1, 2, 2);
+                    button.Margin = new Padding(2, 0, 2, 0);
                 }
             }
         }
