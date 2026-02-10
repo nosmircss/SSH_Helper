@@ -152,10 +152,9 @@ namespace SSH_Helper.Services
                 result.ReleaseNotes = release.Body;
                 result.ReleaseUrl = release.HtmlUrl;
 
-                // Find the appropriate download asset (prefer .zip, then .exe)
-                var asset = release.Assets.FirstOrDefault(a => a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                         ?? release.Assets.FirstOrDefault(a => a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                         ?? release.Assets.FirstOrDefault();
+                // Find the appropriate installable download asset (prefer current exe name, then .exe, then .zip)
+                var currentExeName = Path.GetFileName(Environment.ProcessPath ?? string.Empty);
+                var asset = SelectInstallAsset(release, currentExeName);
 
                 if (asset != null)
                 {
@@ -497,7 +496,13 @@ try {
     if ($UpdatePackage -like '*.zip') {
         Expand-Archive -Path $UpdatePackage -DestinationPath $TargetDir -Force -ErrorAction Stop
     } else {
-        $destPath = Join-Path $TargetDir (Split-Path $UpdatePackage -Leaf)
+        # Always replace the executable we are about to relaunch.
+        # This avoids relaunching an old binary when asset names differ.
+        $destPath = $ExeToLaunch
+        if ([string]::IsNullOrWhiteSpace($destPath)) {
+            $destPath = Join-Path $TargetDir (Split-Path $UpdatePackage -Leaf)
+        }
+
         Copy-Item -Path $UpdatePackage -Destination $destPath -Force -ErrorAction Stop
         if (-not (Test-Path $destPath)) {
             throw ""Update copy failed: $destPath not found.""
@@ -511,10 +516,26 @@ try {
 
     $exePath = $ExeToLaunch
     if (-not (Test-Path $exePath)) {
-        $exeName = Split-Path $ExeToLaunch -Leaf
-        $fallback = Join-Path $TargetDir $exeName
-        if (Test-Path $fallback) {
-            $exePath = $fallback
+        $candidates = [System.Collections.Generic.List[string]]::new()
+        if (-not [string]::IsNullOrWhiteSpace($ExeToLaunch)) {
+            $candidates.Add((Join-Path $TargetDir (Split-Path $ExeToLaunch -Leaf)))
+        }
+        $candidates.Add((Join-Path $TargetDir 'SSH_Helper.exe'))
+
+        foreach ($candidate in $candidates) {
+            if (Test-Path $candidate) {
+                $exePath = $candidate
+                break
+            }
+        }
+    }
+
+    if (-not (Test-Path $exePath)) {
+        $latestExe = Get-ChildItem -Path $TargetDir -Filter '*.exe' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+        if ($latestExe) {
+            $exePath = $latestExe.FullName
         } else {
             throw ""Executable not found after update: $ExeToLaunch""
         }
@@ -557,6 +578,24 @@ try {
             }
 
             return null;
+        }
+
+        private static GitHubAsset? SelectInstallAsset(GitHubRelease release, string? currentExeName)
+        {
+            if (!string.IsNullOrWhiteSpace(currentExeName))
+            {
+                var exactExe = release.Assets.FirstOrDefault(asset =>
+                    string.Equals(asset.Name, currentExeName, StringComparison.OrdinalIgnoreCase));
+                if (exactExe != null)
+                {
+                    return exactExe;
+                }
+            }
+
+            return release.Assets.FirstOrDefault(asset =>
+                       asset.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                   ?? release.Assets.FirstOrDefault(asset =>
+                       asset.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
         }
 
         private static string? ExtractSha256(string content, string? fileName)
