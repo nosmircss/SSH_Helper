@@ -51,9 +51,18 @@
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Rebex.SshShell" Version="7.0.9448" />
-    <PackageReference Include="Scintilla5.NET" Version="6.1.1" />
+    <PackageReference Include="Scintilla5.NET" Version="6.1.1" GeneratePathProperty="true" />
     <PackageReference Include="SSH.NET" Version="2024.1.0" />
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(PkgScintilla5_NET)' != ''">
+    <EmbeddedResource Include="$(PkgScintilla5_NET)\runtimes\win-x64\native\Scintilla.dll">
+      <LogicalName>SSH_Helper.Resources.Scintilla.win-x64.Scintilla.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="$(PkgScintilla5_NET)\runtimes\win-x64\native\Lexilla.dll">
+      <LogicalName>SSH_Helper.Resources.Scintilla.win-x64.Lexilla.dll</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

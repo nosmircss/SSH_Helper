@@ -1,4 +1,5 @@
 using System.Reflection;
+using SSH_Helper.Utilities;
 
 namespace SSH_Helper
 {
@@ -36,6 +37,8 @@ namespace SSH_Helper
             {
                 Rebex.Licensing.Key = rebexKey;
             }
+
+            ScintillaNativeBootstrap.ConfigureSatelliteDirectory();
 
             // To customize application configuration such as set high DPI settings or default font,
             // see https://aka.ms/applicationconfiguration.
