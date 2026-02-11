@@ -394,6 +394,61 @@ public class SetCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_TrimWithNestedJsonGetAndPlaceholders_ResolvesNestedFunctionValue()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("admins", "{\"system\":{\"admin\":{\"admin\":{\"trusthost1\":\" 10.0.0.0 255.255.255.0 \"}}}}");
+        context.SetVariable("admin_name", "admin");
+        context.SetVariable("i", 1);
+
+        var step = new ScriptStep
+        {
+            Set = "th = trim(json.get(admins, \"system.admin.${admin_name}.trusthost${i}\", \"\"))"
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("th").Should().Be("10.0.0.0 255.255.255.0");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NestedStringFunctions_EvaluatesRecursively()
+    {
+        var context = new ScriptContext();
+        var step = new ScriptStep
+        {
+            Set = "value = trim(upper('  mixedCase  '))"
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("value").Should().Be("MIXEDCASE");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonConstructor_ValueSupportsNestedNonJsonFunctions()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("admins", "{\"system\":{\"admin\":{\"admin\":{\"trusthost1\":\" 10.0.0.0 255.255.255.0 \"}}}}");
+        context.SetVariable("admin_name", "admin");
+        context.SetVariable("i", 1);
+        var step = new ScriptStep
+        {
+            Set = "row = json('trusthost', trim(json.get(admins, \"system.admin.${admin_name}.trusthost${i}\", \"\")))"
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var rowJson = context.GetVariableString("row");
+        var node = JsonNode.Parse(rowJson);
+        node.Should().NotBeNull();
+        node!["trusthost"]!.GetValue<string>().Should().Be("10.0.0.0 255.255.255.0");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_SortFunction_SortsAscendingAndDescending()
     {
         var context = new ScriptContext();

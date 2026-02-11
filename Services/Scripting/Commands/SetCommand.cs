@@ -321,6 +321,12 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (handled)
                 return length;
 
+            if (JsonUtilities.TryEvaluateJsonExpression(expr, context, out var jsonResult, normalizeStructured: false))
+                return jsonResult;
+
+            if (LooksLikeFunctionCall(expr))
+                return EvaluateExpression(expr, context);
+
             if (expr.Contains("${", StringComparison.Ordinal))
                 return context.SubstituteVariables(expr);
 
@@ -335,6 +341,63 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             return expr;
+        }
+
+        private static bool LooksLikeFunctionCall(string expr)
+        {
+            if (string.IsNullOrWhiteSpace(expr))
+                return false;
+
+            var openIndex = expr.IndexOf('(');
+            if (openIndex <= 0 || !expr.EndsWith(")", StringComparison.Ordinal))
+                return false;
+
+            var name = expr.Substring(0, openIndex).Trim();
+            if (string.IsNullOrEmpty(name))
+                return false;
+
+            foreach (var c in name)
+            {
+                if (!(char.IsLetterOrDigit(c) || c == '_' || c == '.'))
+                    return false;
+            }
+
+            var depth = 0;
+            var inString = false;
+            var stringChar = '\0';
+            for (int i = openIndex; i < expr.Length; i++)
+            {
+                var c = expr[i];
+                if ((c == '"' || c == '\'') && (i == 0 || expr[i - 1] != '\\'))
+                {
+                    if (!inString)
+                    {
+                        inString = true;
+                        stringChar = c;
+                    }
+                    else if (stringChar == c)
+                    {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (inString)
+                    continue;
+
+                if (c == '(')
+                    depth++;
+                else if (c == ')')
+                    depth--;
+
+                if (depth == 0 && i < expr.Length - 1)
+                    return false;
+
+                if (depth < 0)
+                    return false;
+            }
+
+            return depth == 0;
         }
 
         private static string FormatValueForDisplay(object? value)
