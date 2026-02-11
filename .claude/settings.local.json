@@ -18,7 +18,8 @@
       "mcp__*",
       "mcp__codex__codex",
       "Bash(codex:*)",
-      "Bash(npx openspec validate:*)"
+      "Bash(npx openspec validate:*)",
+      "Bash(npx openspec:*)"
     ],
     "deny": [
       "Read(.env)",
