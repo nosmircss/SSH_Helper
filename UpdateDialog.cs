@@ -16,6 +16,7 @@ namespace SSH_Helper
         private readonly Action<string?> _onSkipVersion;
         private readonly bool _enableUpdateLog;
         private readonly bool _darkMode;
+        private readonly Func<bool>? _confirmExitBeforeInstall;
 
         private readonly Label _lblTitle;
         private readonly Label _lblVersionInfo;
@@ -32,13 +33,20 @@ namespace SSH_Helper
 
         private CancellationTokenSource? _downloadCts;
 
-        public UpdateDialog(UpdateCheckResult updateResult, UpdateService updateService, Action<string?> onSkipVersion, bool enableUpdateLog = false, bool darkMode = false)
+        public UpdateDialog(
+            UpdateCheckResult updateResult,
+            UpdateService updateService,
+            Action<string?> onSkipVersion,
+            bool enableUpdateLog = false,
+            bool darkMode = false,
+            Func<bool>? confirmExitBeforeInstall = null)
         {
             _updateResult = updateResult;
             _updateService = updateService;
             _onSkipVersion = onSkipVersion;
             _enableUpdateLog = enableUpdateLog;
             _darkMode = darkMode;
+            _confirmExitBeforeInstall = confirmExitBeforeInstall;
 
             Text = "Update Available";
             Size = new Size(680, 550);
@@ -546,8 +554,17 @@ namespace SSH_Helper
                 _lblProgress.Text = "Verifying update...";
                 await _updateService.VerifyUpdatePackageAsync(downloadPath, _updateResult.ChecksumUrl, _downloadCts.Token);
 
-                _lblProgress.Text = "Verification complete. Installing update...";
+                _lblProgress.Text = "Verification complete.";
                 _progressBar.Value = 100;
+
+                if (_confirmExitBeforeInstall != null && !_confirmExitBeforeInstall())
+                {
+                    _lblProgress.Text = "Install cancelled.";
+                    ResetButtons();
+                    return;
+                }
+
+                _lblProgress.Text = "Installing update...";
 
                 // Give UI a moment to update
                 await Task.Delay(500);
