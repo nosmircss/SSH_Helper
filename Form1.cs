@@ -7636,7 +7636,7 @@ namespace SSH_Helper
                 return;
             }
 
-            using var dialog = new ExecutionDetailsDialog(details, _isDarkMode);
+            using var dialog = new ExecutionDetailsDialog(details, entry.Output, _isDarkMode);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
             dialog.ShowDialog(this);
         }

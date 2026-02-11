@@ -55,9 +55,9 @@ public class NetworkStepParserTests
         script.Steps.Should().HaveCount(5);
         script.Steps[0].GetStepType().Should().Be(StepType.Http);
         script.Steps[0].Http!.Method.Should().Be("POST");
-        script.Steps[0].Http.Auth.Should().Be("bearer");
-        script.Steps[0].Http.ContentType.Should().Be("xml");
-        script.Steps[0].Http.VerifyTls.Should().BeFalse();
+        script.Steps[0].Http!.Auth.Should().Be("bearer");
+        script.Steps[0].Http!.ContentType.Should().Be("xml");
+        script.Steps[0].Http!.VerifyTls.Should().BeFalse();
 
         script.Steps[1].GetStepType().Should().Be(StepType.Ping);
         script.Steps[1].Ping!.Host.Should().Be("127.0.0.1");
