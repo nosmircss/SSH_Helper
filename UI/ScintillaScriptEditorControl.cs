@@ -20,11 +20,14 @@ namespace SSH_Helper.UI
         private const int FirstCustomStyleIndex = Style.BraceBad + 1;
         private const int LineNumberMarginIndex = 0;
         private const int LineNumberSpacerMarginIndex = 1;
+        private const int FoldMarginIndex = 2;
         private const int MinimumLineNumberDigits = 2;
         private const int MinimumLineNumberMarginWidth = 24;
         private const int LineNumberRightPaddingSpaces = 1;
         private const int LineNumberMarginExtraPaddingPixels = 4;
         private const int LineNumberSpacerWidthPixels = 10;
+        private const int FoldMarginWidthPixels = 14;
+        private const int FoldLevelBase = 1024;
         private const int ErrorIndicatorIndex = 8;
         private const int WarningIndicatorIndex = 9;
         private const int CompletionPopupWidth = 262;
@@ -32,6 +35,16 @@ namespace SSH_Helper.UI
         private static readonly Color LightLineNumberTextColor = Color.FromArgb(115, 115, 115);
         private static readonly Color DarkLineNumberBackColor = Color.FromArgb(30, 30, 30);
         private static readonly Color LightLineNumberBackColor = Color.FromArgb(242, 242, 242);
+        private static readonly Color DarkCurrentLineColor = Color.FromArgb(48, 48, 51);
+        private static readonly Color LightCurrentLineColor = Color.FromArgb(241, 246, 255);
+        private static readonly Color DarkIndentGuideColor = Color.FromArgb(78, 78, 82);
+        private static readonly Color LightIndentGuideColor = Color.FromArgb(205, 210, 219);
+        private static readonly Color DarkLongLineGuideColor = Color.FromArgb(72, 72, 76);
+        private static readonly Color LightLongLineGuideColor = Color.FromArgb(206, 211, 219);
+        private static readonly Color DarkBraceMatchBackColor = Color.FromArgb(66, 66, 70);
+        private static readonly Color LightBraceMatchBackColor = Color.FromArgb(225, 238, 255);
+        private static readonly Color DarkBraceMismatchBackColor = Color.FromArgb(90, 43, 43);
+        private static readonly Color LightBraceMismatchBackColor = Color.FromArgb(255, 233, 233);
 
         private readonly Scintilla _editor;
         private readonly ToolTip _toolTip;
@@ -91,6 +104,7 @@ namespace SSH_Helper.UI
             _editor.KeyUp += Editor_KeyUp;
             _editor.UpdateUI += Editor_UpdateUI;
             _editor.MouseUp += Editor_MouseUp;
+            _editor.MarginClick += Editor_MarginClick;
             _editor.MouseLeave += (_, _) => HideTooltip();
             _editor.DwellStart += Editor_DwellStart;
             _editor.DwellEnd += (_, _) => HideTooltip();
@@ -422,6 +436,7 @@ namespace SSH_Helper.UI
                 HideCompletionPopup();
             }
 
+            ConfigureVisualOptions();
             RequestValidationOrClear();
             RefreshEditorVisuals();
         }
@@ -464,6 +479,7 @@ namespace SSH_Helper.UI
             _completionList.Invalidate();
             ConfigureBaseStyles();
             ConfigureIndicators();
+            ConfigureVisualOptions();
             RefreshEditorVisuals();
         }
 
@@ -536,6 +552,11 @@ namespace SSH_Helper.UI
 
         private void Editor_UpdateUI(object? sender, UpdateUIEventArgs e)
         {
+            if ((e.Change & UpdateChange.Selection) != 0)
+            {
+                UpdateBraceHighlighting();
+            }
+
             if (!_completionPopup.Visible)
             {
                 return;
@@ -554,6 +575,26 @@ namespace SSH_Helper.UI
         {
             HideCompletionPopup();
             OnMouseUp(e);
+        }
+
+        private void Editor_MarginClick(object? sender, MarginClickEventArgs e)
+        {
+            if (!_settings.EnableCodeFolding || e.Margin != FoldMarginIndex)
+            {
+                return;
+            }
+
+            var lineIndex = _editor.LineFromPosition(e.Position);
+            if (lineIndex < 0 || lineIndex >= _editor.Lines.Count)
+            {
+                return;
+            }
+
+            var line = _editor.Lines[lineIndex];
+            if ((line.FoldLevelFlags & FoldLevelFlags.Header) != 0)
+            {
+                line.ToggleFold();
+            }
         }
 
         private void Editor_DwellStart(object? sender, DwellEventArgs e)
@@ -1055,6 +1096,13 @@ namespace SSH_Helper.UI
             }
 
             ApplyDiagnosticsVisuals();
+
+            if (_settings.EnableCodeFolding)
+            {
+                UpdateFoldLevels();
+            }
+
+            UpdateBraceHighlighting();
         }
 
         private void ApplySyntaxHighlighting()
@@ -1147,6 +1195,26 @@ namespace SSH_Helper.UI
             var spacerMargin = _editor.Margins[LineNumberSpacerMarginIndex];
             spacerMargin.BackColor = _isDarkMode ? DarkLineNumberBackColor : LightLineNumberBackColor;
 
+            var indentGuideStyle = _editor.Styles[Style.IndentGuide];
+            indentGuideStyle.ForeColor = _isDarkMode
+                ? DarkIndentGuideColor
+                : LightIndentGuideColor;
+            indentGuideStyle.BackColor = _editor.BackColor;
+
+            var braceLightStyle = _editor.Styles[Style.BraceLight];
+            braceLightStyle.ForeColor = _editor.ForeColor;
+            braceLightStyle.BackColor = _isDarkMode
+                ? DarkBraceMatchBackColor
+                : LightBraceMatchBackColor;
+
+            var braceBadStyle = _editor.Styles[Style.BraceBad];
+            braceBadStyle.ForeColor = _isDarkMode
+                ? Color.FromArgb(255, 178, 178)
+                : Color.FromArgb(179, 29, 29);
+            braceBadStyle.BackColor = _isDarkMode
+                ? DarkBraceMismatchBackColor
+                : LightBraceMismatchBackColor;
+
             _styleByColor.Clear();
             _nextStyleIndex = FirstCustomStyleIndex;
         }
@@ -1165,6 +1233,12 @@ namespace SSH_Helper.UI
             spacerMargin.Sensitive = false;
             spacerMargin.Width = LineNumberSpacerWidthPixels;
             spacerMargin.BackColor = _isDarkMode ? DarkLineNumberBackColor : LightLineNumberBackColor;
+
+            var foldMargin = _editor.Margins[FoldMarginIndex];
+            foldMargin.Type = MarginType.Symbol;
+            foldMargin.Mask = Marker.MaskFolders;
+            foldMargin.Sensitive = true;
+            foldMargin.Width = FoldMarginWidthPixels;
         }
 
         private void UpdateLineNumberMarginWidth()
@@ -1178,6 +1252,325 @@ namespace SSH_Helper.UI
             _editor.Margins[LineNumberMarginIndex].Width = Math.Max(
                 MinimumLineNumberMarginWidth,
                 preferredWidth);
+        }
+
+        private void ConfigureVisualOptions()
+        {
+            ConfigureCurrentLineHighlight();
+            ConfigureIndentGuides();
+            ConfigureWhitespaceMarkers();
+            ConfigureLongLineGuide();
+            ConfigureCodeFolding();
+
+            if (!_settings.EnableBraceMatching)
+            {
+                _editor.BraceHighlight(-1, -1);
+                _editor.BraceBadLight(-1);
+            }
+        }
+
+        private void ConfigureCurrentLineHighlight()
+        {
+            var baseColor = _isDarkMode
+                ? DarkCurrentLineColor
+                : LightCurrentLineColor;
+            var alpha = _settings.EnableCurrentLineHighlight ? 96 : 0;
+            _editor.CaretLineBackColor = Color.FromArgb(alpha, baseColor);
+        }
+
+        private void ConfigureIndentGuides()
+        {
+            _editor.IndentationGuides = _settings.EnableIndentGuides
+                ? IndentView.LookBoth
+                : IndentView.None;
+        }
+
+        private void ConfigureWhitespaceMarkers()
+        {
+            _editor.ViewWhitespace = _settings.ShowWhitespace
+                ? WhitespaceMode.VisibleAlways
+                : WhitespaceMode.Invisible;
+            _editor.ViewEol = false;
+
+            var whitespaceColor = _isDarkMode
+                ? Color.FromArgb(94, 94, 100)
+                : Color.FromArgb(196, 200, 208);
+            _editor.WhitespaceTextColor = whitespaceColor;
+            _editor.WhitespaceBackColor = _editor.BackColor;
+        }
+
+        private void ConfigureLongLineGuide()
+        {
+            _editor.EdgeColumn = _settings.LongLineColumn;
+            _editor.EdgeMode = _settings.EnableLongLineGuide
+                ? EdgeMode.Line
+                : EdgeMode.None;
+            _editor.EdgeColor = _isDarkMode
+                ? DarkLongLineGuideColor
+                : LightLongLineGuideColor;
+        }
+
+        private void ConfigureCodeFolding()
+        {
+            var foldMargin = _editor.Margins[FoldMarginIndex];
+            foldMargin.Type = MarginType.Symbol;
+            foldMargin.Mask = Marker.MaskFolders;
+            foldMargin.Sensitive = _settings.EnableCodeFolding;
+            foldMargin.Width = _settings.EnableCodeFolding
+                ? FoldMarginWidthPixels
+                : 0;
+
+            _editor.SetProperty("fold", _settings.EnableCodeFolding ? "1" : "0");
+            _editor.AutomaticFold = _settings.EnableCodeFolding
+                ? AutomaticFold.Show | AutomaticFold.Click
+                : AutomaticFold.None;
+
+            var foldMarginColor = _isDarkMode
+                ? DarkLineNumberBackColor
+                : LightLineNumberBackColor;
+            foldMargin.BackColor = foldMarginColor;
+            _editor.SetFoldMarginColor(true, foldMarginColor);
+            _editor.SetFoldMarginHighlightColor(true, foldMarginColor);
+
+            ConfigureFoldMarkers();
+
+            if (!_settings.EnableCodeFolding)
+            {
+                ResetFoldLevels();
+            }
+        }
+
+        private void ConfigureFoldMarkers()
+        {
+            var markerColor = _isDarkMode
+                ? DarkLineNumberTextColor
+                : LightLineNumberTextColor;
+
+            ConfigureChevronFoldMarker(Marker.Folder, expanded: false, markerColor);
+            ConfigureChevronFoldMarker(Marker.FolderOpen, expanded: true, markerColor);
+            ConfigureChevronFoldMarker(Marker.FolderEnd, expanded: false, markerColor);
+            ConfigureChevronFoldMarker(Marker.FolderOpenMid, expanded: true, markerColor);
+            ConfigureFoldMarker(Marker.FolderMidTail, MarkerSymbol.Empty, markerColor, Color.Transparent);
+            ConfigureFoldMarker(Marker.FolderTail, MarkerSymbol.Empty, markerColor, Color.Transparent);
+            ConfigureFoldMarker(Marker.FolderSub, MarkerSymbol.Empty, markerColor, Color.Transparent);
+        }
+
+        private void ConfigureChevronFoldMarker(int markerIndex, bool expanded, Color color)
+        {
+            using var image = CreateChevronMarkerBitmap(expanded, color);
+            _editor.Markers[markerIndex].DefineRgbaImage(image);
+        }
+
+        private static Bitmap CreateChevronMarkerBitmap(bool expanded, Color color)
+        {
+            const int size = 9;
+            var bitmap = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using var graphics = Graphics.FromImage(bitmap);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            graphics.Clear(Color.Transparent);
+
+            using var pen = new Pen(color, 1.4f)
+            {
+                StartCap = System.Drawing.Drawing2D.LineCap.Round,
+                EndCap = System.Drawing.Drawing2D.LineCap.Round,
+                LineJoin = System.Drawing.Drawing2D.LineJoin.Round
+            };
+
+            if (expanded)
+            {
+                graphics.DrawLines(pen, new[]
+                {
+                    new PointF(2.2f, 3.0f),
+                    new PointF(4.5f, 5.7f),
+                    new PointF(6.8f, 3.0f)
+                });
+            }
+            else
+            {
+                graphics.DrawLines(pen, new[]
+                {
+                    new PointF(3.0f, 2.2f),
+                    new PointF(5.7f, 4.5f),
+                    new PointF(3.0f, 6.8f)
+                });
+            }
+
+            return bitmap;
+        }
+
+        private void ConfigureFoldMarker(int markerIndex, MarkerSymbol symbol, Color foreColor, Color backColor)
+        {
+            var marker = _editor.Markers[markerIndex];
+            marker.Symbol = symbol;
+            marker.SetForeColor(foreColor);
+            marker.SetBackColor(backColor);
+        }
+
+        private void UpdateFoldLevels()
+        {
+            if (!_settings.EnableCodeFolding)
+            {
+                return;
+            }
+
+            var lineCount = _editor.Lines.Count;
+            if (lineCount == 0)
+            {
+                return;
+            }
+
+            var indentLevels = new int[lineCount];
+            for (var index = 0; index < lineCount; index++)
+            {
+                var lineText = _editor.Lines[index].Text?.TrimEnd('\r', '\n') ?? string.Empty;
+                indentLevels[index] = string.IsNullOrWhiteSpace(lineText)
+                    ? -1
+                    : GetIndentationColumns(lineText);
+            }
+
+            for (var index = 0; index < lineCount; index++)
+            {
+                var line = _editor.Lines[index];
+                var currentIndent = indentLevels[index];
+                if (currentIndent < 0)
+                {
+                    var inheritedIndent = 0;
+                    for (var previousIndex = index - 1; previousIndex >= 0; previousIndex--)
+                    {
+                        if (indentLevels[previousIndex] >= 0)
+                        {
+                            inheritedIndent = indentLevels[previousIndex];
+                            break;
+                        }
+                    }
+
+                    line.FoldLevel = FoldLevelBase + Math.Min(4095, inheritedIndent);
+                    line.FoldLevelFlags = FoldLevelFlags.White;
+                    continue;
+                }
+
+                var nextContentLine = FindNextContentLine(indentLevels, index + 1);
+                var isHeader = nextContentLine >= 0 &&
+                    indentLevels[nextContentLine] > currentIndent;
+
+                line.FoldLevel = FoldLevelBase + Math.Min(4095, currentIndent);
+                line.FoldLevelFlags = isHeader
+                    ? FoldLevelFlags.Header
+                    : (FoldLevelFlags)0;
+            }
+        }
+
+        private void ResetFoldLevels()
+        {
+            for (var index = 0; index < _editor.Lines.Count; index++)
+            {
+                var line = _editor.Lines[index];
+                line.FoldLevel = FoldLevelBase;
+                line.FoldLevelFlags = (FoldLevelFlags)0;
+            }
+        }
+
+        private int GetIndentationColumns(string lineText)
+        {
+            if (string.IsNullOrEmpty(lineText))
+            {
+                return 0;
+            }
+
+            var columns = 0;
+            var tabSize = Math.Max(1, _settings.IndentSize);
+            foreach (var character in lineText)
+            {
+                if (character == ' ')
+                {
+                    columns++;
+                    continue;
+                }
+
+                if (character == '\t')
+                {
+                    columns += tabSize - (columns % tabSize);
+                    continue;
+                }
+
+                break;
+            }
+
+            return columns;
+        }
+
+        private static int FindNextContentLine(int[] indentLevels, int startIndex)
+        {
+            for (var index = Math.Max(0, startIndex); index < indentLevels.Length; index++)
+            {
+                if (indentLevels[index] >= 0)
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+
+        private void UpdateBraceHighlighting()
+        {
+            if (!_settings.EnableBraceMatching || _editor.TextLength <= 0)
+            {
+                _editor.BraceHighlight(-1, -1);
+                _editor.BraceBadLight(-1);
+                return;
+            }
+
+            if (!TryGetBracePositionAtCaret(out var bracePosition))
+            {
+                _editor.BraceHighlight(-1, -1);
+                _editor.BraceBadLight(-1);
+                return;
+            }
+
+            var matchPosition = _editor.BraceMatch(bracePosition);
+            if (matchPosition >= 0)
+            {
+                _editor.BraceBadLight(-1);
+                _editor.BraceHighlight(bracePosition, matchPosition);
+                return;
+            }
+
+            _editor.BraceHighlight(-1, -1);
+            _editor.BraceBadLight(bracePosition);
+        }
+
+        private bool TryGetBracePositionAtCaret(out int bracePosition)
+        {
+            bracePosition = -1;
+
+            var caretPosition = Math.Clamp(_editor.CurrentPosition, 0, _editor.TextLength);
+            if (caretPosition > 0)
+            {
+                var previousChar = (char)_editor.GetCharAt(caretPosition - 1);
+                if (IsBraceCharacter(previousChar))
+                {
+                    bracePosition = caretPosition - 1;
+                    return true;
+                }
+            }
+
+            if (caretPosition < _editor.TextLength)
+            {
+                var currentChar = (char)_editor.GetCharAt(caretPosition);
+                if (IsBraceCharacter(currentChar))
+                {
+                    bracePosition = caretPosition;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsBraceCharacter(char character)
+        {
+            return character is '{' or '}' or '[' or ']' or '(' or ')';
         }
 
         private void ConfigureIndicators()

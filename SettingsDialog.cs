@@ -43,6 +43,13 @@ namespace SSH_Helper
         private readonly NumericUpDown _numIndentSize;
         private readonly CheckBox _chkEnableSmartEnter;
         private readonly CheckBox _chkPreserveBlankLineBetweenSteps;
+        private readonly CheckBox _chkEnableCurrentLineHighlight;
+        private readonly CheckBox _chkEnableIndentGuides;
+        private readonly CheckBox _chkShowWhitespace;
+        private readonly CheckBox _chkEnableLongLineGuide;
+        private readonly NumericUpDown _numLongLineColumn;
+        private readonly CheckBox _chkEnableCodeFolding;
+        private readonly CheckBox _chkEnableBraceMatching;
 
         // Appearance tab controls - Font Families
         private ComboBox _cboUIFont = null!;
@@ -187,6 +194,13 @@ namespace SSH_Helper
             _numIndentSize = FindControl<NumericUpDown>(tabCommandEditor, "numIndentSize");
             _chkEnableSmartEnter = FindControl<CheckBox>(tabCommandEditor, "chkEnableSmartEnter");
             _chkPreserveBlankLineBetweenSteps = FindControl<CheckBox>(tabCommandEditor, "chkPreserveBlankLineBetweenSteps");
+            _chkEnableCurrentLineHighlight = FindControl<CheckBox>(tabCommandEditor, "chkEnableCurrentLineHighlight");
+            _chkEnableIndentGuides = FindControl<CheckBox>(tabCommandEditor, "chkEnableIndentGuides");
+            _chkShowWhitespace = FindControl<CheckBox>(tabCommandEditor, "chkShowWhitespace");
+            _chkEnableLongLineGuide = FindControl<CheckBox>(tabCommandEditor, "chkEnableLongLineGuide");
+            _numLongLineColumn = FindControl<NumericUpDown>(tabCommandEditor, "numLongLineColumn");
+            _chkEnableCodeFolding = FindControl<CheckBox>(tabCommandEditor, "chkEnableCodeFolding");
+            _chkEnableBraceMatching = FindControl<CheckBox>(tabCommandEditor, "chkEnableBraceMatching");
 
             LoadSettings();
             UpdatePreview();
@@ -194,6 +208,7 @@ namespace SSH_Helper
 
             FontChanged += (_, _) => RefreshScrollableFlowExtents();
             Shown += (_, _) => RefreshScrollableFlowExtents();
+            _tabControl.SelectedIndexChanged += (_, _) => BeginInvoke(new Action(RefreshScrollableFlowExtents));
             RefreshScrollableFlowExtents();
         }
 
@@ -524,6 +539,51 @@ namespace SSH_Helper
                 Margin = new Padding(18, 0, 0, 2)
             });
 
+            // Visual aids
+            flow.Controls.Add(SectionHeader("Visual Aids"));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableCurrentLineHighlight",
+                Text = "Highlight current line",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableIndentGuides",
+                Text = "Show indentation guides",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkShowWhitespace",
+                Text = "Show whitespace markers",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableLongLineGuide",
+                Text = "Show long-line guide",
+                AutoSize = true
+            });
+            flow.Controls.Add(LabeledNumeric(
+                "Long-line guide column:",
+                "numLongLineColumn",
+                CommandEditorSettings.MinLongLineColumn,
+                CommandEditorSettings.MaxLongLineColumn,
+                120));
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableCodeFolding",
+                Text = "Enable code folding margin",
+                AutoSize = true
+            });
+            flow.Controls.Add(new CheckBox
+            {
+                Name = "chkEnableBraceMatching",
+                Text = "Highlight matching braces",
+                AutoSize = true
+            });
+
             tabCommandEditor.Controls.Add(flow);
             return tabCommandEditor;
         }
@@ -808,31 +868,44 @@ namespace SSH_Helper
         {
             foreach (var flow in _scrollableFlowPanels)
             {
-                if (flow.IsDisposed)
+                RefreshScrollableFlowExtent(flow);
+            }
+        }
+
+        private static void RefreshScrollableFlowExtent(FlowLayoutPanel flow)
+        {
+            if (flow.IsDisposed)
+            {
+                return;
+            }
+
+            flow.PerformLayout();
+
+            // AutoScrollPosition is negative when scrolled; normalize so extents
+            // are stable regardless of current scroll offset.
+            var scrollOffsetY = -flow.AutoScrollPosition.Y;
+
+            int contentBottom = flow.Padding.Top;
+            foreach (Control control in flow.Controls)
+            {
+                if (!control.Visible)
                 {
                     continue;
                 }
 
-                flow.PerformLayout();
-
-                int contentBottom = flow.Padding.Top;
-                foreach (Control control in flow.Controls)
+                int candidateBottom = control.Bottom + control.Margin.Bottom + scrollOffsetY;
+                if (candidateBottom > contentBottom)
                 {
-                    if (!control.Visible)
-                    {
-                        continue;
-                    }
-
-                    int candidateBottom = control.Bottom + control.Margin.Bottom;
-                    if (candidateBottom > contentBottom)
-                    {
-                        contentBottom = candidateBottom;
-                    }
+                    contentBottom = candidateBottom;
                 }
+            }
 
-                // Reserve a small buffer so the last row is never clipped by
-                // rounding, DPI scaling, or scrollbar metrics.
-                flow.AutoScrollMinSize = new Size(0, contentBottom + flow.Padding.Bottom + 8);
+            // Reserve a small buffer so the last row is never clipped by
+            // rounding, DPI scaling, or scrollbar metrics.
+            var targetHeight = contentBottom + flow.Padding.Bottom + 8;
+            if (flow.AutoScrollMinSize.Height != targetHeight)
+            {
+                flow.AutoScrollMinSize = new Size(0, targetHeight);
             }
         }
 
@@ -1078,6 +1151,13 @@ namespace SSH_Helper
             _numIndentSize.Value = editor.IndentSize;
             _chkEnableSmartEnter.Checked = editor.EnableSmartEnter;
             _chkPreserveBlankLineBetweenSteps.Checked = editor.PreserveBlankLineBetweenSteps;
+            _chkEnableCurrentLineHighlight.Checked = editor.EnableCurrentLineHighlight;
+            _chkEnableIndentGuides.Checked = editor.EnableIndentGuides;
+            _chkShowWhitespace.Checked = editor.ShowWhitespace;
+            _chkEnableLongLineGuide.Checked = editor.EnableLongLineGuide;
+            _numLongLineColumn.Value = editor.LongLineColumn;
+            _chkEnableCodeFolding.Checked = editor.EnableCodeFolding;
+            _chkEnableBraceMatching.Checked = editor.EnableBraceMatching;
 
             // Appearance
             ApplyFontSettingsToControls(config.FontSettings);
@@ -1184,6 +1264,16 @@ namespace SSH_Helper
                     CommandEditorSettings.MaxIndentSize);
                 config.CommandEditor.EnableSmartEnter = _chkEnableSmartEnter.Checked;
                 config.CommandEditor.PreserveBlankLineBetweenSteps = _chkPreserveBlankLineBetweenSteps.Checked;
+                config.CommandEditor.EnableCurrentLineHighlight = _chkEnableCurrentLineHighlight.Checked;
+                config.CommandEditor.EnableIndentGuides = _chkEnableIndentGuides.Checked;
+                config.CommandEditor.ShowWhitespace = _chkShowWhitespace.Checked;
+                config.CommandEditor.EnableLongLineGuide = _chkEnableLongLineGuide.Checked;
+                config.CommandEditor.LongLineColumn = Math.Clamp(
+                    (int)_numLongLineColumn.Value,
+                    CommandEditorSettings.MinLongLineColumn,
+                    CommandEditorSettings.MaxLongLineColumn);
+                config.CommandEditor.EnableCodeFolding = _chkEnableCodeFolding.Checked;
+                config.CommandEditor.EnableBraceMatching = _chkEnableBraceMatching.Checked;
                 config.CommandEditor.Normalize();
 
                 // Appearance - Font Families

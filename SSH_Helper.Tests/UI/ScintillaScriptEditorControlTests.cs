@@ -137,6 +137,72 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
+    public void ApplyCommandEditorSettings_VisualOptions_EnableScintillaVisualAids()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.ApplyCommandEditorSettings(new CommandEditorSettings
+        {
+            EnableCurrentLineHighlight = true,
+            EnableIndentGuides = true,
+            ShowWhitespace = true,
+            EnableLongLineGuide = true,
+            LongLineColumn = 132,
+            EnableCodeFolding = true,
+            EnableBraceMatching = true
+        });
+
+        var editor = GetInnerEditor(control);
+        editor.CaretLineBackColor.A.Should().BeGreaterThan(0);
+        editor.IndentationGuides.Should().Be(IndentView.LookBoth);
+        editor.ViewWhitespace.Should().Be(WhitespaceMode.VisibleAlways);
+        editor.EdgeMode.Should().Be(EdgeMode.Line);
+        editor.EdgeColumn.Should().Be(132);
+        editor.Margins[2].Type.Should().Be(MarginType.Symbol);
+        editor.Margins[2].Width.Should().BeGreaterThan(0);
+    }
+
+    [WinFormsFact]
+    public void ApplyCommandEditorSettings_VisualOptions_DisableScintillaVisualAids()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.ApplyCommandEditorSettings(new CommandEditorSettings
+        {
+            EnableCurrentLineHighlight = false,
+            EnableIndentGuides = false,
+            ShowWhitespace = false,
+            EnableLongLineGuide = false,
+            EnableCodeFolding = false,
+            EnableBraceMatching = false
+        });
+
+        var editor = GetInnerEditor(control);
+        editor.CaretLineBackColor.A.Should().Be(0);
+        editor.IndentationGuides.Should().Be(IndentView.None);
+        editor.ViewWhitespace.Should().Be(WhitespaceMode.Invisible);
+        editor.EdgeMode.Should().Be(EdgeMode.None);
+        editor.Margins[2].Width.Should().Be(0);
+    }
+
+    [WinFormsFact]
+    public void CodeFolding_YamlStructure_MarksFoldHeaders()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.ApplyCommandEditorSettings(new CommandEditorSettings
+        {
+            EnableCodeFolding = true
+        });
+
+        control.Text = "name: demo\nsteps:\n  - send:\n      command: show version\n      capture: out";
+
+        var editor = GetInnerEditor(control);
+        var stepsLine = editor.Lines[1];
+        var sendLine = editor.Lines[2];
+
+        (stepsLine.FoldLevelFlags & FoldLevelFlags.Header).Should().NotBe(0);
+        (sendLine.FoldLevelFlags & FoldLevelFlags.Header).Should().NotBe(0);
+    }
+
+    [WinFormsFact]
     public void CompletionNavigation_EnterCommitsAndEscapeDismissesWithoutMutation()
     {
         using var control = new ScintillaScriptEditorControl();
