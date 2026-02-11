@@ -25,11 +25,11 @@ public class ScriptValidationFormatterTests
     }
 
     [Fact]
-    public void FormatFailureMessage_WithNoErrors_ReturnsFallback()
+    public void FormatFailureMessage_WithNoErrors_ReturnsUnknownErrorsFallback()
     {
         var message = ScriptValidationFormatter.FormatFailureMessage(Array.Empty<string>());
 
-        message.Should().Be("Script validation failed.");
+        message.Should().Be("Script validation failed with unknown errors.");
     }
 
     [Fact]

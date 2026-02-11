@@ -307,6 +307,11 @@ namespace SSH_Helper.Services.Scripting
                 return nestedJsonValue;
             }
 
+            if (TryEvaluateScalarFunctionExpression(expr, context, out var functionValue))
+            {
+                return functionValue;
+            }
+
             // Handle plain variable name
             var varValue = context.GetVariable(expr);
             if (varValue != null)
@@ -324,6 +329,265 @@ namespace SSH_Helper.Services.Scripting
             // Substitute and parse
             var substituted = context.SubstituteVariables(expr);
             return ParseJsonValue(substituted);
+        }
+
+        private static bool TryEvaluateScalarFunctionExpression(string expr, ScriptContext context, out object? value)
+        {
+            value = null;
+
+            if (!TryParseFunctionCall(expr, out var functionName, out var inner))
+                return false;
+
+            switch (functionName.ToLowerInvariant())
+            {
+                case "length":
+                {
+                    var resolved = ResolveJsonValue(inner, context);
+                    if (resolved is List<string> list)
+                    {
+                        value = list.Count;
+                    }
+                    else if (resolved is JsonArray arr)
+                    {
+                        value = arr.Count;
+                    }
+                    else
+                    {
+                        value = resolved?.ToString()?.Length ?? 0;
+                    }
+                    return true;
+                }
+                case "trim":
+                {
+                    var resolved = ResolveJsonValue(inner, context);
+                    value = resolved?.ToString()?.Trim() ?? string.Empty;
+                    return true;
+                }
+                case "upper":
+                {
+                    var resolved = ResolveJsonValue(inner, context);
+                    value = resolved?.ToString()?.ToUpperInvariant() ?? string.Empty;
+                    return true;
+                }
+                case "lower":
+                {
+                    var resolved = ResolveJsonValue(inner, context);
+                    value = resolved?.ToString()?.ToLowerInvariant() ?? string.Empty;
+                    return true;
+                }
+                case "replace":
+                {
+                    var args = SplitTopLevelCommas(inner);
+                    if (args.Count < 3)
+                        return false;
+
+                    var source = ResolveJsonValue(args[0], context)?.ToString() ?? string.Empty;
+                    var oldValue = ResolveJsonValue(args[1], context)?.ToString() ?? string.Empty;
+                    var newValue = ResolveJsonValue(args[2], context)?.ToString() ?? string.Empty;
+                    value = source.Replace(oldValue, newValue, StringComparison.Ordinal);
+                    return true;
+                }
+                case "split":
+                {
+                    var args = SplitTopLevelCommas(inner);
+                    if (args.Count == 0)
+                        return false;
+
+                    var source = ResolveJsonValue(args[0], context)?.ToString() ?? string.Empty;
+                    var delimiter = args.Count > 1 ? ResolveJsonValue(args[1], context)?.ToString() ?? "," : ",";
+                    if (delimiter.Length == 0)
+                    {
+                        var chars = new List<string>(source.Length);
+                        foreach (var c in source)
+                            chars.Add(c.ToString());
+                        value = chars;
+                        return true;
+                    }
+
+                    value = new List<string>(source.Split(new[] { delimiter }, StringSplitOptions.None));
+                    return true;
+                }
+                case "join":
+                {
+                    var args = SplitTopLevelCommas(inner);
+                    if (args.Count == 0)
+                        return false;
+
+                    var source = ResolveJsonValue(args[0], context);
+                    var delimiter = args.Count > 1 ? ResolveJsonValue(args[1], context)?.ToString() ?? "," : ",";
+                    value = string.Join(delimiter, ResolveToStringList(source));
+                    return true;
+                }
+                case "substring":
+                {
+                    var args = SplitTopLevelCommas(inner);
+                    if (args.Count < 2)
+                        return false;
+
+                    var source = ResolveJsonValue(args[0], context)?.ToString() ?? string.Empty;
+                    if (!TryResolveInt(ResolveJsonValue(args[1], context), out var start))
+                        start = 0;
+
+                    if (start < 0)
+                        start = 0;
+                    if (start >= source.Length)
+                    {
+                        value = string.Empty;
+                        return true;
+                    }
+
+                    if (args.Count >= 3)
+                    {
+                        if (!TryResolveInt(ResolveJsonValue(args[2], context), out var length))
+                            length = source.Length - start;
+
+                        if (length <= 0)
+                        {
+                            value = string.Empty;
+                            return true;
+                        }
+
+                        if (start + length > source.Length)
+                            length = source.Length - start;
+
+                        value = source.Substring(start, length);
+                        return true;
+                    }
+
+                    value = source.Substring(start);
+                    return true;
+                }
+                case "sort":
+                {
+                    var args = SplitTopLevelCommas(inner);
+                    if (args.Count == 0)
+                        return false;
+
+                    var list = ResolveToStringList(ResolveJsonValue(args[0], context));
+                    list.Sort(StringComparer.OrdinalIgnoreCase);
+                    var order = args.Count > 1 ? ResolveJsonValue(args[1], context)?.ToString() ?? "asc" : "asc";
+                    if (order.Equals("desc", StringComparison.OrdinalIgnoreCase))
+                        list.Reverse();
+                    value = list;
+                    return true;
+                }
+                default:
+                    return false;
+            }
+        }
+
+        private static bool TryParseFunctionCall(string expr, out string functionName, out string inner)
+        {
+            functionName = string.Empty;
+            inner = string.Empty;
+            if (string.IsNullOrWhiteSpace(expr))
+                return false;
+
+            var openIndex = expr.IndexOf('(');
+            if (openIndex <= 0 || !expr.EndsWith(")", StringComparison.Ordinal))
+                return false;
+
+            var name = expr.Substring(0, openIndex).Trim();
+            if (string.IsNullOrEmpty(name))
+                return false;
+
+            foreach (var c in name)
+            {
+                if (!(char.IsLetterOrDigit(c) || c == '_' || c == '.'))
+                    return false;
+            }
+
+            var depth = 0;
+            var inString = false;
+            var stringChar = '\0';
+            for (int i = openIndex; i < expr.Length; i++)
+            {
+                var c = expr[i];
+                if ((c == '"' || c == '\'') && (i == 0 || expr[i - 1] != '\\'))
+                {
+                    if (!inString)
+                    {
+                        inString = true;
+                        stringChar = c;
+                    }
+                    else if (stringChar == c)
+                    {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (inString)
+                    continue;
+
+                if (c == '(')
+                    depth++;
+                else if (c == ')')
+                    depth--;
+
+                if (depth == 0 && i < expr.Length - 1)
+                    return false;
+
+                if (depth < 0)
+                    return false;
+            }
+
+            if (depth != 0)
+                return false;
+
+            functionName = name;
+            inner = expr.Substring(openIndex + 1, expr.Length - openIndex - 2).Trim();
+            return true;
+        }
+
+        private static bool TryResolveInt(object? value, out int number)
+        {
+            number = 0;
+            if (value == null)
+                return false;
+
+            if (value is int i)
+            {
+                number = i;
+                return true;
+            }
+
+            if (value is long l)
+            {
+                number = (int)l;
+                return true;
+            }
+
+            var text = value.ToString();
+            return int.TryParse(text, out number);
+        }
+
+        private static List<string> ResolveToStringList(object? value)
+        {
+            if (value == null)
+                return new List<string>();
+
+            if (value is List<string> list)
+                return new List<string>(list);
+
+            if (value is JsonArray array)
+            {
+                var items = new List<string>(array.Count);
+                foreach (var item in array)
+                    items.Add(JsonNodeToStringValue(item));
+                return items;
+            }
+
+            if (value is System.Collections.IEnumerable enumerable && value is not string)
+            {
+                var items = new List<string>();
+                foreach (var item in enumerable)
+                    items.Add(item?.ToString() ?? string.Empty);
+                return items;
+            }
+
+            var text = value.ToString() ?? string.Empty;
+            return new List<string> { text };
         }
 
         /// <summary>

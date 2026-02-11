@@ -10,6 +10,7 @@ namespace SSH_Helper
     internal sealed class ExecutionDetailsDialog : Form
     {
         private readonly ExecutionDetails _details;
+        private readonly string _historyOutput;
 
         private readonly BorderlessTabControl _tabControl;
         private readonly TextBox _txtSummary;
@@ -21,8 +22,14 @@ namespace SSH_Helper
         private readonly Button _btnClose;
 
         public ExecutionDetailsDialog(ExecutionDetails details, bool darkMode = false)
+            : this(details, string.Empty, darkMode)
+        {
+        }
+
+        public ExecutionDetailsDialog(ExecutionDetails details, string historyOutput, bool darkMode = false)
         {
             _details = details ?? throw new ArgumentNullException(nameof(details));
+            _historyOutput = historyOutput ?? string.Empty;
 
             Text = "Execution Details";
             Size = new Size(980, 680);
@@ -371,7 +378,7 @@ namespace SSH_Helper
         {
             try
             {
-                Clipboard.SetText(FormatDetailsAsText());
+                Clipboard.SetText(FormatDetailsAsText(includeOutputWindow: false));
                 MessageBox.Show("Execution details copied to clipboard.",
                     "Copied",
                     MessageBoxButtons.OK,
@@ -400,7 +407,7 @@ namespace SSH_Helper
 
             try
             {
-                File.WriteAllText(sfd.FileName, FormatDetailsAsText());
+                File.WriteAllText(sfd.FileName, FormatDetailsAsText(includeOutputWindow: true));
             }
             catch (Exception ex)
             {
@@ -411,7 +418,7 @@ namespace SSH_Helper
             }
         }
 
-        private string FormatDetailsAsText()
+        private string FormatDetailsAsText(bool includeOutputWindow)
         {
             var sb = new StringBuilder();
             sb.AppendLine("Execution Details");
@@ -473,6 +480,25 @@ namespace SSH_Helper
                 foreach (var variable in host.Variables.OrderBy(v => v.Key, StringComparer.OrdinalIgnoreCase))
                 {
                     sb.AppendLine($"  {variable.Key} = {variable.Value}");
+                }
+            }
+
+            if (includeOutputWindow)
+            {
+                sb.AppendLine();
+                sb.AppendLine("Output Window (All Hosts Top to Bottom)");
+                sb.AppendLine(new string('-', 80));
+                if (string.IsNullOrWhiteSpace(_historyOutput))
+                {
+                    sb.AppendLine("(no output)");
+                }
+                else
+                {
+                    sb.Append(_historyOutput);
+                    if (!_historyOutput.EndsWith(Environment.NewLine, StringComparison.Ordinal))
+                    {
+                        sb.AppendLine();
+                    }
                 }
             }
 

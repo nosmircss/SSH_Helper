@@ -108,6 +108,8 @@ namespace SSH_Helper.Models
         public const int MaxValidationDebounceMs = 2000;
         public const int MinIndentSize = 2;
         public const int MaxIndentSize = 8;
+        public const int MinLongLineColumn = 80;
+        public const int MaxLongLineColumn = 200;
 
         public bool EnableSyntaxHighlighting { get; set; } = true;
         public bool EnableAutocomplete { get; set; } = true;
@@ -122,11 +124,19 @@ namespace SSH_Helper.Models
         public int IndentSize { get; set; } = 2;
         public bool EnableSmartEnter { get; set; } = true;
         public bool PreserveBlankLineBetweenSteps { get; set; } = true;
+        public bool EnableCurrentLineHighlight { get; set; } = true;
+        public bool EnableIndentGuides { get; set; } = false;
+        public bool ShowWhitespace { get; set; } = false;
+        public bool EnableLongLineGuide { get; set; } = false;
+        public int LongLineColumn { get; set; } = 120;
+        public bool EnableCodeFolding { get; set; } = false;
+        public bool EnableBraceMatching { get; set; } = true;
 
         public void Normalize()
         {
             ValidationDebounceMs = Math.Clamp(ValidationDebounceMs, MinValidationDebounceMs, MaxValidationDebounceMs);
             IndentSize = Math.Clamp(IndentSize, MinIndentSize, MaxIndentSize);
+            LongLineColumn = Math.Clamp(LongLineColumn, MinLongLineColumn, MaxLongLineColumn);
         }
 
         public CommandEditorSettings CloneNormalized()

@@ -47,6 +47,13 @@ public class ConfigurationServiceCommandEditorSettingsTests : IDisposable
         config.CommandEditor.EnableInlineValidation.Should().BeTrue();
         config.CommandEditor.ValidationDebounceMs.Should().Be(400);
         config.CommandEditor.IndentSize.Should().Be(2);
+        config.CommandEditor.EnableCurrentLineHighlight.Should().BeTrue();
+        config.CommandEditor.EnableIndentGuides.Should().BeFalse();
+        config.CommandEditor.ShowWhitespace.Should().BeFalse();
+        config.CommandEditor.EnableLongLineGuide.Should().BeFalse();
+        config.CommandEditor.LongLineColumn.Should().Be(120);
+        config.CommandEditor.EnableCodeFolding.Should().BeFalse();
+        config.CommandEditor.EnableBraceMatching.Should().BeTrue();
     }
 
     [Fact]
@@ -67,6 +74,13 @@ public class ConfigurationServiceCommandEditorSettingsTests : IDisposable
             config.CommandEditor.IndentSize = 4;
             config.CommandEditor.EnableSmartEnter = false;
             config.CommandEditor.PreserveBlankLineBetweenSteps = false;
+            config.CommandEditor.EnableCurrentLineHighlight = false;
+            config.CommandEditor.EnableIndentGuides = false;
+            config.CommandEditor.ShowWhitespace = true;
+            config.CommandEditor.EnableLongLineGuide = false;
+            config.CommandEditor.LongLineColumn = 150;
+            config.CommandEditor.EnableCodeFolding = false;
+            config.CommandEditor.EnableBraceMatching = false;
         });
 
         var reloaded = new ConfigurationService(_configPath).Load();
@@ -85,6 +99,13 @@ public class ConfigurationServiceCommandEditorSettingsTests : IDisposable
         editor.IndentSize.Should().Be(4);
         editor.EnableSmartEnter.Should().BeFalse();
         editor.PreserveBlankLineBetweenSteps.Should().BeFalse();
+        editor.EnableCurrentLineHighlight.Should().BeFalse();
+        editor.EnableIndentGuides.Should().BeFalse();
+        editor.ShowWhitespace.Should().BeTrue();
+        editor.EnableLongLineGuide.Should().BeFalse();
+        editor.LongLineColumn.Should().Be(150);
+        editor.EnableCodeFolding.Should().BeFalse();
+        editor.EnableBraceMatching.Should().BeFalse();
     }
 
     [Fact]
@@ -95,7 +116,8 @@ public class ConfigurationServiceCommandEditorSettingsTests : IDisposable
                        "Presets": {},
                        "CommandEditor": {
                          "ValidationDebounceMs": 5,
-                         "IndentSize": 99
+                         "IndentSize": 99,
+                         "LongLineColumn": 999
                        }
                      }
                      """;
@@ -105,6 +127,7 @@ public class ConfigurationServiceCommandEditorSettingsTests : IDisposable
 
         config.CommandEditor.ValidationDebounceMs.Should().Be(CommandEditorSettings.MinValidationDebounceMs);
         config.CommandEditor.IndentSize.Should().Be(CommandEditorSettings.MaxIndentSize);
+        config.CommandEditor.LongLineColumn.Should().Be(CommandEditorSettings.MaxLongLineColumn);
     }
 
     [Fact]
@@ -114,10 +137,12 @@ public class ConfigurationServiceCommandEditorSettingsTests : IDisposable
         {
             config.CommandEditor.ValidationDebounceMs = -1;
             config.CommandEditor.IndentSize = 0;
+            config.CommandEditor.LongLineColumn = 10;
         });
 
         var reloaded = new ConfigurationService(_configPath).Load();
         reloaded.CommandEditor.ValidationDebounceMs.Should().Be(CommandEditorSettings.MinValidationDebounceMs);
         reloaded.CommandEditor.IndentSize.Should().Be(CommandEditorSettings.MinIndentSize);
+        reloaded.CommandEditor.LongLineColumn.Should().Be(CommandEditorSettings.MinLongLineColumn);
     }
 }

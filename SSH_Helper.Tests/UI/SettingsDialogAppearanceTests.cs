@@ -157,6 +157,48 @@ public class SettingsDialogAppearanceTests : IDisposable
         generalFlow!.AutoScrollMinSize.Height.Should().BeGreaterOrEqualTo(expectedBottom);
     }
 
+    [WinFormsFact]
+    public void CommandEditorTab_ScrollExtent_ContainsLastVisualOption_AfterTabSelect()
+    {
+        using var dialog = new SettingsDialog(_configService);
+
+        dialog.Show();
+        Application.DoEvents();
+
+        var tabControl = GetField<TabControl>(dialog, "_tabControl");
+        TabPage? commandEditorTab = null;
+        foreach (TabPage tabPage in tabControl.TabPages)
+        {
+            if (string.Equals(tabPage.Text, "Command Editor", StringComparison.Ordinal))
+            {
+                commandEditorTab = tabPage;
+                break;
+            }
+        }
+
+        commandEditorTab.Should().NotBeNull();
+
+        tabControl.SelectedTab = commandEditorTab;
+        Application.DoEvents();
+
+        FlowLayoutPanel? commandFlow = null;
+        foreach (Control control in commandEditorTab!.Controls)
+        {
+            if (control is FlowLayoutPanel flowPanel)
+            {
+                commandFlow = flowPanel;
+                break;
+            }
+        }
+
+        commandFlow.Should().NotBeNull();
+
+        var braceMatchingOption = GetField<CheckBox>(dialog, "_chkEnableBraceMatching");
+        var expectedBottom = braceMatchingOption.Bottom + braceMatchingOption.Margin.Bottom;
+
+        commandFlow!.AutoScrollMinSize.Height.Should().BeGreaterOrEqualTo(expectedBottom);
+    }
+
     #endregion
 
     #region UpdatePreview Tests

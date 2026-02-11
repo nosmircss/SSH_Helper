@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Windows.Forms;
 using System.Drawing;
+using System.Text;
 using FluentAssertions;
 using ScintillaNET;
 using SSH_Helper.Models;
@@ -34,7 +35,7 @@ public class ScintillaScriptEditorControlTests
     {
         using var control = new ScintillaScriptEditorControl();
         control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
-        control.Text = "na";
+        control.Text = "steps:\n  - sen";
         control.SelectionStart = control.Text.Length;
         control.SelectionLength = 0;
 
@@ -85,6 +86,120 @@ public class ScintillaScriptEditorControlTests
         using var control = new ScintillaScriptEditorControl();
         var editor = GetInnerEditor(control);
         editor.EndAtLastLine.Should().BeFalse();
+    }
+
+    [WinFormsFact]
+    public void LineNumberMargin_IsEnabledByDefault()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        var editor = GetInnerEditor(control);
+
+        editor.Margins[0].Type.Should().Be(MarginType.Number);
+        editor.Margins[0].Width.Should().BeGreaterThan(0);
+        editor.Margins[1].Width.Should().BeGreaterThan(0);
+    }
+
+    [WinFormsFact]
+    public void LineNumberMargin_ExpandsWhenLineCountReachesThreeDigits()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "line 1";
+        var editor = GetInnerEditor(control);
+        var smallMarginWidth = editor.Margins[0].Width;
+
+        var sb = new StringBuilder();
+        for (var i = 1; i <= 120; i++)
+        {
+            sb.Append("line ").Append(i).Append('\n');
+        }
+
+        control.Text = sb.ToString();
+        editor.Margins[0].Width.Should().BeGreaterThan(smallMarginWidth);
+    }
+
+    [WinFormsFact]
+    public void LineNumberMargin_ProvidesVisibleGapAfterDigits()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        var sb = new StringBuilder();
+        for (var i = 1; i <= 120; i++)
+        {
+            sb.Append("line ").Append(i).Append('\n');
+        }
+
+        control.Text = sb.ToString();
+        var editor = GetInnerEditor(control);
+        var lineDigitsWidth = editor.TextWidth(Style.LineNumber, "999");
+        var combinedMarginWidth = editor.Margins[0].Width + editor.Margins[1].Width;
+
+        editor.Margins[1].Width.Should().BeGreaterThanOrEqualTo(8);
+        combinedMarginWidth.Should().BeGreaterThan(lineDigitsWidth + 8);
+    }
+
+    [WinFormsFact]
+    public void ApplyCommandEditorSettings_VisualOptions_EnableScintillaVisualAids()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.ApplyCommandEditorSettings(new CommandEditorSettings
+        {
+            EnableCurrentLineHighlight = true,
+            EnableIndentGuides = true,
+            ShowWhitespace = true,
+            EnableLongLineGuide = true,
+            LongLineColumn = 132,
+            EnableCodeFolding = true,
+            EnableBraceMatching = true
+        });
+
+        var editor = GetInnerEditor(control);
+        editor.CaretLineBackColor.A.Should().BeGreaterThan(0);
+        editor.IndentationGuides.Should().Be(IndentView.LookBoth);
+        editor.ViewWhitespace.Should().Be(WhitespaceMode.VisibleAlways);
+        editor.EdgeMode.Should().Be(EdgeMode.Line);
+        editor.EdgeColumn.Should().Be(132);
+        editor.Margins[2].Type.Should().Be(MarginType.Symbol);
+        editor.Margins[2].Width.Should().BeGreaterThan(0);
+    }
+
+    [WinFormsFact]
+    public void ApplyCommandEditorSettings_VisualOptions_DisableScintillaVisualAids()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.ApplyCommandEditorSettings(new CommandEditorSettings
+        {
+            EnableCurrentLineHighlight = false,
+            EnableIndentGuides = false,
+            ShowWhitespace = false,
+            EnableLongLineGuide = false,
+            EnableCodeFolding = false,
+            EnableBraceMatching = false
+        });
+
+        var editor = GetInnerEditor(control);
+        editor.CaretLineBackColor.A.Should().Be(0);
+        editor.IndentationGuides.Should().Be(IndentView.None);
+        editor.ViewWhitespace.Should().Be(WhitespaceMode.Invisible);
+        editor.EdgeMode.Should().Be(EdgeMode.None);
+        editor.Margins[2].Width.Should().Be(0);
+    }
+
+    [WinFormsFact]
+    public void CodeFolding_YamlStructure_MarksFoldHeaders()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.ApplyCommandEditorSettings(new CommandEditorSettings
+        {
+            EnableCodeFolding = true
+        });
+
+        control.Text = "name: demo\nsteps:\n  - send:\n      command: show version\n      capture: out";
+
+        var editor = GetInnerEditor(control);
+        var stepsLine = editor.Lines[1];
+        var sendLine = editor.Lines[2];
+
+        (stepsLine.FoldLevelFlags & FoldLevelFlags.Header).Should().NotBe(0);
+        (sendLine.FoldLevelFlags & FoldLevelFlags.Header).Should().NotBe(0);
     }
 
     [WinFormsFact]
@@ -186,6 +301,49 @@ public class ScintillaScriptEditorControlTests
         popup.BackColor.Should().Be(Color.FromArgb(88, 88, 91));
         list.BackColor.Should().Be(Color.FromArgb(45, 45, 46));
         list.ForeColor.Should().Be(Color.FromArgb(220, 220, 220));
+    }
+
+    [WinFormsFact]
+    public void ApplyTheme_DarkMode_UsesDarkLineNumberPalette()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.ApplyTheme(true);
+
+        var editor = GetInnerEditor(control);
+        var lineNumberStyle = editor.Styles[Style.LineNumber];
+
+        lineNumberStyle.ForeColor.Should().Be(Color.FromArgb(160, 160, 160));
+        lineNumberStyle.BackColor.Should().Be(Color.FromArgb(30, 30, 30));
+        editor.Margins[1].Type.Should().Be(MarginType.Color);
+        editor.Margins[1].BackColor.Should().Be(Color.FromArgb(30, 30, 30));
+    }
+
+    [WinFormsFact]
+    public void ApplyTheme_DarkMode_WithSyntaxHighlighting_KeepsLineNumberPalette()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetSyntaxHighlighter(new YamlSshSyntaxHighlighter());
+        control.Text = "name: qa\nsteps:\n  - send:\n      command: show version";
+        control.ApplyTheme(true);
+
+        var editor = GetInnerEditor(control);
+        var lineNumberStyle = editor.Styles[Style.LineNumber];
+
+        lineNumberStyle.ForeColor.Should().Be(Color.FromArgb(160, 160, 160));
+        lineNumberStyle.BackColor.Should().Be(Color.FromArgb(30, 30, 30));
+        editor.Margins[1].BackColor.Should().Be(Color.FromArgb(30, 30, 30));
+    }
+
+    [WinFormsFact]
+    public void ApplyTheme_LightMode_UsesGreyLineNumberText()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.ApplyTheme(false);
+
+        var editor = GetInnerEditor(control);
+        var lineNumberStyle = editor.Styles[Style.LineNumber];
+
+        lineNumberStyle.ForeColor.Should().Be(Color.FromArgb(115, 115, 115));
     }
 
     [WinFormsFact]

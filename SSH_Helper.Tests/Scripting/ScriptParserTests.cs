@@ -447,8 +447,8 @@ steps:
 
         script.Steps[0].Extract.Should().NotBeNull();
         script.Steps[0].Extract!.From.Should().Be("output");
-        script.Steps[0].Extract.Pattern.Should().Be("Version: (.+)");
-        script.Steps[0].Extract.Into.Should().Be("version");
+        script.Steps[0].Extract!.Pattern.Should().Be("Version: (.+)");
+        script.Steps[0].Extract!.Into.Should().Be("version");
     }
 
     [Fact]
@@ -655,7 +655,7 @@ steps:
 
         script.Steps[0].UpdateColumn.Should().NotBeNull();
         script.Steps[0].UpdateColumn!.Column.Should().Be("version");
-        script.Steps[0].UpdateColumn.Value.Should().Be("1.0.0");
+        script.Steps[0].UpdateColumn!.Value.Should().Be("1.0.0");
     }
 
     [Fact]
@@ -671,7 +671,7 @@ steps:
 
         script.Steps[0].UpdateColumn.Should().NotBeNull();
         script.Steps[0].UpdateColumn!.Column.Should().Be("hostname");
-        script.Steps[0].UpdateColumn.Value.Should().Be("${extracted_hostname}");
+        script.Steps[0].UpdateColumn!.Value.Should().Be("${extracted_hostname}");
     }
 
     [Fact]
@@ -757,7 +757,7 @@ steps:
 
         script.Steps[0].UpdateEnvironment.Should().NotBeNull();
         script.Steps[0].UpdateEnvironment!.Variable.Should().Be("api_token");
-        script.Steps[0].UpdateEnvironment.Value.Should().Be("abc123");
+        script.Steps[0].UpdateEnvironment!.Value.Should().Be("abc123");
     }
 
     [Fact]
@@ -773,7 +773,7 @@ steps:
 
         script.Steps[0].UpdateEnvironment.Should().NotBeNull();
         script.Steps[0].UpdateEnvironment!.Variable.Should().Be("api_token");
-        script.Steps[0].UpdateEnvironment.Value.Should().Be("${new_token}");
+        script.Steps[0].UpdateEnvironment!.Value.Should().Be("${new_token}");
     }
 
     [Fact]

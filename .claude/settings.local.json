@@ -17,7 +17,8 @@
       "WebFetch(domain:*)",
       "mcp__*",
       "mcp__codex__codex",
-      "Bash(codex:*)"
+      "Bash(codex:*)",
+      "Bash(npx openspec validate:*)"
     ],
     "deny": [
       "Read(.env)",

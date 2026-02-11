@@ -77,4 +77,29 @@ public class ExpressionEvaluatorTests
 
         result.Should().BeTrue();
     }
+
+    [Fact]
+    public void Evaluate_NestedStringFunctionsInCondition_ResolvesCorrectly()
+    {
+        var context = new ScriptContext();
+        var evaluator = new ExpressionEvaluator(context);
+
+        var result = evaluator.Evaluate("trim(upper('  admin  ')) == 'ADMIN'");
+
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Evaluate_NestedJsonFunctionWithPlaceholdersInCondition_ResolvesCorrectly()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("admins", "{\"system\":{\"admin\":{\"admin\":{\"trusthost1\":\" 10.0.0.0 255.255.255.0 \"}}}}");
+        context.SetVariable("admin_name", "admin");
+        context.SetVariable("i", 1);
+        var evaluator = new ExpressionEvaluator(context);
+
+        var result = evaluator.Evaluate("trim(json.get(admins, \"system.admin.${admin_name}.trusthost${i}\", \"\")) == '10.0.0.0 255.255.255.0'");
+
+        result.Should().BeTrue();
+    }
 }
