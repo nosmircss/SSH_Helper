@@ -362,16 +362,20 @@ namespace SSH_Helper.Services
 
             try
             {
+                var analyzer = new ScriptDependencyAnalyzer();
+                var sshRequirement = analyzer.AnalyzeSshRequirements(script);
+
                 foreach (var host in hosts)
                 {
                     if (cancellationToken.IsCancellationRequested)
                         break;
 
-                    if (!host.IsValid())
+                    var needsValidHost = sshRequirement.RequiresSshSession || sshRequirement.SftpUsesDefaultHost;
+                    if (needsValidHost && !host.IsValid())
                         continue;
 
                     var result = await Task.Run(() =>
-                        ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader));
+                        ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader, sshRequirement));
 
                     results.Add(result);
                 }
@@ -662,7 +666,9 @@ namespace SSH_Helper.Services
                 };
             }
 
-            return ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader);
+            var analyzer = new ScriptDependencyAnalyzer();
+            var sshRequirement = analyzer.AnalyzeSshRequirements(script);
+            return ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader, sshRequirement);
         }
 
         /// <summary>
@@ -784,7 +790,8 @@ namespace SSH_Helper.Services
             string defaultPassword,
             SshTimeoutOptions timeouts,
             CancellationToken cancellationToken,
-            bool showHeader = true)
+            bool showHeader = true,
+            SshRequirementResult? sshRequirement = null)
         {
             var result = new ExecutionResult
             {
@@ -798,7 +805,11 @@ namespace SSH_Helper.Services
 
             try
             {
-                if (UseConnectionPooling && _connectionPool != null)
+                if (sshRequirement != null && !sshRequirement.RequiresSshSession)
+                {
+                    ExecuteScriptLocal(host, script, username, password, outputBuilder, cancellationToken, showHeader);
+                }
+                else if (UseConnectionPooling && _connectionPool != null)
                 {
                     ExecuteScriptWithPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
                 }
@@ -1078,6 +1089,57 @@ namespace SSH_Helper.Services
                 .GetAwaiter().GetResult();
 
             client.Disconnect();
+        }
+
+        private void ExecuteScriptLocal(
+            HostConnection host,
+            Script script,
+            string username,
+            string password,
+            StringBuilder outputBuilder,
+            CancellationToken cancellationToken,
+            bool showHeader = true)
+        {
+            OnProgressChanged(host, $"Running locally for {host} (no SSH required)", false, false);
+
+            if (showHeader && !script.NoBanner)
+            {
+                var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : string.Empty;
+                string header = $"{new string('#', 20)} LOCAL SCRIPT: {host}{scriptName} {new string('#', 20)}";
+                string separator = new string('#', header.Length);
+
+                outputBuilder.AppendLine(separator);
+                outputBuilder.AppendLine(header);
+                outputBuilder.AppendLine(separator);
+
+                OnOutputReceived(host, outputBuilder.ToString());
+            }
+
+            var context = new ScriptContext(host.Variables);
+            context.Session = null;
+            context.DebugMode = DebugMode;
+            SeedConnectionVariables(context, host, username, password);
+
+            context.OutputReceived += (s, e) =>
+            {
+                var output = e.Message + Environment.NewLine;
+                outputBuilder.Append(output);
+                OnOutputReceived(host, output);
+            };
+
+            context.ColumnUpdateRequested += (s, e) =>
+            {
+                OnColumnUpdateRequested(host, e.ColumnName, e.Value);
+            };
+
+            context.EnvironmentUpdateRequested += (s, e) =>
+            {
+                OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
+            };
+
+            var executor = new ScriptExecutor();
+            var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
+                .GetAwaiter().GetResult();
         }
 
         private static void SeedConnectionVariables(ScriptContext context, HostConnection host, string username, string password)

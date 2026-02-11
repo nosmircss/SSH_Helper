@@ -13,7 +13,7 @@ public class SshRequirementResult
     public bool SftpUsesDefaultCredentials { get; set; } // true if any sftp step omits Username or Password
 }
 ```
-- [ ] 1.1 Add `SshRequirementResult` class
+- [x] 1.1 Add `SshRequirementResult` class
 
 ### 1.2 Add `AnalyzeSshRequirements()` method
 **File**: `Services/Scripting/ScriptDependencyAnalyzer.cs`
@@ -37,7 +37,7 @@ private void AnalyzeSshRequirementsInSteps(List<ScriptStep>? steps, SshRequireme
 - Recurse into: `step.Then`, `step.Else`, `step.Do`, `step.Try`, `step.Catch`, `step.Finally`
 - For `step.Elif`: iterate each branch and recurse into `branch.Then`
 - Short-circuit when `RequiresSshSession && UsesSftp && SftpUsesDefaultHost && SftpUsesDefaultCredentials` are all true
-- [ ] 1.2 Add `AnalyzeSshRequirements()` and `AnalyzeSshRequirementsInSteps()` methods
+- [x] 1.2 Add `AnalyzeSshRequirements()` and `AnalyzeSshRequirementsInSteps()` methods
 
 ### 1.3 Unit tests for SSH analysis
 **File**: `SSH_Helper.Tests/Scripting/ScriptDependencyAnalyzerTests.cs`
@@ -62,7 +62,7 @@ private void AnalyzeSshRequirementsInSteps(List<ScriptStep>? steps, SshRequireme
 17. `AnalyzeSshRequirements_SftpWithoutPassword_SftpUsesDefaultCredentials` — `sftp` step with no `password:` → `SftpUsesDefaultCredentials == true`
 18. `AnalyzeSshRequirements_SftpWithExplicitCredentials_NoDefaultCredentials` — `sftp` step with both `username:` and `password:` specified → `SftpUsesDefaultCredentials == false`
 19. `AnalyzeSshRequirements_MultipleSftpSteps_AnyDefaultSetsFlag` — two sftp steps, one with explicit host, one without → `SftpUsesDefaultHost == true` (any sftp using defaults sets the flag)
-- [ ] 1.3 Add 19 unit tests for SSH requirement analysis
+- [x] 1.3 Add 19 unit tests for SSH requirement analysis
 
 ## 2. Local Execution Path
 
@@ -102,7 +102,7 @@ private void ExecuteScriptLocal(
 - No `session.DebugOutput` subscription
 - No `session.CommandCompleted` subscription (local commands don't fire this)
 - No `client.Disconnect()`
-- [ ] 2.1 Add `ExecuteScriptLocal()` private method
+- [x] 2.1 Add `ExecuteScriptLocal()` private method
 
 ### 2.2 Modify `ExecuteScriptOnHost()` to branch on analysis
 **File**: `Services/SshExecutionService.cs`
@@ -139,7 +139,7 @@ try
 }
 ```
 **Error handling**: Existing catch blocks (SshException auth/connection/timeout, SocketException, OperationCanceledException, generic Exception) remain unchanged. For local execution, SSH-specific exceptions never fire. `OperationCanceledException` still fires if user cancels. Generic `Exception` catches any local command errors (e.g., HTTP timeout, DNS failure).
-- [ ] 2.2 Modify `ExecuteScriptOnHost()` signature and try block
+- [x] 2.2 Modify `ExecuteScriptOnHost()` signature and try block
 
 ### 2.3 Thread analysis through `ExecuteScriptAsync()`
 **File**: `Services/SshExecutionService.cs`
@@ -160,7 +160,7 @@ var needsValidHost = sshRequirement.RequiresSshSession || sshRequirement.SftpUse
 if (needsValidHost && !host.IsValid())
     continue;
 ```
-- [ ] 2.3 Add analysis call, relax host validation, and pass through in `ExecuteScriptAsync()`
+- [x] 2.3 Add analysis call, relax host validation, and pass through in `ExecuteScriptAsync()`
 
 ### 2.4 Thread analysis through `ExecuteScriptTextOnHost()`
 **File**: `Services/SshExecutionService.cs`
@@ -172,11 +172,12 @@ var sshRequirement = analyzer.AnalyzeSshRequirements(script);
 return ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader, sshRequirement);
 ```
 This covers the `ExecuteFolderAsync()` path (folder execution calls `ExecutePresetOnHostAsync()` → `ExecutePresetOnHost()` → `ExecuteScriptTextOnHost()`).
-- [ ] 2.4 Add analysis call and pass through in `ExecuteScriptTextOnHost()`
+- [x] 2.4 Add analysis call and pass through in `ExecuteScriptTextOnHost()`
 
 ## 3. Verification
 - [ ] 3.1 Run full test suite: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj` — no regressions
-- [ ] 3.2 Run focused new tests: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptDependencyAnalyzer"`
+  - Attempted on 2026-02-10; existing unrelated failures remain (`PresetManagerTests` access denied to `%LOCALAPPDATA%\\SSH_Helper\\config.json`, and `ScriptValidationFormatterTests.FormatFailureMessage_WithNoErrors_ReturnsFallback`)
+- [x] 3.2 Run focused new tests: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptDependencyAnalyzer"`
 - [ ] 3.3 Manual test — local script with host rows: script uses `http`/`print`/`set`, grid has hosts with URLs/IDs in Host_IP → runs without SSH, `LOCAL SCRIPT:` header, grid columns available as variables
 - [ ] 3.4 Manual test — SSH script unchanged: script with `send` commands, grid has hosts → SSH connection established normally, `SCRIPT:` header
 - [ ] 3.5 Manual test — mixed script: both `send` and `http` → SSH connection established

@@ -19,6 +19,14 @@ namespace SSH_Helper.Services.Scripting
         public HashSet<string> ReferencedColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
+    public class SshRequirementResult
+    {
+        public bool RequiresSshSession { get; set; }
+        public bool UsesSftp { get; set; }
+        public bool SftpUsesDefaultHost { get; set; }
+        public bool SftpUsesDefaultCredentials { get; set; }
+    }
+
     /// <summary>
     /// Statically analyzes scripts and command text to identify grid column
     /// dependencies before execution. This allows warning the user about
@@ -121,6 +129,80 @@ namespace SSH_Helper.Services.Scripting
 
             combined.ReferencedColumns.ExceptWith(resolvedSet);
             return combined;
+        }
+
+        public SshRequirementResult AnalyzeSshRequirements(Script script)
+        {
+            var result = new SshRequirementResult();
+            AnalyzeSshRequirementsInSteps(script.Steps, result);
+            return result;
+        }
+
+        private void AnalyzeSshRequirementsInSteps(List<ScriptStep>? steps, SshRequirementResult result)
+        {
+            if (steps == null) return;
+
+            foreach (var step in steps)
+            {
+                var stepType = step.GetStepType();
+                if (stepType == StepType.Send)
+                {
+                    result.RequiresSshSession = true;
+                }
+                else if (stepType == StepType.Sftp)
+                {
+                    result.UsesSftp = true;
+                    if (step.Sftp == null || string.IsNullOrWhiteSpace(step.Sftp.Host))
+                        result.SftpUsesDefaultHost = true;
+                    if (step.Sftp == null || string.IsNullOrWhiteSpace(step.Sftp.Username) || string.IsNullOrWhiteSpace(step.Sftp.Password))
+                        result.SftpUsesDefaultCredentials = true;
+                }
+
+                if (HasCompleteSshRequirementSignal(result))
+                    return;
+
+                AnalyzeSshRequirementsInSteps(step.Then, result);
+                if (HasCompleteSshRequirementSignal(result))
+                    return;
+
+                AnalyzeSshRequirementsInSteps(step.Else, result);
+                if (HasCompleteSshRequirementSignal(result))
+                    return;
+
+                AnalyzeSshRequirementsInSteps(step.Do, result);
+                if (HasCompleteSshRequirementSignal(result))
+                    return;
+
+                AnalyzeSshRequirementsInSteps(step.Try, result);
+                if (HasCompleteSshRequirementSignal(result))
+                    return;
+
+                AnalyzeSshRequirementsInSteps(step.Catch, result);
+                if (HasCompleteSshRequirementSignal(result))
+                    return;
+
+                AnalyzeSshRequirementsInSteps(step.Finally, result);
+                if (HasCompleteSshRequirementSignal(result))
+                    return;
+
+                if (step.Elif == null)
+                    continue;
+
+                foreach (var branch in step.Elif)
+                {
+                    AnalyzeSshRequirementsInSteps(branch.Then, result);
+                    if (HasCompleteSshRequirementSignal(result))
+                        return;
+                }
+            }
+        }
+
+        private static bool HasCompleteSshRequirementSignal(SshRequirementResult result)
+        {
+            return result.RequiresSshSession
+                && result.UsesSftp
+                && result.SftpUsesDefaultHost
+                && result.SftpUsesDefaultCredentials;
         }
 
         private void AnalyzeSteps(List<ScriptStep>? steps, HashSet<string> definedVars, HashSet<string> referencedVars)
