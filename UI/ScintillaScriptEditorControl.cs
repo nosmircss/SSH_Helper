@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using SSH_Helper.Models;
@@ -16,10 +17,21 @@ namespace SSH_Helper.UI
             new(@"\$\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}|\{\{(?<column>[^}\s]+)\}\}",
                 RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-        private const int FirstCustomStyleIndex = 32;
+        private const int FirstCustomStyleIndex = Style.BraceBad + 1;
+        private const int LineNumberMarginIndex = 0;
+        private const int LineNumberSpacerMarginIndex = 1;
+        private const int MinimumLineNumberDigits = 2;
+        private const int MinimumLineNumberMarginWidth = 24;
+        private const int LineNumberRightPaddingSpaces = 1;
+        private const int LineNumberMarginExtraPaddingPixels = 4;
+        private const int LineNumberSpacerWidthPixels = 10;
         private const int ErrorIndicatorIndex = 8;
         private const int WarningIndicatorIndex = 9;
         private const int CompletionPopupWidth = 262;
+        private static readonly Color DarkLineNumberTextColor = Color.FromArgb(160, 160, 160);
+        private static readonly Color LightLineNumberTextColor = Color.FromArgb(115, 115, 115);
+        private static readonly Color DarkLineNumberBackColor = Color.FromArgb(30, 30, 30);
+        private static readonly Color LightLineNumberBackColor = Color.FromArgb(242, 242, 242);
 
         private readonly Scintilla _editor;
         private readonly ToolTip _toolTip;
@@ -57,6 +69,8 @@ namespace SSH_Helper.UI
                 MouseDwellTime = 250
             };
 
+            ConfigureLineNumberMargin();
+
             _editor.AutoCSeparator = '\n';
             _editor.AutoCCancelAtStart = false;
             _editor.AutoCAutoHide = true;
@@ -66,7 +80,11 @@ namespace SSH_Helper.UI
             _editor.AutoCMaxHeight = 8;
             _editor.TabIndents = false;
             _editor.UsePopup(false);
-            _editor.HandleCreated += (_, _) => ApplyScrollbarTheme(_editor, _isDarkMode);
+            _editor.HandleCreated += (_, _) =>
+            {
+                ApplyScrollbarTheme(_editor, _isDarkMode);
+                UpdateLineNumberMarginWidth();
+            };
 
             _editor.TextChanged += Editor_TextChanged;
             _editor.KeyDown += Editor_KeyDown;
@@ -1025,6 +1043,8 @@ namespace SSH_Helper.UI
 
         private void RefreshEditorVisuals()
         {
+            UpdateLineNumberMarginWidth();
+
             if (_settings.EnableSyntaxHighlighting)
             {
                 ApplySyntaxHighlighting();
@@ -1113,8 +1133,51 @@ namespace SSH_Helper.UI
             defaultStyle.ForeColor = _editor.ForeColor;
             defaultStyle.BackColor = _editor.BackColor;
             _editor.StyleClearAll();
+
+            var lineNumberStyle = _editor.Styles[Style.LineNumber];
+            lineNumberStyle.Font = _editor.Font.Name;
+            lineNumberStyle.SizeF = _editor.Font.SizeInPoints;
+            lineNumberStyle.ForeColor = _isDarkMode
+                ? DarkLineNumberTextColor
+                : LightLineNumberTextColor;
+            lineNumberStyle.BackColor = _isDarkMode
+                ? DarkLineNumberBackColor
+                : LightLineNumberBackColor;
+
+            var spacerMargin = _editor.Margins[LineNumberSpacerMarginIndex];
+            spacerMargin.BackColor = _isDarkMode ? DarkLineNumberBackColor : LightLineNumberBackColor;
+
             _styleByColor.Clear();
             _nextStyleIndex = FirstCustomStyleIndex;
+        }
+
+        private void ConfigureLineNumberMargin()
+        {
+            var lineNumberMargin = _editor.Margins[LineNumberMarginIndex];
+            lineNumberMargin.Type = MarginType.Number;
+            lineNumberMargin.Mask = 0;
+            lineNumberMargin.Sensitive = false;
+            lineNumberMargin.Width = MinimumLineNumberMarginWidth;
+
+            var spacerMargin = _editor.Margins[LineNumberSpacerMarginIndex];
+            spacerMargin.Type = MarginType.Color;
+            spacerMargin.Mask = 0;
+            spacerMargin.Sensitive = false;
+            spacerMargin.Width = LineNumberSpacerWidthPixels;
+            spacerMargin.BackColor = _isDarkMode ? DarkLineNumberBackColor : LightLineNumberBackColor;
+        }
+
+        private void UpdateLineNumberMarginWidth()
+        {
+            var lineCount = Math.Max(1, _editor.Lines.Count);
+            var digits = Math.Max(
+                MinimumLineNumberDigits,
+                lineCount.ToString(CultureInfo.InvariantCulture).Length);
+            var lineNumberSample = new string('9', digits) + new string(' ', LineNumberRightPaddingSpaces);
+            var preferredWidth = _editor.TextWidth(Style.LineNumber, lineNumberSample) + LineNumberMarginExtraPaddingPixels;
+            _editor.Margins[LineNumberMarginIndex].Width = Math.Max(
+                MinimumLineNumberMarginWidth,
+                preferredWidth);
         }
 
         private void ConfigureIndicators()
