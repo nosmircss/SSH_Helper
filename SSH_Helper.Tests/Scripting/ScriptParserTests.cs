@@ -1022,4 +1022,148 @@ steps:
     }
 
     #endregion
+
+    #region Choose/Multiselect/Confirm Parser Tests
+
+    [Theory]
+    [InlineData("- choose:\n    prompt: test\n    into: x\n    options:\n      - a")]
+    [InlineData("- multiselect:\n    prompt: test\n    into: x\n    options:\n      - a")]
+    [InlineData("- confirm:\n    prompt: test\n    into: x")]
+    public void IsYamlScript_InteractivePromptSteps_ReturnsTrue(string input)
+    {
+        ScriptParser.IsYamlScript(input).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Parse_ChooseStep_SimpleOptions_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      prompt: ""Select device:""
+      into: device
+      options:
+        - router
+        - switch
+        - firewall
+      default: router";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        var step = script.Steps[0];
+        step.GetStepType().Should().Be(StepType.Choose);
+        step.Choose.Should().NotBeNull();
+        step.Choose!.Prompt.Should().Be("Select device:");
+        step.Choose.Into.Should().Be("device");
+        step.Choose.Options.Should().HaveCount(3);
+        step.Choose.Options[0].Label.Should().Be("router");
+        step.Choose.Options[0].Value.Should().Be("router");
+        step.Choose.Options[1].Label.Should().Be("switch");
+        step.Choose.Options[2].Label.Should().Be("firewall");
+        step.Choose.Default.Should().Be("router");
+    }
+
+    [Fact]
+    public void Parse_ChooseStep_LabelValueOptions_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      prompt: ""Select protocol:""
+      into: port
+      options:
+        - label: ""SSH (22)""
+          value: ""22""
+        - label: ""HTTPS (443)""
+          value: ""443""
+      default: ""22""";
+
+        var script = _parser.Parse(yaml);
+
+        var step = script.Steps[0];
+        step.Choose.Should().NotBeNull();
+        step.Choose!.Options.Should().HaveCount(2);
+        step.Choose.Options[0].Label.Should().Be("SSH (22)");
+        step.Choose.Options[0].Value.Should().Be("22");
+        step.Choose.Options[1].Label.Should().Be("HTTPS (443)");
+        step.Choose.Options[1].Value.Should().Be("443");
+        step.Choose.Default.Should().Be("22");
+    }
+
+    [Fact]
+    public void Parse_MultiselectStep_WithMinMax_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - multiselect:
+      prompt: ""Select interfaces:""
+      into: ifaces
+      options:
+        - Gig0/0
+        - Gig0/1
+        - Loopback0
+      min: 1
+      max: 2";
+
+        var script = _parser.Parse(yaml);
+
+        var step = script.Steps[0];
+        step.GetStepType().Should().Be(StepType.Multiselect);
+        step.Multiselect.Should().NotBeNull();
+        step.Multiselect!.Prompt.Should().Be("Select interfaces:");
+        step.Multiselect.Into.Should().Be("ifaces");
+        step.Multiselect.Options.Should().HaveCount(3);
+        step.Multiselect.Min.Should().Be(1);
+        step.Multiselect.Max.Should().Be(2);
+    }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("yes", true)]
+    [InlineData("false", false)]
+    [InlineData("no", false)]
+    public void Parse_ConfirmStep_DefaultValues_ParsesCorrectly(string defaultStr, bool expected)
+    {
+        var yaml = $@"---
+steps:
+  - confirm:
+      prompt: ""Are you sure?""
+      into: confirmed
+      default: {defaultStr}";
+
+        var script = _parser.Parse(yaml);
+
+        var step = script.Steps[0];
+        step.GetStepType().Should().Be(StepType.Confirm);
+        step.Confirm.Should().NotBeNull();
+        step.Confirm!.Prompt.Should().Be("Are you sure?");
+        step.Confirm.Into.Should().Be("confirmed");
+        step.Confirm.Default.Should().Be(expected);
+    }
+
+    [Fact]
+    public void Parse_ChooseStep_MixedOptions_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      prompt: ""Pick:""
+      into: pick
+      options:
+        - simple
+        - label: ""Labeled""
+          value: ""lbl""";
+
+        var script = _parser.Parse(yaml);
+
+        var step = script.Steps[0];
+        step.Choose!.Options.Should().HaveCount(2);
+        step.Choose.Options[0].Label.Should().Be("simple");
+        step.Choose.Options[0].Value.Should().Be("simple");
+        step.Choose.Options[1].Label.Should().Be("Labeled");
+        step.Choose.Options[1].Value.Should().Be("lbl");
+    }
+
+    #endregion
 }

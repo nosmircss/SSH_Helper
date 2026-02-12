@@ -148,6 +148,21 @@ namespace SSH_Helper.Services.Scripting.Models
         public ParseOptions? Parse { get; set; }
 
         /// <summary>
+        /// Choose command - prompts user to select one option from a list.
+        /// </summary>
+        public ChooseOptions? Choose { get; set; }
+
+        /// <summary>
+        /// Multiselect command - prompts user to select multiple options from a list.
+        /// </summary>
+        public MultiselectOptions? Multiselect { get; set; }
+
+        /// <summary>
+        /// Confirm command - prompts user with a yes/no question.
+        /// </summary>
+        public ConfirmOptions? Confirm { get; set; }
+
+        /// <summary>
         /// Break command - exits the current loop.
         /// </summary>
         public bool BreakLoop { get; set; }
@@ -260,6 +275,9 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Sftp != null) return StepType.Sftp;
             if (Webhook != null) return StepType.Webhook;
             if (Parse != null) return StepType.Parse;
+            if (Choose != null) return StepType.Choose;
+            if (Multiselect != null) return StepType.Multiselect;
+            if (Confirm != null) return StepType.Confirm;
             if (DeclaredStepType != StepType.Unknown) return DeclaredStepType;
             return StepType.Unknown;
         }
@@ -422,6 +440,101 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Error message to show when validation fails.
         /// </summary>
         public string? ValidationError { get; set; }
+    }
+
+    /// <summary>
+    /// Represents a single option in a choose/multiselect list.
+    /// Can be a simple string (label = value) or a label/value pair.
+    /// </summary>
+    public class ChoiceOption
+    {
+        /// <summary>
+        /// Display label shown to the user.
+        /// </summary>
+        public string Label { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Value stored in the variable. Defaults to Label if not specified.
+        /// </summary>
+        public string Value { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Options for the choose command (single selection from a list).
+    /// </summary>
+    public class ChooseOptions
+    {
+        /// <summary>
+        /// Prompt text to display to the user.
+        /// </summary>
+        public string Prompt { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Variable name to store the selected value.
+        /// </summary>
+        public string Into { get; set; } = string.Empty;
+
+        /// <summary>
+        /// List of options to choose from.
+        /// </summary>
+        public List<ChoiceOption> Options { get; set; } = new();
+
+        /// <summary>
+        /// Default selection (matched against option values).
+        /// </summary>
+        public string? Default { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the multiselect command (multiple selections from a list).
+    /// </summary>
+    public class MultiselectOptions
+    {
+        /// <summary>
+        /// Prompt text to display to the user.
+        /// </summary>
+        public string Prompt { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Variable name to store the selected values.
+        /// </summary>
+        public string Into { get; set; } = string.Empty;
+
+        /// <summary>
+        /// List of options to choose from.
+        /// </summary>
+        public List<ChoiceOption> Options { get; set; } = new();
+
+        /// <summary>
+        /// Minimum number of selections required.
+        /// </summary>
+        public int? Min { get; set; }
+
+        /// <summary>
+        /// Maximum number of selections allowed.
+        /// </summary>
+        public int? Max { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the confirm command (yes/no boolean prompt).
+    /// </summary>
+    public class ConfirmOptions
+    {
+        /// <summary>
+        /// Prompt text to display to the user.
+        /// </summary>
+        public string Prompt { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Variable name to store the result ("true" or "false").
+        /// </summary>
+        public string Into { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Default button: true = Yes focused, false = No focused.
+        /// </summary>
+        public bool Default { get; set; }
     }
 
     /// <summary>
@@ -783,6 +896,9 @@ namespace SSH_Helper.Services.Scripting.Models
         Portcheck,
         Sftp,
         Webhook,
-        Parse
+        Parse,
+        Choose,
+        Multiselect,
+        Confirm
     }
 }
