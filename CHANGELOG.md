@@ -1,5 +1,89 @@
 # Changelog
 
+## Changes Since `86f4dc2` (0.51.3)
+
+### Interactive Scripting Commands
+
+Three new scripting commands let scripts prompt users for input during execution:
+
+**`choose` — Single-Select from List**
+
+Presents a dialog where the user picks one option from a list. Options can be simple strings or label/value pairs with a different display label from the stored value. Supports a `default` pre-selection and variable substitution in prompts and option text.
+
+```yaml
+- choose:
+    prompt: "Select management protocol:"
+    into: mgmt_port
+    options:
+      - label: "SSH (22)"
+        value: "22"
+      - label: "HTTPS (443)"
+        value: "443"
+    default: "22"
+```
+
+**`multiselect` — Multiple-Select from Checklist**
+
+Presents a checkbox list for selecting multiple items. Stores the result as a list accessible via `${var[0]}`, `${var.length}`, and `foreach` iteration. Also sets `${var}_count`. Supports optional `min`/`max` selection constraints with inline validation.
+
+```yaml
+- multiselect:
+    prompt: "Select interfaces to configure:"
+    into: selected_ifaces
+    options:
+      - GigabitEthernet0/0
+      - GigabitEthernet0/1
+      - Loopback0
+    min: 1
+    max: 3
+```
+
+**`confirm` — Yes/No Confirmation**
+
+Presents a simple yes/no dialog. Stores `"true"` or `"false"` as a string. Unlike `input`, confirm never fails — it always stores a value regardless of which button is pressed. The `default` field controls which button is pre-focused.
+
+```yaml
+- confirm:
+    prompt: "Apply configuration changes?"
+    into: confirmed
+    default: false
+```
+
+All three commands:
+- Support variable substitution in prompts and option text
+- Respect `on_error: continue` for error handling
+- Auto-detect dark mode and render themed dialogs
+- Integrate with the dependency analyzer for column reference tracking
+
+### Local Script Execution
+
+Scripts that don't require an SSH session are now detected and executed locally without establishing an SSH connection. A static analyzer walks the parsed script tree and checks whether any `send` or default-host `sftp` steps are present.
+
+When a script contains only local commands (e.g., `set`, `print`, `choose`, `http`, `dns`, `readfile`, `writefile`, control flow), it runs in a local execution path that:
+- Skips SSH connection setup entirely
+- Skips invalid host validation when no SSH session is needed
+- Shows a `LOCAL SCRIPT` banner instead of the SSH connection header
+- Still receives host context variables (IP, columns, environment variables)
+
+This means scripts that only do local work (file processing, HTTP calls, user prompts, variable manipulation) no longer require valid SSH credentials or reachable hosts.
+
+### List Variable Rendering
+
+`ScriptContext.GetVariableString` now joins `List<string>` values with `, ` when interpolated via `${var}`. This makes multiselect results and DNS result lists readable in `print` and `log` output without manual iteration.
+
+### QA Presets
+
+Three new QA presets added under `QA/Interactive`:
+- **QA Choose Basic** — Tests simple options, label/value pairs, default selection, and conditional branching
+- **QA Multiselect Basic** — Tests min/max constraints, count variable, foreach iteration, and index access
+- **QA Confirm Basic** — Tests default values, conditional branching, and value validation
+
+### Documentation
+
+`SCRIPTING.md` updated with full reference sections for `choose`, `multiselect`, and `confirm` including syntax, parameter tables, feature notes, and usage examples.
+
+---
+
 ## Changes Since `f34fb7c` (0.51.0)
 
 ### Environment Management
