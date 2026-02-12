@@ -181,6 +181,8 @@ namespace SSH_Helper.Services.Scripting
         public string GetVariableString(string name)
         {
             var value = GetVariable(name);
+            if (value is List<string> list)
+                return string.Join(", ", list);
             return value?.ToString() ?? string.Empty;
         }
 

@@ -311,6 +311,47 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case StepType.Choose:
+                        if (step.Choose != null)
+                        {
+                            ExtractVarReferences(step.Choose.Prompt, referencedVars);
+                            ExtractVarReferences(step.Choose.Default, referencedVars);
+                            foreach (var opt in step.Choose.Options)
+                            {
+                                ExtractVarReferences(opt.Label, referencedVars);
+                                ExtractVarReferences(opt.Value, referencedVars);
+                            }
+                            if (!string.IsNullOrEmpty(step.Choose.Into))
+                                definedVars.Add(step.Choose.Into);
+                        }
+                        break;
+
+                    case StepType.Multiselect:
+                        if (step.Multiselect != null)
+                        {
+                            ExtractVarReferences(step.Multiselect.Prompt, referencedVars);
+                            foreach (var opt in step.Multiselect.Options)
+                            {
+                                ExtractVarReferences(opt.Label, referencedVars);
+                                ExtractVarReferences(opt.Value, referencedVars);
+                            }
+                            if (!string.IsNullOrEmpty(step.Multiselect.Into))
+                            {
+                                definedVars.Add(step.Multiselect.Into);
+                                definedVars.Add($"{step.Multiselect.Into}_count");
+                            }
+                        }
+                        break;
+
+                    case StepType.Confirm:
+                        if (step.Confirm != null)
+                        {
+                            ExtractVarReferences(step.Confirm.Prompt, referencedVars);
+                            if (!string.IsNullOrEmpty(step.Confirm.Into))
+                                definedVars.Add(step.Confirm.Into);
+                        }
+                        break;
+
                     case StepType.UpdateColumn:
                         if (step.UpdateColumn != null)
                         {

@@ -44,6 +44,9 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Sftp, new SftpCommand() },
                 { StepType.Webhook, new WebhookCommand() },
                 { StepType.Parse, new ParseCommand() },
+                { StepType.Choose, new ChooseCommand() },
+                { StepType.Multiselect, new MultiselectCommand() },
+                { StepType.Confirm, new ConfirmCommand() },
             };
         }
 

@@ -223,7 +223,25 @@
                                                       "timeout":  60,
                                                       "isFavorite":  false,
                                                       "folder":  "QA/Network"
-                                                  }
+                                                  },
+                    "QA Choose Basic":  {
+                                            "commands":  "---\nname: QA Choose Basic\ndescription: Tests choose command with simple options, label/value pairs, and default selection\nversion: 1\ndebug: true\nsteps:\n  - print:\n      message: \"=== Choose Command Tests ===\"\n\n  # Simple string options with default\n  - choose:\n      prompt: \"Select device type:\"\n      into: device_type\n      options:\n        - router\n        - switch\n        - firewall\n      default: router\n  - print:\n      message: \"Device type: ${device_type}\"\n\n  # Label/value pairs\n  - choose:\n      prompt: \"Select management protocol:\"\n      into: mgmt_port\n      options:\n        - label: \"SSH (22)\"\n          value: \"22\"\n        - label: \"HTTPS (443)\"\n          value: \"443\"\n        - label: \"HTTP (80)\"\n          value: \"80\"\n      default: \"22\"\n  - print:\n      message: \"Management port: ${mgmt_port}\"\n\n  # Variable substitution in prompt\n  - choose:\n      prompt: \"Configure ${device_type} role:\"\n      into: role\n      options:\n        - primary\n        - secondary\n        - standby\n  - print:\n      message: \"Role: ${role}\"\n\n  # Verify values are stored correctly\n  - if:\n      condition: device_type is not empty\n      then:\n        - log:\n            message: \"Choose stored value correctly\"\n            level: success\n      else:\n        - log:\n            message: \"Choose value was empty\"\n            level: error\n\n  - log:\n      message: \"QA Choose Basic complete\"\n      level: success",
+                                            "timeout":  60,
+                                            "isFavorite":  false,
+                                            "folder":  "QA/Interactive"
+                                        },
+                    "QA Multiselect Basic":  {
+                                                 "commands":  "---\nname: QA Multiselect Basic\ndescription: Tests multiselect command with min/max, count variable, foreach iteration, and indexing\nversion: 1\ndebug: true\nsteps:\n  - print:\n      message: \"=== Multiselect Command Tests ===\"\n\n  # Basic multiselect with min/max\n  - multiselect:\n      prompt: \"Select interfaces to configure:\"\n      into: selected_ifaces\n      options:\n        - GigabitEthernet0/0\n        - GigabitEthernet0/1\n        - GigabitEthernet0/2\n        - Loopback0\n      min: 1\n      max: 3\n\n  # Verify count variable\n  - print:\n      message: \"Selected ${selected_ifaces_count} interface(s)\"\n  - print:\n      message: \"Selections: ${selected_ifaces}\"\n\n  # Verify .length property\n  - print:\n      message: \"Length: ${selected_ifaces.length} (should match count)\"\n\n  # Index access\n  - print:\n      message: \"First selected: ${selected_ifaces[0]}\"\n\n  # Foreach iteration\n  - set:\n      expression: \"iter_count = 0\"\n  - foreach: iface in ${selected_ifaces}\n      do:\n        - print:\n            message: \"  Configuring: ${iface}\"\n        - set:\n            expression: \"iter_count = iter_count + 1\"\n  - print:\n      message: \"Iterated ${iter_count} times (should match ${selected_ifaces_count})\"\n\n  # Label/value multiselect\n  - multiselect:\n      prompt: \"Select services:\"\n      into: services\n      options:\n        - label: \"Web Server (nginx)\"\n          value: \"nginx\"\n        - label: \"Database (postgresql)\"\n          value: \"postgresql\"\n        - label: \"Cache (redis)\"\n          value: \"redis\"\n      min: 1\n  - print:\n      message: \"Services: ${services}\"\n\n  - log:\n      message: \"QA Multiselect Basic complete\"\n      level: success",
+                                                 "timeout":  60,
+                                                 "isFavorite":  false,
+                                                 "folder":  "QA/Interactive"
+                                             },
+                    "QA Confirm Basic":  {
+                                             "commands":  "---\nname: QA Confirm Basic\ndescription: Tests confirm command with default values and conditional branching\nversion: 1\ndebug: true\nsteps:\n  - print:\n      message: \"=== Confirm Command Tests ===\"\n\n  # Basic confirm with default No\n  - confirm:\n      prompt: \"Apply configuration changes?\"\n      into: confirmed\n      default: false\n  - print:\n      message: \"Confirmed: ${confirmed}\"\n\n  # Branch on result\n  - if:\n      condition: confirmed == \"true\"\n      then:\n        - print:\n            message: \"User chose YES\"\n      else:\n        - print:\n            message: \"User chose NO\"\n\n  # Confirm with variable substitution and default Yes\n  - confirm:\n      prompt: \"Save backup of ${Host_IP} before changes?\"\n      into: do_backup\n      default: true\n  - print:\n      message: \"Backup: ${do_backup}\"\n\n  # Confirm for destructive action\n  - confirm:\n      prompt: \"Delete temporary files? This cannot be undone.\"\n      into: delete_confirmed\n      default: false\n\n  - if:\n      condition: delete_confirmed == \"false\"\n      then:\n        - print:\n            message: \"Deletion skipped\"\n      else:\n        - print:\n            message: \"Proceeding with deletion\"\n\n  # Verify stored values are valid strings\n  - if:\n      condition: confirmed == \"true\" or confirmed == \"false\"\n      then:\n        - log:\n            message: \"Confirm stores valid boolean strings\"\n            level: success\n      else:\n        - log:\n            message: \"Confirm stored unexpected value: ${confirmed}\"\n            level: error\n\n  - log:\n      message: \"QA Confirm Basic complete\"\n      level: success",
+                                             "timeout":  60,
+                                             "isFavorite":  false,
+                                             "folder":  "QA/Interactive"
+                                         }
                 },
     "folders":  {
                     "QA":  {
@@ -289,6 +307,11 @@
                                        "isExpanded":  true,
                                        "sortOrder":  10,
                                        "isFavorite":  false
-                                   }
+                                   },
+                    "QA/Interactive":  {
+                                          "isExpanded":  true,
+                                          "sortOrder":  11,
+                                          "isFavorite":  false
+                                      }
                 }
 }

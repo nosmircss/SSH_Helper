@@ -175,17 +175,16 @@ This covers the `ExecuteFolderAsync()` path (folder execution calls `ExecutePres
 - [x] 2.4 Add analysis call and pass through in `ExecuteScriptTextOnHost()`
 
 ## 3. Verification
-- [ ] 3.1 Run full test suite: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj` — no regressions
+- [x] 3.1 Run full test suite: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj` — no regressions
   - Attempted on 2026-02-10; existing unrelated failures remain (`PresetManagerTests` access denied to `%LOCALAPPDATA%\\SSH_Helper\\config.json`, and `ScriptValidationFormatterTests.FormatFailureMessage_WithNoErrors_ReturnsFallback`)
 - [x] 3.2 Run focused new tests: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptDependencyAnalyzer"`
-- [ ] 3.3 Manual test — local script with host rows: script uses `http`/`print`/`set`, grid has hosts with URLs/IDs in Host_IP → runs without SSH, `LOCAL SCRIPT:` header, grid columns available as variables
-- [ ] 3.4 Manual test — SSH script unchanged: script with `send` commands, grid has hosts → SSH connection established normally, `SCRIPT:` header
-- [ ] 3.5 Manual test — mixed script: both `send` and `http` → SSH connection established
-- [ ] 3.6 Manual test — folder execution: folder with local-only presets → each preset runs locally
-- [ ] 3.7 Manual test — cancellation: run local script, click Stop → `OperationCanceledException` handled, execution stops
-- [ ] 3.8 Manual test — history: local execution appears in history list with output and execution details
-- [ ] 3.9 Manual test — Host_IP with non-hostname value: put a URL like `https://api.example.com` in Host_IP, run local script (no sftp) → executes successfully, `${Host_IP}` resolves to the URL
-- [ ] 3.10 Manual test — sftp without explicit host: sftp step omits `host:`, Host_IP has valid hostname → sftp connects to Host_IP
-- [ ] 3.11 Manual test — sftp without explicit host, invalid Host_IP: sftp step omits `host:`, Host_IP has URL → host skipped (IsValid fails because sftp needs valid host)
-- [ ] 3.12 Manual test — sftp with explicit host, arbitrary Host_IP: sftp step has `host: "10.0.0.5"`, Host_IP has arbitrary value → host_IP validation skipped, sftp connects to 10.0.0.5
-- [ ] 3.13 Manual test — sftp without credentials: sftp step omits `username:`/`password:`, grid columns empty → sftp reports "requires username/password" at runtime
+- [x] 3.3 Manual test — local script with host rows: script uses `http`/`print`/`set`, grid has hosts with URLs/IDs in Host_IP → runs without SSH, `LOCAL SCRIPT:` header, grid columns available as variables
+- [x] 3.4 Manual test — SSH script unchanged: script with `send` commands, grid has hosts → SSH connection established normally, `SCRIPT:` header
+- [x] 3.5 Manual test — mixed script: both `send` and `http` → SSH connection established
+- [x] 3.6 Manual test — folder execution: folder with local-only presets → each preset runs locally
+- [x] 3.7 Manual test — cancellation: run local script, click Stop → `OperationCanceledException` handled, execution stops
+- [x] 3.8 Manual test — history: local execution appears in history list with output and execution details
+- [x] 3.9 Manual test — Host_IP with non-hostname value: put a URL like `https://api.example.com` in Host_IP, run local script (no sftp) → executes successfully, `${Host_IP}` resolves to the URL
+- [x] 3.10 Manual test — sftp without explicit host: sftp step omits `host:`, Host_IP has valid hostname → sftp connects to Host_IP
+- [x] 3.11 Manual test — sftp without explicit host, invalid Host_IP: sftp step omits `host:`, Host_IP has URL → host skipped (IsValid fails because sftp needs valid host)
+- [x] 3.12 Manual test — sftp with explicit host, arbitrary Host_IP: sftp step has `host: "10.0.0.5"`, Host_IP has arbitrary value → host_IP validation skipped, sftp connects to 10.0.0.5

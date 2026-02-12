@@ -41,6 +41,9 @@ namespace SSH_Helper.Services.Scripting
             "sftp",
             "webhook",
             "parse",
+            "choose",
+            "multiselect",
+            "confirm",
             "break",
             "continue",
             "try"
@@ -96,7 +99,10 @@ namespace SSH_Helper.Services.Scripting
                 ["portcheck"] = ["host", "port", "timeout", "into", "on_error"],
                 ["sftp"] = ["action", "local_path", "remote_path", "host", "port", "username", "password", "overwrite", "timeout", "into", "on_error"],
                 ["webhook"] = ["url", "method", "body", "headers", "into", "timeout", "on_error"],
-                ["parse"] = ["format", "from", "into", "sections"]
+                ["parse"] = ["format", "from", "into", "sections"],
+                ["choose"] = ["prompt", "into", "options", "default"],
+                ["multiselect"] = ["prompt", "into", "options", "min", "max"],
+                ["confirm"] = ["prompt", "into", "default"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -123,6 +129,9 @@ namespace SSH_Helper.Services.Scripting
                 ["sftp"] = [],
                 ["webhook"] = [],
                 ["parse"] = [],
+                ["choose"] = [],
+                ["multiselect"] = [],
+                ["confirm"] = [],
                 ["break"] = [],
                 ["continue"] = [],
                 ["try"] = []
@@ -150,7 +159,10 @@ namespace SSH_Helper.Services.Scripting
             StepType.Dns,
             StepType.Portcheck,
             StepType.Sftp,
-            StepType.Webhook
+            StepType.Webhook,
+            StepType.Choose,
+            StepType.Multiselect,
+            StepType.Confirm
         ];
         private static readonly HashSet<string> ExitStatusTokens = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -567,6 +579,18 @@ namespace SSH_Helper.Services.Scripting
                     case "parse":
                         step.DeclaredStepType = StepType.Parse;
                         step.Parse = ParseParseOptions(parser);
+                        break;
+                    case "choose":
+                        step.DeclaredStepType = StepType.Choose;
+                        step.Choose = ParseChooseOptions(parser);
+                        break;
+                    case "multiselect":
+                        step.DeclaredStepType = StepType.Multiselect;
+                        step.Multiselect = ParseMultiselectOptions(parser);
+                        break;
+                    case "confirm":
+                        step.DeclaredStepType = StepType.Confirm;
+                        step.Confirm = ParseConfirmOptions(parser);
                         break;
                     case "then":
                         step.Then = ParseSteps(parser);
@@ -1451,6 +1475,206 @@ namespace SSH_Helper.Services.Scripting
             }
 
             return options;
+        }
+
+        private ChooseOptions ParseChooseOptions(IParser parser)
+        {
+            var options = new ChooseOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "prompt":
+                            options.Prompt = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "options":
+                            options.Options = ParseChoiceOptionList(parser);
+                            break;
+                        case "default":
+                            options.Default = parser.Consume<Scalar>().Value;
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown choose key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private MultiselectOptions ParseMultiselectOptions(IParser parser)
+        {
+            var options = new MultiselectOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "prompt":
+                            options.Prompt = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "options":
+                            options.Options = ParseChoiceOptionList(parser);
+                            break;
+                        case "min":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var min))
+                                options.Min = min;
+                            break;
+                        case "max":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var max))
+                                options.Max = max;
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown multiselect key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private ConfirmOptions ParseConfirmOptions(IParser parser)
+        {
+            var options = new ConfirmOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "prompt":
+                            options.Prompt = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "default":
+                            var defVal = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                            options.Default = defVal == "true" || defVal == "yes" || defVal == "1";
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown confirm key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        /// <summary>
+        /// Parses a YAML sequence where each item is either a scalar string (label=value)
+        /// or a mapping with "label" and "value" keys.
+        /// </summary>
+        private List<ChoiceOption> ParseChoiceOptionList(IParser parser)
+        {
+            var result = new List<ChoiceOption>();
+
+            if (!parser.Accept<SequenceStart>(out _))
+            {
+                SkipValue(parser);
+                return result;
+            }
+
+            parser.Consume<SequenceStart>();
+
+            while (!parser.Accept<SequenceEnd>(out _))
+            {
+                if (parser.Accept<Scalar>(out _))
+                {
+                    var val = parser.Consume<Scalar>().Value;
+                    result.Add(new ChoiceOption { Label = val, Value = val });
+                }
+                else if (parser.Accept<MappingStart>(out _))
+                {
+                    parser.Consume<MappingStart>();
+                    var opt = new ChoiceOption();
+
+                    while (!parser.Accept<MappingEnd>(out _))
+                    {
+                        var k = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                        switch (k)
+                        {
+                            case "label":
+                                opt.Label = parser.Consume<Scalar>().Value;
+                                break;
+                            case "value":
+                                opt.Value = parser.Consume<Scalar>().Value;
+                                break;
+                            default:
+                                SkipValue(parser);
+                                break;
+                        }
+                    }
+
+                    parser.Consume<MappingEnd>();
+
+                    // Default value to label or label to value when only one is specified
+                    if (string.IsNullOrEmpty(opt.Value) && !string.IsNullOrEmpty(opt.Label))
+                        opt.Value = opt.Label;
+                    if (string.IsNullOrEmpty(opt.Label) && !string.IsNullOrEmpty(opt.Value))
+                        opt.Label = opt.Value;
+
+                    result.Add(opt);
+                }
+                else
+                {
+                    SkipValue(parser);
+                }
+            }
+
+            parser.Consume<SequenceEnd>();
+            return result;
         }
 
         private object? ParseScalarOrSequence(IParser parser)

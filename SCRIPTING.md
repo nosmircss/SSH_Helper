@@ -21,6 +21,9 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [readfile](#readfile---read-text-files)
    - [writefile](#writefile---write-text-files)
    - [input](#input---prompt-for-user-input)
+   - [choose](#choose---single-select-from-list)
+   - [multiselect](#multiselect---multiple-select-from-list)
+   - [confirm](#confirm---yesno-confirmation)
    - [updatecolumn](#updatecolumn---update-host-table-column)
    - [updateenvironment](#updateenvironment---update-active-environment-variable)
    - [log](#log---output-with-log-level)
@@ -68,7 +71,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- parse:`
 
 Metadata-only keys (for example `name:` or `description:`) are not treated as strong YAML indicators by themselves.
 
@@ -1496,6 +1499,247 @@ Prompts the user for input during script execution with optional validation.
     then:
       - exit:
           message: "Operation cancelled"
+```
+
+---
+
+### choose - Single-Select from List
+
+Prompts the user to select one option from a list during script execution.
+
+**Syntax:**
+```yaml
+- choose:
+    prompt: "Select an option:"
+    into: variable_name
+    options:
+      - option1
+      - option2
+    default: "option1"             # Optional
+```
+
+**With Label/Value Pairs:**
+```yaml
+- choose:
+    prompt: "Select protocol:"
+    into: port
+    options:
+      - label: "SSH (22)"
+        value: "22"
+      - label: "HTTPS (443)"
+        value: "443"
+    default: "22"
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `prompt` | No | `"Select an option:"` | Text to display to the user |
+| `into` | Yes | - | Variable name to store the selected value |
+| `options` | Yes | - | List of options (strings or label/value pairs) |
+| `default` | No | - | Pre-selected option (matched against values) |
+
+**Features:**
+- Options can be simple strings (label and value are the same) or label/value pairs
+- Dialog appears during script execution with a selection list
+- Double-click selects and confirms
+- User can cancel (script will fail unless `on_error: continue`)
+- Variables can be used in `prompt`, `default`, and option labels/values
+
+**Examples:**
+```yaml
+# Simple string options
+- choose:
+    prompt: "Select device type:"
+    into: device_type
+    options:
+      - router
+      - switch
+      - firewall
+    default: router
+
+- print:
+    message: "Selected: ${device_type}"
+
+# Label/value pairs (display differs from stored value)
+- choose:
+    prompt: "Select management protocol:"
+    into: mgmt_port
+    options:
+      - label: "SSH (22)"
+        value: "22"
+      - label: "HTTPS (443)"
+        value: "443"
+      - label: "HTTP (80)"
+        value: "80"
+    default: "22"
+
+- print:
+    message: "Will connect on port ${mgmt_port}"
+
+# Dynamic options with variable substitution
+- choose:
+    prompt: "Configure ${Host_IP} as:"
+    into: role
+    options:
+      - primary
+      - secondary
+      - standby
+```
+
+---
+
+### multiselect - Multiple-Select from List
+
+Prompts the user to select multiple options from a checklist during script execution.
+
+**Syntax:**
+```yaml
+- multiselect:
+    prompt: "Select options:"
+    into: variable_name
+    options:
+      - option1
+      - option2
+      - option3
+    min: 1                         # Optional: minimum selections
+    max: 3                         # Optional: maximum selections
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `prompt` | No | `"Select options:"` | Text to display to the user |
+| `into` | Yes | - | Variable name to store selected values |
+| `options` | Yes | - | List of options (strings or label/value pairs) |
+| `min` | No | - | Minimum number of selections required |
+| `max` | No | - | Maximum number of selections allowed |
+
+**Features:**
+- Stores result as a list: use `${into[0]}`, `${into[1]}`, `${into.length}` for indexing
+- Also sets `${into}_count` with the number of selected items
+- `${into}` in print renders as comma-separated text
+- Works with `foreach: item in ${into}` for iteration
+- Supports label/value pairs (same as choose)
+- User can cancel (script will fail unless `on_error: continue`)
+- Variables can be used in `prompt` and option labels/values
+
+**Examples:**
+```yaml
+# Select interfaces to configure
+- multiselect:
+    prompt: "Select interfaces to configure:"
+    into: selected_interfaces
+    options:
+      - GigabitEthernet0/0
+      - GigabitEthernet0/1
+      - GigabitEthernet0/2
+      - Loopback0
+    min: 1
+    max: 3
+
+- print:
+    message: "Selected ${selected_interfaces_count} interfaces: ${selected_interfaces}"
+
+# Iterate over selections
+- foreach: iface in ${selected_interfaces}
+    do:
+      - print:
+          message: "Configuring ${iface}..."
+      - send:
+          command: "interface ${iface}"
+
+# Access by index
+- print:
+    message: "First selected: ${selected_interfaces[0]}"
+
+# With label/value pairs
+- multiselect:
+    prompt: "Select services to restart:"
+    into: services
+    options:
+      - label: "Web Server (nginx)"
+        value: "nginx"
+      - label: "Database (postgresql)"
+        value: "postgresql"
+      - label: "Cache (redis)"
+        value: "redis"
+    min: 1
+```
+
+---
+
+### confirm - Yes/No Confirmation
+
+Prompts the user with a yes/no confirmation dialog during script execution.
+
+**Syntax:**
+```yaml
+- confirm:
+    prompt: "Are you sure?"
+    into: variable_name
+    default: false                 # Optional (default: false)
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `prompt` | No | `"Are you sure?"` | Text to display to the user |
+| `into` | Yes | - | Variable name to store result (`"true"` or `"false"`) |
+| `default` | No | `false` | Which button is focused: `true` = Yes, `false` = No |
+
+**Features:**
+- Stores `"true"` (Yes) or `"false"` (No/Escape) as a string
+- Default controls which button is pre-focused
+- Escape key acts as No
+- Confirm never fails — it always stores a value (unlike `input` which fails on cancel)
+- Variables can be used in `prompt`
+
+**Examples:**
+```yaml
+# Simple confirmation
+- confirm:
+    prompt: "Apply configuration changes?"
+    into: confirmed
+
+- if:
+    condition: confirmed == "true"
+    then:
+      - print:
+          message: "Applying changes..."
+    else:
+      - exit:
+          message: "Operation cancelled"
+
+# With variable substitution and default
+- confirm:
+    prompt: "Reload ${Host_IP}? This will cause a brief outage."
+    into: do_reload
+    default: false
+
+- if:
+    condition: do_reload == "true"
+    then:
+      - send:
+          command: reload
+          expect: '/confirm/'
+      - send:
+          command: "y"
+
+# Destructive action confirmation
+- confirm:
+    prompt: "Delete all backup files older than 30 days?"
+    into: delete_confirmed
+    default: false
+
+- if:
+    condition: delete_confirmed == "false"
+    then:
+      - exit:
+          message: "Deletion cancelled"
 ```
 
 ---
