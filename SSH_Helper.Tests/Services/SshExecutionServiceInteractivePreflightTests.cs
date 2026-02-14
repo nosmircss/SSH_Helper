@@ -79,4 +79,55 @@ public class SshExecutionServiceInteractivePreflightTests
         results[0].Success.Should().BeFalse();
         results[0].ErrorMessage.Should().Contain("folder runs");
     }
+
+    [Fact]
+    public async Task ExecuteFolderAsync_MixedPresetsWithInteractive_BlocksWholeRun()
+    {
+        var service = new SshExecutionService();
+        var hosts = new[]
+        {
+            new HostConnection { IpAddress = "127.0.0.1", Port = 22 }
+        };
+
+        var interactivePreset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - interactive:
+                      session: separate
+                """
+        };
+
+        var simplePreset = new PresetInfo
+        {
+            Commands = "show system status"
+        };
+
+        var presets = new Dictionary<string, PresetInfo>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["SimplePreset"] = simplePreset,
+            ["InteractivePreset"] = interactivePreset
+        };
+
+        var options = new FolderExecutionOptions
+        {
+            SelectedPresets = new List<string> { "SimplePreset", "InteractivePreset" },
+            ParallelHostCount = 1,
+            RunPresetsInParallel = false
+        };
+
+        var results = await service.ExecuteFolderAsync(
+            hosts,
+            presets,
+            defaultUsername: "user",
+            defaultPassword: "pass",
+            timeouts: SshTimeoutOptions.Default,
+            options: options);
+
+        results.Should().HaveCount(1);
+        results[0].Success.Should().BeFalse();
+        results[0].ErrorMessage.Should().Contain("folder runs");
+        results[0].ErrorMessage.Should().Contain("InteractivePreset");
+    }
 }

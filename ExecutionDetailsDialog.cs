@@ -11,6 +11,9 @@ namespace SSH_Helper
     {
         private readonly ExecutionDetails _details;
         private readonly string _historyOutput;
+        private readonly string? _hostAddressFilter;
+        private readonly List<SSH_Helper.Models.HostExecutionContext> _visibleHosts;
+        private readonly List<InteractiveTerminalSessionDetails> _visibleInteractiveSessions;
 
         private readonly BorderlessTabControl _tabControl;
         private readonly TextBox _txtSummary;
@@ -28,16 +31,30 @@ namespace SSH_Helper
         private bool _interactiveSplitDefaultLayoutApplied;
 
         public ExecutionDetailsDialog(ExecutionDetails details, bool darkMode = false)
-            : this(details, string.Empty, darkMode)
+            : this(details, string.Empty, null, darkMode)
         {
         }
 
         public ExecutionDetailsDialog(ExecutionDetails details, string historyOutput, bool darkMode = false)
+            : this(details, historyOutput, null, darkMode)
+        {
+        }
+
+        public ExecutionDetailsDialog(
+            ExecutionDetails details,
+            string historyOutput,
+            string? hostAddressFilter,
+            bool darkMode = false)
         {
             _details = details ?? throw new ArgumentNullException(nameof(details));
             _historyOutput = historyOutput ?? string.Empty;
+            _hostAddressFilter = NormalizeHostAddress(hostAddressFilter);
+            _visibleHosts = CreateVisibleHosts(_details.Hosts, _hostAddressFilter);
+            _visibleInteractiveSessions = CreateVisibleInteractiveSessions(_details.InteractiveSessions, _hostAddressFilter);
 
-            Text = "Execution Details";
+            Text = string.IsNullOrEmpty(_hostAddressFilter)
+                ? "Execution Details"
+                : $"Execution Details - {_hostAddressFilter}";
             Size = new Size(980, 680);
             MinimumSize = new Size(760, 520);
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -348,8 +365,8 @@ namespace SSH_Helper
 
         private void PopulateSummaryTab()
         {
-            int hostCount = _details.Hosts?.Count ?? 0;
-            int successCount = _details.Hosts?.Count(h => h.Success) ?? 0;
+            int hostCount = _visibleHosts.Count;
+            int successCount = _visibleHosts.Count(h => h.Success);
             int failedCount = hostCount - successCount;
             var duration = _details.EndTimeUtc > _details.StartTimeUtc
                 ? _details.EndTimeUtc - _details.StartTimeUtc
@@ -368,8 +385,13 @@ namespace SSH_Helper
             sb.AppendLine($"End Time: {FormatTimestamp(_details.EndTimeUtc)}");
             sb.AppendLine($"Duration: {duration:hh\\:mm\\:ss}");
             sb.AppendLine($"Environment: {_details.EnvironmentName}");
+            if (!string.IsNullOrEmpty(_hostAddressFilter))
+            {
+                sb.AppendLine($"Host Scope: {_hostAddressFilter}");
+            }
+
             sb.AppendLine($"Hosts: {hostCount} total ({successCount} succeeded, {failedCount} failed)");
-            sb.AppendLine($"Interactive Sessions: {_details.InteractiveSessions?.Count ?? 0} launched");
+            sb.AppendLine($"Interactive Sessions: {_visibleInteractiveSessions.Count} launched");
             sb.AppendLine();
             sb.AppendLine("Executed Presets:");
             if (_details.ExecutedPresetNames.Count == 0)
@@ -396,7 +418,7 @@ namespace SSH_Helper
         {
             _gridHosts.Rows.Clear();
 
-            foreach (var host in _details.Hosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
+            foreach (var host in _visibleHosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
             {
                 _gridHosts.Rows.Add(
                     host.HostAddress,
@@ -423,7 +445,7 @@ namespace SSH_Helper
         {
             _gridContext.Rows.Clear();
 
-            foreach (var host in _details.Hosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
+            foreach (var host in _visibleHosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
             {
                 if (host.Variables.Count == 0)
                 {
@@ -443,9 +465,9 @@ namespace SSH_Helper
             _gridInteractiveSessions.Rows.Clear();
             _txtInteractiveTranscript.Clear();
 
-            var sessions = _details.InteractiveSessions?
+            var sessions = _visibleInteractiveSessions
                 .OrderBy(s => s.SessionNumber)
-                .ToList() ?? new List<InteractiveTerminalSessionDetails>();
+                .ToList();
 
             if (sessions.Count == 0)
             {
@@ -581,6 +603,11 @@ namespace SSH_Helper
             sb.AppendLine($"Start Time: {FormatTimestamp(_details.StartTimeUtc)}");
             sb.AppendLine($"End Time: {FormatTimestamp(_details.EndTimeUtc)}");
             sb.AppendLine($"Environment: {_details.EnvironmentName}");
+            if (!string.IsNullOrEmpty(_hostAddressFilter))
+            {
+                sb.AppendLine($"Host Scope: {_hostAddressFilter}");
+            }
+
             sb.AppendLine($"Username: {_details.Username}");
             sb.AppendLine($"Command Timeout: {_details.CommandTimeoutSeconds} sec");
             sb.AppendLine($"Connection Timeout: {_details.ConnectionTimeoutSeconds} sec");
@@ -607,7 +634,7 @@ namespace SSH_Helper
             sb.AppendLine();
             sb.AppendLine("Host Results");
             sb.AppendLine(new string('-', 80));
-            foreach (var host in _details.Hosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
+            foreach (var host in _visibleHosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
             {
                 sb.AppendLine($"{host.HostAddress} | {(host.Success ? "Success" : "Failed")} | {FormatTimestamp(host.TimestampUtc)}");
             }
@@ -615,7 +642,7 @@ namespace SSH_Helper
             sb.AppendLine();
             sb.AppendLine("Host Context Variables");
             sb.AppendLine(new string('-', 80));
-            foreach (var host in _details.Hosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
+            foreach (var host in _visibleHosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
             {
                 sb.AppendLine($"[{host.HostAddress}]");
                 if (host.Variables.Count == 0)
@@ -635,7 +662,15 @@ namespace SSH_Helper
             if (includeOutputWindow)
             {
                 sb.AppendLine();
-                sb.AppendLine("Output Window (All Hosts Top to Bottom)");
+                if (string.IsNullOrEmpty(_hostAddressFilter))
+                {
+                    sb.AppendLine("Output Window (All Hosts Top to Bottom)");
+                }
+                else
+                {
+                    sb.AppendLine($"Output Window ({_hostAddressFilter})");
+                }
+
                 sb.AppendLine(new string('-', 80));
                 if (string.IsNullOrWhiteSpace(_historyOutput))
                 {
@@ -660,9 +695,9 @@ namespace SSH_Helper
             sb.AppendLine("Interactive Terminal Sessions");
             sb.AppendLine(new string('-', 80));
 
-            var sessions = _details.InteractiveSessions?
+            var sessions = _visibleInteractiveSessions
                 .OrderBy(s => s.SessionNumber)
-                .ToList() ?? new List<InteractiveTerminalSessionDetails>();
+                .ToList();
             if (sessions.Count == 0)
             {
                 sb.AppendLine("(none)");
@@ -710,6 +745,45 @@ namespace SSH_Helper
                 return "(unknown)";
 
             return sessionMode.Trim();
+        }
+
+        private static string? NormalizeHostAddress(string? hostAddress)
+        {
+            if (string.IsNullOrWhiteSpace(hostAddress))
+                return null;
+
+            return hostAddress.Trim();
+        }
+
+        private static bool HostMatchesFilter(string? hostAddress, string hostAddressFilter)
+        {
+            return string.Equals(hostAddress?.Trim(), hostAddressFilter, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static List<SSH_Helper.Models.HostExecutionContext> CreateVisibleHosts(
+            IEnumerable<SSH_Helper.Models.HostExecutionContext>? hosts,
+            string? hostAddressFilter)
+        {
+            var source = hosts?.ToList() ?? new List<SSH_Helper.Models.HostExecutionContext>();
+            if (string.IsNullOrEmpty(hostAddressFilter))
+                return source;
+
+            return source
+                .Where(host => HostMatchesFilter(host.HostAddress, hostAddressFilter))
+                .ToList();
+        }
+
+        private static List<InteractiveTerminalSessionDetails> CreateVisibleInteractiveSessions(
+            IEnumerable<InteractiveTerminalSessionDetails>? sessions,
+            string? hostAddressFilter)
+        {
+            var source = sessions?.ToList() ?? new List<InteractiveTerminalSessionDetails>();
+            if (string.IsNullOrEmpty(hostAddressFilter))
+                return source;
+
+            return source
+                .Where(session => HostMatchesFilter(session.HostAddress, hostAddressFilter))
+                .ToList();
         }
     }
 }

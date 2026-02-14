@@ -60,6 +60,7 @@ namespace SSH_Helper.Services
         private Regex _promptPattern;
         private string _currentPrompt;
         private bool _disposed;
+        private DateTime _nextKeepAliveAtUtc;
 
         // Rebex ScriptEvents for pattern matching
         private ScriptEvent? _shellPromptEvent;
@@ -191,6 +192,7 @@ namespace SSH_Helper.Services
             _terminalOwner = terminalOwner;
             _currentPrompt = string.Empty;
             _promptPattern = Patterns.ShellPrompt;
+            _nextKeepAliveAtUtc = ComputeNextKeepAliveUtc();
 
             // Initialize ScriptEvents for pattern matching
             InitializeScriptEvents();
@@ -358,6 +360,7 @@ namespace SSH_Helper.Services
                 while (attemptSw.ElapsedMilliseconds < overallTimeout)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    TrySendKeepAliveIfDue("session initialization");
                     _scripting.Timeout = pollInterval;
 
                     try
@@ -654,6 +657,8 @@ namespace SSH_Helper.Services
                     break;
                 }
 
+                TrySendKeepAliveIfDue("ReadUntilPrompt");
+
                 // Inner loop: accumulate characters into a batch using short timeout
                 var batch = new StringBuilder();
                 _scripting.Timeout = batchTimeout;
@@ -902,6 +907,8 @@ namespace SSH_Helper.Services
                     break;
                 }
 
+                TrySendKeepAliveIfDue("ReadUntilExpect");
+
                 var batch = new StringBuilder();
                 _scripting.Timeout = batchTimeout;
                 bool gotData = false;
@@ -1121,6 +1128,38 @@ namespace SSH_Helper.Services
                 var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
                 var debugLine = $"[DEBUG {timestamp}] {message}\r\n";
                 DebugOutput?.Invoke(this, new ShellOutputEventArgs { Output = debugLine });
+            }
+        }
+
+        private DateTime ComputeNextKeepAliveUtc()
+        {
+            if (_timeouts.KeepAliveInterval <= TimeSpan.Zero)
+                return DateTime.MaxValue;
+
+            return DateTime.UtcNow + _timeouts.KeepAliveInterval;
+        }
+
+        private void TrySendKeepAliveIfDue(string operation)
+        {
+            if (_timeouts.KeepAliveInterval <= TimeSpan.Zero)
+                return;
+
+            var now = DateTime.UtcNow;
+            if (now < _nextKeepAliveAtUtc)
+                return;
+
+            try
+            {
+                _scripting.KeepAlive();
+                EmitDebug($"Sent SSH keepalive during {operation}.");
+            }
+            catch (Exception ex)
+            {
+                EmitDebug($"Keepalive failed during {operation}: {ex.Message}");
+            }
+            finally
+            {
+                _nextKeepAliveAtUtc = now + _timeouts.KeepAliveInterval;
             }
         }
 

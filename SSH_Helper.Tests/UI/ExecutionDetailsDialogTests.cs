@@ -68,6 +68,24 @@ public class ExecutionDetailsDialogTests
         dialog.Close();
     }
 
+    [WinFormsFact]
+    public void Constructor_WithHostFilter_LimitsHostsAndContextToSelectedHost()
+    {
+        var details = CreateDetailsWithMultipleHosts();
+        using var dialog = new ExecutionDetailsDialog(details, "host-two-output", "10.0.0.2", darkMode: false);
+
+        var hostsGrid = GetField<DataGridView>(dialog, "_gridHosts");
+        hostsGrid.Rows.Count.Should().Be(1);
+        hostsGrid.Rows[0].Cells["HostAddress"].Value.Should().Be("10.0.0.2");
+
+        var contextGrid = GetField<DataGridView>(dialog, "_gridContext");
+        contextGrid.Rows.Count.Should().BeGreaterThan(0);
+        foreach (DataGridViewRow row in contextGrid.Rows)
+        {
+            row.Cells["HostAddress"].Value.Should().Be("10.0.0.2");
+        }
+    }
+
     private static ExecutionDetails CreateDetailsWithInteractiveSessions()
     {
         var now = DateTime.UtcNow;
@@ -105,6 +123,69 @@ public class ExecutionDetailsDialogTests
                     SessionNumber = 2,
                     HostAddress = "10.0.0.1",
                     SessionMode = "shared",
+                    EmulationMode = "full",
+                    StartedAtUtc = now.AddMinutes(-2),
+                    EndedAtUtc = now.AddMinutes(-1),
+                    CloseReason = "disconnected",
+                    Completed = true,
+                    Transcript = "show interfaces"
+                }
+            }
+        };
+    }
+
+    private static ExecutionDetails CreateDetailsWithMultipleHosts()
+    {
+        var now = DateTime.UtcNow;
+        return new ExecutionDetails
+        {
+            PresetName = "Scoped Host",
+            PresetType = "YamlScript",
+            StartTimeUtc = now.AddMinutes(-5),
+            EndTimeUtc = now,
+            Hosts = new List<SSH_Helper.Models.HostExecutionContext>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.1",
+                    Success = true,
+                    TimestampUtc = now.AddMinutes(-1),
+                    Variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["site"] = "alpha"
+                    }
+                },
+                new()
+                {
+                    HostAddress = "10.0.0.2",
+                    Success = false,
+                    TimestampUtc = now,
+                    Variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["site"] = "beta",
+                        ["role"] = "edge"
+                    }
+                }
+            },
+            InteractiveSessions = new List<InteractiveTerminalSessionDetails>
+            {
+                new()
+                {
+                    SessionNumber = 1,
+                    HostAddress = "10.0.0.1",
+                    SessionMode = "shared",
+                    EmulationMode = "full",
+                    StartedAtUtc = now.AddMinutes(-4),
+                    EndedAtUtc = now.AddMinutes(-3),
+                    CloseReason = "user_closed",
+                    Completed = true,
+                    Transcript = "show version"
+                },
+                new()
+                {
+                    SessionNumber = 2,
+                    HostAddress = "10.0.0.2",
+                    SessionMode = "separate",
                     EmulationMode = "full",
                     StartedAtUtc = now.AddMinutes(-2),
                     EndedAtUtc = now.AddMinutes(-1),

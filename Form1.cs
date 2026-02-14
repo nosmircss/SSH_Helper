@@ -4521,9 +4521,29 @@ namespace SSH_Helper
             }
         }
 
+        private void contextHostLst_Opening(object sender, CancelEventArgs e)
+        {
+            if (lstOutput.SelectedItem is HistoryListItem entry &&
+                lstHosts.SelectedItem is HostHistoryEntry hostEntry &&
+                _historyResults.HasDetails(entry.Id))
+            {
+                viewHostDetailsToolStripMenuItem.Enabled = true;
+                viewHostDetailsToolStripMenuItem.Text = $"View Details ({hostEntry.HostAddress})...";
+                return;
+            }
+
+            viewHostDetailsToolStripMenuItem.Enabled = false;
+            viewHostDetailsToolStripMenuItem.Text = "View Details (not available)";
+        }
+
         private void viewDetailsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             ViewExecutionDetails();
+        }
+
+        private void viewHostDetailsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ViewExecutionDetailsForSelectedHost();
         }
 
         private void LstOutput_MouseDown(object? sender, MouseEventArgs e)
@@ -6686,6 +6706,60 @@ namespace SSH_Helper
             return dialogResult == DialogResult.Yes;
         }
 
+        private bool ValidateFolderInteractiveRestrictions(IReadOnlyDictionary<string, PresetInfo> presets)
+        {
+            var interactivePresetNames = GetInteractiveFolderPresetNames(presets);
+            if (interactivePresetNames.Count == 0)
+                return true;
+
+            var presetList = string.Join("\n", interactivePresetNames.Select(name => $"  \u2022 {name}"));
+            var message =
+                "Folder execution cannot include presets that use the 'interactive' step.\n\n" +
+                "Blocked preset(s):\n" +
+                presetList +
+                "\n\nRun those presets directly against a single current host instead.";
+
+            MessageBox.Show(
+                this,
+                message,
+                "Interactive Presets Not Allowed",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+
+            return false;
+        }
+
+        private static List<string> GetInteractiveFolderPresetNames(IReadOnlyDictionary<string, PresetInfo> presets)
+        {
+            var parser = new ScriptParser();
+            var analyzer = new ScriptDependencyAnalyzer();
+            var interactivePresetNames = new List<string>();
+
+            foreach (var entry in presets)
+            {
+                if (!entry.Value.IsScript)
+                    continue;
+
+                SSH_Helper.Services.Scripting.Models.Script script;
+                try
+                {
+                    script = parser.Parse(entry.Value.Commands);
+                    var validationErrors = parser.Validate(script, entry.Value.Commands, enforceCanonicalSyntax: true);
+                    if (validationErrors.Count > 0)
+                        continue;
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+
+                if (analyzer.AnalyzeSshRequirements(script).UsesInteractive)
+                    interactivePresetNames.Add(entry.Key);
+            }
+
+            return interactivePresetNames;
+        }
+
         private async void ExecuteOnAllHosts()
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -6902,6 +6976,9 @@ namespace SSH_Helper
             }
 
             if (presets.Count == 0)
+                return;
+
+            if (!ValidateFolderInteractiveRestrictions(presets))
                 return;
 
             // Validate column dependencies before entering execution mode
@@ -7672,7 +7749,7 @@ namespace SSH_Helper
             ClearOutput();
         }
 
-        private void ViewExecutionDetails()
+        private void ViewExecutionDetails(string? hostAddressFilter = null, string? scopedOutput = null)
         {
             if (lstOutput.SelectedItem is not HistoryListItem entry)
                 return;
@@ -7687,9 +7764,27 @@ namespace SSH_Helper
                 return;
             }
 
-            using var dialog = new ExecutionDetailsDialog(details, entry.Output, _isDarkMode);
+            using var dialog = new ExecutionDetailsDialog(
+                details,
+                scopedOutput ?? entry.Output,
+                hostAddressFilter,
+                _isDarkMode);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
             dialog.ShowDialog(this);
+        }
+
+        private void ViewExecutionDetailsForSelectedHost()
+        {
+            if (lstHosts.SelectedItem is not HostHistoryEntry hostEntry)
+            {
+                MessageBox.Show("Please select a host first.",
+                    "No Host Selected",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            ViewExecutionDetails(hostEntry.HostAddress, hostEntry.Output);
         }
 
         #endregion

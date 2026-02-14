@@ -249,7 +249,7 @@
                                                          "folder":  "QA/Interactive"
                                                      },
                     "QA Interactive Shared":  {
-                                                       "commands":  "---\nname: QA Interactive Shared\ndescription: Uses shared interactive mode and continues on shared unavailable\nversion: 1\ndebug: true\nsteps:\n  - interactive:\n      session: shared\n      on_error: continue\n  - print:\n      message: \"Shared interactive step completed or was skipped by on_error.\"",
+                                                       "commands":  "---\nname: QA Interactive Shared\ndescription: Uses shared interactive mode and continues on shared unavailable\nversion: 1\ndebug: true\nsteps:\n  - send:\n      command: cd /tmp\n  - interactive:\n      session: shared\n      on_error: continue\n  - send:\n      command: pwd\n  - print:\n      message: \"Shared interactive step completed or was skipped by on_error.\"",
                                                         "timeout":  120,
                                                         "isFavorite":  false,
                                                         "folder":  "QA/Interactive"

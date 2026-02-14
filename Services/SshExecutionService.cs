@@ -442,6 +442,28 @@ namespace SSH_Helper.Services
 
             try
             {
+                var interactivePresetNames = FindInteractiveFolderPresets(presetNames, presets);
+                if (interactivePresetNames.Count > 0)
+                {
+                    var preflightMessage = BuildFolderInteractivePreflightMessage(interactivePresetNames);
+                    var errorOutput = $"Script preflight error: {preflightMessage}\n";
+                    OnOutputReceived(hostList.FirstOrDefault() ?? new HostConnection(), errorOutput);
+
+                    foreach (var host in hostList)
+                    {
+                        results.Add(new ExecutionResult
+                        {
+                            Host = host,
+                            Success = false,
+                            ErrorMessage = preflightMessage,
+                            Output = errorOutput,
+                            Timestamp = DateTime.Now
+                        });
+                    }
+
+                    return results;
+                }
+
                 // Process hosts in batches based on ParallelHostCount
                 var hostBatches = hostList
                     .Select((host, index) => new { host, index })
@@ -619,6 +641,51 @@ namespace SSH_Helper.Services
             }
 
             return results;
+        }
+
+        private static List<string> FindInteractiveFolderPresets(
+            IEnumerable<string> presetNames,
+            IReadOnlyDictionary<string, PresetInfo> presets)
+        {
+            var parser = new ScriptParser();
+            var analyzer = new ScriptDependencyAnalyzer();
+            var interactivePresetNames = new List<string>();
+
+            foreach (var presetName in presetNames.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!presets.TryGetValue(presetName, out var preset) || !preset.IsScript)
+                    continue;
+
+                Script script;
+                try
+                {
+                    script = parser.Parse(preset.Commands);
+                    var validationErrors = parser.Validate(script, preset.Commands, enforceCanonicalSyntax: true);
+                    if (validationErrors.Count > 0)
+                        continue;
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+
+                if (analyzer.AnalyzeSshRequirements(script).UsesInteractive)
+                {
+                    interactivePresetNames.Add(presetName);
+                }
+            }
+
+            return interactivePresetNames;
+        }
+
+        private static string BuildFolderInteractivePreflightMessage(IReadOnlyList<string> interactivePresetNames)
+        {
+            const string baseMessage = "Scripts using 'interactive' are not supported in folder runs. Run the script against a single current host instead.";
+            if (interactivePresetNames.Count == 0)
+                return baseMessage;
+
+            var blockedPresets = string.Join(", ", interactivePresetNames.Select(name => $"'{name}'"));
+            return $"{baseMessage} Blocked preset(s): {blockedPresets}.";
         }
 
         // Execute a preset without starting a new execution scope (caller owns BeginExecution/EndExecution).

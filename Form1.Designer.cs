@@ -142,6 +142,8 @@ namespace SSH_Helper
             hostListPanel = new Panel();
             lstHosts = new ListBox();
             contextHostLst = new ContextMenuStrip(components);
+            viewHostDetailsToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparatorHostDetails = new ToolStripSeparator();
             exportHostOutputToolStripMenuItem = new ToolStripMenuItem();
             hostHeaderPanel = new Panel();
             lblHostsListTitle = new Label();
@@ -1179,9 +1181,22 @@ namespace SSH_Helper
             //
             // contextHostLst
             //
-            contextHostLst.Items.AddRange(new ToolStripItem[] { exportHostOutputToolStripMenuItem });
+            contextHostLst.Items.AddRange(new ToolStripItem[] { viewHostDetailsToolStripMenuItem, toolStripSeparatorHostDetails, exportHostOutputToolStripMenuItem });
             contextHostLst.Name = "contextHostLst";
-            contextHostLst.Size = new Size(181, 48);
+            contextHostLst.Size = new Size(181, 76);
+            contextHostLst.Opening += contextHostLst_Opening;
+            //
+            // viewHostDetailsToolStripMenuItem
+            //
+            viewHostDetailsToolStripMenuItem.Name = "viewHostDetailsToolStripMenuItem";
+            viewHostDetailsToolStripMenuItem.Size = new Size(180, 22);
+            viewHostDetailsToolStripMenuItem.Text = "View Details...";
+            viewHostDetailsToolStripMenuItem.Click += viewHostDetailsToolStripMenuItem_Click;
+            //
+            // toolStripSeparatorHostDetails
+            //
+            toolStripSeparatorHostDetails.Name = "toolStripSeparatorHostDetails";
+            toolStripSeparatorHostDetails.Size = new Size(177, 6);
             //
             // exportHostOutputToolStripMenuItem
             //
@@ -1795,6 +1810,8 @@ namespace SSH_Helper
         private Label lblHostsListTitle;
         private ListBox lstHosts;
         private ContextMenuStrip contextHostLst;
+        private ToolStripMenuItem viewHostDetailsToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparatorHostDetails;
         private ToolStripMenuItem exportHostOutputToolStripMenuItem;
 
         // Status bar

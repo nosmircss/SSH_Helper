@@ -8,9 +8,12 @@ namespace SSH_Helper
     /// </summary>
     internal sealed class FolderExecutionDialog : Form
     {
+        private const string UnsupportedInteractiveSuffix = " (unsupported interactive command)";
+
         private readonly string _folderName;
         private readonly List<string> _presetNames;
         private readonly List<string> _hostAddresses;
+        private readonly HashSet<string> _unsupportedInteractivePresets;
 
         private readonly Panel _pnlPresets;
         private readonly Panel _pnlHosts;
@@ -22,7 +25,6 @@ namespace SSH_Helper
         private readonly CheckBox _chkStopOnError;
         private readonly CheckBox _chkSuppressPresetNames;
         private readonly TextBox _txtParallelHosts;
-        private readonly Label _lblHostCount;
         private readonly Button _btnRun;
         private readonly Button _btnCancel;
 
@@ -31,11 +33,19 @@ namespace SSH_Helper
         /// </summary>
         public FolderExecutionOptions Options { get; private set; } = new();
 
-        public FolderExecutionDialog(string folderName, List<string> presetNames, List<string> hostAddresses, bool darkMode = false)
+        public FolderExecutionDialog(
+            string folderName,
+            List<string> presetNames,
+            List<string> hostAddresses,
+            bool darkMode = false,
+            IEnumerable<string>? unsupportedInteractivePresets = null)
         {
             _folderName = folderName;
             _presetNames = presetNames;
             _hostAddresses = hostAddresses;
+            _unsupportedInteractivePresets = new HashSet<string>(
+                unsupportedInteractivePresets ?? Enumerable.Empty<string>(),
+                StringComparer.OrdinalIgnoreCase);
 
             Text = $"Run Folder: {folderName}";
             Size = new Size(420, 580);
@@ -70,7 +80,8 @@ namespace SSH_Helper
 
             foreach (var preset in _presetNames)
             {
-                _lstPresets.Items.Add(preset, true);
+                var isUnsupportedInteractive = _unsupportedInteractivePresets.Contains(preset);
+                _lstPresets.Items.Add(new PresetListItem(preset, isUnsupportedInteractive), !isUnsupportedInteractive);
             }
             _lstPresets.ItemCheck += LstPresets_ItemCheck;
 
@@ -173,14 +184,7 @@ namespace SSH_Helper
                 TextAlign = HorizontalAlignment.Right
             };
             _txtParallelHosts.KeyPress += TxtParallelHosts_KeyPress;
-
-            _lblHostCount = new Label
-            {
-                Text = $"(of {_hostAddresses.Count} selected)",
-                Location = new Point(162, 456),
-                AutoSize = true,
-                ForeColor = Color.Gray
-            };
+            _txtParallelHosts.Leave += TxtParallelHosts_Leave;
 
             // Buttons
             _btnRun = new Button
@@ -215,13 +219,13 @@ namespace SSH_Helper
             Controls.Add(lblHostSection);
             Controls.Add(lblParallelHosts);
             Controls.Add(_txtParallelHosts);
-            Controls.Add(_lblHostCount);
             Controls.Add(_btnCancel);
             Controls.Add(_btnRun);
 
             AcceptButton = _btnRun;
             CancelButton = _btnCancel;
 
+            UpdateRunButtonState(_lstPresets.CheckedItems.Count, _lstHosts.CheckedItems.Count);
             ApplyTheme(darkMode);
         }
 
@@ -250,8 +254,7 @@ namespace SSH_Helper
             if (e.NewValue == CheckState.Checked) presetCount++;
             else if (e.NewValue == CheckState.Unchecked) presetCount--;
 
-            _btnRun.Text = $"Run {presetCount} Presets";
-            _btnRun.Enabled = presetCount > 0 && _lstHosts.CheckedItems.Count > 0;
+            UpdateRunButtonState(presetCount, _lstHosts.CheckedItems.Count);
         }
 
         private void LstHosts_ItemCheck(object? sender, ItemCheckEventArgs e)
@@ -261,8 +264,8 @@ namespace SSH_Helper
             else if (e.NewValue == CheckState.Unchecked) hostCount--;
 
             _lblHosts.Text = $"Target hosts ({hostCount} of {_hostAddresses.Count}):";
-            _lblHostCount.Text = $"(of {hostCount} selected)";
-            _btnRun.Enabled = _lstPresets.CheckedItems.Count > 0 && hostCount > 0;
+            UpdateRunButtonState(_lstPresets.CheckedItems.Count, hostCount);
+            NormalizeParallelHosts(hostCount);
         }
 
         private void TxtParallelHosts_KeyPress(object? sender, KeyPressEventArgs e)
@@ -274,30 +277,69 @@ namespace SSH_Helper
             }
         }
 
+        private void TxtParallelHosts_Leave(object? sender, EventArgs e)
+        {
+            NormalizeParallelHosts(_lstHosts.CheckedItems.Count);
+        }
+
+        private void NormalizeParallelHosts(int selectedHostCount)
+        {
+            int maxParallelHosts = Math.Max(1, selectedHostCount);
+
+            if (!int.TryParse(_txtParallelHosts.Text, out int parallelHosts))
+            {
+                parallelHosts = 1;
+            }
+
+            parallelHosts = Math.Clamp(parallelHosts, 1, maxParallelHosts);
+            _txtParallelHosts.Text = parallelHosts.ToString();
+        }
+
         private void BtnRun_Click(object? sender, EventArgs e)
         {
-            // Validate parallel hosts input
-            if (!int.TryParse(_txtParallelHosts.Text, out int parallelHosts) || parallelHosts < 1)
-            {
-                MessageBox.Show(
-                    "Please enter a valid number for parallel hosts (minimum 1).",
-                    "Invalid Input",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                DialogResult = DialogResult.None;
-                return;
-            }
+            int selectedHostCount = _lstHosts.CheckedItems.Count;
+            NormalizeParallelHosts(selectedHostCount);
+            int parallelHosts = int.Parse(_txtParallelHosts.Text);
 
             // Build the options
             Options = new FolderExecutionOptions
             {
-                SelectedPresets = _lstPresets.CheckedItems.Cast<string>().ToList(),
+                SelectedPresets = _lstPresets.CheckedItems
+                    .Cast<PresetListItem>()
+                    .Select(item => item.Name)
+                    .ToList(),
                 SelectedHostIndices = _lstHosts.CheckedIndices.Cast<int>().ToList(),
                 RunPresetsInParallel = _rbParallel.Checked,
                 StopOnFirstError = _chkStopOnError.Checked,
                 ParallelHostCount = parallelHosts,
                 SuppressPresetNames = _chkSuppressPresetNames.Checked
             };
+        }
+
+        private void UpdateRunButtonState(int checkedPresetCount, int checkedHostCount)
+        {
+            _btnRun.Text = $"Run {checkedPresetCount} Presets";
+            _btnRun.Enabled = checkedPresetCount > 0 && checkedHostCount > 0;
+        }
+
+        private sealed class PresetListItem
+        {
+            public PresetListItem(string name, bool unsupportedInteractive)
+            {
+                Name = name;
+                UnsupportedInteractive = unsupportedInteractive;
+            }
+
+            public string Name { get; }
+            public bool UnsupportedInteractive { get; }
+
+            public override string ToString()
+            {
+                if (!UnsupportedInteractive)
+                    return Name;
+
+                return Name + FolderExecutionDialog.UnsupportedInteractiveSuffix;
+            }
         }
     }
 }

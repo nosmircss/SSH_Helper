@@ -32,6 +32,12 @@ namespace SSH_Helper.Services
         public TimeSpan InitialPromptTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
         /// <summary>
+        /// Interval between SSH keepalive NOOP packets while a session is waiting for I/O.
+        /// Set to zero or a negative value to disable keepalive.
+        /// </summary>
+        public TimeSpan KeepAliveInterval { get; set; } = TimeSpan.FromSeconds(25);
+
+        /// <summary>
         /// Creates default timeout options.
         /// </summary>
         public static SshTimeoutOptions Default => new();

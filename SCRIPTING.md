@@ -1761,6 +1761,8 @@ Opens an in-app SSH terminal window and pauses the script until the terminal win
 - Closing the terminal window by the user is treated as success and script execution continues.
 - `session: separate` opens a new SSH terminal connection using current host credentials/settings.
 - `session: shared` attaches to the active script SSH session. If unavailable, the step fails with `InteractiveSharedUnavailable`.
+- In `session: shared`, pressing `Ctrl+D` closes only the interactive window and does not send EOF to the shared SSH shell.
+- In `session: shared`, pressing Enter on `exit` or `logout` closes the interactive window (detach) and does not execute those commands on the shared SSH session.
 - Stop/cancel while terminal is open force-closes the terminal/session and cancels script execution.
 - `interactive` is single-host only:
   - Multi-host script runs are rejected in preflight.

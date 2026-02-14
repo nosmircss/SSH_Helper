@@ -77,6 +77,18 @@ namespace SSH_Helper.Services.Terminal
                 string.Equals(CloseReason, InteractiveCloseReasonDisconnected, StringComparison.Ordinal);
         }
 
+        private sealed class SharedCommandGuardState
+        {
+            public StringBuilder CurrentLine { get; } = new();
+            public int SentCharactersOnLine { get; set; }
+
+            public void Reset()
+            {
+                CurrentLine.Clear();
+                SentCharactersOnLine = 0;
+            }
+        }
+
         internal readonly record struct TranscriptCaptureResult(string CapturedText, bool InAlternateScreen);
 
         public async Task<InteractiveTerminalRunResult> RunAsync(
@@ -107,6 +119,7 @@ namespace SSH_Helper.Services.Terminal
 
             var startedAtUtc = DateTime.UtcNow;
             var runSummary = new InteractiveWindowRunSummary();
+            var timeouts = context.Timeouts ?? SshTimeoutOptions.Default;
             try
             {
                 sharedSession.FlushBuffer();
@@ -117,6 +130,8 @@ namespace SSH_Helper.Services.Terminal
                     title: $"{context.CurrentHost?.ToString() ?? "Current Host"} - Interactive ({options.Session.ToString().ToLowerInvariant()})",
                     scripting: sharedSession.SharedScripting,
                     terminal: terminal,
+                    sessionMode: options.Session,
+                    keepAliveInterval: timeouts.KeepAliveInterval,
                     cancellationToken: cancellationToken,
                     isConnectionAlive: () => sharedSession.IsConnected,
                     onCancellation: () =>
@@ -209,6 +224,8 @@ namespace SSH_Helper.Services.Terminal
                     title: $"{host} - Interactive ({options.Session.ToString().ToLowerInvariant()})",
                     scripting: scripting,
                     terminal: virtualTerminal,
+                    sessionMode: options.Session,
+                    keepAliveInterval: timeouts.KeepAliveInterval,
                     cancellationToken: cancellationToken,
                     isConnectionAlive: () => client != null && client.IsConnected,
                     onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting));
@@ -245,6 +262,8 @@ namespace SSH_Helper.Services.Terminal
             string title,
             RebexScripting scripting,
             ITerminal? terminal,
+            InteractiveSessionMode sessionMode,
+            TimeSpan keepAliveInterval,
             CancellationToken cancellationToken,
             Func<bool>? isConnectionAlive,
             Action? onCancellation)
@@ -260,6 +279,7 @@ namespace SSH_Helper.Services.Terminal
             var transcriptLock = new object();
             var inAlternateScreen = false;
             var inAlternateScreenState = 0;
+            var sharedCommandGuard = sessionMode == InteractiveSessionMode.Shared ? new SharedCommandGuardState() : null;
             InteractiveTerminalForm? form = null;
             var terminalDisconnected = 0;
             var terminalRequestedDisconnect = 0;
@@ -361,15 +381,42 @@ namespace SSH_Helper.Services.Terminal
 
                 form.TextInput += (_, text) =>
                 {
+                    if (sharedCommandGuard != null)
+                    {
+                        if (EnqueueSharedTextInput(sharedCommandGuard, pendingInput, text))
+                        {
+                            EnqueueSharedDetachRequest(sharedCommandGuard, pendingInput, form);
+                        }
+
+                        return;
+                    }
+
                     pendingInput.Enqueue(stream => stream.Send(text));
                 };
 
                 form.KeyInput += (_, keyArgs) =>
                 {
+                    if (ShouldCloseSharedWindowWithoutSendingEof(sessionMode, keyArgs))
+                    {
+                        RequestCloseSafe(form);
+                        return;
+                    }
+
                     if (keyArgs.ConsoleKey == ConsoleKey.D &&
                         (keyArgs.Modifiers & ConsoleModifiers.Control) == ConsoleModifiers.Control)
                     {
                         Interlocked.Exchange(ref ctrlDRequestedTick, Environment.TickCount64);
+                    }
+
+                    if (sharedCommandGuard != null)
+                    {
+                        if (ShouldBlockSharedShellCommandOnEnter(sharedCommandGuard, keyArgs))
+                        {
+                            EnqueueSharedDetachRequest(sharedCommandGuard, pendingInput, form);
+                            return;
+                        }
+
+                        UpdateSharedCommandGuardForKey(sharedCommandGuard, keyArgs);
                     }
 
                     pendingInput.Enqueue(stream =>
@@ -451,6 +498,7 @@ namespace SSH_Helper.Services.Terminal
                         terminal,
                         ioLock,
                         pendingInput,
+                        keepAliveInterval,
                         isConnectionAlive,
                         () => Volatile.Read(ref terminalDisconnected) == 1 ||
                               Volatile.Read(ref terminalRequestedDisconnect) == 1 ||
@@ -552,6 +600,7 @@ namespace SSH_Helper.Services.Terminal
             ITerminal? terminal,
             object ioLock,
             ConcurrentQueue<Action<RebexScripting>> pendingInput,
+            TimeSpan keepAliveInterval,
             Func<bool>? isConnectionAlive,
             Func<bool>? isTerminalClosed,
             Func<bool>? isAlternateScreenActive,
@@ -570,6 +619,7 @@ namespace SSH_Helper.Services.Terminal
             var lastScreenHash = int.MinValue;
             var lastRenderedHistoryLength = 0;
             var hadFatalError = false;
+            var nextKeepAliveAtUtc = ComputeNextKeepAliveUtc(keepAliveInterval);
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -590,6 +640,8 @@ namespace SSH_Helper.Services.Terminal
                             RequestCloseSafe(form);
                             break;
                         }
+
+                        TrySendKeepAliveIfDue(scripting, keepAliveInterval, ref nextKeepAliveAtUtc);
 
                         FlushPendingInput(scripting, pendingInput);
                         var terminalState = scripting.Process(processTimeoutMs);
@@ -809,8 +861,151 @@ namespace SSH_Helper.Services.Terminal
                 EndedAtUtc = endedAtUtc,
                 CloseReason = summary.CloseReason,
                 Completed = summary.Completed,
-                Transcript = summary.Transcript ?? string.Empty
+                Transcript = CleanTranscriptForAudit(summary.Transcript)
             };
+        }
+
+        internal static bool ShouldCloseSharedWindowWithoutSendingEof(
+            InteractiveSessionMode sessionMode,
+            TerminalKeyEventArgs keyArgs)
+        {
+            return sessionMode == InteractiveSessionMode.Shared &&
+                   keyArgs.ConsoleKey == ConsoleKey.D &&
+                   (keyArgs.Modifiers & ConsoleModifiers.Control) == ConsoleModifiers.Control;
+        }
+
+        internal static bool ShouldBlockSharedShellCommand(string? commandText)
+        {
+            if (string.IsNullOrWhiteSpace(commandText))
+                return false;
+
+            var normalized = commandText.Trim();
+            return string.Equals(normalized, "exit", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "logout", StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static string CleanTranscriptForAudit(string? transcript)
+        {
+            if (string.IsNullOrEmpty(transcript))
+                return string.Empty;
+
+            if (transcript.IndexOf('\b') < 0 && transcript.IndexOf((char)0x7F) < 0)
+                return transcript;
+
+            // Transcript audit should preserve what the user typed while removing
+            // non-printable control artifacts (for example backspace squares).
+            return transcript
+                .Replace("\b", string.Empty, StringComparison.Ordinal)
+                .Replace("\u007F", string.Empty, StringComparison.Ordinal);
+        }
+
+        private static bool ShouldBlockSharedShellCommandOnEnter(
+            SharedCommandGuardState guardState,
+            TerminalKeyEventArgs keyArgs)
+        {
+            if (keyArgs.FunctionKey != FunctionKey.Enter)
+                return false;
+
+            return ShouldBlockSharedShellCommand(guardState.CurrentLine.ToString());
+        }
+
+        private static void UpdateSharedCommandGuardForKey(
+            SharedCommandGuardState guardState,
+            TerminalKeyEventArgs keyArgs)
+        {
+            if (keyArgs.FunctionKey == FunctionKey.Enter)
+            {
+                guardState.Reset();
+                return;
+            }
+
+            if (keyArgs.FunctionKey == FunctionKey.Backspace)
+            {
+                if (guardState.SentCharactersOnLine > 0 &&
+                    guardState.CurrentLine.Length > 0)
+                {
+                    guardState.CurrentLine.Remove(guardState.CurrentLine.Length - 1, 1);
+                    guardState.SentCharactersOnLine--;
+                }
+
+                return;
+            }
+
+            if (keyArgs.FunctionKey == FunctionKey.Tab)
+            {
+                guardState.CurrentLine.Append('\t');
+                guardState.SentCharactersOnLine++;
+                return;
+            }
+
+            if (keyArgs.FunctionKey.HasValue || keyArgs.ConsoleKey.HasValue)
+            {
+                // Cursor navigation and control key combos can alter line state in ways this local buffer
+                // cannot reliably reconstruct, so drop tracking until the user starts typing again.
+                guardState.Reset();
+            }
+        }
+
+        private static bool EnqueueSharedTextInput(
+            SharedCommandGuardState guardState,
+            ConcurrentQueue<Action<RebexScripting>> pendingInput,
+            string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return false;
+
+            var pendingSegment = new StringBuilder();
+
+            foreach (var nextChar in text)
+            {
+                if (nextChar == '\r')
+                    continue;
+
+                if (nextChar == '\n')
+                {
+                    if (ShouldBlockSharedShellCommand(guardState.CurrentLine.ToString()))
+                    {
+                        return true;
+                    }
+
+                    pendingSegment.Append('\n');
+                    var lineToSend = pendingSegment.ToString();
+                    pendingInput.Enqueue(stream => stream.Send(lineToSend));
+                    guardState.Reset();
+                    pendingSegment.Clear();
+                    continue;
+                }
+
+                guardState.CurrentLine.Append(nextChar);
+                pendingSegment.Append(nextChar);
+            }
+
+            if (pendingSegment.Length <= 0)
+                return false;
+
+            var textToSend = pendingSegment.ToString();
+            pendingInput.Enqueue(stream => stream.Send(textToSend));
+            guardState.SentCharactersOnLine += textToSend.Length;
+            return false;
+        }
+
+        private static void EnqueueSharedDetachRequest(
+            SharedCommandGuardState guardState,
+            ConcurrentQueue<Action<RebexScripting>> pendingInput,
+            InteractiveTerminalForm form)
+        {
+            var repeatCount = Math.Max(0, guardState.SentCharactersOnLine);
+            guardState.Reset();
+
+            pendingInput.Enqueue(stream =>
+            {
+                for (var i = 0; i < repeatCount; i++)
+                {
+                    stream.Send(FunctionKey.Backspace, ConsoleModifiers.None);
+                }
+
+                RequestCloseSafe(form);
+            });
         }
 
         private static void FlushPendingInput(
@@ -827,6 +1022,40 @@ namespace SSH_Helper.Services.Terminal
                 {
                     // Ignore send failures while terminal is closing.
                 }
+            }
+        }
+
+        private static DateTime ComputeNextKeepAliveUtc(TimeSpan keepAliveInterval)
+        {
+            if (keepAliveInterval <= TimeSpan.Zero)
+                return DateTime.MaxValue;
+
+            return DateTime.UtcNow + keepAliveInterval;
+        }
+
+        private static void TrySendKeepAliveIfDue(
+            RebexScripting scripting,
+            TimeSpan keepAliveInterval,
+            ref DateTime nextKeepAliveAtUtc)
+        {
+            if (keepAliveInterval <= TimeSpan.Zero)
+                return;
+
+            var now = DateTime.UtcNow;
+            if (now < nextKeepAliveAtUtc)
+                return;
+
+            try
+            {
+                scripting.KeepAlive();
+            }
+            catch
+            {
+                // Ignore keepalive failures; main pump loop still handles disconnect signals.
+            }
+            finally
+            {
+                nextKeepAliveAtUtc = now + keepAliveInterval;
             }
         }
 

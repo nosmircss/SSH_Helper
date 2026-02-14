@@ -1,4 +1,6 @@
 using FluentAssertions;
+using SSH_Helper.Forms;
+using SSH_Helper.Services.Scripting.Models;
 using SSH_Helper.Services.Terminal;
 using Xunit;
 
@@ -59,5 +61,93 @@ public class InteractiveTerminalServiceTranscriptFilterTests
 
         result.CapturedText.Should().Contain("host$");
         result.InAlternateScreen.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldCloseSharedWindowWithoutSendingEof_SharedCtrlD_ReturnsTrue()
+    {
+        var result = InteractiveTerminalService.ShouldCloseSharedWindowWithoutSendingEof(
+            InteractiveSessionMode.Shared,
+            new TerminalKeyEventArgs
+            {
+                ConsoleKey = ConsoleKey.D,
+                Modifiers = ConsoleModifiers.Control
+            });
+
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ShouldCloseSharedWindowWithoutSendingEof_SeparateCtrlD_ReturnsFalse()
+    {
+        var result = InteractiveTerminalService.ShouldCloseSharedWindowWithoutSendingEof(
+            InteractiveSessionMode.Separate,
+            new TerminalKeyEventArgs
+            {
+                ConsoleKey = ConsoleKey.D,
+                Modifiers = ConsoleModifiers.Control
+            });
+
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldCloseSharedWindowWithoutSendingEof_SharedNonCtrlD_ReturnsFalse()
+    {
+        var result = InteractiveTerminalService.ShouldCloseSharedWindowWithoutSendingEof(
+            InteractiveSessionMode.Shared,
+            new TerminalKeyEventArgs
+            {
+                ConsoleKey = ConsoleKey.C,
+                Modifiers = ConsoleModifiers.Control
+            });
+
+        result.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("exit")]
+    [InlineData("logout")]
+    [InlineData("  EXIT  ")]
+    [InlineData("\tLogout\t")]
+    public void ShouldBlockSharedShellCommand_ExitAndLogout_ReturnsTrue(string value)
+    {
+        var result = InteractiveTerminalService.ShouldBlockSharedShellCommand(value);
+        result.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("show version")]
+    [InlineData("exit now")]
+    [InlineData("logout 1")]
+    public void ShouldBlockSharedShellCommand_NonProtectedCommands_ReturnsFalse(string? value)
+    {
+        var result = InteractiveTerminalService.ShouldBlockSharedShellCommand(value);
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void CleanTranscriptForAudit_BackspaceSequence_RemovesSquareArtifacts()
+    {
+        const string raw = "○ → exit\b\b\b\b\r\n";
+
+        var cleaned = InteractiveTerminalService.CleanTranscriptForAudit(raw);
+
+        cleaned.Should().Be("○ → exit\r\n");
+        cleaned.Should().NotContain("\b");
+    }
+
+    [Fact]
+    public void CleanTranscriptForAudit_DeleteControl_RemovesPreviousCharacter()
+    {
+        const string raw = "logout\u007F\u007F\r\n";
+
+        var cleaned = InteractiveTerminalService.CleanTranscriptForAudit(raw);
+
+        cleaned.Should().Be("logout\r\n");
+        cleaned.Should().NotContain("\u007F");
     }
 }
