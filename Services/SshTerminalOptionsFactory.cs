@@ -12,7 +12,7 @@ namespace SSH_Helper.Services
     {
         public const int DefaultColumns = 120;
         public const int DefaultRows = 36;
-        public const int DefaultHistoryMaxLength = 1000;
+        public const int DefaultHistoryMaxLength = 1000000;
 
         public static TerminalOptions Create()
         {

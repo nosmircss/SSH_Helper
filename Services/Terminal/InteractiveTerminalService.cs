@@ -1,6 +1,7 @@
 using System.IO;
 using System.Drawing;
 using System.Collections.Concurrent;
+using System.Text;
 using Rebex.Net;
 using Rebex.TerminalEmulation;
 using SSH_Helper.Forms;
@@ -81,6 +82,7 @@ namespace SSH_Helper.Services.Terminal
                     scripting: sharedSession.SharedScripting,
                     terminal: terminal,
                     cancellationToken: cancellationToken,
+                    isConnectionAlive: () => sharedSession.IsConnected,
                     onCancellation: () =>
                     {
                         // Required behavior: stop/cancel force-closes active shared interactive session.
@@ -154,6 +156,7 @@ namespace SSH_Helper.Services.Terminal
                     scripting: scripting,
                     terminal: virtualTerminal,
                     cancellationToken: cancellationToken,
+                    isConnectionAlive: () => client != null && client.IsConnected,
                     onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting));
 
                 return InteractiveTerminalRunResult.Ok();
@@ -177,6 +180,7 @@ namespace SSH_Helper.Services.Terminal
             RebexScripting scripting,
             ITerminal? terminal,
             CancellationToken cancellationToken,
+            Func<bool>? isConnectionAlive,
             Action? onCancellation)
         {
             var ioLock = new object();
@@ -185,6 +189,13 @@ namespace SSH_Helper.Services.Terminal
             using var uiLoopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var cancelledByToken = false;
             InteractiveTerminalForm? form = null;
+            var terminalDisconnected = 0;
+            var terminalRequestedDisconnect = 0;
+            var ctrlDRequestedTick = -1L;
+            var sawLogoutAfterCtrlD = 0;
+            EventHandler? disconnectedHandler = null;
+            EventHandler<ActionRequestEventArgs>? actionRequestedHandler = null;
+            EventHandler<DataReceivedEventArgs>? dataReceivedHandler = null;
 
             using var cancellationRegistration = cancellationToken.Register(() =>
             {
@@ -196,20 +207,55 @@ namespace SSH_Helper.Services.Terminal
 
                 try
                 {
-                    if (form.InvokeRequired)
-                    {
-                        form.BeginInvoke(new Action(form.Close));
-                    }
-                    else
-                    {
-                        form.Close();
-                    }
+                    RequestCloseSafe(form);
                 }
                 catch
                 {
                     // Form might already be disposing.
                 }
             });
+
+            if (terminal != null)
+            {
+                disconnectedHandler = (_, _) =>
+                {
+                    Interlocked.Exchange(ref terminalDisconnected, 1);
+                    if (form != null)
+                        RequestCloseSafe(form);
+                };
+
+                actionRequestedHandler = (_, args) =>
+                {
+                    if (args.Action != RequestedAction.DisconnectRequest)
+                        return;
+
+                    Interlocked.Exchange(ref terminalRequestedDisconnect, 1);
+                    if (form != null)
+                        RequestCloseSafe(form);
+                };
+
+                dataReceivedHandler = (_, args) =>
+                {
+                    var ctrlDTick = Interlocked.Read(ref ctrlDRequestedTick);
+                    if (ctrlDTick < 0)
+                        return;
+
+                    var stripped = args.StrippedData;
+                    if (string.IsNullOrWhiteSpace(stripped))
+                        return;
+
+                    if (ContainsLogoutLine(stripped))
+                    {
+                        Interlocked.Exchange(ref sawLogoutAfterCtrlD, 1);
+                        if (form != null)
+                            RequestCloseSafe(form);
+                    }
+                };
+
+                terminal.Disconnected += disconnectedHandler;
+                terminal.ActionRequested += actionRequestedHandler;
+                terminal.DataReceived += dataReceivedHandler;
+            }
 
             await InvokeOnUiThreadAsync(() =>
             {
@@ -228,6 +274,12 @@ namespace SSH_Helper.Services.Terminal
 
                 form.KeyInput += (_, keyArgs) =>
                 {
+                    if (keyArgs.ConsoleKey == ConsoleKey.D &&
+                        (keyArgs.Modifiers & ConsoleModifiers.Control) == ConsoleModifiers.Control)
+                    {
+                        Interlocked.Exchange(ref ctrlDRequestedTick, Environment.TickCount64);
+                    }
+
                     pendingInput.Enqueue(stream =>
                     {
                         if (keyArgs.FunctionKey.HasValue)
@@ -259,6 +311,39 @@ namespace SSH_Helper.Services.Terminal
                     }
                 };
 
+                form.CopyAllTextProvider = () =>
+                {
+                    if (terminal == null)
+                        return string.Empty;
+
+                    lock (ioLock)
+                    {
+                        return BuildClipboardText(terminal);
+                    }
+                };
+
+                form.ClearScrollbackAction = () =>
+                {
+                    if (terminal == null)
+                        return;
+
+                    lock (ioLock)
+                    {
+                        ClearScrollbackPreservingScreen(terminal);
+                    }
+                };
+
+                form.ResetTerminalAction = () =>
+                {
+                    if (terminal == null)
+                        return;
+
+                    lock (ioLock)
+                    {
+                        ResetTerminalState(terminal);
+                    }
+                };
+
                 form.Show(Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null);
                 form.FocusTerminal();
             });
@@ -267,7 +352,17 @@ namespace SSH_Helper.Services.Terminal
             {
                 try
                 {
-                    await PumpFullAsync(form!, scripting, terminal, ioLock, pendingInput, uiLoopCancellation.Token);
+                    await PumpFullAsync(
+                        form!,
+                        scripting,
+                        terminal,
+                        ioLock,
+                        pendingInput,
+                        isConnectionAlive,
+                        () => Volatile.Read(ref terminalDisconnected) == 1 ||
+                              Volatile.Read(ref terminalRequestedDisconnect) == 1 ||
+                              Volatile.Read(ref sawLogoutAfterCtrlD) == 1,
+                        uiLoopCancellation.Token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -278,6 +373,39 @@ namespace SSH_Helper.Services.Terminal
             await formClosedTcs.Task;
             uiLoopCancellation.Cancel();
             await pumpTask;
+
+            if (terminal != null)
+            {
+                try
+                {
+                    if (disconnectedHandler != null)
+                        terminal.Disconnected -= disconnectedHandler;
+                }
+                catch
+                {
+                    // Ignore handler detach failures during shutdown.
+                }
+
+                try
+                {
+                    if (actionRequestedHandler != null)
+                        terminal.ActionRequested -= actionRequestedHandler;
+                }
+                catch
+                {
+                    // Ignore handler detach failures during shutdown.
+                }
+
+                try
+                {
+                    if (dataReceivedHandler != null)
+                        terminal.DataReceived -= dataReceivedHandler;
+                }
+                catch
+                {
+                    // Ignore handler detach failures during shutdown.
+                }
+            }
 
             if (cancelledByToken || cancellationToken.IsCancellationRequested)
             {
@@ -291,11 +419,14 @@ namespace SSH_Helper.Services.Terminal
             ITerminal? terminal,
             object ioLock,
             ConcurrentQueue<Action<RebexScripting>> pendingInput,
+            Func<bool>? isConnectionAlive,
+            Func<bool>? isTerminalClosed,
             CancellationToken cancellationToken)
         {
             if (terminal == null)
             {
                 AppendOutputSafe(form, "\r\n[interactive-error] Full terminal emulation is unavailable.\r\n");
+                RequestCloseSafe(form);
                 return;
             }
 
@@ -313,8 +444,39 @@ namespace SSH_Helper.Services.Terminal
                 {
                     lock (ioLock)
                     {
+                        if (isTerminalClosed != null && isTerminalClosed())
+                        {
+                            RequestCloseSafe(form);
+                            break;
+                        }
+
+                        if (isConnectionAlive != null && !isConnectionAlive())
+                        {
+                            RequestCloseSafe(form);
+                            break;
+                        }
+
                         FlushPendingInput(scripting, pendingInput);
-                        scripting.Process(processTimeoutMs);
+                        var terminalState = scripting.Process(processTimeoutMs);
+
+                        if ((terminalState & TerminalState.Disconnected) == TerminalState.Disconnected)
+                        {
+                            RequestCloseSafe(form);
+                            break;
+                        }
+
+                        if (isTerminalClosed != null && isTerminalClosed())
+                        {
+                            RequestCloseSafe(form);
+                            break;
+                        }
+
+                        if (isConnectionAlive != null && !isConnectionAlive())
+                        {
+                            RequestCloseSafe(form);
+                            break;
+                        }
+
                         var totalHistoryLength = Math.Max(0, terminal.HistoryLength);
                         var requestedOffset = form.ScrollbackOffset;
                         if (requestedOffset > 0 && totalHistoryLength > lastRenderedHistoryLength)
@@ -337,6 +499,7 @@ namespace SSH_Helper.Services.Terminal
                 catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
                 {
                     AppendOutputSafe(form, $"\r\n[interactive-error] {ex.Message}\r\n");
+                    RequestCloseSafe(form);
                     break;
                 }
 
@@ -356,6 +519,17 @@ namespace SSH_Helper.Services.Terminal
 
                 await Task.Delay(idleDelayMs, cancellationToken);
             }
+        }
+
+        private static bool ContainsLogoutLine(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            // Match common shell exit marker seen after Ctrl+D on Linux shells.
+            return text.Contains("\nlogout\n", StringComparison.OrdinalIgnoreCase) ||
+                   text.Contains("\r\nlogout\r\n", StringComparison.OrdinalIgnoreCase) ||
+                   text.Trim().Equals("logout", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void FlushPendingInput(
@@ -427,6 +601,32 @@ namespace SSH_Helper.Services.Terminal
             }
         }
 
+        private static void RequestCloseSafe(InteractiveTerminalForm form)
+        {
+            if (form.IsDisposed)
+                return;
+
+            try
+            {
+                if (form.InvokeRequired)
+                {
+                    form.BeginInvoke(new Action(() =>
+                    {
+                        if (!form.IsDisposed)
+                            form.Close();
+                    }));
+                }
+                else
+                {
+                    form.Close();
+                }
+            }
+            catch
+            {
+                // UI closed while requesting close.
+            }
+        }
+
         private static TerminalScreenSnapshot BuildScreenSnapshot(
             ITerminal terminal,
             int scrollbackOffset)
@@ -436,6 +636,15 @@ namespace SSH_Helper.Services.Terminal
             var rows = Math.Max(1, screen.Rows);
             var historyLength = Math.Max(0, terminal.HistoryLength);
             var appliedOffset = Math.Clamp(scrollbackOffset, 0, historyLength);
+            var effectiveOffset = appliedOffset;
+            if (appliedOffset == 0)
+            {
+                // In follow-tail mode, keep the host cursor visually anchored near the bottom after resize,
+                // matching the behavior users expect from terminal emulators like PuTTY.
+                var cursorTop = Math.Clamp(screen.CursorTop, 0, rows - 1);
+                var tailAnchorOffset = Math.Max(0, (rows - 1) - cursorTop);
+                effectiveOffset = Math.Min(historyLength, tailAnchorOffset);
+            }
             var palette = terminal.Palette;
             var count = columns * rows;
             var characters = new char[count];
@@ -458,11 +667,12 @@ namespace SSH_Helper.Services.Terminal
             hash.Add(rows);
             hash.Add(historyLength);
             hash.Add(appliedOffset);
+            hash.Add(effectiveOffset);
 
             var absoluteIndex = 0;
             for (var row = 0; row < rows; row++)
             {
-                var sourceRow = row - appliedOffset;
+                var sourceRow = row - effectiveOffset;
                 for (var column = 0; column < columns; column++)
                 {
                     var cell = screen.GetCell(column, sourceRow);
@@ -496,8 +706,13 @@ namespace SSH_Helper.Services.Terminal
             var cursorRow = -1;
             var cursorForeColor = defaultBackColor;
             var cursorBackColor = defaultForeColor;
+            var fallbackCursorBackColor = ResolvePaletteColorArgb(
+                palette,
+                TerminalColor.LightGreen,
+                Color.Lime.ToArgb(),
+                paletteCache);
 
-            var viewportCursorRow = screen.CursorTop - appliedOffset;
+            var viewportCursorRow = screen.CursorTop + effectiveOffset;
             if (screen.CursorLeft >= 0 &&
                 screen.CursorLeft < columns &&
                 viewportCursorRow >= 0 &&
@@ -506,13 +721,17 @@ namespace SSH_Helper.Services.Terminal
                 cursorColumn = screen.CursorLeft;
                 cursorRow = viewportCursorRow;
                 var cursorIndex = cursorRow * columns + cursorColumn;
-                cursorForeColor = backColors[cursorIndex];
-                cursorBackColor = foreColors[cursorIndex];
+                var cellForeColor = foreColors[cursorIndex];
+                var cellBackColor = backColors[cursorIndex];
+                cursorForeColor = cellBackColor;
+                cursorBackColor = cellForeColor;
 
-                if (cursorForeColor == cursorBackColor)
+                // Keep a PuTTY-like visible cursor on default blank cells (common after resize/tail anchoring).
+                if (cursorForeColor == cursorBackColor ||
+                    (cellForeColor == defaultForeColor && cellBackColor == defaultBackColor))
                 {
                     cursorForeColor = defaultBackColor;
-                    cursorBackColor = defaultForeColor;
+                    cursorBackColor = fallbackCursorBackColor;
                 }
             }
 
@@ -536,6 +755,72 @@ namespace SSH_Helper.Services.Terminal
                 CursorBackColor = cursorBackColor,
                 Hash = hash.ToHashCode()
             };
+        }
+
+        private static string BuildClipboardText(ITerminal terminal)
+        {
+            var screen = terminal.Screen;
+            var columns = Math.Max(1, screen.Columns);
+            var rows = Math.Max(1, screen.Rows);
+            var historyLength = Math.Max(0, terminal.HistoryLength);
+            var totalRows = historyLength + rows;
+            if (totalRows <= 0)
+                return string.Empty;
+
+            var lines = screen.GetRegionText(0, -historyLength, columns, totalRows);
+            if (lines == null || lines.Length == 0)
+                return string.Empty;
+
+            var builder = new StringBuilder(lines.Length * Math.Max(8, columns));
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (i > 0)
+                    builder.AppendLine();
+
+                builder.Append((lines[i] ?? string.Empty).TrimEnd(' '));
+            }
+
+            return builder.ToString();
+        }
+
+        private static void ClearScrollbackPreservingScreen(ITerminal terminal)
+        {
+            var screen = terminal.Screen;
+            var columns = Math.Max(1, screen.Columns);
+            var rows = Math.Max(1, screen.Rows);
+            var cursorLeft = screen.CursorLeft;
+            var cursorTop = screen.CursorTop;
+            var region = screen.GetRegion(0, 0, columns, rows);
+            var cells = new TerminalCell[columns, rows];
+
+            for (var row = 0; row < rows; row++)
+            {
+                for (var column = 0; column < columns; column++)
+                {
+                    cells[column, row] = region[column, row];
+                }
+            }
+
+            screen.Clear(true);
+
+            for (var row = 0; row < rows; row++)
+            {
+                for (var column = 0; column < columns; column++)
+                {
+                    screen.SetCell(column, row, cells[column, row]);
+                }
+            }
+
+            var maxColumn = Math.Max(0, columns - 1);
+            var maxRow = Math.Max(0, rows - 1);
+            screen.SetCursorPosition(
+                Math.Clamp(cursorLeft, 0, maxColumn),
+                Math.Clamp(cursorTop, 0, maxRow));
+        }
+
+        private static void ResetTerminalState(ITerminal terminal)
+        {
+            terminal.Screen.Clear(true);
         }
 
         private static int ResolvePaletteColorArgb(

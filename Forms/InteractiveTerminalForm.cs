@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
 using Rebex.TerminalEmulation;
 using SSH_Helper.UI;
 
@@ -36,6 +37,13 @@ namespace SSH_Helper.Forms
 
     internal sealed class InteractiveTerminalForm : Form
     {
+        private const int WmSysCommand = 0x0112;
+        private const uint MfString = 0x0000;
+        private const uint MfSeparator = 0x0800;
+        private const int SysMenuCommandCopyAllToClipboard = 0x1F00;
+        private const int SysMenuCommandClearScrollback = 0x1F10;
+        private const int SysMenuCommandResetTerminal = 0x1F20;
+
         private readonly InteractiveTerminalViewportControl _terminalView;
         private readonly VScrollBar _historyScrollBar;
         private readonly bool _isDarkMode;
@@ -48,6 +56,10 @@ namespace SSH_Helper.Forms
 
         public bool IsFollowingTail => _scrollbackOffset == 0;
         public int ScrollbackOffset => _scrollbackOffset;
+
+        public Func<string?>? CopyAllTextProvider { get; set; }
+        public Action? ClearScrollbackAction { get; set; }
+        public Action? ResetTerminalAction { get; set; }
 
         public event EventHandler<string>? TextInput;
         public event EventHandler<TerminalKeyEventArgs>? KeyInput;
@@ -144,9 +156,40 @@ namespace SSH_Helper.Forms
             EmitTerminalSizeChanged();
         }
 
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            InitializeSystemMenuCommands();
+        }
+
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             base.OnFormClosed(e);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WmSysCommand)
+            {
+                var command = (int)(m.WParam.ToInt64() & 0xFFF0);
+                switch (command)
+                {
+                    case SysMenuCommandCopyAllToClipboard:
+                        CopyAllToClipboard();
+                        m.Result = IntPtr.Zero;
+                        return;
+                    case SysMenuCommandClearScrollback:
+                        ClearScrollback();
+                        m.Result = IntPtr.Zero;
+                        return;
+                    case SysMenuCommandResetTerminal:
+                        ResetTerminal();
+                        m.Result = IntPtr.Zero;
+                        return;
+                }
+            }
+
+            base.WndProc(ref m);
         }
 
         private void InteractiveTerminalForm_KeyPress(object? sender, KeyPressEventArgs e)
@@ -292,6 +335,16 @@ namespace SSH_Helper.Forms
             SyncHistoryScrollBar();
         }
 
+        private void FollowTailAndRefresh()
+        {
+            _terminalView.ClearSelection();
+            _scrollbackOffset = 0;
+            _historyLength = 0;
+            _lastRenderHash = int.MinValue;
+            SyncHistoryScrollBar();
+            FocusTerminal();
+        }
+
         private void PasteClipboardToHost()
         {
             var clipboardText = GetClipboardTextSafe();
@@ -324,6 +377,75 @@ namespace SSH_Helper.Forms
                 .Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Replace('\r', '\n');
         }
+
+        private void CopyAllToClipboard()
+        {
+            var text = CopyAllTextProvider?.Invoke();
+            if (string.IsNullOrEmpty(text))
+            {
+                FocusTerminal();
+                return;
+            }
+
+            try
+            {
+                Clipboard.SetText(text);
+            }
+            catch
+            {
+                // Ignore clipboard contention errors.
+            }
+
+            FocusTerminal();
+        }
+
+        private void ClearScrollback()
+        {
+            try
+            {
+                ClearScrollbackAction?.Invoke();
+            }
+            finally
+            {
+                FollowTailAndRefresh();
+            }
+        }
+
+        private void ResetTerminal()
+        {
+            try
+            {
+                ResetTerminalAction?.Invoke();
+            }
+            finally
+            {
+                FollowTailAndRefresh();
+            }
+        }
+
+        private void InitializeSystemMenuCommands()
+        {
+            if (!IsHandleCreated)
+                return;
+
+            var hMenu = GetSystemMenu(Handle, false);
+            if (hMenu == IntPtr.Zero)
+                return;
+
+            _ = AppendMenu(hMenu, MfSeparator, 0, IntPtr.Zero);
+            _ = AppendMenu(hMenu, MfString, (nuint)SysMenuCommandCopyAllToClipboard, "Copy All to Clipboard");
+            _ = AppendMenu(hMenu, MfString, (nuint)SysMenuCommandClearScrollback, "Clear Scrollback");
+            _ = AppendMenu(hMenu, MfString, (nuint)SysMenuCommandResetTerminal, "Reset Terminal");
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr GetSystemMenu(IntPtr hWnd, bool bRevert);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool AppendMenu(IntPtr hMenu, uint uFlags, nuint uIDNewItem, string lpNewItem);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool AppendMenu(IntPtr hMenu, uint uFlags, nuint uIDNewItem, IntPtr lpNewItem);
 
         private void SyncHistoryScrollBar()
         {
