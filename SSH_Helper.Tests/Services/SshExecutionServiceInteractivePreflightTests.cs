@@ -77,7 +77,7 @@ public class SshExecutionServiceInteractivePreflightTests
 
         results.Should().HaveCount(1);
         results[0].Success.Should().BeFalse();
-        results[0].ErrorMessage.Should().Contain("folder runs");
+        results[0].ErrorMessage.Should().Contain("folder or multi-host runs");
     }
 
     [Fact]
@@ -127,7 +127,7 @@ public class SshExecutionServiceInteractivePreflightTests
 
         results.Should().HaveCount(1);
         results[0].Success.Should().BeFalse();
-        results[0].ErrorMessage.Should().Contain("folder runs");
+        results[0].ErrorMessage.Should().Contain("folder or multi-host runs");
         results[0].ErrorMessage.Should().Contain("InteractivePreset");
     }
 }

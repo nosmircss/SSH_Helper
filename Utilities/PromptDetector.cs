@@ -10,9 +10,7 @@ namespace SSH_Helper.Utilities
     {
         private static readonly char[] PromptTerminators = { '#', '>', '$', '%', '\u2192', '\u276F', '\u279C' };
 
-        // Arrow-style terminators that don't require alphanumeric content before them
-        // These are specific to modern shell prompts (starship, oh-my-zsh, powerlevel10k)
-        // and rarely appear in normal output, unlike % or $ which can appear in "50%", "$100"
+        // Arrow-style terminators that do not require alphanumeric content before them.
         private static readonly HashSet<char> ArrowStyleTerminators = new() { '\u2192', '\u276F', '\u279C' };
 
         // Pre-compiled regex patterns for hot path optimization
@@ -22,8 +20,8 @@ namespace SSH_Helper.Utilities
         private static readonly Regex AlphanumericRegex = new(@"[a-zA-Z0-9]", RegexOptions.Compiled);
 
         /// <summary>
-        /// Builds a regex pattern to match the given prompt, allowing for mode changes
-        /// (e.g., "hostname (config)#" vs "hostname#").
+        /// Builds a regex pattern to match the given prompt while allowing common
+        /// prompt-body changes (cwd, mode/context, prompt decorations).
         /// </summary>
         public static Regex BuildPromptRegex(string promptLiteral)
         {
@@ -39,26 +37,14 @@ namespace SSH_Helper.Utilities
             if (!TerminatorCheckRegex.IsMatch(trimmed))
                 return CreateFallbackRegex();
 
-            // Extract base hostname and terminator
+            // Build around a stable prompt anchor and current terminator.
             char terminator = trimmed[^1];
             string body = trimmed[..^1].TrimEnd();
+            string anchor = ExtractPromptAnchor(body);
 
-            // Split off any mode/context portion (parenthetical)
-            // e.g., "MSD903-DFWB (setting)" => baseHost = "MSD903-DFWB"
-            string baseHost;
-            int parenIdx = body.IndexOf('(');
-            if (parenIdx > 0)
-                baseHost = body[..parenIdx].TrimEnd();
-            else
-                baseHost = body;
-
-            if (string.IsNullOrWhiteSpace(baseHost))
-                baseHost = body;
-
-            // If baseHost doesn't contain alphanumeric characters, it's likely a
-            // status indicator (e.g., ○, ●) from a starship/oh-my-zsh style prompt,
-            // not a real hostname. Use a terminator-only pattern.
-            if (!AlphanumericRegex.IsMatch(baseHost))
+            // If anchor does not contain alphanumeric characters, it is likely a
+            // status indicator from starship/oh-my-zsh style prompts.
+            if (!AlphanumericRegex.IsMatch(anchor))
             {
                 string terminatorEsc = Regex.Escape(terminator.ToString());
                 // Use (?:^|[\r\n]) instead of bare ^ so pattern works both with
@@ -67,11 +53,12 @@ namespace SSH_Helper.Utilities
                 return new Regex(fallbackPattern, RegexOptions.Multiline | RegexOptions.CultureInvariant);
             }
 
-            string baseEsc = Regex.Escape(baseHost);
+            string anchorEsc = Regex.Escape(anchor);
 
             // Use (?:^|[\r\n]) for Rebex ScriptEvent compatibility (pattern is used
-            // via .ToString() in contexts without RegexOptions.Multiline)
-            string pattern = $"(?:^|[\\r\\n]){baseEsc}(?:\\s*\\([^)]+\\))?\\s*[{Regex.Escape(terminator.ToString())}#>$%]\\s*$";
+            // via .ToString() in contexts without RegexOptions.Multiline).
+            // Allow changing context after the anchor (cwd, branch, mode text, etc.).
+            string pattern = $"(?:^|[\\r\\n])\\s*{anchorEsc}[^\\r\\n]*\\s*[{Regex.Escape(terminator.ToString())}#>$%]\\s*$";
 
             return new Regex(pattern, RegexOptions.Multiline | RegexOptions.CultureInvariant);
         }
@@ -183,7 +170,7 @@ namespace SSH_Helper.Utilities
             if (!PromptTerminators.Contains(last))
                 return false;
 
-            // Real prompts are short — reject very long lines (likely wrapped text/warnings)
+            // Real prompts are short - reject very long lines (likely wrapped text/warnings)
             if (line.Length > 80)
                 return false;
 
@@ -193,7 +180,7 @@ namespace SSH_Helper.Utilities
                 return false;
 
             // Require alphanumeric content before traditional terminators (#, >, $, %)
-            // Arrow-style terminators (→, ❯, ›) are specific to shell prompts and don't need this check
+            // Arrow-style terminators are specific to shell prompts and do not need this check
             string beforeTerminator = line[..^1];
             if (!ArrowStyleTerminators.Contains(last) && !AlphanumericRegex.IsMatch(beforeTerminator))
                 return false;
@@ -204,6 +191,57 @@ namespace SSH_Helper.Utilities
                 return false;
 
             return true;
+        }
+
+        private static string ExtractPromptAnchor(string body)
+        {
+            if (string.IsNullOrWhiteSpace(body))
+                return string.Empty;
+
+            // Prefer "user@host" token when available; this remains stable as cwd changes.
+            var tokens = body.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var token in tokens)
+            {
+                if (!token.Contains('@'))
+                    continue;
+
+                var candidate = token.Trim('[', ']', '(', ')');
+                var atIndex = candidate.IndexOf('@');
+                if (atIndex <= 0 || atIndex >= candidate.Length - 1)
+                    continue;
+
+                var separatorIndex = candidate.IndexOf(':', atIndex + 1);
+                if (separatorIndex < 0)
+                    separatorIndex = candidate.IndexOf('/', atIndex + 1);
+                if (separatorIndex < 0)
+                    separatorIndex = candidate.IndexOf('\\', atIndex + 1);
+
+                if (separatorIndex > 0)
+                    candidate = candidate[..separatorIndex];
+
+                candidate = candidate.TrimEnd(':');
+                if (AlphanumericRegex.IsMatch(candidate))
+                    return candidate;
+            }
+
+            // Support prompts like "hostname (config)#" and "hostname:/path$".
+            var candidateAnchor = body;
+            var parenIndex = candidateAnchor.IndexOf('(');
+            if (parenIndex > 0)
+                candidateAnchor = candidateAnchor[..parenIndex].TrimEnd();
+
+            if (string.IsNullOrWhiteSpace(candidateAnchor))
+                candidateAnchor = body;
+
+            var colonIndex = candidateAnchor.IndexOf(':');
+            if (colonIndex > 0)
+                candidateAnchor = candidateAnchor[..colonIndex];
+
+            var whitespaceIndex = candidateAnchor.IndexOfAny(new[] { ' ', '\t' });
+            if (whitespaceIndex > 0)
+                candidateAnchor = candidateAnchor[..whitespaceIndex];
+
+            return candidateAnchor.Trim();
         }
 
         private static Regex CreateFallbackRegex()

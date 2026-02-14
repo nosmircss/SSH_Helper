@@ -66,6 +66,9 @@ namespace SSH_Helper.Services
     /// </summary>
     public class SshExecutionService : IDisposable
     {
+        private const string InteractiveUnsupportedMultiHostOrFolderMessage =
+            "Scripts using 'interactive' are not supported in folder or multi-host runs. Run the script against a single current host instead.";
+
         private readonly SshConnectionPool? _connectionPool;
         private readonly bool _ownsPool;
 
@@ -368,7 +371,7 @@ namespace SSH_Helper.Services
 
                 if (sshRequirement.UsesInteractive && hostList.Count != 1)
                 {
-                    const string preflightMessage = "Scripts using 'interactive' can only run against a single current host. Multi-host and folder runs are not supported.";
+                    const string preflightMessage = InteractiveUnsupportedMultiHostOrFolderMessage;
                     var errorOutput = $"Script preflight error: {preflightMessage}\n";
                     OnOutputReceived(hostList.FirstOrDefault() ?? new HostConnection(), errorOutput);
 
@@ -680,7 +683,7 @@ namespace SSH_Helper.Services
 
         private static string BuildFolderInteractivePreflightMessage(IReadOnlyList<string> interactivePresetNames)
         {
-            const string baseMessage = "Scripts using 'interactive' are not supported in folder runs. Run the script against a single current host instead.";
+            const string baseMessage = InteractiveUnsupportedMultiHostOrFolderMessage;
             if (interactivePresetNames.Count == 0)
                 return baseMessage;
 
@@ -760,7 +763,7 @@ namespace SSH_Helper.Services
 
             if (sshRequirement.UsesInteractive)
             {
-                const string preflightMessage = "Scripts using 'interactive' are not supported in folder runs. Run the script against a single current host instead.";
+                const string preflightMessage = InteractiveUnsupportedMultiHostOrFolderMessage;
                 var errorOutput = $"Script preflight error: {preflightMessage}\n";
                 OnOutputReceived(host, errorOutput);
 

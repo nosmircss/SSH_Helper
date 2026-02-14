@@ -84,8 +84,8 @@ namespace SSH_Helper
         private const int UiOutputThrottleMs = 50;
         private const string FolderIcon = "\U0001F4C1";
         private const string StarIcon = "\u2605";
-        private static readonly string FolderSummarySeparator = new string('-', 60);
-        private static readonly string FolderSummarySubSeparator = new string('-', 9);
+        private static readonly string FolderSummarySeparator = new string('=', 60);
+        private static readonly string FolderSummarySubSeparator = new string('=', 9);
 
         #endregion
 
