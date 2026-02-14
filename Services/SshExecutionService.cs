@@ -325,6 +325,7 @@ namespace SSH_Helper.Services
         {
             var results = new List<ExecutionResult>();
             var cancellationToken = BeginExecution();
+            var hostList = hosts.ToList();
 
             // Parse the script once
             var parser = new ScriptParser();
@@ -342,10 +343,10 @@ namespace SSH_Helper.Services
             {
                 // Emit the error so it appears in the output window
                 var errorOutput = $"Script parse error: {ex.Message}\n";
-                OnOutputReceived(hosts.FirstOrDefault() ?? new HostConnection(), errorOutput);
+                OnOutputReceived(hostList.FirstOrDefault() ?? new HostConnection(), errorOutput);
 
                 // Return error result for all hosts
-                foreach (var host in hosts)
+                foreach (var host in hostList)
                 {
                     results.Add(new ExecutionResult
                     {
@@ -365,7 +366,28 @@ namespace SSH_Helper.Services
                 var analyzer = new ScriptDependencyAnalyzer();
                 var sshRequirement = analyzer.AnalyzeSshRequirements(script);
 
-                foreach (var host in hosts)
+                if (sshRequirement.UsesInteractive && hostList.Count != 1)
+                {
+                    const string preflightMessage = "Scripts using 'interactive' can only run against a single current host. Multi-host and folder runs are not supported.";
+                    var errorOutput = $"Script preflight error: {preflightMessage}\n";
+                    OnOutputReceived(hostList.FirstOrDefault() ?? new HostConnection(), errorOutput);
+
+                    foreach (var host in hostList)
+                    {
+                        results.Add(new ExecutionResult
+                        {
+                            Host = host,
+                            Success = false,
+                            ErrorMessage = preflightMessage,
+                            Output = errorOutput,
+                            Timestamp = DateTime.Now
+                        });
+                    }
+
+                    return results;
+                }
+
+                foreach (var host in hostList)
                 {
                     if (cancellationToken.IsCancellationRequested)
                         break;
@@ -668,6 +690,23 @@ namespace SSH_Helper.Services
 
             var analyzer = new ScriptDependencyAnalyzer();
             var sshRequirement = analyzer.AnalyzeSshRequirements(script);
+
+            if (sshRequirement.UsesInteractive)
+            {
+                const string preflightMessage = "Scripts using 'interactive' are not supported in folder runs. Run the script against a single current host instead.";
+                var errorOutput = $"Script preflight error: {preflightMessage}\n";
+                OnOutputReceived(host, errorOutput);
+
+                return new ExecutionResult
+                {
+                    Host = host,
+                    Success = false,
+                    ErrorMessage = preflightMessage,
+                    Output = errorOutput,
+                    Timestamp = DateTime.Now
+                };
+            }
+
             return ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader, sshRequirement);
         }
 
@@ -919,7 +958,7 @@ namespace SSH_Helper.Services
                 var context = new ScriptContext(host.Variables);
                 context.Session = session;
                 context.DebugMode = DebugMode;
-                SeedConnectionVariables(context, host, username, password);
+                SeedConnectionVariables(context, host, username, password, timeouts);
 
                 // Wire up context output to our events
                 context.OutputReceived += (s, e) =>
@@ -1007,11 +1046,16 @@ namespace SSH_Helper.Services
 
             SshDebugLog(host, "SCRIPT", "Starting scripting session", sw);
             var terminalOptions = SshTerminalOptionsFactory.Create();
-            RebexScripting scripting = client.StartScripting(terminalOptions);
+            var (scripting, terminal) = SshTerminalOptionsFactory.CreateScriptingWithHistory(
+                client,
+                terminalOptions,
+                SshTerminalOptionsFactory.DefaultColumns,
+                SshTerminalOptionsFactory.DefaultRows,
+                SshTerminalOptionsFactory.DefaultHistoryMaxLength);
             scripting.Timeout = (int)timeouts.CommandTimeout.TotalMilliseconds;
             SshDebugLog(host, "SCRIPT", "Scripting session created", sw);
 
-            using var session = new SshShellSession(client, scripting, timeouts);
+            using var session = new SshShellSession(client, scripting, timeouts, terminal);
             session.DebugMode = DebugMode;
             session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
 
@@ -1062,7 +1106,7 @@ namespace SSH_Helper.Services
             var context = new ScriptContext(host.Variables);
             context.Session = session;
             context.DebugMode = DebugMode;
-            SeedConnectionVariables(context, host, username, password);
+            SeedConnectionVariables(context, host, username, password, timeouts);
 
             // Wire up context output to our events
             context.OutputReceived += (s, e) =>
@@ -1118,7 +1162,7 @@ namespace SSH_Helper.Services
             var context = new ScriptContext(host.Variables);
             context.Session = null;
             context.DebugMode = DebugMode;
-            SeedConnectionVariables(context, host, username, password);
+            SeedConnectionVariables(context, host, username, password, SshTimeoutOptions.Default);
 
             context.OutputReceived += (s, e) =>
             {
@@ -1142,8 +1186,18 @@ namespace SSH_Helper.Services
                 .GetAwaiter().GetResult();
         }
 
-        private static void SeedConnectionVariables(ScriptContext context, HostConnection host, string username, string password)
+        private static void SeedConnectionVariables(
+            ScriptContext context,
+            HostConnection host,
+            string username,
+            string password,
+            SshTimeoutOptions? timeouts)
         {
+            context.CurrentHost = host;
+            context.ResolvedUsername = username;
+            context.ResolvedPassword = password;
+            context.Timeouts = timeouts;
+
             // Keep runtime context aligned with the credentials/endpoints actually used for SSH.
             if (string.IsNullOrWhiteSpace(context.GetVariableString("Host_IP")))
                 context.SetVariable("Host_IP", host.ToString());
@@ -1310,12 +1364,17 @@ namespace SSH_Helper.Services
 
             SshDebugLog(host, "SSH", "Starting scripting session", sw);
             var terminalOptions = SshTerminalOptionsFactory.Create();
-            RebexScripting scripting = client.StartScripting(terminalOptions);
+            var (scripting, terminal) = SshTerminalOptionsFactory.CreateScriptingWithHistory(
+                client,
+                terminalOptions,
+                SshTerminalOptionsFactory.DefaultColumns,
+                SshTerminalOptionsFactory.DefaultRows,
+                SshTerminalOptionsFactory.DefaultHistoryMaxLength);
             scripting.Timeout = (int)timeouts.CommandTimeout.TotalMilliseconds;
             SshDebugLog(host, "SSH", "Scripting session created", sw);
 
             SshDebugLog(host, "SSH", "Creating SshShellSession", sw);
-            using var session = new SshShellSession(client, scripting, timeouts);
+            using var session = new SshShellSession(client, scripting, timeouts, terminal);
             SshDebugLog(host, "SSH", "SshShellSession created", sw);
 
             // Configure debug mode BEFORE subscribing to events

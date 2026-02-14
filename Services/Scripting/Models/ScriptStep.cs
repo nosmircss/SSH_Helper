@@ -163,6 +163,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public ConfirmOptions? Confirm { get; set; }
 
         /// <summary>
+        /// Interactive command - opens an in-app SSH terminal and blocks until closed.
+        /// </summary>
+        public InteractiveOptions? Interactive { get; set; }
+
+        /// <summary>
         /// Break command - exits the current loop.
         /// </summary>
         public bool BreakLoop { get; set; }
@@ -278,6 +283,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Choose != null) return StepType.Choose;
             if (Multiselect != null) return StepType.Multiselect;
             if (Confirm != null) return StepType.Confirm;
+            if (Interactive != null) return StepType.Interactive;
             if (DeclaredStepType != StepType.Unknown) return DeclaredStepType;
             return StepType.Unknown;
         }
@@ -535,6 +541,39 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Default button: true = Yes focused, false = No focused.
         /// </summary>
         public bool Default { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the interactive command (embedded SSH terminal).
+    /// </summary>
+    public class InteractiveOptions
+    {
+        /// <summary>
+        /// Session model. Separate opens a new connection; shared attaches to the current session.
+        /// </summary>
+        public InteractiveSessionMode Session { get; set; } = InteractiveSessionMode.Separate;
+
+        /// <summary>
+        /// Terminal emulation mode.
+        /// </summary>
+        public InteractiveEmulationMode Emulation { get; set; } = InteractiveEmulationMode.Full;
+    }
+
+    /// <summary>
+    /// Session model for interactive terminal steps.
+    /// </summary>
+    public enum InteractiveSessionMode
+    {
+        Separate,
+        Shared
+    }
+
+    /// <summary>
+    /// Emulation mode for interactive terminal steps.
+    /// </summary>
+    public enum InteractiveEmulationMode
+    {
+        Full
     }
 
     /// <summary>
@@ -899,6 +938,7 @@ namespace SSH_Helper.Services.Scripting.Models
         Parse,
         Choose,
         Multiselect,
-        Confirm
+        Confirm,
+        Interactive
     }
 }

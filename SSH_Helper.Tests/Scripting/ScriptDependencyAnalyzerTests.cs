@@ -84,6 +84,7 @@ public class ScriptDependencyAnalyzerTests
 
         result.RequiresSshSession.Should().BeFalse();
         result.UsesSftp.Should().BeFalse();
+        result.UsesInteractive.Should().BeFalse();
         result.SftpUsesDefaultHost.Should().BeFalse();
         result.SftpUsesDefaultCredentials.Should().BeFalse();
     }
@@ -218,6 +219,7 @@ public class ScriptDependencyAnalyzerTests
 
         result.RequiresSshSession.Should().BeFalse();
         result.UsesSftp.Should().BeFalse();
+        result.UsesInteractive.Should().BeFalse();
         result.SftpUsesDefaultHost.Should().BeFalse();
         result.SftpUsesDefaultCredentials.Should().BeFalse();
     }
@@ -237,6 +239,21 @@ public class ScriptDependencyAnalyzerTests
 
         result.RequiresSshSession.Should().BeTrue();
         result.UsesSftp.Should().BeTrue();
+    }
+
+    [Fact]
+    public void AnalyzeSshRequirements_InteractiveStep_RequiresSshAndFlagsInteractive()
+    {
+        var result = AnalyzeSshRequirements("""
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  emulation: full
+            """);
+
+        result.RequiresSshSession.Should().BeTrue();
+        result.UsesInteractive.Should().BeTrue();
     }
 
     [Fact]

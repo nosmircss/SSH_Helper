@@ -119,6 +119,42 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_InteractiveStepOptionKey_SuggestsInteractiveOptions()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - interactive:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["session", "emulation", "on_error"]);
+    }
+
+    [Fact]
+    public void GetCompletion_InteractiveSessionValue_SuggestsSessionEnumValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - interactive:\n      session: s";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["separate", "shared"]);
+    }
+
+    [Fact]
+    public void GetCompletion_InteractiveEmulationValue_SuggestsFullOnly()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - interactive:\n      emulation: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().BeEquivalentTo(["full"]);
+    }
+
+    [Fact]
     public void InterpolationTriggers_DollarAndBraces_AreSymmetric()
     {
         var provider = new ScriptAutocompleteProvider(() => new[] { "hostname", "ip" });

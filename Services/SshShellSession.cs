@@ -56,6 +56,7 @@ namespace SSH_Helper.Services
         private readonly Ssh _sshClient;
         private readonly RebexScripting _scripting;
         private readonly SshTimeoutOptions _timeouts;
+        private readonly IDisposable? _terminalOwner;
         private Regex _promptPattern;
         private string _currentPrompt;
         private bool _disposed;
@@ -95,6 +96,16 @@ namespace SSH_Helper.Services
         /// Gets whether the session is still valid and connected.
         /// </summary>
         public bool IsConnected => !_disposed && _sshClient.IsConnected;
+
+        /// <summary>
+        /// Internal access to the live scripting stream for shared interactive terminal mode.
+        /// </summary>
+        internal RebexScripting SharedScripting => _scripting;
+
+        /// <summary>
+        /// Internal access to the live terminal object for shared interactive full emulation mode.
+        /// </summary>
+        internal ITerminal SharedTerminal => _scripting.Terminal;
 
         /// <summary>
         /// Common patterns used in expect operations.
@@ -167,11 +178,17 @@ namespace SSH_Helper.Services
         /// <param name="sshClient">The Rebex SSH client</param>
         /// <param name="scripting">The Rebex Scripting instance from StartScripting()</param>
         /// <param name="timeouts">Timeout configuration</param>
-        public SshShellSession(Ssh sshClient, RebexScripting scripting, SshTimeoutOptions? timeouts = null)
+        /// <param name="terminalOwner">Optional terminal object to dispose with this session.</param>
+        public SshShellSession(
+            Ssh sshClient,
+            RebexScripting scripting,
+            SshTimeoutOptions? timeouts = null,
+            IDisposable? terminalOwner = null)
         {
             _sshClient = sshClient ?? throw new ArgumentNullException(nameof(sshClient));
             _scripting = scripting ?? throw new ArgumentNullException(nameof(scripting));
             _timeouts = timeouts ?? SshTimeoutOptions.Default;
+            _terminalOwner = terminalOwner;
             _currentPrompt = string.Empty;
             _promptPattern = Patterns.ShellPrompt;
 
@@ -277,6 +294,32 @@ namespace SSH_Helper.Services
                 ex.Message.Contains("time limit", StringComparison.OrdinalIgnoreCase))
             {
                 // Timeout means buffer is drained
+            }
+            finally
+            {
+                _scripting.Timeout = savedTimeout;
+            }
+        }
+
+        /// <summary>
+        /// Attempts to re-align the shell stream after an external interactive use.
+        /// </summary>
+        internal void SyncAfterInteractive()
+        {
+            if (_disposed || !_sshClient.IsConnected)
+                return;
+
+            var savedTimeout = _scripting.Timeout;
+            try
+            {
+                _scripting.Send("\r");
+                _scripting.Timeout = (int)_timeouts.IdleTimeout.TotalMilliseconds;
+                var promptEvent = _promptOrPagerEvent ?? _shellPromptEvent ?? ScriptEvent.FromRegex(Patterns.ShellPromptPattern);
+                _scripting.ReadUntil(promptEvent);
+            }
+            catch
+            {
+                // Best-effort resync only.
             }
             finally
             {
@@ -1145,7 +1188,14 @@ namespace SSH_Helper.Services
             if (!_disposed)
             {
                 _disposed = true;
-                // Note: We don't dispose the Ssh client or Scripting here as they're owned by the caller/pool
+                try
+                {
+                    _terminalOwner?.Dispose();
+                }
+                catch
+                {
+                    // Ignore terminal cleanup errors during session disposal.
+                }
             }
         }
     }

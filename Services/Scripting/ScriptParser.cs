@@ -44,6 +44,7 @@ namespace SSH_Helper.Services.Scripting
             "choose",
             "multiselect",
             "confirm",
+            "interactive",
             "break",
             "continue",
             "try"
@@ -102,7 +103,8 @@ namespace SSH_Helper.Services.Scripting
                 ["parse"] = ["format", "from", "into", "sections"],
                 ["choose"] = ["prompt", "into", "options", "default"],
                 ["multiselect"] = ["prompt", "into", "options", "min", "max"],
-                ["confirm"] = ["prompt", "into", "default"]
+                ["confirm"] = ["prompt", "into", "default"],
+                ["interactive"] = ["session", "emulation", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -132,6 +134,7 @@ namespace SSH_Helper.Services.Scripting
                 ["choose"] = [],
                 ["multiselect"] = [],
                 ["confirm"] = [],
+                ["interactive"] = [],
                 ["break"] = [],
                 ["continue"] = [],
                 ["try"] = []
@@ -162,7 +165,8 @@ namespace SSH_Helper.Services.Scripting
             StepType.Webhook,
             StepType.Choose,
             StepType.Multiselect,
-            StepType.Confirm
+            StepType.Confirm,
+            StepType.Interactive
         ];
         private static readonly HashSet<string> ExitStatusTokens = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -191,7 +195,9 @@ namespace SSH_Helper.Services.Scripting
                 ["encoding"] = ["utf-8", "ascii", "utf-16", "utf-32"],
                 ["follow_redirects"] = ["true", "false"],
                 ["allow_failure"] = ["true", "false"],
-                ["verify_tls"] = ["true", "false"]
+                ["verify_tls"] = ["true", "false"],
+                ["session"] = ["separate", "shared"],
+                ["emulation"] = ["full"]
             };
 
         /// <summary>
@@ -591,6 +597,10 @@ namespace SSH_Helper.Services.Scripting
                     case "confirm":
                         step.DeclaredStepType = StepType.Confirm;
                         step.Confirm = ParseConfirmOptions(parser);
+                        break;
+                    case "interactive":
+                        step.DeclaredStepType = StepType.Interactive;
+                        step.Interactive = ParseInteractiveOptions(parser, step);
                         break;
                     case "then":
                         step.Then = ParseSteps(parser);
@@ -1612,6 +1622,83 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
+        private InteractiveOptions? ParseInteractiveOptions(IParser parser, ScriptStep step)
+        {
+            if (!parser.Accept<MappingStart>(out _))
+            {
+                SkipValue(parser);
+                AddStepParseError(step, "interactive must be a mapping with optional keys 'session' and 'emulation'");
+                return null;
+            }
+
+            var options = new InteractiveOptions();
+            parser.Consume<MappingStart>();
+
+            while (!parser.Accept<MappingEnd>(out _))
+            {
+                var keyScalar = parser.Consume<Scalar>();
+                var key = keyScalar.Value.ToLowerInvariant();
+
+                switch (key)
+                {
+                    case "session":
+                        if (!parser.Accept<Scalar>(out _))
+                        {
+                            SkipValue(parser);
+                            AddStepParseError(step, "interactive.session must be 'separate' or 'shared'");
+                            break;
+                        }
+
+                        var sessionValue = parser.Consume<Scalar>().Value;
+                        if (string.Equals(sessionValue, "separate", StringComparison.OrdinalIgnoreCase))
+                        {
+                            options.Session = InteractiveSessionMode.Separate;
+                        }
+                        else if (string.Equals(sessionValue, "shared", StringComparison.OrdinalIgnoreCase))
+                        {
+                            options.Session = InteractiveSessionMode.Shared;
+                        }
+                        else
+                        {
+                            AddStepParseError(step, "interactive.session must be 'separate' or 'shared'");
+                        }
+                        break;
+
+                    case "emulation":
+                        if (!parser.Accept<Scalar>(out _))
+                        {
+                            SkipValue(parser);
+                            AddStepParseError(step, "interactive.emulation must be 'full'");
+                            break;
+                        }
+
+                        var emulationValue = parser.Consume<Scalar>().Value;
+                        if (string.Equals(emulationValue, "full", StringComparison.OrdinalIgnoreCase))
+                        {
+                            options.Emulation = InteractiveEmulationMode.Full;
+                        }
+                        else
+                        {
+                            AddStepParseError(step, "interactive.emulation must be 'full'");
+                        }
+                        break;
+
+                    case "on_error":
+                    case "onerror":
+                        ApplyNestedOnErrorAlias(step, parser);
+                        break;
+
+                    default:
+                        AddStepParseError(step, $"interactive.{keyScalar.Value} is not supported");
+                        SkipValue(parser);
+                        break;
+                }
+            }
+
+            parser.Consume<MappingEnd>();
+            return options;
+        }
+
         /// <summary>
         /// Parses a YAML sequence where each item is either a scalar string (label=value)
         /// or a mapping with "label" and "value" keys.
@@ -2334,7 +2421,7 @@ namespace SSH_Helper.Services.Scripting
             {
                 var stepType = step.GetStepType();
 
-                if (enforceCanonicalSyntax && step.ParseErrors.Count > 0)
+                if ((enforceCanonicalSyntax || stepType == StepType.Interactive) && step.ParseErrors.Count > 0)
                 {
                     var lineContent = GetLineContent(lines, step.LineNumber);
                     foreach (var parseError in step.ParseErrors)
@@ -2675,6 +2762,14 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Parse requires 'into' variable{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Interactive:
+                        if (step.Interactive == null)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session' and 'emulation'{lineContent}");
                         }
                         break;
                 }

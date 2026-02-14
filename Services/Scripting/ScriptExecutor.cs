@@ -47,6 +47,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Choose, new ChooseCommand() },
                 { StepType.Multiselect, new MultiselectCommand() },
                 { StepType.Confirm, new ConfirmCommand() },
+                { StepType.Interactive, new InteractiveCommand() },
             };
         }
 

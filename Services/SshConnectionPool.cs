@@ -222,9 +222,14 @@ namespace SSH_Helper.Services
             }
 
             var terminalOptions = SshTerminalOptionsFactory.Create();
-            RebexScripting scripting = client.StartScripting(terminalOptions);
+            var (scripting, terminal) = SshTerminalOptionsFactory.CreateScriptingWithHistory(
+                client,
+                terminalOptions,
+                SshTerminalOptionsFactory.DefaultColumns,
+                SshTerminalOptionsFactory.DefaultRows,
+                SshTerminalOptionsFactory.DefaultHistoryMaxLength);
             scripting.Timeout = (int)effectiveTimeouts.CommandTimeout.TotalMilliseconds;
-            var session = new SshShellSession(client, scripting, effectiveTimeouts);
+            var session = new SshShellSession(client, scripting, effectiveTimeouts, terminal);
 
             await session.InitializeAsync(cancellationToken);
 

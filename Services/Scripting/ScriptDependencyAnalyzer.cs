@@ -23,6 +23,7 @@ namespace SSH_Helper.Services.Scripting
     {
         public bool RequiresSshSession { get; set; }
         public bool UsesSftp { get; set; }
+        public bool UsesInteractive { get; set; }
         public bool SftpUsesDefaultHost { get; set; }
         public bool SftpUsesDefaultCredentials { get; set; }
     }
@@ -149,6 +150,11 @@ namespace SSH_Helper.Services.Scripting
                 {
                     result.RequiresSshSession = true;
                 }
+                else if (stepType == StepType.Interactive)
+                {
+                    result.RequiresSshSession = true;
+                    result.UsesInteractive = true;
+                }
                 else if (stepType == StepType.Sftp)
                 {
                     result.UsesSftp = true;
@@ -199,6 +205,9 @@ namespace SSH_Helper.Services.Scripting
 
         private static bool HasCompleteSshRequirementSignal(SshRequirementResult result)
         {
+            if (result.UsesInteractive)
+                return true;
+
             return result.RequiresSshSession
                 && result.UsesSftp
                 && result.SftpUsesDefaultHost
@@ -350,6 +359,9 @@ namespace SSH_Helper.Services.Scripting
                             if (!string.IsNullOrEmpty(step.Confirm.Into))
                                 definedVars.Add(step.Confirm.Into);
                         }
+                        break;
+
+                    case StepType.Interactive:
                         break;
 
                     case StepType.UpdateColumn:

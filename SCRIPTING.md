@@ -24,6 +24,7 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [choose](#choose---single-select-from-list)
    - [multiselect](#multiselect---multiple-select-from-list)
    - [confirm](#confirm---yesno-confirmation)
+   - [interactive](#interactive---in-app-ssh-terminal)
    - [updatecolumn](#updatecolumn---update-host-table-column)
    - [updateenvironment](#updateenvironment---update-active-environment-variable)
    - [log](#log---output-with-log-level)
@@ -71,7 +72,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- parse:`
 
 Metadata-only keys (for example `name:` or `description:`) are not treated as strong YAML indicators by themselves.
 
@@ -1740,6 +1741,55 @@ Prompts the user with a yes/no confirmation dialog during script execution.
     then:
       - exit:
           message: "Deletion cancelled"
+```
+
+---
+
+### interactive - In-App SSH Terminal
+
+Opens an in-app SSH terminal window and pauses the script until the terminal window is closed.
+
+**Syntax (map only):**
+```yaml
+- interactive:
+    session: separate    # Optional: separate|shared (default: separate)
+    emulation: full      # Optional: full (default: full)
+    on_error: stop       # Optional: continue|stop (default: stop)
+```
+
+**Important behavior:**
+- `interactive` is map-only. Scalar shorthand (for example `- interactive`) is invalid.
+- Closing the terminal window by the user is treated as success and script execution continues.
+- `session: separate` opens a new SSH terminal connection using current host credentials/settings.
+- `session: shared` attaches to the active script SSH session. If unavailable, the step fails with `InteractiveSharedUnavailable`.
+- Stop/cancel while terminal is open force-closes the terminal/session and cancels script execution.
+- `interactive` is single-host only:
+  - Multi-host script runs are rejected in preflight.
+  - Folder runs are rejected in preflight.
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `session` | No | `separate` | Session model: `separate` or `shared` |
+| `emulation` | No | `full` | Terminal emulation mode: `full` |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+
+**Examples:**
+```yaml
+# Separate connection + full emulation (defaults)
+- interactive: {}
+
+# Explicit separate/full
+- interactive:
+    session: separate
+    emulation: full
+
+# Shared session + full emulation
+- interactive:
+    session: shared
+    emulation: full
+    on_error: continue
 ```
 
 ---

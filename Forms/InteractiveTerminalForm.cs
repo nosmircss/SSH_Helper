@@ -1,0 +1,348 @@
+using System.Drawing;
+using System.Windows.Forms;
+using Rebex.TerminalEmulation;
+using SSH_Helper.UI;
+
+namespace SSH_Helper.Forms
+{
+    internal sealed class TerminalKeyEventArgs : EventArgs
+    {
+        public FunctionKey? FunctionKey { get; init; }
+        public ConsoleKey? ConsoleKey { get; init; }
+        public ConsoleModifiers Modifiers { get; init; }
+    }
+
+    internal sealed class TerminalSizeChangedEventArgs : EventArgs
+    {
+        public int Columns { get; init; }
+        public int Rows { get; init; }
+    }
+
+    internal sealed class TerminalScreenSnapshot
+    {
+        public required int Columns { get; init; }
+        public required int Rows { get; init; }
+        public required int HistoryLength { get; init; }
+        public required int ScrollbackOffset { get; init; }
+        public required char[] Characters { get; init; }
+        public required int[] ForeColors { get; init; }
+        public required int[] BackColors { get; init; }
+        public int CursorColumn { get; init; } = -1;
+        public int CursorRow { get; init; } = -1;
+        public int CursorForeColor { get; init; }
+        public int CursorBackColor { get; init; }
+        public required int Hash { get; init; }
+    }
+
+    internal sealed class InteractiveTerminalForm : Form
+    {
+        private readonly InteractiveTerminalViewportControl _terminalView;
+        private readonly VScrollBar _historyScrollBar;
+        private readonly bool _isDarkMode;
+        private int _lastColumns;
+        private int _lastRows;
+        private int _lastRenderHash = int.MinValue;
+        private int _historyLength;
+        private volatile int _scrollbackOffset;
+        private bool _syncingScrollBar;
+
+        public bool IsFollowingTail => _scrollbackOffset == 0;
+        public int ScrollbackOffset => _scrollbackOffset;
+
+        public event EventHandler<string>? TextInput;
+        public event EventHandler<TerminalKeyEventArgs>? KeyInput;
+        public event EventHandler<TerminalSizeChangedEventArgs>? TerminalSizeChanged;
+
+        public InteractiveTerminalForm(string title)
+        {
+            Text = title;
+            StartPosition = FormStartPosition.CenterParent;
+            MinimumSize = new Size(760, 420);
+            Size = new Size(980, 620);
+            KeyPreview = true;
+            Padding = Padding.Empty;
+            BackColor = Color.Black;
+
+            _terminalView = new InteractiveTerminalViewportControl
+            {
+                Dock = DockStyle.Fill,
+                Margin = Padding.Empty,
+                Font = new Font("Courier New", 10f, FontStyle.Regular, GraphicsUnit.Point),
+                BackColor = Color.Black,
+                ForeColor = Color.FromArgb(187, 187, 187)
+            };
+            _historyScrollBar = new VScrollBar
+            {
+                Dock = DockStyle.Right,
+                Width = SystemInformation.VerticalScrollBarWidth,
+                SmallChange = 1,
+                LargeChange = 1,
+                Minimum = 0,
+                Maximum = 0,
+                Value = 0,
+                Enabled = false
+            };
+
+            var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
+            _isDarkMode = mainForm != null && mainForm.BackColor.GetBrightness() < 0.2f;
+
+            Controls.Add(_terminalView);
+            Controls.Add(_historyScrollBar);
+
+            KeyDown += InteractiveTerminalForm_KeyDown;
+            KeyPress += InteractiveTerminalForm_KeyPress;
+            _terminalView.Resize += (_, _) => EmitTerminalSizeChanged();
+            _terminalView.MouseWheel += TerminalView_MouseWheel;
+            _terminalView.MouseEnter += (_, _) => _terminalView.Focus();
+            _terminalView.MouseDown += TerminalView_MouseDown;
+            _historyScrollBar.ValueChanged += HistoryScrollBar_ValueChanged;
+
+            if (_isDarkMode)
+            {
+                DialogTheme.ApplyTo(this, true);
+                DialogTheme.SetDarkTitleBar(this, true);
+                _terminalView.BackColor = Color.Black;
+                _terminalView.ForeColor = Color.FromArgb(187, 187, 187);
+            }
+            else
+            {
+                _terminalView.BackColor = Color.Black;
+                _terminalView.ForeColor = Color.FromArgb(187, 187, 187);
+            }
+        }
+
+        public void AppendOutput(string text)
+        {
+            // Full-screen emulation renders terminal output through SetScreen snapshots.
+            // This path is intentionally kept as a no-op for exceptional legacy calls.
+        }
+
+        public void SetScreen(TerminalScreenSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return;
+
+            if (_lastRenderHash == snapshot.Hash)
+                return;
+
+            _lastRenderHash = snapshot.Hash;
+            _historyLength = Math.Max(0, snapshot.HistoryLength);
+            _scrollbackOffset = Math.Clamp(snapshot.ScrollbackOffset, 0, _historyLength);
+            _terminalView.SetSnapshot(snapshot);
+            SyncHistoryScrollBar();
+        }
+
+        public void FocusTerminal()
+        {
+            _terminalView.Focus();
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            FocusTerminal();
+            EmitTerminalSizeChanged();
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            base.OnFormClosed(e);
+        }
+
+        private void InteractiveTerminalForm_KeyPress(object? sender, KeyPressEventArgs e)
+        {
+            if (char.IsControl(e.KeyChar))
+                return;
+
+            SnapToTailForInput();
+            TextInput?.Invoke(this, e.KeyChar.ToString());
+            e.Handled = true;
+        }
+
+        private void InteractiveTerminalForm_KeyDown(object? sender, KeyEventArgs e)
+        {
+            // Ctrl+letter combinations (for example Ctrl+C).
+            if (e.Control && e.KeyCode >= Keys.A && e.KeyCode <= Keys.Z)
+            {
+                var consoleKey = (ConsoleKey)((int)ConsoleKey.A + ((int)e.KeyCode - (int)Keys.A));
+                SnapToTailForInput();
+                KeyInput?.Invoke(this, new TerminalKeyEventArgs
+                {
+                    ConsoleKey = consoleKey,
+                    Modifiers = ConsoleModifiers.Control
+                });
+                e.SuppressKeyPress = true;
+                return;
+            }
+
+            FunctionKey? functionKey = e.KeyCode switch
+            {
+                Keys.Enter => Rebex.TerminalEmulation.FunctionKey.Enter,
+                Keys.Tab => Rebex.TerminalEmulation.FunctionKey.Tab,
+                Keys.Back => Rebex.TerminalEmulation.FunctionKey.Backspace,
+                Keys.Escape => Rebex.TerminalEmulation.FunctionKey.Escape,
+                Keys.Up => Rebex.TerminalEmulation.FunctionKey.UpArrow,
+                Keys.Down => Rebex.TerminalEmulation.FunctionKey.DownArrow,
+                Keys.Left => Rebex.TerminalEmulation.FunctionKey.LeftArrow,
+                Keys.Right => Rebex.TerminalEmulation.FunctionKey.RightArrow,
+                Keys.Home => Rebex.TerminalEmulation.FunctionKey.Home,
+                Keys.End => Rebex.TerminalEmulation.FunctionKey.End,
+                Keys.PageUp => Rebex.TerminalEmulation.FunctionKey.PageUp,
+                Keys.PageDown => Rebex.TerminalEmulation.FunctionKey.PageDown,
+                Keys.Insert => Rebex.TerminalEmulation.FunctionKey.Insert,
+                Keys.Delete => Rebex.TerminalEmulation.FunctionKey.Delete,
+                _ => null
+            };
+
+            if (!functionKey.HasValue)
+                return;
+
+            SnapToTailForInput();
+            var modifiers = ConsoleModifiers.None;
+            if (e.Control) modifiers |= ConsoleModifiers.Control;
+            if (e.Shift) modifiers |= ConsoleModifiers.Shift;
+            if (e.Alt) modifiers |= ConsoleModifiers.Alt;
+
+            KeyInput?.Invoke(this, new TerminalKeyEventArgs
+            {
+                FunctionKey = functionKey.Value,
+                Modifiers = modifiers
+            });
+            e.SuppressKeyPress = true;
+        }
+
+        private void EmitTerminalSizeChanged()
+        {
+            var cellSize = _terminalView.CellSize;
+            var columnWidth = Math.Max(1, cellSize.Width);
+            var rowHeight = Math.Max(1, cellSize.Height);
+            var columns = Math.Max(20, _terminalView.ClientSize.Width / columnWidth);
+            var rows = Math.Max(5, _terminalView.ClientSize.Height / rowHeight);
+
+            if (columns == _lastColumns && rows == _lastRows)
+                return;
+
+            _lastColumns = columns;
+            _lastRows = rows;
+            TerminalSizeChanged?.Invoke(this, new TerminalSizeChangedEventArgs
+            {
+                Columns = columns,
+                Rows = rows
+            });
+        }
+
+        private void TerminalView_MouseWheel(object? sender, MouseEventArgs e)
+        {
+            var wheelNotches = e.Delta / SystemInformation.MouseWheelScrollDelta;
+            if (wheelNotches == 0)
+                return;
+
+            var scrollLines = SystemInformation.MouseWheelScrollLines;
+            if (scrollLines <= 0)
+                scrollLines = 3;
+
+            AdjustScrollbackOffset(wheelNotches * scrollLines);
+        }
+
+        private void TerminalView_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                PasteClipboardToHost();
+            }
+        }
+
+        private void HistoryScrollBar_ValueChanged(object? sender, EventArgs e)
+        {
+            if (_syncingScrollBar)
+                return;
+
+            var nextOffset = Math.Max(0, _historyLength - _historyScrollBar.Value);
+            if (nextOffset == _scrollbackOffset)
+                return;
+
+            _scrollbackOffset = nextOffset;
+            // Force rerender request because viewport changed while terminal content may not.
+            _lastRenderHash = int.MinValue;
+        }
+
+        private void AdjustScrollbackOffset(int deltaLines)
+        {
+            if (deltaLines == 0 || _historyLength <= 0)
+                return;
+
+            var nextOffset = Math.Clamp(_scrollbackOffset + deltaLines, 0, _historyLength);
+            if (nextOffset == _scrollbackOffset)
+                return;
+
+            _scrollbackOffset = nextOffset;
+            _lastRenderHash = int.MinValue;
+            SyncHistoryScrollBar();
+        }
+
+        private void SnapToTailForInput()
+        {
+            _terminalView.ClearSelection();
+
+            if (_scrollbackOffset == 0)
+                return;
+
+            _scrollbackOffset = 0;
+            _lastRenderHash = int.MinValue;
+            SyncHistoryScrollBar();
+        }
+
+        private void PasteClipboardToHost()
+        {
+            var clipboardText = GetClipboardTextSafe();
+            if (string.IsNullOrEmpty(clipboardText))
+            {
+                FocusTerminal();
+                return;
+            }
+
+            SnapToTailForInput();
+            TextInput?.Invoke(this, NormalizePasteText(clipboardText));
+            FocusTerminal();
+        }
+
+        private static string GetClipboardTextSafe()
+        {
+            try
+            {
+                return Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string NormalizePasteText(string text)
+        {
+            return text
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
+        }
+
+        private void SyncHistoryScrollBar()
+        {
+            _syncingScrollBar = true;
+            try
+            {
+                var viewportRows = Math.Max(1, _lastRows);
+                _historyScrollBar.Minimum = 0;
+                _historyScrollBar.SmallChange = 1;
+                _historyScrollBar.LargeChange = viewportRows;
+                _historyScrollBar.Maximum = _historyLength + viewportRows - 1;
+                _historyScrollBar.Enabled = _historyLength > 0;
+                var value = Math.Clamp(_historyLength - _scrollbackOffset, 0, _historyLength);
+                _historyScrollBar.Value = value;
+            }
+            finally
+            {
+                _syncingScrollBar = false;
+            }
+        }
+    }
+}

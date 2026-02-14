@@ -100,6 +100,7 @@ show interface status";
     [InlineData("- try:\n  - print: test")]
     [InlineData("- updatecolumn:\n    column: test")]
     [InlineData("- updateenvironment:\n    variable: token")]
+    [InlineData("- interactive:\n    session: separate")]
     public void IsYamlScript_StepSyntax_ReturnsTrue(string input)
     {
         var result = ScriptParser.IsYamlScript(input);
@@ -1163,6 +1164,109 @@ steps:
         step.Choose.Options[0].Value.Should().Be("simple");
         step.Choose.Options[1].Label.Should().Be("Labeled");
         step.Choose.Options[1].Value.Should().Be("lbl");
+    }
+
+    #endregion
+
+    #region Interactive Terminal Parser Tests
+
+    [Fact]
+    public void Parse_InteractiveStep_DefaultsApplied()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive: {}
+            """;
+
+        var script = _parser.Parse(yaml);
+        var step = script.Steps[0];
+
+        step.GetStepType().Should().Be(StepType.Interactive);
+        step.Interactive.Should().NotBeNull();
+        step.Interactive!.Session.Should().Be(InteractiveSessionMode.Separate);
+        step.Interactive.Emulation.Should().Be(InteractiveEmulationMode.Full);
+    }
+
+    [Fact]
+    public void Validate_InteractiveScalarForm_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive: true
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive must be a mapping"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveInvalidEnumValues_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: pooled
+                  emulation: advanced
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.session must be 'separate' or 'shared'"));
+        errors.Should().Contain(error => error.Contains("interactive.emulation must be 'full'"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveBasicEmulation_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  emulation: basic
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.emulation must be 'full'"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveUnknownKey_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  unknown_flag: true
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.unknown_flag is not supported"));
+    }
+
+    [Fact]
+    public void Parse_InteractiveOnErrorInsideMap_ParsesOnError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  on_error: continue
+            """;
+
+        var script = _parser.Parse(yaml);
+        script.Steps[0].OnError.Should().Be("continue");
     }
 
     #endregion

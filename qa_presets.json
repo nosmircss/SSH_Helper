@@ -241,6 +241,30 @@
                                              "timeout":  60,
                                              "isFavorite":  false,
                                              "folder":  "QA/Interactive"
+                                         },
+                    "QA Interactive Separate Full":  {
+                                                         "commands":  "---\nname: QA Interactive Separate Full\ndescription: Opens a separate in-app full terminal and continues when it closes\nversion: 1\ndebug: true\nsteps:\n  - print:\n      message: \"Opening separate/full interactive terminal. Close the terminal window to continue.\"\n  - interactive:\n      session: separate\n      emulation: full\n  - print:\n      message: \"Interactive terminal closed. Script resumed successfully.\"",
+                                                         "timeout":  120,
+                                                         "isFavorite":  false,
+                                                         "folder":  "QA/Interactive"
+                                                     },
+                    "QA Interactive Shared Full":  {
+                                                       "commands":  "---\nname: QA Interactive Shared Full\ndescription: Uses shared full interactive mode and continues on shared unavailable\nversion: 1\ndebug: true\nsteps:\n  - interactive:\n      session: shared\n      emulation: full\n      on_error: continue\n  - print:\n      message: \"Shared interactive step completed or was skipped by on_error.\"",
+                                                        "timeout":  120,
+                                                        "isFavorite":  false,
+                                                        "folder":  "QA/Interactive"
+                                                    },
+                    "QA Interactive Invalid Scalar":  {
+                                                         "commands":  "---\nname: QA Interactive Invalid Scalar\ndescription: Validation sample - interactive scalar form should fail\nversion: 1\nsteps:\n  - interactive: true\n  - print:\n      message: \"This line should not execute.\"",
+                                                         "timeout":  30,
+                                                         "isFavorite":  false,
+                                                         "folder":  "QA/Interactive"
+                                                     },
+                    "QA Interactive Invalid Enum":  {
+                                                      "commands":  "---\nname: QA Interactive Invalid Enum\ndescription: Validation sample - invalid session/emulation enum values should fail\nversion: 1\nsteps:\n  - interactive:\n      session: pooled\n      emulation: advanced\n  - print:\n      message: \"This line should not execute.\"",
+                                                      "timeout":  30,
+                                                      "isFavorite":  false,
+                                                      "folder":  "QA/Interactive"
                                          }
                 },
     "folders":  {

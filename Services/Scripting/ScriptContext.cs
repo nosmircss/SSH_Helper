@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
+using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting.Models;
 
 namespace SSH_Helper.Services.Scripting
@@ -98,6 +99,26 @@ namespace SSH_Helper.Services.Scripting
         /// The SSH shell session for executing commands.
         /// </summary>
         public SshShellSession? Session { get; set; }
+
+        /// <summary>
+        /// The host currently being executed for this script context.
+        /// </summary>
+        public HostConnection? CurrentHost { get; set; }
+
+        /// <summary>
+        /// Resolved username used for the current host execution.
+        /// </summary>
+        public string? ResolvedUsername { get; set; }
+
+        /// <summary>
+        /// Resolved password used for the current host execution.
+        /// </summary>
+        public string? ResolvedPassword { get; set; }
+
+        /// <summary>
+        /// Timeout options for the current host execution.
+        /// </summary>
+        public SshTimeoutOptions? Timeouts { get; set; }
 
         /// <summary>
         /// Debug state for breakpoints and stepping.
