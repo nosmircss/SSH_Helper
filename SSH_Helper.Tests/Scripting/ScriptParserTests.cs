@@ -1185,7 +1185,6 @@ steps:
         step.GetStepType().Should().Be(StepType.Interactive);
         step.Interactive.Should().NotBeNull();
         step.Interactive!.Session.Should().Be(InteractiveSessionMode.Separate);
-        step.Interactive.Emulation.Should().Be(InteractiveEmulationMode.Full);
     }
 
     [Fact]
@@ -1204,25 +1203,23 @@ steps:
     }
 
     [Fact]
-    public void Validate_InteractiveInvalidEnumValues_ReturnsError()
+    public void Validate_InteractiveInvalidSession_ReturnsError()
     {
         var yaml = """
             ---
             steps:
               - interactive:
                   session: pooled
-                  emulation: advanced
             """;
 
         var script = _parser.Parse(yaml);
         var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
 
         errors.Should().Contain(error => error.Contains("interactive.session must be 'separate' or 'shared'"));
-        errors.Should().Contain(error => error.Contains("interactive.emulation must be 'full'"));
     }
 
     [Fact]
-    public void Validate_InteractiveBasicEmulation_ReturnsError()
+    public void Parse_InteractiveEmulationKey_AddsDeprecationWarning()
     {
         var yaml = """
             ---
@@ -1234,7 +1231,8 @@ steps:
         var script = _parser.Parse(yaml);
         var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
 
-        errors.Should().Contain(error => error.Contains("interactive.emulation must be 'full'"));
+        errors.Should().NotContain(error => error.Contains("interactive.emulation", StringComparison.OrdinalIgnoreCase));
+        _parser.Warnings.Should().Contain(warning => warning.Contains("interactive.emulation is deprecated and ignored", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

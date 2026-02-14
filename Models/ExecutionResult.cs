@@ -11,5 +11,6 @@ namespace SSH_Helper.Models
         public string? ErrorMessage { get; set; }
         public Exception? Exception { get; set; }
         public DateTime Timestamp { get; set; } = DateTime.Now;
+        public List<InteractiveTerminalSessionDetails> InteractiveSessions { get; set; } = new();
     }
 }

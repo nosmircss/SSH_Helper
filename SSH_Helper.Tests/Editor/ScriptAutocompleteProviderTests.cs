@@ -127,7 +127,8 @@ public class ScriptAutocompleteProviderTests
         var completion = provider.GetCompletion(text, text.Length);
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
-        completion.Items.Select(item => item.Label).Should().Contain(["session", "emulation", "on_error"]);
+        completion.Items.Select(item => item.Label).Should().Contain(["session", "on_error"]);
+        completion.Items.Select(item => item.Label).Should().NotContain("emulation");
     }
 
     [Fact]
@@ -143,15 +144,15 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
-    public void GetCompletion_InteractiveEmulationValue_SuggestsFullOnly()
+    public void GetCompletion_InteractiveEmulationValue_HasNoSuggestions()
     {
         var provider = new ScriptAutocompleteProvider();
         var text = "steps:\n  - interactive:\n      emulation: ";
 
         var completion = provider.GetCompletion(text, text.Length);
 
-        completion.Context.Should().Be(CompletionContextKind.OptionValue);
-        completion.Items.Select(item => item.Label).Should().BeEquivalentTo(["full"]);
+        completion.Context.Should().Be(CompletionContextKind.None);
+        completion.Items.Should().BeEmpty();
     }
 
     [Fact]

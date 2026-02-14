@@ -205,6 +205,30 @@ namespace SSH_Helper.UI
             Invalidate();
         }
 
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            base.OnMouseDoubleClick(e);
+            if (e.Button != MouseButtons.Left)
+                return;
+
+            var snapshot = _snapshot;
+            if (snapshot == null || snapshot.Columns <= 0 || snapshot.Rows <= 0)
+                return;
+
+            var cell = GetCellFromPoint(e.Location, snapshot);
+            if (!TrySelectWord(cell, snapshot))
+            {
+                Capture = false;
+                ClearSelection();
+                return;
+            }
+
+            _isSelecting = false;
+            Capture = false;
+            Invalidate();
+            CopySelectionToClipboard();
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
@@ -474,6 +498,48 @@ namespace SSH_Helper.UI
             var maxColumn = Math.Max(0, snapshot.Columns - 1);
             var maxRow = Math.Max(0, snapshot.Rows - 1);
             return new Point(Math.Clamp(cell.X, 0, maxColumn), Math.Clamp(cell.Y, 0, maxRow));
+        }
+
+        private bool TrySelectWord(Point cell, TerminalScreenSnapshot snapshot)
+        {
+            if (cell == InvalidCell)
+                return false;
+
+            var clampedCell = ClampCellToSnapshot(cell, snapshot);
+            if (clampedCell == InvalidCell)
+                return false;
+
+            var columns = snapshot.Columns;
+            var rowOffset = clampedCell.Y * columns;
+            var characters = snapshot.Characters;
+            var startColumn = clampedCell.X;
+            var endColumn = clampedCell.X;
+
+            if (rowOffset + startColumn < 0 || rowOffset + startColumn >= characters.Length)
+                return false;
+
+            if (!IsWordCharacter(characters[rowOffset + startColumn]))
+                return false;
+
+            while (startColumn > 0 && IsWordCharacter(characters[rowOffset + startColumn - 1]))
+            {
+                startColumn--;
+            }
+
+            while (endColumn < columns - 1 && IsWordCharacter(characters[rowOffset + endColumn + 1]))
+            {
+                endColumn++;
+            }
+
+            _selectionAnchor = new Point(startColumn, clampedCell.Y);
+            _selectionCaret = new Point(endColumn, clampedCell.Y);
+            _selectionDragged = true;
+            return true;
+        }
+
+        private static bool IsWordCharacter(char value)
+        {
+            return value != '\0' && !char.IsWhiteSpace(value);
         }
 
         private static bool AllSpaces(char[] characters, int start, int length)

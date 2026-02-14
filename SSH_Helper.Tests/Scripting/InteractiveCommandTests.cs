@@ -1,4 +1,5 @@
 using FluentAssertions;
+using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
@@ -78,6 +79,42 @@ public class InteractiveCommandTests
 
         var act = async () => await command.ExecuteAsync(step, new ScriptContext(), cts.Token);
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ServiceAddsInteractiveAudit_ContextRetainsSession()
+    {
+        var command = new InteractiveCommand(new StubInteractiveTerminalService(
+            (context, _, _) =>
+            {
+                context.AddInteractiveSession(new InteractiveTerminalSessionDetails
+                {
+                    HostAddress = "10.0.0.1",
+                    SessionMode = "separate",
+                    EmulationMode = "full",
+                    StartedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+                    EndedAtUtc = DateTime.UtcNow,
+                    CloseReason = "user_closed",
+                    Completed = true,
+                    Transcript = "show version"
+                });
+
+                return Task.FromResult(InteractiveTerminalRunResult.Ok());
+            }));
+
+        var context = new ScriptContext();
+        var step = new ScriptStep
+        {
+            Interactive = new InteractiveOptions()
+        };
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var sessions = context.GetInteractiveSessionsSnapshot();
+        sessions.Should().ContainSingle();
+        sessions[0].CloseReason.Should().Be("user_closed");
+        sessions[0].Transcript.Should().Contain("show version");
     }
 
     private sealed class StubInteractiveTerminalService : IInteractiveTerminalService

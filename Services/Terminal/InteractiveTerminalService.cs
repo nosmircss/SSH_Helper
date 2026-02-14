@@ -2,12 +2,14 @@ using System.IO;
 using System.Drawing;
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.RegularExpressions;
 using Rebex.Net;
 using Rebex.TerminalEmulation;
 using SSH_Helper.Forms;
 using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.Utilities;
 
 // Alias to avoid conflict with SSH_Helper.Services.Scripting namespace.
 using RebexScripting = Rebex.TerminalEmulation.Scripting;
@@ -46,6 +48,37 @@ namespace SSH_Helper.Services.Terminal
 
     public sealed class InteractiveTerminalService : IInteractiveTerminalService
     {
+        private static readonly Regex AlternateScreenSequenceRegex = new(
+            "\u001B\\[\\?(?:1049|1047|47)(?:;\\d+)?(?<mode>[hl])",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private const string InteractiveCloseReasonUserClosed = "user_closed";
+        private const string InteractiveCloseReasonDisconnected = "disconnected";
+        private const string InteractiveCloseReasonCancelled = "cancelled";
+        private const string InteractiveCloseReasonError = "error";
+
+        private enum InteractiveCloseReasonState
+        {
+            UserClosed = 0,
+            Disconnected = 1,
+            Cancelled = 2,
+            Error = 3
+        }
+
+        private sealed class InteractiveWindowRunSummary
+        {
+            public bool WasLaunched { get; set; }
+            public bool CancelledByToken { get; set; }
+            public string CloseReason { get; set; } = InteractiveCloseReasonUserClosed;
+            public string Transcript { get; set; } = string.Empty;
+
+            public bool Completed =>
+                string.Equals(CloseReason, InteractiveCloseReasonUserClosed, StringComparison.Ordinal) ||
+                string.Equals(CloseReason, InteractiveCloseReasonDisconnected, StringComparison.Ordinal);
+        }
+
+        internal readonly record struct TranscriptCaptureResult(string CapturedText, bool InAlternateScreen);
+
         public async Task<InteractiveTerminalRunResult> RunAsync(
             ScriptContext context,
             InteractiveOptions options,
@@ -72,13 +105,16 @@ namespace SSH_Helper.Services.Terminal
                     "InteractiveSharedUnavailable: no active shared SSH shell session is available for session=shared.");
             }
 
+            var startedAtUtc = DateTime.UtcNow;
+            var runSummary = new InteractiveWindowRunSummary();
             try
             {
                 sharedSession.FlushBuffer();
                 var terminal = sharedSession.SharedTerminal;
+                startedAtUtc = DateTime.UtcNow;
 
-                await RunWindowLoopAsync(
-                    title: $"{context.CurrentHost?.ToString() ?? "Current Host"} - Interactive ({options.Session.ToString().ToLowerInvariant()}/{options.Emulation.ToString().ToLowerInvariant()})",
+                runSummary = await RunWindowLoopAsync(
+                    title: $"{context.CurrentHost?.ToString() ?? "Current Host"} - Interactive ({options.Session.ToString().ToLowerInvariant()})",
                     scripting: sharedSession.SharedScripting,
                     terminal: terminal,
                     cancellationToken: cancellationToken,
@@ -88,6 +124,9 @@ namespace SSH_Helper.Services.Terminal
                         // Required behavior: stop/cancel force-closes active shared interactive session.
                         sharedSession.Dispose();
                     });
+
+                if (runSummary.CancelledByToken)
+                    throw new OperationCanceledException(cancellationToken);
 
                 sharedSession.SyncAfterInteractive();
                 return InteractiveTerminalRunResult.Ok();
@@ -99,6 +138,18 @@ namespace SSH_Helper.Services.Terminal
             catch (Exception ex)
             {
                 return InteractiveTerminalRunResult.Fail($"Interactive terminal failed: {ex.Message}");
+            }
+            finally
+            {
+                if (runSummary.WasLaunched)
+                {
+                    context.AddInteractiveSession(CreateSessionDetails(
+                        runSummary,
+                        context.CurrentHost?.ToString() ?? string.Empty,
+                        options,
+                        startedAtUtc,
+                        DateTime.UtcNow));
+                }
             }
         }
 
@@ -130,6 +181,8 @@ namespace SSH_Helper.Services.Terminal
             Ssh? client = null;
             VirtualTerminal? virtualTerminal = null;
             RebexScripting? scripting = null;
+            var startedAtUtc = DateTime.UtcNow;
+            var runSummary = new InteractiveWindowRunSummary();
 
             try
             {
@@ -150,14 +203,18 @@ namespace SSH_Helper.Services.Terminal
                     SshTerminalOptionsFactory.DefaultColumns,
                     SshTerminalOptionsFactory.DefaultRows,
                     SshTerminalOptionsFactory.DefaultHistoryMaxLength);
+                startedAtUtc = DateTime.UtcNow;
 
-                await RunWindowLoopAsync(
-                    title: $"{host} - Interactive ({options.Session.ToString().ToLowerInvariant()}/{options.Emulation.ToString().ToLowerInvariant()})",
+                runSummary = await RunWindowLoopAsync(
+                    title: $"{host} - Interactive ({options.Session.ToString().ToLowerInvariant()})",
                     scripting: scripting,
                     terminal: virtualTerminal,
                     cancellationToken: cancellationToken,
                     isConnectionAlive: () => client != null && client.IsConnected,
                     onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting));
+
+                if (runSummary.CancelledByToken)
+                    throw new OperationCanceledException(cancellationToken);
 
                 return InteractiveTerminalRunResult.Ok();
             }
@@ -172,10 +229,19 @@ namespace SSH_Helper.Services.Terminal
             finally
             {
                 CloseSeparateResources(client, virtualTerminal, scripting);
+                if (runSummary.WasLaunched)
+                {
+                    context.AddInteractiveSession(CreateSessionDetails(
+                        runSummary,
+                        host.ToString(),
+                        options,
+                        startedAtUtc,
+                        DateTime.UtcNow));
+                }
             }
         }
 
-        private async Task RunWindowLoopAsync(
+        private async Task<InteractiveWindowRunSummary> RunWindowLoopAsync(
             string title,
             RebexScripting scripting,
             ITerminal? terminal,
@@ -187,19 +253,27 @@ namespace SSH_Helper.Services.Terminal
             var pendingInput = new ConcurrentQueue<Action<RebexScripting>>();
             var formClosedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             using var uiLoopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var cancelledByToken = false;
+            var cancelledByToken = 0;
+            var closeReasonState = (int)InteractiveCloseReasonState.UserClosed;
+            var wasLaunched = 0;
+            var transcriptBuilder = new StringBuilder();
+            var transcriptLock = new object();
+            var inAlternateScreen = false;
+            var inAlternateScreenState = 0;
             InteractiveTerminalForm? form = null;
             var terminalDisconnected = 0;
             var terminalRequestedDisconnect = 0;
             var ctrlDRequestedTick = -1L;
             var sawLogoutAfterCtrlD = 0;
+            var pumpHadError = 0;
             EventHandler? disconnectedHandler = null;
             EventHandler<ActionRequestEventArgs>? actionRequestedHandler = null;
             EventHandler<DataReceivedEventArgs>? dataReceivedHandler = null;
 
             using var cancellationRegistration = cancellationToken.Register(() =>
             {
-                cancelledByToken = true;
+                Interlocked.Exchange(ref cancelledByToken, 1);
+                TrySetCloseReason(ref closeReasonState, InteractiveCloseReasonState.Cancelled);
                 onCancellation?.Invoke();
 
                 if (form == null || form.IsDisposed)
@@ -220,6 +294,7 @@ namespace SSH_Helper.Services.Terminal
                 disconnectedHandler = (_, _) =>
                 {
                     Interlocked.Exchange(ref terminalDisconnected, 1);
+                    TrySetCloseReason(ref closeReasonState, InteractiveCloseReasonState.Disconnected);
                     if (form != null)
                         RequestCloseSafe(form);
                 };
@@ -230,12 +305,28 @@ namespace SSH_Helper.Services.Terminal
                         return;
 
                     Interlocked.Exchange(ref terminalRequestedDisconnect, 1);
+                    TrySetCloseReason(ref closeReasonState, InteractiveCloseReasonState.Disconnected);
                     if (form != null)
                         RequestCloseSafe(form);
                 };
 
                 dataReceivedHandler = (_, args) =>
                 {
+                    lock (transcriptLock)
+                    {
+                        var captureResult = FilterTranscriptChunkForAudit(
+                            args.RawData,
+                            inAlternateScreen,
+                            () => args.StrippedData);
+
+                        inAlternateScreen = captureResult.InAlternateScreen;
+                        Volatile.Write(ref inAlternateScreenState, inAlternateScreen ? 1 : 0);
+                        if (!string.IsNullOrEmpty(captureResult.CapturedText))
+                        {
+                            transcriptBuilder.Append(captureResult.CapturedText);
+                        }
+                    }
+
                     var ctrlDTick = Interlocked.Read(ref ctrlDRequestedTick);
                     if (ctrlDTick < 0)
                         return;
@@ -247,6 +338,7 @@ namespace SSH_Helper.Services.Terminal
                     if (ContainsLogoutLine(stripped))
                     {
                         Interlocked.Exchange(ref sawLogoutAfterCtrlD, 1);
+                        TrySetCloseReason(ref closeReasonState, InteractiveCloseReasonState.Disconnected);
                         if (form != null)
                             RequestCloseSafe(form);
                     }
@@ -345,6 +437,7 @@ namespace SSH_Helper.Services.Terminal
                 };
 
                 form.Show(Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null);
+                Interlocked.Exchange(ref wasLaunched, 1);
                 form.FocusTerminal();
             });
 
@@ -352,7 +445,7 @@ namespace SSH_Helper.Services.Terminal
             {
                 try
                 {
-                    await PumpFullAsync(
+                    var hadPumpError = await PumpFullAsync(
                         form!,
                         scripting,
                         terminal,
@@ -362,11 +455,25 @@ namespace SSH_Helper.Services.Terminal
                         () => Volatile.Read(ref terminalDisconnected) == 1 ||
                               Volatile.Read(ref terminalRequestedDisconnect) == 1 ||
                               Volatile.Read(ref sawLogoutAfterCtrlD) == 1,
+                        () => Volatile.Read(ref inAlternateScreenState) == 1,
                         uiLoopCancellation.Token);
+                    if (hadPumpError)
+                    {
+                        Interlocked.Exchange(ref pumpHadError, 1);
+                    }
                 }
                 catch (OperationCanceledException)
                 {
                     // Cancellation is expected.
+                }
+                catch (Exception ex)
+                {
+                    TrySetCloseReason(ref closeReasonState, InteractiveCloseReasonState.Error);
+                    if (form != null)
+                    {
+                        AppendOutputSafe(form, $"\r\n[interactive-error] {ex.Message}\r\n");
+                        RequestCloseSafe(form);
+                    }
                 }
             }, CancellationToken.None);
 
@@ -407,13 +514,39 @@ namespace SSH_Helper.Services.Terminal
                 }
             }
 
-            if (cancelledByToken || cancellationToken.IsCancellationRequested)
+            if (Volatile.Read(ref terminalDisconnected) == 1 ||
+                Volatile.Read(ref terminalRequestedDisconnect) == 1 ||
+                Volatile.Read(ref sawLogoutAfterCtrlD) == 1)
             {
-                throw new OperationCanceledException(cancellationToken);
+                TrySetCloseReason(ref closeReasonState, InteractiveCloseReasonState.Disconnected);
             }
+
+            if (Volatile.Read(ref pumpHadError) == 1)
+            {
+                TrySetCloseReason(ref closeReasonState, InteractiveCloseReasonState.Error);
+            }
+
+            if (Volatile.Read(ref cancelledByToken) == 1 || cancellationToken.IsCancellationRequested)
+            {
+                TrySetCloseReason(ref closeReasonState, InteractiveCloseReasonState.Cancelled);
+            }
+
+            string transcript;
+            lock (transcriptLock)
+            {
+                transcript = transcriptBuilder.ToString();
+            }
+
+            return new InteractiveWindowRunSummary
+            {
+                WasLaunched = Volatile.Read(ref wasLaunched) == 1,
+                CancelledByToken = Volatile.Read(ref cancelledByToken) == 1 || cancellationToken.IsCancellationRequested,
+                CloseReason = ResolveCloseReason((InteractiveCloseReasonState)Volatile.Read(ref closeReasonState)),
+                Transcript = transcript
+            };
         }
 
-        private static async Task PumpFullAsync(
+        private static async Task<bool> PumpFullAsync(
             InteractiveTerminalForm form,
             RebexScripting scripting,
             ITerminal? terminal,
@@ -421,13 +554,14 @@ namespace SSH_Helper.Services.Terminal
             ConcurrentQueue<Action<RebexScripting>> pendingInput,
             Func<bool>? isConnectionAlive,
             Func<bool>? isTerminalClosed,
+            Func<bool>? isAlternateScreenActive,
             CancellationToken cancellationToken)
         {
             if (terminal == null)
             {
-                AppendOutputSafe(form, "\r\n[interactive-error] Full terminal emulation is unavailable.\r\n");
+                AppendOutputSafe(form, "\r\n[interactive-error] Interactive terminal is unavailable.\r\n");
                 RequestCloseSafe(form);
-                return;
+                return true;
             }
 
             const int processTimeoutMs = 2;
@@ -435,6 +569,7 @@ namespace SSH_Helper.Services.Terminal
             const int idleDelayMs = 4;
             var lastScreenHash = int.MinValue;
             var lastRenderedHistoryLength = 0;
+            var hadFatalError = false;
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -478,8 +613,11 @@ namespace SSH_Helper.Services.Terminal
                         }
 
                         var totalHistoryLength = Math.Max(0, terminal.HistoryLength);
-                        var requestedOffset = form.ScrollbackOffset;
-                        if (requestedOffset > 0 && totalHistoryLength > lastRenderedHistoryLength)
+                        var alternateScreenActive = isAlternateScreenActive != null && isAlternateScreenActive();
+                        var requestedOffset = alternateScreenActive ? 0 : form.ScrollbackOffset;
+                        if (!alternateScreenActive &&
+                            requestedOffset > 0 &&
+                            totalHistoryLength > lastRenderedHistoryLength)
                         {
                             // Match PuTTY-like behavior: keep a stable scrollback anchor while new data arrives.
                             requestedOffset = Math.Min(
@@ -487,7 +625,10 @@ namespace SSH_Helper.Services.Terminal
                                 requestedOffset + (totalHistoryLength - lastRenderedHistoryLength));
                         }
 
-                        snapshot = BuildScreenSnapshot(terminal, requestedOffset);
+                        snapshot = BuildScreenSnapshot(
+                            terminal,
+                            requestedOffset,
+                            applyFollowTailAnchoring: !alternateScreenActive);
                         lastRenderedHistoryLength = snapshot.HistoryLength;
                     }
                 }
@@ -499,6 +640,7 @@ namespace SSH_Helper.Services.Terminal
                 catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
                 {
                     AppendOutputSafe(form, $"\r\n[interactive-error] {ex.Message}\r\n");
+                    hadFatalError = true;
                     RequestCloseSafe(form);
                     break;
                 }
@@ -519,6 +661,104 @@ namespace SSH_Helper.Services.Terminal
 
                 await Task.Delay(idleDelayMs, cancellationToken);
             }
+
+            return hadFatalError;
+        }
+
+        internal static TranscriptCaptureResult FilterTranscriptChunkForAudit(
+            string? rawData,
+            string? strippedData,
+            bool inAlternateScreen)
+        {
+            return FilterTranscriptChunkForAudit(
+                rawData,
+                inAlternateScreen,
+                () => strippedData);
+        }
+
+        internal static TranscriptCaptureResult FilterTranscriptChunkForAudit(
+            string? rawData,
+            bool inAlternateScreen,
+            Func<string?> strippedDataProvider)
+        {
+            ArgumentNullException.ThrowIfNull(strippedDataProvider);
+
+            if (string.IsNullOrEmpty(rawData))
+            {
+                if (inAlternateScreen)
+                    return new TranscriptCaptureResult(string.Empty, inAlternateScreen);
+
+                var stripped = strippedDataProvider();
+                if (string.IsNullOrEmpty(stripped))
+                    return new TranscriptCaptureResult(string.Empty, inAlternateScreen);
+
+                return new TranscriptCaptureResult(stripped, inAlternateScreen);
+            }
+
+            if (rawData.IndexOf("\u001B[?", StringComparison.Ordinal) < 0)
+            {
+                if (inAlternateScreen)
+                    return new TranscriptCaptureResult(string.Empty, inAlternateScreen);
+
+                return new TranscriptCaptureResult(strippedDataProvider() ?? string.Empty, inAlternateScreen);
+            }
+
+            var matches = AlternateScreenSequenceRegex.Matches(rawData);
+            if (matches.Count == 0)
+            {
+                if (inAlternateScreen)
+                    return new TranscriptCaptureResult(string.Empty, inAlternateScreen);
+
+                return new TranscriptCaptureResult(strippedDataProvider() ?? string.Empty, inAlternateScreen);
+            }
+
+            var nextAlternateState = inAlternateScreen;
+            var sawEnter = false;
+            var sawLeave = false;
+            var firstEnterIndex = -1;
+            foreach (Match match in matches)
+            {
+                var mode = match.Groups["mode"].Value;
+                if (string.Equals(mode, "h", StringComparison.Ordinal))
+                {
+                    nextAlternateState = true;
+                    sawEnter = true;
+                    if (firstEnterIndex < 0)
+                        firstEnterIndex = match.Index;
+                }
+                else
+                {
+                    nextAlternateState = false;
+                    sawLeave = true;
+                }
+            }
+
+            if (sawEnter)
+            {
+                var preservedPrefix = CaptureRawPrefixBeforeAlternateScreen(rawData, firstEnterIndex);
+                if (!string.IsNullOrEmpty(preservedPrefix))
+                    return new TranscriptCaptureResult(preservedPrefix, nextAlternateState);
+
+                if (!nextAlternateState && sawLeave)
+                    return new TranscriptCaptureResult(strippedDataProvider() ?? string.Empty, false);
+
+                return new TranscriptCaptureResult(string.Empty, nextAlternateState);
+            }
+
+            if (nextAlternateState)
+                return new TranscriptCaptureResult(string.Empty, true);
+
+            // Leaving alternate screen often includes the prompt in stripped data; keep that.
+            return new TranscriptCaptureResult(strippedDataProvider() ?? string.Empty, false);
+        }
+
+        private static string CaptureRawPrefixBeforeAlternateScreen(string rawData, int firstEnterIndex)
+        {
+            if (firstEnterIndex <= 0 || firstEnterIndex > rawData.Length)
+                return string.Empty;
+
+            var prefix = rawData[..firstEnterIndex];
+            return TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(prefix));
         }
 
         private static bool ContainsLogoutLine(string text)
@@ -530,6 +770,47 @@ namespace SSH_Helper.Services.Terminal
             return text.Contains("\nlogout\n", StringComparison.OrdinalIgnoreCase) ||
                    text.Contains("\r\nlogout\r\n", StringComparison.OrdinalIgnoreCase) ||
                    text.Trim().Equals("logout", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void TrySetCloseReason(
+            ref int closeReasonState,
+            InteractiveCloseReasonState nextReason)
+        {
+            _ = Interlocked.CompareExchange(
+                ref closeReasonState,
+                (int)nextReason,
+                (int)InteractiveCloseReasonState.UserClosed);
+        }
+
+        private static string ResolveCloseReason(InteractiveCloseReasonState reason)
+        {
+            return reason switch
+            {
+                InteractiveCloseReasonState.Disconnected => InteractiveCloseReasonDisconnected,
+                InteractiveCloseReasonState.Cancelled => InteractiveCloseReasonCancelled,
+                InteractiveCloseReasonState.Error => InteractiveCloseReasonError,
+                _ => InteractiveCloseReasonUserClosed
+            };
+        }
+
+        private static InteractiveTerminalSessionDetails CreateSessionDetails(
+            InteractiveWindowRunSummary summary,
+            string hostAddress,
+            InteractiveOptions options,
+            DateTime startedAtUtc,
+            DateTime endedAtUtc)
+        {
+            return new InteractiveTerminalSessionDetails
+            {
+                HostAddress = hostAddress ?? string.Empty,
+                SessionMode = options.Session.ToString().ToLowerInvariant(),
+                EmulationMode = string.Empty,
+                StartedAtUtc = startedAtUtc,
+                EndedAtUtc = endedAtUtc,
+                CloseReason = summary.CloseReason,
+                Completed = summary.Completed,
+                Transcript = summary.Transcript ?? string.Empty
+            };
         }
 
         private static void FlushPendingInput(
@@ -629,7 +910,8 @@ namespace SSH_Helper.Services.Terminal
 
         private static TerminalScreenSnapshot BuildScreenSnapshot(
             ITerminal terminal,
-            int scrollbackOffset)
+            int scrollbackOffset,
+            bool applyFollowTailAnchoring = true)
         {
             var screen = terminal.Screen;
             var columns = Math.Max(1, screen.Columns);
@@ -637,7 +919,7 @@ namespace SSH_Helper.Services.Terminal
             var historyLength = Math.Max(0, terminal.HistoryLength);
             var appliedOffset = Math.Clamp(scrollbackOffset, 0, historyLength);
             var effectiveOffset = appliedOffset;
-            if (appliedOffset == 0)
+            if (applyFollowTailAnchoring && appliedOffset == 0)
             {
                 // In follow-tail mode, keep the host cursor visually anchored near the bottom after resize,
                 // matching the behavior users expect from terminal emulators like PuTTY.

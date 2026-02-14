@@ -1030,7 +1030,22 @@ namespace SSH_Helper
                             : new Dictionary<string, string>(host.Variables, StringComparer.OrdinalIgnoreCase)
                     })
                     .ToList()
-                    ?? new List<SSH_Helper.Models.HostExecutionContext>()
+                    ?? new List<SSH_Helper.Models.HostExecutionContext>(),
+                InteractiveSessions = details.InteractiveSessions?
+                    .Select(session => new InteractiveTerminalSessionDetails
+                    {
+                        SessionNumber = session.SessionNumber,
+                        HostAddress = session.HostAddress ?? string.Empty,
+                        SessionMode = session.SessionMode ?? string.Empty,
+                        EmulationMode = session.EmulationMode ?? string.Empty,
+                        StartedAtUtc = session.StartedAtUtc,
+                        EndedAtUtc = session.EndedAtUtc,
+                        CloseReason = session.CloseReason ?? string.Empty,
+                        Completed = session.Completed,
+                        Transcript = session.Transcript ?? string.Empty
+                    })
+                    .ToList()
+                    ?? new List<InteractiveTerminalSessionDetails>()
             };
         }
 
@@ -7037,7 +7052,8 @@ namespace SSH_Helper
                 IsFolderExecution = isFolderExecution,
                 FolderName = folderName ?? string.Empty,
                 ExecutedPresetNames = executedPresetNames?.ToList() ?? new List<string>(),
-                Hosts = BuildHostExecutionContexts(hosts, results, endTimeUtc)
+                Hosts = BuildHostExecutionContexts(hosts, results, endTimeUtc),
+                InteractiveSessions = BuildInteractiveSessionDetails(results)
             };
         }
 
@@ -7084,6 +7100,41 @@ namespace SSH_Helper
             }
 
             return contexts;
+        }
+
+        private static List<InteractiveTerminalSessionDetails> BuildInteractiveSessionDetails(
+            IReadOnlyList<ExecutionResult> results)
+        {
+            var sessions = new List<InteractiveTerminalSessionDetails>();
+            if (results == null || results.Count == 0)
+                return sessions;
+
+            var nextSessionNumber = 1;
+            foreach (var result in results)
+            {
+                if (result?.InteractiveSessions == null || result.InteractiveSessions.Count == 0)
+                    continue;
+
+                foreach (var session in result.InteractiveSessions)
+                {
+                    sessions.Add(new InteractiveTerminalSessionDetails
+                    {
+                        SessionNumber = nextSessionNumber++,
+                        HostAddress = string.IsNullOrWhiteSpace(session.HostAddress)
+                            ? result.Host?.ToString() ?? string.Empty
+                            : session.HostAddress,
+                        SessionMode = session.SessionMode ?? string.Empty,
+                        EmulationMode = session.EmulationMode ?? string.Empty,
+                        StartedAtUtc = session.StartedAtUtc,
+                        EndedAtUtc = session.EndedAtUtc,
+                        CloseReason = session.CloseReason ?? string.Empty,
+                        Completed = session.Completed,
+                        Transcript = session.Transcript ?? string.Empty
+                    });
+                }
+            }
+
+            return sessions;
         }
 
         private static string BuildRunModeDescription(FolderExecutionOptions? options, bool isFolderExecution)

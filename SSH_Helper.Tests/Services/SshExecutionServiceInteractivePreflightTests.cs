@@ -22,7 +22,6 @@ public class SshExecutionServiceInteractivePreflightTests
             steps:
               - interactive:
                   session: separate
-                  emulation: full
             """;
 
         var results = await service.ExecuteScriptAsync(
@@ -53,7 +52,6 @@ public class SshExecutionServiceInteractivePreflightTests
                 steps:
                   - interactive:
                       session: separate
-                      emulation: full
                 """
         };
 

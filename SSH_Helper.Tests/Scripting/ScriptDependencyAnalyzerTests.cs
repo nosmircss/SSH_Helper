@@ -249,7 +249,6 @@ public class ScriptDependencyAnalyzerTests
             steps:
               - interactive:
                   session: separate
-                  emulation: full
             """);
 
         result.RequiresSshSession.Should().BeTrue();

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using SSH_Helper.Models;
@@ -93,6 +94,8 @@ namespace SSH_Helper.Services.Scripting
         private static readonly Regex ArrayExpressionRegex = new(@"^(\w+)\[([^\]]+)\]$", RegexOptions.Compiled);
         private readonly Dictionary<string, object?> _variables = new(StringComparer.OrdinalIgnoreCase);
         private readonly StringBuilder _output = new();
+        private readonly List<InteractiveTerminalSessionDetails> _interactiveSessions = new();
+        private readonly object _interactiveSessionsLock = new();
         private string _lastCommandOutput = string.Empty;
 
         /// <summary>
@@ -453,6 +456,39 @@ namespace SSH_Helper.Services.Scripting
         }
 
         /// <summary>
+        /// Stores one interactive terminal session audit record for this script execution context.
+        /// </summary>
+        public void AddInteractiveSession(InteractiveTerminalSessionDetails session)
+        {
+            if (session == null)
+                return;
+
+            lock (_interactiveSessionsLock)
+            {
+                var cloned = CloneInteractiveSession(session);
+                if (cloned.SessionNumber <= 0)
+                {
+                    cloned.SessionNumber = _interactiveSessions.Count + 1;
+                }
+
+                _interactiveSessions.Add(cloned);
+            }
+        }
+
+        /// <summary>
+        /// Returns a deep-copied snapshot of captured interactive terminal sessions.
+        /// </summary>
+        public List<InteractiveTerminalSessionDetails> GetInteractiveSessionsSnapshot()
+        {
+            lock (_interactiveSessionsLock)
+            {
+                return _interactiveSessions
+                    .Select(CloneInteractiveSession)
+                    .ToList();
+            }
+        }
+
+        /// <summary>
         /// Imports variables from a script's vars section.
         /// </summary>
         public void ImportScriptVars(Dictionary<string, object?> vars)
@@ -465,6 +501,22 @@ namespace SSH_Helper.Services.Scripting
                     _variables[kvp.Key] = kvp.Value;
                 }
             }
+        }
+
+        private static InteractiveTerminalSessionDetails CloneInteractiveSession(InteractiveTerminalSessionDetails session)
+        {
+            return new InteractiveTerminalSessionDetails
+            {
+                SessionNumber = session.SessionNumber,
+                HostAddress = session.HostAddress ?? string.Empty,
+                SessionMode = session.SessionMode ?? string.Empty,
+                EmulationMode = session.EmulationMode ?? string.Empty,
+                StartedAtUtc = session.StartedAtUtc,
+                EndedAtUtc = session.EndedAtUtc,
+                CloseReason = session.CloseReason ?? string.Empty,
+                Completed = session.Completed,
+                Transcript = session.Transcript ?? string.Empty
+            };
         }
     }
 }

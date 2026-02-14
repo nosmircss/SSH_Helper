@@ -242,14 +242,14 @@
                                              "isFavorite":  false,
                                              "folder":  "QA/Interactive"
                                          },
-                    "QA Interactive Separate Full":  {
-                                                         "commands":  "---\nname: QA Interactive Separate Full\ndescription: Opens a separate in-app full terminal and continues when it closes\nversion: 1\ndebug: true\nsteps:\n  - print:\n      message: \"Opening separate/full interactive terminal. Close the terminal window to continue.\"\n  - interactive:\n      session: separate\n      emulation: full\n  - print:\n      message: \"Interactive terminal closed. Script resumed successfully.\"",
+                    "QA Interactive Separate":  {
+                                                         "commands":  "---\nname: QA Interactive Separate\ndescription: Opens a separate in-app interactive terminal and continues when it closes\nversion: 1\ndebug: true\nsteps:\n  - print:\n      message: \"Opening separate interactive terminal. Close the terminal window to continue.\"\n  - interactive:\n      session: separate\n  - print:\n      message: \"Interactive terminal closed. Script resumed successfully.\"",
                                                          "timeout":  120,
                                                          "isFavorite":  false,
                                                          "folder":  "QA/Interactive"
                                                      },
-                    "QA Interactive Shared Full":  {
-                                                       "commands":  "---\nname: QA Interactive Shared Full\ndescription: Uses shared full interactive mode and continues on shared unavailable\nversion: 1\ndebug: true\nsteps:\n  - interactive:\n      session: shared\n      emulation: full\n      on_error: continue\n  - print:\n      message: \"Shared interactive step completed or was skipped by on_error.\"",
+                    "QA Interactive Shared":  {
+                                                       "commands":  "---\nname: QA Interactive Shared\ndescription: Uses shared interactive mode and continues on shared unavailable\nversion: 1\ndebug: true\nsteps:\n  - interactive:\n      session: shared\n      on_error: continue\n  - print:\n      message: \"Shared interactive step completed or was skipped by on_error.\"",
                                                         "timeout":  120,
                                                         "isFavorite":  false,
                                                         "folder":  "QA/Interactive"
@@ -261,7 +261,7 @@
                                                          "folder":  "QA/Interactive"
                                                      },
                     "QA Interactive Invalid Enum":  {
-                                                      "commands":  "---\nname: QA Interactive Invalid Enum\ndescription: Validation sample - invalid session/emulation enum values should fail\nversion: 1\nsteps:\n  - interactive:\n      session: pooled\n      emulation: advanced\n  - print:\n      message: \"This line should not execute.\"",
+                                                      "commands":  "---\nname: QA Interactive Invalid Enum\ndescription: Validation sample - invalid session enum value should fail\nversion: 1\nsteps:\n  - interactive:\n      session: pooled\n  - print:\n      message: \"This line should not execute.\"",
                                                       "timeout":  30,
                                                       "isFavorite":  false,
                                                       "folder":  "QA/Interactive"

@@ -88,6 +88,21 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
                                         ["role"] = "edge"
                                     }
                                 }
+                            },
+                            InteractiveSessions = new List<InteractiveTerminalSessionDetails>
+                            {
+                                new()
+                                {
+                                    SessionNumber = 1,
+                                    HostAddress = "10.0.0.1",
+                                    SessionMode = "separate",
+                                    EmulationMode = "full",
+                                    StartedAtUtc = startTimeUtc.AddSeconds(5),
+                                    EndedAtUtc = startTimeUtc.AddSeconds(25),
+                                    CloseReason = "user_closed",
+                                    Completed = true,
+                                    Transcript = "show version\nFortiGate-VM64"
+                                }
                             }
                         }
                     }
@@ -116,5 +131,10 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
         entry.Details.Hosts.Should().ContainSingle();
         entry.Details.Hosts[0].HostAddress.Should().Be("10.0.0.1");
         entry.Details.Hosts[0].Variables.Should().ContainKey("role").WhoseValue.Should().Be("edge");
+        entry.Details.InteractiveSessions.Should().ContainSingle();
+        entry.Details.InteractiveSessions[0].HostAddress.Should().Be("10.0.0.1");
+        entry.Details.InteractiveSessions[0].CloseReason.Should().Be("user_closed");
+        entry.Details.InteractiveSessions[0].Completed.Should().BeTrue();
+        entry.Details.InteractiveSessions[0].Transcript.Should().Contain("FortiGate-VM64");
     }
 }

@@ -1753,7 +1753,6 @@ Opens an in-app SSH terminal window and pauses the script until the terminal win
 ```yaml
 - interactive:
     session: separate    # Optional: separate|shared (default: separate)
-    emulation: full      # Optional: full (default: full)
     on_error: stop       # Optional: continue|stop (default: stop)
 ```
 
@@ -1772,23 +1771,20 @@ Opens an in-app SSH terminal window and pauses the script until the terminal win
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `session` | No | `separate` | Session model: `separate` or `shared` |
-| `emulation` | No | `full` | Terminal emulation mode: `full` |
 | `on_error` | No | `stop` | Error handling: `continue` or `stop` |
 
 **Examples:**
 ```yaml
-# Separate connection + full emulation (defaults)
+# Separate connection (defaults)
 - interactive: {}
 
-# Explicit separate/full
+# Explicit separate
 - interactive:
     session: separate
-    emulation: full
 
-# Shared session + full emulation
+# Shared session
 - interactive:
     session: shared
-    emulation: full
     on_error: continue
 ```
 

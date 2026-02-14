@@ -552,11 +552,6 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Session model. Separate opens a new connection; shared attaches to the current session.
         /// </summary>
         public InteractiveSessionMode Session { get; set; } = InteractiveSessionMode.Separate;
-
-        /// <summary>
-        /// Terminal emulation mode.
-        /// </summary>
-        public InteractiveEmulationMode Emulation { get; set; } = InteractiveEmulationMode.Full;
     }
 
     /// <summary>
@@ -566,14 +561,6 @@ namespace SSH_Helper.Services.Scripting.Models
     {
         Separate,
         Shared
-    }
-
-    /// <summary>
-    /// Emulation mode for interactive terminal steps.
-    /// </summary>
-    public enum InteractiveEmulationMode
-    {
-        Full
     }
 
     /// <summary>

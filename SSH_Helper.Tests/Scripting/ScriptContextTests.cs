@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using FluentAssertions;
+using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
 using Xunit;
 
@@ -61,5 +62,46 @@ public class ScriptContextTests
         var second = context.SubstituteVariables("${_timestamp}");
 
         second.Should().NotBe(first);
+    }
+
+    [Fact]
+    public void InteractiveSessions_AddAndSnapshot_PreservesOrderAndNumbering()
+    {
+        var context = new ScriptContext();
+
+        context.AddInteractiveSession(new InteractiveTerminalSessionDetails
+        {
+            HostAddress = "10.0.0.1",
+            SessionMode = "separate",
+            EmulationMode = "full",
+            StartedAtUtc = new DateTime(2026, 2, 14, 10, 0, 0, DateTimeKind.Utc),
+            EndedAtUtc = new DateTime(2026, 2, 14, 10, 5, 0, DateTimeKind.Utc),
+            CloseReason = "user_closed",
+            Completed = true,
+            Transcript = "first"
+        });
+        context.AddInteractiveSession(new InteractiveTerminalSessionDetails
+        {
+            SessionNumber = 7,
+            HostAddress = "10.0.0.2",
+            SessionMode = "shared",
+            EmulationMode = "full",
+            StartedAtUtc = new DateTime(2026, 2, 14, 10, 6, 0, DateTimeKind.Utc),
+            EndedAtUtc = new DateTime(2026, 2, 14, 10, 7, 0, DateTimeKind.Utc),
+            CloseReason = "disconnected",
+            Completed = true,
+            Transcript = "second"
+        });
+
+        var snapshot = context.GetInteractiveSessionsSnapshot();
+
+        snapshot.Should().HaveCount(2);
+        snapshot[0].SessionNumber.Should().Be(1);
+        snapshot[0].Transcript.Should().Be("first");
+        snapshot[1].SessionNumber.Should().Be(7);
+        snapshot[1].Transcript.Should().Be("second");
+
+        snapshot[0].Transcript = "mutated";
+        context.GetInteractiveSessionsSnapshot()[0].Transcript.Should().Be("first");
     }
 }

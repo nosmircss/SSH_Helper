@@ -839,6 +839,7 @@ namespace SSH_Helper.Services
             };
 
             var outputBuilder = new StringBuilder();
+            var interactiveSessions = new List<InteractiveTerminalSessionDetails>();
             string username = !string.IsNullOrWhiteSpace(host.Username) ? host.Username : defaultUsername;
             string password = !string.IsNullOrWhiteSpace(host.Password) ? host.Password : defaultPassword;
 
@@ -846,15 +847,15 @@ namespace SSH_Helper.Services
             {
                 if (sshRequirement != null && !sshRequirement.RequiresSshSession)
                 {
-                    ExecuteScriptLocal(host, script, username, password, outputBuilder, cancellationToken, showHeader);
+                    interactiveSessions = ExecuteScriptLocal(host, script, username, password, outputBuilder, cancellationToken, showHeader);
                 }
                 else if (UseConnectionPooling && _connectionPool != null)
                 {
-                    ExecuteScriptWithPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
+                    interactiveSessions = ExecuteScriptWithPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
                 }
                 else
                 {
-                    ExecuteScriptWithoutPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
+                    interactiveSessions = ExecuteScriptWithoutPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
                 }
 
                 result.Success = true;
@@ -913,6 +914,7 @@ namespace SSH_Helper.Services
             }
 
             result.Output = outputBuilder.ToString();
+            result.InteractiveSessions = interactiveSessions;
             return result;
         }
 
@@ -920,7 +922,7 @@ namespace SSH_Helper.Services
         /// Executes a script using connection pooling.
         /// </summary>
         /// <param name="showHeader">If false, suppresses the header output.</param>
-        private void ExecuteScriptWithPool(
+        private List<InteractiveTerminalSessionDetails> ExecuteScriptWithPool(
             HostConnection host,
             Script script,
             string username,
@@ -983,7 +985,7 @@ namespace SSH_Helper.Services
                 var executor = new ScriptExecutor();
                 var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                     .GetAwaiter().GetResult();
-
+                return context.GetInteractiveSessionsSnapshot();
             }
             finally
             {
@@ -996,7 +998,7 @@ namespace SSH_Helper.Services
         /// Executes a script without connection pooling.
         /// </summary>
         /// <param name="showHeader">If false, suppresses the header output.</param>
-        private void ExecuteScriptWithoutPool(
+        private List<InteractiveTerminalSessionDetails> ExecuteScriptWithoutPool(
             HostConnection host,
             Script script,
             string username,
@@ -1133,9 +1135,10 @@ namespace SSH_Helper.Services
                 .GetAwaiter().GetResult();
 
             client.Disconnect();
+            return context.GetInteractiveSessionsSnapshot();
         }
 
-        private void ExecuteScriptLocal(
+        private List<InteractiveTerminalSessionDetails> ExecuteScriptLocal(
             HostConnection host,
             Script script,
             string username,
@@ -1184,6 +1187,7 @@ namespace SSH_Helper.Services
             var executor = new ScriptExecutor();
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
+            return context.GetInteractiveSessionsSnapshot();
         }
 
         private static void SeedConnectionVariables(

@@ -104,7 +104,7 @@ namespace SSH_Helper.Services.Scripting
                 ["choose"] = ["prompt", "into", "options", "default"],
                 ["multiselect"] = ["prompt", "into", "options", "min", "max"],
                 ["confirm"] = ["prompt", "into", "default"],
-                ["interactive"] = ["session", "emulation", "on_error"]
+                ["interactive"] = ["session", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -196,8 +196,7 @@ namespace SSH_Helper.Services.Scripting
                 ["follow_redirects"] = ["true", "false"],
                 ["allow_failure"] = ["true", "false"],
                 ["verify_tls"] = ["true", "false"],
-                ["session"] = ["separate", "shared"],
-                ["emulation"] = ["full"]
+                ["session"] = ["separate", "shared"]
             };
 
         /// <summary>
@@ -1627,7 +1626,7 @@ namespace SSH_Helper.Services.Scripting
             if (!parser.Accept<MappingStart>(out _))
             {
                 SkipValue(parser);
-                AddStepParseError(step, "interactive must be a mapping with optional keys 'session' and 'emulation'");
+                AddStepParseError(step, "interactive must be a mapping with optional keys 'session' and 'on_error'");
                 return null;
             }
 
@@ -1665,22 +1664,8 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case "emulation":
-                        if (!parser.Accept<Scalar>(out _))
-                        {
-                            SkipValue(parser);
-                            AddStepParseError(step, "interactive.emulation must be 'full'");
-                            break;
-                        }
-
-                        var emulationValue = parser.Consume<Scalar>().Value;
-                        if (string.Equals(emulationValue, "full", StringComparison.OrdinalIgnoreCase))
-                        {
-                            options.Emulation = InteractiveEmulationMode.Full;
-                        }
-                        else
-                        {
-                            AddStepParseError(step, "interactive.emulation must be 'full'");
-                        }
+                        AddUnknownKeyWarning("interactive.emulation is deprecated and ignored", (int)keyScalar.Start.Line);
+                        SkipValue(parser);
                         break;
 
                     case "on_error":
@@ -2769,7 +2754,7 @@ namespace SSH_Helper.Services.Scripting
                         if (step.Interactive == null)
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session' and 'emulation'{lineContent}");
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session' and 'on_error'{lineContent}");
                         }
                         break;
                 }
