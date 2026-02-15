@@ -104,7 +104,7 @@ namespace SSH_Helper.Services.Scripting
                 ["choose"] = ["prompt", "into", "options", "default"],
                 ["multiselect"] = ["prompt", "into", "options", "min", "max"],
                 ["confirm"] = ["prompt", "into", "default"],
-                ["interactive"] = ["session", "command", "capture", "max_seconds", "max_lines", "mirror_output", "show_window", "on_error"]
+                ["interactive"] = ["session", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -1633,7 +1633,7 @@ namespace SSH_Helper.Services.Scripting
             if (!parser.Accept<MappingStart>(out _))
             {
                 SkipValue(parser);
-                AddStepParseError(step, "interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'max_lines', 'mirror_output', 'show_window', and 'on_error'");
+                AddStepParseError(step, "interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'max_lines', 'width', 'height', 'mirror_output', 'show_window', and 'on_error'");
                 return null;
             }
 
@@ -1697,6 +1697,52 @@ namespace SSH_Helper.Services.Scripting
                         else
                         {
                             AddStepParseError(step, "interactive.max_lines must be a positive integer");
+                        }
+                        break;
+
+                    case "width":
+                        if (int.TryParse(parser.Consume<Scalar>().Value, out var width))
+                        {
+                            options.Width = width;
+                        }
+                        else
+                        {
+                            AddStepParseError(step, "interactive.width must be a positive integer");
+                        }
+                        break;
+
+                    case "height":
+                        if (int.TryParse(parser.Consume<Scalar>().Value, out var height))
+                        {
+                            options.Height = height;
+                        }
+                        else
+                        {
+                            AddStepParseError(step, "interactive.height must be a positive integer");
+                        }
+                        break;
+
+                    case "columns":
+                        AddUnknownKeyWarning("interactive.columns is deprecated; use interactive.width/interactive.height (pixels)", (int)keyScalar.Start.Line);
+                        if (int.TryParse(parser.Consume<Scalar>().Value, out var legacyColumns))
+                        {
+                            options.Columns = legacyColumns;
+                        }
+                        else
+                        {
+                            AddStepParseError(step, "interactive.columns must be a positive integer");
+                        }
+                        break;
+
+                    case "rows":
+                        AddUnknownKeyWarning("interactive.rows is deprecated; use interactive.width/interactive.height (pixels)", (int)keyScalar.Start.Line);
+                        if (int.TryParse(parser.Consume<Scalar>().Value, out var legacyRows))
+                        {
+                            options.Rows = legacyRows;
+                        }
+                        else
+                        {
+                            AddStepParseError(step, "interactive.rows must be a positive integer");
                         }
                         break;
 
@@ -2814,7 +2860,7 @@ namespace SSH_Helper.Services.Scripting
                         if (step.Interactive == null)
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'max_lines', 'mirror_output', 'show_window', and 'on_error'{lineContent}");
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'max_lines', 'width', 'height', 'mirror_output', 'show_window', and 'on_error'{lineContent}");
                             break;
                         }
 
@@ -2837,6 +2883,34 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: interactive.max_lines must be greater than 0{lineContent}");
+                        }
+
+                        if (step.Interactive.Width.HasValue &&
+                            step.Interactive.Width.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive.width must be greater than 0{lineContent}");
+                        }
+
+                        if (step.Interactive.Height.HasValue &&
+                            step.Interactive.Height.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive.height must be greater than 0{lineContent}");
+                        }
+
+                        if (step.Interactive.Columns.HasValue &&
+                            step.Interactive.Columns.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive.columns must be greater than 0{lineContent}");
+                        }
+
+                        if (step.Interactive.Rows.HasValue &&
+                            step.Interactive.Rows.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive.rows must be greater than 0{lineContent}");
                         }
 
                         if (!step.Interactive.ShowWindow &&

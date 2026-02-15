@@ -12,7 +12,6 @@ namespace SSH_Helper.Services
     {
         public const int DefaultColumns = 120;
         public const int DefaultRows = 36;
-        // Keep scrollback bounded: very large limits can consume gigabytes in VirtualTerminal buffers.
         public const int DefaultHistoryMaxLength = 20000;
 
         public static TerminalOptions Create()

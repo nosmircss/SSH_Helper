@@ -1254,6 +1254,8 @@ steps:
                   capture: sniffer_output
                   max_seconds: 120
                   max_lines: 250
+                  width: 940
+                  height: 600
                   mirror_output: true
                   show_window: false
             """;
@@ -1267,6 +1269,8 @@ steps:
         step.Interactive.Capture.Should().Be("sniffer_output");
         step.Interactive.MaxSeconds.Should().Be(120);
         step.Interactive.MaxLines.Should().Be(250);
+        step.Interactive.Width.Should().Be(940);
+        step.Interactive.Height.Should().Be(600);
         step.Interactive.MirrorOutput.Should().BeTrue();
         step.Interactive.ShowWindow.Should().BeFalse();
     }
@@ -1353,6 +1357,60 @@ steps:
         var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
 
         errors.Should().Contain(error => error.Contains("interactive.max_lines must be greater than 0"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveWidthNotPositive_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  width: 0
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.width must be greater than 0"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveHeightNotPositive_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  height: 0
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.height must be greater than 0"));
+    }
+
+    [Fact]
+    public void Parse_InteractiveLegacyColumnsRows_ParsesAndWarns()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  columns: 100
+                  rows: 30
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Interactive.Should().NotBeNull();
+        script.Steps[0].Interactive!.Columns.Should().Be(100);
+        script.Steps[0].Interactive!.Rows.Should().Be(30);
+        _parser.Warnings.Should().Contain(warning => warning.Contains("interactive.columns is deprecated; use interactive.width/interactive.height (pixels)", StringComparison.OrdinalIgnoreCase));
+        _parser.Warnings.Should().Contain(warning => warning.Contains("interactive.rows is deprecated; use interactive.width/interactive.height (pixels)", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

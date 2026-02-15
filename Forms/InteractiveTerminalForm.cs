@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using Rebex.TerminalEmulation;
+using SSH_Helper.Services;
 using SSH_Helper.UI;
 
 namespace SSH_Helper.Forms
@@ -72,12 +73,22 @@ namespace SSH_Helper.Forms
         public event EventHandler<TerminalKeyEventArgs>? KeyInput;
         public event EventHandler<TerminalSizeChangedEventArgs>? TerminalSizeChanged;
 
-        public InteractiveTerminalForm(string title)
+        public InteractiveTerminalForm(
+            string title,
+            int? initialWindowWidth = null,
+            int? initialWindowHeight = null,
+            int? initialColumns = null,
+            int? initialRows = null)
         {
             Text = title;
             _baseTitle = title;
             StartPosition = FormStartPosition.CenterParent;
-            MinimumSize = new Size(760, 420);
+            var hasInitialSizeOverride =
+                initialWindowWidth.HasValue ||
+                initialWindowHeight.HasValue ||
+                initialColumns.HasValue ||
+                initialRows.HasValue;
+            MinimumSize = hasInitialSizeOverride ? new Size(320, 200) : new Size(760, 420);
             Size = new Size(980, 620);
             KeyPreview = true;
             Padding = Padding.Empty;
@@ -109,6 +120,12 @@ namespace SSH_Helper.Forms
 
             Controls.Add(_terminalView);
             Controls.Add(_historyScrollBar);
+
+            ApplyInitialWindowSize(initialWindowWidth, initialWindowHeight);
+            if (!initialWindowWidth.HasValue && !initialWindowHeight.HasValue)
+            {
+                ApplyInitialGridSize(initialColumns, initialRows);
+            }
 
             KeyDown += InteractiveTerminalForm_KeyDown;
             KeyPress += InteractiveTerminalForm_KeyPress;
@@ -664,6 +681,37 @@ namespace SSH_Helper.Forms
             var x = Math.Max(workingArea.Left, Math.Min(location.X, maxX));
             var y = Math.Max(workingArea.Top, Math.Min(location.Y, maxY));
             return new Point(x, y);
+        }
+
+        private void ApplyInitialGridSize(int? columns, int? rows)
+        {
+            if (!columns.HasValue && !rows.HasValue)
+                return;
+
+            var targetColumns = Math.Max(1, columns ?? SshTerminalOptionsFactory.DefaultColumns);
+            var targetRows = Math.Max(1, rows ?? SshTerminalOptionsFactory.DefaultRows);
+            var cellSize = _terminalView.CellSize;
+            var cellWidth = Math.Max(1, cellSize.Width);
+            var cellHeight = Math.Max(1, cellSize.Height);
+
+            var desiredClientWidth = (targetColumns * cellWidth) + _historyScrollBar.Width;
+            var desiredClientHeight = targetRows * cellHeight;
+            ClientSize = new Size(
+                Math.Max(1, desiredClientWidth),
+                Math.Max(1, desiredClientHeight));
+
+            _lastColumns = targetColumns;
+            _lastRows = targetRows;
+        }
+
+        private void ApplyInitialWindowSize(int? width, int? height)
+        {
+            if (!width.HasValue && !height.HasValue)
+                return;
+
+            var targetWidth = Math.Max(1, width ?? Size.Width);
+            var targetHeight = Math.Max(1, height ?? Size.Height);
+            Size = new Size(targetWidth, targetHeight);
         }
     }
 }

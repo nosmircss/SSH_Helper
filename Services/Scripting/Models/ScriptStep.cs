@@ -587,6 +587,30 @@ namespace SSH_Helper.Services.Scripting.Models
         public int? MaxLines { get; set; }
 
         /// <summary>
+        /// Optional interactive window width in pixels for separate sessions.
+        /// Defaults to 980 when not specified.
+        /// </summary>
+        public int? Width { get; set; }
+
+        /// <summary>
+        /// Optional interactive window height in pixels for separate sessions.
+        /// Defaults to 620 when not specified.
+        /// </summary>
+        public int? Height { get; set; }
+
+        /// <summary>
+        /// Optional terminal width in character columns for separate sessions.
+        /// Deprecated in favor of width/height pixel sizing.
+        /// </summary>
+        public int? Columns { get; set; }
+
+        /// <summary>
+        /// Optional terminal height in character rows for separate sessions.
+        /// Deprecated in favor of width/height pixel sizing.
+        /// </summary>
+        public int? Rows { get; set; }
+
+        /// <summary>
         /// When true, captured terminal chunks are mirrored into the main script output stream.
         /// </summary>
         public bool MirrorOutput { get; set; }

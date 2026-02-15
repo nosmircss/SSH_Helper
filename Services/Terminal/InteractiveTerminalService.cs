@@ -251,11 +251,13 @@ namespace SSH_Helper.Services.Terminal
                 await Task.Run(() => ConnectAndLogin(client, host, username, password ?? string.Empty), cancellationToken);
 
                 var terminalOptions = SshTerminalOptionsFactory.Create();
+                var columns = ResolveTerminalColumns(options);
+                var rows = ResolveTerminalRows(options);
                 (scripting, virtualTerminal) = SshTerminalOptionsFactory.CreateScriptingWithHistory(
                     client,
                     terminalOptions,
-                    SshTerminalOptionsFactory.DefaultColumns,
-                    SshTerminalOptionsFactory.DefaultRows,
+                    columns,
+                    rows,
                     SshTerminalOptionsFactory.DefaultHistoryMaxLength);
                 startedAtUtc = DateTime.UtcNow;
 
@@ -267,7 +269,11 @@ namespace SSH_Helper.Services.Terminal
                     keepAliveInterval: timeouts.KeepAliveInterval,
                     cancellationToken: cancellationToken,
                     isConnectionAlive: () => client != null && client.IsConnected,
-                    onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting));
+                    onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting),
+                    initialWindowWidth: options.Width,
+                    initialWindowHeight: options.Height,
+                    initialColumns: columns,
+                    initialRows: rows);
 
                 if (runSummary.CancelledByToken)
                     throw new OperationCanceledException(cancellationToken);
@@ -346,11 +352,13 @@ namespace SSH_Helper.Services.Terminal
                 await Task.Run(() => ConnectAndLogin(client, host, username, password ?? string.Empty), cancellationToken);
 
                 var terminalOptions = SshTerminalOptionsFactory.Create();
+                var columns = ResolveTerminalColumns(options);
+                var rows = ResolveTerminalRows(options);
                 (scripting, virtualTerminal) = SshTerminalOptionsFactory.CreateScriptingWithHistory(
                     client,
                     terminalOptions,
-                    SshTerminalOptionsFactory.DefaultColumns,
-                    SshTerminalOptionsFactory.DefaultRows,
+                    columns,
+                    rows,
                     SshTerminalOptionsFactory.DefaultHistoryMaxLength);
                 startedAtUtc = DateTime.UtcNow;
 
@@ -368,7 +376,11 @@ namespace SSH_Helper.Services.Terminal
                         keepAliveInterval: timeouts.KeepAliveInterval,
                         cancellationToken: cancellationToken,
                         isConnectionAlive: () => client != null && client.IsConnected,
-                        onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting));
+                        onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting),
+                        initialWindowWidth: options.Width,
+                        initialWindowHeight: options.Height,
+                        initialColumns: columns,
+                        initialRows: rows);
                 }
                 else
                 {
@@ -436,7 +448,11 @@ namespace SSH_Helper.Services.Terminal
             TimeSpan keepAliveInterval,
             CancellationToken cancellationToken,
             Func<bool>? isConnectionAlive,
-            Action? onCancellation)
+            Action? onCancellation,
+            int? initialWindowWidth = null,
+            int? initialWindowHeight = null,
+            int? initialColumns = null,
+            int? initialRows = null)
         {
             var ioLock = new object();
             var pendingInput = new ConcurrentQueue<Action<RebexScripting>>();
@@ -595,7 +611,12 @@ namespace SSH_Helper.Services.Terminal
 
             await InvokeOnUiThreadAsync(() =>
             {
-                form = new InteractiveTerminalForm(title);
+                form = new InteractiveTerminalForm(
+                    title,
+                    initialWindowWidth,
+                    initialWindowHeight,
+                    initialColumns,
+                    initialRows);
 
                 formClosedHandler = (_, _) =>
                 {
@@ -1167,7 +1188,11 @@ namespace SSH_Helper.Services.Terminal
             TimeSpan keepAliveInterval,
             CancellationToken cancellationToken,
             Func<bool>? isConnectionAlive,
-            Action? onCancellation)
+            Action? onCancellation,
+            int? initialWindowWidth = null,
+            int? initialWindowHeight = null,
+            int? initialColumns = null,
+            int? initialRows = null)
         {
             var ioLock = new object();
             var pendingInput = new ConcurrentQueue<Action<RebexScripting>>();
@@ -1272,7 +1297,12 @@ namespace SSH_Helper.Services.Terminal
 
             await InvokeOnUiThreadAsync(() =>
             {
-                form = new InteractiveTerminalForm(title);
+                form = new InteractiveTerminalForm(
+                    title,
+                    initialWindowWidth,
+                    initialWindowHeight,
+                    initialColumns,
+                    initialRows);
 
                 form.FormClosed += (_, _) =>
                 {
@@ -2652,6 +2682,22 @@ namespace SSH_Helper.Services.Terminal
             {
                 client.Settings.SshParameters.SetEncryptionAlgorithms(host.Ciphers);
             }
+        }
+
+        private static int ResolveTerminalColumns(InteractiveOptions options)
+        {
+            ArgumentNullException.ThrowIfNull(options);
+            return options.Columns.HasValue && options.Columns.Value > 0
+                ? options.Columns.Value
+                : SshTerminalOptionsFactory.DefaultColumns;
+        }
+
+        private static int ResolveTerminalRows(InteractiveOptions options)
+        {
+            ArgumentNullException.ThrowIfNull(options);
+            return options.Rows.HasValue && options.Rows.Value > 0
+                ? options.Rows.Value
+                : SshTerminalOptionsFactory.DefaultRows;
         }
     }
 }

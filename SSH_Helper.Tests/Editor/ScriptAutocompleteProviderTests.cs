@@ -127,7 +127,7 @@ public class ScriptAutocompleteProviderTests
         var completion = provider.GetCompletion(text, text.Length);
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
-        completion.Items.Select(item => item.Label).Should().Contain(["session", "command", "capture", "max_seconds", "max_lines", "mirror_output", "show_window", "on_error"]);
+        completion.Items.Select(item => item.Label).Should().Contain(["session", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"]);
         completion.Items.Select(item => item.Label).Should().NotContain("emulation");
     }
 

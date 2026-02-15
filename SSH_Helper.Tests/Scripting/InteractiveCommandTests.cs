@@ -156,6 +156,10 @@ public class InteractiveCommandTests
             {
                 Command = "tcpdump -i any",
                 MaxLines = 150,
+                Width = 180,
+                Height = 48,
+                Columns = 120,
+                Rows = 36,
                 ShowWindow = false
             }
         };
@@ -165,6 +169,10 @@ public class InteractiveCommandTests
         result.Success.Should().BeTrue();
         receivedOptions.Should().NotBeNull();
         receivedOptions!.MaxLines.Should().Be(150);
+        receivedOptions!.Width.Should().Be(180);
+        receivedOptions!.Height.Should().Be(48);
+        receivedOptions!.Columns.Should().Be(120);
+        receivedOptions!.Rows.Should().Be(36);
         receivedOptions!.ShowWindow.Should().BeFalse();
     }
 

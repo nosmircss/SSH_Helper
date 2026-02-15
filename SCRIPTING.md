@@ -1789,12 +1789,15 @@ Opens an in-app SSH terminal window.
 - In normal mode (no `command`), the script pauses until the terminal window is closed.
 - In capture mode (`command` set), the command auto-runs and the step completes on Ctrl+C/timeout/natural completion/early close.
 - Set `show_window: false` for headless capture when no terminal UI should be displayed.
+- Window size defaults to `980x620` pixels and can be overridden with `width`/`height`.
 
 **Syntax (map only):**
 ```yaml
 # Normal interactive terminal
 - interactive:
     session: separate
+    width: 1200
+    height: 760
     on_error: stop
 
 # Capture mode (long-running command)
@@ -1804,6 +1807,8 @@ Opens an in-app SSH terminal window.
     capture: sniffer_output
     max_seconds: 120
     max_lines: 500
+    width: 980
+    height: 620
     show_window: true
     mirror_output: false
     on_error: stop
@@ -1813,6 +1818,9 @@ Opens an in-app SSH terminal window.
 - `interactive` is map-only. Scalar shorthand (for example `- interactive`) is invalid.
 - `session: separate` opens a new SSH terminal connection using current host credentials/settings.
 - `session: shared` attaches to the active script SSH session. If unavailable, the step fails with `InteractiveSharedUnavailable`.
+- `width`/`height` set the interactive window size in pixels (`Size.Width`/`Size.Height`) for `session: separate`.
+- Shared mode currently ignores `width`/`height` and uses the shared interactive window defaults.
+- Legacy `columns`/`rows` are still accepted for separate mode terminal grid sizing but deprecated.
 - In `session: shared`, pressing `Ctrl+D` closes only the interactive window and does not send EOF to the shared SSH shell.
 - In `session: shared`, pressing Enter on `exit` or `logout` closes the interactive window (detach) and does not execute those commands on the shared SSH session.
 - Capture mode (`command`) is `session: separate` only.
@@ -1837,6 +1845,8 @@ Opens an in-app SSH terminal window.
 | `capture` | No | - | Variable name to receive the captured transcript at step completion |
 | `max_seconds` | No | - | Positive timeout in seconds; auto-sends Ctrl+C when reached |
 | `max_lines` | No | - | Positive line limit; auto-sends Ctrl+C when captured line count reaches this value |
+| `width` | No | `980` | Positive interactive window width in pixels (separate mode) |
+| `height` | No | `620` | Positive interactive window height in pixels (separate mode) |
 | `show_window` | No | `true` | When `false`, runs capture mode headlessly (no interactive window) |
 | `mirror_output` | No | `false` | Mirrors live captured chunks into script output while capture is running |
 | `on_error` | No | `stop` | Error handling: `continue` or `stop` |
