@@ -1,5 +1,6 @@
 using System.Threading;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
@@ -247,6 +248,24 @@ public class SetCommandTests
         context.HasVariable("null_val").Should().BeTrue();
         context.GetVariable("null_val").Should().BeNull();
         context.GetVariableString("null_val").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonGet_FromJsonElementVariable_ResolvesPath()
+    {
+        var context = new ScriptContext();
+        var device = JsonSerializer.Deserialize<JsonElement>("{\"system\":{\"hostname\":\"edge-01\"}}");
+        context.SetVariable("device", device);
+
+        var step = new ScriptStep
+        {
+            Set = "hostname = json.get(device, 'system.hostname')"
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("hostname").Should().Be("edge-01");
     }
 
     [Fact]

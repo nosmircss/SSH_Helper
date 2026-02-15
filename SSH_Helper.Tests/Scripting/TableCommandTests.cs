@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
@@ -78,5 +80,141 @@ public class TableCommandTests
         output.Should().NotBeNullOrEmpty();
         output.Should().Contain("Host");
         output.Should().Contain("server-01");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonElementArrayOfObjects_RendersObjectRows()
+    {
+        var step = new ScriptStep
+        {
+            Table = new TableOptions
+            {
+                Data = "${rows}"
+            }
+        };
+
+        var context = new ScriptContext();
+        var jsonElement = JsonSerializer.Deserialize<JsonElement>(
+            "[{\"host\":\"server-01\",\"status\":\"up\"},{\"host\":\"server-02\",\"status\":\"down\"}]");
+        context.SetVariable("rows", jsonElement);
+
+        string? output = null;
+        context.OutputReceived += (_, args) =>
+        {
+            if (args.Type == ScriptOutputType.Info)
+                output = args.Message;
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        output.Should().NotBeNullOrEmpty();
+        output.Should().Contain("server-01");
+        output.Should().Contain("server-02");
+        output.Should().Contain("up");
+        output.Should().Contain("down");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonNodeArrayOfObjects_RendersObjectRows()
+    {
+        var step = new ScriptStep
+        {
+            Table = new TableOptions
+            {
+                Data = "${rows}"
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("rows", JsonNode.Parse("[{\"host\":\"edge-1\",\"latency\":12},{\"host\":\"edge-2\",\"latency\":9}]"));
+
+        string? output = null;
+        context.OutputReceived += (_, args) =>
+        {
+            if (args.Type == ScriptOutputType.Info)
+                output = args.Message;
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        output.Should().NotBeNullOrEmpty();
+        output.Should().Contain("edge-1");
+        output.Should().Contain("edge-2");
+        output.Should().Contain("12");
+        output.Should().Contain("9");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JsonObjectString_RendersSingleDataRow()
+    {
+        var step = new ScriptStep
+        {
+            Table = new TableOptions
+            {
+                Data = "${row}"
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("row", "{\"host\":\"single-host\",\"status\":\"up\"}");
+
+        string? output = null;
+        context.OutputReceived += (_, args) =>
+        {
+            if (args.Type == ScriptOutputType.Info)
+                output = args.Message;
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        output.Should().NotBeNullOrEmpty();
+        output.Should().Contain("single-host");
+        output.Should().Contain("up");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ListOfDictionaries_RendersEachDictionaryAsRow()
+    {
+        var step = new ScriptStep
+        {
+            Table = new TableOptions
+            {
+                Data = "${rows}"
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("rows", new List<object>
+        {
+            new Dictionary<string, object>
+            {
+                ["host"] = "core-1",
+                ["status"] = "up"
+            },
+            new Dictionary<string, object>
+            {
+                ["host"] = "core-2",
+                ["status"] = "down"
+            }
+        });
+
+        string? output = null;
+        context.OutputReceived += (_, args) =>
+        {
+            if (args.Type == ScriptOutputType.Info)
+                output = args.Message;
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        output.Should().NotBeNullOrEmpty();
+        output.Should().Contain("core-1");
+        output.Should().Contain("core-2");
+        output.Should().Contain("up");
+        output.Should().Contain("down");
     }
 }

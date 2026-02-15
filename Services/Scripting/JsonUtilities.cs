@@ -795,6 +795,15 @@ namespace SSH_Helper.Services.Scripting
             if (value is JsonArray jsonArr)
                 return jsonArr;
 
+            if (value is JsonElement jsonElement)
+            {
+                try
+                {
+                    return JsonNode.Parse(jsonElement.GetRawText());
+                }
+                catch { /* Not valid JSON */ }
+            }
+
             // Handle Dictionary<string, object> (from parse command)
             if (value is IDictionary<string, object> dict)
             {

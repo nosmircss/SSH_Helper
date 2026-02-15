@@ -394,6 +394,16 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case StepType.Interactive:
+                        if (step.Interactive != null)
+                        {
+                            ExtractVarReferences(step.Interactive.Title, referencedVars);
+                            ExtractVarReferences(step.Interactive.Command, referencedVars);
+                            ExtractVarReferences(step.Interactive.Capture, referencedVars);
+
+                            var captureVariable = step.Interactive.Capture?.Trim();
+                            if (!string.IsNullOrWhiteSpace(captureVariable) && BareVariableNamePattern.IsMatch(captureVariable))
+                                definedVars.Add(captureVariable);
+                        }
                         break;
 
                     case StepType.UpdateColumn:

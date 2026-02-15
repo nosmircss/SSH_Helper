@@ -224,18 +224,21 @@ namespace SSH_Helper.Services.Scripting
             for (int attempt = 0; attempt <= maxRetries; attempt++)
             {
                 // On non-final attempts, force failures to surface (override on_error)
-                if (attempt < maxRetries)
-                    step.OnError = "stop";
-                else
+                var onErrorForAttempt = attempt < maxRetries ? "stop" : originalOnError;
+                step.OnError = onErrorForAttempt;
+                try
+                {
+                    result = await ExecuteStepCoreAsync(step, context, cancellationToken);
+                }
+                finally
+                {
                     step.OnError = originalOnError;
-
-                result = await ExecuteStepCoreAsync(step, context, cancellationToken);
+                }
 
                 // Don't retry on: success, exit, break, continue, suppressed
                 if (result.Success || result.ShouldExit || result.ShouldBreak ||
                     result.ShouldContinue || result.SuppressedError)
                 {
-                    step.OnError = originalOnError;
                     if (attempt > 0)
                         context.EmitOutput($"Step succeeded on attempt {attempt + 1}", ScriptOutputType.Debug);
                     return result;
@@ -252,7 +255,6 @@ namespace SSH_Helper.Services.Scripting
                 }
             }
 
-            step.OnError = originalOnError;
             return result;
         }
 

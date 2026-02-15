@@ -28,6 +28,13 @@ namespace SSH_Helper.Services.Scripting.Commands
                 var runResult = await _terminalService.RunAsync(context, runtimeOptions, cancellationToken);
                 if (runResult.Success)
                 {
+                    if (runtimeOptions.MirrorOutput &&
+                        string.IsNullOrWhiteSpace(runtimeOptions.Command) &&
+                        !string.IsNullOrEmpty(runResult.CapturedTranscript))
+                    {
+                        context.EmitOutput(runResult.CapturedTranscript, ScriptOutputType.RawChunk);
+                    }
+
                     if (!string.IsNullOrWhiteSpace(runtimeOptions.Capture))
                     {
                         context.RecordCommandOutput(runResult.CapturedTranscript ?? string.Empty, runtimeOptions.Capture);

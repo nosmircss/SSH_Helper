@@ -461,15 +461,21 @@ namespace SSH_Helper.Services.Scripting
             if (type == ScriptOutputType.Debug && !DebugMode)
                 return;
 
+            EventHandler<ScriptOutputEventArgs>? outputReceived;
+            ScriptOutputEventArgs eventArgs;
+
             lock (_stateLock)
             {
                 _output.AppendLine(message);
-                OutputReceived?.Invoke(this, new ScriptOutputEventArgs
+                outputReceived = OutputReceived;
+                eventArgs = new ScriptOutputEventArgs
                 {
                     Message = message,
                     Type = type
-                });
+                };
             }
+
+            outputReceived?.Invoke(this, eventArgs);
         }
 
         /// <summary>

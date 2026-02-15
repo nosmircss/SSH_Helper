@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 using FluentAssertions;
 using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
@@ -103,5 +105,35 @@ public class ScriptContextTests
 
         snapshot[0].Transcript = "mutated";
         context.GetInteractiveSessionsSnapshot()[0].Transcript.Should().Be("first");
+    }
+
+    [Fact]
+    public async Task EmitOutput_InvokesSubscribersOutsideStateLock()
+    {
+        var context = new ScriptContext();
+        using var handlerStarted = new ManualResetEventSlim(false);
+        using var allowHandlerFinish = new ManualResetEventSlim(false);
+
+        context.OutputReceived += (_, _) =>
+        {
+            handlerStarted.Set();
+            allowHandlerFinish.Wait(TimeSpan.FromSeconds(2));
+        };
+
+        var emitTask = Task.Run(() => context.EmitOutput("line-1"));
+        handlerStarted.Wait(TimeSpan.FromSeconds(2)).Should().BeTrue();
+
+        var setTask = Task.Run(() => context.SetVariable("k", "v"));
+        var setCompleted = await Task.WhenAny(setTask, Task.Delay(500)) == setTask;
+
+        try
+        {
+            setCompleted.Should().BeTrue("EmitOutput should not hold _stateLock while invoking subscribers");
+        }
+        finally
+        {
+            allowHandlerFinish.Set();
+            await emitTask;
+        }
     }
 }

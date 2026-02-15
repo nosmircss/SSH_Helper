@@ -138,6 +138,29 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_InteractiveCaptureDefinesVariableForLaterReferences()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - interactive:
+                      session: separate
+                      command: "diagnose sniffer packet ${selected_interface} '${filter}' 4 10 a"
+                      capture: sniffer_output
+                  - print:
+                      message: "Capture complete. Output length: ${sniffer_output.length}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().BeEquivalentTo("selected_interface", "filter");
+    }
+
+    [Fact]
     public void AnalyzeSshRequirements_SendAtRoot_RequiresSshSession()
     {
         var result = AnalyzeSshRequirements("""

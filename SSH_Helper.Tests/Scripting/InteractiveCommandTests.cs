@@ -140,6 +140,34 @@ public class InteractiveCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_WithMirrorOutputInSharedMode_EmitsTranscriptChunk()
+    {
+        var transcript = "user typed command\r\ncommand output\r\n";
+        var command = new InteractiveCommand(new StubInteractiveTerminalService(
+            (_, _, _) => Task.FromResult(InteractiveTerminalRunResult.Ok(transcript, "user_closed"))));
+
+        var context = new ScriptContext();
+        ScriptOutputEventArgs? emitted = null;
+        context.OutputReceived += (_, args) => emitted = args;
+
+        var step = new ScriptStep
+        {
+            Interactive = new InteractiveOptions
+            {
+                Session = InteractiveSessionMode.Shared,
+                MirrorOutput = true
+            }
+        };
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        emitted.Should().NotBeNull();
+        emitted!.Type.Should().Be(ScriptOutputType.RawChunk);
+        emitted.Message.Should().Be(transcript);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_PropagatesShowWindowOption()
     {
         InteractiveOptions? receivedOptions = null;
