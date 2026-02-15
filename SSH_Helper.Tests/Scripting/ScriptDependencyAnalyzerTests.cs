@@ -37,6 +37,42 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_WithWritefileRuntimeVariable_ExcludesUnderscoreRuntimeReferences()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - writefile:
+                      path: "output.csv"
+                      content: "test"
+                      mode: overwrite
+                  - print: "CSV written to {{_writefile}}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AnalyzePresets_WithUnderscoreOnlySimpleReferences_ExcludesUnderscoreRuntimeReferences()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = "echo {{_custom_runtime}}\r\necho ${_another_runtime}"
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().BeEmpty();
+    }
+
+    [Fact]
     public void AnalyzePresets_UpdateEnvironmentDefinesVariableForLaterSteps()
     {
         var analyzer = new ScriptDependencyAnalyzer();

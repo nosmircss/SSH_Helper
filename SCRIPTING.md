@@ -1317,7 +1317,7 @@ Writes content to a text file. Supports multiple formats including text, JSON, J
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `path` | Yes | - | Path to the file (supports variable substitution) |
+| `path` | Yes | - | Path to the file (supports variable substitution). If not fully qualified, the user is prompted to choose a save location at runtime |
 | `content` | No | `""` | Content to write (use `${varname}` for variables) |
 | `mode` | No | `overwrite` | Write mode: `overwrite` or `append` |
 | `format` | No | `text` | Output format: `text`, `json`, `jsonl`, or `csv` |
@@ -1328,6 +1328,10 @@ Writes content to a text file. Supports multiple formats including text, JSON, J
 - **Blocked paths**: Cannot write to system directories or Program Files
 - **Blocked extensions**: Cannot write executable files (`.exe`, `.dll`, `.bat`, `.ps1`, `.cmd`, etc.)
 - **Allowed paths**: User profile, Documents, Desktop, AppData, Temp only
+
+**Runtime Variable:**
+- On successful write, `writefile` sets `_writefile` to the fully resolved file path.
+- You can reference it in later steps using `${_writefile}` or `{{_writefile}}`.
 
 **Format Details:**
 
@@ -1345,6 +1349,8 @@ Writes content to a text file. Supports multiple formats including text, JSON, J
     path: "C:\\Users\\me\\output.log"
     content: "${_timestamp} - Processed ${Host_IP}: ${status}"
     mode: append
+- print:
+    message: "File written to {{_writefile}}"
 
 # Overwrite a file
 - writefile:

@@ -40,7 +40,7 @@ namespace SSH_Helper.Services.Scripting
 
         private static readonly HashSet<string> BuiltInVariables = new(StringComparer.OrdinalIgnoreCase)
         {
-            "_output", "_timestamp", "_iteration", "_last_error"
+            "_output", "_timestamp", "_iteration", "_last_error", "_writefile"
         };
 
         /// <summary>
@@ -76,6 +76,7 @@ namespace SSH_Helper.Services.Scripting
 
             // External reads = referenced vars that aren't script-defined
             referencedVars.ExceptWith(definedVars);
+            referencedVars.RemoveWhere(IsRuntimeUnderscoreVariable);
 
             return new ColumnDependencyResult { ReferencedColumns = referencedVars };
         }
@@ -92,6 +93,7 @@ namespace SSH_Helper.Services.Scripting
 
             // Remove built-ins
             referencedVars.ExceptWith(BuiltInVariables);
+            referencedVars.RemoveWhere(IsRuntimeUnderscoreVariable);
 
             return new ColumnDependencyResult { ReferencedColumns = referencedVars };
         }
@@ -704,6 +706,16 @@ namespace SSH_Helper.Services.Scripting
             {
                 AddBareVarReference(trimmed, references);
             }
+        }
+
+        private static bool IsRuntimeUnderscoreVariable(string variableName)
+        {
+            if (string.IsNullOrWhiteSpace(variableName))
+                return false;
+
+            var trimmed = variableName.Trim();
+            return trimmed.StartsWith("_", StringComparison.Ordinal)
+                && BareVariableNamePattern.IsMatch(trimmed);
         }
     }
 }

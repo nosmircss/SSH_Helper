@@ -148,6 +148,84 @@ public class WriteFileCommandTests : IDisposable
         lines[1].Should().Be("admin,super_admin,\"root, vd2\"");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_RelativePath_PromptsForSaveLocation()
+    {
+        var promptedPath = Path.Combine(_testDirectory, "prompted", "output.txt");
+        var promptCallCount = 0;
+        var command = new WriteFileCommand((suggestedPath, _) =>
+        {
+            promptCallCount++;
+            suggestedPath.Should().Be("output.txt");
+            return Task.FromResult<string?>(promptedPath);
+        });
+
+        var context = new ScriptContext();
+        var step = BuildTextStep("output.txt", "Prompted write", "overwrite");
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        promptCallCount.Should().Be(1);
+        File.Exists(promptedPath).Should().BeTrue();
+        File.ReadAllText(promptedPath).Should().Be("Prompted write");
+        context.GetVariableString("_writefile").Should().Be(promptedPath);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FullPath_DoesNotPromptForSaveLocation()
+    {
+        var fullPath = Path.Combine(_testDirectory, "direct.txt");
+        var promptCalled = false;
+        var command = new WriteFileCommand((_, _) =>
+        {
+            promptCalled = true;
+            return Task.FromResult<string?>(null);
+        });
+
+        var context = new ScriptContext();
+        var step = BuildTextStep(fullPath, "Direct write", "overwrite");
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        promptCalled.Should().BeFalse();
+        File.Exists(fullPath).Should().BeTrue();
+        File.ReadAllText(fullPath).Should().Be("Direct write");
+        context.GetVariableString("_writefile").Should().Be(fullPath);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RelativePathPromptCancelled_ReturnsFailure()
+    {
+        var command = new WriteFileCommand((_, _) => Task.FromResult<string?>(null));
+        var context = new ScriptContext();
+        var step = BuildTextStep("cancelled.txt", "Should not write", "overwrite");
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Message.Should().NotBeNullOrEmpty();
+        result.Message!.ToLowerInvariant().Should().Contain("cancelled");
+        context.HasVariable("_writefile").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RelativePathPromptCancelled_WithOnErrorContinue_ReturnsSuppressed()
+    {
+        var command = new WriteFileCommand((_, _) => Task.FromResult<string?>(null));
+        var context = new ScriptContext();
+        var step = BuildTextStep("cancelled.txt", "Should not write", "overwrite");
+        step.OnError = "continue";
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.SuppressedError.Should().BeTrue();
+        result.Message.Should().NotBeNullOrEmpty();
+        context.HasVariable("_writefile").Should().BeFalse();
+    }
+
     private static ScriptStep BuildJsonlStep(string filePath, string content, string mode)
     {
         return new ScriptStep
