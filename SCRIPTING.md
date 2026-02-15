@@ -34,6 +34,10 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [portcheck](#portcheck---tcp-port-checks)
    - [sftp](#sftp---sftp-upload-and-download)
    - [webhook](#webhook---legacy-http-requests)
+   - [assert](#assert---validate-conditions)
+   - [switch](#switch---multi-branch-dispatch)
+   - [parallel](#parallel---concurrent-execution)
+   - [table](#table---formatted-table-output)
    - [parse](#parse---configuration-parsing)
 3. [Variables](#variables)
 4. [Expressions and Conditions](#expressions-and-conditions)
@@ -72,7 +76,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
 
 Metadata-only keys (for example `name:` or `description:`) are not treated as strong YAML indicators by themselves.
 
@@ -106,9 +110,14 @@ Executes a command on the SSH session.
     expect: '/regex_pattern/'   # Regex to wait for in output
     timeout: 30                 # Timeout in seconds for this command
     on_error: continue          # continue or stop (default)
+    retry: 3                    # Retry up to N times on failure
+    retry_delay: 2              # Seconds between retries (default: 1)
+    respond:                    # Interactive prompt/response pairs
+      - expect: "pattern"
+        reply: "response"
 ```
 
-Use the map form when you need options (`capture`, `suppress`, `expect`, `timeout`, `on_error`).
+Use the map form when you need options (`capture`, `suppress`, `expect`, `timeout`, `on_error`, `retry`, `respond`).
 
 **Options:**
 
@@ -119,10 +128,15 @@ Use the map form when you need options (`capture`, `suppress`, `expect`, `timeou
 | `expect` | string | Regex pattern to wait for in output (case-insensitive, multiline). When matched, the send completes immediately. |
 | `timeout` | integer | Command-specific timeout in seconds |
 | `on_error` | string | `continue` to proceed on error, `stop` to halt (default) |
+| `retry` | integer | Number of times to retry the step on failure (default: 0) |
+| `retry_delay` | integer | Seconds to wait between retries (default: 1) |
+| `respond` | list | Sequence of expect/reply pairs for interactive prompts |
 
 **Notes:**
 - `expect` supports `/pattern/`, `"pattern"`, or `'pattern'` delimiters (they are stripped automatically).
 - When `expect` is set, the command stops as soon as the pattern matches; it does not automatically wait for the prompt. Omit `expect` to wait for the prompt, or include the prompt in your regex if needed.
+- `respond` is for multi-step interactive commands where you need to send replies to successive prompts. Each pair has an `expect` pattern and a `reply` to send when matched.
+- Every `respond` entry must include both `expect` and `reply`; incomplete entries fail script validation.
 
 **Examples:**
 ```yaml
@@ -155,6 +169,25 @@ Use the map form when you need options (`capture`, `suppress`, `expect`, `timeou
     command: ping 192.168.1.1 count 3
     on_error: continue
     capture: ping_result
+
+# Retry a flaky command up to 3 times
+- send:
+    command: curl -s http://unstable-api/health
+    retry: 3
+    retry_delay: 2
+    capture: health_check
+
+# Interactive prompts with respond pairs
+- send:
+    command: adduser newuser
+    respond:
+      - expect: "Enter password:"
+        reply: "${user_password}"
+      - expect: "Confirm password:"
+        reply: "${user_password}"
+      - expect: "Full Name:"
+        reply: "New User"
+    capture: adduser_output
 ```
 
 ---
@@ -2440,6 +2473,318 @@ When using the `into` parameter, two variables are created:
 
 ---
 
+### assert - Validate Conditions
+
+Validates that a condition is true. Useful for adding guardrails and sanity checks to scripts.
+
+**Shorthand Syntax:**
+```yaml
+- assert: "condition_expression"
+```
+
+**Full Syntax:**
+```yaml
+- assert:
+    condition: "condition_expression"
+    message: "Error message if assertion fails"
+    severity: error          # error (stops script) or warning (continues)
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `condition` | string | (required) | Expression to evaluate (same syntax as `if` conditions) |
+| `message` | string | `"Assertion failed: {condition}"` | Custom failure message. Supports `${variable}` substitution. |
+| `severity` | string | `error` | `error` stops script execution; `warning` logs a warning and continues |
+
+**Examples:**
+```yaml
+# Simple assertion
+- assert: "hostname is not empty"
+
+# Assert with custom message
+- assert:
+    condition: "status == 'up'"
+    message: "Host ${Host_IP} is down, expected 'up' but got '${status}'"
+
+# Warning-level assertion (continues execution)
+- assert:
+    condition: "latency < 100"
+    message: "High latency detected: ${latency}ms"
+    severity: warning
+
+# Validate setup before proceeding
+- send:
+    command: show version
+    capture: version_output
+- assert:
+    condition: "version_output contains 'FortiOS'"
+    message: "Not a FortiGate device - aborting"
+```
+
+---
+
+### switch - Multi-Branch Dispatch
+
+Dispatches execution based on a value matching one of several cases. More readable than chained `if` statements when comparing against multiple values.
+
+**Syntax:**
+```yaml
+- switch: "${variable}"
+  cases:
+    - value: "match1"
+      do:
+        - # steps when value matches "match1"
+    - value: "match2"
+      do:
+        - # steps when value matches "match2"
+  else:
+    - # steps when no case matches (default branch)
+```
+
+**Options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `switch` | string | The value to compare against cases. Supports `${variable}` substitution. |
+| `cases` | list | Sequence of case entries, each with `value` and `do` |
+| `else` | list | Default steps when no case matches (optional) |
+
+**Case Matching:**
+- Comparison is **case-insensitive** (`"WARNING"` matches `"warning"`)
+- Prefix a case value with `matches` to use regex matching: `value: "matches ^v2\\."`
+- First matching case wins; subsequent cases are skipped
+
+**Examples:**
+```yaml
+# Basic string dispatch
+- switch: "${os_type}"
+  cases:
+    - value: linux
+      do:
+        - send:
+            command: uname -a
+            capture: sys_info
+    - value: fortigate
+      do:
+        - send:
+            command: get system status
+            capture: sys_info
+    - value: cisco
+      do:
+        - send:
+            command: show version
+            capture: sys_info
+  else:
+    - print:
+        message: "Unknown OS type: ${os_type}"
+
+# Switch with regex matching
+- switch: "${firmware_version}"
+  cases:
+    - value: "matches ^7\\.0"
+      do:
+        - print:
+            message: "FortiOS 7.0.x detected"
+    - value: "matches ^7\\.2"
+      do:
+        - print:
+            message: "FortiOS 7.2.x detected"
+  else:
+    - print:
+        message: "Unsupported version: ${firmware_version}"
+
+# Switch on status codes
+- switch: "${http_status}"
+  cases:
+    - value: "200"
+      do:
+        - log:
+            message: "API healthy"
+            level: success
+    - value: "503"
+      do:
+        - log:
+            message: "Service unavailable"
+            level: warning
+  else:
+    - log:
+        message: "Unexpected status: ${http_status}"
+        level: error
+```
+
+---
+
+### parallel - Concurrent Execution
+
+Executes multiple steps concurrently. Useful for running independent operations (like pinging multiple hosts or gathering data from different sources) in parallel.
+
+**Syntax:**
+```yaml
+- parallel:
+    steps:
+      - # step 1
+      - # step 2
+      - # step 3
+    max_concurrent: 3      # Optional: limit concurrent steps (0 = unlimited)
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `steps` | list | (required) | List of steps to execute concurrently |
+| `max_concurrent` | integer | `0` (unlimited) | Maximum number of steps running at the same time |
+
+**Notes:**
+- All parallel steps share the same script context. Variable writes use last-write-wins semantics for concurrent updates.
+- If any step fails (and doesn't have `on_error: continue`), the parallel block returns the first failure.
+- Steps that don't require SSH (like `set`, `print`) also work in parallel.
+- `break` and `continue` raised inside a parallel child step propagate to the enclosing loop.
+- `send` steps running in parallel on the same SSH session are serialized for stream safety.
+
+**Examples:**
+```yaml
+# Run multiple checks simultaneously
+- parallel:
+    steps:
+      - ping:
+          target: "${Host_IP}"
+          capture: ping_result
+      - portcheck:
+          host: "${Host_IP}"
+          port: 443
+          capture: https_check
+      - dns:
+          query: "${Host_IP}"
+          type: PTR
+          capture: ptr_record
+
+# Limit concurrency for resource-intensive operations
+- parallel:
+    max_concurrent: 2
+    steps:
+      - send:
+          command: show running-config
+          capture: config1
+      - send:
+          command: show tech-support
+          capture: tech_support
+      - send:
+          command: show log
+          capture: logs
+
+# Parallel variable computation
+- parallel:
+    steps:
+      - set:
+          expression: "val_a = 100"
+      - set:
+          expression: "val_b = 200"
+      - set:
+          expression: "val_c = 300"
+- set:
+    expression: "total = val_a + val_b + val_c"
+- print:
+    message: "Total: ${total}"
+```
+
+---
+
+### table - Formatted Table Output
+
+Formats data into aligned columns for display. Supports lists, JSON arrays, and newline-delimited strings.
+
+**Syntax:**
+```yaml
+- table:
+    data: "${variable}"
+    columns:                    # Optional: explicit column definitions
+      - header: "Column Name"
+        field: "field_name"     # Key in data objects (defaults to header)
+        align: left             # left, right, or center
+        width: 15               # Fixed width (auto-sized if omitted)
+    into: formatted_output      # Optional: capture formatted text
+    align: left                 # Default alignment for all columns
+    show_header: true           # Show header row and separator (default: true)
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `data` | string | (required) | Variable reference containing the data to display |
+| `columns` | list | auto-detect | Column definitions with header, field, align, and width |
+| `into` | string | — | Variable name to capture the formatted table text |
+| `align` | string | `left` | Default alignment: `left`, `right`, or `center` |
+| `show_header` | boolean | `true` | Whether to show the header row and separator line |
+
+**Data Formats:**
+- **List of strings**: Displayed as a single column (header defaults to source variable name, with `Value` as fallback)
+- **JSON array of objects**: Each object becomes a row; keys become column headers
+- **Newline-delimited string**: Each line becomes a row in a single column (same header behavior as lists)
+
+**Examples:**
+```yaml
+# Table from a JSON array
+- set:
+    expression: 'json_data = "[{\"host\":\"10.0.1.1\",\"status\":\"up\",\"latency\":\"12ms\"},{\"host\":\"10.0.1.2\",\"status\":\"up\",\"latency\":\"8ms\"},{\"host\":\"10.0.1.3\",\"status\":\"down\",\"latency\":\"-\"}]"'
+- table:
+    data: "${json_data}"
+# Output:
+#   host      status  latency
+#   --------  ------  -------
+#   10.0.1.1  up      12ms
+#   10.0.1.2  up      8ms
+#   10.0.1.3  down    -
+
+# Table with explicit columns and alignment
+- table:
+    data: "${json_data}"
+    columns:
+      - header: Host
+        field: host
+        width: 15
+      - header: Status
+        field: status
+        align: center
+      - header: Latency
+        field: latency
+        align: right
+
+# Capture formatted table into variable
+- table:
+    data: "${json_data}"
+    into: report_text
+- writefile:
+    path: "C:\\reports\\status.txt"
+    content: "${report_text}"
+
+# Table from a simple list
+- set:
+    expression: "servers = push(servers, web-01)"
+- set:
+    expression: "servers = push(servers, web-02)"
+- set:
+    expression: "servers = push(servers, db-01)"
+- table:
+    data: "${servers}"
+# Output:
+#   servers
+#   ------
+#   web-01
+#   web-02
+#   db-01
+
+# Table without headers
+- table:
+    data: "${servers}"
+    show_header: false
+```
+
+---
+
 ### parse - Configuration Parsing
 
 Parses device configuration text into structured JSON data. Currently supports FortiGate/FortiOS configuration format. The parsed data can be accessed using the `json.*` functions and exported to CSV or JSON files.
@@ -3034,7 +3379,41 @@ For map-style steps (`http`, `ping`, `dns`, `portcheck`, `sftp`, `webhook`), nes
           message: failure "Command failed"
 ```
 
-### Retry Pattern
+### Built-in Retry
+
+Any step can be retried automatically using the `retry` and `retry_delay` options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `retry` | integer | `0` | Number of times to retry the step on failure |
+| `retry_delay` | integer | `1` | Seconds to wait between retries |
+
+```yaml
+# Retry a flaky command 3 times with 2-second delays
+- send:
+    command: curl -s http://api/health
+    retry: 3
+    retry_delay: 2
+    capture: health
+
+# Retry with on_error: continue (error suppressed only after all retries fail)
+- send:
+    command: ping -c 1 unstable-host
+    retry: 2
+    retry_delay: 5
+    on_error: continue
+    capture: ping_result
+```
+
+**Behavior:**
+- On each failure, the step is retried after the delay period
+- During retries, `on_error` is temporarily set to `stop` so failures surface for retry logic
+- On the final attempt, the original `on_error` value is restored
+- If the step succeeds on any attempt, execution continues normally
+
+### Manual Retry Pattern
+
+For more complex retry logic (e.g., conditional retries), use a `while` loop:
 
 ```yaml
 - set:

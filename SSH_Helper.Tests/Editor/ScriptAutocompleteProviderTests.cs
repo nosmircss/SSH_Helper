@@ -68,6 +68,18 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_StepPrefix_IncludesNewCommandKeywords()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - pa";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Select(item => item.Label).Should().Contain("parallel");
+    }
+
+    [Fact]
     public void GetCompletion_LogBlockOptionKey_SuggestsOnlyLogOptions()
     {
         var provider = new ScriptAutocompleteProvider();
@@ -91,6 +103,49 @@ public class ScriptAutocompleteProviderTests
         completion.Items.Select(item => item.Label).Should().Contain("capture");
         completion.Items.Select(item => item.Label).Should().NotContain("action");
         completion.Items.Select(item => item.Label).Should().NotContain("max_iterations");
+    }
+
+    [Fact]
+    public void GetCompletion_SendStepOptionKey_IncludesRetryAndRespondOptions()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - send:\n      command: show version\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["retry", "retry_delay", "respond"]);
+    }
+
+    [Fact]
+    public void GetCompletion_SendRespondNestedOptionKey_SuggestsExpectAndReply()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = """
+                   steps:
+                     - send:
+                         command: adduser qa
+                         respond:
+                           -
+                             
+                   """;
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["expect", "reply"]);
+    }
+
+    [Fact]
+    public void GetCompletion_SwitchShorthandSiblingKeys_IncludeCasesAndElse()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - switch: \"${mode}\"\n    ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["cases", "else"]);
     }
 
     [Fact]

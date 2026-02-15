@@ -79,6 +79,29 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_SendRespond_TracksExpectAndReplyVariableDependencies()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - send:
+                      command: adduser qa
+                      respond:
+                        - expect: "Password for ${username}:"
+                          reply: "${password}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().Contain("username");
+        result.ReferencedColumns.Should().Contain("password");
+    }
+
+    [Fact]
     public void AnalyzeSshRequirements_SendAtRoot_RequiresSshSession()
     {
         var result = AnalyzeSshRequirements("""

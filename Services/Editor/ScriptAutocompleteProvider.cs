@@ -58,6 +58,10 @@ namespace SSH_Helper.Services.Editor
         private static readonly Regex OptionKeyRegex =
             new(@"^\s+(?<token>[A-Za-z0-9_-]*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+        private static readonly Regex MappingKeyLineRegex =
+            new(@"^\s*(?<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(?<value>.*)$",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
         private static readonly Regex SetAssignmentRegex =
             new(@"^\s*-\s*set:\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=",
                 RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -334,6 +338,10 @@ namespace SSH_Helper.Services.Editor
 
         private IReadOnlyList<string> ResolveOptionKeyCandidates(string text, int currentLineStart, int currentIndent)
         {
+            var nestedCandidates = ResolveNestedOptionKeyCandidates(text, currentLineStart, currentIndent);
+            if (nestedCandidates.Count > 0)
+                return nestedCandidates;
+
             if (!TryGetImmediateParentLine(text, currentLineStart, currentIndent, out var parentLine, out var parentIndent))
                 return Array.Empty<string>();
 
@@ -354,6 +362,23 @@ namespace SSH_Helper.Services.Editor
             }
 
             return _commonStepOptionKeys;
+        }
+
+        private IReadOnlyList<string> ResolveNestedOptionKeyCandidates(string text, int currentLineStart, int currentIndent)
+        {
+            if (!TryFindAncestorMappingKey(text, currentLineStart, currentIndent, out var ancestorKey, out var ancestorIndent))
+                return Array.Empty<string>();
+
+            if (!string.Equals(CanonicalizeKey(ancestorKey), "respond", StringComparison.OrdinalIgnoreCase))
+                return Array.Empty<string>();
+
+            if (!TryFindAncestorStepCommand(text, currentLineStart, ancestorIndent, out var command))
+                return Array.Empty<string>();
+
+            if (!string.Equals(CanonicalizeKey(command), "send", StringComparison.OrdinalIgnoreCase))
+                return Array.Empty<string>();
+
+            return new[] { "expect", "reply" };
         }
 
         private static bool TryGetImmediateParentLine(
@@ -385,6 +410,83 @@ namespace SSH_Helper.Services.Editor
                     parentIndent = indent;
                     return true;
                 }
+            }
+
+            return false;
+        }
+
+        private static bool TryFindAncestorMappingKey(
+            string text,
+            int currentLineStart,
+            int startIndent,
+            out string key,
+            out int keyIndent)
+        {
+            key = string.Empty;
+            keyIndent = 0;
+
+            var threshold = startIndent;
+            var searchEnd = Math.Clamp(currentLineStart, 0, text.Length);
+            while (TryReadPreviousLine(text, searchEnd, out var previousLineStart, out var previousLineEnd))
+            {
+                searchEnd = previousLineStart;
+                var candidate = text.Substring(previousLineStart, previousLineEnd - previousLineStart).TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(candidate))
+                    continue;
+
+                var trimmedStart = candidate.TrimStart();
+                if (trimmedStart.StartsWith('#'))
+                    continue;
+
+                var indent = CountIndent(candidate);
+                if (indent >= threshold)
+                    continue;
+
+                if (TryParseMappingKeyLine(candidate, out var parsedKey))
+                {
+                    key = parsedKey;
+                    keyIndent = indent;
+                    return true;
+                }
+
+                threshold = indent;
+            }
+
+            return false;
+        }
+
+        private static bool TryFindAncestorStepCommand(
+            string text,
+            int currentLineStart,
+            int startIndent,
+            out string command)
+        {
+            command = string.Empty;
+
+            var threshold = startIndent;
+            var searchEnd = Math.Clamp(currentLineStart, 0, text.Length);
+            while (TryReadPreviousLine(text, searchEnd, out var previousLineStart, out var previousLineEnd))
+            {
+                searchEnd = previousLineStart;
+                var candidate = text.Substring(previousLineStart, previousLineEnd - previousLineStart).TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(candidate))
+                    continue;
+
+                var trimmedStart = candidate.TrimStart();
+                if (trimmedStart.StartsWith('#'))
+                    continue;
+
+                var indent = CountIndent(candidate);
+                if (indent >= threshold)
+                    continue;
+
+                if (TryParseStepCommandLine(candidate, out var parsedCommand, out _))
+                {
+                    command = parsedCommand;
+                    return true;
+                }
+
+                threshold = indent;
             }
 
             return false;
@@ -423,6 +525,17 @@ namespace SSH_Helper.Services.Editor
 
             command = match.Groups["command"].Value;
             hasInlineValue = HasInlineValue(match.Groups["value"].Value);
+            return true;
+        }
+
+        private static bool TryParseMappingKeyLine(string line, out string key)
+        {
+            key = string.Empty;
+            var match = MappingKeyLineRegex.Match(line);
+            if (!match.Success)
+                return false;
+
+            key = match.Groups["key"].Value;
             return true;
         }
 

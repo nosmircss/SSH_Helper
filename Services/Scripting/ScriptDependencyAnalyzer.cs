@@ -192,12 +192,31 @@ namespace SSH_Helper.Services.Scripting
                 if (HasCompleteSshRequirementSignal(result))
                     return;
 
-                if (step.Elif == null)
-                    continue;
-
-                foreach (var branch in step.Elif)
+                if (step.Elif != null)
                 {
-                    AnalyzeSshRequirementsInSteps(branch.Then, result);
+                    foreach (var branch in step.Elif)
+                    {
+                        AnalyzeSshRequirementsInSteps(branch.Then, result);
+                        if (HasCompleteSshRequirementSignal(result))
+                            return;
+                    }
+                }
+
+                // Recurse into switch cases
+                if (step.Cases != null)
+                {
+                    foreach (var switchCase in step.Cases)
+                    {
+                        AnalyzeSshRequirementsInSteps(switchCase.Do, result);
+                        if (HasCompleteSshRequirementSignal(result))
+                            return;
+                    }
+                }
+
+                // Recurse into parallel steps
+                if (step.Parallel?.Steps != null)
+                {
+                    AnalyzeSshRequirementsInSteps(step.Parallel.Steps, result);
                     if (HasCompleteSshRequirementSignal(result))
                         return;
                 }
@@ -227,6 +246,14 @@ namespace SSH_Helper.Services.Scripting
                 {
                     case StepType.Send:
                         ExtractVarReferences(step.Send, referencedVars);
+                        if (step.Respond != null)
+                        {
+                            foreach (var pair in step.Respond)
+                            {
+                                ExtractVarReferences(pair.Expect, referencedVars);
+                                ExtractVarReferences(pair.Reply, referencedVars);
+                            }
+                        }
                         if (!string.IsNullOrEmpty(step.Capture))
                             definedVars.Add(step.Capture);
                         break;
@@ -499,6 +526,43 @@ namespace SSH_Helper.Services.Scripting
                             AddBareVarReference(step.Parse.From, referencedVars);
                             if (!string.IsNullOrEmpty(step.Parse.Into))
                                 definedVars.Add(step.Parse.Into);
+                        }
+                        break;
+
+                    case StepType.Assert:
+                        if (step.Assert != null)
+                        {
+                            ExtractVarReferences(step.Assert.Condition, referencedVars);
+                            ExtractVarReferences(step.Assert.Message, referencedVars);
+                        }
+                        break;
+
+                    case StepType.Switch:
+                        ExtractVarReferences(step.Switch, referencedVars);
+                        if (step.Cases != null)
+                        {
+                            foreach (var switchCase in step.Cases)
+                            {
+                                ExtractVarReferences(switchCase.Value, referencedVars);
+                                if (switchCase.Do != null)
+                                    AnalyzeSteps(switchCase.Do, definedVars, referencedVars);
+                            }
+                        }
+                        if (step.Else != null)
+                            AnalyzeSteps(step.Else, definedVars, referencedVars);
+                        break;
+
+                    case StepType.Parallel:
+                        if (step.Parallel?.Steps != null)
+                            AnalyzeSteps(step.Parallel.Steps, definedVars, referencedVars);
+                        break;
+
+                    case StepType.Table:
+                        if (step.Table != null)
+                        {
+                            ExtractVarReferences(step.Table.Data, referencedVars);
+                            if (!string.IsNullOrEmpty(step.Table.Into))
+                                definedVars.Add(step.Table.Into);
                         }
                         break;
                 }

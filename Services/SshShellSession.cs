@@ -68,6 +68,7 @@ namespace SSH_Helper.Services
         private ScriptEvent? _pagerEvent;
         private ScriptEvent? _promptOrPagerEvent;
         private ScriptEvent? _bannerEvent;
+        private readonly SemaphoreSlim _commandExecutionLock = new(1, 1);
 
         /// <summary>
         /// When enabled, emits debug timestamps and diagnostic info to help troubleshoot prompt detection.
@@ -501,6 +502,7 @@ namespace SSH_Helper.Services
         public async Task<string> ExecuteAsync(string command, CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
+            await _commandExecutionLock.WaitAsync(cancellationToken);
 
             try
             {
@@ -515,6 +517,7 @@ namespace SSH_Helper.Services
             finally
             {
                 OnCommandCompleted(command);
+                _commandExecutionLock.Release();
             }
         }
 
@@ -535,6 +538,7 @@ namespace SSH_Helper.Services
                 return await ExecuteAsync(command, cancellationToken);
 
             ThrowIfDisposed();
+            await _commandExecutionLock.WaitAsync(cancellationToken);
 
             try
             {
@@ -554,6 +558,65 @@ namespace SSH_Helper.Services
             finally
             {
                 OnCommandCompleted(command);
+                _commandExecutionLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Executes a command with interactive respond pairs (expect/reply sequences).
+        /// Sends the command, then for each pair waits for the expect pattern and sends the reply.
+        /// After all pairs, waits for the final prompt.
+        /// </summary>
+        /// <param name="command">The command to send</param>
+        /// <param name="responds">Sequence of (expectPattern, reply) pairs</param>
+        /// <param name="timeoutSeconds">Override timeout in seconds (optional)</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>The accumulated output from all expect/reply exchanges</returns>
+        public async Task<string> ExecuteWithRespondsAsync(
+            string command,
+            IReadOnlyList<(string expectPattern, string reply)> responds,
+            int? timeoutSeconds,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            await _commandExecutionLock.WaitAsync(cancellationToken);
+
+            try
+            {
+                EmitDebug($">>> Sending command with {responds.Count} respond pair(s): \"{EscapeForDebug(command, 200)}\"");
+
+                _scripting.Send(command + "\r");
+
+                var allOutput = new StringBuilder();
+
+                foreach (var (expectPattern, reply) in responds)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    EmitDebug($">>> Waiting for pattern: \"{expectPattern}\"");
+
+                    // Wait for the expect pattern
+                    var expectRegex = BuildExpectRegex(expectPattern);
+                    var output = await ReadUntilPatternAsync(expectRegex, cancellationToken, timeoutSeconds);
+                    allOutput.Append(output);
+
+                    EmitDebug($">>> Pattern matched, sending reply: \"{EscapeForDebug(reply, 100)}\"");
+
+                    // Send the reply
+                    _scripting.Send(reply + "\r");
+                }
+
+                // Wait for final prompt after all respond pairs
+                EmitDebug(">>> All respond pairs done, waiting for final prompt");
+                var finalOutput = await ReadUntilPromptAsync(cancellationToken, timeoutSeconds);
+                allOutput.Append(finalOutput);
+
+                return allOutput.ToString();
+            }
+            finally
+            {
+                OnCommandCompleted(command);
+                _commandExecutionLock.Release();
             }
         }
 
@@ -1249,6 +1312,8 @@ namespace SSH_Helper.Services
                         // Ignore terminal cleanup errors during session disposal.
                     }
                 }
+
+                _commandExecutionLock.Dispose();
             }
         }
     }

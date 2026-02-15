@@ -545,6 +545,22 @@ steps:
     }
 
     [Fact]
+    public void Validate_TableScalarForm_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - table: "${items}"
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error =>
+            error.Contains("table must be a mapping with required key 'data'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Validate_IfWithoutThen_ReturnsError()
     {
         var yaml = @"---
@@ -1316,6 +1332,8 @@ steps:
         var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
 
         errors.Should().Contain(error => error.Contains("interactive must be a mapping"));
+        errors.Count(error => error.Contains("interactive must be a mapping", StringComparison.OrdinalIgnoreCase))
+            .Should().Be(1);
     }
 
     [Fact]
@@ -1523,6 +1541,73 @@ steps:
 
         var script = _parser.Parse(yaml);
         script.Steps[0].OnError.Should().Be("continue");
+    }
+
+    #endregion
+
+    #region Send Retry/Respond Parser Tests
+
+    [Fact]
+    public void Parse_SendMapWithRetryOptions_ParsesCorrectly()
+    {
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: show version
+                  retry: 2
+                  retry_delay: 5
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].Send.Should().Be("show version");
+        script.Steps[0].Retry.Should().Be(2);
+        script.Steps[0].RetryDelay.Should().Be(5);
+    }
+
+    [Fact]
+    public void Parse_SendMapWithRespondPairs_ParsesCorrectly()
+    {
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: adduser qa
+                  respond:
+                    - expect: "Password:"
+                      reply: "secret"
+                    - expect: "Confirm:"
+                      reply: "secret"
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].Respond.Should().NotBeNull();
+        script.Steps[0].Respond.Should().HaveCount(2);
+        script.Steps[0].Respond![0].Expect.Should().Be("Password:");
+        script.Steps[0].Respond![0].Reply.Should().Be("secret");
+        script.Steps[0].Respond![1].Expect.Should().Be("Confirm:");
+    }
+
+    [Fact]
+    public void Validate_SendRespondPairMissingReply_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: adduser qa
+                  respond:
+                    - expect: "Password:"
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("send.respond entry", StringComparison.OrdinalIgnoreCase));
     }
 
     #endregion
