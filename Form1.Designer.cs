@@ -185,6 +185,7 @@ namespace SSH_Helper
             editToolStripMenuItem = new ToolStripMenuItem();
             findToolStripMenuItem = new ToolStripMenuItem();
             validateScriptToolStripMenuItem = new ToolStripMenuItem();
+            memoryDebuggerToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparatorEdit1 = new ToolStripSeparator();
             debugModeToolStripMenuItem = new ToolStripMenuItem();
             sshDebugModeToolStripMenuItem = new ToolStripMenuItem();
@@ -1514,7 +1515,7 @@ namespace SSH_Helper
             // 
             // editToolStripMenuItem
             // 
-            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, validateScriptToolStripMenuItem, toolStripSeparatorEdit1, debugModeToolStripMenuItem, sshDebugModeToolStripMenuItem });
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, validateScriptToolStripMenuItem, memoryDebuggerToolStripMenuItem, toolStripSeparatorEdit1, debugModeToolStripMenuItem, sshDebugModeToolStripMenuItem });
             editToolStripMenuItem.Name = "editToolStripMenuItem";
             editToolStripMenuItem.Size = new Size(39, 20);
             editToolStripMenuItem.Text = "&Edit";
@@ -1523,7 +1524,7 @@ namespace SSH_Helper
             // 
             findToolStripMenuItem.Name = "findToolStripMenuItem";
             findToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.F;
-            findToolStripMenuItem.Size = new Size(146, 22);
+            findToolStripMenuItem.Size = new Size(188, 22);
             findToolStripMenuItem.Text = "&Find...";
             findToolStripMenuItem.Click += findToolStripMenuItem_Click;
             // 
@@ -1531,20 +1532,27 @@ namespace SSH_Helper
             // 
             validateScriptToolStripMenuItem.Name = "validateScriptToolStripMenuItem";
             validateScriptToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.V;
-            validateScriptToolStripMenuItem.Size = new Size(146, 22);
+            validateScriptToolStripMenuItem.Size = new Size(188, 22);
             validateScriptToolStripMenuItem.Text = "Validate &Script...";
             validateScriptToolStripMenuItem.Click += validateScriptToolStripMenuItem_Click;
+            //
+            // memoryDebuggerToolStripMenuItem
+            //
+            memoryDebuggerToolStripMenuItem.Name = "memoryDebuggerToolStripMenuItem";
+            memoryDebuggerToolStripMenuItem.Size = new Size(188, 22);
+            memoryDebuggerToolStripMenuItem.Text = "&Memory Debugger...";
+            memoryDebuggerToolStripMenuItem.Click += memoryDebuggerToolStripMenuItem_Click;
             // 
             // toolStripSeparatorEdit1
             // 
             toolStripSeparatorEdit1.Name = "toolStripSeparatorEdit1";
-            toolStripSeparatorEdit1.Size = new Size(143, 6);
+            toolStripSeparatorEdit1.Size = new Size(185, 6);
             // 
             // debugModeToolStripMenuItem
             // 
             debugModeToolStripMenuItem.CheckOnClick = true;
             debugModeToolStripMenuItem.Name = "debugModeToolStripMenuItem";
-            debugModeToolStripMenuItem.Size = new Size(146, 22);
+            debugModeToolStripMenuItem.Size = new Size(188, 22);
             debugModeToolStripMenuItem.Text = "&Debug Mode";
             debugModeToolStripMenuItem.ToolTipText = "When enabled, shows timestamps and diagnostic info to help troubleshoot prompt detection";
             debugModeToolStripMenuItem.CheckedChanged += debugModeToolStripMenuItem_CheckedChanged;
@@ -1553,7 +1561,7 @@ namespace SSH_Helper
             //
             sshDebugModeToolStripMenuItem.CheckOnClick = true;
             sshDebugModeToolStripMenuItem.Name = "sshDebugModeToolStripMenuItem";
-            sshDebugModeToolStripMenuItem.Size = new Size(146, 22);
+            sshDebugModeToolStripMenuItem.Size = new Size(188, 22);
             sshDebugModeToolStripMenuItem.Text = "&SSH Debug";
             sshDebugModeToolStripMenuItem.ToolTipText = "When enabled, logs detailed timing info from button click through SSH connection to help diagnose startup delays";
             sshDebugModeToolStripMenuItem.CheckedChanged += sshDebugModeToolStripMenuItem_CheckedChanged;
@@ -1837,6 +1845,7 @@ namespace SSH_Helper
         private ToolStripMenuItem editToolStripMenuItem;
         private ToolStripMenuItem findToolStripMenuItem;
         private ToolStripMenuItem validateScriptToolStripMenuItem;
+        private ToolStripMenuItem memoryDebuggerToolStripMenuItem;
         private ToolStripSeparator toolStripSeparatorEdit1;
         private ToolStripMenuItem debugModeToolStripMenuItem;
         private ToolStripMenuItem sshDebugModeToolStripMenuItem;

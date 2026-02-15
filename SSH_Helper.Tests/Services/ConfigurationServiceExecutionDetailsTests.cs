@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Newtonsoft.Json.Linq;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
 using Xunit;
@@ -136,5 +137,41 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
         entry.Details.InteractiveSessions[0].CloseReason.Should().Be("user_closed");
         entry.Details.InteractiveSessions[0].Completed.Should().BeTrue();
         entry.Details.InteractiveSessions[0].Transcript.Should().Contain("FortiGate-VM64");
+    }
+
+    [Fact]
+    public void Save_WritesSavedStateAsCompressedPayload_AndLoadInflatesIt()
+    {
+        var repeatedOutput = string.Concat(Enumerable.Repeat("sniffer-line-abcdefghijklmnopqrstuvwxyz0123456789\n", 5000));
+        var service = new ConfigurationService(_configPath);
+        service.Load();
+        service.Update(config =>
+        {
+            config.SavedState = new ApplicationState
+            {
+                History = new List<HistoryEntry>
+                {
+                    new()
+                    {
+                        Id = "entry-compressed",
+                        Timestamp = "2026-02-15 11:22:33 - Sniffer",
+                        Output = repeatedOutput
+                    }
+                }
+            };
+        });
+
+        var json = File.ReadAllText(_configPath);
+        var root = JObject.Parse(json);
+
+        root["SavedState"]?.Type.Should().Be(JTokenType.Null);
+        root["SavedStateCompressed"]?.Type.Should().Be(JTokenType.String);
+        root["SavedStateCompressed"]!.ToString().Should().StartWith("gz64:");
+        json.Should().NotContain("sniffer-line-abcdefghijklmnopqrstuvwxyz0123456789");
+
+        var reloaded = new ConfigurationService(_configPath).Load();
+        reloaded.SavedState.Should().NotBeNull();
+        reloaded.SavedState!.History.Should().ContainSingle();
+        reloaded.SavedState.History[0].Output.Should().Be(repeatedOutput);
     }
 }

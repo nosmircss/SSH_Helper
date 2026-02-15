@@ -467,7 +467,8 @@ namespace SSH_Helper.Services.Terminal
                 }
             });
 
-            FlushCaptureStartupBuffer(scripting, cancellationToken);
+            var startupOutput = FlushCaptureStartupBuffer(scripting, cancellationToken);
+            var capturePromptRegex = TryBuildCapturePromptRegex(startupOutput);
 
             if (terminal != null)
             {
@@ -521,13 +522,13 @@ namespace SSH_Helper.Services.Terminal
                     {
                         var stripped = args.StrippedData;
                         if (Interlocked.CompareExchange(ref commandPromptArmed, 0, 0) == 0 &&
-                            ShouldArmCaptureNaturalCompletion(stripped, command))
+                            ShouldArmCaptureNaturalCompletion(stripped, command, capturePromptRegex))
                         {
                             Interlocked.Exchange(ref commandPromptArmed, 1);
                         }
 
                         if (Interlocked.CompareExchange(ref commandPromptArmed, 0, 0) == 1 &&
-                            ContainsLikelyPromptLine(stripped))
+                            ShouldCompleteCaptureOnPrompt(stripped, capturePromptRegex))
                         {
                             TrySetCompletion(InteractiveCloseReasonNaturalComplete);
                         }
@@ -1431,7 +1432,7 @@ namespace SSH_Helper.Services.Terminal
             return mirrorOutput && !string.IsNullOrEmpty(capturedText);
         }
 
-        internal static bool ShouldArmCaptureNaturalCompletion(string? text, string command)
+        internal static bool ShouldArmCaptureNaturalCompletion(string? text, string command, Regex? promptRegex = null)
         {
             if (string.IsNullOrWhiteSpace(text))
                 return false;
@@ -1439,7 +1440,12 @@ namespace SSH_Helper.Services.Terminal
             if (ContainsCommandEchoLine(text, command))
                 return true;
 
-            return !ContainsLikelyPromptLine(text);
+            return !ShouldCompleteCaptureOnPrompt(text, promptRegex);
+        }
+
+        internal static bool ShouldCompleteCaptureOnPrompt(string? text, Regex? promptRegex = null)
+        {
+            return ContainsLikelyPromptLine(text, promptRegex);
         }
 
         private static bool ContainsCommandEchoLine(string? text, string command)
@@ -1466,7 +1472,7 @@ namespace SSH_Helper.Services.Terminal
             return false;
         }
 
-        private static bool ContainsLikelyPromptLine(string? text)
+        private static bool ContainsLikelyPromptLine(string? text, Regex? promptRegex = null)
         {
             if (string.IsNullOrWhiteSpace(text))
                 return false;
@@ -1479,10 +1485,28 @@ namespace SSH_Helper.Services.Terminal
                 if (line.Length == 0)
                     continue;
 
+                if (promptRegex != null)
+                    return promptRegex.IsMatch(line);
+
                 return PromptDetector.IsLikelyPrompt(line);
             }
 
             return false;
+        }
+
+        private static Regex? TryBuildCapturePromptRegex(string? startupOutput)
+        {
+            if (string.IsNullOrWhiteSpace(startupOutput))
+                return null;
+
+            var normalized = TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(startupOutput));
+            if (!PromptDetector.TryDetectPromptFromTail(normalized, out var startupPrompt) ||
+                string.IsNullOrWhiteSpace(startupPrompt))
+            {
+                return null;
+            }
+
+            return PromptDetector.BuildPromptRegex(startupPrompt);
         }
 
         private static InteractiveTerminalSessionDetails CreateSessionDetails(
@@ -2023,16 +2047,21 @@ namespace SSH_Helper.Services.Terminal
             return tcs.Task;
         }
 
-        private static void FlushCaptureStartupBuffer(RebexScripting scripting, CancellationToken cancellationToken)
+        private static string FlushCaptureStartupBuffer(RebexScripting scripting, CancellationToken cancellationToken)
         {
             var savedTimeout = scripting.Timeout;
             var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
+            var startupOutput = new StringBuilder();
             try
             {
                 scripting.Timeout = 150;
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    scripting.ReadUntil(anyDataEvent);
+                    var chunk = scripting.ReadUntil(anyDataEvent);
+                    if (!string.IsNullOrEmpty(chunk))
+                    {
+                        startupOutput.Append(chunk);
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -2047,6 +2076,8 @@ namespace SSH_Helper.Services.Terminal
             {
                 scripting.Timeout = savedTimeout;
             }
+
+            return startupOutput.ToString();
         }
 
         private static bool IsTimeoutException(Exception ex)

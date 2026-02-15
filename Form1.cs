@@ -1006,7 +1006,7 @@ namespace SSH_Helper
             return new ExecutionDetails
             {
                 PresetName = details.PresetName ?? string.Empty,
-                Commands = details.Commands ?? string.Empty,
+                Commands = MemoryPressureGuard.TrimCommandSnapshot(details.Commands),
                 PresetType = details.PresetType ?? string.Empty,
                 StartTimeUtc = details.StartTimeUtc,
                 EndTimeUtc = details.EndTimeUtc,
@@ -1025,9 +1025,7 @@ namespace SSH_Helper
                         HostAddress = host.HostAddress ?? string.Empty,
                         Success = host.Success,
                         TimestampUtc = host.TimestampUtc,
-                        Variables = host.Variables == null
-                            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                            : new Dictionary<string, string>(host.Variables, StringComparer.OrdinalIgnoreCase)
+                        Variables = CloneAndTrimDetailVariables(host.Variables)
                     })
                     .ToList()
                     ?? new List<SSH_Helper.Models.HostExecutionContext>(),
@@ -1042,11 +1040,28 @@ namespace SSH_Helper
                         EndedAtUtc = session.EndedAtUtc,
                         CloseReason = session.CloseReason ?? string.Empty,
                         Completed = session.Completed,
-                        Transcript = session.Transcript ?? string.Empty
+                        Transcript = MemoryPressureGuard.TrimInteractiveTranscript(session.Transcript)
                     })
                     .ToList()
                     ?? new List<InteractiveTerminalSessionDetails>()
             };
+        }
+
+        private static Dictionary<string, string> CloneAndTrimDetailVariables(Dictionary<string, string>? source)
+        {
+            var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (source == null || source.Count == 0)
+                return variables;
+
+            foreach (var kvp in source)
+            {
+                if (string.IsNullOrWhiteSpace(kvp.Key))
+                    continue;
+
+                variables[kvp.Key] = MemoryPressureGuard.TrimDetailVariableValue(kvp.Value);
+            }
+
+            return variables;
         }
 
         private void RefreshEnvironmentSelector(string? preferredEnvironment = null)
@@ -3947,6 +3962,372 @@ namespace SSH_Helper
                 AppendOutputText(Environment.NewLine + message + Environment.NewLine);
                 DialogTheme.ShowMessage(this, message, "Validate Script", MessageBoxIcon.Error, _isDarkMode, _dialogFont);
             }
+        }
+
+        private void memoryDebuggerToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using var dialog = new MemoryDebuggerDialog(CaptureMemoryDebuggerSnapshot, TrimMemoryPressureNow, _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
+            dialog.ShowDialog(this);
+        }
+
+        private (long WorkingSetBytes, long PrivateBytes, long ManagedHeapBytes, string Summary) CaptureMemoryDebuggerSnapshot()
+        {
+            var process = Process.GetCurrentProcess();
+            process.Refresh();
+
+            var historyRows = new List<(string Label, int Length)>(_outputHistory.Count);
+            long historyChars = 0;
+            foreach (var entry in _outputHistory)
+            {
+                var length = entry.Output?.Length ?? 0;
+                historyChars += length;
+                historyRows.Add((entry.Label, length));
+            }
+
+            int hostOutputCount = 0;
+            long hostOutputChars = 0;
+            foreach (var kvp in _historyResults.EnumerateResults())
+            {
+                var hostResults = kvp.Value;
+                if (hostResults == null)
+                    continue;
+
+                foreach (var hostResult in hostResults)
+                {
+                    hostOutputCount++;
+                    hostOutputChars += hostResult?.Output?.Length ?? 0;
+                }
+            }
+
+            int detailsCount = 0;
+            long commandChars = 0;
+            long variableChars = 0;
+            int transcriptCount = 0;
+            long transcriptChars = 0;
+            var transcriptRows = new List<(string Label, int Length)>();
+
+            foreach (var kvp in _historyResults.EnumerateDetails())
+            {
+                var details = kvp.Value;
+                if (details == null)
+                    continue;
+
+                detailsCount++;
+                commandChars += details.Commands?.Length ?? 0;
+
+                if (details.Hosts != null)
+                {
+                    foreach (var host in details.Hosts)
+                    {
+                        if (host?.Variables == null)
+                            continue;
+
+                        foreach (var variable in host.Variables)
+                        {
+                            variableChars += (variable.Key?.Length ?? 0) + (variable.Value?.Length ?? 0);
+                        }
+                    }
+                }
+
+                if (details.InteractiveSessions != null)
+                {
+                    foreach (var session in details.InteractiveSessions)
+                    {
+                        var transcriptLength = session?.Transcript?.Length ?? 0;
+                        if (transcriptLength <= 0)
+                            continue;
+
+                        transcriptCount++;
+                        transcriptChars += transcriptLength;
+                        var hostLabel = string.IsNullOrWhiteSpace(session?.HostAddress) ? "unknown host" : session.HostAddress;
+                        var sessionNumber = session?.SessionNumber ?? 0;
+                        transcriptRows.Add(($"{hostLabel} (session {sessionNumber})", transcriptLength));
+                    }
+                }
+            }
+
+            long presetChars = 0;
+            foreach (var preset in _presetManager.Presets.Values)
+            {
+                presetChars += preset?.Commands?.Length ?? 0;
+            }
+
+            long hostGridChars = 0;
+            int hostGridCellCount = 0;
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (row.IsNewRow)
+                    continue;
+
+                foreach (DataGridViewCell cell in row.Cells)
+                {
+                    var value = cell.Value?.ToString();
+                    if (string.IsNullOrEmpty(value))
+                        continue;
+
+                    hostGridCellCount++;
+                    hostGridChars += value.Length;
+                }
+            }
+
+            var scriptChars = txtCommand.Text?.Length ?? 0;
+            var visibleOutputChars = txtOutput.TextLength;
+            int outputBufferChars;
+            lock (_outputBufferLock)
+            {
+                outputBufferChars = _outputBuffer.Length;
+            }
+
+            var configPath = _configService.ConfigFilePath;
+            long configSizeBytes = 0;
+            try
+            {
+                if (File.Exists(configPath))
+                {
+                    configSizeBytes = new FileInfo(configPath).Length;
+                }
+            }
+            catch
+            {
+                configSizeBytes = 0;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Captured: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            sb.AppendLine($"Config path: {configPath}");
+            sb.AppendLine($"Config size: {FormatBytes(configSizeBytes)}");
+            sb.AppendLine();
+            sb.AppendLine("Large managed text buckets (estimated):");
+            AppendMemoryBucket(sb, "History entry output", historyChars, _outputHistory.Count);
+            AppendMemoryBucket(sb, "Host output cache", hostOutputChars, hostOutputCount);
+            AppendMemoryBucket(sb, "Interactive transcripts", transcriptChars, transcriptCount);
+            AppendMemoryBucket(sb, "Execution command snapshots", commandChars, detailsCount);
+            AppendMemoryBucket(sb, "Execution detail variables", variableChars, detailsCount);
+            AppendMemoryBucket(sb, "Preset command text", presetChars, _presetManager.Presets.Count);
+            AppendMemoryBucket(sb, "Host grid cell text", hostGridChars, hostGridCellCount);
+            AppendMemoryBucket(sb, "Script editor text", scriptChars, 1);
+            AppendMemoryBucket(sb, "Output panel text", visibleOutputChars, 1);
+            AppendMemoryBucket(sb, "Live output buffer", outputBufferChars, 1);
+
+            historyRows.Sort((a, b) => b.Length.CompareTo(a.Length));
+            transcriptRows.Sort((a, b) => b.Length.CompareTo(a.Length));
+
+            if (historyRows.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("Top history outputs:");
+                for (int i = 0; i < Math.Min(5, historyRows.Count); i++)
+                {
+                    if (historyRows[i].Length <= 0)
+                        continue;
+
+                    sb.AppendLine($"- {historyRows[i].Label}: {FormatBytes(historyRows[i].Length * 2L)}");
+                }
+            }
+
+            if (transcriptRows.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("Top interactive transcripts:");
+                for (int i = 0; i < Math.Min(5, transcriptRows.Count); i++)
+                {
+                    if (transcriptRows[i].Length <= 0)
+                        continue;
+
+                    sb.AppendLine($"- {transcriptRows[i].Label}: {FormatBytes(transcriptRows[i].Length * 2L)}");
+                }
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("Notes:");
+            sb.AppendLine("- Estimates assume UTF-16 string storage (~2 bytes per char).");
+            sb.AppendLine("- Private bytes include native allocations from WinForms controls and SSH libraries.");
+
+            return (process.WorkingSet64, process.PrivateMemorySize64, GC.GetTotalMemory(false), sb.ToString());
+        }
+
+        private string TrimMemoryPressureNow()
+        {
+            long removedChars = 0;
+            int trimmedHistoryEntries = 0;
+            int trimmedHostOutputs = 0;
+            int trimmedCommands = 0;
+            int trimmedTranscripts = 0;
+            int trimmedVariables = 0;
+            int trimmedOutputBuffer = 0;
+
+            foreach (var entry in _outputHistory)
+            {
+                var beforeLength = entry.Output?.Length ?? 0;
+                if (!MemoryPressureGuard.TrimRuntimeHistoryEntry(entry))
+                    continue;
+
+                trimmedHistoryEntries++;
+                removedChars += beforeLength - (entry.Output?.Length ?? 0);
+            }
+
+            foreach (var kvp in _historyResults.EnumerateResults())
+            {
+                var hostResults = kvp.Value;
+                if (hostResults == null)
+                    continue;
+
+                foreach (var hostResult in hostResults)
+                {
+                    if (hostResult == null)
+                        continue;
+
+                    var currentOutput = hostResult.Output ?? string.Empty;
+                    var trimmedOutput = MemoryPressureGuard.TrimHostOutput(currentOutput);
+                    if (string.Equals(currentOutput, trimmedOutput, StringComparison.Ordinal))
+                        continue;
+
+                    hostResult.Output = trimmedOutput;
+                    trimmedHostOutputs++;
+                    removedChars += currentOutput.Length - trimmedOutput.Length;
+                }
+            }
+
+            foreach (var kvp in _historyResults.EnumerateDetails())
+            {
+                var details = kvp.Value;
+                if (details == null)
+                    continue;
+
+                var currentCommands = details.Commands ?? string.Empty;
+                var trimmedCommandsText = MemoryPressureGuard.TrimCommandSnapshot(currentCommands);
+                if (!string.Equals(currentCommands, trimmedCommandsText, StringComparison.Ordinal))
+                {
+                    details.Commands = trimmedCommandsText;
+                    trimmedCommands++;
+                    removedChars += currentCommands.Length - trimmedCommandsText.Length;
+                }
+
+                if (details.Hosts != null)
+                {
+                    foreach (var host in details.Hosts)
+                    {
+                        if (host?.Variables == null || host.Variables.Count == 0)
+                            continue;
+
+                        var keys = new List<string>(host.Variables.Keys);
+                        foreach (var key in keys)
+                        {
+                            var currentValue = host.Variables.TryGetValue(key, out var value)
+                                ? value ?? string.Empty
+                                : string.Empty;
+                            var trimmedValue = MemoryPressureGuard.TrimDetailVariableValue(currentValue);
+                            if (string.Equals(currentValue, trimmedValue, StringComparison.Ordinal))
+                                continue;
+
+                            host.Variables[key] = trimmedValue;
+                            trimmedVariables++;
+                            removedChars += currentValue.Length - trimmedValue.Length;
+                        }
+                    }
+                }
+
+                if (details.InteractiveSessions != null)
+                {
+                    foreach (var session in details.InteractiveSessions)
+                    {
+                        if (session == null)
+                            continue;
+
+                        var currentTranscript = session.Transcript ?? string.Empty;
+                        var trimmedTranscript = MemoryPressureGuard.TrimInteractiveTranscript(currentTranscript);
+                        if (string.Equals(currentTranscript, trimmedTranscript, StringComparison.Ordinal))
+                            continue;
+
+                        session.Transcript = trimmedTranscript;
+                        trimmedTranscripts++;
+                        removedChars += currentTranscript.Length - trimmedTranscript.Length;
+                    }
+                }
+            }
+
+            lock (_outputBufferLock)
+            {
+                if (_outputBuffer.Length > MemoryPressureGuard.MaxInMemoryOutputBufferChars)
+                {
+                    var currentBuffer = _outputBuffer.ToString();
+                    var trimmedBuffer = MemoryPressureGuard.TrimInMemoryOutputBuffer(currentBuffer);
+                    if (!string.Equals(currentBuffer, trimmedBuffer, StringComparison.Ordinal))
+                    {
+                        _outputBuffer.Clear();
+                        _outputBuffer.Append(trimmedBuffer);
+                        trimmedOutputBuffer++;
+                        removedChars += currentBuffer.Length - trimmedBuffer.Length;
+                    }
+                }
+            }
+
+            var trimmedItemCount = trimmedHistoryEntries + trimmedHostOutputs + trimmedCommands + trimmedTranscripts + trimmedVariables + trimmedOutputBuffer;
+            if (trimmedItemCount > 0)
+            {
+                if (_currentHostResults != null && _currentHostResults.Count > 0)
+                {
+                    SetOutputText(BuildSelectedHostOutput());
+                }
+                else if (lstOutput.SelectedItem is HistoryListItem selectedEntry)
+                {
+                    SetOutputText(selectedEntry.Output);
+                }
+                else
+                {
+                    SetOutputText(txtOutput.Text);
+                }
+
+                SaveConfiguration();
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Trim complete. Estimated reduction: {FormatBytes(removedChars * 2L)}");
+            sb.AppendLine($"Trimmed items: {trimmedItemCount:N0}");
+            sb.AppendLine($"- History outputs: {trimmedHistoryEntries:N0}");
+            sb.AppendLine($"- Host outputs: {trimmedHostOutputs:N0}");
+            sb.AppendLine($"- Command snapshots: {trimmedCommands:N0}");
+            sb.AppendLine($"- Interactive transcripts: {trimmedTranscripts:N0}");
+            sb.AppendLine($"- Detail variable values: {trimmedVariables:N0}");
+            if (trimmedOutputBuffer > 0)
+            {
+                sb.AppendLine($"- Live output buffer: {trimmedOutputBuffer:N0}");
+            }
+
+            if (trimmedItemCount == 0)
+            {
+                sb.AppendLine("No oversized payloads needed trimming.");
+            }
+
+            return sb.ToString();
+        }
+
+        private static void AppendMemoryBucket(StringBuilder sb, string name, long charCount, int entryCount)
+        {
+            var estimatedBytes = Math.Max(0, charCount) * 2L;
+            sb.AppendLine($"- {name}: {FormatBytes(estimatedBytes)} ({entryCount:N0} item(s), {charCount:N0} chars)");
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes < 1024)
+                return $"{bytes:N0} B";
+
+            string[] units = ["KB", "MB", "GB", "TB"];
+            var unitIndex = -1;
+            double value = bytes;
+            do
+            {
+                value /= 1024d;
+                unitIndex++;
+            }
+            while (value >= 1024d && unitIndex < units.Length - 1);
+
+            return $"{value:N2} {units[unitIndex]}";
         }
 
         private void debugModeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
@@ -7071,7 +7452,7 @@ namespace SSH_Helper
 
             string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {FolderIcon} {folderName}";
             var entryId = HistoryIdGenerator.NewId();
-            var entry = new HistoryListItem(entryId, label, combinedOutput.ToString());
+            var entry = new HistoryListItem(entryId, label, MemoryPressureGuard.TrimHistoryOutput(combinedOutput.ToString()));
 
             Invoke(() =>
             {
@@ -7114,7 +7495,7 @@ namespace SSH_Helper
             return new ExecutionDetails
             {
                 PresetName = presetName,
-                Commands = commands ?? string.Empty,
+                Commands = MemoryPressureGuard.TrimCommandSnapshot(commands),
                 PresetType = presetType,
                 StartTimeUtc = startTimeUtc,
                 EndTimeUtc = endTimeUtc,
@@ -7206,7 +7587,7 @@ namespace SSH_Helper
                         EndedAtUtc = session.EndedAtUtc,
                         CloseReason = session.CloseReason ?? string.Empty,
                         Completed = session.Completed,
-                        Transcript = session.Transcript ?? string.Empty
+                        Transcript = MemoryPressureGuard.TrimInteractiveTranscript(session.Transcript)
                     });
                 }
             }
@@ -7267,6 +7648,7 @@ namespace SSH_Helper
                 var output = result.Output;
                 if (i == 0)
                     output = output.TrimStart('\r', '\n');
+                output = MemoryPressureGuard.TrimHostOutput(output);
 
                 hostResults.Add(new HostHistoryEntry
                 {
@@ -7473,6 +7855,13 @@ namespace SSH_Helper
                 }
 
                 _outputBuffer.Append(output);
+                if (_outputBuffer.Length > MemoryPressureGuard.MaxInMemoryOutputBufferChars)
+                {
+                    var trimmedBuffer = MemoryPressureGuard.TrimInMemoryOutputBuffer(_outputBuffer.ToString());
+                    _outputBuffer.Clear();
+                    _outputBuffer.Append(trimmedBuffer);
+                }
+
                 return output;
             }
         }
@@ -7496,6 +7885,10 @@ namespace SSH_Helper
             }
 
             txtOutput.AppendText(output);
+            if (txtOutput.TextLength > MemoryPressureGuard.MaxVisibleOutputChars)
+            {
+                txtOutput.Text = MemoryPressureGuard.TrimVisibleOutput(txtOutput.Text);
+            }
             ScrollOutputToEnd();
         }
 
@@ -7510,10 +7903,10 @@ namespace SSH_Helper
                 {
                     _outputBuffer.Clear();
                     if (!string.IsNullOrEmpty(text))
-                        _outputBuffer.Append(text);
+                        _outputBuffer.Append(MemoryPressureGuard.TrimInMemoryOutputBuffer(text));
                 }
 
-                txtOutput.Text = text ?? string.Empty;
+                txtOutput.Text = MemoryPressureGuard.TrimVisibleOutput(text);
             }
             finally
             {
@@ -7623,6 +8016,7 @@ namespace SSH_Helper
             {
                 output = _outputBuffer.ToString();
             }
+            output = MemoryPressureGuard.TrimHistoryOutput(output);
 
             string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
             var entryId = HistoryIdGenerator.NewId();
@@ -8143,12 +8537,14 @@ namespace SSH_Helper
                 state.History.Add(historyEntry);
             }
 
+            MemoryPressureGuard.TrimApplicationState(state);
             return state;
         }
 
         private void RestoreApplicationState(ApplicationState state)
         {
             if (state == null) return;
+            MemoryPressureGuard.TrimApplicationState(state);
 
             if (dgv_variables.DataSource != null)
             {

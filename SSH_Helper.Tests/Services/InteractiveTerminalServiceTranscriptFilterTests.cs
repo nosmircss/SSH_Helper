@@ -2,6 +2,7 @@ using FluentAssertions;
 using SSH_Helper.Forms;
 using SSH_Helper.Services.Scripting.Models;
 using SSH_Helper.Services.Terminal;
+using SSH_Helper.Utilities;
 using Xunit;
 
 namespace SSH_Helper.Tests.Services;
@@ -207,6 +208,30 @@ public class InteractiveTerminalServiceTranscriptFilterTests
         var result = InteractiveTerminalService.ShouldArmCaptureNaturalCompletion(
             "interfaces sniff line",
             "diagnose sniffer packet any 'icmp' 4 0 a");
+
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ShouldCompleteCaptureOnPrompt_WithKnownPromptRegex_PacketDirectionChunk_ReturnsFalse()
+    {
+        var promptRegex = PromptDetector.BuildPromptRegex("FGT-01 #");
+
+        var result = InteractiveTerminalService.ShouldCompleteCaptureOnPrompt(
+            "10.10.10.11 ->",
+            promptRegex);
+
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldCompleteCaptureOnPrompt_WithKnownPromptRegex_ReturnedPrompt_ReturnsTrue()
+    {
+        var promptRegex = PromptDetector.BuildPromptRegex("FGT-01 #");
+
+        var result = InteractiveTerminalService.ShouldCompleteCaptureOnPrompt(
+            "FGT-01 # ",
+            promptRegex);
 
         result.Should().BeTrue();
     }
