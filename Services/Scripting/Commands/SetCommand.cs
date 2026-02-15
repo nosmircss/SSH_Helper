@@ -129,15 +129,111 @@ namespace SSH_Helper.Services.Scripting.Commands
                 var commaIdx = JsonUtilities.FindTopLevelComma(innerPush);
                 if (commaIdx > 0)
                 {
-                    var arrayName = innerPush.Substring(0, commaIdx).Trim();
+                    var arrayExpr = innerPush.Substring(0, commaIdx).Trim();
                     var valueExpr = innerPush.Substring(commaIdx + 1).Trim();
-                    var existing = context.GetVariable(arrayName);
-                    var array = existing as List<string> ?? new List<string>();
+                    var array = ResolveListForExpression(arrayExpr, context, out var listVariableName);
                     var resolvedValue = EvaluateExpression(valueExpr, context)?.ToString() ?? string.Empty;
                     array.Add(resolvedValue);
-                    context.SetVariable(arrayName, array);
+
+                    if (!string.IsNullOrEmpty(listVariableName))
+                    {
+                        context.SetVariable(listVariableName!, array);
+                    }
+
                     return array;
                 }
+            }
+
+            if (TryParseFunctionCall(expression, "unshift", out var innerUnshift))
+            {
+                var commaIdx = JsonUtilities.FindTopLevelComma(innerUnshift);
+                if (commaIdx > 0)
+                {
+                    var arrayExpr = innerUnshift.Substring(0, commaIdx).Trim();
+                    var valueExpr = innerUnshift.Substring(commaIdx + 1).Trim();
+                    var array = ResolveListForExpression(arrayExpr, context, out var listVariableName);
+                    var resolvedValue = EvaluateExpression(valueExpr, context)?.ToString() ?? string.Empty;
+                    array.Insert(0, resolvedValue);
+
+                    if (!string.IsNullOrEmpty(listVariableName))
+                    {
+                        context.SetVariable(listVariableName!, array);
+                    }
+
+                    return array;
+                }
+            }
+
+            if (TryParseFunctionCall(expression, "pop", out var innerPop))
+            {
+                var arrayExpr = innerPop.Trim();
+                var array = ResolveListForExpression(arrayExpr, context, out var listVariableName);
+                if (array.Count == 0)
+                    return null;
+
+                var lastIndex = array.Count - 1;
+                var removedValue = array[lastIndex];
+                array.RemoveAt(lastIndex);
+
+                if (!string.IsNullOrEmpty(listVariableName))
+                {
+                    context.SetVariable(listVariableName!, array);
+                }
+
+                return removedValue;
+            }
+
+            if (TryParseFunctionCall(expression, "shift", out var innerShift))
+            {
+                var arrayExpr = innerShift.Trim();
+                var array = ResolveListForExpression(arrayExpr, context, out var listVariableName);
+                if (array.Count == 0)
+                    return null;
+
+                var removedValue = array[0];
+                array.RemoveAt(0);
+
+                if (!string.IsNullOrEmpty(listVariableName))
+                {
+                    context.SetVariable(listVariableName!, array);
+                }
+
+                return removedValue;
+            }
+
+            if (TryParseFunctionCall(expression, "first", out var innerFirst))
+            {
+                var array = ResolveToStringList(ResolveValue(innerFirst, context));
+                return array.Count > 0 ? array[0] : null;
+            }
+
+            if (TryParseFunctionCall(expression, "last", out var innerLast))
+            {
+                var array = ResolveToStringList(ResolveValue(innerLast, context));
+                return array.Count > 0 ? array[array.Count - 1] : null;
+            }
+
+            if (TryParseFunctionCall(expression, "indexof", out var innerIndexOf))
+            {
+                var args = JsonUtilities.SplitTopLevelCommas(innerIndexOf);
+                if (args.Count >= 2)
+                {
+                    var array = ResolveToStringList(ResolveValue(args[0], context));
+                    var searchValue = ResolveValue(args[1], context)?.ToString() ?? string.Empty;
+                    return array.FindIndex(item => string.Equals(item, searchValue, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+
+            if (TryParseFunctionCall(expression, "concat", out var innerConcat))
+            {
+                var args = JsonUtilities.SplitTopLevelCommas(innerConcat);
+                var combined = new List<string>();
+                foreach (var arg in args)
+                {
+                    combined.AddRange(ResolveToStringList(ResolveValue(arg, context)));
+                }
+
+                return combined;
             }
 
             if (TryParseFunctionCall(expression, "replace", out var innerReplace))
@@ -398,6 +494,64 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             return depth == 0;
+        }
+
+        private static bool TryResolveWritableListVariableName(string expr, out string variableName)
+        {
+            variableName = string.Empty;
+            var trimmed = expr.Trim();
+            if (trimmed.Length == 0)
+                return false;
+
+            if (trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                var candidate = trimmed.Substring(2, trimmed.Length - 3).Trim();
+                if (IsSimpleVariableName(candidate))
+                {
+                    variableName = candidate;
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (IsSimpleVariableName(trimmed))
+            {
+                variableName = trimmed;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsSimpleVariableName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            if (!(char.IsLetter(value[0]) || value[0] == '_'))
+                return false;
+
+            for (int i = 1; i < value.Length; i++)
+            {
+                var c = value[i];
+                if (!(char.IsLetterOrDigit(c) || c == '_'))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private List<string> ResolveListForExpression(string expr, ScriptContext context, out string? writableVariableName)
+        {
+            if (TryResolveWritableListVariableName(expr, out var variableName))
+            {
+                writableVariableName = variableName;
+                return ResolveToStringList(context.GetVariable(variableName));
+            }
+
+            writableVariableName = null;
+            return ResolveToStringList(ResolveValue(expr, context));
         }
 
         private static string FormatValueForDisplay(object? value)

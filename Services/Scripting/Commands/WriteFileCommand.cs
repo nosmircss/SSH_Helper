@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Drawing;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -8,6 +9,8 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.UI;
+using System.Windows.Forms;
 
 namespace SSH_Helper.Services.Scripting.Commands
 {
@@ -17,29 +20,45 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     public class WriteFileCommand : IScriptCommand
     {
-        public Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
+        private const string LastWriteFileVariableName = "_writefile";
+        private readonly Func<string, CancellationToken, Task<string?>> _savePathPrompt;
+
+        public WriteFileCommand(Func<string, CancellationToken, Task<string?>>? savePathPrompt = null)
+        {
+            _savePathPrompt = savePathPrompt ?? PromptForSavePathAsync;
+        }
+
+        public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
         {
             if (step.Writefile == null)
-                return Task.FromResult(CommandResult.Fail("Writefile command has no options"));
+                return CommandResult.Fail("Writefile command has no options");
 
             if (string.IsNullOrEmpty(step.Writefile.Path))
-                return Task.FromResult(CommandResult.Fail("Writefile command requires a 'path' property"));
+                return CommandResult.Fail("Writefile command requires a 'path' property");
 
             try
             {
-                // Substitute variables in path (supports both script variables and Windows env vars like %HOMEPATH%)
-                var filePath = Environment.ExpandEnvironmentVariables(
-                    context.SubstituteVariables(step.Writefile.Path));
+                var filePath = await ResolveFilePathAsync(step, context, cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(filePath))
+                {
+                    var cancelMessage = "Writefile save location selection cancelled by user";
+                    context.EmitOutput(cancelMessage, ScriptOutputType.Warning);
+
+                    if (IsContinueOnError(step))
+                        return CommandResult.Suppressed(cancelMessage);
+
+                    return CommandResult.Fail(cancelMessage);
+                }
 
                 // Validate path for security
                 if (!ScriptFileAccessValidator.ValidateWritePath(filePath, out var pathError))
                 {
                     context.EmitOutput(pathError!, ScriptOutputType.Error);
 
-                    if (step.OnError?.ToLowerInvariant() == "continue")
-                        return Task.FromResult(CommandResult.Ok(pathError));
+                    if (IsContinueOnError(step))
+                        return CommandResult.Ok(pathError);
 
-                    return Task.FromResult(CommandResult.Fail(pathError!));
+                    return CommandResult.Fail(pathError!);
                 }
 
                 // Ensure directory exists
@@ -114,28 +133,63 @@ namespace SSH_Helper.Services.Scripting.Commands
                     context.EmitOutput($"Wrote to '{filePath}' (overwrite, {format})", ScriptOutputType.Debug);
                 }
 
-                return Task.FromResult(CommandResult.Ok());
+                context.SetVariable(LastWriteFileVariableName, filePath);
+                return CommandResult.Ok();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (UnauthorizedAccessException ex)
             {
                 var errorMsg = $"Access denied writing file: {ex.Message}";
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
-                if (step.OnError?.ToLowerInvariant() == "continue")
-                    return Task.FromResult(CommandResult.Suppressed(errorMsg));
+                if (IsContinueOnError(step))
+                    return CommandResult.Suppressed(errorMsg);
 
-                return Task.FromResult(CommandResult.Fail(errorMsg));
+                return CommandResult.Fail(errorMsg);
             }
             catch (Exception ex)
             {
                 var errorMsg = $"Error writing file: {ex.Message}";
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
-                if (step.OnError?.ToLowerInvariant() == "continue")
-                    return Task.FromResult(CommandResult.Suppressed(errorMsg));
+                if (IsContinueOnError(step))
+                    return CommandResult.Suppressed(errorMsg);
 
-                return Task.FromResult(CommandResult.Fail(errorMsg));
+                return CommandResult.Fail(errorMsg);
             }
+        }
+
+        private static bool IsContinueOnError(ScriptStep step)
+        {
+            return string.Equals(step.OnError, "continue", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task<string?> ResolveFilePathAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
+        {
+            // Substitute variables in path (supports both script variables and Windows env vars like %HOMEPATH%)
+            var path = Environment.ExpandEnvironmentVariables(context.SubstituteVariables(step.Writefile!.Path));
+
+            if (!Path.IsPathFullyQualified(path))
+            {
+                var promptedPath = await _savePathPrompt(path, cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(promptedPath))
+                    return null;
+
+                path = Environment.ExpandEnvironmentVariables(promptedPath);
+            }
+
+            return Path.GetFullPath(path);
+        }
+
+        private static Task<string?> PromptForSavePathAsync(string suggestedPath, CancellationToken cancellationToken)
+        {
+            return ScriptPromptDialogRunner.ShowAsync<ScriptWriteFileSavePathDialog, string?>(
+                () => new ScriptWriteFileSavePathDialog(suggestedPath),
+                dialog => dialog.DialogResult == DialogResult.OK ? dialog.SelectedPath : null,
+                cancellationToken);
         }
 
         /// <summary>
@@ -592,6 +646,209 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             return field;
+        }
+    }
+
+    internal sealed class ScriptWriteFileSavePathDialog : Form
+    {
+        private readonly TextBox _txtPath;
+        private readonly Label _lblError;
+
+        public string SelectedPath => _txtPath.Text.Trim();
+
+        public ScriptWriteFileSavePathDialog(string suggestedPath)
+        {
+            Text = "Choose Save Location";
+            Size = new Size(560, 200);
+            AutoScaleMode = AutoScaleMode.None;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+
+            var lblPrompt = new Label
+            {
+                Text = "Writefile path is not fully qualified. Choose where to save this file:",
+                Location = new Point(15, 15),
+                Size = new Size(515, 34),
+                AutoSize = false
+            };
+
+            _txtPath = new TextBox
+            {
+                Text = BuildDefaultPath(suggestedPath),
+                Location = new Point(15, 55),
+                Size = new Size(420, 23)
+            };
+
+            var btnBrowse = new Button
+            {
+                Text = "Browse...",
+                Size = new Size(95, 28),
+                Location = new Point(440, 52)
+            };
+            btnBrowse.Click += (_, _) => BrowseForPath();
+
+            _lblError = new Label
+            {
+                Text = string.Empty,
+                Location = new Point(15, 84),
+                Size = new Size(525, 20),
+                ForeColor = Color.Red,
+                Visible = false
+            };
+
+            var btnOk = new Button
+            {
+                Text = "OK",
+                Size = new Size(80, 28),
+                Location = new Point(365, 114)
+            };
+            btnOk.Click += BtnOk_Click;
+
+            var btnCancel = new Button
+            {
+                Text = "Cancel",
+                Size = new Size(80, 28),
+                Location = new Point(450, 114),
+                DialogResult = DialogResult.Cancel
+            };
+
+            Controls.Add(lblPrompt);
+            Controls.Add(_txtPath);
+            Controls.Add(btnBrowse);
+            Controls.Add(_lblError);
+            Controls.Add(btnOk);
+            Controls.Add(btnCancel);
+
+            AcceptButton = btnOk;
+            CancelButton = btnCancel;
+
+            var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
+            var isDark = mainForm != null && mainForm.BackColor.GetBrightness() < 0.2f;
+            if (isDark)
+            {
+                DialogTheme.ApplyTo(this, true);
+                DialogTheme.StyleButton(btnBrowse, true);
+                DialogTheme.StyleButton(btnOk, true, isPrimary: true);
+                DialogTheme.StyleButton(btnCancel, true);
+                DialogTheme.SetDarkTitleBar(this, true);
+            }
+
+            Load += (_, _) =>
+            {
+                if (isDark)
+                    DialogTheme.ApplyNativeTheme(this, true);
+                _txtPath.Focus();
+                _txtPath.SelectAll();
+            };
+
+            _txtPath.TextChanged += (_, _) => _lblError.Visible = false;
+        }
+
+        private void BrowseForPath()
+        {
+            using var dialog = new SaveFileDialog
+            {
+                Title = "Choose Save Location",
+                FileName = GetSuggestedFileName(_txtPath.Text)
+            };
+
+            var initialDirectory = ResolveInitialDirectory(_txtPath.Text);
+            if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
+            {
+                dialog.InitialDirectory = initialDirectory;
+            }
+
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                _txtPath.Text = dialog.FileName;
+            }
+        }
+
+        private void BtnOk_Click(object? sender, EventArgs e)
+        {
+            var selectedPath = _txtPath.Text.Trim();
+            if (string.IsNullOrWhiteSpace(selectedPath))
+            {
+                _lblError.Text = "A file path is required.";
+                _lblError.Visible = true;
+                return;
+            }
+
+            try
+            {
+                _txtPath.Text = Path.GetFullPath(selectedPath);
+            }
+            catch (Exception ex)
+            {
+                _lblError.Text = ex.Message;
+                _lblError.Visible = true;
+                return;
+            }
+
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+
+        private static string BuildDefaultPath(string suggestedPath)
+        {
+            var trimmed = (suggestedPath ?? string.Empty).Trim();
+            var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                return Path.Combine(documents, "output.txt");
+            }
+
+            if (Path.IsPathFullyQualified(trimmed))
+            {
+                return trimmed;
+            }
+
+            var fileName = Path.GetFileName(trimmed);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                fileName = "output.txt";
+            }
+
+            return Path.Combine(documents, fileName);
+        }
+
+        private static string GetSuggestedFileName(string pathText)
+        {
+            var fileName = Path.GetFileName(pathText?.Trim() ?? string.Empty);
+            return string.IsNullOrWhiteSpace(fileName) ? "output.txt" : fileName;
+        }
+
+        private static string ResolveInitialDirectory(string pathText)
+        {
+            var trimmed = (pathText ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            }
+
+            try
+            {
+                if (Path.IsPathFullyQualified(trimmed))
+                {
+                    return Path.GetDirectoryName(trimmed) ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                }
+
+                var relativeDir = Path.GetDirectoryName(trimmed);
+                if (string.IsNullOrWhiteSpace(relativeDir))
+                {
+                    return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                }
+
+                return Path.GetFullPath(relativeDir);
+            }
+            catch
+            {
+                return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            }
         }
     }
 }

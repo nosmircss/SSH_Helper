@@ -100,6 +100,7 @@ show interface status";
     [InlineData("- try:\n  - print: test")]
     [InlineData("- updatecolumn:\n    column: test")]
     [InlineData("- updateenvironment:\n    variable: token")]
+    [InlineData("- interactive:\n    session: separate")]
     public void IsYamlScript_StepSyntax_ReturnsTrue(string input)
     {
         var result = ScriptParser.IsYamlScript(input);
@@ -523,6 +524,40 @@ steps:
         var errors = _parser.Validate(script);
 
         errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Validate_ScalarStepItem_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - print: ""ok""
+  - print ""missing colon""";
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(2);
+        script.Steps[1].GetStepType().Should().Be(StepType.Unknown);
+
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(e => e.Contains("Step has no recognized command"));
+        errors.Should().Contain(e => e.Contains("print \"missing colon\""));
+    }
+
+    [Fact]
+    public void Validate_TableScalarForm_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - table: "${items}"
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error =>
+            error.Contains("table must be a mapping with required key 'data'", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1040,6 +1075,7 @@ steps:
         var yaml = @"---
 steps:
   - choose:
+      title: ""Device Role Selection""
       prompt: ""Select device:""
       into: device
       options:
@@ -1054,6 +1090,7 @@ steps:
         var step = script.Steps[0];
         step.GetStepType().Should().Be(StepType.Choose);
         step.Choose.Should().NotBeNull();
+        step.Choose!.Title.Should().Be("Device Role Selection");
         step.Choose!.Prompt.Should().Be("Select device:");
         step.Choose.Into.Should().Be("device");
         step.Choose.Options.Should().HaveCount(3);
@@ -1097,6 +1134,7 @@ steps:
         var yaml = @"---
 steps:
   - multiselect:
+      title: ""Interface Selection""
       prompt: ""Select interfaces:""
       into: ifaces
       options:
@@ -1111,6 +1149,7 @@ steps:
         var step = script.Steps[0];
         step.GetStepType().Should().Be(StepType.Multiselect);
         step.Multiselect.Should().NotBeNull();
+        step.Multiselect!.Title.Should().Be("Interface Selection");
         step.Multiselect!.Prompt.Should().Be("Select interfaces:");
         step.Multiselect.Into.Should().Be("ifaces");
         step.Multiselect.Options.Should().HaveCount(3);
@@ -1128,6 +1167,7 @@ steps:
         var yaml = $@"---
 steps:
   - confirm:
+      title: ""Confirm Action""
       prompt: ""Are you sure?""
       into: confirmed
       default: {defaultStr}";
@@ -1137,9 +1177,30 @@ steps:
         var step = script.Steps[0];
         step.GetStepType().Should().Be(StepType.Confirm);
         step.Confirm.Should().NotBeNull();
+        step.Confirm!.Title.Should().Be("Confirm Action");
         step.Confirm!.Prompt.Should().Be("Are you sure?");
         step.Confirm.Into.Should().Be("confirmed");
         step.Confirm.Default.Should().Be(expected);
+    }
+
+    [Fact]
+    public void Parse_InputStep_WithTitle_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - input:
+      title: ""Credential Prompt""
+      prompt: ""Enter username:""
+      into: username";
+
+        var script = _parser.Parse(yaml);
+
+        var step = script.Steps[0];
+        step.GetStepType().Should().Be(StepType.Input);
+        step.Input.Should().NotBeNull();
+        step.Input!.Title.Should().Be("Credential Prompt");
+        step.Input.Prompt.Should().Be("Enter username:");
+        step.Input.Into.Should().Be("username");
     }
 
     [Fact]
@@ -1163,6 +1224,390 @@ steps:
         step.Choose.Options[0].Value.Should().Be("simple");
         step.Choose.Options[1].Label.Should().Be("Labeled");
         step.Choose.Options[1].Value.Should().Be("lbl");
+    }
+
+    [Fact]
+    public void Parse_ChooseStep_OptionsFromVariable_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      prompt: ""Pick interface:""
+      into: selected_interface
+      options: interface_list";
+
+        var script = _parser.Parse(yaml);
+
+        var step = script.Steps[0];
+        step.Choose.Should().NotBeNull();
+        step.Choose!.Options.Should().BeEmpty();
+        step.Choose.OptionsFrom.Should().Be("interface_list");
+    }
+
+    [Fact]
+    public void Parse_MultiselectStep_OptionsFromVariable_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - multiselect:
+      prompt: ""Pick interfaces:""
+      into: selected_interfaces
+      options: ${interface_list}";
+
+        var script = _parser.Parse(yaml);
+
+        var step = script.Steps[0];
+        step.Multiselect.Should().NotBeNull();
+        step.Multiselect!.Options.Should().BeEmpty();
+        step.Multiselect.OptionsFrom.Should().Be("${interface_list}");
+    }
+
+    #endregion
+
+    #region Interactive Terminal Parser Tests
+
+    [Fact]
+    public void Parse_InteractiveStep_DefaultsApplied()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive: {}
+            """;
+
+        var script = _parser.Parse(yaml);
+        var step = script.Steps[0];
+
+        step.GetStepType().Should().Be(StepType.Interactive);
+        step.Interactive.Should().NotBeNull();
+        step.Interactive!.Session.Should().Be(InteractiveSessionMode.Separate);
+        step.Interactive.ShowWindow.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Parse_InteractiveCaptureModeOptions_ParsesCorrectly()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  title: "Packet Capture"
+                  command: diagnose sniffer packet any 'host 10.0.0.1' 4 10 a
+                  capture: sniffer_output
+                  max_seconds: 120
+                  max_lines: 250
+                  width: 940
+                  height: 600
+                  mirror_output: true
+                  show_window: false
+            """;
+
+        var script = _parser.Parse(yaml);
+        var step = script.Steps[0];
+
+        step.Interactive.Should().NotBeNull();
+        step.Interactive!.Session.Should().Be(InteractiveSessionMode.Separate);
+        step.Interactive.Title.Should().Be("Packet Capture");
+        step.Interactive.Command.Should().Be("diagnose sniffer packet any 'host 10.0.0.1' 4 10 a");
+        step.Interactive.Capture.Should().Be("sniffer_output");
+        step.Interactive.MaxSeconds.Should().Be(120);
+        step.Interactive.MaxLines.Should().Be(250);
+        step.Interactive.Width.Should().Be(940);
+        step.Interactive.Height.Should().Be(600);
+        step.Interactive.MirrorOutput.Should().BeTrue();
+        step.Interactive.ShowWindow.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_InteractiveScalarForm_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive: true
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive must be a mapping"));
+        errors.Count(error => error.Contains("interactive must be a mapping", StringComparison.OrdinalIgnoreCase))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public void Validate_InteractiveInvalidSession_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: pooled
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.session must be 'separate' or 'shared'"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveCommandWithSharedSession_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: shared
+                  command: tcpdump -i any
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.session must be 'separate' when interactive.command is set"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveMaxSecondsNotPositive_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  command: tcpdump -i any
+                  max_seconds: 0
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.max_seconds must be greater than 0"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveMaxLinesNotPositive_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  command: tcpdump -i any
+                  max_lines: 0
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.max_lines must be greater than 0"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveWidthNotPositive_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  width: 0
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.width must be greater than 0"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveHeightNotPositive_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  height: 0
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.height must be greater than 0"));
+    }
+
+    [Fact]
+    public void Parse_InteractiveLegacyColumnsRows_ParsesAndWarns()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  columns: 100
+                  rows: 30
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Interactive.Should().NotBeNull();
+        script.Steps[0].Interactive!.Columns.Should().Be(100);
+        script.Steps[0].Interactive!.Rows.Should().Be(30);
+        _parser.Warnings.Should().Contain(warning => warning.Contains("interactive.columns is deprecated; use interactive.width/interactive.height (pixels)", StringComparison.OrdinalIgnoreCase));
+        _parser.Warnings.Should().Contain(warning => warning.Contains("interactive.rows is deprecated; use interactive.width/interactive.height (pixels)", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_InteractiveShowWindowFalseWithoutCommand_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  show_window: false
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.show_window=false requires interactive.command"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveShowWindowFalseWithoutLimits_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  command: tcpdump -i any
+                  show_window: false
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.show_window=false requires interactive.max_seconds or interactive.max_lines"));
+    }
+
+    [Fact]
+    public void Parse_InteractiveEmulationKey_AddsDeprecationWarning()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  emulation: basic
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().NotContain(error => error.Contains("interactive.emulation", StringComparison.OrdinalIgnoreCase));
+        _parser.Warnings.Should().Contain(warning => warning.Contains("interactive.emulation is deprecated and ignored", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_InteractiveUnknownKey_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  unknown_flag: true
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.unknown_flag is not supported"));
+    }
+
+    [Fact]
+    public void Parse_InteractiveOnErrorInsideMap_ParsesOnError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  on_error: continue
+            """;
+
+        var script = _parser.Parse(yaml);
+        script.Steps[0].OnError.Should().Be("continue");
+    }
+
+    #endregion
+
+    #region Send Retry/Respond Parser Tests
+
+    [Fact]
+    public void Parse_SendMapWithRetryOptions_ParsesCorrectly()
+    {
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: show version
+                  retry: 2
+                  retry_delay: 5
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].Send.Should().Be("show version");
+        script.Steps[0].Retry.Should().Be(2);
+        script.Steps[0].RetryDelay.Should().Be(5);
+    }
+
+    [Fact]
+    public void Parse_SendMapWithRespondPairs_ParsesCorrectly()
+    {
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: adduser qa
+                  respond:
+                    - expect: "Password:"
+                      reply: "secret"
+                    - expect: "Confirm:"
+                      reply: "secret"
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].Respond.Should().NotBeNull();
+        script.Steps[0].Respond.Should().HaveCount(2);
+        script.Steps[0].Respond![0].Expect.Should().Be("Password:");
+        script.Steps[0].Respond![0].Reply.Should().Be("secret");
+        script.Steps[0].Respond![1].Expect.Should().Be("Confirm:");
+    }
+
+    [Fact]
+    public void Validate_SendRespondPairMissingReply_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: adduser qa
+                  respond:
+                    - expect: "Password:"
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("send.respond entry", StringComparison.OrdinalIgnoreCase));
     }
 
     #endregion

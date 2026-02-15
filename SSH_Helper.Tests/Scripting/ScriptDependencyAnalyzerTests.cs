@@ -37,6 +37,42 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_WithWritefileRuntimeVariable_ExcludesUnderscoreRuntimeReferences()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - writefile:
+                      path: "output.csv"
+                      content: "test"
+                      mode: overwrite
+                  - print: "CSV written to {{_writefile}}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AnalyzePresets_WithUnderscoreOnlySimpleReferences_ExcludesUnderscoreRuntimeReferences()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = "echo {{_custom_runtime}}\r\necho ${_another_runtime}"
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().BeEmpty();
+    }
+
+    [Fact]
     public void AnalyzePresets_UpdateEnvironmentDefinesVariableForLaterSteps()
     {
         var analyzer = new ScriptDependencyAnalyzer();
@@ -56,6 +92,72 @@ public class ScriptDependencyAnalyzerTests
 
         result.ReferencedColumns.Should().Contain("token_from_api");
         result.ReferencedColumns.Should().NotContain("api_token");
+    }
+
+    [Fact]
+    public void AnalyzePresets_ChooseOptionsFromVariable_TracksOptionsSourceDependency()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - choose:
+                      into: selected_interface
+                      options: interface_list
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().Contain("interface_list");
+    }
+
+    [Fact]
+    public void AnalyzePresets_SendRespond_TracksExpectAndReplyVariableDependencies()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - send:
+                      command: adduser qa
+                      respond:
+                        - expect: "Password for ${username}:"
+                          reply: "${password}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().Contain("username");
+        result.ReferencedColumns.Should().Contain("password");
+    }
+
+    [Fact]
+    public void AnalyzePresets_InteractiveCaptureDefinesVariableForLaterReferences()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - interactive:
+                      session: separate
+                      command: "diagnose sniffer packet ${selected_interface} '${filter}' 4 10 a"
+                      capture: sniffer_output
+                  - print:
+                      message: "Capture complete. Output length: ${sniffer_output.length}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().BeEquivalentTo("selected_interface", "filter");
     }
 
     [Fact]
@@ -84,6 +186,7 @@ public class ScriptDependencyAnalyzerTests
 
         result.RequiresSshSession.Should().BeFalse();
         result.UsesSftp.Should().BeFalse();
+        result.UsesInteractive.Should().BeFalse();
         result.SftpUsesDefaultHost.Should().BeFalse();
         result.SftpUsesDefaultCredentials.Should().BeFalse();
     }
@@ -218,6 +321,7 @@ public class ScriptDependencyAnalyzerTests
 
         result.RequiresSshSession.Should().BeFalse();
         result.UsesSftp.Should().BeFalse();
+        result.UsesInteractive.Should().BeFalse();
         result.SftpUsesDefaultHost.Should().BeFalse();
         result.SftpUsesDefaultCredentials.Should().BeFalse();
     }
@@ -237,6 +341,20 @@ public class ScriptDependencyAnalyzerTests
 
         result.RequiresSshSession.Should().BeTrue();
         result.UsesSftp.Should().BeTrue();
+    }
+
+    [Fact]
+    public void AnalyzeSshRequirements_InteractiveStep_RequiresSshAndFlagsInteractive()
+    {
+        var result = AnalyzeSshRequirements("""
+            ---
+            steps:
+              - interactive:
+                  session: separate
+            """);
+
+        result.RequiresSshSession.Should().BeTrue();
+        result.UsesInteractive.Should().BeTrue();
     }
 
     [Fact]

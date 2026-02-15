@@ -11,27 +11,50 @@ namespace SSH_Helper
     {
         private readonly ExecutionDetails _details;
         private readonly string _historyOutput;
+        private readonly string? _hostAddressFilter;
+        private readonly List<SSH_Helper.Models.HostExecutionContext> _visibleHosts;
+        private readonly List<InteractiveTerminalSessionDetails> _visibleInteractiveSessions;
 
         private readonly BorderlessTabControl _tabControl;
         private readonly TextBox _txtSummary;
         private readonly DataGridView _gridHosts;
         private readonly TextBox _txtSettings;
         private readonly DataGridView _gridContext;
+        private readonly DataGridView _gridInteractiveSessions;
+        private readonly TextBox _txtInteractiveTranscript;
+        private readonly SplitContainer _interactiveSplit;
         private readonly Button _btnCopyToClipboard;
         private readonly Button _btnSaveToFile;
         private readonly Button _btnClose;
+        private const float DefaultReadOnlyTextFontSize = 9.5f;
+        private const int InteractiveSessionsPanelDefaultHeight = 130;
+        private bool _interactiveSplitDefaultLayoutApplied;
 
         public ExecutionDetailsDialog(ExecutionDetails details, bool darkMode = false)
-            : this(details, string.Empty, darkMode)
+            : this(details, string.Empty, null, darkMode)
         {
         }
 
         public ExecutionDetailsDialog(ExecutionDetails details, string historyOutput, bool darkMode = false)
+            : this(details, historyOutput, null, darkMode)
+        {
+        }
+
+        public ExecutionDetailsDialog(
+            ExecutionDetails details,
+            string historyOutput,
+            string? hostAddressFilter,
+            bool darkMode = false)
         {
             _details = details ?? throw new ArgumentNullException(nameof(details));
             _historyOutput = historyOutput ?? string.Empty;
+            _hostAddressFilter = NormalizeHostAddress(hostAddressFilter);
+            _visibleHosts = CreateVisibleHosts(_details.Hosts, _hostAddressFilter);
+            _visibleInteractiveSessions = CreateVisibleInteractiveSessions(_details.InteractiveSessions, _hostAddressFilter);
 
-            Text = "Execution Details";
+            Text = string.IsNullOrEmpty(_hostAddressFilter)
+                ? "Execution Details"
+                : $"Execution Details - {_hostAddressFilter}";
             Size = new Size(980, 680);
             MinimumSize = new Size(760, 520);
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -51,6 +74,7 @@ namespace SSH_Helper
             var hostsTab = new TabPage("Hosts");
             var settingsTab = new TabPage("Settings");
             var contextTab = new TabPage("Context");
+            var interactiveTab = new TabPage("Interactive");
 
             _txtSummary = CreateReadOnlyTextBox();
             summaryTab.Controls.Add(_txtSummary);
@@ -76,10 +100,42 @@ namespace SSH_Helper
             _gridContext.Columns["Value"]!.FillWeight = 50;
             contextTab.Controls.Add(_gridContext);
 
+            _gridInteractiveSessions = CreateReadOnlyGrid();
+            _gridInteractiveSessions.Columns.Add("SessionNumber", "#");
+            _gridInteractiveSessions.Columns.Add("HostAddress", "Host");
+            _gridInteractiveSessions.Columns.Add("Mode", "Session");
+            _gridInteractiveSessions.Columns.Add("Started", "Started");
+            _gridInteractiveSessions.Columns.Add("Ended", "Ended");
+            _gridInteractiveSessions.Columns.Add("CloseReason", "Close");
+            _gridInteractiveSessions.Columns.Add("Completed", "Completed");
+            _gridInteractiveSessions.Columns["SessionNumber"]!.FillWeight = 8;
+            _gridInteractiveSessions.Columns["HostAddress"]!.FillWeight = 20;
+            _gridInteractiveSessions.Columns["Mode"]!.FillWeight = 16;
+            _gridInteractiveSessions.Columns["Started"]!.FillWeight = 18;
+            _gridInteractiveSessions.Columns["Ended"]!.FillWeight = 18;
+            _gridInteractiveSessions.Columns["CloseReason"]!.FillWeight = 10;
+            _gridInteractiveSessions.Columns["Completed"]!.FillWeight = 10;
+            _gridInteractiveSessions.SelectionChanged += GridInteractiveSessions_SelectionChanged;
+
+            _txtInteractiveTranscript = CreateReadOnlyTextBox();
+
+            _interactiveSplit = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Horizontal,
+                Panel1MinSize = 120,
+                Panel2MinSize = 120
+            };
+            _interactiveSplit.Panel1.Controls.Add(_gridInteractiveSessions);
+            _interactiveSplit.Panel2.Controls.Add(_txtInteractiveTranscript);
+            _interactiveSplit.SizeChanged += InteractiveSplit_SizeChanged;
+            interactiveTab.Controls.Add(_interactiveSplit);
+
             _tabControl.TabPages.Add(summaryTab);
             _tabControl.TabPages.Add(hostsTab);
             _tabControl.TabPages.Add(settingsTab);
             _tabControl.TabPages.Add(contextTab);
+            _tabControl.TabPages.Add(interactiveTab);
 
             _btnCopyToClipboard = new Button
             {
@@ -120,10 +176,17 @@ namespace SSH_Helper
             PopulateHostsTab();
             PopulateSettingsTab();
             PopulateContextTab();
+            PopulateInteractiveTab();
             ApplyTheme(darkMode);
         }
 
-        private static TextBox CreateReadOnlyTextBox()
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            ApplyDefaultInteractiveSplitLayout();
+        }
+
+        private static TextBox CreateReadOnlyTextBox(float fontSize = DefaultReadOnlyTextFontSize)
         {
             return new TextBox
             {
@@ -133,7 +196,7 @@ namespace SSH_Helper
                 ScrollBars = ScrollBars.Both,
                 WordWrap = false,
                 BorderStyle = BorderStyle.None,
-                Font = new Font("Consolas", 9.5f)
+                Font = new Font("Consolas", fontSize)
             };
         }
 
@@ -260,10 +323,50 @@ namespace SSH_Helper
             }
         }
 
+        private void InteractiveSplit_SizeChanged(object? sender, EventArgs e)
+        {
+            ApplyDefaultInteractiveSplitLayout();
+        }
+
+        private void ApplyDefaultInteractiveSplitLayout()
+        {
+            if (_interactiveSplitDefaultLayoutApplied)
+                return;
+
+            var totalHeight = _interactiveSplit.ClientSize.Height;
+            if (totalHeight <= 0)
+                return;
+
+            var maxTopHeight = totalHeight - _interactiveSplit.Panel2MinSize - _interactiveSplit.SplitterWidth;
+            if (maxTopHeight < _interactiveSplit.Panel1MinSize)
+                return;
+
+            var targetTopHeight = Math.Clamp(
+                InteractiveSessionsPanelDefaultHeight,
+                _interactiveSplit.Panel1MinSize,
+                maxTopHeight);
+
+            if (_interactiveSplit.SplitterDistance == targetTopHeight)
+            {
+                _interactiveSplitDefaultLayoutApplied = true;
+                return;
+            }
+
+            try
+            {
+                _interactiveSplit.SplitterDistance = targetTopHeight;
+                _interactiveSplitDefaultLayoutApplied = true;
+            }
+            catch (InvalidOperationException)
+            {
+                // Split container is not fully laid out yet; try again on the next size change.
+            }
+        }
+
         private void PopulateSummaryTab()
         {
-            int hostCount = _details.Hosts?.Count ?? 0;
-            int successCount = _details.Hosts?.Count(h => h.Success) ?? 0;
+            int hostCount = _visibleHosts.Count;
+            int successCount = _visibleHosts.Count(h => h.Success);
             int failedCount = hostCount - successCount;
             var duration = _details.EndTimeUtc > _details.StartTimeUtc
                 ? _details.EndTimeUtc - _details.StartTimeUtc
@@ -282,7 +385,13 @@ namespace SSH_Helper
             sb.AppendLine($"End Time: {FormatTimestamp(_details.EndTimeUtc)}");
             sb.AppendLine($"Duration: {duration:hh\\:mm\\:ss}");
             sb.AppendLine($"Environment: {_details.EnvironmentName}");
+            if (!string.IsNullOrEmpty(_hostAddressFilter))
+            {
+                sb.AppendLine($"Host Scope: {_hostAddressFilter}");
+            }
+
             sb.AppendLine($"Hosts: {hostCount} total ({successCount} succeeded, {failedCount} failed)");
+            sb.AppendLine($"Interactive Sessions: {_visibleInteractiveSessions.Count} launched");
             sb.AppendLine();
             sb.AppendLine("Executed Presets:");
             if (_details.ExecutedPresetNames.Count == 0)
@@ -309,7 +418,7 @@ namespace SSH_Helper
         {
             _gridHosts.Rows.Clear();
 
-            foreach (var host in _details.Hosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
+            foreach (var host in _visibleHosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
             {
                 _gridHosts.Rows.Add(
                     host.HostAddress,
@@ -336,7 +445,7 @@ namespace SSH_Helper
         {
             _gridContext.Rows.Clear();
 
-            foreach (var host in _details.Hosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
+            foreach (var host in _visibleHosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
             {
                 if (host.Variables.Count == 0)
                 {
@@ -351,6 +460,65 @@ namespace SSH_Helper
             }
         }
 
+        private void PopulateInteractiveTab()
+        {
+            _gridInteractiveSessions.Rows.Clear();
+            _txtInteractiveTranscript.Clear();
+
+            var sessions = _visibleInteractiveSessions
+                .OrderBy(s => s.SessionNumber)
+                .ToList();
+
+            if (sessions.Count == 0)
+            {
+                _txtInteractiveTranscript.Text = "(no interactive terminal sessions captured)";
+                return;
+            }
+
+            foreach (var session in sessions)
+            {
+                var rowIndex = _gridInteractiveSessions.Rows.Add(
+                    session.SessionNumber,
+                    session.HostAddress,
+                    FormatInteractiveSessionMode(session.SessionMode),
+                    FormatTimestamp(session.StartedAtUtc),
+                    FormatTimestamp(session.EndedAtUtc),
+                    session.CloseReason,
+                    session.Completed ? "Yes" : "No");
+                _gridInteractiveSessions.Rows[rowIndex].Tag = session;
+            }
+
+            if (_gridInteractiveSessions.Rows.Count > 0)
+            {
+                _gridInteractiveSessions.ClearSelection();
+                var firstRow = _gridInteractiveSessions.Rows[0];
+                firstRow.Selected = true;
+                _gridInteractiveSessions.CurrentCell = firstRow.Cells[0];
+                UpdateInteractiveTranscriptFromSelection();
+            }
+        }
+
+        private void GridInteractiveSessions_SelectionChanged(object? sender, EventArgs e)
+        {
+            UpdateInteractiveTranscriptFromSelection();
+        }
+
+        private void UpdateInteractiveTranscriptFromSelection()
+        {
+            if (_gridInteractiveSessions.CurrentRow?.Tag is not InteractiveTerminalSessionDetails session)
+            {
+                if (string.IsNullOrWhiteSpace(_txtInteractiveTranscript.Text))
+                    _txtInteractiveTranscript.Text = "(select a session)";
+                return;
+            }
+
+            _txtInteractiveTranscript.Text = string.IsNullOrWhiteSpace(session.Transcript)
+                ? "(no terminal transcript captured)"
+                : session.Transcript;
+            _txtInteractiveTranscript.SelectionStart = 0;
+            _txtInteractiveTranscript.SelectionLength = 0;
+        }
+
         private void ApplyTheme(bool darkMode)
         {
             DialogTheme.ApplyTo(this, darkMode);
@@ -362,6 +530,7 @@ namespace SSH_Helper
 
             ApplyGridTheme(_gridHosts, darkMode);
             ApplyGridTheme(_gridContext, darkMode);
+            ApplyGridTheme(_gridInteractiveSessions, darkMode);
 
             if (darkMode)
             {
@@ -434,6 +603,11 @@ namespace SSH_Helper
             sb.AppendLine($"Start Time: {FormatTimestamp(_details.StartTimeUtc)}");
             sb.AppendLine($"End Time: {FormatTimestamp(_details.EndTimeUtc)}");
             sb.AppendLine($"Environment: {_details.EnvironmentName}");
+            if (!string.IsNullOrEmpty(_hostAddressFilter))
+            {
+                sb.AppendLine($"Host Scope: {_hostAddressFilter}");
+            }
+
             sb.AppendLine($"Username: {_details.Username}");
             sb.AppendLine($"Command Timeout: {_details.CommandTimeoutSeconds} sec");
             sb.AppendLine($"Connection Timeout: {_details.ConnectionTimeoutSeconds} sec");
@@ -460,7 +634,7 @@ namespace SSH_Helper
             sb.AppendLine();
             sb.AppendLine("Host Results");
             sb.AppendLine(new string('-', 80));
-            foreach (var host in _details.Hosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
+            foreach (var host in _visibleHosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
             {
                 sb.AppendLine($"{host.HostAddress} | {(host.Success ? "Success" : "Failed")} | {FormatTimestamp(host.TimestampUtc)}");
             }
@@ -468,7 +642,7 @@ namespace SSH_Helper
             sb.AppendLine();
             sb.AppendLine("Host Context Variables");
             sb.AppendLine(new string('-', 80));
-            foreach (var host in _details.Hosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
+            foreach (var host in _visibleHosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
             {
                 sb.AppendLine($"[{host.HostAddress}]");
                 if (host.Variables.Count == 0)
@@ -483,10 +657,20 @@ namespace SSH_Helper
                 }
             }
 
+            AppendInteractiveSessionsSection(sb);
+
             if (includeOutputWindow)
             {
                 sb.AppendLine();
-                sb.AppendLine("Output Window (All Hosts Top to Bottom)");
+                if (string.IsNullOrEmpty(_hostAddressFilter))
+                {
+                    sb.AppendLine("Output Window (All Hosts Top to Bottom)");
+                }
+                else
+                {
+                    sb.AppendLine($"Output Window ({_hostAddressFilter})");
+                }
+
                 sb.AppendLine(new string('-', 80));
                 if (string.IsNullOrWhiteSpace(_historyOutput))
                 {
@@ -505,12 +689,101 @@ namespace SSH_Helper
             return sb.ToString();
         }
 
+        private void AppendInteractiveSessionsSection(StringBuilder sb)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Interactive Terminal Sessions");
+            sb.AppendLine(new string('-', 80));
+
+            var sessions = _visibleInteractiveSessions
+                .OrderBy(s => s.SessionNumber)
+                .ToList();
+            if (sessions.Count == 0)
+            {
+                sb.AppendLine("(none)");
+                return;
+            }
+
+            foreach (var session in sessions)
+            {
+                sb.AppendLine($"[Session {session.SessionNumber}]");
+                sb.AppendLine($"Host: {session.HostAddress}");
+                sb.AppendLine($"Session: {FormatInteractiveSessionMode(session.SessionMode)}");
+                sb.AppendLine($"Started: {FormatTimestamp(session.StartedAtUtc)}");
+                sb.AppendLine($"Ended: {FormatTimestamp(session.EndedAtUtc)}");
+                sb.AppendLine($"Close Reason: {session.CloseReason}");
+                sb.AppendLine($"Completed: {session.Completed}");
+                sb.AppendLine("Transcript:");
+                if (string.IsNullOrWhiteSpace(session.Transcript))
+                {
+                    sb.AppendLine("  (no terminal transcript captured)");
+                }
+                else
+                {
+                    sb.Append(session.Transcript);
+                    if (!session.Transcript.EndsWith(Environment.NewLine, StringComparison.Ordinal))
+                    {
+                        sb.AppendLine();
+                    }
+                }
+
+                sb.AppendLine(new string('-', 80));
+            }
+        }
+
         private static string FormatTimestamp(DateTime timestampUtc)
         {
             if (timestampUtc == default)
                 return "(not recorded)";
 
             return timestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
+        private static string FormatInteractiveSessionMode(string? sessionMode)
+        {
+            if (string.IsNullOrWhiteSpace(sessionMode))
+                return "(unknown)";
+
+            return sessionMode.Trim();
+        }
+
+        private static string? NormalizeHostAddress(string? hostAddress)
+        {
+            if (string.IsNullOrWhiteSpace(hostAddress))
+                return null;
+
+            return hostAddress.Trim();
+        }
+
+        private static bool HostMatchesFilter(string? hostAddress, string hostAddressFilter)
+        {
+            return string.Equals(hostAddress?.Trim(), hostAddressFilter, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static List<SSH_Helper.Models.HostExecutionContext> CreateVisibleHosts(
+            IEnumerable<SSH_Helper.Models.HostExecutionContext>? hosts,
+            string? hostAddressFilter)
+        {
+            var source = hosts?.ToList() ?? new List<SSH_Helper.Models.HostExecutionContext>();
+            if (string.IsNullOrEmpty(hostAddressFilter))
+                return source;
+
+            return source
+                .Where(host => HostMatchesFilter(host.HostAddress, hostAddressFilter))
+                .ToList();
+        }
+
+        private static List<InteractiveTerminalSessionDetails> CreateVisibleInteractiveSessions(
+            IEnumerable<InteractiveTerminalSessionDetails>? sessions,
+            string? hostAddressFilter)
+        {
+            var source = sessions?.ToList() ?? new List<InteractiveTerminalSessionDetails>();
+            if (string.IsNullOrEmpty(hostAddressFilter))
+                return source;
+
+            return source
+                .Where(session => HostMatchesFilter(session.HostAddress, hostAddressFilter))
+                .ToList();
         }
     }
 }

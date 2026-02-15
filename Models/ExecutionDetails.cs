@@ -20,6 +20,7 @@ namespace SSH_Helper.Models
         public string FolderName { get; set; } = string.Empty;
         public List<string> ExecutedPresetNames { get; set; } = new();
         public List<HostExecutionContext> Hosts { get; set; } = new();
+        public List<InteractiveTerminalSessionDetails> InteractiveSessions { get; set; } = new();
     }
 
     /// <summary>
@@ -31,5 +32,21 @@ namespace SSH_Helper.Models
         public bool Success { get; set; }
         public DateTime TimestampUtc { get; set; }
         public Dictionary<string, string> Variables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Captures a single interactive terminal session launched during script execution.
+    /// </summary>
+    public class InteractiveTerminalSessionDetails
+    {
+        public int SessionNumber { get; set; }
+        public string HostAddress { get; set; } = string.Empty;
+        public string SessionMode { get; set; } = string.Empty;
+        public string EmulationMode { get; set; } = string.Empty;
+        public DateTime StartedAtUtc { get; set; }
+        public DateTime EndedAtUtc { get; set; }
+        public string CloseReason { get; set; } = string.Empty;
+        public bool Completed { get; set; }
+        public string Transcript { get; set; } = string.Empty;
     }
 }

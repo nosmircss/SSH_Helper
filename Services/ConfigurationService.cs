@@ -1,6 +1,8 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SSH_Helper.Models;
+using System.IO.Compression;
+using System.Text;
 
 namespace SSH_Helper.Services
 {
@@ -9,6 +11,7 @@ namespace SSH_Helper.Services
     /// </summary>
     public class ConfigurationService
     {
+        private const string SavedStateCompressionPrefix = "gz64:";
         private readonly string _configFilePath;
         private AppConfiguration? _cachedConfig;
 
@@ -63,7 +66,23 @@ namespace SSH_Helper.Services
             {
                 string json = File.ReadAllText(_configFilePath);
                 var config = ParseConfiguration(json);
+                var hadCompressedSavedState = !string.IsNullOrWhiteSpace(config.SavedStateCompressed);
+                InflateSavedStateFromCompressedPayload(config);
+                var shouldPersistCompressedState = !hadCompressedSavedState && config.SavedState != null;
                 _cachedConfig = config;
+
+                if (shouldPersistCompressedState)
+                {
+                    try
+                    {
+                        Save(config);
+                    }
+                    catch
+                    {
+                        // Best effort: keep the in-memory state even if write-back fails.
+                    }
+                }
+
                 return config;
             }
             catch (Exception ex)
@@ -105,7 +124,28 @@ namespace SSH_Helper.Services
                     catch { /* best-effort backup */ }
                 }
 
-                string json = JsonConvert.SerializeObject(config, Formatting.Indented);
+                var savedState = config.SavedState;
+                var compressedSavedState = CompressSavedState(savedState);
+
+                config.SavedStateCompressed = compressedSavedState;
+                if (!string.IsNullOrEmpty(compressedSavedState))
+                {
+                    // Persist compressed state only to keep config size down.
+                    config.SavedState = null;
+                }
+
+                string json;
+                try
+                {
+                    json = JsonConvert.SerializeObject(config, Formatting.Indented);
+                }
+                finally
+                {
+                    // Keep runtime config hydrated and avoid holding duplicate compressed payload in memory.
+                    config.SavedState = savedState;
+                    config.SavedStateCompressed = null;
+                }
+
                 File.WriteAllText(_configFilePath, json);
                 _cachedConfig = config;
             }
@@ -169,34 +209,174 @@ namespace SSH_Helper.Services
 
         private AppConfiguration ParseConfiguration(string json)
         {
-            // First, deserialize all fields using standard deserialization
-            var config = JsonConvert.DeserializeObject<AppConfiguration>(json) ?? new AppConfiguration();
+            AppConfiguration config;
 
-            // Now handle legacy preset format (where value was just a string instead of PresetInfo object)
-            var rootObj = JObject.Parse(json);
-            var presetsToken = rootObj["Presets"] as JObject;
-            if (presetsToken != null)
+            // Legacy support: older config versions stored preset values as plain strings.
+            // Detect this cheaply first so large modern configs do not pay for an extra full DOM parse.
+            var hasLegacyPresetFormat = ContainsLegacyPresetFormat(json);
+            if (hasLegacyPresetFormat)
             {
-                config.Presets.Clear();
-                foreach (var prop in presetsToken.Properties())
-                {
-                    if (prop.Value.Type == JTokenType.String)
-                    {
-                        // Legacy format: value is just a command string
-                        config.Presets[prop.Name] = new PresetInfo { Commands = prop.Value.ToString() };
-                    }
-                    else
-                    {
-                        var info = prop.Value.ToObject<PresetInfo>() ?? new PresetInfo();
-                        info.Commands ??= "";
-                        config.Presets[prop.Name] = info;
-                    }
-                }
+                config = ParseConfigurationWithLegacyPresets(json);
+            }
+            else
+            {
+                config = JsonConvert.DeserializeObject<AppConfiguration>(json) ?? new AppConfiguration();
             }
 
             NormalizeEnvironmentData(config);
             NormalizeCommandEditorSettings(config);
             return config;
+        }
+
+        private static bool ContainsLegacyPresetFormat(string json)
+        {
+            if (string.IsNullOrEmpty(json))
+                return false;
+
+            try
+            {
+                using var sr = new StringReader(json);
+                using var reader = new JsonTextReader(sr);
+
+                while (reader.Read())
+                {
+                    if (reader.TokenType != JsonToken.PropertyName ||
+                        !string.Equals(reader.Value?.ToString(), "Presets", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (!reader.Read() || reader.TokenType != JsonToken.StartObject)
+                        return false;
+
+                    var presetsDepth = reader.Depth;
+                    while (reader.Read())
+                    {
+                        if (reader.TokenType == JsonToken.EndObject && reader.Depth == presetsDepth)
+                            return false;
+
+                        if (reader.TokenType != JsonToken.PropertyName)
+                            continue;
+
+                        if (!reader.Read())
+                            return false;
+
+                        if (reader.TokenType == JsonToken.String)
+                            return true;
+
+                        if (reader.TokenType == JsonToken.StartObject || reader.TokenType == JsonToken.StartArray)
+                            reader.Skip();
+                    }
+
+                    return false;
+                }
+            }
+            catch
+            {
+                // If detection fails, fall back to default parser behavior.
+            }
+
+            return false;
+        }
+
+        private static AppConfiguration ParseConfigurationWithLegacyPresets(string json)
+        {
+            var rootObj = JObject.Parse(json);
+            var presetsToken = rootObj["Presets"] as JObject;
+
+            // Avoid conversion failures for legacy string preset values.
+            if (presetsToken != null)
+            {
+                rootObj["Presets"] = new JObject();
+            }
+
+            var config = rootObj.ToObject<AppConfiguration>() ?? new AppConfiguration();
+            ApplyLegacyPresetFormat(presetsToken, config);
+            return config;
+        }
+
+        private static void ApplyLegacyPresetFormat(JObject? presetsToken, AppConfiguration config)
+        {
+            if (presetsToken == null)
+                return;
+
+            config.Presets.Clear();
+            foreach (var prop in presetsToken.Properties())
+            {
+                if (prop.Value.Type == JTokenType.String)
+                {
+                    config.Presets[prop.Name] = new PresetInfo { Commands = prop.Value.ToString() };
+                    continue;
+                }
+
+                var info = prop.Value.ToObject<PresetInfo>() ?? new PresetInfo();
+                info.Commands ??= "";
+                config.Presets[prop.Name] = info;
+            }
+        }
+
+        private static void InflateSavedStateFromCompressedPayload(AppConfiguration config)
+        {
+            if (config == null)
+                return;
+
+            var compressedPayload = config.SavedStateCompressed;
+            if (string.IsNullOrWhiteSpace(compressedPayload))
+                return;
+
+            try
+            {
+                var savedStateJson = DecompressPayload(compressedPayload);
+                var inflated = JsonConvert.DeserializeObject<ApplicationState>(savedStateJson);
+                if (inflated != null)
+                {
+                    config.SavedState = inflated;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"SavedState decompression failed: {ex.Message}");
+            }
+            finally
+            {
+                // Do not keep compressed + inflated copies in memory at the same time.
+                config.SavedStateCompressed = null;
+            }
+        }
+
+        private static string? CompressSavedState(ApplicationState? savedState)
+        {
+            if (savedState == null)
+                return null;
+
+            var json = JsonConvert.SerializeObject(savedState, Formatting.None);
+            if (string.IsNullOrEmpty(json))
+                return null;
+
+            using var input = new MemoryStream(Encoding.UTF8.GetBytes(json));
+            using var output = new MemoryStream();
+            using (var gzip = new GZipStream(output, CompressionLevel.Optimal, leaveOpen: true))
+            {
+                input.CopyTo(gzip);
+            }
+
+            return SavedStateCompressionPrefix + Convert.ToBase64String(output.ToArray());
+        }
+
+        private static string DecompressPayload(string compressedPayload)
+        {
+            var payload = compressedPayload;
+            if (payload.StartsWith(SavedStateCompressionPrefix, StringComparison.Ordinal))
+            {
+                payload = payload.Substring(SavedStateCompressionPrefix.Length);
+            }
+
+            var compressedBytes = Convert.FromBase64String(payload);
+            using var input = new MemoryStream(compressedBytes);
+            using var gzip = new GZipStream(input, CompressionMode.Decompress);
+            using var output = new MemoryStream();
+            gzip.CopyTo(output);
+            return Encoding.UTF8.GetString(output.ToArray());
         }
 
         private static void NormalizeEnvironmentData(AppConfiguration config)

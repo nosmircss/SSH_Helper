@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
@@ -182,5 +183,109 @@ public class ScriptExecutorControlFlowTests
 
         result.Status.Should().Be(ScriptExitStatus.Success);
         context.GetVariableString("matched").Should().Be("yes");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ParallelPropagatesBreak_OutOfWhileLoop()
+    {
+        var executor = new ScriptExecutor();
+        var context = new ScriptContext();
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new() { Set = "loop = 0" },
+                new()
+                {
+                    While = "loop < 3",
+                    MaxIterations = 10,
+                    Do = new List<ScriptStep>
+                    {
+                        new() { Set = "loop = loop + 1" },
+                        new()
+                        {
+                            Parallel = new SSH_Helper.Services.Scripting.Models.ParallelOptions
+                            {
+                                Steps = new List<ScriptStep>
+                                {
+                                    new() { BreakLoop = true }
+                                }
+                            }
+                        },
+                        new() { Set = "after_inner = should_not_be_set" }
+                    }
+                }
+            }
+        };
+
+        var result = await executor.ExecuteAsync(script, context);
+
+        result.Status.Should().Be(ScriptExitStatus.Success);
+        context.GetVariable("loop").Should().Be(1d);
+        context.HasVariable("after_inner").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ParallelPropagatesContinue_SkipsRemainingWhileBody()
+    {
+        var executor = new ScriptExecutor();
+        var context = new ScriptContext();
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new() { Set = "i = 0" },
+                new() { Set = "marks = ''" },
+                new()
+                {
+                    While = "i < 3",
+                    MaxIterations = 10,
+                    Do = new List<ScriptStep>
+                    {
+                        new() { Set = "i = i + 1" },
+                        new()
+                        {
+                            Parallel = new SSH_Helper.Services.Scripting.Models.ParallelOptions
+                            {
+                                Steps = new List<ScriptStep>
+                                {
+                                    new() { ContinueLoop = true }
+                                }
+                            }
+                        },
+                        new() { Set = "marks = \"${marks}x\"" }
+                    }
+                }
+            }
+        };
+
+        var result = await executor.ExecuteAsync(script, context);
+
+        result.Status.Should().Be(ScriptExitStatus.Success);
+        context.GetVariable("i").Should().Be(3d);
+        context.GetVariableString("marks").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RetryCancelled_RestoresOriginalOnError()
+    {
+        var executor = new ScriptExecutor();
+        var context = new ScriptContext();
+        var retryStep = new ScriptStep
+        {
+            Wait = 5,
+            Retry = 2,
+            OnError = "continue"
+        };
+        var script = new Script
+        {
+            Steps = new List<ScriptStep> { retryStep }
+        };
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        var result = await executor.ExecuteAsync(script, context, cts.Token);
+
+        result.Status.Should().Be(ScriptExitStatus.Cancelled);
+        retryStep.OnError.Should().Be("continue");
     }
 }

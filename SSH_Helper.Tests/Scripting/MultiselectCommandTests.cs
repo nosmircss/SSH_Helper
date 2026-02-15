@@ -59,4 +59,24 @@ public class MultiselectCommandTests
         result.Success.Should().BeFalse();
         result.Message.Should().Contain("at least one option");
     }
+
+    [Fact]
+    public async Task ExecuteAsync_OptionsSourceMissing_ReturnsFail()
+    {
+        var step = new ScriptStep
+        {
+            Multiselect = new MultiselectOptions
+            {
+                Prompt = "Select:",
+                Into = "choices",
+                OptionsFrom = "interface_list"
+            }
+        };
+        var context = new ScriptContext();
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain("did not resolve");
+    }
 }

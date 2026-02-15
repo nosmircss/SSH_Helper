@@ -1,5 +1,215 @@
 # Changelog
 
+## Changes Since `c8e6a68` (0.51.4)
+
+### Interactive Terminal Scripting
+
+A new `interactive` scripting command opens an in-app SSH terminal window directly from YAML scripts, providing live terminal access during automated workflows. Two session modes are supported:
+
+**Separate mode** (`session: separate`) opens a dedicated SSH connection with its own terminal emulation. The script pauses until the operator closes the terminal window.
+
+**Shared mode** (`session: shared`) attaches to the active script SSH session. Pressing `Ctrl+D` or typing `exit`/`logout` detaches the window without sending those commands to the underlying shell, preserving the shared session for subsequent script steps.
+
+```yaml
+# Open an interactive troubleshooting session
+- interactive:
+    session: separate
+    title: "Troubleshooting - ${Host_IP}"
+    width: 1200
+    height: 760
+```
+
+**Capture mode** adds automated command execution with transcript collection. Setting `command` auto-sends the command once the terminal is ready. The step completes when Ctrl+C is pressed, a timeout fires, or the line limit is reached:
+
+```yaml
+# Capture a packet sniffer with timeout
+- interactive:
+    session: separate
+    command: "diagnose sniffer packet any 'host 10.0.0.1' 4 10 a"
+    capture: sniffer_output
+    max_seconds: 120
+    max_lines: 500
+    mirror_output: false
+```
+
+When `show_window: true` (the default), pressing Ctrl+C or hitting a limiter completes the step while the terminal window remains open as a detached read-only view for copy/review. Setting `show_window: false` runs capture headlessly with no terminal window displayed.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `session` | `separate` | `separate` or `shared` |
+| `title` | host-based | Custom window title |
+| `command` | — | Enables capture mode; auto-runs this command |
+| `capture` | — | Variable name for the captured transcript |
+| `max_seconds` | — | Auto-sends Ctrl+C after this timeout |
+| `max_lines` | — | Auto-sends Ctrl+C after this many captured lines |
+| `width` | `980` | Window width in pixels |
+| `height` | `620` | Window height in pixels |
+| `show_window` | `true` | `false` for headless capture (requires `command` + a limiter) |
+| `mirror_output` | `false` | Mirror captured chunks into script output in real time |
+| `on_error` | `stop` | `continue` or `stop` |
+
+The terminal viewport (`InteractiveTerminalViewportControl`) is a custom double-buffered cell-based renderer with full Rebex `VirtualTerminal` color fidelity, PuTTY-like text selection (highlight auto-copies, right-click pastes), system menu commands (Copy All to Clipboard, Clear Scrollback, Reset Terminal), scrollback history rendering via `GetRegion` negative-row indexing, and follow-tail resize compensation that keeps the prompt anchored at the bottom.
+
+**Preflight enforcement** — `interactive` is restricted to single-host runs. Multi-host script executions and folder runs are rejected in preflight with a message naming the blocked preset(s). `SshExecutionService` and `FolderExecutionDialog` both enforce this restriction via `ScriptDependencyAnalyzer.AnalyzeSshRequirements`.
+
+### Interactive Session Audit Trail
+
+Interactive terminal sessions now capture audit metadata into execution details. Each session records host address, session mode (`separate`/`shared`), emulation mode, start/end timestamps, close reason, and a filtered transcript. The `ExecutionDetailsDialog` displays a dedicated "Interactive" tab with a session grid and transcript viewer. Transcript filtering strips alternate-screen application redraws (`vi`/`less`/`top`) while preserving normal shell output.
+
+### New Scripting Commands
+
+Four new scripting commands expand control flow and output formatting:
+
+**`assert` — Condition Validation**
+
+Validates that a condition is true using the same expression syntax as `if` conditions. Supports `severity: error` (stops the script, default) and `severity: warning` (logs and continues). Custom failure messages support `${variable}` substitution.
+
+```yaml
+- assert:
+    condition: "status == 'up'"
+    message: "Host ${Host_IP} is down"
+
+- assert:
+    condition: "latency < 100"
+    message: "High latency: ${latency}ms"
+    severity: warning
+```
+
+**`switch` — Multi-Branch Dispatch**
+
+Dispatches execution based on a value matching one of several cases. Case comparison is case-insensitive. Prefix a case value with `matches` to use regex matching. An optional `else` block handles unmatched values.
+
+```yaml
+- switch: "${os_type}"
+  cases:
+    - value: linux
+      do:
+        - send:
+            command: uname -a
+            capture: sys_info
+    - value: "matches ^7\\.0"
+      do:
+        - print:
+            message: "Version 7.0.x detected"
+  else:
+    - print:
+        message: "Unknown: ${os_type}"
+```
+
+**`parallel` — Concurrent Execution**
+
+Executes multiple steps concurrently with an optional `max_concurrent` limit. All parallel steps share the same script context with last-write-wins variable semantics. `send` steps running on the same SSH session are serialized for stream safety. `break`/`continue` signals from parallel children propagate to enclosing loops.
+
+```yaml
+- parallel:
+    max_concurrent: 3
+    steps:
+      - ping:
+          target: "${Host_IP}"
+          capture: ping_result
+      - portcheck:
+          host: "${Host_IP}"
+          port: 443
+          capture: https_check
+      - dns:
+          query: "${Host_IP}"
+          type: PTR
+          capture: ptr_record
+```
+
+**`table` — Formatted Table Output**
+
+Formats data into aligned columns for display. Accepts `List<string>`, JSON arrays of objects, or newline-delimited strings. Columns auto-detect from data keys or can be explicitly defined with header, field mapping, alignment (`left`/`right`/`center`), and fixed width. The formatted text can be captured into a variable via `into`.
+
+```yaml
+- table:
+    data: "${json_data}"
+    columns:
+      - header: Host
+        field: host
+        width: 15
+      - header: Status
+        field: status
+        align: center
+    into: report_text
+```
+
+### List Expression Helpers
+
+Five new list mutation functions operate on script variables directly:
+
+| Function | Description |
+|----------|-------------|
+| `push(list, value)` | Appends a value to the end of a list |
+| `pop(list)` | Removes and returns the last element |
+| `unshift(list, value)` | Prepends a value to the beginning |
+| `shift(list)` | Removes and returns the first element |
+| `slice(list, start, end)` | Returns a sub-list between start and end indices |
+
+These complement the existing `json.push()`/`json.pop()` functions and work with both `List<string>` variables and JSON arrays. `push` and `unshift` create a new list if the target variable does not exist.
+
+### History Storage Refactoring
+
+Execution history payloads have been moved from inline `config.json` storage to external per-run JSON files under `%LocalAppData%\SSH_Helper\history\`. A lightweight index file (`history.index.json`) maintains the history list for UI display, while full per-run payloads (`history/<run-id>.json`) are loaded on demand.
+
+`HistoryStorageService` handles payload serialization, index management, and orphan cleanup. `HistoryRunPayload` encapsulates the full execution output, details, and per-host results for each run. Lightweight deserialization via `Utf8JsonReader` extracts metadata without fully parsing large payload fields.
+
+### Modeless Script Prompt Dialogs
+
+Script prompt dialogs (`input`, `choose`, `multiselect`, `confirm`) now run modeless on the UI thread via `ScriptPromptDialogRunner`. The main form's control tree is temporarily disabled except the Stop button ancestor chain, so operators can cancel script execution while a prompt is displayed. `ScriptPromptDialogRunner.ShowAsync<TDialog, TResult>` shows the dialog modeless with `Show(owner)` and awaits a `TaskCompletionSource` that resolves when the dialog closes or cancellation is requested.
+
+### Dialog Title Support
+
+`input`, `choose`, `multiselect`, and `confirm` scripting commands now accept an optional `title` parameter that overrides the dialog window title. When omitted, the default title is used.
+
+```yaml
+- choose:
+    prompt: "Select target environment:"
+    into: target_env
+    title: "Environment Selection"
+    options:
+      - dev
+      - staging
+      - prod
+```
+
+### Dynamic Choice Options
+
+`choose.options` and `multiselect.options` now accept a scalar runtime source in addition to inline YAML lists. Setting `options: ${interface_list}` or `options: interface_list` resolves the options from a `List<string>`, JSON array, or comma-delimited string variable at runtime. `ChoiceOptionResolver` handles resolution with error reporting when the source variable is empty or unresolvable.
+
+### WriteFile Save Path Prompt
+
+`writefile` now prompts for a save location when the configured path is relative (not rooted). A Save File dialog is shown on the UI thread, and the selected path is stored in the `_writefile` runtime variable for use in subsequent steps. Cancelling the dialog respects `on_error` handling. Runtime variable references in `writefile.content` are now resolved before writing.
+
+### ScriptContext Thread Safety
+
+`ScriptContext` variable access (`SetVariable`, `GetVariable`, `HasVariable`, `RemoveVariable`, `GetAllVariables`) is now synchronized with locks for safe concurrent access during `parallel` step execution. `LoopDepth` uses `AsyncLocal<int>` to maintain per-task loop depth in parallel branches.
+
+### QA Presets
+
+New QA presets added for validating the new commands:
+- **QA Assert** — Tests condition evaluation, custom messages, warning severity, and variable substitution
+- **QA Switch** — Tests case matching, regex cases, default branches, and variable dispatch
+- **QA Parallel** — Tests concurrent execution, max_concurrent limiting, and variable capture
+- **QA Table** — Tests JSON array formatting, list formatting, explicit columns, and alignment
+- **QA Control Flow Primitives** — Updated with assert, switch, and parallel coverage
+
+### Documentation
+
+`SCRIPTING.md` updated with full reference sections for `interactive`, `assert`, `switch`, `parallel`, and `table` including syntax, parameter tables, behavior notes, and usage examples. New sections on built-in retry and manual retry patterns added.
+
+### Test Coverage
+
+New test suites added:
+
+- **Scripting** — `InteractiveCommandTests`, `TableCommandTests`, `ChoiceOptionResolverTests`, `QaPresetsSyntaxTests`, `ScriptParserTests` (expanded with assert/switch/parallel/table/interactive parsing), `ScriptExecutorControlFlowTests` (expanded), `ScriptDependencyAnalyzerTests` (expanded with interactive detection), `SetCommandTests` (expanded), `WriteFileCommandTests` (expanded), `ChooseCommandTests` (expanded with dynamic options), `MultiselectCommandTests` (expanded with dynamic options), `ScriptContextTests` (expanded)
+- **Services** — `HistoryStorageServiceTests`, `InteractiveTerminalServiceTranscriptFilterTests`, `SshExecutionServiceInteractivePreflightTests`, `SshExecutionServiceOutputFormattingTests`, `ConfigurationServiceExecutionDetailsTests` (expanded), `HistoryResultStoreTests` (expanded)
+- **UI** — `ExecutionDetailsDialogTests`
+- **Utilities** — `PromptDetectorTests`
+- **Editor** — `ScriptAutocompleteProviderTests` (expanded with new command completions)
+
+---
+
 ## Changes Since `86f4dc2` (0.51.3)
 
 ### Interactive Scripting Commands

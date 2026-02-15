@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Newtonsoft.Json.Linq;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
 using Xunit;
@@ -88,6 +89,21 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
                                         ["role"] = "edge"
                                     }
                                 }
+                            },
+                            InteractiveSessions = new List<InteractiveTerminalSessionDetails>
+                            {
+                                new()
+                                {
+                                    SessionNumber = 1,
+                                    HostAddress = "10.0.0.1",
+                                    SessionMode = "separate",
+                                    EmulationMode = "full",
+                                    StartedAtUtc = startTimeUtc.AddSeconds(5),
+                                    EndedAtUtc = startTimeUtc.AddSeconds(25),
+                                    CloseReason = "user_closed",
+                                    Completed = true,
+                                    Transcript = "show version\nFortiGate-VM64"
+                                }
                             }
                         }
                     }
@@ -116,5 +132,70 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
         entry.Details.Hosts.Should().ContainSingle();
         entry.Details.Hosts[0].HostAddress.Should().Be("10.0.0.1");
         entry.Details.Hosts[0].Variables.Should().ContainKey("role").WhoseValue.Should().Be("edge");
+        entry.Details.InteractiveSessions.Should().ContainSingle();
+        entry.Details.InteractiveSessions[0].HostAddress.Should().Be("10.0.0.1");
+        entry.Details.InteractiveSessions[0].CloseReason.Should().Be("user_closed");
+        entry.Details.InteractiveSessions[0].Completed.Should().BeTrue();
+        entry.Details.InteractiveSessions[0].Transcript.Should().Contain("FortiGate-VM64");
+    }
+
+    [Fact]
+    public void Save_WritesSavedStateAsCompressedPayload_AndLoadInflatesIt()
+    {
+        var repeatedOutput = string.Concat(Enumerable.Repeat("sniffer-line-abcdefghijklmnopqrstuvwxyz0123456789\n", 5000));
+        var service = new ConfigurationService(_configPath);
+        service.Load();
+        service.Update(config =>
+        {
+            config.SavedState = new ApplicationState
+            {
+                History = new List<HistoryEntry>
+                {
+                    new()
+                    {
+                        Id = "entry-compressed",
+                        Timestamp = "2026-02-15 11:22:33 - Sniffer",
+                        Output = repeatedOutput
+                    }
+                }
+            };
+        });
+
+        var json = File.ReadAllText(_configPath);
+        var root = JObject.Parse(json);
+
+        root["SavedState"]?.Type.Should().Be(JTokenType.Null);
+        root["SavedStateCompressed"]?.Type.Should().Be(JTokenType.String);
+        root["SavedStateCompressed"]!.ToString().Should().StartWith("gz64:");
+        json.Should().NotContain("sniffer-line-abcdefghijklmnopqrstuvwxyz0123456789");
+
+        var reloaded = new ConfigurationService(_configPath).Load();
+        reloaded.SavedState.Should().NotBeNull();
+        reloaded.SavedState!.History.Should().ContainSingle();
+        reloaded.SavedState.History[0].Output.Should().Be(repeatedOutput);
+    }
+
+    [Fact]
+    public void Load_MixedModernAndLegacyPresets_LoadsBothWithoutFallback()
+    {
+        File.WriteAllText(_configPath, """
+            {
+              "Username": "tester",
+              "Timeout": 10,
+              "Presets": {
+                "ModernPreset": { "Commands": "show version", "IsScript": false },
+                "LegacyPreset": "show run"
+              }
+            }
+            """);
+
+        var service = new ConfigurationService(_configPath);
+        var config = service.Load();
+
+        service.ConfigLoadError.Should().BeNull();
+        config.Presets.Should().ContainKey("ModernPreset");
+        config.Presets.Should().ContainKey("LegacyPreset");
+        config.Presets["ModernPreset"].Commands.Should().Be("show version");
+        config.Presets["LegacyPreset"].Commands.Should().Be("show run");
     }
 }

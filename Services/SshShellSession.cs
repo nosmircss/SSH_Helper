@@ -56,15 +56,19 @@ namespace SSH_Helper.Services
         private readonly Ssh _sshClient;
         private readonly RebexScripting _scripting;
         private readonly SshTimeoutOptions _timeouts;
+        private readonly IDisposable? _scriptingOwner;
+        private readonly IDisposable? _terminalOwner;
         private Regex _promptPattern;
         private string _currentPrompt;
         private bool _disposed;
+        private DateTime _nextKeepAliveAtUtc;
 
         // Rebex ScriptEvents for pattern matching
         private ScriptEvent? _shellPromptEvent;
         private ScriptEvent? _pagerEvent;
         private ScriptEvent? _promptOrPagerEvent;
         private ScriptEvent? _bannerEvent;
+        private readonly SemaphoreSlim _commandExecutionLock = new(1, 1);
 
         /// <summary>
         /// When enabled, emits debug timestamps and diagnostic info to help troubleshoot prompt detection.
@@ -95,6 +99,16 @@ namespace SSH_Helper.Services
         /// Gets whether the session is still valid and connected.
         /// </summary>
         public bool IsConnected => !_disposed && _sshClient.IsConnected;
+
+        /// <summary>
+        /// Internal access to the live scripting stream for shared interactive terminal mode.
+        /// </summary>
+        internal RebexScripting SharedScripting => _scripting;
+
+        /// <summary>
+        /// Internal access to the live terminal object for shared interactive full emulation mode.
+        /// </summary>
+        internal ITerminal SharedTerminal => _scripting.Terminal;
 
         /// <summary>
         /// Common patterns used in expect operations.
@@ -167,13 +181,21 @@ namespace SSH_Helper.Services
         /// <param name="sshClient">The Rebex SSH client</param>
         /// <param name="scripting">The Rebex Scripting instance from StartScripting()</param>
         /// <param name="timeouts">Timeout configuration</param>
-        public SshShellSession(Ssh sshClient, RebexScripting scripting, SshTimeoutOptions? timeouts = null)
+        /// <param name="terminalOwner">Optional terminal object to dispose with this session.</param>
+        public SshShellSession(
+            Ssh sshClient,
+            RebexScripting scripting,
+            SshTimeoutOptions? timeouts = null,
+            IDisposable? terminalOwner = null)
         {
             _sshClient = sshClient ?? throw new ArgumentNullException(nameof(sshClient));
             _scripting = scripting ?? throw new ArgumentNullException(nameof(scripting));
             _timeouts = timeouts ?? SshTimeoutOptions.Default;
+            _scriptingOwner = scripting as IDisposable;
+            _terminalOwner = terminalOwner;
             _currentPrompt = string.Empty;
             _promptPattern = Patterns.ShellPrompt;
+            _nextKeepAliveAtUtc = ComputeNextKeepAliveUtc();
 
             // Initialize ScriptEvents for pattern matching
             InitializeScriptEvents();
@@ -285,6 +307,32 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Attempts to re-align the shell stream after an external interactive use.
+        /// </summary>
+        internal void SyncAfterInteractive()
+        {
+            if (_disposed || !_sshClient.IsConnected)
+                return;
+
+            var savedTimeout = _scripting.Timeout;
+            try
+            {
+                _scripting.Send("\r");
+                _scripting.Timeout = (int)_timeouts.IdleTimeout.TotalMilliseconds;
+                var promptEvent = _promptOrPagerEvent ?? _shellPromptEvent ?? ScriptEvent.FromRegex(Patterns.ShellPromptPattern);
+                _scripting.ReadUntil(promptEvent);
+            }
+            catch
+            {
+                // Best-effort resync only.
+            }
+            finally
+            {
+                _scripting.Timeout = savedTimeout;
+            }
+        }
+
+        /// <summary>
         /// Polling-based initialization: uses a catch-all ScriptEvent to read data as it arrives,
         /// accumulates all received data, and checks banner/prompt patterns on the full buffer.
         /// This avoids premature pattern matches from Rebex's incremental ScriptEvent processing.
@@ -315,6 +363,7 @@ namespace SSH_Helper.Services
                 while (attemptSw.ElapsedMilliseconds < overallTimeout)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    TrySendKeepAliveIfDue("session initialization");
                     _scripting.Timeout = pollInterval;
 
                     try
@@ -453,6 +502,7 @@ namespace SSH_Helper.Services
         public async Task<string> ExecuteAsync(string command, CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
+            await _commandExecutionLock.WaitAsync(cancellationToken);
 
             try
             {
@@ -467,6 +517,7 @@ namespace SSH_Helper.Services
             finally
             {
                 OnCommandCompleted(command);
+                _commandExecutionLock.Release();
             }
         }
 
@@ -487,6 +538,7 @@ namespace SSH_Helper.Services
                 return await ExecuteAsync(command, cancellationToken);
 
             ThrowIfDisposed();
+            await _commandExecutionLock.WaitAsync(cancellationToken);
 
             try
             {
@@ -506,6 +558,65 @@ namespace SSH_Helper.Services
             finally
             {
                 OnCommandCompleted(command);
+                _commandExecutionLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Executes a command with interactive respond pairs (expect/reply sequences).
+        /// Sends the command, then for each pair waits for the expect pattern and sends the reply.
+        /// After all pairs, waits for the final prompt.
+        /// </summary>
+        /// <param name="command">The command to send</param>
+        /// <param name="responds">Sequence of (expectPattern, reply) pairs</param>
+        /// <param name="timeoutSeconds">Override timeout in seconds (optional)</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>The accumulated output from all expect/reply exchanges</returns>
+        public async Task<string> ExecuteWithRespondsAsync(
+            string command,
+            IReadOnlyList<(string expectPattern, string reply)> responds,
+            int? timeoutSeconds,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            await _commandExecutionLock.WaitAsync(cancellationToken);
+
+            try
+            {
+                EmitDebug($">>> Sending command with {responds.Count} respond pair(s): \"{EscapeForDebug(command, 200)}\"");
+
+                _scripting.Send(command + "\r");
+
+                var allOutput = new StringBuilder();
+
+                foreach (var (expectPattern, reply) in responds)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    EmitDebug($">>> Waiting for pattern: \"{expectPattern}\"");
+
+                    // Wait for the expect pattern
+                    var expectRegex = BuildExpectRegex(expectPattern);
+                    var output = await ReadUntilPatternAsync(expectRegex, cancellationToken, timeoutSeconds);
+                    allOutput.Append(output);
+
+                    EmitDebug($">>> Pattern matched, sending reply: \"{EscapeForDebug(reply, 100)}\"");
+
+                    // Send the reply
+                    _scripting.Send(reply + "\r");
+                }
+
+                // Wait for final prompt after all respond pairs
+                EmitDebug(">>> All respond pairs done, waiting for final prompt");
+                var finalOutput = await ReadUntilPromptAsync(cancellationToken, timeoutSeconds);
+                allOutput.Append(finalOutput);
+
+                return allOutput.ToString();
+            }
+            finally
+            {
+                OnCommandCompleted(command);
+                _commandExecutionLock.Release();
             }
         }
 
@@ -610,6 +721,8 @@ namespace SSH_Helper.Services
                     EmitDebug($"Overall command timeout reached ({overallTimeout}ms)");
                     break;
                 }
+
+                TrySendKeepAliveIfDue("ReadUntilPrompt");
 
                 // Inner loop: accumulate characters into a batch using short timeout
                 var batch = new StringBuilder();
@@ -859,6 +972,8 @@ namespace SSH_Helper.Services
                     break;
                 }
 
+                TrySendKeepAliveIfDue("ReadUntilExpect");
+
                 var batch = new StringBuilder();
                 _scripting.Timeout = batchTimeout;
                 bool gotData = false;
@@ -1081,6 +1196,38 @@ namespace SSH_Helper.Services
             }
         }
 
+        private DateTime ComputeNextKeepAliveUtc()
+        {
+            if (_timeouts.KeepAliveInterval <= TimeSpan.Zero)
+                return DateTime.MaxValue;
+
+            return DateTime.UtcNow + _timeouts.KeepAliveInterval;
+        }
+
+        private void TrySendKeepAliveIfDue(string operation)
+        {
+            if (_timeouts.KeepAliveInterval <= TimeSpan.Zero)
+                return;
+
+            var now = DateTime.UtcNow;
+            if (now < _nextKeepAliveAtUtc)
+                return;
+
+            try
+            {
+                _scripting.KeepAlive();
+                EmitDebug($"Sent SSH keepalive during {operation}.");
+            }
+            catch (Exception ex)
+            {
+                EmitDebug($"Keepalive failed during {operation}: {ex.Message}");
+            }
+            finally
+            {
+                _nextKeepAliveAtUtc = now + _timeouts.KeepAliveInterval;
+            }
+        }
+
         /// <summary>
         /// Escapes control characters for debug display.
         /// </summary>
@@ -1145,7 +1292,28 @@ namespace SSH_Helper.Services
             if (!_disposed)
             {
                 _disposed = true;
-                // Note: We don't dispose the Ssh client or Scripting here as they're owned by the caller/pool
+                try
+                {
+                    _scriptingOwner?.Dispose();
+                }
+                catch
+                {
+                    // Ignore scripting cleanup errors during session disposal.
+                }
+
+                if (!ReferenceEquals(_scriptingOwner, _terminalOwner))
+                {
+                    try
+                    {
+                        _terminalOwner?.Dispose();
+                    }
+                    catch
+                    {
+                        // Ignore terminal cleanup errors during session disposal.
+                    }
+                }
+
+                _commandExecutionLock.Dispose();
             }
         }
     }

@@ -15,58 +15,57 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     public class MultiselectCommand : IScriptCommand
     {
-        public Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
+        public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
         {
             if (step.Multiselect == null)
-                return Task.FromResult(CommandResult.Fail("Multiselect command has no options"));
+                return CommandResult.Fail("Multiselect command has no options");
 
             if (string.IsNullOrEmpty(step.Multiselect.Into))
-                return Task.FromResult(CommandResult.Fail("Multiselect command requires an 'into' property"));
-
-            if (step.Multiselect.Options.Count == 0)
-                return Task.FromResult(CommandResult.Fail("Multiselect command requires at least one option"));
+                return CommandResult.Fail("Multiselect command requires an 'into' property");
 
             try
             {
                 var prompt = context.SubstituteVariables(step.Multiselect.Prompt ?? "Select options:");
+                var title = string.IsNullOrWhiteSpace(step.Multiselect.Title)
+                    ? null
+                    : context.SubstituteVariables(step.Multiselect.Title);
 
-                // Substitute variables in option labels and values
-                var resolvedOptions = new List<ChoiceOption>();
-                foreach (var opt in step.Multiselect.Options)
+                var resolvedOptions = ChoiceOptionResolver.Resolve(
+                    step.Multiselect.Options,
+                    step.Multiselect.OptionsFrom,
+                    context,
+                    out var optionResolveError);
+
+                if (resolvedOptions.Count == 0)
                 {
-                    resolvedOptions.Add(new ChoiceOption
-                    {
-                        Label = context.SubstituteVariables(opt.Label),
-                        Value = context.SubstituteVariables(opt.Value)
-                    });
+                    var error = string.IsNullOrWhiteSpace(optionResolveError)
+                        ? "Multiselect command requires at least one option"
+                        : $"Multiselect command requires at least one option ({optionResolveError})";
+                    return CommandResult.Fail(error);
                 }
 
-                List<string>? selectedValues = null;
-
-                var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
-                if (mainForm != null && mainForm.InvokeRequired)
-                {
-                    mainForm.Invoke(() =>
-                    {
-                        selectedValues = ShowMultiselectDialog(prompt, resolvedOptions, step.Multiselect.Min, step.Multiselect.Max);
-                    });
-                }
-                else
-                {
-                    selectedValues = ShowMultiselectDialog(prompt, resolvedOptions, step.Multiselect.Min, step.Multiselect.Max);
-                }
+                var selectedValues = await ScriptPromptDialogRunner
+                    .ShowAsync<ScriptMultiselectDialog, List<string>?>(
+                        () => new ScriptMultiselectDialog(prompt, resolvedOptions, step.Multiselect.Min, step.Multiselect.Max, title),
+                        dialog => dialog.DialogResult == DialogResult.OK ? dialog.SelectedValues : null,
+                        cancellationToken)
+                    .ConfigureAwait(false);
 
                 if (selectedValues == null)
                 {
                     context.EmitOutput("Selection cancelled by user", ScriptOutputType.Warning);
-                    return Task.FromResult(CommandResult.Fail("Selection cancelled by user"));
+                    return CommandResult.Fail("Selection cancelled by user");
                 }
 
                 context.SetVariable(step.Multiselect.Into, selectedValues);
                 context.SetVariable($"{step.Multiselect.Into}_count", selectedValues.Count.ToString());
                 context.EmitOutput($"Set {step.Multiselect.Into} with {selectedValues.Count} selection(s)", ScriptOutputType.Debug);
 
-                return Task.FromResult(CommandResult.Ok());
+                return CommandResult.Ok();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -74,21 +73,10 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return Task.FromResult(CommandResult.Suppressed(errorMsg));
+                    return CommandResult.Suppressed(errorMsg);
 
-                return Task.FromResult(CommandResult.Fail(errorMsg));
+                return CommandResult.Fail(errorMsg);
             }
-        }
-
-        private static List<string>? ShowMultiselectDialog(string prompt, List<ChoiceOption> options, int? min, int? max)
-        {
-            using var dialog = new ScriptMultiselectDialog(prompt, options, min, max);
-            var result = dialog.ShowDialog();
-
-            if (result == DialogResult.OK)
-                return dialog.SelectedValues;
-
-            return null;
         }
     }
 
@@ -117,7 +105,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
         }
 
-        public ScriptMultiselectDialog(string prompt, List<ChoiceOption> options, int? min, int? max)
+        public ScriptMultiselectDialog(string prompt, List<ChoiceOption> options, int? min, int? max, string? title = null)
         {
             _options = options;
             _min = min;
@@ -127,8 +115,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             var listHeight = Math.Max(visibleItems * 20, 40);
             var formHeight = 165 + listHeight;
 
-            Text = "Script Selection";
+            Text = string.IsNullOrWhiteSpace(title) ? "Script Selection" : title.Trim();
             Size = new Size(400, formHeight);
+            AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;

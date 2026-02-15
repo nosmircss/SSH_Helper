@@ -23,6 +23,7 @@ namespace SSH_Helper.Services.Scripting
     {
         public bool RequiresSshSession { get; set; }
         public bool UsesSftp { get; set; }
+        public bool UsesInteractive { get; set; }
         public bool SftpUsesDefaultHost { get; set; }
         public bool SftpUsesDefaultCredentials { get; set; }
     }
@@ -35,10 +36,11 @@ namespace SSH_Helper.Services.Scripting
     public class ScriptDependencyAnalyzer
     {
         private static readonly Regex VarRefPattern = new(@"\$\{([^}]+)\}|\{\{([^}]+)\}\}", RegexOptions.Compiled);
+        private static readonly Regex BareVariableNamePattern = new(@"^[A-Za-z_]\w*$", RegexOptions.Compiled);
 
         private static readonly HashSet<string> BuiltInVariables = new(StringComparer.OrdinalIgnoreCase)
         {
-            "_output", "_timestamp", "_iteration", "_last_error"
+            "_output", "_timestamp", "_iteration", "_last_error", "_writefile"
         };
 
         /// <summary>
@@ -74,6 +76,7 @@ namespace SSH_Helper.Services.Scripting
 
             // External reads = referenced vars that aren't script-defined
             referencedVars.ExceptWith(definedVars);
+            referencedVars.RemoveWhere(IsRuntimeUnderscoreVariable);
 
             return new ColumnDependencyResult { ReferencedColumns = referencedVars };
         }
@@ -90,6 +93,7 @@ namespace SSH_Helper.Services.Scripting
 
             // Remove built-ins
             referencedVars.ExceptWith(BuiltInVariables);
+            referencedVars.RemoveWhere(IsRuntimeUnderscoreVariable);
 
             return new ColumnDependencyResult { ReferencedColumns = referencedVars };
         }
@@ -149,6 +153,11 @@ namespace SSH_Helper.Services.Scripting
                 {
                     result.RequiresSshSession = true;
                 }
+                else if (stepType == StepType.Interactive)
+                {
+                    result.RequiresSshSession = true;
+                    result.UsesInteractive = true;
+                }
                 else if (stepType == StepType.Sftp)
                 {
                     result.UsesSftp = true;
@@ -185,12 +194,31 @@ namespace SSH_Helper.Services.Scripting
                 if (HasCompleteSshRequirementSignal(result))
                     return;
 
-                if (step.Elif == null)
-                    continue;
-
-                foreach (var branch in step.Elif)
+                if (step.Elif != null)
                 {
-                    AnalyzeSshRequirementsInSteps(branch.Then, result);
+                    foreach (var branch in step.Elif)
+                    {
+                        AnalyzeSshRequirementsInSteps(branch.Then, result);
+                        if (HasCompleteSshRequirementSignal(result))
+                            return;
+                    }
+                }
+
+                // Recurse into switch cases
+                if (step.Cases != null)
+                {
+                    foreach (var switchCase in step.Cases)
+                    {
+                        AnalyzeSshRequirementsInSteps(switchCase.Do, result);
+                        if (HasCompleteSshRequirementSignal(result))
+                            return;
+                    }
+                }
+
+                // Recurse into parallel steps
+                if (step.Parallel?.Steps != null)
+                {
+                    AnalyzeSshRequirementsInSteps(step.Parallel.Steps, result);
                     if (HasCompleteSshRequirementSignal(result))
                         return;
                 }
@@ -199,6 +227,9 @@ namespace SSH_Helper.Services.Scripting
 
         private static bool HasCompleteSshRequirementSignal(SshRequirementResult result)
         {
+            if (result.UsesInteractive)
+                return true;
+
             return result.RequiresSshSession
                 && result.UsesSftp
                 && result.SftpUsesDefaultHost
@@ -217,6 +248,14 @@ namespace SSH_Helper.Services.Scripting
                 {
                     case StepType.Send:
                         ExtractVarReferences(step.Send, referencedVars);
+                        if (step.Respond != null)
+                        {
+                            foreach (var pair in step.Respond)
+                            {
+                                ExtractVarReferences(pair.Expect, referencedVars);
+                                ExtractVarReferences(pair.Reply, referencedVars);
+                            }
+                        }
                         if (!string.IsNullOrEmpty(step.Capture))
                             definedVars.Add(step.Capture);
                         break;
@@ -316,6 +355,7 @@ namespace SSH_Helper.Services.Scripting
                         {
                             ExtractVarReferences(step.Choose.Prompt, referencedVars);
                             ExtractVarReferences(step.Choose.Default, referencedVars);
+                            AnalyzeChoiceOptionsSourceReference(step.Choose.OptionsFrom, referencedVars);
                             foreach (var opt in step.Choose.Options)
                             {
                                 ExtractVarReferences(opt.Label, referencedVars);
@@ -330,6 +370,7 @@ namespace SSH_Helper.Services.Scripting
                         if (step.Multiselect != null)
                         {
                             ExtractVarReferences(step.Multiselect.Prompt, referencedVars);
+                            AnalyzeChoiceOptionsSourceReference(step.Multiselect.OptionsFrom, referencedVars);
                             foreach (var opt in step.Multiselect.Options)
                             {
                                 ExtractVarReferences(opt.Label, referencedVars);
@@ -349,6 +390,19 @@ namespace SSH_Helper.Services.Scripting
                             ExtractVarReferences(step.Confirm.Prompt, referencedVars);
                             if (!string.IsNullOrEmpty(step.Confirm.Into))
                                 definedVars.Add(step.Confirm.Into);
+                        }
+                        break;
+
+                    case StepType.Interactive:
+                        if (step.Interactive != null)
+                        {
+                            ExtractVarReferences(step.Interactive.Title, referencedVars);
+                            ExtractVarReferences(step.Interactive.Command, referencedVars);
+                            ExtractVarReferences(step.Interactive.Capture, referencedVars);
+
+                            var captureVariable = step.Interactive.Capture?.Trim();
+                            if (!string.IsNullOrWhiteSpace(captureVariable) && BareVariableNamePattern.IsMatch(captureVariable))
+                                definedVars.Add(captureVariable);
                         }
                         break;
 
@@ -486,6 +540,43 @@ namespace SSH_Helper.Services.Scripting
                                 definedVars.Add(step.Parse.Into);
                         }
                         break;
+
+                    case StepType.Assert:
+                        if (step.Assert != null)
+                        {
+                            ExtractVarReferences(step.Assert.Condition, referencedVars);
+                            ExtractVarReferences(step.Assert.Message, referencedVars);
+                        }
+                        break;
+
+                    case StepType.Switch:
+                        ExtractVarReferences(step.Switch, referencedVars);
+                        if (step.Cases != null)
+                        {
+                            foreach (var switchCase in step.Cases)
+                            {
+                                ExtractVarReferences(switchCase.Value, referencedVars);
+                                if (switchCase.Do != null)
+                                    AnalyzeSteps(switchCase.Do, definedVars, referencedVars);
+                            }
+                        }
+                        if (step.Else != null)
+                            AnalyzeSteps(step.Else, definedVars, referencedVars);
+                        break;
+
+                    case StepType.Parallel:
+                        if (step.Parallel?.Steps != null)
+                            AnalyzeSteps(step.Parallel.Steps, definedVars, referencedVars);
+                        break;
+
+                    case StepType.Table:
+                        if (step.Table != null)
+                        {
+                            ExtractVarReferences(step.Table.Data, referencedVars);
+                            if (!string.IsNullOrEmpty(step.Table.Into))
+                                definedVars.Add(step.Table.Into);
+                        }
+                        break;
                 }
             }
         }
@@ -608,6 +699,33 @@ namespace SSH_Helper.Services.Scripting
         {
             if (string.IsNullOrWhiteSpace(varName)) return;
             references.Add(varName.Trim());
+        }
+
+        private static void AnalyzeChoiceOptionsSourceReference(string? source, HashSet<string> references)
+        {
+            if (string.IsNullOrWhiteSpace(source))
+                return;
+
+            ExtractVarReferences(source, references);
+
+            var trimmed = source.Trim();
+            if (trimmed.Length == 0)
+                return;
+
+            if (BareVariableNamePattern.IsMatch(trimmed))
+            {
+                AddBareVarReference(trimmed, references);
+            }
+        }
+
+        private static bool IsRuntimeUnderscoreVariable(string variableName)
+        {
+            if (string.IsNullOrWhiteSpace(variableName))
+                return false;
+
+            var trimmed = variableName.Trim();
+            return trimmed.StartsWith("_", StringComparison.Ordinal)
+                && BareVariableNamePattern.IsMatch(trimmed);
         }
     }
 }

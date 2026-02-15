@@ -24,6 +24,7 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [choose](#choose---single-select-from-list)
    - [multiselect](#multiselect---multiple-select-from-list)
    - [confirm](#confirm---yesno-confirmation)
+   - [interactive](#interactive---in-app-ssh-terminal)
    - [updatecolumn](#updatecolumn---update-host-table-column)
    - [updateenvironment](#updateenvironment---update-active-environment-variable)
    - [log](#log---output-with-log-level)
@@ -33,6 +34,10 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [portcheck](#portcheck---tcp-port-checks)
    - [sftp](#sftp---sftp-upload-and-download)
    - [webhook](#webhook---legacy-http-requests)
+   - [assert](#assert---validate-conditions)
+   - [switch](#switch---multi-branch-dispatch)
+   - [parallel](#parallel---concurrent-execution)
+   - [table](#table---formatted-table-output)
    - [parse](#parse---configuration-parsing)
 3. [Variables](#variables)
 4. [Expressions and Conditions](#expressions-and-conditions)
@@ -71,7 +76,7 @@ steps:                           # Required: list of execution steps
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
 
 Metadata-only keys (for example `name:` or `description:`) are not treated as strong YAML indicators by themselves.
 
@@ -105,9 +110,14 @@ Executes a command on the SSH session.
     expect: '/regex_pattern/'   # Regex to wait for in output
     timeout: 30                 # Timeout in seconds for this command
     on_error: continue          # continue or stop (default)
+    retry: 3                    # Retry up to N times on failure
+    retry_delay: 2              # Seconds between retries (default: 1)
+    respond:                    # Interactive prompt/response pairs
+      - expect: "pattern"
+        reply: "response"
 ```
 
-Use the map form when you need options (`capture`, `suppress`, `expect`, `timeout`, `on_error`).
+Use the map form when you need options (`capture`, `suppress`, `expect`, `timeout`, `on_error`, `retry`, `respond`).
 
 **Options:**
 
@@ -118,10 +128,15 @@ Use the map form when you need options (`capture`, `suppress`, `expect`, `timeou
 | `expect` | string | Regex pattern to wait for in output (case-insensitive, multiline). When matched, the send completes immediately. |
 | `timeout` | integer | Command-specific timeout in seconds |
 | `on_error` | string | `continue` to proceed on error, `stop` to halt (default) |
+| `retry` | integer | Number of times to retry the step on failure (default: 0) |
+| `retry_delay` | integer | Seconds to wait between retries (default: 1) |
+| `respond` | list | Sequence of expect/reply pairs for interactive prompts |
 
 **Notes:**
 - `expect` supports `/pattern/`, `"pattern"`, or `'pattern'` delimiters (they are stripped automatically).
 - When `expect` is set, the command stops as soon as the pattern matches; it does not automatically wait for the prompt. Omit `expect` to wait for the prompt, or include the prompt in your regex if needed.
+- `respond` is for multi-step interactive commands where you need to send replies to successive prompts. Each pair has an `expect` pattern and a `reply` to send when matched.
+- Every `respond` entry must include both `expect` and `reply`; incomplete entries fail script validation.
 
 **Examples:**
 ```yaml
@@ -154,6 +169,25 @@ Use the map form when you need options (`capture`, `suppress`, `expect`, `timeou
     command: ping 192.168.1.1 count 3
     on_error: continue
     capture: ping_result
+
+# Retry a flaky command up to 3 times
+- send:
+    command: curl -s http://unstable-api/health
+    retry: 3
+    retry_delay: 2
+    capture: health_check
+
+# Interactive prompts with respond pairs
+- send:
+    command: adduser newuser
+    respond:
+      - expect: "Enter password:"
+        reply: "${user_password}"
+      - expect: "Confirm password:"
+        reply: "${user_password}"
+      - expect: "Full Name:"
+        reply: "New User"
+    capture: adduser_output
 ```
 
 ---
@@ -261,6 +295,13 @@ Sets or modifies variable values with expression support.
 | substring() | `part = substring(text, 0, 5)` | Extract string segment |
 | sort() | `sorted = sort(arr, "desc")` | Sort list values |
 | push() | `arr = push(arr, item)` | Add item to array |
+| unshift() | `arr = unshift(arr, item)` | Prepend item to list |
+| pop() | `last = pop(arr)` | Remove and return last list item |
+| shift() | `first = shift(arr)` | Remove and return first list item |
+| first() | `first = first(arr)` | Get first list item (non-destructive) |
+| last() | `last = last(arr)` | Get last list item (non-destructive) |
+| indexof() | `idx = indexof(arr, value)` | Find item index in list |
+| concat() | `all = concat(arr1, arr2)` | Combine multiple lists |
 | json() | `obj = json("k1", v1, "k2", v2)` | Create JSON object or array |
 | json.get() | `val = json.get(data, "path", default)` | Extract value with optional default |
 | json.set() | `obj = json.set(obj, "path", value)` | Set value at path |
@@ -326,6 +367,24 @@ Sets or modifies variable values with expression support.
     expression: results = push(results, ${Host_IP})
 - set:
     expression: results = push(results, ${status})
+
+# Prepend and remove values
+- set:
+    expression: results = unshift(results, "any")
+- set:
+    expression: last_result = pop(results)
+- set:
+    expression: first_result = shift(results)
+
+# Read-only helpers
+- set:
+    expression: first_view = first(results)
+- set:
+    expression: last_view = last(results)
+- set:
+    expression: status_index = indexof(results, "up")
+- set:
+    expression: combined = concat(results, other_results)
 
 # Get array length
 - set:
@@ -1258,7 +1317,7 @@ Writes content to a text file. Supports multiple formats including text, JSON, J
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `path` | Yes | - | Path to the file (supports variable substitution) |
+| `path` | Yes | - | Path to the file (supports variable substitution). If not fully qualified, the user is prompted to choose a save location at runtime |
 | `content` | No | `""` | Content to write (use `${varname}` for variables) |
 | `mode` | No | `overwrite` | Write mode: `overwrite` or `append` |
 | `format` | No | `text` | Output format: `text`, `json`, `jsonl`, or `csv` |
@@ -1269,6 +1328,10 @@ Writes content to a text file. Supports multiple formats including text, JSON, J
 - **Blocked paths**: Cannot write to system directories or Program Files
 - **Blocked extensions**: Cannot write executable files (`.exe`, `.dll`, `.bat`, `.ps1`, `.cmd`, etc.)
 - **Allowed paths**: User profile, Documents, Desktop, AppData, Temp only
+
+**Runtime Variable:**
+- On successful write, `writefile` sets `_writefile` to the fully resolved file path.
+- You can reference it in later steps using `${_writefile}` or `{{_writefile}}`.
 
 **Format Details:**
 
@@ -1286,6 +1349,8 @@ Writes content to a text file. Supports multiple formats including text, JSON, J
     path: "C:\\Users\\me\\output.log"
     content: "${_timestamp} - Processed ${Host_IP}: ${status}"
     mode: append
+- print:
+    message: "File written to {{_writefile}}"
 
 # Overwrite a file
 - writefile:
@@ -1429,6 +1494,7 @@ Prompts the user for input during script execution with optional validation.
 **Syntax:**
 ```yaml
 - input:
+    title: "Input Required"       # Optional custom dialog title
     prompt: "Enter value:"
     into: variable_name
     default: "default_value"   # Optional
@@ -1441,6 +1507,7 @@ Prompts the user for input during script execution with optional validation.
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
+| `title` | No | `"Script Input"` | Custom dialog window title |
 | `prompt` | No | `"Enter value:"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store the input |
 | `default` | No | `""` | Default value pre-filled in the input |
@@ -1452,7 +1519,7 @@ Prompts the user for input during script execution with optional validation.
 - Dialog appears during script execution
 - User can cancel (script will fail unless `on_error: continue`)
 - Validation prevents submission until input matches pattern
-- Variables can be used in `prompt` and `default`
+- Variables can be used in `title`, `prompt`, and `default`
 
 **Examples:**
 ```yaml
@@ -1510,11 +1577,14 @@ Prompts the user to select one option from a list during script execution.
 **Syntax:**
 ```yaml
 - choose:
+    title: "Role Selection"           # Optional custom dialog title
     prompt: "Select an option:"
     into: variable_name
     options:
       - option1
       - option2
+    # or: options: interface_list
+    # or: options: ${interface_list}
     default: "option1"             # Optional
 ```
 
@@ -1535,17 +1605,19 @@ Prompts the user to select one option from a list during script execution.
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
+| `title` | No | `"Script Choice"` | Custom dialog window title |
 | `prompt` | No | `"Select an option:"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store the selected value |
-| `options` | Yes | - | List of options (strings or label/value pairs) |
+| `options` | Yes | - | Inline list of options OR a variable/expression that resolves to a list |
 | `default` | No | - | Pre-selected option (matched against values) |
 
 **Features:**
 - Options can be simple strings (label and value are the same) or label/value pairs
+- `options` can come from a runtime list variable (for example `options: interface_list`)
 - Dialog appears during script execution with a selection list
 - Double-click selects and confirms
 - User can cancel (script will fail unless `on_error: continue`)
-- Variables can be used in `prompt`, `default`, and option labels/values
+- Variables can be used in `title`, `prompt`, `default`, and option labels/values
 
 **Examples:**
 ```yaml
@@ -1586,6 +1658,12 @@ Prompts the user to select one option from a list during script execution.
       - primary
       - secondary
       - standby
+
+# Options from a variable list
+- choose:
+    prompt: "Select interface:"
+    into: selected_interface
+    options: interface_list
 ```
 
 ---
@@ -1597,12 +1675,15 @@ Prompts the user to select multiple options from a checklist during script execu
 **Syntax:**
 ```yaml
 - multiselect:
+    title: "Select Targets"          # Optional custom dialog title
     prompt: "Select options:"
     into: variable_name
     options:
       - option1
       - option2
       - option3
+    # or: options: interface_list
+    # or: options: ${interface_list}
     min: 1                         # Optional: minimum selections
     max: 3                         # Optional: maximum selections
 ```
@@ -1611,9 +1692,10 @@ Prompts the user to select multiple options from a checklist during script execu
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
+| `title` | No | `"Script Selection"` | Custom dialog window title |
 | `prompt` | No | `"Select options:"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store selected values |
-| `options` | Yes | - | List of options (strings or label/value pairs) |
+| `options` | Yes | - | Inline list of options OR a variable/expression that resolves to a list |
 | `min` | No | - | Minimum number of selections required |
 | `max` | No | - | Maximum number of selections allowed |
 
@@ -1623,8 +1705,9 @@ Prompts the user to select multiple options from a checklist during script execu
 - `${into}` in print renders as comma-separated text
 - Works with `foreach: item in ${into}` for iteration
 - Supports label/value pairs (same as choose)
+- `options` can come from a runtime list variable (for example `options: interface_list`)
 - User can cancel (script will fail unless `on_error: continue`)
-- Variables can be used in `prompt` and option labels/values
+- Variables can be used in `title`, `prompt`, and option labels/values
 
 **Examples:**
 ```yaml
@@ -1678,6 +1761,7 @@ Prompts the user with a yes/no confirmation dialog during script execution.
 **Syntax:**
 ```yaml
 - confirm:
+    title: "Final Confirmation"      # Optional custom dialog title
     prompt: "Are you sure?"
     into: variable_name
     default: false                 # Optional (default: false)
@@ -1687,6 +1771,7 @@ Prompts the user with a yes/no confirmation dialog during script execution.
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
+| `title` | No | `"Script Confirmation"` | Custom dialog window title |
 | `prompt` | No | `"Are you sure?"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store result (`"true"` or `"false"`) |
 | `default` | No | `false` | Which button is focused: `true` = Yes, `false` = No |
@@ -1696,7 +1781,7 @@ Prompts the user with a yes/no confirmation dialog during script execution.
 - Default controls which button is pre-focused
 - Escape key acts as No
 - Confirm never fails — it always stores a value (unlike `input` which fails on cancel)
-- Variables can be used in `prompt`
+- Variables can be used in `title` and `prompt`
 
 **Examples:**
 ```yaml
@@ -1740,6 +1825,111 @@ Prompts the user with a yes/no confirmation dialog during script execution.
     then:
       - exit:
           message: "Deletion cancelled"
+```
+
+---
+
+### interactive - In-App SSH Terminal
+
+Opens an in-app SSH terminal window.
+
+- In normal mode (no `command`), the script pauses until the terminal window is closed.
+- In capture mode (`command` set), the command auto-runs and the step completes on Ctrl+C/timeout/natural completion/early close.
+- Set `show_window: false` for headless capture when no terminal UI should be displayed.
+- Window size defaults to `980x620` pixels and can be overridden with `width`/`height`.
+
+**Syntax (map only):**
+```yaml
+# Normal interactive terminal
+- interactive:
+    session: separate
+    title: "Troubleshooting Session"
+    width: 1200
+    height: 760
+    on_error: stop
+
+# Capture mode (long-running command)
+- interactive:
+    session: separate
+    title: "Sniffer - ${Host_IP}"
+    command: "diagnose sniffer packet any 'host 10.0.0.1' 4 10 a"
+    capture: sniffer_output
+    max_seconds: 120
+    max_lines: 500
+    width: 980
+    height: 620
+    show_window: true
+    mirror_output: false
+    on_error: stop
+```
+
+**Important behavior:**
+- `interactive` is map-only. Scalar shorthand (for example `- interactive`) is invalid.
+- `session: separate` opens a new SSH terminal connection using current host credentials/settings.
+- `session: shared` attaches to the active script SSH session. If unavailable, the step fails with `InteractiveSharedUnavailable`.
+- `title` overrides the window caption. If omitted, a host-based default title is used.
+- `width`/`height` set the interactive window size in pixels (`Size.Width`/`Size.Height`) for `session: separate`.
+- Shared mode currently ignores `width`/`height` and uses the shared interactive window defaults.
+- Legacy `columns`/`rows` are still accepted for separate mode terminal grid sizing but deprecated.
+- In `session: shared`, pressing `Ctrl+D` closes only the interactive window and does not send EOF to the shared SSH shell.
+- In `session: shared`, pressing Enter on `exit` or `logout` closes the interactive window (detach) and does not execute those commands on the shared SSH session.
+- Capture mode (`command`) is `session: separate` only.
+- `show_window: false` is capture-only and requires `command` plus at least one limiter: `max_seconds` or `max_lines`.
+- In capture mode, the command is auto-sent once the terminal is ready.
+- In capture mode with `show_window: true`, `Ctrl+C` (or timeout auto-Ctrl+C) completes the step and script continues while the terminal window remains open as detached read-only for copy/review.
+- In capture mode with `show_window: false`, the step completes headlessly with no detached window.
+- `max_lines` auto-sends Ctrl+C after the captured transcript reaches the specified line count.
+- In capture mode, closing the window before completion succeeds with a partial transcript.
+- Capture transcript is written only when `capture` is set.
+- Stop/cancel while terminal is open force-closes the terminal/session and cancels script execution.
+- `interactive` is single-host only:
+  - Multi-host script runs are rejected in preflight.
+  - Folder runs are rejected in preflight.
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `session` | No | `separate` | Session model: `separate` or `shared` |
+| `title` | No | host-based default | Custom interactive window title text |
+| `command` | No | - | Enables capture mode and auto-runs this command in the interactive terminal |
+| `capture` | No | - | Variable name to receive the captured transcript at step completion |
+| `max_seconds` | No | - | Positive timeout in seconds; auto-sends Ctrl+C when reached |
+| `max_lines` | No | - | Positive line limit; auto-sends Ctrl+C when captured line count reaches this value |
+| `width` | No | `980` | Positive interactive window width in pixels (separate mode) |
+| `height` | No | `620` | Positive interactive window height in pixels (separate mode) |
+| `show_window` | No | `true` | When `false`, runs capture mode headlessly (no interactive window) |
+| `mirror_output` | No | `false` | Mirrors live captured chunks into script output while capture is running |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+
+When `show_window: false`, set `max_seconds` and/or `max_lines`.
+
+**Examples:**
+```yaml
+# Separate connection (defaults)
+- interactive: {}
+
+# Shared session
+- interactive:
+    session: shared
+    on_error: continue
+
+# Tcpdump/sniffer style capture until Ctrl+C
+- input:
+    prompt: "Enter sniffer filter:"
+    into: filter
+- set:
+    expression: sniffer_command = "diagnose sniffer packet any '${filter}' 4 10 a"
+- interactive:
+    session: separate
+    command: "${sniffer_command}"
+    capture: sniffer_output
+    max_seconds: 300
+    max_lines: 1000
+    show_window: false
+    mirror_output: true
+- print:
+    message: "Captured output length: ${sniffer_output.length}"
 ```
 
 ---
@@ -2286,6 +2476,318 @@ When using the `into` parameter, two variables are created:
 - URLs must use `http://` or `https://` protocol
 - Consider using `on_error: continue` when webhook failures shouldn't stop script execution
 - Sensitive data in headers (like API keys) should be stored in script variables or CSV columns, not hardcoded
+
+---
+
+### assert - Validate Conditions
+
+Validates that a condition is true. Useful for adding guardrails and sanity checks to scripts.
+
+**Shorthand Syntax:**
+```yaml
+- assert: "condition_expression"
+```
+
+**Full Syntax:**
+```yaml
+- assert:
+    condition: "condition_expression"
+    message: "Error message if assertion fails"
+    severity: error          # error (stops script) or warning (continues)
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `condition` | string | (required) | Expression to evaluate (same syntax as `if` conditions) |
+| `message` | string | `"Assertion failed: {condition}"` | Custom failure message. Supports `${variable}` substitution. |
+| `severity` | string | `error` | `error` stops script execution; `warning` logs a warning and continues |
+
+**Examples:**
+```yaml
+# Simple assertion
+- assert: "hostname is not empty"
+
+# Assert with custom message
+- assert:
+    condition: "status == 'up'"
+    message: "Host ${Host_IP} is down, expected 'up' but got '${status}'"
+
+# Warning-level assertion (continues execution)
+- assert:
+    condition: "latency < 100"
+    message: "High latency detected: ${latency}ms"
+    severity: warning
+
+# Validate setup before proceeding
+- send:
+    command: show version
+    capture: version_output
+- assert:
+    condition: "version_output contains 'FortiOS'"
+    message: "Not a FortiGate device - aborting"
+```
+
+---
+
+### switch - Multi-Branch Dispatch
+
+Dispatches execution based on a value matching one of several cases. More readable than chained `if` statements when comparing against multiple values.
+
+**Syntax:**
+```yaml
+- switch: "${variable}"
+  cases:
+    - value: "match1"
+      do:
+        - # steps when value matches "match1"
+    - value: "match2"
+      do:
+        - # steps when value matches "match2"
+  else:
+    - # steps when no case matches (default branch)
+```
+
+**Options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `switch` | string | The value to compare against cases. Supports `${variable}` substitution. |
+| `cases` | list | Sequence of case entries, each with `value` and `do` |
+| `else` | list | Default steps when no case matches (optional) |
+
+**Case Matching:**
+- Comparison is **case-insensitive** (`"WARNING"` matches `"warning"`)
+- Prefix a case value with `matches` to use regex matching: `value: "matches ^v2\\."`
+- First matching case wins; subsequent cases are skipped
+
+**Examples:**
+```yaml
+# Basic string dispatch
+- switch: "${os_type}"
+  cases:
+    - value: linux
+      do:
+        - send:
+            command: uname -a
+            capture: sys_info
+    - value: fortigate
+      do:
+        - send:
+            command: get system status
+            capture: sys_info
+    - value: cisco
+      do:
+        - send:
+            command: show version
+            capture: sys_info
+  else:
+    - print:
+        message: "Unknown OS type: ${os_type}"
+
+# Switch with regex matching
+- switch: "${firmware_version}"
+  cases:
+    - value: "matches ^7\\.0"
+      do:
+        - print:
+            message: "FortiOS 7.0.x detected"
+    - value: "matches ^7\\.2"
+      do:
+        - print:
+            message: "FortiOS 7.2.x detected"
+  else:
+    - print:
+        message: "Unsupported version: ${firmware_version}"
+
+# Switch on status codes
+- switch: "${http_status}"
+  cases:
+    - value: "200"
+      do:
+        - log:
+            message: "API healthy"
+            level: success
+    - value: "503"
+      do:
+        - log:
+            message: "Service unavailable"
+            level: warning
+  else:
+    - log:
+        message: "Unexpected status: ${http_status}"
+        level: error
+```
+
+---
+
+### parallel - Concurrent Execution
+
+Executes multiple steps concurrently. Useful for running independent operations (like pinging multiple hosts or gathering data from different sources) in parallel.
+
+**Syntax:**
+```yaml
+- parallel:
+    steps:
+      - # step 1
+      - # step 2
+      - # step 3
+    max_concurrent: 3      # Optional: limit concurrent steps (0 = unlimited)
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `steps` | list | (required) | List of steps to execute concurrently |
+| `max_concurrent` | integer | `0` (unlimited) | Maximum number of steps running at the same time |
+
+**Notes:**
+- All parallel steps share the same script context. Variable writes use last-write-wins semantics for concurrent updates.
+- If any step fails (and doesn't have `on_error: continue`), the parallel block returns the first failure.
+- Steps that don't require SSH (like `set`, `print`) also work in parallel.
+- `break` and `continue` raised inside a parallel child step propagate to the enclosing loop.
+- `send` steps running in parallel on the same SSH session are serialized for stream safety.
+
+**Examples:**
+```yaml
+# Run multiple checks simultaneously
+- parallel:
+    steps:
+      - ping:
+          target: "${Host_IP}"
+          capture: ping_result
+      - portcheck:
+          host: "${Host_IP}"
+          port: 443
+          capture: https_check
+      - dns:
+          query: "${Host_IP}"
+          type: PTR
+          capture: ptr_record
+
+# Limit concurrency for resource-intensive operations
+- parallel:
+    max_concurrent: 2
+    steps:
+      - send:
+          command: show running-config
+          capture: config1
+      - send:
+          command: show tech-support
+          capture: tech_support
+      - send:
+          command: show log
+          capture: logs
+
+# Parallel variable computation
+- parallel:
+    steps:
+      - set:
+          expression: "val_a = 100"
+      - set:
+          expression: "val_b = 200"
+      - set:
+          expression: "val_c = 300"
+- set:
+    expression: "total = val_a + val_b + val_c"
+- print:
+    message: "Total: ${total}"
+```
+
+---
+
+### table - Formatted Table Output
+
+Formats data into aligned columns for display. Supports lists, JSON arrays, and newline-delimited strings.
+
+**Syntax:**
+```yaml
+- table:
+    data: "${variable}"
+    columns:                    # Optional: explicit column definitions
+      - header: "Column Name"
+        field: "field_name"     # Key in data objects (defaults to header)
+        align: left             # left, right, or center
+        width: 15               # Fixed width (auto-sized if omitted)
+    into: formatted_output      # Optional: capture formatted text
+    align: left                 # Default alignment for all columns
+    show_header: true           # Show header row and separator (default: true)
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `data` | string | (required) | Variable reference containing the data to display |
+| `columns` | list | auto-detect | Column definitions with header, field, align, and width |
+| `into` | string | — | Variable name to capture the formatted table text |
+| `align` | string | `left` | Default alignment: `left`, `right`, or `center` |
+| `show_header` | boolean | `true` | Whether to show the header row and separator line |
+
+**Data Formats:**
+- **List of strings**: Displayed as a single column (header defaults to source variable name, with `Value` as fallback)
+- **JSON array of objects**: Each object becomes a row; keys become column headers
+- **Newline-delimited string**: Each line becomes a row in a single column (same header behavior as lists)
+
+**Examples:**
+```yaml
+# Table from a JSON array
+- set:
+    expression: 'json_data = "[{\"host\":\"10.0.1.1\",\"status\":\"up\",\"latency\":\"12ms\"},{\"host\":\"10.0.1.2\",\"status\":\"up\",\"latency\":\"8ms\"},{\"host\":\"10.0.1.3\",\"status\":\"down\",\"latency\":\"-\"}]"'
+- table:
+    data: "${json_data}"
+# Output:
+#   host      status  latency
+#   --------  ------  -------
+#   10.0.1.1  up      12ms
+#   10.0.1.2  up      8ms
+#   10.0.1.3  down    -
+
+# Table with explicit columns and alignment
+- table:
+    data: "${json_data}"
+    columns:
+      - header: Host
+        field: host
+        width: 15
+      - header: Status
+        field: status
+        align: center
+      - header: Latency
+        field: latency
+        align: right
+
+# Capture formatted table into variable
+- table:
+    data: "${json_data}"
+    into: report_text
+- writefile:
+    path: "C:\\reports\\status.txt"
+    content: "${report_text}"
+
+# Table from a simple list
+- set:
+    expression: "servers = push(servers, web-01)"
+- set:
+    expression: "servers = push(servers, web-02)"
+- set:
+    expression: "servers = push(servers, db-01)"
+- table:
+    data: "${servers}"
+# Output:
+#   servers
+#   ------
+#   web-01
+#   web-02
+#   db-01
+
+# Table without headers
+- table:
+    data: "${servers}"
+    show_header: false
+```
 
 ---
 
@@ -2883,7 +3385,41 @@ For map-style steps (`http`, `ping`, `dns`, `portcheck`, `sftp`, `webhook`), nes
           message: failure "Command failed"
 ```
 
-### Retry Pattern
+### Built-in Retry
+
+Any step can be retried automatically using the `retry` and `retry_delay` options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `retry` | integer | `0` | Number of times to retry the step on failure |
+| `retry_delay` | integer | `1` | Seconds to wait between retries |
+
+```yaml
+# Retry a flaky command 3 times with 2-second delays
+- send:
+    command: curl -s http://api/health
+    retry: 3
+    retry_delay: 2
+    capture: health
+
+# Retry with on_error: continue (error suppressed only after all retries fail)
+- send:
+    command: ping -c 1 unstable-host
+    retry: 2
+    retry_delay: 5
+    on_error: continue
+    capture: ping_result
+```
+
+**Behavior:**
+- On each failure, the step is retried after the delay period
+- During retries, `on_error` is temporarily set to `stop` so failures surface for retry logic
+- On the final attempt, the original `on_error` value is restored
+- If the step succeeds on any attempt, execution continues normally
+
+### Manual Retry Pattern
+
+For more complex retry logic (e.g., conditional retries), use a `while` loop:
 
 ```yaml
 - set:

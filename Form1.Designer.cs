@@ -142,6 +142,8 @@ namespace SSH_Helper
             hostListPanel = new Panel();
             lstHosts = new ListBox();
             contextHostLst = new ContextMenuStrip(components);
+            viewHostDetailsToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparatorHostDetails = new ToolStripSeparator();
             exportHostOutputToolStripMenuItem = new ToolStripMenuItem();
             hostHeaderPanel = new Panel();
             lblHostsListTitle = new Label();
@@ -183,9 +185,11 @@ namespace SSH_Helper
             editToolStripMenuItem = new ToolStripMenuItem();
             findToolStripMenuItem = new ToolStripMenuItem();
             validateScriptToolStripMenuItem = new ToolStripMenuItem();
+#if DEBUG
+            memoryDebuggerToolStripMenuItem = new ToolStripMenuItem();
+#endif
             toolStripSeparatorEdit1 = new ToolStripSeparator();
             debugModeToolStripMenuItem = new ToolStripMenuItem();
-            sshDebugModeToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             documentationToolStripMenuItem = new ToolStripMenuItem();
             scriptingDocumentationToolStripMenuItem = new ToolStripMenuItem();
@@ -1179,9 +1183,22 @@ namespace SSH_Helper
             //
             // contextHostLst
             //
-            contextHostLst.Items.AddRange(new ToolStripItem[] { exportHostOutputToolStripMenuItem });
+            contextHostLst.Items.AddRange(new ToolStripItem[] { viewHostDetailsToolStripMenuItem, toolStripSeparatorHostDetails, exportHostOutputToolStripMenuItem });
             contextHostLst.Name = "contextHostLst";
-            contextHostLst.Size = new Size(181, 48);
+            contextHostLst.Size = new Size(181, 76);
+            contextHostLst.Opening += contextHostLst_Opening;
+            //
+            // viewHostDetailsToolStripMenuItem
+            //
+            viewHostDetailsToolStripMenuItem.Name = "viewHostDetailsToolStripMenuItem";
+            viewHostDetailsToolStripMenuItem.Size = new Size(180, 22);
+            viewHostDetailsToolStripMenuItem.Text = "View Details...";
+            viewHostDetailsToolStripMenuItem.Click += viewHostDetailsToolStripMenuItem_Click;
+            //
+            // toolStripSeparatorHostDetails
+            //
+            toolStripSeparatorHostDetails.Name = "toolStripSeparatorHostDetails";
+            toolStripSeparatorHostDetails.Size = new Size(177, 6);
             //
             // exportHostOutputToolStripMenuItem
             //
@@ -1499,7 +1516,11 @@ namespace SSH_Helper
             // 
             // editToolStripMenuItem
             // 
-            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, validateScriptToolStripMenuItem, toolStripSeparatorEdit1, debugModeToolStripMenuItem, sshDebugModeToolStripMenuItem });
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, validateScriptToolStripMenuItem,
+#if DEBUG
+                memoryDebuggerToolStripMenuItem,
+#endif
+                toolStripSeparatorEdit1, debugModeToolStripMenuItem });
             editToolStripMenuItem.Name = "editToolStripMenuItem";
             editToolStripMenuItem.Size = new Size(39, 20);
             editToolStripMenuItem.Text = "&Edit";
@@ -1508,7 +1529,7 @@ namespace SSH_Helper
             // 
             findToolStripMenuItem.Name = "findToolStripMenuItem";
             findToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.F;
-            findToolStripMenuItem.Size = new Size(146, 22);
+            findToolStripMenuItem.Size = new Size(188, 22);
             findToolStripMenuItem.Text = "&Find...";
             findToolStripMenuItem.Click += findToolStripMenuItem_Click;
             // 
@@ -1516,32 +1537,32 @@ namespace SSH_Helper
             // 
             validateScriptToolStripMenuItem.Name = "validateScriptToolStripMenuItem";
             validateScriptToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.V;
-            validateScriptToolStripMenuItem.Size = new Size(146, 22);
+            validateScriptToolStripMenuItem.Size = new Size(188, 22);
             validateScriptToolStripMenuItem.Text = "Validate &Script...";
             validateScriptToolStripMenuItem.Click += validateScriptToolStripMenuItem_Click;
+#if DEBUG
+            //
+            // memoryDebuggerToolStripMenuItem
+            //
+            memoryDebuggerToolStripMenuItem.Name = "memoryDebuggerToolStripMenuItem";
+            memoryDebuggerToolStripMenuItem.Size = new Size(188, 22);
+            memoryDebuggerToolStripMenuItem.Text = "&Memory Debugger...";
+            memoryDebuggerToolStripMenuItem.Click += memoryDebuggerToolStripMenuItem_Click;
+#endif
             // 
             // toolStripSeparatorEdit1
             // 
             toolStripSeparatorEdit1.Name = "toolStripSeparatorEdit1";
-            toolStripSeparatorEdit1.Size = new Size(143, 6);
+            toolStripSeparatorEdit1.Size = new Size(185, 6);
             // 
             // debugModeToolStripMenuItem
             // 
             debugModeToolStripMenuItem.CheckOnClick = true;
             debugModeToolStripMenuItem.Name = "debugModeToolStripMenuItem";
-            debugModeToolStripMenuItem.Size = new Size(146, 22);
+            debugModeToolStripMenuItem.Size = new Size(188, 22);
             debugModeToolStripMenuItem.Text = "&Debug Mode";
-            debugModeToolStripMenuItem.ToolTipText = "When enabled, shows timestamps and diagnostic info to help troubleshoot prompt detection";
+            debugModeToolStripMenuItem.ToolTipText = "When enabled, shows diagnostic info including prompt detection details and execution timing";
             debugModeToolStripMenuItem.CheckedChanged += debugModeToolStripMenuItem_CheckedChanged;
-            //
-            // sshDebugModeToolStripMenuItem
-            //
-            sshDebugModeToolStripMenuItem.CheckOnClick = true;
-            sshDebugModeToolStripMenuItem.Name = "sshDebugModeToolStripMenuItem";
-            sshDebugModeToolStripMenuItem.Size = new Size(146, 22);
-            sshDebugModeToolStripMenuItem.Text = "&SSH Debug";
-            sshDebugModeToolStripMenuItem.ToolTipText = "When enabled, logs detailed timing info from button click through SSH connection to help diagnose startup delays";
-            sshDebugModeToolStripMenuItem.CheckedChanged += sshDebugModeToolStripMenuItem_CheckedChanged;
             //
             // helpToolStripMenuItem
             // 
@@ -1795,6 +1816,8 @@ namespace SSH_Helper
         private Label lblHostsListTitle;
         private ListBox lstHosts;
         private ContextMenuStrip contextHostLst;
+        private ToolStripMenuItem viewHostDetailsToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparatorHostDetails;
         private ToolStripMenuItem exportHostOutputToolStripMenuItem;
 
         // Status bar
@@ -1820,9 +1843,11 @@ namespace SSH_Helper
         private ToolStripMenuItem editToolStripMenuItem;
         private ToolStripMenuItem findToolStripMenuItem;
         private ToolStripMenuItem validateScriptToolStripMenuItem;
+#if DEBUG
+        private ToolStripMenuItem memoryDebuggerToolStripMenuItem;
+#endif
         private ToolStripSeparator toolStripSeparatorEdit1;
         private ToolStripMenuItem debugModeToolStripMenuItem;
-        private ToolStripMenuItem sshDebugModeToolStripMenuItem;
         private ToolStripMenuItem helpToolStripMenuItem;
         private ToolStripMenuItem documentationToolStripMenuItem;
         private ToolStripMenuItem scriptingDocumentationToolStripMenuItem;

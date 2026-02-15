@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting.Models;
 
 namespace SSH_Helper.Services.Scripting
@@ -55,6 +58,7 @@ namespace SSH_Helper.Services.Scripting
         Info,
         Command,
         CommandOutput,
+        RawChunk,
         Debug,
         Warning,
         Error,
@@ -92,12 +96,36 @@ namespace SSH_Helper.Services.Scripting
         private static readonly Regex ArrayExpressionRegex = new(@"^(\w+)\[([^\]]+)\]$", RegexOptions.Compiled);
         private readonly Dictionary<string, object?> _variables = new(StringComparer.OrdinalIgnoreCase);
         private readonly StringBuilder _output = new();
+        private readonly object _stateLock = new();
+        private readonly List<InteractiveTerminalSessionDetails> _interactiveSessions = new();
+        private readonly object _interactiveSessionsLock = new();
+        private readonly AsyncLocal<int> _loopDepth = new();
         private string _lastCommandOutput = string.Empty;
 
         /// <summary>
         /// The SSH shell session for executing commands.
         /// </summary>
         public SshShellSession? Session { get; set; }
+
+        /// <summary>
+        /// The host currently being executed for this script context.
+        /// </summary>
+        public HostConnection? CurrentHost { get; set; }
+
+        /// <summary>
+        /// Resolved username used for the current host execution.
+        /// </summary>
+        public string? ResolvedUsername { get; set; }
+
+        /// <summary>
+        /// Resolved password used for the current host execution.
+        /// </summary>
+        public string? ResolvedPassword { get; set; }
+
+        /// <summary>
+        /// Timeout options for the current host execution.
+        /// </summary>
+        public SshTimeoutOptions? Timeouts { get; set; }
 
         /// <summary>
         /// Debug state for breakpoints and stepping.
@@ -113,7 +141,11 @@ namespace SSH_Helper.Services.Scripting
         /// <summary>
         /// Current loop nesting depth. Managed by ScriptExecutor.
         /// </summary>
-        public int LoopDepth { get; set; }
+        public int LoopDepth
+        {
+            get => _loopDepth.Value;
+            set => _loopDepth.Value = value;
+        }
 
         /// <summary>
         /// Fired when script produces output.
@@ -133,12 +165,30 @@ namespace SSH_Helper.Services.Scripting
         /// <summary>
         /// Gets the last command output.
         /// </summary>
-        public string LastCommandOutput => _lastCommandOutput;
+        public string LastCommandOutput
+        {
+            get
+            {
+                lock (_stateLock)
+                {
+                    return _lastCommandOutput;
+                }
+            }
+        }
 
         /// <summary>
         /// Gets the accumulated full output.
         /// </summary>
-        public string FullOutput => _output.ToString();
+        public string FullOutput
+        {
+            get
+            {
+                lock (_stateLock)
+                {
+                    return _output.ToString();
+                }
+            }
+        }
 
         /// <summary>
         /// Creates a new script context with optional initial variables.
@@ -161,7 +211,10 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public void SetVariable(string name, object? value)
         {
-            _variables[name] = value;
+            lock (_stateLock)
+            {
+                _variables[name] = value;
+            }
         }
 
         /// <summary>
@@ -172,7 +225,10 @@ namespace SSH_Helper.Services.Scripting
             if (string.Equals(name, "_timestamp", StringComparison.OrdinalIgnoreCase))
                 return DateTime.Now.ToString(TimestampFormat);
 
-            return _variables.TryGetValue(name, out var value) ? value : null;
+            lock (_stateLock)
+            {
+                return _variables.TryGetValue(name, out var value) ? value : null;
+            }
         }
 
         /// <summary>
@@ -207,7 +263,10 @@ namespace SSH_Helper.Services.Scripting
             if (string.Equals(name, "_timestamp", StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            return _variables.ContainsKey(name);
+            lock (_stateLock)
+            {
+                return _variables.ContainsKey(name);
+            }
         }
 
         /// <summary>
@@ -215,7 +274,10 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public void RemoveVariable(string name)
         {
-            _variables.Remove(name);
+            lock (_stateLock)
+            {
+                _variables.Remove(name);
+            }
         }
 
         /// <summary>
@@ -223,10 +285,13 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public IReadOnlyDictionary<string, object?> GetAllVariables()
         {
-            var snapshot = new Dictionary<string, object?>(_variables, StringComparer.OrdinalIgnoreCase)
+            Dictionary<string, object?> snapshot;
+            lock (_stateLock)
             {
-                ["_timestamp"] = DateTime.Now.ToString(TimestampFormat)
-            };
+                snapshot = new Dictionary<string, object?>(_variables, StringComparer.OrdinalIgnoreCase);
+            }
+
+            snapshot["_timestamp"] = DateTime.Now.ToString(TimestampFormat);
             return snapshot;
         }
 
@@ -239,8 +304,14 @@ namespace SSH_Helper.Services.Scripting
             if (string.IsNullOrEmpty(input))
                 return input;
 
+            string lastOutput;
+            lock (_stateLock)
+            {
+                lastOutput = _lastCommandOutput;
+            }
+
             // Handle special _output variable
-            var result = input.Replace("${_output}", _lastCommandOutput);
+            var result = input.Replace("${_output}", lastOutput);
 
             // Replace ${variable} and {{variable}} patterns with support for nested ${...} expressions.
             return SubstituteVariableTokens(result);
@@ -368,9 +439,12 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public void RecordCommandOutput(string output, string? captureVariable = null)
         {
-            _lastCommandOutput = output;
-            _variables["_output"] = output;
-            _output.AppendLine(output);
+            lock (_stateLock)
+            {
+                _lastCommandOutput = output;
+                _variables["_output"] = output;
+                _output.AppendLine(output);
+            }
 
             if (!string.IsNullOrEmpty(captureVariable))
             {
@@ -387,12 +461,21 @@ namespace SSH_Helper.Services.Scripting
             if (type == ScriptOutputType.Debug && !DebugMode)
                 return;
 
-            _output.AppendLine(message);
-            OutputReceived?.Invoke(this, new ScriptOutputEventArgs
+            EventHandler<ScriptOutputEventArgs>? outputReceived;
+            ScriptOutputEventArgs eventArgs;
+
+            lock (_stateLock)
             {
-                Message = message,
-                Type = type
-            });
+                _output.AppendLine(message);
+                outputReceived = OutputReceived;
+                eventArgs = new ScriptOutputEventArgs
+                {
+                    Message = message,
+                    Type = type
+                };
+            }
+
+            outputReceived?.Invoke(this, eventArgs);
         }
 
         /// <summary>
@@ -400,7 +483,10 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public void ClearOutput()
         {
-            _output.Clear();
+            lock (_stateLock)
+            {
+                _output.Clear();
+            }
         }
 
         /// <summary>
@@ -432,18 +518,70 @@ namespace SSH_Helper.Services.Scripting
         }
 
         /// <summary>
+        /// Stores one interactive terminal session audit record for this script execution context.
+        /// </summary>
+        public void AddInteractiveSession(InteractiveTerminalSessionDetails session)
+        {
+            if (session == null)
+                return;
+
+            lock (_interactiveSessionsLock)
+            {
+                var cloned = CloneInteractiveSession(session);
+                if (cloned.SessionNumber <= 0)
+                {
+                    cloned.SessionNumber = _interactiveSessions.Count + 1;
+                }
+
+                _interactiveSessions.Add(cloned);
+            }
+        }
+
+        /// <summary>
+        /// Returns a deep-copied snapshot of captured interactive terminal sessions.
+        /// </summary>
+        public List<InteractiveTerminalSessionDetails> GetInteractiveSessionsSnapshot()
+        {
+            lock (_interactiveSessionsLock)
+            {
+                return _interactiveSessions
+                    .Select(CloneInteractiveSession)
+                    .ToList();
+            }
+        }
+
+        /// <summary>
         /// Imports variables from a script's vars section.
         /// </summary>
         public void ImportScriptVars(Dictionary<string, object?> vars)
         {
-            foreach (var kvp in vars)
+            lock (_stateLock)
             {
-                // Only set if not already defined (CSV variables take precedence)
-                if (!_variables.ContainsKey(kvp.Key))
+                foreach (var kvp in vars)
                 {
-                    _variables[kvp.Key] = kvp.Value;
+                    // Only set if not already defined (CSV variables take precedence)
+                    if (!_variables.ContainsKey(kvp.Key))
+                    {
+                        _variables[kvp.Key] = kvp.Value;
+                    }
                 }
             }
+        }
+
+        private static InteractiveTerminalSessionDetails CloneInteractiveSession(InteractiveTerminalSessionDetails session)
+        {
+            return new InteractiveTerminalSessionDetails
+            {
+                SessionNumber = session.SessionNumber,
+                HostAddress = session.HostAddress ?? string.Empty,
+                SessionMode = session.SessionMode ?? string.Empty,
+                EmulationMode = session.EmulationMode ?? string.Empty,
+                StartedAtUtc = session.StartedAtUtc,
+                EndedAtUtc = session.EndedAtUtc,
+                CloseReason = session.CloseReason ?? string.Empty,
+                Completed = session.Completed,
+                Transcript = session.Transcript ?? string.Empty
+            };
         }
     }
 }

@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using SSH_Helper.Services.Scripting.Models;
@@ -40,9 +42,24 @@ namespace SSH_Helper.Services.Scripting.Commands
                     context.EmitOutput($"{prompt} {command}", ScriptOutputType.Command);
                 }
 
-                // Execute the command
                 var timeoutSeconds = step.Timeout.HasValue && step.Timeout.Value > 0 ? step.Timeout.Value : (int?)null;
-                var output = await session.ExecuteAsync(command, step.Expect, timeoutSeconds, cancellationToken);
+                string output;
+
+                // Use respond path if respond pairs are defined
+                if (step.Respond != null && step.Respond.Count > 0)
+                {
+                    var respondPairs = step.Respond
+                        .Select(r => (
+                            expectPattern: context.SubstituteVariables(r.Expect),
+                            reply: context.SubstituteVariables(r.Reply)))
+                        .ToList();
+
+                    output = await session.ExecuteWithRespondsAsync(command, respondPairs, timeoutSeconds, cancellationToken);
+                }
+                else
+                {
+                    output = await session.ExecuteAsync(command, step.Expect, timeoutSeconds, cancellationToken);
+                }
 
                 // Strip the echoed command from output
                 output = TerminalOutputProcessor.StripCommandEcho(output, command);

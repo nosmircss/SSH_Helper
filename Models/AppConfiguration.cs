@@ -57,6 +57,11 @@ namespace SSH_Helper.Models
         // Remember state settings
         public bool RememberState { get; set; } = true;
         public ApplicationState? SavedState { get; set; }
+        /// <summary>
+        /// Optional compressed representation of SavedState used for persistence size reduction.
+        /// This is decompressed into SavedState on load and cleared in memory afterward.
+        /// </summary>
+        public string? SavedStateCompressed { get; set; }
         public Dictionary<string, EnvironmentConfig> Environments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public string? ActiveEnvironment { get; set; }
 
@@ -316,7 +321,8 @@ namespace SSH_Helper.Models
         public string? Username { get; set; }
 
         /// <summary>
-        /// Execution history entries (timestamp -> output).
+        /// Legacy in-config execution history entries used only for migration.
+        /// New history persistence is stored in external per-run files.
         /// </summary>
         public List<HistoryEntry> History { get; set; } = new();
     }

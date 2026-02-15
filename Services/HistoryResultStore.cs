@@ -75,5 +75,15 @@ namespace SSH_Helper.Services
 
             return _details.ContainsKey(entryId);
         }
+
+        public IEnumerable<KeyValuePair<string, List<HostHistoryEntry>>> EnumerateResults()
+        {
+            return _results;
+        }
+
+        public IEnumerable<KeyValuePair<string, ExecutionDetails>> EnumerateDetails()
+        {
+            return _details;
+        }
     }
 }

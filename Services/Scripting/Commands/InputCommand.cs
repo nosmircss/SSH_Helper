@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.UI;
 
 namespace SSH_Helper.Services.Scripting.Commands
 {
@@ -12,18 +13,21 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     public class InputCommand : IScriptCommand
     {
-        public Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
+        public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
         {
             if (step.Input == null)
-                return Task.FromResult(CommandResult.Fail("Input command has no options"));
+                return CommandResult.Fail("Input command has no options");
 
             if (string.IsNullOrEmpty(step.Input.Into))
-                return Task.FromResult(CommandResult.Fail("Input command requires an 'into' property"));
+                return CommandResult.Fail("Input command requires an 'into' property");
 
             try
             {
                 // Substitute variables in prompt and default
                 var prompt = context.SubstituteVariables(step.Input.Prompt ?? "Enter value:");
+                var title = string.IsNullOrWhiteSpace(step.Input.Title)
+                    ? null
+                    : context.SubstituteVariables(step.Input.Title);
                 var defaultValue = step.Input.Default != null
                     ? context.SubstituteVariables(step.Input.Default)
                     : string.Empty;
@@ -38,40 +42,35 @@ namespace SSH_Helper.Services.Scripting.Commands
                     }
                     catch (ArgumentException ex)
                     {
-                        return Task.FromResult(CommandResult.Fail($"Invalid validation pattern: {ex.Message}"));
+                        return CommandResult.Fail($"Invalid validation pattern: {ex.Message}");
                     }
                 }
 
                 var validationError = step.Input.ValidationError ?? "Input does not match required format.";
 
-                string? userInput = null;
-
-                // Show input dialog on UI thread
-                var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
-                if (mainForm != null && mainForm.InvokeRequired)
-                {
-                    mainForm.Invoke(() =>
-                    {
-                        userInput = ShowInputDialogWithValidation(prompt, defaultValue, step.Input.Password, validationRegex, validationError);
-                    });
-                }
-                else
-                {
-                    userInput = ShowInputDialogWithValidation(prompt, defaultValue, step.Input.Password, validationRegex, validationError);
-                }
+                var userInput = await ScriptPromptDialogRunner
+                    .ShowAsync<ScriptInputDialog, string?>(
+                        () => new ScriptInputDialog(prompt, defaultValue, step.Input.Password, validationRegex, validationError, title),
+                        dialog => dialog.DialogResult == DialogResult.OK ? dialog.InputValue : null,
+                        cancellationToken)
+                    .ConfigureAwait(false);
 
                 // Check for cancellation
                 if (userInput == null)
                 {
                     context.EmitOutput("Input cancelled by user", ScriptOutputType.Warning);
-                    return Task.FromResult(CommandResult.Fail("Input cancelled by user"));
+                    return CommandResult.Fail("Input cancelled by user");
                 }
 
                 // Store the input
                 context.SetVariable(step.Input.Into, userInput);
                 context.EmitOutput($"Set {step.Input.Into} from user input", ScriptOutputType.Debug);
 
-                return Task.FromResult(CommandResult.Ok());
+                return CommandResult.Ok();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -79,21 +78,10 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return Task.FromResult(CommandResult.Suppressed(errorMsg));
+                    return CommandResult.Suppressed(errorMsg);
 
-                return Task.FromResult(CommandResult.Fail(errorMsg));
+                return CommandResult.Fail(errorMsg);
             }
-        }
-
-        private static string? ShowInputDialogWithValidation(string prompt, string defaultValue, bool password, Regex? validationRegex, string validationError)
-        {
-            using var dialog = new ScriptInputDialog(prompt, defaultValue, password, validationRegex, validationError);
-            var result = dialog.ShowDialog();
-
-            if (result == DialogResult.OK)
-                return dialog.InputValue;
-
-            return null;
         }
     }
 
@@ -109,13 +97,20 @@ namespace SSH_Helper.Services.Scripting.Commands
 
         public string InputValue => _txtInput.Text;
 
-        public ScriptInputDialog(string prompt, string defaultValue, bool password, Regex? validationRegex = null, string validationError = "Invalid input.")
+        public ScriptInputDialog(
+            string prompt,
+            string defaultValue,
+            bool password,
+            Regex? validationRegex = null,
+            string validationError = "Invalid input.",
+            string? title = null)
         {
             _validationRegex = validationRegex;
             _validationError = validationError;
 
-            Text = "Script Input";
+            Text = string.IsNullOrWhiteSpace(title) ? "Script Input" : title.Trim();
             Size = new System.Drawing.Size(400, 185);
+            AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -172,8 +167,21 @@ namespace SSH_Helper.Services.Scripting.Commands
             AcceptButton = btnOk;
             CancelButton = btnCancel;
 
+            // Apply dark mode if the app is in dark mode
+            var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
+            var isDark = mainForm != null && mainForm.BackColor.GetBrightness() < 0.2f;
+            if (isDark)
+            {
+                DialogTheme.ApplyTo(this, true);
+                DialogTheme.StyleButton(btnOk, true, isPrimary: true);
+                DialogTheme.StyleButton(btnCancel, true);
+                DialogTheme.SetDarkTitleBar(this, true);
+            }
+
             Load += (_, _) =>
             {
+                if (isDark)
+                    DialogTheme.ApplyNativeTheme(this, true);
                 _txtInput.Focus();
                 _txtInput.SelectAll();
             };

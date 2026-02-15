@@ -46,12 +46,15 @@ namespace SSH_Helper.Services
     /// </remarks>
     public class SshConnectionPool : IDisposable
     {
+        private static readonly TimeSpan IdleKeepAliveSweepInterval = TimeSpan.FromSeconds(5);
         private readonly ConcurrentDictionary<string, PooledConnection> _connections = new();
         private readonly ConcurrentDictionary<string, bool> _leasedKeys = new();
         private readonly SemaphoreSlim _creationLock = new(1, 1);
         private readonly SshTimeoutOptions _defaultTimeouts;
         private readonly TimeSpan _maxConnectionAge;
         private readonly TimeSpan _healthCheckInterval;
+        private readonly System.Threading.Timer _idleKeepAliveTimer;
+        private int _idleKeepAliveSweepRunning;
         private bool _disposed;
 
         /// <summary>
@@ -103,6 +106,11 @@ namespace SSH_Helper.Services
             _defaultTimeouts = defaultTimeouts ?? SshTimeoutOptions.Default;
             _maxConnectionAge = maxConnectionAge ?? TimeSpan.FromMinutes(30);
             _healthCheckInterval = healthCheckInterval ?? TimeSpan.FromSeconds(30);
+            _idleKeepAliveTimer = new System.Threading.Timer(
+                _ => RunIdleKeepAliveSweep(),
+                null,
+                IdleKeepAliveSweepInterval,
+                IdleKeepAliveSweepInterval);
         }
 
         /// <summary>
@@ -131,6 +139,7 @@ namespace SSH_Helper.Services
                 if (await IsConnectionHealthyAsync(pooled, cancellationToken))
                 {
                     pooled.LastUsed = DateTime.UtcNow;
+                    pooled.KeepAliveInterval = effectiveTimeouts.KeepAliveInterval;
                     Statistics.IncrementReused();
                     OnConnectionReused(host, username);
                     return pooled.Client;
@@ -152,6 +161,7 @@ namespace SSH_Helper.Services
                     if (await IsConnectionHealthyAsync(pooled, cancellationToken))
                     {
                         pooled.LastUsed = DateTime.UtcNow;
+                        pooled.KeepAliveInterval = effectiveTimeouts.KeepAliveInterval;
                         Statistics.IncrementReused();
                         OnConnectionReused(host, username);
                         return pooled.Client;
@@ -173,7 +183,9 @@ namespace SSH_Helper.Services
                     Username = username,
                     Created = DateTime.UtcNow,
                     LastUsed = DateTime.UtcNow,
-                    LastHealthCheck = DateTime.UtcNow
+                    LastHealthCheck = DateTime.UtcNow,
+                    LastKeepAlive = DateTime.UtcNow,
+                    KeepAliveInterval = effectiveTimeouts.KeepAliveInterval
                 };
 
                 _connections[key] = pooled;
@@ -222,9 +234,14 @@ namespace SSH_Helper.Services
             }
 
             var terminalOptions = SshTerminalOptionsFactory.Create();
-            RebexScripting scripting = client.StartScripting(terminalOptions);
+            var (scripting, terminal) = SshTerminalOptionsFactory.CreateScriptingWithHistory(
+                client,
+                terminalOptions,
+                SshTerminalOptionsFactory.DefaultColumns,
+                SshTerminalOptionsFactory.DefaultRows,
+                SshTerminalOptionsFactory.DefaultHistoryMaxLength);
             scripting.Timeout = (int)effectiveTimeouts.CommandTimeout.TotalMilliseconds;
-            var session = new SshShellSession(client, scripting, effectiveTimeouts);
+            var session = new SshShellSession(client, scripting, effectiveTimeouts, terminal);
 
             await session.InitializeAsync(cancellationToken);
 
@@ -238,6 +255,10 @@ namespace SSH_Helper.Services
         {
             var key = CreateConnectionKey(host, username);
             _leasedKeys.TryRemove(key, out _);
+            if (_connections.TryGetValue(key, out var pooled))
+            {
+                pooled.LastUsed = DateTime.UtcNow;
+            }
         }
 
         /// <summary>
@@ -414,6 +435,7 @@ namespace SSH_Helper.Services
         {
             if (_connections.TryRemove(key, out var pooled))
             {
+                _leasedKeys.TryRemove(key, out _);
                 try
                 {
                     if (pooled.Client.IsConnected)
@@ -428,6 +450,69 @@ namespace SSH_Helper.Services
                 {
                     // Ignore cleanup errors
                 }
+            }
+        }
+
+        private void RunIdleKeepAliveSweep()
+        {
+            if (_disposed)
+                return;
+
+            if (Interlocked.Exchange(ref _idleKeepAliveSweepRunning, 1) == 1)
+                return;
+
+            try
+            {
+                var now = DateTime.UtcNow;
+                var removeKeys = new List<string>();
+
+                foreach (var entry in _connections)
+                {
+                    var key = entry.Key;
+                    var pooled = entry.Value;
+
+                    if (_leasedKeys.ContainsKey(key))
+                        continue;
+
+                    if (pooled.KeepAliveInterval <= TimeSpan.Zero)
+                        continue;
+
+                    if (!pooled.Client.IsConnected)
+                    {
+                        removeKeys.Add(key);
+                        continue;
+                    }
+
+                    var lastActivity = pooled.LastUsed >= pooled.LastKeepAlive ? pooled.LastUsed : pooled.LastKeepAlive;
+                    if (now - lastActivity < pooled.KeepAliveInterval)
+                        continue;
+
+                    try
+                    {
+                        pooled.Client.Session.KeepAlive();
+                        pooled.LastKeepAlive = now;
+                    }
+                    catch (Exception ex)
+                    {
+                        OnConnectionError(pooled.Host, pooled.Username, ex);
+                        removeKeys.Add(key);
+                    }
+                }
+
+                if (removeKeys.Count > 0)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        foreach (var key in removeKeys.Distinct())
+                        {
+                            await RemoveConnectionAsync(key);
+                        }
+                    });
+                }
+            }
+            finally
+            {
+                Volatile.Write(ref _idleKeepAliveSweepRunning, 0);
             }
         }
 
@@ -482,6 +567,7 @@ namespace SSH_Helper.Services
             if (!_disposed)
             {
                 _disposed = true;
+                _idleKeepAliveTimer.Dispose();
 
                 foreach (var pooled in _connections.Values)
                 {
@@ -513,6 +599,8 @@ namespace SSH_Helper.Services
             public DateTime Created { get; set; }
             public DateTime LastUsed { get; set; }
             public DateTime LastHealthCheck { get; set; }
+            public DateTime LastKeepAlive { get; set; }
+            public TimeSpan KeepAliveInterval { get; set; }
         }
     }
 

@@ -163,6 +163,37 @@ namespace SSH_Helper.Services.Scripting.Models
         public ConfirmOptions? Confirm { get; set; }
 
         /// <summary>
+        /// Interactive command - opens an in-app SSH terminal and blocks until closed.
+        /// </summary>
+        public InteractiveOptions? Interactive { get; set; }
+
+        /// <summary>
+        /// Assert command - validates a condition and fails/warns if not met.
+        /// </summary>
+        public AssertOptions? Assert { get; set; }
+
+        /// <summary>
+        /// Switch command - dispatches execution based on a value matching cases.
+        /// Shorthand: "switch: ${var}" sets the value to match against.
+        /// </summary>
+        public string? Switch { get; set; }
+
+        /// <summary>
+        /// Cases for the switch command. Each case has a value to match and steps to execute.
+        /// </summary>
+        public List<SwitchCase>? Cases { get; set; }
+
+        /// <summary>
+        /// Parallel command - executes multiple steps concurrently.
+        /// </summary>
+        public ParallelOptions? Parallel { get; set; }
+
+        /// <summary>
+        /// Table command - formats data into aligned columns for display.
+        /// </summary>
+        public TableOptions? Table { get; set; }
+
+        /// <summary>
         /// Break command - exits the current loop.
         /// </summary>
         public bool BreakLoop { get; set; }
@@ -199,6 +230,22 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Error handling mode: "continue" | "stop" (default)
         /// </summary>
         public string? OnError { get; set; }
+
+        /// <summary>
+        /// Number of retry attempts on step failure (0 = no retry).
+        /// </summary>
+        public int? Retry { get; set; }
+
+        /// <summary>
+        /// Delay in seconds between retry attempts (default: 1).
+        /// </summary>
+        public int? RetryDelay { get; set; }
+
+        /// <summary>
+        /// Expect/reply pairs for interactive send commands.
+        /// After sending the command, each pair waits for the expect pattern then sends the reply.
+        /// </summary>
+        public List<RespondPair>? Respond { get; set; }
 
         /// <summary>
         /// Steps to execute if condition is true (for if/foreach/while).
@@ -278,6 +325,11 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Choose != null) return StepType.Choose;
             if (Multiselect != null) return StepType.Multiselect;
             if (Confirm != null) return StepType.Confirm;
+            if (Interactive != null) return StepType.Interactive;
+            if (Assert != null) return StepType.Assert;
+            if (!string.IsNullOrEmpty(Switch)) return StepType.Switch;
+            if (Parallel != null) return StepType.Parallel;
+            if (Table != null) return StepType.Table;
             if (DeclaredStepType != StepType.Unknown) return DeclaredStepType;
             return StepType.Unknown;
         }
@@ -412,6 +464,11 @@ namespace SSH_Helper.Services.Scripting.Models
     public class InputOptions
     {
         /// <summary>
+        /// Optional dialog window title.
+        /// </summary>
+        public string? Title { get; set; }
+
+        /// <summary>
         /// Prompt text to display to the user.
         /// </summary>
         public string Prompt { get; set; } = string.Empty;
@@ -465,6 +522,11 @@ namespace SSH_Helper.Services.Scripting.Models
     public class ChooseOptions
     {
         /// <summary>
+        /// Optional dialog window title.
+        /// </summary>
+        public string? Title { get; set; }
+
+        /// <summary>
         /// Prompt text to display to the user.
         /// </summary>
         public string Prompt { get; set; } = string.Empty;
@@ -480,6 +542,12 @@ namespace SSH_Helper.Services.Scripting.Models
         public List<ChoiceOption> Options { get; set; } = new();
 
         /// <summary>
+        /// Optional variable/expression source for options.
+        /// When set, the value should resolve to a list (e.g., List&lt;string&gt;).
+        /// </summary>
+        public string? OptionsFrom { get; set; }
+
+        /// <summary>
         /// Default selection (matched against option values).
         /// </summary>
         public string? Default { get; set; }
@@ -490,6 +558,11 @@ namespace SSH_Helper.Services.Scripting.Models
     /// </summary>
     public class MultiselectOptions
     {
+        /// <summary>
+        /// Optional dialog window title.
+        /// </summary>
+        public string? Title { get; set; }
+
         /// <summary>
         /// Prompt text to display to the user.
         /// </summary>
@@ -504,6 +577,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// List of options to choose from.
         /// </summary>
         public List<ChoiceOption> Options { get; set; } = new();
+
+        /// <summary>
+        /// Optional variable/expression source for options.
+        /// When set, the value should resolve to a list (e.g., List&lt;string&gt;).
+        /// </summary>
+        public string? OptionsFrom { get; set; }
 
         /// <summary>
         /// Minimum number of selections required.
@@ -522,6 +601,11 @@ namespace SSH_Helper.Services.Scripting.Models
     public class ConfirmOptions
     {
         /// <summary>
+        /// Optional dialog window title.
+        /// </summary>
+        public string? Title { get; set; }
+
+        /// <summary>
         /// Prompt text to display to the user.
         /// </summary>
         public string Prompt { get; set; } = string.Empty;
@@ -535,6 +619,87 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Default button: true = Yes focused, false = No focused.
         /// </summary>
         public bool Default { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the interactive command (embedded SSH terminal).
+    /// </summary>
+    public class InteractiveOptions
+    {
+        /// <summary>
+        /// Session model. Separate opens a new connection; shared attaches to the current session.
+        /// </summary>
+        public InteractiveSessionMode Session { get; set; } = InteractiveSessionMode.Separate;
+
+        /// <summary>
+        /// Optional custom window title for the interactive terminal form.
+        /// </summary>
+        public string? Title { get; set; }
+
+        /// <summary>
+        /// Optional long-running command to execute automatically when the terminal opens.
+        /// When set, interactive capture mode is enabled.
+        /// </summary>
+        public string? Command { get; set; }
+
+        /// <summary>
+        /// Optional variable name used to capture the terminal transcript when capture mode completes.
+        /// </summary>
+        public string? Capture { get; set; }
+
+        /// <summary>
+        /// Optional safety timeout (seconds) that auto-sends Ctrl+C in capture mode.
+        /// </summary>
+        public int? MaxSeconds { get; set; }
+
+        /// <summary>
+        /// Optional safety limit (lines) that auto-sends Ctrl+C in capture mode.
+        /// </summary>
+        public int? MaxLines { get; set; }
+
+        /// <summary>
+        /// Optional interactive window width in pixels for separate sessions.
+        /// Defaults to 980 when not specified.
+        /// </summary>
+        public int? Width { get; set; }
+
+        /// <summary>
+        /// Optional interactive window height in pixels for separate sessions.
+        /// Defaults to 620 when not specified.
+        /// </summary>
+        public int? Height { get; set; }
+
+        /// <summary>
+        /// Optional terminal width in character columns for separate sessions.
+        /// Deprecated in favor of width/height pixel sizing.
+        /// </summary>
+        public int? Columns { get; set; }
+
+        /// <summary>
+        /// Optional terminal height in character rows for separate sessions.
+        /// Deprecated in favor of width/height pixel sizing.
+        /// </summary>
+        public int? Rows { get; set; }
+
+        /// <summary>
+        /// When true, captured terminal chunks are mirrored into the main script output stream.
+        /// </summary>
+        public bool MirrorOutput { get; set; }
+
+        /// <summary>
+        /// When true (default), the interactive terminal window is shown.
+        /// Set false for headless capture runs controlled by timeout/natural completion.
+        /// </summary>
+        public bool ShowWindow { get; set; } = true;
+    }
+
+    /// <summary>
+    /// Session model for interactive terminal steps.
+    /// </summary>
+    public enum InteractiveSessionMode
+    {
+        Separate,
+        Shared
     }
 
     /// <summary>
@@ -899,6 +1064,142 @@ namespace SSH_Helper.Services.Scripting.Models
         Parse,
         Choose,
         Multiselect,
-        Confirm
+        Confirm,
+        Interactive,
+        Assert,
+        Switch,
+        Parallel,
+        Table
+    }
+
+    /// <summary>
+    /// Options for the assert command.
+    /// </summary>
+    public class AssertOptions
+    {
+        /// <summary>
+        /// The condition expression to evaluate.
+        /// </summary>
+        public string Condition { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Optional message to display on assertion failure.
+        /// </summary>
+        public string? Message { get; set; }
+
+        /// <summary>
+        /// Severity: "error" (stops execution) or "warning" (continues with warning).
+        /// </summary>
+        public string Severity { get; set; } = "error";
+    }
+
+    /// <summary>
+    /// Represents a single case branch in a switch command.
+    /// </summary>
+    public class SwitchCase
+    {
+        /// <summary>
+        /// Line number in the original YAML for error reporting.
+        /// </summary>
+        public int LineNumber { get; set; }
+
+        /// <summary>
+        /// The value to match against the switch expression.
+        /// </summary>
+        public string Value { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Steps to execute when this case matches.
+        /// </summary>
+        public List<ScriptStep> Do { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Represents an expect/reply pair for interactive send commands.
+    /// </summary>
+    public class RespondPair
+    {
+        /// <summary>
+        /// Pattern to wait for in the output.
+        /// </summary>
+        public string Expect { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Text to send when the expect pattern is matched.
+        /// </summary>
+        public string Reply { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Options for the parallel command.
+    /// </summary>
+    public class ParallelOptions
+    {
+        /// <summary>
+        /// Steps to execute concurrently.
+        /// </summary>
+        public List<ScriptStep> Steps { get; set; } = new();
+
+        /// <summary>
+        /// Maximum number of concurrent steps (0 = unlimited).
+        /// </summary>
+        public int MaxConcurrent { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the table command.
+    /// </summary>
+    public class TableOptions
+    {
+        /// <summary>
+        /// Variable reference containing the data to display.
+        /// </summary>
+        public string Data { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Optional column definitions for formatting.
+        /// </summary>
+        public List<TableColumn>? Columns { get; set; }
+
+        /// <summary>
+        /// Variable name to capture the formatted table output into.
+        /// </summary>
+        public string? Into { get; set; }
+
+        /// <summary>
+        /// Default column alignment: "left", "right", or "center".
+        /// </summary>
+        public string Align { get; set; } = "left";
+
+        /// <summary>
+        /// Whether to display a header row (default: true).
+        /// </summary>
+        public bool ShowHeader { get; set; } = true;
+    }
+
+    /// <summary>
+    /// Defines a single column in a table command.
+    /// </summary>
+    public class TableColumn
+    {
+        /// <summary>
+        /// Column header text.
+        /// </summary>
+        public string Header { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Field name or property to extract from each data item.
+        /// </summary>
+        public string? Field { get; set; }
+
+        /// <summary>
+        /// Column alignment: "left", "right", or "center".
+        /// </summary>
+        public string Align { get; set; } = "left";
+
+        /// <summary>
+        /// Fixed column width (null = auto-size to content).
+        /// </summary>
+        public int? Width { get; set; }
     }
 }

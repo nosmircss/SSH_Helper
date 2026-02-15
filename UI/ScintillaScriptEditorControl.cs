@@ -1658,6 +1658,7 @@ namespace SSH_Helper.UI
             }
             else if (!ScriptParser.IsYamlScript(_editor.Text))
             {
+                _validationService?.CancelPendingValidation();
                 ClearDiagnostics();
             }
         }

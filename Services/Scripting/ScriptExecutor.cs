@@ -47,6 +47,11 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Choose, new ChooseCommand() },
                 { StepType.Multiselect, new MultiselectCommand() },
                 { StepType.Confirm, new ConfirmCommand() },
+                { StepType.Interactive, new InteractiveCommand() },
+                { StepType.Assert, new AssertCommand() },
+                { StepType.Switch, new SwitchCommand(this) },
+                { StepType.Parallel, new ParallelCommand(this) },
+                { StepType.Table, new TableCommand() },
             };
         }
 
@@ -200,9 +205,63 @@ namespace SSH_Helper.Services.Scripting
         }
 
         /// <summary>
-        /// Executes a single step by dispatching to the appropriate command handler.
+        /// Executes a single step with optional retry logic.
         /// </summary>
         private async Task<CommandResult> ExecuteStepAsync(
+            ScriptStep step,
+            ScriptContext context,
+            CancellationToken cancellationToken)
+        {
+            var maxRetries = step.Retry.HasValue && step.Retry.Value > 0 ? step.Retry.Value : 0;
+
+            if (maxRetries == 0)
+                return await ExecuteStepCoreAsync(step, context, cancellationToken);
+
+            // Retry loop
+            var originalOnError = step.OnError;
+            CommandResult result = CommandResult.Fail("No attempts");
+
+            for (int attempt = 0; attempt <= maxRetries; attempt++)
+            {
+                // On non-final attempts, force failures to surface (override on_error)
+                var onErrorForAttempt = attempt < maxRetries ? "stop" : originalOnError;
+                step.OnError = onErrorForAttempt;
+                try
+                {
+                    result = await ExecuteStepCoreAsync(step, context, cancellationToken);
+                }
+                finally
+                {
+                    step.OnError = originalOnError;
+                }
+
+                // Don't retry on: success, exit, break, continue, suppressed
+                if (result.Success || result.ShouldExit || result.ShouldBreak ||
+                    result.ShouldContinue || result.SuppressedError)
+                {
+                    if (attempt > 0)
+                        context.EmitOutput($"Step succeeded on attempt {attempt + 1}", ScriptOutputType.Debug);
+                    return result;
+                }
+
+                // Failed - retry if not the last attempt
+                if (attempt < maxRetries)
+                {
+                    var delay = step.RetryDelay.HasValue && step.RetryDelay.Value > 0 ? step.RetryDelay.Value : 1;
+                    context.EmitOutput(
+                        $"Step failed (attempt {attempt + 1}/{maxRetries + 1}), retrying in {delay}s...",
+                        ScriptOutputType.Warning);
+                    await Task.Delay(TimeSpan.FromSeconds(delay), cancellationToken);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Executes a single step by dispatching to the appropriate command handler.
+        /// </summary>
+        private async Task<CommandResult> ExecuteStepCoreAsync(
             ScriptStep step,
             ScriptContext context,
             CancellationToken cancellationToken)

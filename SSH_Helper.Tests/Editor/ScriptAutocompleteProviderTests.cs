@@ -68,6 +68,18 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_StepPrefix_IncludesNewCommandKeywords()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - pa";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Select(item => item.Label).Should().Contain("parallel");
+    }
+
+    [Fact]
     public void GetCompletion_LogBlockOptionKey_SuggestsOnlyLogOptions()
     {
         var provider = new ScriptAutocompleteProvider();
@@ -94,6 +106,49 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_SendStepOptionKey_IncludesRetryAndRespondOptions()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - send:\n      command: show version\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["retry", "retry_delay", "respond"]);
+    }
+
+    [Fact]
+    public void GetCompletion_SendRespondNestedOptionKey_SuggestsExpectAndReply()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = """
+                   steps:
+                     - send:
+                         command: adduser qa
+                         respond:
+                           -
+                             
+                   """;
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["expect", "reply"]);
+    }
+
+    [Fact]
+    public void GetCompletion_SwitchShorthandSiblingKeys_IncludeCasesAndElse()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - switch: \"${mode}\"\n    ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["cases", "else"]);
+    }
+
+    [Fact]
     public void GetCompletion_WhileStepLevelOptionKey_IncludesMaxIterations()
     {
         var provider = new ScriptAutocompleteProvider();
@@ -116,6 +171,115 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
         completion.Items.Select(item => item.Label).Should().BeEquivalentTo(["message"]);
+    }
+
+    [Fact]
+    public void GetCompletion_InputStepOptionKey_IncludesTitle()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - input:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "default", "password", "validate", "validation_error"]);
+    }
+
+    [Fact]
+    public void GetCompletion_ChooseStepOptionKey_IncludesTitle()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - choose:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "options", "default"]);
+    }
+
+    [Fact]
+    public void GetCompletion_MultiselectStepOptionKey_IncludesTitle()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - multiselect:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "options", "min", "max"]);
+    }
+
+    [Fact]
+    public void GetCompletion_ConfirmStepOptionKey_IncludesTitle()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - confirm:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "default"]);
+    }
+
+    [Fact]
+    public void GetCompletion_InteractiveStepOptionKey_SuggestsInteractiveOptions()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - interactive:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["session", "title", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"]);
+        completion.Items.Select(item => item.Label).Should().NotContain("emulation");
+    }
+
+    [Fact]
+    public void GetCompletion_InteractiveSessionValue_SuggestsSessionEnumValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - interactive:\n      session: s";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["separate", "shared"]);
+    }
+
+    [Fact]
+    public void GetCompletion_InteractiveEmulationValue_HasNoSuggestions()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - interactive:\n      emulation: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.None);
+        completion.Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GetCompletion_InteractiveMirrorOutputValue_SuggestsBooleanValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - interactive:\n      mirror_output: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["true", "false"]);
+    }
+
+    [Fact]
+    public void GetCompletion_InteractiveShowWindowValue_SuggestsBooleanValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - interactive:\n      show_window: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["true", "false"]);
     }
 
     [Fact]

@@ -78,6 +78,8 @@ public class HistoryResultStoreTests
         loaded.Should().NotBeNull();
         loaded!.PresetName.Should().Be("Folder Run");
         loaded.RunMode.Should().Be("Sequential presets");
+        loaded.InteractiveSessions.Should().ContainSingle();
+        loaded.InteractiveSessions[0].CloseReason.Should().Be("user_closed");
     }
 
     private static ExecutionDetails CreateDetails(string presetName)
@@ -93,7 +95,22 @@ public class HistoryResultStoreTests
             CommandTimeoutSeconds = 30,
             ConnectionTimeoutSeconds = 15,
             UseConnectionPooling = true,
-            RunMode = "Sequential presets"
+            RunMode = "Sequential presets",
+            InteractiveSessions = new List<InteractiveTerminalSessionDetails>
+            {
+                new()
+                {
+                    SessionNumber = 1,
+                    HostAddress = "host1",
+                    SessionMode = "separate",
+                    EmulationMode = "full",
+                    StartedAtUtc = DateTime.UtcNow.AddMinutes(-2),
+                    EndedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+                    CloseReason = "user_closed",
+                    Completed = true,
+                    Transcript = "hostname"
+                }
+            }
         };
     }
 }
