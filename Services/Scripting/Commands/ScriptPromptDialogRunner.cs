@@ -45,6 +45,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 try
                 {
                     dialog = dialogFactory();
+                    WireModelessDialogResultButtons(dialog);
                     promptLock = MainFormPromptLock.TryAcquire(mainForm);
                     registration = RegisterCancellation(dialog, cancellationToken);
                     PositionDialogCenteredOnMainForm(dialog, mainForm);
@@ -176,6 +177,40 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             dialog.StartPosition = FormStartPosition.Manual;
             dialog.Location = new Point(x, y);
+        }
+
+        private static void WireModelessDialogResultButtons(Form dialog)
+        {
+            foreach (var button in EnumerateDialogButtons(dialog))
+            {
+                if (button.IsDisposed || button.DialogResult == DialogResult.None)
+                    continue;
+
+                button.Click += (_, _) =>
+                {
+                    if (dialog.IsDisposed)
+                        return;
+
+                    dialog.DialogResult = button.DialogResult;
+                    dialog.Close();
+                };
+            }
+        }
+
+        private static IEnumerable<Button> EnumerateDialogButtons(Control root)
+        {
+            foreach (Control child in root.Controls)
+            {
+                if (child is Button button)
+                {
+                    yield return button;
+                }
+
+                foreach (var nested in EnumerateDialogButtons(child))
+                {
+                    yield return nested;
+                }
+            }
         }
 
         private sealed class MainFormPromptLock : IDisposable
