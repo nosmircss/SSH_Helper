@@ -24,11 +24,14 @@ namespace SSH_Helper.Services.Scripting.Commands
             try
             {
                 var prompt = context.SubstituteVariables(step.Confirm.Prompt ?? "Are you sure?");
+                var title = string.IsNullOrWhiteSpace(step.Confirm.Title)
+                    ? null
+                    : context.SubstituteVariables(step.Confirm.Title);
                 var defaultYes = step.Confirm.Default;
 
                 var confirmed = await ScriptPromptDialogRunner
                     .ShowAsync<ScriptConfirmDialog, bool>(
-                        () => new ScriptConfirmDialog(prompt, defaultYes),
+                        () => new ScriptConfirmDialog(prompt, defaultYes, title),
                         dialog => dialog.DialogResult == DialogResult.Yes,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -61,10 +64,11 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     internal sealed class ScriptConfirmDialog : Form
     {
-        public ScriptConfirmDialog(string prompt, bool defaultYes)
+        public ScriptConfirmDialog(string prompt, bool defaultYes, string? title = null)
         {
-            Text = "Script Confirmation";
+            Text = string.IsNullOrWhiteSpace(title) ? "Script Confirmation" : title.Trim();
             Size = new Size(400, 150);
+            AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;

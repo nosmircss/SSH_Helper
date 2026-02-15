@@ -48,7 +48,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     WireModelessDialogResultButtons(dialog);
                     promptLock = MainFormPromptLock.TryAcquire(mainForm);
                     registration = RegisterCancellation(dialog, cancellationToken);
-                    PositionDialogCenteredOnMainForm(dialog, mainForm);
+                    PrepareModelessDialogForShow(dialog, mainForm);
 
                     dialog.FormClosed += (_, _) =>
                     {
@@ -177,6 +177,25 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             dialog.StartPosition = FormStartPosition.Manual;
             dialog.Location = new Point(x, y);
+        }
+
+        private static void PrepareModelessDialogForShow(Form dialog, Form mainForm)
+        {
+            if (dialog.IsDisposed || mainForm.IsDisposed)
+                return;
+
+            dialog.StartPosition = FormStartPosition.Manual;
+            // Initial position for non-autoscaled dialogs.
+            PositionDialogCenteredOnMainForm(dialog, mainForm);
+
+            // Re-center after layout/auto-scale but before first visible frame.
+            dialog.Load += (_, _) =>
+            {
+                if (dialog.IsDisposed || mainForm.IsDisposed)
+                    return;
+
+                PositionDialogCenteredOnMainForm(dialog, mainForm);
+            };
         }
 
         private static void WireModelessDialogResultButtons(Form dialog)

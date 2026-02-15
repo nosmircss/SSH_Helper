@@ -63,6 +63,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             return new InteractiveOptions
             {
                 Session = source.Session,
+                Title = string.IsNullOrWhiteSpace(source.Title)
+                    ? source.Title
+                    : context.SubstituteVariables(source.Title),
                 Command = string.IsNullOrWhiteSpace(source.Command)
                     ? source.Command
                     : context.SubstituteVariables(source.Command),

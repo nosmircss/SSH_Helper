@@ -26,6 +26,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             try
             {
                 var prompt = context.SubstituteVariables(step.Multiselect.Prompt ?? "Select options:");
+                var title = string.IsNullOrWhiteSpace(step.Multiselect.Title)
+                    ? null
+                    : context.SubstituteVariables(step.Multiselect.Title);
 
                 var resolvedOptions = ChoiceOptionResolver.Resolve(
                     step.Multiselect.Options,
@@ -43,7 +46,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
                 var selectedValues = await ScriptPromptDialogRunner
                     .ShowAsync<ScriptMultiselectDialog, List<string>?>(
-                        () => new ScriptMultiselectDialog(prompt, resolvedOptions, step.Multiselect.Min, step.Multiselect.Max),
+                        () => new ScriptMultiselectDialog(prompt, resolvedOptions, step.Multiselect.Min, step.Multiselect.Max, title),
                         dialog => dialog.DialogResult == DialogResult.OK ? dialog.SelectedValues : null,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -102,7 +105,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
         }
 
-        public ScriptMultiselectDialog(string prompt, List<ChoiceOption> options, int? min, int? max)
+        public ScriptMultiselectDialog(string prompt, List<ChoiceOption> options, int? min, int? max, string? title = null)
         {
             _options = options;
             _min = min;
@@ -112,8 +115,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             var listHeight = Math.Max(visibleItems * 20, 40);
             var formHeight = 165 + listHeight;
 
-            Text = "Script Selection";
+            Text = string.IsNullOrWhiteSpace(title) ? "Script Selection" : title.Trim();
             Size = new Size(400, formHeight);
+            AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;

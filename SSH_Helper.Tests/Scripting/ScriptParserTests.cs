@@ -1059,6 +1059,7 @@ steps:
         var yaml = @"---
 steps:
   - choose:
+      title: ""Device Role Selection""
       prompt: ""Select device:""
       into: device
       options:
@@ -1073,6 +1074,7 @@ steps:
         var step = script.Steps[0];
         step.GetStepType().Should().Be(StepType.Choose);
         step.Choose.Should().NotBeNull();
+        step.Choose!.Title.Should().Be("Device Role Selection");
         step.Choose!.Prompt.Should().Be("Select device:");
         step.Choose.Into.Should().Be("device");
         step.Choose.Options.Should().HaveCount(3);
@@ -1116,6 +1118,7 @@ steps:
         var yaml = @"---
 steps:
   - multiselect:
+      title: ""Interface Selection""
       prompt: ""Select interfaces:""
       into: ifaces
       options:
@@ -1130,6 +1133,7 @@ steps:
         var step = script.Steps[0];
         step.GetStepType().Should().Be(StepType.Multiselect);
         step.Multiselect.Should().NotBeNull();
+        step.Multiselect!.Title.Should().Be("Interface Selection");
         step.Multiselect!.Prompt.Should().Be("Select interfaces:");
         step.Multiselect.Into.Should().Be("ifaces");
         step.Multiselect.Options.Should().HaveCount(3);
@@ -1147,6 +1151,7 @@ steps:
         var yaml = $@"---
 steps:
   - confirm:
+      title: ""Confirm Action""
       prompt: ""Are you sure?""
       into: confirmed
       default: {defaultStr}";
@@ -1156,9 +1161,30 @@ steps:
         var step = script.Steps[0];
         step.GetStepType().Should().Be(StepType.Confirm);
         step.Confirm.Should().NotBeNull();
+        step.Confirm!.Title.Should().Be("Confirm Action");
         step.Confirm!.Prompt.Should().Be("Are you sure?");
         step.Confirm.Into.Should().Be("confirmed");
         step.Confirm.Default.Should().Be(expected);
+    }
+
+    [Fact]
+    public void Parse_InputStep_WithTitle_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - input:
+      title: ""Credential Prompt""
+      prompt: ""Enter username:""
+      into: username";
+
+        var script = _parser.Parse(yaml);
+
+        var step = script.Steps[0];
+        step.GetStepType().Should().Be(StepType.Input);
+        step.Input.Should().NotBeNull();
+        step.Input!.Title.Should().Be("Credential Prompt");
+        step.Input.Prompt.Should().Be("Enter username:");
+        step.Input.Into.Should().Be("username");
     }
 
     [Fact]
@@ -1250,6 +1276,7 @@ steps:
             steps:
               - interactive:
                   session: separate
+                  title: "Packet Capture"
                   command: diagnose sniffer packet any 'host 10.0.0.1' 4 10 a
                   capture: sniffer_output
                   max_seconds: 120
@@ -1265,6 +1292,7 @@ steps:
 
         step.Interactive.Should().NotBeNull();
         step.Interactive!.Session.Should().Be(InteractiveSessionMode.Separate);
+        step.Interactive.Title.Should().Be("Packet Capture");
         step.Interactive.Command.Should().Be("diagnose sniffer packet any 'host 10.0.0.1' 4 10 a");
         step.Interactive.Capture.Should().Be("sniffer_output");
         step.Interactive.MaxSeconds.Should().Be(120);

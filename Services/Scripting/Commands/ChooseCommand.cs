@@ -25,6 +25,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             try
             {
                 var prompt = context.SubstituteVariables(step.Choose.Prompt ?? "Select an option:");
+                var title = string.IsNullOrWhiteSpace(step.Choose.Title)
+                    ? null
+                    : context.SubstituteVariables(step.Choose.Title);
                 var defaultValue = step.Choose.Default != null
                     ? context.SubstituteVariables(step.Choose.Default)
                     : null;
@@ -45,7 +48,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
                 var selectedValue = await ScriptPromptDialogRunner
                     .ShowAsync<ScriptChooseDialog, string?>(
-                        () => new ScriptChooseDialog(prompt, resolvedOptions, defaultValue),
+                        () => new ScriptChooseDialog(prompt, resolvedOptions, defaultValue, title),
                         dialog => dialog.DialogResult == DialogResult.OK ? dialog.SelectedValue : null,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -92,7 +95,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             ? _options[_listBox.SelectedIndex].Value
             : null;
 
-        public ScriptChooseDialog(string prompt, List<ChoiceOption> options, string? defaultValue)
+        public ScriptChooseDialog(string prompt, List<ChoiceOption> options, string? defaultValue, string? title = null)
         {
             _options = options;
 
@@ -100,8 +103,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             var listHeight = Math.Max(visibleItems * 20, 40);
             var formHeight = 130 + listHeight;
 
-            Text = "Script Choice";
+            Text = string.IsNullOrWhiteSpace(title) ? "Script Choice" : title.Trim();
             Size = new Size(400, formHeight);
+            AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;

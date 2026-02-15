@@ -90,7 +90,7 @@ namespace SSH_Helper.Services.Scripting
                 ["try"] = ["do", "catch", "finally"],
                 ["readfile"] = ["path", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"],
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers"],
-                ["input"] = ["prompt", "into", "default", "password", "validate", "validation_error"],
+                ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error"],
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
                 ["log"] = ["message", "level"],
@@ -101,10 +101,10 @@ namespace SSH_Helper.Services.Scripting
                 ["sftp"] = ["action", "local_path", "remote_path", "host", "port", "username", "password", "overwrite", "timeout", "into", "on_error"],
                 ["webhook"] = ["url", "method", "body", "headers", "into", "timeout", "on_error"],
                 ["parse"] = ["format", "from", "into", "sections"],
-                ["choose"] = ["prompt", "into", "options", "default"],
-                ["multiselect"] = ["prompt", "into", "options", "min", "max"],
-                ["confirm"] = ["prompt", "into", "default"],
-                ["interactive"] = ["session", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"]
+                ["choose"] = ["title", "prompt", "into", "options", "default"],
+                ["multiselect"] = ["title", "prompt", "into", "options", "min", "max"],
+                ["confirm"] = ["title", "prompt", "into", "default"],
+                ["interactive"] = ["session", "title", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -1456,6 +1456,9 @@ namespace SSH_Helper.Services.Scripting
 
                     switch (key)
                     {
+                        case "title":
+                            options.Title = parser.Consume<Scalar>().Value;
+                            break;
                         case "prompt":
                             options.Prompt = parser.Consume<Scalar>().Value;
                             break;
@@ -1508,6 +1511,9 @@ namespace SSH_Helper.Services.Scripting
 
                     switch (key)
                     {
+                        case "title":
+                            options.Title = parser.Consume<Scalar>().Value;
+                            break;
                         case "prompt":
                             options.Prompt = parser.Consume<Scalar>().Value;
                             break;
@@ -1552,6 +1558,9 @@ namespace SSH_Helper.Services.Scripting
 
                     switch (key)
                     {
+                        case "title":
+                            options.Title = parser.Consume<Scalar>().Value;
+                            break;
                         case "prompt":
                             options.Prompt = parser.Consume<Scalar>().Value;
                             break;
@@ -1601,6 +1610,9 @@ namespace SSH_Helper.Services.Scripting
 
                     switch (key)
                     {
+                        case "title":
+                            options.Title = parser.Consume<Scalar>().Value;
+                            break;
                         case "prompt":
                             options.Prompt = parser.Consume<Scalar>().Value;
                             break;
@@ -1633,7 +1645,7 @@ namespace SSH_Helper.Services.Scripting
             if (!parser.Accept<MappingStart>(out _))
             {
                 SkipValue(parser);
-                AddStepParseError(step, "interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'max_lines', 'width', 'height', 'mirror_output', 'show_window', and 'on_error'");
+                AddStepParseError(step, "interactive must be a mapping with optional keys 'session', 'title', 'command', 'capture', 'max_seconds', 'max_lines', 'width', 'height', 'mirror_output', 'show_window', and 'on_error'");
                 return null;
             }
 
@@ -1672,6 +1684,10 @@ namespace SSH_Helper.Services.Scripting
 
                     case "command":
                         options.Command = parser.Consume<Scalar>().Value;
+                        break;
+
+                    case "title":
+                        options.Title = parser.Consume<Scalar>().Value;
                         break;
 
                     case "capture":
@@ -2860,7 +2876,7 @@ namespace SSH_Helper.Services.Scripting
                         if (step.Interactive == null)
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'max_lines', 'width', 'height', 'mirror_output', 'show_window', and 'on_error'{lineContent}");
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session', 'title', 'command', 'capture', 'max_seconds', 'max_lines', 'width', 'height', 'mirror_output', 'show_window', and 'on_error'{lineContent}");
                             break;
                         }
 

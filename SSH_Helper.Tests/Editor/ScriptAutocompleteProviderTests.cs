@@ -119,6 +119,54 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_InputStepOptionKey_IncludesTitle()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - input:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "default", "password", "validate", "validation_error"]);
+    }
+
+    [Fact]
+    public void GetCompletion_ChooseStepOptionKey_IncludesTitle()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - choose:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "options", "default"]);
+    }
+
+    [Fact]
+    public void GetCompletion_MultiselectStepOptionKey_IncludesTitle()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - multiselect:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "options", "min", "max"]);
+    }
+
+    [Fact]
+    public void GetCompletion_ConfirmStepOptionKey_IncludesTitle()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - confirm:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "default"]);
+    }
+
+    [Fact]
     public void GetCompletion_InteractiveStepOptionKey_SuggestsInteractiveOptions()
     {
         var provider = new ScriptAutocompleteProvider();
@@ -127,7 +175,7 @@ public class ScriptAutocompleteProviderTests
         var completion = provider.GetCompletion(text, text.Length);
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
-        completion.Items.Select(item => item.Label).Should().Contain(["session", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"]);
+        completion.Items.Select(item => item.Label).Should().Contain(["session", "title", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"]);
         completion.Items.Select(item => item.Label).Should().NotContain("emulation");
     }
 

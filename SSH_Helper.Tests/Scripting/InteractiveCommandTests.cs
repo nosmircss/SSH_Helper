@@ -160,11 +160,15 @@ public class InteractiveCommandTests
                 Height = 48,
                 Columns = 120,
                 Rows = 36,
+                Title = "Capture ${window_name}",
                 ShowWindow = false
             }
         };
 
-        var result = await command.ExecuteAsync(step, new ScriptContext(), CancellationToken.None);
+        var context = new ScriptContext();
+        context.SetVariable("window_name", "Sniffer");
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
 
         result.Success.Should().BeTrue();
         receivedOptions.Should().NotBeNull();
@@ -173,6 +177,7 @@ public class InteractiveCommandTests
         receivedOptions!.Height.Should().Be(48);
         receivedOptions!.Columns.Should().Be(120);
         receivedOptions!.Rows.Should().Be(36);
+        receivedOptions!.Title.Should().Be("Capture Sniffer");
         receivedOptions!.ShowWindow.Should().BeFalse();
     }
 

@@ -1455,6 +1455,7 @@ Prompts the user for input during script execution with optional validation.
 **Syntax:**
 ```yaml
 - input:
+    title: "Input Required"       # Optional custom dialog title
     prompt: "Enter value:"
     into: variable_name
     default: "default_value"   # Optional
@@ -1467,6 +1468,7 @@ Prompts the user for input during script execution with optional validation.
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
+| `title` | No | `"Script Input"` | Custom dialog window title |
 | `prompt` | No | `"Enter value:"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store the input |
 | `default` | No | `""` | Default value pre-filled in the input |
@@ -1478,7 +1480,7 @@ Prompts the user for input during script execution with optional validation.
 - Dialog appears during script execution
 - User can cancel (script will fail unless `on_error: continue`)
 - Validation prevents submission until input matches pattern
-- Variables can be used in `prompt` and `default`
+- Variables can be used in `title`, `prompt`, and `default`
 
 **Examples:**
 ```yaml
@@ -1536,6 +1538,7 @@ Prompts the user to select one option from a list during script execution.
 **Syntax:**
 ```yaml
 - choose:
+    title: "Role Selection"           # Optional custom dialog title
     prompt: "Select an option:"
     into: variable_name
     options:
@@ -1563,6 +1566,7 @@ Prompts the user to select one option from a list during script execution.
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
+| `title` | No | `"Script Choice"` | Custom dialog window title |
 | `prompt` | No | `"Select an option:"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store the selected value |
 | `options` | Yes | - | Inline list of options OR a variable/expression that resolves to a list |
@@ -1574,7 +1578,7 @@ Prompts the user to select one option from a list during script execution.
 - Dialog appears during script execution with a selection list
 - Double-click selects and confirms
 - User can cancel (script will fail unless `on_error: continue`)
-- Variables can be used in `prompt`, `default`, and option labels/values
+- Variables can be used in `title`, `prompt`, `default`, and option labels/values
 
 **Examples:**
 ```yaml
@@ -1632,6 +1636,7 @@ Prompts the user to select multiple options from a checklist during script execu
 **Syntax:**
 ```yaml
 - multiselect:
+    title: "Select Targets"          # Optional custom dialog title
     prompt: "Select options:"
     into: variable_name
     options:
@@ -1648,6 +1653,7 @@ Prompts the user to select multiple options from a checklist during script execu
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
+| `title` | No | `"Script Selection"` | Custom dialog window title |
 | `prompt` | No | `"Select options:"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store selected values |
 | `options` | Yes | - | Inline list of options OR a variable/expression that resolves to a list |
@@ -1662,7 +1668,7 @@ Prompts the user to select multiple options from a checklist during script execu
 - Supports label/value pairs (same as choose)
 - `options` can come from a runtime list variable (for example `options: interface_list`)
 - User can cancel (script will fail unless `on_error: continue`)
-- Variables can be used in `prompt` and option labels/values
+- Variables can be used in `title`, `prompt`, and option labels/values
 
 **Examples:**
 ```yaml
@@ -1716,6 +1722,7 @@ Prompts the user with a yes/no confirmation dialog during script execution.
 **Syntax:**
 ```yaml
 - confirm:
+    title: "Final Confirmation"      # Optional custom dialog title
     prompt: "Are you sure?"
     into: variable_name
     default: false                 # Optional (default: false)
@@ -1725,6 +1732,7 @@ Prompts the user with a yes/no confirmation dialog during script execution.
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
+| `title` | No | `"Script Confirmation"` | Custom dialog window title |
 | `prompt` | No | `"Are you sure?"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store result (`"true"` or `"false"`) |
 | `default` | No | `false` | Which button is focused: `true` = Yes, `false` = No |
@@ -1734,7 +1742,7 @@ Prompts the user with a yes/no confirmation dialog during script execution.
 - Default controls which button is pre-focused
 - Escape key acts as No
 - Confirm never fails — it always stores a value (unlike `input` which fails on cancel)
-- Variables can be used in `prompt`
+- Variables can be used in `title` and `prompt`
 
 **Examples:**
 ```yaml
@@ -1796,6 +1804,7 @@ Opens an in-app SSH terminal window.
 # Normal interactive terminal
 - interactive:
     session: separate
+    title: "Troubleshooting Session"
     width: 1200
     height: 760
     on_error: stop
@@ -1803,6 +1812,7 @@ Opens an in-app SSH terminal window.
 # Capture mode (long-running command)
 - interactive:
     session: separate
+    title: "Sniffer - ${Host_IP}"
     command: "diagnose sniffer packet any 'host 10.0.0.1' 4 10 a"
     capture: sniffer_output
     max_seconds: 120
@@ -1818,6 +1828,7 @@ Opens an in-app SSH terminal window.
 - `interactive` is map-only. Scalar shorthand (for example `- interactive`) is invalid.
 - `session: separate` opens a new SSH terminal connection using current host credentials/settings.
 - `session: shared` attaches to the active script SSH session. If unavailable, the step fails with `InteractiveSharedUnavailable`.
+- `title` overrides the window caption. If omitted, a host-based default title is used.
 - `width`/`height` set the interactive window size in pixels (`Size.Width`/`Size.Height`) for `session: separate`.
 - Shared mode currently ignores `width`/`height` and uses the shared interactive window defaults.
 - Legacy `columns`/`rows` are still accepted for separate mode terminal grid sizing but deprecated.
@@ -1841,6 +1852,7 @@ Opens an in-app SSH terminal window.
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `session` | No | `separate` | Session model: `separate` or `shared` |
+| `title` | No | host-based default | Custom interactive window title text |
 | `command` | No | - | Enables capture mode and auto-runs this command in the interactive terminal |
 | `capture` | No | - | Variable name to receive the captured transcript at step completion |
 | `max_seconds` | No | - | Positive timeout in seconds; auto-sends Ctrl+C when reached |

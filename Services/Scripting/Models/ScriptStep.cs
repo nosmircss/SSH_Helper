@@ -418,6 +418,11 @@ namespace SSH_Helper.Services.Scripting.Models
     public class InputOptions
     {
         /// <summary>
+        /// Optional dialog window title.
+        /// </summary>
+        public string? Title { get; set; }
+
+        /// <summary>
         /// Prompt text to display to the user.
         /// </summary>
         public string Prompt { get; set; } = string.Empty;
@@ -471,6 +476,11 @@ namespace SSH_Helper.Services.Scripting.Models
     public class ChooseOptions
     {
         /// <summary>
+        /// Optional dialog window title.
+        /// </summary>
+        public string? Title { get; set; }
+
+        /// <summary>
         /// Prompt text to display to the user.
         /// </summary>
         public string Prompt { get; set; } = string.Empty;
@@ -502,6 +512,11 @@ namespace SSH_Helper.Services.Scripting.Models
     /// </summary>
     public class MultiselectOptions
     {
+        /// <summary>
+        /// Optional dialog window title.
+        /// </summary>
+        public string? Title { get; set; }
+
         /// <summary>
         /// Prompt text to display to the user.
         /// </summary>
@@ -540,6 +555,11 @@ namespace SSH_Helper.Services.Scripting.Models
     public class ConfirmOptions
     {
         /// <summary>
+        /// Optional dialog window title.
+        /// </summary>
+        public string? Title { get; set; }
+
+        /// <summary>
         /// Prompt text to display to the user.
         /// </summary>
         public string Prompt { get; set; } = string.Empty;
@@ -564,6 +584,11 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Session model. Separate opens a new connection; shared attaches to the current session.
         /// </summary>
         public InteractiveSessionMode Session { get; set; } = InteractiveSessionMode.Separate;
+
+        /// <summary>
+        /// Optional custom window title for the interactive terminal form.
+        /// </summary>
+        public string? Title { get; set; }
 
         /// <summary>
         /// Optional long-running command to execute automatically when the terminal opens.

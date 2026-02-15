@@ -25,6 +25,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 // Substitute variables in prompt and default
                 var prompt = context.SubstituteVariables(step.Input.Prompt ?? "Enter value:");
+                var title = string.IsNullOrWhiteSpace(step.Input.Title)
+                    ? null
+                    : context.SubstituteVariables(step.Input.Title);
                 var defaultValue = step.Input.Default != null
                     ? context.SubstituteVariables(step.Input.Default)
                     : string.Empty;
@@ -47,7 +50,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
                 var userInput = await ScriptPromptDialogRunner
                     .ShowAsync<ScriptInputDialog, string?>(
-                        () => new ScriptInputDialog(prompt, defaultValue, step.Input.Password, validationRegex, validationError),
+                        () => new ScriptInputDialog(prompt, defaultValue, step.Input.Password, validationRegex, validationError, title),
                         dialog => dialog.DialogResult == DialogResult.OK ? dialog.InputValue : null,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -94,13 +97,20 @@ namespace SSH_Helper.Services.Scripting.Commands
 
         public string InputValue => _txtInput.Text;
 
-        public ScriptInputDialog(string prompt, string defaultValue, bool password, Regex? validationRegex = null, string validationError = "Invalid input.")
+        public ScriptInputDialog(
+            string prompt,
+            string defaultValue,
+            bool password,
+            Regex? validationRegex = null,
+            string validationError = "Invalid input.",
+            string? title = null)
         {
             _validationRegex = validationRegex;
             _validationError = validationError;
 
-            Text = "Script Input";
+            Text = string.IsNullOrWhiteSpace(title) ? "Script Input" : title.Trim();
             Size = new System.Drawing.Size(400, 185);
+            AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;

@@ -166,7 +166,10 @@ namespace SSH_Helper.Services.Terminal
                 startedAtUtc = DateTime.UtcNow;
 
                 runSummary = await RunWindowLoopAsync(
-                    title: $"{context.CurrentHost?.ToString() ?? "Current Host"} - Interactive ({options.Session.ToString().ToLowerInvariant()})",
+                    title: ResolveInteractiveWindowTitle(
+                        options,
+                        context.CurrentHost?.ToString() ?? "Current Host",
+                        captureMode: false),
                     scripting: sharedSession.SharedScripting,
                     terminal: terminal,
                     sessionMode: options.Session,
@@ -262,7 +265,7 @@ namespace SSH_Helper.Services.Terminal
                 startedAtUtc = DateTime.UtcNow;
 
                 runSummary = await RunWindowLoopAsync(
-                    title: $"{host} - Interactive ({options.Session.ToString().ToLowerInvariant()})",
+                    title: ResolveInteractiveWindowTitle(options, host.ToString(), captureMode: false),
                     scripting: scripting,
                     terminal: virtualTerminal,
                     sessionMode: options.Session,
@@ -365,7 +368,7 @@ namespace SSH_Helper.Services.Terminal
                 if (options.ShowWindow)
                 {
                     runSummary = await RunCaptureWindowLoopAsync(
-                        title: $"{host} - Interactive Capture",
+                        title: ResolveInteractiveWindowTitle(options, host.ToString(), captureMode: true),
                         context: context,
                         scripting: scripting,
                         terminal: virtualTerminal,
@@ -2690,6 +2693,28 @@ namespace SSH_Helper.Services.Terminal
             return options.Columns.HasValue && options.Columns.Value > 0
                 ? options.Columns.Value
                 : SshTerminalOptionsFactory.DefaultColumns;
+        }
+
+        private static string ResolveInteractiveWindowTitle(
+            InteractiveOptions options,
+            string hostLabel,
+            bool captureMode)
+        {
+            ArgumentNullException.ThrowIfNull(options);
+
+            var customTitle = options.Title?.Trim();
+            if (!string.IsNullOrWhiteSpace(customTitle))
+            {
+                return customTitle;
+            }
+
+            var safeHostLabel = string.IsNullOrWhiteSpace(hostLabel) ? "Current Host" : hostLabel;
+            if (captureMode)
+            {
+                return $"{safeHostLabel} - Interactive Capture";
+            }
+
+            return $"{safeHostLabel} - Interactive ({options.Session.ToString().ToLowerInvariant()})";
         }
 
         private static int ResolveTerminalRows(InteractiveOptions options)
