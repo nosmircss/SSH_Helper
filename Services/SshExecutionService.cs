@@ -1657,7 +1657,7 @@ namespace SSH_Helper.Services
             if (!DebugMode) return;
             var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
             var elapsed = sw != null ? $" (+{sw.ElapsedMilliseconds}ms)" : "";
-            var output = $"[SSH DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";
+            var output = $"[DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";
             OnOutputReceived(host, output);
         }
 

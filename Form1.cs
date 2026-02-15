@@ -1694,7 +1694,7 @@ namespace SSH_Helper
 
             var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
             var elapsed = stopwatch != null ? $" (+{stopwatch.ElapsedMilliseconds}ms)" : "";
-            var debugLine = $"[SSH DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";
+            var debugLine = $"[DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";
             AppendOutputText(debugLine);
         }
 
@@ -8188,8 +8188,7 @@ namespace SSH_Helper
         private static bool IsDebugOutput(string output)
         {
             var trimmed = output.TrimStart('\r', '\n');
-            return trimmed.StartsWith("[DEBUG ", StringComparison.Ordinal) ||
-                   trimmed.StartsWith("[SSH DEBUG ", StringComparison.Ordinal);
+            return trimmed.StartsWith("[DEBUG ", StringComparison.Ordinal);
         }
 
         private void AppendOutputToUi(string output)
