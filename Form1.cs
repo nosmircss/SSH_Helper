@@ -170,9 +170,6 @@ namespace SSH_Helper
         // Track which TreeView triggered the context menu
         private TreeView? _contextMenuSourceTreeView;
 
-        // SSH startup debug mode - logs timing from button click through SSH connection
-        private bool _sshDebugMode;
-
         // Script editor services
         private ScriptAutocompleteProvider? _scriptAutocompleteProvider;
         private readonly YamlSshSyntaxHighlighter _scriptSyntaxHighlighter = new();
@@ -1693,7 +1690,7 @@ namespace SSH_Helper
         /// </summary>
         private void SshDebugLog(string phase, string message, System.Diagnostics.Stopwatch? stopwatch = null)
         {
-            if (!_sshDebugMode) return;
+            if (!debugModeToolStripMenuItem.Checked) return;
 
             var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
             var elapsed = stopwatch != null ? $" (+{stopwatch.ElapsedMilliseconds}ms)" : "";
@@ -4220,6 +4217,7 @@ namespace SSH_Helper
             }
         }
 
+#if DEBUG
         private void memoryDebuggerToolStripMenuItem_Click(object sender, EventArgs e)
         {
             using var dialog = new MemoryDebuggerDialog(
@@ -4553,6 +4551,7 @@ namespace SSH_Helper
 
             return $"{value:N2} {units[unitIndex]}";
         }
+#endif
 
         private void debugModeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
         {
@@ -4560,12 +4559,6 @@ namespace SSH_Helper
             UpdateStatusBar(debugModeToolStripMenuItem.Checked ? "Debug mode enabled" : "Debug mode disabled");
         }
 
-        private void sshDebugModeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
-        {
-            _sshDebugMode = sshDebugModeToolStripMenuItem.Checked;
-            _sshService.SshDebugMode = _sshDebugMode;
-            UpdateStatusBar(_sshDebugMode ? "SSH Debug enabled - timing info will be logged" : "SSH Debug disabled");
-        }
 
         private void documentationToolStripMenuItem_Click(object sender, EventArgs e)
         {

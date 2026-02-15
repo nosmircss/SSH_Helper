@@ -185,10 +185,11 @@ namespace SSH_Helper
             editToolStripMenuItem = new ToolStripMenuItem();
             findToolStripMenuItem = new ToolStripMenuItem();
             validateScriptToolStripMenuItem = new ToolStripMenuItem();
+#if DEBUG
             memoryDebuggerToolStripMenuItem = new ToolStripMenuItem();
+#endif
             toolStripSeparatorEdit1 = new ToolStripSeparator();
             debugModeToolStripMenuItem = new ToolStripMenuItem();
-            sshDebugModeToolStripMenuItem = new ToolStripMenuItem();
             helpToolStripMenuItem = new ToolStripMenuItem();
             documentationToolStripMenuItem = new ToolStripMenuItem();
             scriptingDocumentationToolStripMenuItem = new ToolStripMenuItem();
@@ -1515,7 +1516,11 @@ namespace SSH_Helper
             // 
             // editToolStripMenuItem
             // 
-            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, validateScriptToolStripMenuItem, memoryDebuggerToolStripMenuItem, toolStripSeparatorEdit1, debugModeToolStripMenuItem, sshDebugModeToolStripMenuItem });
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, validateScriptToolStripMenuItem,
+#if DEBUG
+                memoryDebuggerToolStripMenuItem,
+#endif
+                toolStripSeparatorEdit1, debugModeToolStripMenuItem });
             editToolStripMenuItem.Name = "editToolStripMenuItem";
             editToolStripMenuItem.Size = new Size(39, 20);
             editToolStripMenuItem.Text = "&Edit";
@@ -1535,6 +1540,7 @@ namespace SSH_Helper
             validateScriptToolStripMenuItem.Size = new Size(188, 22);
             validateScriptToolStripMenuItem.Text = "Validate &Script...";
             validateScriptToolStripMenuItem.Click += validateScriptToolStripMenuItem_Click;
+#if DEBUG
             //
             // memoryDebuggerToolStripMenuItem
             //
@@ -1542,6 +1548,7 @@ namespace SSH_Helper
             memoryDebuggerToolStripMenuItem.Size = new Size(188, 22);
             memoryDebuggerToolStripMenuItem.Text = "&Memory Debugger...";
             memoryDebuggerToolStripMenuItem.Click += memoryDebuggerToolStripMenuItem_Click;
+#endif
             // 
             // toolStripSeparatorEdit1
             // 
@@ -1554,17 +1561,8 @@ namespace SSH_Helper
             debugModeToolStripMenuItem.Name = "debugModeToolStripMenuItem";
             debugModeToolStripMenuItem.Size = new Size(188, 22);
             debugModeToolStripMenuItem.Text = "&Debug Mode";
-            debugModeToolStripMenuItem.ToolTipText = "When enabled, shows timestamps and diagnostic info to help troubleshoot prompt detection";
+            debugModeToolStripMenuItem.ToolTipText = "When enabled, shows diagnostic info including prompt detection details and execution timing";
             debugModeToolStripMenuItem.CheckedChanged += debugModeToolStripMenuItem_CheckedChanged;
-            //
-            // sshDebugModeToolStripMenuItem
-            //
-            sshDebugModeToolStripMenuItem.CheckOnClick = true;
-            sshDebugModeToolStripMenuItem.Name = "sshDebugModeToolStripMenuItem";
-            sshDebugModeToolStripMenuItem.Size = new Size(188, 22);
-            sshDebugModeToolStripMenuItem.Text = "&SSH Debug";
-            sshDebugModeToolStripMenuItem.ToolTipText = "When enabled, logs detailed timing info from button click through SSH connection to help diagnose startup delays";
-            sshDebugModeToolStripMenuItem.CheckedChanged += sshDebugModeToolStripMenuItem_CheckedChanged;
             //
             // helpToolStripMenuItem
             // 
@@ -1845,10 +1843,11 @@ namespace SSH_Helper
         private ToolStripMenuItem editToolStripMenuItem;
         private ToolStripMenuItem findToolStripMenuItem;
         private ToolStripMenuItem validateScriptToolStripMenuItem;
+#if DEBUG
         private ToolStripMenuItem memoryDebuggerToolStripMenuItem;
+#endif
         private ToolStripSeparator toolStripSeparatorEdit1;
         private ToolStripMenuItem debugModeToolStripMenuItem;
-        private ToolStripMenuItem sshDebugModeToolStripMenuItem;
         private ToolStripMenuItem helpToolStripMenuItem;
         private ToolStripMenuItem documentationToolStripMenuItem;
         private ToolStripMenuItem scriptingDocumentationToolStripMenuItem;

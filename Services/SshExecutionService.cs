@@ -127,11 +127,6 @@ namespace SSH_Helper.Services
         /// </summary>
         public bool DebugMode { get; set; }
 
-        /// <summary>
-        /// When enabled, emits detailed startup timing info to help diagnose delays from button click to SSH connection.
-        /// Debug output is sent via the OutputReceived event with [SSH DEBUG] prefix.
-        /// </summary>
-        public bool SshDebugMode { get; set; }
 
         /// <summary>
         /// When enabled, attempts SSH agent authentication before falling back to key/password.
@@ -1134,12 +1129,6 @@ namespace SSH_Helper.Services
             session.DebugMode = DebugMode;
             session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
 
-            // Also enable debug mode on the session if SSH debug is on
-            if (SshDebugMode)
-            {
-                session.DebugMode = true;
-            }
-
             // Subscribe to session debug output so we can see banner detection, prompt detection, etc.
             session.DebugOutput += (s, e) =>
             {
@@ -1392,7 +1381,7 @@ namespace SSH_Helper.Services
             SshDebugLog(host, "SSH", $"ExecuteWithoutPool entered. Creating Ssh client for {host.IpAddress}:{host.Port}");
 
             // Test raw TCP connectivity first to isolate network latency from SSH negotiation
-            if (SshDebugMode)
+            if (DebugMode)
             {
                 try
                 {
@@ -1661,11 +1650,11 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Emits SSH debug timing information when SshDebugMode is enabled.
+        /// Emits SSH debug timing information when DebugMode is enabled.
         /// </summary>
         private void SshDebugLog(HostConnection host, string phase, string message, System.Diagnostics.Stopwatch? sw = null)
         {
-            if (!SshDebugMode) return;
+            if (!DebugMode) return;
             var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
             var elapsed = sw != null ? $" (+{sw.ElapsedMilliseconds}ms)" : "";
             var output = $"[SSH DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";
