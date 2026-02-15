@@ -527,6 +527,24 @@ steps:
     }
 
     [Fact]
+    public void Validate_ScalarStepItem_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - print: ""ok""
+  - print ""missing colon""";
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(2);
+        script.Steps[1].GetStepType().Should().Be(StepType.Unknown);
+
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(e => e.Contains("Step has no recognized command"));
+        errors.Should().Contain(e => e.Contains("print \"missing colon\""));
+    }
+
+    [Fact]
     public void Validate_IfWithoutThen_ReturnsError()
     {
         var yaml = @"---
@@ -1166,6 +1184,42 @@ steps:
         step.Choose.Options[1].Value.Should().Be("lbl");
     }
 
+    [Fact]
+    public void Parse_ChooseStep_OptionsFromVariable_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      prompt: ""Pick interface:""
+      into: selected_interface
+      options: interface_list";
+
+        var script = _parser.Parse(yaml);
+
+        var step = script.Steps[0];
+        step.Choose.Should().NotBeNull();
+        step.Choose!.Options.Should().BeEmpty();
+        step.Choose.OptionsFrom.Should().Be("interface_list");
+    }
+
+    [Fact]
+    public void Parse_MultiselectStep_OptionsFromVariable_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - multiselect:
+      prompt: ""Pick interfaces:""
+      into: selected_interfaces
+      options: ${interface_list}";
+
+        var script = _parser.Parse(yaml);
+
+        var step = script.Steps[0];
+        step.Multiselect.Should().NotBeNull();
+        step.Multiselect!.Options.Should().BeEmpty();
+        step.Multiselect.OptionsFrom.Should().Be("${interface_list}");
+    }
+
     #endregion
 
     #region Interactive Terminal Parser Tests
@@ -1185,6 +1239,31 @@ steps:
         step.GetStepType().Should().Be(StepType.Interactive);
         step.Interactive.Should().NotBeNull();
         step.Interactive!.Session.Should().Be(InteractiveSessionMode.Separate);
+    }
+
+    [Fact]
+    public void Parse_InteractiveCaptureModeOptions_ParsesCorrectly()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  command: diagnose sniffer packet any 'host 10.0.0.1' 4 10 a
+                  capture: sniffer_output
+                  max_seconds: 120
+                  mirror_output: true
+            """;
+
+        var script = _parser.Parse(yaml);
+        var step = script.Steps[0];
+
+        step.Interactive.Should().NotBeNull();
+        step.Interactive!.Session.Should().Be(InteractiveSessionMode.Separate);
+        step.Interactive.Command.Should().Be("diagnose sniffer packet any 'host 10.0.0.1' 4 10 a");
+        step.Interactive.Capture.Should().Be("sniffer_output");
+        step.Interactive.MaxSeconds.Should().Be(120);
+        step.Interactive.MirrorOutput.Should().BeTrue();
     }
 
     [Fact]
@@ -1216,6 +1295,41 @@ steps:
         var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
 
         errors.Should().Contain(error => error.Contains("interactive.session must be 'separate' or 'shared'"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveCommandWithSharedSession_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: shared
+                  command: tcpdump -i any
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.session must be 'separate' when interactive.command is set"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveMaxSecondsNotPositive_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  command: tcpdump -i any
+                  max_seconds: 0
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.max_seconds must be greater than 0"));
     }
 
     [Fact]

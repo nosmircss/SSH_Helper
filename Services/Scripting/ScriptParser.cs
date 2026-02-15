@@ -104,7 +104,7 @@ namespace SSH_Helper.Services.Scripting
                 ["choose"] = ["prompt", "into", "options", "default"],
                 ["multiselect"] = ["prompt", "into", "options", "min", "max"],
                 ["confirm"] = ["prompt", "into", "default"],
-                ["interactive"] = ["session", "on_error"]
+                ["interactive"] = ["session", "command", "capture", "max_seconds", "mirror_output", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -196,7 +196,8 @@ namespace SSH_Helper.Services.Scripting
                 ["follow_redirects"] = ["true", "false"],
                 ["allow_failure"] = ["true", "false"],
                 ["verify_tls"] = ["true", "false"],
-                ["session"] = ["separate", "shared"]
+                ["session"] = ["separate", "shared"],
+                ["mirror_output"] = ["true", "false"]
             };
 
         /// <summary>
@@ -441,8 +442,13 @@ namespace SSH_Helper.Services.Scripting
         {
             if (!parser.Accept<MappingStart>(out _))
             {
+                var invalidStep = new ScriptStep
+                {
+                    LineNumber = (int)(parser.Current?.Start.Line ?? 0)
+                };
+                AddStepParseError(invalidStep, "step must be a mapping (for example '- print: message')");
                 SkipValue(parser);
-                return null;
+                return invalidStep;
             }
 
             var step = new ScriptStep();
@@ -1508,7 +1514,7 @@ namespace SSH_Helper.Services.Scripting
                             options.Into = parser.Consume<Scalar>().Value;
                             break;
                         case "options":
-                            options.Options = ParseChoiceOptionList(parser);
+                            (options.Options, options.OptionsFrom) = ParseChoiceOptions(parser);
                             break;
                         case "default":
                             options.Default = parser.Consume<Scalar>().Value;
@@ -1552,7 +1558,7 @@ namespace SSH_Helper.Services.Scripting
                             options.Into = parser.Consume<Scalar>().Value;
                             break;
                         case "options":
-                            options.Options = ParseChoiceOptionList(parser);
+                            (options.Options, options.OptionsFrom) = ParseChoiceOptions(parser);
                             break;
                         case "min":
                             if (int.TryParse(parser.Consume<Scalar>().Value, out var min))
@@ -1626,7 +1632,7 @@ namespace SSH_Helper.Services.Scripting
             if (!parser.Accept<MappingStart>(out _))
             {
                 SkipValue(parser);
-                AddStepParseError(step, "interactive must be a mapping with optional keys 'session' and 'on_error'");
+                AddStepParseError(step, "interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'mirror_output', and 'on_error'");
                 return null;
             }
 
@@ -1663,6 +1669,29 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case "command":
+                        options.Command = parser.Consume<Scalar>().Value;
+                        break;
+
+                    case "capture":
+                        options.Capture = parser.Consume<Scalar>().Value;
+                        break;
+
+                    case "max_seconds":
+                        if (int.TryParse(parser.Consume<Scalar>().Value, out var maxSeconds))
+                        {
+                            options.MaxSeconds = maxSeconds;
+                        }
+                        else
+                        {
+                            AddStepParseError(step, "interactive.max_seconds must be a positive integer");
+                        }
+                        break;
+
+                    case "mirror_output":
+                        options.MirrorOutput = ParseBooleanOrDefault(parser, options.MirrorOutput);
+                        break;
+
                     case "emulation":
                         AddUnknownKeyWarning("interactive.emulation is deprecated and ignored", (int)keyScalar.Start.Line);
                         SkipValue(parser);
@@ -1685,18 +1714,33 @@ namespace SSH_Helper.Services.Scripting
         }
 
         /// <summary>
+        /// Parses choose/multiselect options from either:
+        /// - sequence syntax (inline options list), or
+        /// - scalar syntax (variable/expression source for options).
+        /// </summary>
+        private (List<ChoiceOption> options, string? optionsFrom) ParseChoiceOptions(IParser parser)
+        {
+            if (parser.Accept<SequenceStart>(out _))
+            {
+                return (ParseChoiceOptionList(parser), null);
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                return (new List<ChoiceOption>(), parser.Consume<Scalar>().Value);
+            }
+
+            SkipValue(parser);
+            return (new List<ChoiceOption>(), null);
+        }
+
+        /// <summary>
         /// Parses a YAML sequence where each item is either a scalar string (label=value)
         /// or a mapping with "label" and "value" keys.
         /// </summary>
         private List<ChoiceOption> ParseChoiceOptionList(IParser parser)
         {
             var result = new List<ChoiceOption>();
-
-            if (!parser.Accept<SequenceStart>(out _))
-            {
-                SkipValue(parser);
-                return result;
-            }
 
             parser.Consume<SequenceStart>();
 
@@ -2754,7 +2798,22 @@ namespace SSH_Helper.Services.Scripting
                         if (step.Interactive == null)
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session' and 'on_error'{lineContent}");
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'mirror_output', and 'on_error'{lineContent}");
+                            break;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(step.Interactive.Command) &&
+                            step.Interactive.Session != InteractiveSessionMode.Separate)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive.session must be 'separate' when interactive.command is set{lineContent}");
+                        }
+
+                        if (step.Interactive.MaxSeconds.HasValue &&
+                            step.Interactive.MaxSeconds.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive.max_seconds must be greater than 0{lineContent}");
                         }
                         break;
                 }

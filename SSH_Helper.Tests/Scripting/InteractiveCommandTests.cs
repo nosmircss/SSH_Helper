@@ -117,6 +117,28 @@ public class InteractiveCommandTests
         sessions[0].Transcript.Should().Contain("show version");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_WithCaptureVariable_StoresTranscriptAndOutput()
+    {
+        var command = new InteractiveCommand(new StubInteractiveTerminalService(
+            (_, _, _) => Task.FromResult(InteractiveTerminalRunResult.Ok("packet line 1\r\npacket line 2", "ctrl_c_continue"))));
+
+        var context = new ScriptContext();
+        var step = new ScriptStep
+        {
+            Interactive = new InteractiveOptions
+            {
+                Capture = "sniffer_capture"
+            }
+        };
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("sniffer_capture").Should().Contain("packet line 1");
+        context.GetVariableString("_output").Should().Contain("packet line 2");
+    }
+
     private sealed class StubInteractiveTerminalService : IInteractiveTerminalService
     {
         private readonly Func<ScriptContext, InteractiveOptions, CancellationToken, Task<InteractiveTerminalRunResult>> _handler;

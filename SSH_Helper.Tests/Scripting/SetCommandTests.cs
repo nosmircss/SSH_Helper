@@ -108,6 +108,68 @@ public class SetCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_Unshift_PrependsToList()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "interface_list = split('port1,port2', ',')" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "interface_list = unshift(interface_list, 'any')" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        var interfaces = context.GetVariable("interface_list").Should().BeOfType<List<string>>().Subject;
+        interfaces.Should().Equal("any", "port1", "port2");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShiftAndPop_MutateWritableListAndReturnRemovedValues()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "values = split('one,two,three', ',')" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "last = pop(values)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "first = shift(values)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        context.GetVariableString("last").Should().Be("three");
+        context.GetVariableString("first").Should().Be("one");
+        var values = context.GetVariable("values").Should().BeOfType<List<string>>().Subject;
+        values.Should().Equal("two");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ListHelpers_FirstLastIndexOfConcat_WorkAsExpected()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "a = split('wan1,wan2', ',')" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "b = split('lan1,lan2', ',')" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "first_value = first(a)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "last_value = last(a)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "idx = indexof(a, 'WAN2')" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "combined = concat(a, b)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        context.GetVariableString("first_value").Should().Be("wan1");
+        context.GetVariableString("last_value").Should().Be("wan2");
+        context.GetVariable("idx").Should().Be(1);
+
+        var combined = context.GetVariable("combined").Should().BeOfType<List<string>>().Subject;
+        combined.Should().Equal("wan1", "wan2", "lan1", "lan2");
+
+        var originalA = context.GetVariable("a").Should().BeOfType<List<string>>().Subject;
+        originalA.Should().Equal("wan1", "wan2");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_JsonConstructor_WithNestedJsonExpression_StoresNestedObject()
     {
         var step = new ScriptStep

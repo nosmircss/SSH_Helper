@@ -150,4 +150,64 @@ public class InteractiveTerminalServiceTranscriptFilterTests
         cleaned.Should().Be("logout\r\n");
         cleaned.Should().NotContain("\u007F");
     }
+
+    [Fact]
+    public void IsDetachedCaptureCompletionReason_CtrlCAndTimeout_ReturnTrue()
+    {
+        InteractiveTerminalService.IsDetachedCaptureCompletionReason("ctrl_c_continue").Should().BeTrue();
+        InteractiveTerminalService.IsDetachedCaptureCompletionReason("timeout_continue").Should().BeTrue();
+        InteractiveTerminalService.IsDetachedCaptureCompletionReason("natural_complete").Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsCaptureSuccessCloseReason_EarlyClosePartial_ReturnsTrue()
+    {
+        var result = InteractiveTerminalService.IsCaptureSuccessCloseReason("early_close_partial");
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsCaptureSuccessCloseReason_Disconnected_ReturnsFalse()
+    {
+        var result = InteractiveTerminalService.IsCaptureSuccessCloseReason("disconnected");
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldMirrorCaptureChunk_ReflectsMirrorFlagAndContent()
+    {
+        InteractiveTerminalService.ShouldMirrorCaptureChunk(false, "line").Should().BeFalse();
+        InteractiveTerminalService.ShouldMirrorCaptureChunk(true, string.Empty).Should().BeFalse();
+        InteractiveTerminalService.ShouldMirrorCaptureChunk(true, "line").Should().BeTrue();
+    }
+
+    [Fact]
+    public void ShouldArmCaptureNaturalCompletion_PromptOnlyChunk_DoesNotArm()
+    {
+        var result = InteractiveTerminalService.ShouldArmCaptureNaturalCompletion(
+            "fw-host # ",
+            "diagnose sniffer packet any 'icmp' 4 0 a");
+
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldArmCaptureNaturalCompletion_CommandEchoChunk_Arms()
+    {
+        var result = InteractiveTerminalService.ShouldArmCaptureNaturalCompletion(
+            "fw-host # diagnose sniffer packet any 'icmp' 4 0 a",
+            "diagnose sniffer packet any 'icmp' 4 0 a");
+
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ShouldArmCaptureNaturalCompletion_NonPromptOutput_Arms()
+    {
+        var result = InteractiveTerminalService.ShouldArmCaptureNaturalCompletion(
+            "interfaces sniff line",
+            "diagnose sniffer packet any 'icmp' 4 0 a");
+
+        result.Should().BeTrue();
+    }
 }

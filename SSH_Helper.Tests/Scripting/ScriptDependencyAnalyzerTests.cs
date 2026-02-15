@@ -59,6 +59,26 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_ChooseOptionsFromVariable_TracksOptionsSourceDependency()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - choose:
+                      into: selected_interface
+                      options: interface_list
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().Contain("interface_list");
+    }
+
+    [Fact]
     public void AnalyzeSshRequirements_SendAtRoot_RequiresSshSession()
     {
         var result = AnalyzeSshRequirements("""

@@ -29,8 +29,15 @@ namespace SSH_Helper.Services.Terminal
         public bool Success { get; private init; }
         public bool SharedUnavailable { get; private init; }
         public string? ErrorMessage { get; private init; }
+        public string? CapturedTranscript { get; private init; }
+        public string? CompletionReason { get; private init; }
 
-        public static InteractiveTerminalRunResult Ok() => new() { Success = true };
+        public static InteractiveTerminalRunResult Ok(string? capturedTranscript = null, string? completionReason = null) => new()
+        {
+            Success = true,
+            CapturedTranscript = capturedTranscript,
+            CompletionReason = completionReason
+        };
 
         public static InteractiveTerminalRunResult Fail(string message) => new()
         {
@@ -56,6 +63,10 @@ namespace SSH_Helper.Services.Terminal
         private const string InteractiveCloseReasonDisconnected = "disconnected";
         private const string InteractiveCloseReasonCancelled = "cancelled";
         private const string InteractiveCloseReasonError = "error";
+        private const string InteractiveCloseReasonCtrlCContinue = "ctrl_c_continue";
+        private const string InteractiveCloseReasonTimeoutContinue = "timeout_continue";
+        private const string InteractiveCloseReasonEarlyClosePartial = "early_close_partial";
+        private const string InteractiveCloseReasonNaturalComplete = "natural_complete";
 
         private enum InteractiveCloseReasonState
         {
@@ -74,7 +85,11 @@ namespace SSH_Helper.Services.Terminal
 
             public bool Completed =>
                 string.Equals(CloseReason, InteractiveCloseReasonUserClosed, StringComparison.Ordinal) ||
-                string.Equals(CloseReason, InteractiveCloseReasonDisconnected, StringComparison.Ordinal);
+                string.Equals(CloseReason, InteractiveCloseReasonDisconnected, StringComparison.Ordinal) ||
+                string.Equals(CloseReason, InteractiveCloseReasonCtrlCContinue, StringComparison.Ordinal) ||
+                string.Equals(CloseReason, InteractiveCloseReasonTimeoutContinue, StringComparison.Ordinal) ||
+                string.Equals(CloseReason, InteractiveCloseReasonEarlyClosePartial, StringComparison.Ordinal) ||
+                string.Equals(CloseReason, InteractiveCloseReasonNaturalComplete, StringComparison.Ordinal);
         }
 
         private sealed class SharedCommandGuardState
@@ -99,6 +114,15 @@ namespace SSH_Helper.Services.Terminal
             ArgumentNullException.ThrowIfNull(context);
             ArgumentNullException.ThrowIfNull(options);
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (!string.IsNullOrWhiteSpace(options.Command) &&
+                options.Session != InteractiveSessionMode.Separate)
+            {
+                return InteractiveTerminalRunResult.Fail("Interactive command mode requires 'session: separate'.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(options.Command))
+                return await RunSeparateCaptureAsync(context, options, cancellationToken);
 
             return options.Session == InteractiveSessionMode.Shared
                 ? await RunSharedAsync(context, options, cancellationToken)
@@ -144,7 +168,7 @@ namespace SSH_Helper.Services.Terminal
                     throw new OperationCanceledException(cancellationToken);
 
                 sharedSession.SyncAfterInteractive();
-                return InteractiveTerminalRunResult.Ok();
+                return InteractiveTerminalRunResult.Ok(runSummary.Transcript, runSummary.CloseReason);
             }
             catch (OperationCanceledException)
             {
@@ -233,7 +257,7 @@ namespace SSH_Helper.Services.Terminal
                 if (runSummary.CancelledByToken)
                     throw new OperationCanceledException(cancellationToken);
 
-                return InteractiveTerminalRunResult.Ok();
+                return InteractiveTerminalRunResult.Ok(runSummary.Transcript, runSummary.CloseReason);
             }
             catch (OperationCanceledException)
             {
@@ -256,6 +280,545 @@ namespace SSH_Helper.Services.Terminal
                         DateTime.UtcNow));
                 }
             }
+        }
+
+        private async Task<InteractiveTerminalRunResult> RunSeparateCaptureAsync(
+            ScriptContext context,
+            InteractiveOptions options,
+            CancellationToken cancellationToken)
+        {
+            var host = context.CurrentHost;
+            if (host == null || string.IsNullOrWhiteSpace(host.IpAddress))
+            {
+                return InteractiveTerminalRunResult.Fail("Interactive command requires current host connection details.");
+            }
+
+            if (string.IsNullOrWhiteSpace(options.Command))
+            {
+                return InteractiveTerminalRunResult.Fail("Interactive capture mode requires a non-empty command.");
+            }
+
+            var username = !string.IsNullOrWhiteSpace(context.ResolvedUsername) ? context.ResolvedUsername : host.Username;
+            var password = !string.IsNullOrWhiteSpace(context.ResolvedPassword) ? context.ResolvedPassword : host.Password;
+
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                return InteractiveTerminalRunResult.Fail("Interactive command requires a resolved username.");
+            }
+
+            if (string.IsNullOrWhiteSpace(password) && string.IsNullOrWhiteSpace(host.IdentityFile))
+            {
+                return InteractiveTerminalRunResult.Fail("Interactive command requires a resolved password or an identity file.");
+            }
+
+            var timeouts = context.Timeouts ?? SshTimeoutOptions.Default;
+            Ssh? client = null;
+            VirtualTerminal? virtualTerminal = null;
+            RebexScripting? scripting = null;
+            var startedAtUtc = DateTime.UtcNow;
+            var runSummary = new InteractiveWindowRunSummary();
+
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                client = new Ssh
+                {
+                    Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds
+                };
+
+                ApplyAlgorithmSettings(client, host);
+                await Task.Run(() => ConnectAndLogin(client, host, username, password ?? string.Empty), cancellationToken);
+
+                var terminalOptions = SshTerminalOptionsFactory.Create();
+                (scripting, virtualTerminal) = SshTerminalOptionsFactory.CreateScriptingWithHistory(
+                    client,
+                    terminalOptions,
+                    SshTerminalOptionsFactory.DefaultColumns,
+                    SshTerminalOptionsFactory.DefaultRows,
+                    SshTerminalOptionsFactory.DefaultHistoryMaxLength);
+                startedAtUtc = DateTime.UtcNow;
+
+                runSummary = await RunCaptureWindowLoopAsync(
+                    title: $"{host} - Interactive Capture",
+                    context: context,
+                    scripting: scripting,
+                    terminal: virtualTerminal,
+                    command: options.Command,
+                    maxSeconds: options.MaxSeconds,
+                    mirrorOutput: options.MirrorOutput,
+                    keepAliveInterval: timeouts.KeepAliveInterval,
+                    cancellationToken: cancellationToken,
+                    isConnectionAlive: () => client != null && client.IsConnected,
+                    onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting));
+
+                if (runSummary.CancelledByToken)
+                    throw new OperationCanceledException(cancellationToken);
+
+                if (string.Equals(runSummary.CloseReason, InteractiveCloseReasonDisconnected, StringComparison.Ordinal))
+                {
+                    return InteractiveTerminalRunResult.Fail("Interactive capture disconnected before completion.");
+                }
+
+                if (string.Equals(runSummary.CloseReason, InteractiveCloseReasonError, StringComparison.Ordinal))
+                {
+                    return InteractiveTerminalRunResult.Fail("Interactive capture failed.");
+                }
+
+                return InteractiveTerminalRunResult.Ok(runSummary.Transcript, runSummary.CloseReason);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return InteractiveTerminalRunResult.Fail($"Interactive terminal failed: {ex.Message}");
+            }
+            finally
+            {
+                CloseSeparateResources(client, virtualTerminal, scripting);
+                if (runSummary.WasLaunched)
+                {
+                    context.AddInteractiveSession(CreateSessionDetails(
+                        runSummary,
+                        host.ToString(),
+                        options,
+                        startedAtUtc,
+                        DateTime.UtcNow));
+                }
+            }
+        }
+
+        private async Task<InteractiveWindowRunSummary> RunCaptureWindowLoopAsync(
+            string title,
+            ScriptContext context,
+            RebexScripting scripting,
+            ITerminal? terminal,
+            string command,
+            int? maxSeconds,
+            bool mirrorOutput,
+            TimeSpan keepAliveInterval,
+            CancellationToken cancellationToken,
+            Func<bool>? isConnectionAlive,
+            Action? onCancellation)
+        {
+            var ioLock = new object();
+            var pendingInput = new ConcurrentQueue<Action<RebexScripting>>();
+            using var uiLoopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var completionTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var wasLaunched = 0;
+            var cancelledByToken = 0;
+            var pumpHadError = 0;
+            var completionSignaled = 0;
+            var completionReason = InteractiveCloseReasonEarlyClosePartial;
+            var transcriptBuilder = new StringBuilder();
+            var transcriptLock = new object();
+            var inAlternateScreen = false;
+            var inAlternateScreenState = 0;
+            var commandDispatched = 0;
+            var commandPromptArmed = 0;
+            InteractiveTerminalForm? form = null;
+
+            EventHandler? disconnectedHandler = null;
+            EventHandler<ActionRequestEventArgs>? actionRequestedHandler = null;
+            EventHandler<DataReceivedEventArgs>? dataReceivedHandler = null;
+            FormClosedEventHandler? formClosedHandler = null;
+            EventHandler<string>? textInputHandler = null;
+            EventHandler<TerminalKeyEventArgs>? keyInputHandler = null;
+            EventHandler<TerminalSizeChangedEventArgs>? terminalSizeChangedHandler = null;
+
+            bool TrySetCompletion(string reason)
+            {
+                if (Interlocked.CompareExchange(ref completionSignaled, 1, 0) != 0)
+                    return false;
+
+                completionReason = reason;
+                completionTcs.TrySetResult(true);
+                return true;
+            }
+
+            void TrySendCtrlC()
+            {
+                try
+                {
+                    lock (ioLock)
+                    {
+                        scripting.Send(ConsoleKey.C, ConsoleModifiers.Control);
+                    }
+                }
+                catch
+                {
+                    // Ignore send failures while terminal is shutting down.
+                }
+            }
+
+            using var cancellationRegistration = cancellationToken.Register(() =>
+            {
+                Interlocked.Exchange(ref cancelledByToken, 1);
+                if (TrySetCompletion(InteractiveCloseReasonCancelled))
+                {
+                    onCancellation?.Invoke();
+                }
+
+                if (form != null && !form.IsDisposed)
+                {
+                    RequestCloseSafe(form);
+                }
+            });
+
+            FlushCaptureStartupBuffer(scripting, cancellationToken);
+
+            if (terminal != null)
+            {
+                disconnectedHandler = (_, _) =>
+                {
+                    if (TrySetCompletion(InteractiveCloseReasonDisconnected) &&
+                        form != null)
+                    {
+                        RequestCloseSafe(form);
+                    }
+                };
+
+                actionRequestedHandler = (_, args) =>
+                {
+                    if (args.Action != RequestedAction.DisconnectRequest)
+                        return;
+
+                    if (TrySetCompletion(InteractiveCloseReasonDisconnected) &&
+                        form != null)
+                    {
+                        RequestCloseSafe(form);
+                    }
+                };
+
+                dataReceivedHandler = (_, args) =>
+                {
+                    string capturedText = string.Empty;
+
+                    lock (transcriptLock)
+                    {
+                        var captureResult = FilterTranscriptChunkForAudit(
+                            args.RawData,
+                            inAlternateScreen,
+                            () => args.StrippedData);
+
+                        inAlternateScreen = captureResult.InAlternateScreen;
+                        Volatile.Write(ref inAlternateScreenState, inAlternateScreen ? 1 : 0);
+                        capturedText = captureResult.CapturedText;
+                        if (!string.IsNullOrEmpty(capturedText))
+                        {
+                            transcriptBuilder.Append(capturedText);
+                        }
+                    }
+
+                    if (ShouldMirrorCaptureChunk(mirrorOutput, capturedText))
+                    {
+                        context.EmitOutput(capturedText, ScriptOutputType.CommandOutput);
+                    }
+
+                    if (Volatile.Read(ref commandDispatched) == 1)
+                    {
+                        var stripped = args.StrippedData;
+                        if (Interlocked.CompareExchange(ref commandPromptArmed, 0, 0) == 0 &&
+                            ShouldArmCaptureNaturalCompletion(stripped, command))
+                        {
+                            Interlocked.Exchange(ref commandPromptArmed, 1);
+                        }
+
+                        if (Interlocked.CompareExchange(ref commandPromptArmed, 0, 0) == 1 &&
+                            ContainsLikelyPromptLine(stripped))
+                        {
+                            TrySetCompletion(InteractiveCloseReasonNaturalComplete);
+                        }
+                    }
+                };
+
+                terminal.Disconnected += disconnectedHandler;
+                terminal.ActionRequested += actionRequestedHandler;
+                terminal.DataReceived += dataReceivedHandler;
+            }
+
+            await InvokeOnUiThreadAsync(() =>
+            {
+                form = new InteractiveTerminalForm(title);
+
+                formClosedHandler = (_, _) =>
+                {
+                    if (Interlocked.CompareExchange(ref completionSignaled, 0, 0) == 0)
+                    {
+                        TrySetCompletion(InteractiveCloseReasonEarlyClosePartial);
+                    }
+
+                    uiLoopCancellation.Cancel();
+                };
+                form.FormClosed += formClosedHandler;
+
+                textInputHandler = (_, text) =>
+                {
+                    pendingInput.Enqueue(stream => stream.Send(text));
+                };
+                form.TextInput += textInputHandler;
+
+                keyInputHandler = (_, keyArgs) =>
+                {
+                    if (keyArgs.ConsoleKey == ConsoleKey.C &&
+                        (keyArgs.Modifiers & ConsoleModifiers.Control) == ConsoleModifiers.Control &&
+                        Volatile.Read(ref commandDispatched) == 1)
+                    {
+                        TrySendCtrlC();
+                        TrySetCompletion(InteractiveCloseReasonCtrlCContinue);
+                        return;
+                    }
+
+                    pendingInput.Enqueue(stream =>
+                    {
+                        if (keyArgs.FunctionKey.HasValue)
+                        {
+                            stream.Send(keyArgs.FunctionKey.Value, keyArgs.Modifiers);
+                        }
+                        else if (keyArgs.ConsoleKey.HasValue)
+                        {
+                            stream.Send(keyArgs.ConsoleKey.Value, keyArgs.Modifiers);
+                        }
+                    });
+                };
+                form.KeyInput += keyInputHandler;
+
+                terminalSizeChangedHandler = (_, sizeArgs) =>
+                {
+                    if (terminal == null)
+                        return;
+
+                    try
+                    {
+                        lock (ioLock)
+                        {
+                            terminal.SetScreenSize(sizeArgs.Columns, sizeArgs.Rows);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore resize failures while terminal is shutting down.
+                    }
+                };
+                form.TerminalSizeChanged += terminalSizeChangedHandler;
+
+                form.CopyAllTextProvider = () =>
+                {
+                    if (terminal == null)
+                        return string.Empty;
+
+                    lock (ioLock)
+                    {
+                        return BuildClipboardText(terminal);
+                    }
+                };
+
+                form.ClearScrollbackAction = () =>
+                {
+                    if (terminal == null)
+                        return;
+
+                    lock (ioLock)
+                    {
+                        ClearScrollbackPreservingScreen(terminal);
+                    }
+                };
+
+                form.ResetTerminalAction = () =>
+                {
+                    if (terminal == null)
+                        return;
+
+                    lock (ioLock)
+                    {
+                        ResetTerminalState(terminal);
+                    }
+                };
+
+                form.Show(Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null);
+                Interlocked.Exchange(ref wasLaunched, 1);
+                form.FocusTerminal();
+            });
+
+            pendingInput.Enqueue(stream =>
+            {
+                stream.Send(command + "\r");
+                Interlocked.Exchange(ref commandDispatched, 1);
+            });
+
+            Task timeoutTask = Task.CompletedTask;
+            if (maxSeconds.HasValue && maxSeconds.Value > 0)
+            {
+                timeoutTask = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(maxSeconds.Value), uiLoopCancellation.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+
+                    if (Interlocked.CompareExchange(ref completionSignaled, 0, 0) != 0)
+                        return;
+
+                    TrySendCtrlC();
+                    TrySetCompletion(InteractiveCloseReasonTimeoutContinue);
+                }, CancellationToken.None);
+            }
+
+            var pumpTask = Task.Run(async () =>
+            {
+                try
+                {
+                    var hadPumpError = await PumpFullAsync(
+                        form!,
+                        scripting,
+                        terminal,
+                        ioLock,
+                        pendingInput,
+                        keepAliveInterval,
+                        isConnectionAlive,
+                        () => Interlocked.CompareExchange(ref completionSignaled, 0, 0) == 1,
+                        () => Volatile.Read(ref inAlternateScreenState) == 1,
+                        uiLoopCancellation.Token,
+                        closeOnTerminalClosed: false);
+
+                    if (hadPumpError)
+                    {
+                        Interlocked.Exchange(ref pumpHadError, 1);
+                        TrySetCompletion(InteractiveCloseReasonError);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected while shutting down capture mode.
+                }
+                catch (Exception ex)
+                {
+                    Interlocked.Exchange(ref pumpHadError, 1);
+                    TrySetCompletion(InteractiveCloseReasonError);
+                    if (form != null)
+                    {
+                        AppendOutputSafe(form, $"\r\n[interactive-error] {ex.Message}\r\n");
+                    }
+                }
+            }, CancellationToken.None);
+
+            await completionTcs.Task;
+
+            string detachedHistoryText = string.Empty;
+            if (terminal != null && IsDetachedCaptureCompletionReason(completionReason))
+            {
+                try
+                {
+                    lock (ioLock)
+                    {
+                        detachedHistoryText = BuildClipboardText(terminal);
+                    }
+                }
+                catch
+                {
+                    detachedHistoryText = string.Empty;
+                }
+            }
+
+            if (form != null &&
+                !form.IsDisposed &&
+                IsDetachedCaptureCompletionReason(completionReason))
+            {
+                await InvokeOnUiThreadAsync(() =>
+                {
+                    if (!form.IsDisposed)
+                    {
+                        form.EnableDetachedReadOnlyMode("Detached (read-only)", detachedHistoryText);
+                    }
+                });
+            }
+
+            uiLoopCancellation.Cancel();
+            await pumpTask;
+            await timeoutTask;
+
+            if (terminal != null)
+            {
+                try
+                {
+                    if (disconnectedHandler != null)
+                        terminal.Disconnected -= disconnectedHandler;
+                }
+                catch
+                {
+                    // Ignore detach failures while terminal is shutting down.
+                }
+
+                try
+                {
+                    if (actionRequestedHandler != null)
+                        terminal.ActionRequested -= actionRequestedHandler;
+                }
+                catch
+                {
+                    // Ignore detach failures while terminal is shutting down.
+                }
+
+                try
+                {
+                    if (dataReceivedHandler != null)
+                        terminal.DataReceived -= dataReceivedHandler;
+                }
+                catch
+                {
+                    // Ignore detach failures while terminal is shutting down.
+                }
+            }
+
+            if (form != null)
+            {
+                try
+                {
+                    if (formClosedHandler != null)
+                        form.FormClosed -= formClosedHandler;
+                    if (textInputHandler != null)
+                        form.TextInput -= textInputHandler;
+                    if (keyInputHandler != null)
+                        form.KeyInput -= keyInputHandler;
+                    if (terminalSizeChangedHandler != null)
+                        form.TerminalSizeChanged -= terminalSizeChangedHandler;
+                }
+                catch
+                {
+                    // Ignore detach failures while form is closing.
+                }
+            }
+
+            if (Volatile.Read(ref cancelledByToken) == 1 || cancellationToken.IsCancellationRequested)
+            {
+                completionReason = InteractiveCloseReasonCancelled;
+            }
+            else if (Volatile.Read(ref pumpHadError) == 1 &&
+                !string.Equals(completionReason, InteractiveCloseReasonEarlyClosePartial, StringComparison.Ordinal) &&
+                !IsDetachedCaptureCompletionReason(completionReason))
+            {
+                completionReason = InteractiveCloseReasonError;
+            }
+
+            string transcript;
+            lock (transcriptLock)
+            {
+                transcript = transcriptBuilder.ToString();
+            }
+
+            return new InteractiveWindowRunSummary
+            {
+                WasLaunched = Volatile.Read(ref wasLaunched) == 1,
+                CancelledByToken = Volatile.Read(ref cancelledByToken) == 1 || cancellationToken.IsCancellationRequested,
+                CloseReason = completionReason,
+                Transcript = transcript
+            };
         }
 
         private async Task<InteractiveWindowRunSummary> RunWindowLoopAsync(
@@ -604,7 +1167,8 @@ namespace SSH_Helper.Services.Terminal
             Func<bool>? isConnectionAlive,
             Func<bool>? isTerminalClosed,
             Func<bool>? isAlternateScreenActive,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool closeOnTerminalClosed = true)
         {
             if (terminal == null)
             {
@@ -631,7 +1195,8 @@ namespace SSH_Helper.Services.Terminal
                     {
                         if (isTerminalClosed != null && isTerminalClosed())
                         {
-                            RequestCloseSafe(form);
+                            if (closeOnTerminalClosed)
+                                RequestCloseSafe(form);
                             break;
                         }
 
@@ -648,13 +1213,15 @@ namespace SSH_Helper.Services.Terminal
 
                         if ((terminalState & TerminalState.Disconnected) == TerminalState.Disconnected)
                         {
-                            RequestCloseSafe(form);
+                            if (closeOnTerminalClosed)
+                                RequestCloseSafe(form);
                             break;
                         }
 
                         if (isTerminalClosed != null && isTerminalClosed())
                         {
-                            RequestCloseSafe(form);
+                            if (closeOnTerminalClosed)
+                                RequestCloseSafe(form);
                             break;
                         }
 
@@ -843,6 +1410,79 @@ namespace SSH_Helper.Services.Terminal
                 InteractiveCloseReasonState.Error => InteractiveCloseReasonError,
                 _ => InteractiveCloseReasonUserClosed
             };
+        }
+
+        internal static bool IsDetachedCaptureCompletionReason(string closeReason)
+        {
+            return string.Equals(closeReason, InteractiveCloseReasonCtrlCContinue, StringComparison.Ordinal) ||
+                   string.Equals(closeReason, InteractiveCloseReasonTimeoutContinue, StringComparison.Ordinal) ||
+                   string.Equals(closeReason, InteractiveCloseReasonNaturalComplete, StringComparison.Ordinal);
+        }
+
+        internal static bool IsCaptureSuccessCloseReason(string closeReason)
+        {
+            return IsDetachedCaptureCompletionReason(closeReason) ||
+                   string.Equals(closeReason, InteractiveCloseReasonEarlyClosePartial, StringComparison.Ordinal) ||
+                   string.Equals(closeReason, InteractiveCloseReasonUserClosed, StringComparison.Ordinal);
+        }
+
+        internal static bool ShouldMirrorCaptureChunk(bool mirrorOutput, string? capturedText)
+        {
+            return mirrorOutput && !string.IsNullOrEmpty(capturedText);
+        }
+
+        internal static bool ShouldArmCaptureNaturalCompletion(string? text, string command)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            if (ContainsCommandEchoLine(text, command))
+                return true;
+
+            return !ContainsLikelyPromptLine(text);
+        }
+
+        private static bool ContainsCommandEchoLine(string? text, string command)
+        {
+            if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(command))
+                return false;
+
+            var normalizedCommand = command.Trim();
+            if (normalizedCommand.Length == 0)
+                return false;
+
+            var normalizedText = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+            var lines = normalizedText.Split('\n');
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i].Trim();
+                if (line.Length == 0)
+                    continue;
+
+                if (line.IndexOf(normalizedCommand, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool ContainsLikelyPromptLine(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            var normalized = TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(text));
+            var lines = normalized.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries);
+            for (var i = lines.Length - 1; i >= 0; i--)
+            {
+                var line = lines[i].TrimEnd();
+                if (line.Length == 0)
+                    continue;
+
+                return PromptDetector.IsLikelyPrompt(line);
+            }
+
+            return false;
         }
 
         private static InteractiveTerminalSessionDetails CreateSessionDetails(
@@ -1381,6 +2021,32 @@ namespace SSH_Helper.Services.Terminal
                 }
             }));
             return tcs.Task;
+        }
+
+        private static void FlushCaptureStartupBuffer(RebexScripting scripting, CancellationToken cancellationToken)
+        {
+            var savedTimeout = scripting.Timeout;
+            var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
+            try
+            {
+                scripting.Timeout = 150;
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    scripting.ReadUntil(anyDataEvent);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutdown/cancel requested while draining startup output.
+            }
+            catch (Exception ex) when (IsTimeoutException(ex))
+            {
+                // Timeout means there is no more startup output to drain.
+            }
+            finally
+            {
+                scripting.Timeout = savedTimeout;
+            }
         }
 
         private static bool IsTimeoutException(Exception ex)

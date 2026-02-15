@@ -23,22 +23,22 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (string.IsNullOrEmpty(step.Multiselect.Into))
                 return Task.FromResult(CommandResult.Fail("Multiselect command requires an 'into' property"));
 
-            if (step.Multiselect.Options.Count == 0)
-                return Task.FromResult(CommandResult.Fail("Multiselect command requires at least one option"));
-
             try
             {
                 var prompt = context.SubstituteVariables(step.Multiselect.Prompt ?? "Select options:");
 
-                // Substitute variables in option labels and values
-                var resolvedOptions = new List<ChoiceOption>();
-                foreach (var opt in step.Multiselect.Options)
+                var resolvedOptions = ChoiceOptionResolver.Resolve(
+                    step.Multiselect.Options,
+                    step.Multiselect.OptionsFrom,
+                    context,
+                    out var optionResolveError);
+
+                if (resolvedOptions.Count == 0)
                 {
-                    resolvedOptions.Add(new ChoiceOption
-                    {
-                        Label = context.SubstituteVariables(opt.Label),
-                        Value = context.SubstituteVariables(opt.Value)
-                    });
+                    var error = string.IsNullOrWhiteSpace(optionResolveError)
+                        ? "Multiselect command requires at least one option"
+                        : $"Multiselect command requires at least one option ({optionResolveError})";
+                    return Task.FromResult(CommandResult.Fail(error));
                 }
 
                 List<string>? selectedValues = null;

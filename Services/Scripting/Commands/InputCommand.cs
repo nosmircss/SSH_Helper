@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.UI;
 
 namespace SSH_Helper.Services.Scripting.Commands
 {
@@ -172,8 +173,21 @@ namespace SSH_Helper.Services.Scripting.Commands
             AcceptButton = btnOk;
             CancelButton = btnCancel;
 
+            // Apply dark mode if the app is in dark mode
+            var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
+            var isDark = mainForm != null && mainForm.BackColor.GetBrightness() < 0.2f;
+            if (isDark)
+            {
+                DialogTheme.ApplyTo(this, true);
+                DialogTheme.StyleButton(btnOk, true, isPrimary: true);
+                DialogTheme.StyleButton(btnCancel, true);
+                DialogTheme.SetDarkTitleBar(this, true);
+            }
+
             Load += (_, _) =>
             {
+                if (isDark)
+                    DialogTheme.ApplyNativeTheme(this, true);
                 _txtInput.Focus();
                 _txtInput.SelectAll();
             };

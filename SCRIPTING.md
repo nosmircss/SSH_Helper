@@ -262,6 +262,13 @@ Sets or modifies variable values with expression support.
 | substring() | `part = substring(text, 0, 5)` | Extract string segment |
 | sort() | `sorted = sort(arr, "desc")` | Sort list values |
 | push() | `arr = push(arr, item)` | Add item to array |
+| unshift() | `arr = unshift(arr, item)` | Prepend item to list |
+| pop() | `last = pop(arr)` | Remove and return last list item |
+| shift() | `first = shift(arr)` | Remove and return first list item |
+| first() | `first = first(arr)` | Get first list item (non-destructive) |
+| last() | `last = last(arr)` | Get last list item (non-destructive) |
+| indexof() | `idx = indexof(arr, value)` | Find item index in list |
+| concat() | `all = concat(arr1, arr2)` | Combine multiple lists |
 | json() | `obj = json("k1", v1, "k2", v2)` | Create JSON object or array |
 | json.get() | `val = json.get(data, "path", default)` | Extract value with optional default |
 | json.set() | `obj = json.set(obj, "path", value)` | Set value at path |
@@ -327,6 +334,24 @@ Sets or modifies variable values with expression support.
     expression: results = push(results, ${Host_IP})
 - set:
     expression: results = push(results, ${status})
+
+# Prepend and remove values
+- set:
+    expression: results = unshift(results, "any")
+- set:
+    expression: last_result = pop(results)
+- set:
+    expression: first_result = shift(results)
+
+# Read-only helpers
+- set:
+    expression: first_view = first(results)
+- set:
+    expression: last_view = last(results)
+- set:
+    expression: status_index = indexof(results, "up")
+- set:
+    expression: combined = concat(results, other_results)
 
 # Get array length
 - set:
@@ -1516,6 +1541,8 @@ Prompts the user to select one option from a list during script execution.
     options:
       - option1
       - option2
+    # or: options: interface_list
+    # or: options: ${interface_list}
     default: "option1"             # Optional
 ```
 
@@ -1538,11 +1565,12 @@ Prompts the user to select one option from a list during script execution.
 |-----------|----------|---------|-------------|
 | `prompt` | No | `"Select an option:"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store the selected value |
-| `options` | Yes | - | List of options (strings or label/value pairs) |
+| `options` | Yes | - | Inline list of options OR a variable/expression that resolves to a list |
 | `default` | No | - | Pre-selected option (matched against values) |
 
 **Features:**
 - Options can be simple strings (label and value are the same) or label/value pairs
+- `options` can come from a runtime list variable (for example `options: interface_list`)
 - Dialog appears during script execution with a selection list
 - Double-click selects and confirms
 - User can cancel (script will fail unless `on_error: continue`)
@@ -1587,6 +1615,12 @@ Prompts the user to select one option from a list during script execution.
       - primary
       - secondary
       - standby
+
+# Options from a variable list
+- choose:
+    prompt: "Select interface:"
+    into: selected_interface
+    options: interface_list
 ```
 
 ---
@@ -1604,6 +1638,8 @@ Prompts the user to select multiple options from a checklist during script execu
       - option1
       - option2
       - option3
+    # or: options: interface_list
+    # or: options: ${interface_list}
     min: 1                         # Optional: minimum selections
     max: 3                         # Optional: maximum selections
 ```
@@ -1614,7 +1650,7 @@ Prompts the user to select multiple options from a checklist during script execu
 |-----------|----------|---------|-------------|
 | `prompt` | No | `"Select options:"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store selected values |
-| `options` | Yes | - | List of options (strings or label/value pairs) |
+| `options` | Yes | - | Inline list of options OR a variable/expression that resolves to a list |
 | `min` | No | - | Minimum number of selections required |
 | `max` | No | - | Maximum number of selections allowed |
 
@@ -1624,6 +1660,7 @@ Prompts the user to select multiple options from a checklist during script execu
 - `${into}` in print renders as comma-separated text
 - Works with `foreach: item in ${into}` for iteration
 - Supports label/value pairs (same as choose)
+- `options` can come from a runtime list variable (for example `options: interface_list`)
 - User can cancel (script will fail unless `on_error: continue`)
 - Variables can be used in `prompt` and option labels/values
 
@@ -1747,22 +1784,39 @@ Prompts the user with a yes/no confirmation dialog during script execution.
 
 ### interactive - In-App SSH Terminal
 
-Opens an in-app SSH terminal window and pauses the script until the terminal window is closed.
+Opens an in-app SSH terminal window.
+
+- In normal mode (no `command`), the script pauses until the terminal window is closed.
+- In capture mode (`command` set), the command auto-runs and the step completes on Ctrl+C/timeout/natural completion/early close.
 
 **Syntax (map only):**
 ```yaml
+# Normal interactive terminal
 - interactive:
-    session: separate    # Optional: separate|shared (default: separate)
-    on_error: stop       # Optional: continue|stop (default: stop)
+    session: separate
+    on_error: stop
+
+# Capture mode (long-running command)
+- interactive:
+    session: separate
+    command: "diagnose sniffer packet any 'host 10.0.0.1' 4 10 a"
+    capture: sniffer_output
+    max_seconds: 120
+    mirror_output: false
+    on_error: stop
 ```
 
 **Important behavior:**
 - `interactive` is map-only. Scalar shorthand (for example `- interactive`) is invalid.
-- Closing the terminal window by the user is treated as success and script execution continues.
 - `session: separate` opens a new SSH terminal connection using current host credentials/settings.
 - `session: shared` attaches to the active script SSH session. If unavailable, the step fails with `InteractiveSharedUnavailable`.
 - In `session: shared`, pressing `Ctrl+D` closes only the interactive window and does not send EOF to the shared SSH shell.
 - In `session: shared`, pressing Enter on `exit` or `logout` closes the interactive window (detach) and does not execute those commands on the shared SSH session.
+- Capture mode (`command`) is `session: separate` only.
+- In capture mode, the command is auto-sent once the terminal is ready.
+- In capture mode, `Ctrl+C` (or timeout auto-Ctrl+C) completes the step and script continues while the terminal window remains open as detached read-only for copy/review.
+- In capture mode, closing the window before completion succeeds with a partial transcript.
+- Capture transcript is written only when `capture` is set.
 - Stop/cancel while terminal is open force-closes the terminal/session and cancels script execution.
 - `interactive` is single-host only:
   - Multi-host script runs are rejected in preflight.
@@ -1773,6 +1827,10 @@ Opens an in-app SSH terminal window and pauses the script until the terminal win
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `session` | No | `separate` | Session model: `separate` or `shared` |
+| `command` | No | - | Enables capture mode and auto-runs this command in the interactive terminal |
+| `capture` | No | - | Variable name to receive the captured transcript at step completion |
+| `max_seconds` | No | - | Positive timeout in seconds; auto-sends Ctrl+C when reached |
+| `mirror_output` | No | `false` | Mirrors live captured chunks into script output while capture is running |
 | `on_error` | No | `stop` | Error handling: `continue` or `stop` |
 
 **Examples:**
@@ -1780,14 +1838,25 @@ Opens an in-app SSH terminal window and pauses the script until the terminal win
 # Separate connection (defaults)
 - interactive: {}
 
-# Explicit separate
-- interactive:
-    session: separate
-
 # Shared session
 - interactive:
     session: shared
     on_error: continue
+
+# Tcpdump/sniffer style capture until Ctrl+C
+- input:
+    prompt: "Enter sniffer filter:"
+    into: filter
+- set:
+    expression: sniffer_command = "diagnose sniffer packet any '${filter}' 4 10 a"
+- interactive:
+    session: separate
+    command: "${sniffer_command}"
+    capture: sniffer_output
+    max_seconds: 300
+    mirror_output: true
+- print:
+    message: "Captured output length: ${sniffer_output.length}"
 ```
 
 ---

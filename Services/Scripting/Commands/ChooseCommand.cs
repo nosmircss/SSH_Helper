@@ -22,9 +22,6 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (string.IsNullOrEmpty(step.Choose.Into))
                 return Task.FromResult(CommandResult.Fail("Choose command requires an 'into' property"));
 
-            if (step.Choose.Options.Count == 0)
-                return Task.FromResult(CommandResult.Fail("Choose command requires at least one option"));
-
             try
             {
                 var prompt = context.SubstituteVariables(step.Choose.Prompt ?? "Select an option:");
@@ -32,15 +29,18 @@ namespace SSH_Helper.Services.Scripting.Commands
                     ? context.SubstituteVariables(step.Choose.Default)
                     : null;
 
-                // Substitute variables in option labels and values
-                var resolvedOptions = new List<ChoiceOption>();
-                foreach (var opt in step.Choose.Options)
+                var resolvedOptions = ChoiceOptionResolver.Resolve(
+                    step.Choose.Options,
+                    step.Choose.OptionsFrom,
+                    context,
+                    out var optionResolveError);
+
+                if (resolvedOptions.Count == 0)
                 {
-                    resolvedOptions.Add(new ChoiceOption
-                    {
-                        Label = context.SubstituteVariables(opt.Label),
-                        Value = context.SubstituteVariables(opt.Value)
-                    });
+                    var error = string.IsNullOrWhiteSpace(optionResolveError)
+                        ? "Choose command requires at least one option"
+                        : $"Choose command requires at least one option ({optionResolveError})";
+                    return Task.FromResult(CommandResult.Fail(error));
                 }
 
                 string? selectedValue = null;

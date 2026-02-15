@@ -36,6 +36,7 @@ namespace SSH_Helper.Services.Scripting
     public class ScriptDependencyAnalyzer
     {
         private static readonly Regex VarRefPattern = new(@"\$\{([^}]+)\}|\{\{([^}]+)\}\}", RegexOptions.Compiled);
+        private static readonly Regex BareVariableNamePattern = new(@"^[A-Za-z_]\w*$", RegexOptions.Compiled);
 
         private static readonly HashSet<string> BuiltInVariables = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -325,6 +326,7 @@ namespace SSH_Helper.Services.Scripting
                         {
                             ExtractVarReferences(step.Choose.Prompt, referencedVars);
                             ExtractVarReferences(step.Choose.Default, referencedVars);
+                            AnalyzeChoiceOptionsSourceReference(step.Choose.OptionsFrom, referencedVars);
                             foreach (var opt in step.Choose.Options)
                             {
                                 ExtractVarReferences(opt.Label, referencedVars);
@@ -339,6 +341,7 @@ namespace SSH_Helper.Services.Scripting
                         if (step.Multiselect != null)
                         {
                             ExtractVarReferences(step.Multiselect.Prompt, referencedVars);
+                            AnalyzeChoiceOptionsSourceReference(step.Multiselect.OptionsFrom, referencedVars);
                             foreach (var opt in step.Multiselect.Options)
                             {
                                 ExtractVarReferences(opt.Label, referencedVars);
@@ -620,6 +623,23 @@ namespace SSH_Helper.Services.Scripting
         {
             if (string.IsNullOrWhiteSpace(varName)) return;
             references.Add(varName.Trim());
+        }
+
+        private static void AnalyzeChoiceOptionsSourceReference(string? source, HashSet<string> references)
+        {
+            if (string.IsNullOrWhiteSpace(source))
+                return;
+
+            ExtractVarReferences(source, references);
+
+            var trimmed = source.Trim();
+            if (trimmed.Length == 0)
+                return;
+
+            if (BareVariableNamePattern.IsMatch(trimmed))
+            {
+                AddBareVarReference(trimmed, references);
+            }
         }
     }
 }

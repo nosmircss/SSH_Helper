@@ -47,12 +47,16 @@ namespace SSH_Helper.Forms
         private readonly InteractiveTerminalViewportControl _terminalView;
         private readonly VScrollBar _historyScrollBar;
         private readonly bool _isDarkMode;
+        private readonly string _baseTitle;
         private int _lastColumns;
         private int _lastRows;
         private int _lastRenderHash = int.MinValue;
         private int _historyLength;
         private volatile int _scrollbackOffset;
         private bool _syncingScrollBar;
+        private bool _acceptHostInput = true;
+        private bool _allowTerminalActions = true;
+        private string[]? _detachedHistoryLines;
 
         public bool IsFollowingTail => _scrollbackOffset == 0;
         public int ScrollbackOffset => _scrollbackOffset;
@@ -68,6 +72,7 @@ namespace SSH_Helper.Forms
         public InteractiveTerminalForm(string title)
         {
             Text = title;
+            _baseTitle = title;
             StartPosition = FormStartPosition.CenterParent;
             MinimumSize = new Size(760, 420);
             Size = new Size(980, 620);
@@ -149,6 +154,28 @@ namespace SSH_Helper.Forms
             _terminalView.Focus();
         }
 
+        public void EnableDetachedReadOnlyMode(string? statusSuffix = null, string? detachedHistoryText = null)
+        {
+            _acceptHostInput = false;
+            _allowTerminalActions = false;
+
+            var suffix = string.IsNullOrWhiteSpace(statusSuffix)
+                ? "Detached (read-only)"
+                : statusSuffix.Trim();
+
+            if (!Text.Contains(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                Text = $"{_baseTitle} - {suffix}";
+            }
+
+            if (!string.IsNullOrEmpty(detachedHistoryText))
+            {
+                _detachedHistoryLines = NormalizeDetachedHistoryLines(detachedHistoryText);
+                _scrollbackOffset = 0;
+                RenderDetachedHistorySnapshot();
+            }
+        }
+
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
@@ -194,6 +221,9 @@ namespace SSH_Helper.Forms
 
         private void InteractiveTerminalForm_KeyPress(object? sender, KeyPressEventArgs e)
         {
+            if (!_acceptHostInput)
+                return;
+
             if (char.IsControl(e.KeyChar))
                 return;
 
@@ -204,6 +234,9 @@ namespace SSH_Helper.Forms
 
         private void InteractiveTerminalForm_KeyDown(object? sender, KeyEventArgs e)
         {
+            if (!_acceptHostInput)
+                return;
+
             // Ctrl+letter combinations (for example Ctrl+C).
             if (e.Control && e.KeyCode >= Keys.A && e.KeyCode <= Keys.Z)
             {
@@ -267,6 +300,13 @@ namespace SSH_Helper.Forms
 
             _lastColumns = columns;
             _lastRows = rows;
+
+            if (_detachedHistoryLines != null)
+            {
+                RenderDetachedHistorySnapshot();
+                return;
+            }
+
             TerminalSizeChanged?.Invoke(this, new TerminalSizeChangedEventArgs
             {
                 Columns = columns,
@@ -305,6 +345,12 @@ namespace SSH_Helper.Forms
                 return;
 
             _scrollbackOffset = nextOffset;
+            if (_detachedHistoryLines != null)
+            {
+                RenderDetachedHistorySnapshot();
+                return;
+            }
+
             // Force rerender request because viewport changed while terminal content may not.
             _lastRenderHash = int.MinValue;
         }
@@ -319,6 +365,12 @@ namespace SSH_Helper.Forms
                 return;
 
             _scrollbackOffset = nextOffset;
+            if (_detachedHistoryLines != null)
+            {
+                RenderDetachedHistorySnapshot();
+                return;
+            }
+
             _lastRenderHash = int.MinValue;
             SyncHistoryScrollBar();
         }
@@ -347,6 +399,12 @@ namespace SSH_Helper.Forms
 
         private void PasteClipboardToHost()
         {
+            if (!_acceptHostInput)
+            {
+                FocusTerminal();
+                return;
+            }
+
             var clipboardText = GetClipboardTextSafe();
             if (string.IsNullOrEmpty(clipboardText))
             {
@@ -401,6 +459,12 @@ namespace SSH_Helper.Forms
 
         private void ClearScrollback()
         {
+            if (!_allowTerminalActions)
+            {
+                FocusTerminal();
+                return;
+            }
+
             try
             {
                 ClearScrollbackAction?.Invoke();
@@ -413,6 +477,12 @@ namespace SSH_Helper.Forms
 
         private void ResetTerminal()
         {
+            if (!_allowTerminalActions)
+            {
+                FocusTerminal();
+                return;
+            }
+
             try
             {
                 ResetTerminalAction?.Invoke();
@@ -465,6 +535,83 @@ namespace SSH_Helper.Forms
             {
                 _syncingScrollBar = false;
             }
+        }
+
+        private void RenderDetachedHistorySnapshot()
+        {
+            if (_detachedHistoryLines == null)
+                return;
+
+            var rows = Math.Max(1, _lastRows);
+            var columns = Math.Max(1, _lastColumns);
+            var totalRows = Math.Max(rows, _detachedHistoryLines.Length);
+            var historyLength = Math.Max(0, totalRows - rows);
+            var appliedOffset = Math.Clamp(_scrollbackOffset, 0, historyLength);
+            var startRow = Math.Max(0, totalRows - rows - appliedOffset);
+            var count = rows * columns;
+            var characters = new char[count];
+            var foreColors = new int[count];
+            var backColors = new int[count];
+            Array.Fill(characters, ' ');
+
+            var defaultFore = Color.FromArgb(187, 187, 187).ToArgb();
+            var defaultBack = Color.Black.ToArgb();
+            Array.Fill(foreColors, defaultFore);
+            Array.Fill(backColors, defaultBack);
+
+            var displayPadding = Math.Max(0, rows - _detachedHistoryLines.Length);
+            var hash = new HashCode();
+            hash.Add(columns);
+            hash.Add(rows);
+            hash.Add(historyLength);
+            hash.Add(appliedOffset);
+
+            for (var row = 0; row < rows; row++)
+            {
+                var sourceRow = startRow + row;
+                if (sourceRow < 0 || sourceRow >= totalRows)
+                    continue;
+
+                var sourceLineIndex = sourceRow - displayPadding;
+                if (sourceLineIndex < 0 || sourceLineIndex >= _detachedHistoryLines.Length)
+                    continue;
+
+                var line = _detachedHistoryLines[sourceLineIndex] ?? string.Empty;
+                var copyLength = Math.Min(columns, line.Length);
+                if (copyLength <= 0)
+                    continue;
+
+                line.AsSpan(0, copyLength).CopyTo(characters.AsSpan(row * columns, copyLength));
+                hash.Add(line);
+            }
+
+            SetScreen(new TerminalScreenSnapshot
+            {
+                Columns = columns,
+                Rows = rows,
+                HistoryLength = historyLength,
+                ScrollbackOffset = appliedOffset,
+                Characters = characters,
+                ForeColors = foreColors,
+                BackColors = backColors,
+                CursorColumn = -1,
+                CursorRow = -1,
+                CursorForeColor = defaultBack,
+                CursorBackColor = defaultFore,
+                Hash = hash.ToHashCode()
+            });
+        }
+
+        private static string[] NormalizeDetachedHistoryLines(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return Array.Empty<string>();
+
+            var normalized = text
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
+
+            return normalized.Split('\n');
         }
     }
 }

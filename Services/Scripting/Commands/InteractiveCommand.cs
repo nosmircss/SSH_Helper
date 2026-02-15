@@ -24,9 +24,15 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             try
             {
-                var runResult = await _terminalService.RunAsync(context, step.Interactive, cancellationToken);
+                var runtimeOptions = BuildRuntimeOptions(step.Interactive, context);
+                var runResult = await _terminalService.RunAsync(context, runtimeOptions, cancellationToken);
                 if (runResult.Success)
                 {
+                    if (!string.IsNullOrWhiteSpace(runtimeOptions.Capture))
+                    {
+                        context.RecordCommandOutput(runResult.CapturedTranscript ?? string.Empty, runtimeOptions.Capture);
+                    }
+
                     return CommandResult.Ok();
                 }
 
@@ -47,6 +53,25 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 throw;
             }
+        }
+
+        private static InteractiveOptions BuildRuntimeOptions(InteractiveOptions source, ScriptContext context)
+        {
+            ArgumentNullException.ThrowIfNull(source);
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new InteractiveOptions
+            {
+                Session = source.Session,
+                Command = string.IsNullOrWhiteSpace(source.Command)
+                    ? source.Command
+                    : context.SubstituteVariables(source.Command),
+                Capture = string.IsNullOrWhiteSpace(source.Capture)
+                    ? source.Capture
+                    : context.SubstituteVariables(source.Capture),
+                MaxSeconds = source.MaxSeconds,
+                MirrorOutput = source.MirrorOutput
+            };
         }
     }
 }

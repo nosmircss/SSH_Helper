@@ -191,6 +191,28 @@ public class CanonicalCommandMapSyntaxTests
     }
 
     [Fact]
+    public void Validate_EnforceCanonicalSyntax_AcceptsInteractiveCaptureMap()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  command: tcpdump -i any
+                  capture: pcap_output
+                  max_seconds: 30
+                  mirror_output: true
+                  on_error: continue
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().BeEmpty();
+        script.Steps[0].GetStepType().Should().Be(StepType.Interactive);
+    }
+
+    [Fact]
     public void Validate_ScriptSamples_AreCanonicalAndPassEnforcedValidation()
     {
         DirectoryInfo? search = new(AppContext.BaseDirectory);

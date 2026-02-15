@@ -486,6 +486,12 @@ namespace SSH_Helper.Services.Scripting.Models
         public List<ChoiceOption> Options { get; set; } = new();
 
         /// <summary>
+        /// Optional variable/expression source for options.
+        /// When set, the value should resolve to a list (e.g., List&lt;string&gt;).
+        /// </summary>
+        public string? OptionsFrom { get; set; }
+
+        /// <summary>
         /// Default selection (matched against option values).
         /// </summary>
         public string? Default { get; set; }
@@ -510,6 +516,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// List of options to choose from.
         /// </summary>
         public List<ChoiceOption> Options { get; set; } = new();
+
+        /// <summary>
+        /// Optional variable/expression source for options.
+        /// When set, the value should resolve to a list (e.g., List&lt;string&gt;).
+        /// </summary>
+        public string? OptionsFrom { get; set; }
 
         /// <summary>
         /// Minimum number of selections required.
@@ -552,6 +564,27 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Session model. Separate opens a new connection; shared attaches to the current session.
         /// </summary>
         public InteractiveSessionMode Session { get; set; } = InteractiveSessionMode.Separate;
+
+        /// <summary>
+        /// Optional long-running command to execute automatically when the terminal opens.
+        /// When set, interactive capture mode is enabled.
+        /// </summary>
+        public string? Command { get; set; }
+
+        /// <summary>
+        /// Optional variable name used to capture the terminal transcript when capture mode completes.
+        /// </summary>
+        public string? Capture { get; set; }
+
+        /// <summary>
+        /// Optional safety timeout (seconds) that auto-sends Ctrl+C in capture mode.
+        /// </summary>
+        public int? MaxSeconds { get; set; }
+
+        /// <summary>
+        /// When true, captured terminal chunks are mirrored into the main script output stream.
+        /// </summary>
+        public bool MirrorOutput { get; set; }
     }
 
     /// <summary>
