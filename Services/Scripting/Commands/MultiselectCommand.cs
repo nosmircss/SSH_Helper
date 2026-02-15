@@ -15,13 +15,13 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     public class MultiselectCommand : IScriptCommand
     {
-        public Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
+        public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
         {
             if (step.Multiselect == null)
-                return Task.FromResult(CommandResult.Fail("Multiselect command has no options"));
+                return CommandResult.Fail("Multiselect command has no options");
 
             if (string.IsNullOrEmpty(step.Multiselect.Into))
-                return Task.FromResult(CommandResult.Fail("Multiselect command requires an 'into' property"));
+                return CommandResult.Fail("Multiselect command requires an 'into' property");
 
             try
             {
@@ -38,35 +38,31 @@ namespace SSH_Helper.Services.Scripting.Commands
                     var error = string.IsNullOrWhiteSpace(optionResolveError)
                         ? "Multiselect command requires at least one option"
                         : $"Multiselect command requires at least one option ({optionResolveError})";
-                    return Task.FromResult(CommandResult.Fail(error));
+                    return CommandResult.Fail(error);
                 }
 
-                List<string>? selectedValues = null;
-
-                var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
-                if (mainForm != null && mainForm.InvokeRequired)
-                {
-                    mainForm.Invoke(() =>
-                    {
-                        selectedValues = ShowMultiselectDialog(prompt, resolvedOptions, step.Multiselect.Min, step.Multiselect.Max);
-                    });
-                }
-                else
-                {
-                    selectedValues = ShowMultiselectDialog(prompt, resolvedOptions, step.Multiselect.Min, step.Multiselect.Max);
-                }
+                var selectedValues = await ScriptPromptDialogRunner
+                    .ShowAsync<ScriptMultiselectDialog, List<string>?>(
+                        () => new ScriptMultiselectDialog(prompt, resolvedOptions, step.Multiselect.Min, step.Multiselect.Max),
+                        dialog => dialog.DialogResult == DialogResult.OK ? dialog.SelectedValues : null,
+                        cancellationToken)
+                    .ConfigureAwait(false);
 
                 if (selectedValues == null)
                 {
                     context.EmitOutput("Selection cancelled by user", ScriptOutputType.Warning);
-                    return Task.FromResult(CommandResult.Fail("Selection cancelled by user"));
+                    return CommandResult.Fail("Selection cancelled by user");
                 }
 
                 context.SetVariable(step.Multiselect.Into, selectedValues);
                 context.SetVariable($"{step.Multiselect.Into}_count", selectedValues.Count.ToString());
                 context.EmitOutput($"Set {step.Multiselect.Into} with {selectedValues.Count} selection(s)", ScriptOutputType.Debug);
 
-                return Task.FromResult(CommandResult.Ok());
+                return CommandResult.Ok();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -74,21 +70,10 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return Task.FromResult(CommandResult.Suppressed(errorMsg));
+                    return CommandResult.Suppressed(errorMsg);
 
-                return Task.FromResult(CommandResult.Fail(errorMsg));
+                return CommandResult.Fail(errorMsg);
             }
-        }
-
-        private static List<string>? ShowMultiselectDialog(string prompt, List<ChoiceOption> options, int? min, int? max)
-        {
-            using var dialog = new ScriptMultiselectDialog(prompt, options, min, max);
-            var result = dialog.ShowDialog();
-
-            if (result == DialogResult.OK)
-                return dialog.SelectedValues;
-
-            return null;
         }
     }
 

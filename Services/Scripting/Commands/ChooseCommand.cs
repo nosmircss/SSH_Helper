@@ -14,13 +14,13 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     public class ChooseCommand : IScriptCommand
     {
-        public Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
+        public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
         {
             if (step.Choose == null)
-                return Task.FromResult(CommandResult.Fail("Choose command has no options"));
+                return CommandResult.Fail("Choose command has no options");
 
             if (string.IsNullOrEmpty(step.Choose.Into))
-                return Task.FromResult(CommandResult.Fail("Choose command requires an 'into' property"));
+                return CommandResult.Fail("Choose command requires an 'into' property");
 
             try
             {
@@ -40,34 +40,30 @@ namespace SSH_Helper.Services.Scripting.Commands
                     var error = string.IsNullOrWhiteSpace(optionResolveError)
                         ? "Choose command requires at least one option"
                         : $"Choose command requires at least one option ({optionResolveError})";
-                    return Task.FromResult(CommandResult.Fail(error));
+                    return CommandResult.Fail(error);
                 }
 
-                string? selectedValue = null;
-
-                var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
-                if (mainForm != null && mainForm.InvokeRequired)
-                {
-                    mainForm.Invoke(() =>
-                    {
-                        selectedValue = ShowChooseDialog(prompt, resolvedOptions, defaultValue);
-                    });
-                }
-                else
-                {
-                    selectedValue = ShowChooseDialog(prompt, resolvedOptions, defaultValue);
-                }
+                var selectedValue = await ScriptPromptDialogRunner
+                    .ShowAsync<ScriptChooseDialog, string?>(
+                        () => new ScriptChooseDialog(prompt, resolvedOptions, defaultValue),
+                        dialog => dialog.DialogResult == DialogResult.OK ? dialog.SelectedValue : null,
+                        cancellationToken)
+                    .ConfigureAwait(false);
 
                 if (selectedValue == null)
                 {
                     context.EmitOutput("Selection cancelled by user", ScriptOutputType.Warning);
-                    return Task.FromResult(CommandResult.Fail("Selection cancelled by user"));
+                    return CommandResult.Fail("Selection cancelled by user");
                 }
 
                 context.SetVariable(step.Choose.Into, selectedValue);
                 context.EmitOutput($"Set {step.Choose.Into} from user selection", ScriptOutputType.Debug);
 
-                return Task.FromResult(CommandResult.Ok());
+                return CommandResult.Ok();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -75,22 +71,12 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return Task.FromResult(CommandResult.Suppressed(errorMsg));
+                    return CommandResult.Suppressed(errorMsg);
 
-                return Task.FromResult(CommandResult.Fail(errorMsg));
+                return CommandResult.Fail(errorMsg);
             }
         }
 
-        private static string? ShowChooseDialog(string prompt, List<ChoiceOption> options, string? defaultValue)
-        {
-            using var dialog = new ScriptChooseDialog(prompt, options, defaultValue);
-            var result = dialog.ShowDialog();
-
-            if (result == DialogResult.OK)
-                return dialog.SelectedValue;
-
-            return null;
-        }
     }
 
     /// <summary>

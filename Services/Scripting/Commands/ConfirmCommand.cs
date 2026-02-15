@@ -13,39 +13,35 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     public class ConfirmCommand : IScriptCommand
     {
-        public Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
+        public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
         {
             if (step.Confirm == null)
-                return Task.FromResult(CommandResult.Fail("Confirm command has no options"));
+                return CommandResult.Fail("Confirm command has no options");
 
             if (string.IsNullOrEmpty(step.Confirm.Into))
-                return Task.FromResult(CommandResult.Fail("Confirm command requires an 'into' property"));
+                return CommandResult.Fail("Confirm command requires an 'into' property");
 
             try
             {
                 var prompt = context.SubstituteVariables(step.Confirm.Prompt ?? "Are you sure?");
                 var defaultYes = step.Confirm.Default;
 
-                bool? confirmed = null;
+                var confirmed = await ScriptPromptDialogRunner
+                    .ShowAsync<ScriptConfirmDialog, bool>(
+                        () => new ScriptConfirmDialog(prompt, defaultYes),
+                        dialog => dialog.DialogResult == DialogResult.Yes,
+                        cancellationToken)
+                    .ConfigureAwait(false);
 
-                var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
-                if (mainForm != null && mainForm.InvokeRequired)
-                {
-                    mainForm.Invoke(() =>
-                    {
-                        confirmed = ShowConfirmDialog(prompt, defaultYes);
-                    });
-                }
-                else
-                {
-                    confirmed = ShowConfirmDialog(prompt, defaultYes);
-                }
-
-                var result = confirmed == true ? "true" : "false";
+                var result = confirmed ? "true" : "false";
                 context.SetVariable(step.Confirm.Into, result);
                 context.EmitOutput($"Set {step.Confirm.Into} = {result} from user confirmation", ScriptOutputType.Debug);
 
-                return Task.FromResult(CommandResult.Ok());
+                return CommandResult.Ok();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -53,17 +49,10 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
                 if (step.OnError?.ToLowerInvariant() == "continue")
-                    return Task.FromResult(CommandResult.Suppressed(errorMsg));
+                    return CommandResult.Suppressed(errorMsg);
 
-                return Task.FromResult(CommandResult.Fail(errorMsg));
+                return CommandResult.Fail(errorMsg);
             }
-        }
-
-        private static bool ShowConfirmDialog(string prompt, bool defaultYes)
-        {
-            using var dialog = new ScriptConfirmDialog(prompt, defaultYes);
-            var result = dialog.ShowDialog();
-            return result == DialogResult.Yes;
         }
     }
 
