@@ -209,14 +209,18 @@ namespace SSH_Helper.Services
 
         private AppConfiguration ParseConfiguration(string json)
         {
-            // First, deserialize all fields using standard deserialization
-            var config = JsonConvert.DeserializeObject<AppConfiguration>(json) ?? new AppConfiguration();
+            AppConfiguration config;
 
             // Legacy support: older config versions stored preset values as plain strings.
             // Detect this cheaply first so large modern configs do not pay for an extra full DOM parse.
-            if (ContainsLegacyPresetFormat(json))
+            var hasLegacyPresetFormat = ContainsLegacyPresetFormat(json);
+            if (hasLegacyPresetFormat)
             {
-                ApplyLegacyPresetFormat(json, config);
+                config = ParseConfigurationWithLegacyPresets(json);
+            }
+            else
+            {
+                config = JsonConvert.DeserializeObject<AppConfiguration>(json) ?? new AppConfiguration();
             }
 
             NormalizeEnvironmentData(config);
@@ -245,19 +249,26 @@ namespace SSH_Helper.Services
                     if (!reader.Read() || reader.TokenType != JsonToken.StartObject)
                         return false;
 
-                    if (!reader.Read())
-                        return false;
+                    var presetsDepth = reader.Depth;
+                    while (reader.Read())
+                    {
+                        if (reader.TokenType == JsonToken.EndObject && reader.Depth == presetsDepth)
+                            return false;
 
-                    if (reader.TokenType == JsonToken.EndObject)
-                        return false;
+                        if (reader.TokenType != JsonToken.PropertyName)
+                            continue;
 
-                    if (reader.TokenType != JsonToken.PropertyName)
-                        return false;
+                        if (!reader.Read())
+                            return false;
 
-                    if (!reader.Read())
-                        return false;
+                        if (reader.TokenType == JsonToken.String)
+                            return true;
 
-                    return reader.TokenType == JsonToken.String;
+                        if (reader.TokenType == JsonToken.StartObject || reader.TokenType == JsonToken.StartArray)
+                            reader.Skip();
+                    }
+
+                    return false;
                 }
             }
             catch
@@ -268,10 +279,24 @@ namespace SSH_Helper.Services
             return false;
         }
 
-        private static void ApplyLegacyPresetFormat(string json, AppConfiguration config)
+        private static AppConfiguration ParseConfigurationWithLegacyPresets(string json)
         {
             var rootObj = JObject.Parse(json);
             var presetsToken = rootObj["Presets"] as JObject;
+
+            // Avoid conversion failures for legacy string preset values.
+            if (presetsToken != null)
+            {
+                rootObj["Presets"] = new JObject();
+            }
+
+            var config = rootObj.ToObject<AppConfiguration>() ?? new AppConfiguration();
+            ApplyLegacyPresetFormat(presetsToken, config);
+            return config;
+        }
+
+        private static void ApplyLegacyPresetFormat(JObject? presetsToken, AppConfiguration config)
+        {
             if (presetsToken == null)
                 return;
 

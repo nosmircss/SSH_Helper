@@ -157,6 +157,7 @@ namespace SSH_Helper
         private HistoryRunPayload? _loadedHistoryPayload;
         private bool _loadedHistoryPayloadHasDetails;
         private bool _loadedHistoryPayloadHasHostOutputs;
+        private bool _loadedHistoryPayloadHasFullOutput;
 
         // Output state
         private readonly StringBuilder _outputBuffer = new();
@@ -789,6 +790,7 @@ namespace SSH_Helper
                 _loadedHistoryPayload = null;
                 _loadedHistoryPayloadHasDetails = false;
                 _loadedHistoryPayloadHasHostOutputs = false;
+                _loadedHistoryPayloadHasFullOutput = false;
                 _selectedHistoryOutput = string.Empty;
 
                 if (!string.IsNullOrWhiteSpace(selectEntryId))
@@ -855,7 +857,8 @@ namespace SSH_Helper
             out HistoryRunPayload payload,
             bool showError = true,
             bool requireDetails = false,
-            bool requireHostOutputs = false)
+            bool requireHostOutputs = false,
+            bool requireFullOutput = false)
         {
             payload = new HistoryRunPayload();
             if (string.IsNullOrWhiteSpace(entryId))
@@ -874,6 +877,10 @@ namespace SSH_Helper
                 {
                     // Cached payload was loaded without host output bodies; reload host outputs on demand.
                 }
+                else if (requireFullOutput && !_loadedHistoryPayloadHasFullOutput)
+                {
+                    // Cached payload output was trimmed for lightweight display; reload full output on demand.
+                }
                 else
                 {
                     payload = _loadedHistoryPayload;
@@ -881,12 +888,13 @@ namespace SSH_Helper
                 }
             }
 
+            var shouldTrimOutput = !requireDetails && !requireHostOutputs && !requireFullOutput;
             if (_historyStorage.TryLoadRunPayload(
                     entryId,
                     out var loadedPayload,
                     includeDetails: requireDetails,
                     includeHostOutputs: requireHostOutputs,
-                    maxOutputChars: (!requireDetails && !requireHostOutputs)
+                    maxOutputChars: shouldTrimOutput
                         ? MemoryPressureGuard.MaxVisibleOutputChars
                         : null) && loadedPayload != null)
             {
@@ -895,6 +903,7 @@ namespace SSH_Helper
                 _loadedHistoryPayload = loadedPayload;
                 _loadedHistoryPayloadHasDetails = !hasPersistedDetails || requireDetails;
                 _loadedHistoryPayloadHasHostOutputs = !hasPersistedHostResults || requireHostOutputs;
+                _loadedHistoryPayloadHasFullOutput = !shouldTrimOutput;
                 payload = loadedPayload;
                 MaybeCompactAfterPayloadSwap(previousPayloadChars, loadedPayload);
                 return true;
@@ -8011,6 +8020,7 @@ namespace SSH_Helper
             _loadedHistoryPayload = null;
             _loadedHistoryPayloadHasDetails = false;
             _loadedHistoryPayloadHasHostOutputs = false;
+            _loadedHistoryPayloadHasFullOutput = false;
         }
 
         private void StopExecution()
@@ -8452,7 +8462,7 @@ namespace SSH_Helper
             {
                 try
                 {
-                    if (!TryLoadHistoryPayload(entry.Id, out var payload))
+                    if (!TryLoadHistoryPayload(entry.Id, out var payload, requireFullOutput: true))
                         return;
 
                     File.WriteAllText(sfd.FileName, payload.Output ?? string.Empty);
@@ -8490,7 +8500,7 @@ namespace SSH_Helper
                         var entry = _outputHistory[i];
                         sw.WriteLine($"===== {entry.Label} =====");
                         sw.WriteLine();
-                        if (!TryLoadHistoryPayload(entry.Id, out var payload, showError: false))
+                        if (!TryLoadHistoryPayload(entry.Id, out var payload, showError: false, requireFullOutput: true))
                         {
                             missingPayloads++;
                             sw.WriteLine("[history payload unavailable]");

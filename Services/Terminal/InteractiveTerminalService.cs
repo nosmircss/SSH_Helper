@@ -965,9 +965,6 @@ namespace SSH_Helper.Services.Terminal
                 {
                     onCancellation?.Invoke();
                 }
-
-                // Headless mode should never leave any terminal windows behind after Stop/cancel.
-                CloseAllInteractiveWindowsSafe();
             });
 
             var startupOutput = FlushCaptureStartupBuffer(scripting, cancellationToken);
@@ -2526,50 +2523,6 @@ namespace SSH_Helper.Services.Terminal
                 }
             }));
             return tcs.Task;
-        }
-
-        private static void CloseAllInteractiveWindowsSafe()
-        {
-            static void CloseWindowsOnUiThread()
-            {
-                var windowsToClose = new List<InteractiveTerminalForm>();
-                for (var i = 0; i < Application.OpenForms.Count; i++)
-                {
-                    if (Application.OpenForms[i] is InteractiveTerminalForm form && !form.IsDisposed)
-                    {
-                        windowsToClose.Add(form);
-                    }
-                }
-
-                foreach (var form in windowsToClose)
-                {
-                    try
-                    {
-                        if (!form.IsDisposed)
-                            form.Close();
-                    }
-                    catch
-                    {
-                        // Ignore close race if form is already disposing.
-                    }
-                }
-            }
-
-            try
-            {
-                var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
-                if (mainForm == null || !mainForm.InvokeRequired)
-                {
-                    CloseWindowsOnUiThread();
-                    return;
-                }
-
-                mainForm.BeginInvoke(new Action(CloseWindowsOnUiThread));
-            }
-            catch
-            {
-                // Ignore cleanup failures during cancellation.
-            }
         }
 
         private static string FlushCaptureStartupBuffer(RebexScripting scripting, CancellationToken cancellationToken)

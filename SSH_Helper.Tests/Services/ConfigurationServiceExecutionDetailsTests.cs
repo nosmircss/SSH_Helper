@@ -174,4 +174,28 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
         reloaded.SavedState!.History.Should().ContainSingle();
         reloaded.SavedState.History[0].Output.Should().Be(repeatedOutput);
     }
+
+    [Fact]
+    public void Load_MixedModernAndLegacyPresets_LoadsBothWithoutFallback()
+    {
+        File.WriteAllText(_configPath, """
+            {
+              "Username": "tester",
+              "Timeout": 10,
+              "Presets": {
+                "ModernPreset": { "Commands": "show version", "IsScript": false },
+                "LegacyPreset": "show run"
+              }
+            }
+            """);
+
+        var service = new ConfigurationService(_configPath);
+        var config = service.Load();
+
+        service.ConfigLoadError.Should().BeNull();
+        config.Presets.Should().ContainKey("ModernPreset");
+        config.Presets.Should().ContainKey("LegacyPreset");
+        config.Presets["ModernPreset"].Commands.Should().Be("show version");
+        config.Presets["LegacyPreset"].Commands.Should().Be("show run");
+    }
 }
