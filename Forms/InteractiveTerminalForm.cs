@@ -37,6 +37,9 @@ namespace SSH_Helper.Forms
 
     internal sealed class InteractiveTerminalForm : Form
     {
+        private static readonly object _placementLock = new();
+        private static Point? _lastKnownLocation;
+
         private const int WmSysCommand = 0x0112;
         private const uint MfString = 0x0000;
         private const uint MfSeparator = 0x0800;
@@ -79,6 +82,7 @@ namespace SSH_Helper.Forms
             KeyPreview = true;
             Padding = Padding.Empty;
             BackColor = Color.Black;
+            ApplyRememberedLocation();
 
             _terminalView = new InteractiveTerminalViewportControl
             {
@@ -191,6 +195,7 @@ namespace SSH_Helper.Forms
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            RememberLocation();
             base.OnFormClosed(e);
         }
 
@@ -612,6 +617,53 @@ namespace SSH_Helper.Forms
                 .Replace('\r', '\n');
 
             return normalized.Split('\n');
+        }
+
+        private void ApplyRememberedLocation()
+        {
+            Point? rememberedLocation;
+            lock (_placementLock)
+            {
+                rememberedLocation = _lastKnownLocation;
+            }
+
+            if (!rememberedLocation.HasValue)
+                return;
+
+            StartPosition = FormStartPosition.Manual;
+            Location = ClampLocationToVisibleArea(rememberedLocation.Value, Size);
+        }
+
+        private void RememberLocation()
+        {
+            if (IsDisposed)
+                return;
+
+            var bounds = WindowState == FormWindowState.Normal
+                ? Bounds
+                : RestoreBounds;
+
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+                return;
+
+            var clampedLocation = ClampLocationToVisibleArea(bounds.Location, bounds.Size);
+            lock (_placementLock)
+            {
+                _lastKnownLocation = clampedLocation;
+            }
+        }
+
+        private static Point ClampLocationToVisibleArea(Point location, Size size)
+        {
+            var targetBounds = new Rectangle(location, size);
+            var workingArea = Screen.FromRectangle(targetBounds).WorkingArea;
+
+            var maxX = Math.Max(workingArea.Left, workingArea.Right - size.Width);
+            var maxY = Math.Max(workingArea.Top, workingArea.Bottom - size.Height);
+
+            var x = Math.Max(workingArea.Left, Math.Min(location.X, maxX));
+            var y = Math.Max(workingArea.Top, Math.Min(location.Y, maxY));
+            return new Point(x, y);
         }
     }
 }

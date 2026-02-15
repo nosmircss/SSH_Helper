@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -46,6 +47,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     dialog = dialogFactory();
                     promptLock = MainFormPromptLock.TryAcquire(mainForm);
                     registration = RegisterCancellation(dialog, cancellationToken);
+                    PositionDialogCenteredOnMainForm(dialog, mainForm);
 
                     dialog.FormClosed += (_, _) =>
                     {
@@ -153,6 +155,27 @@ namespace SSH_Helper.Services.Scripting.Commands
                 {
                 }
             });
+        }
+
+        private static void PositionDialogCenteredOnMainForm(Form dialog, Form mainForm)
+        {
+            if (dialog.IsDisposed || mainForm.IsDisposed)
+                return;
+
+            var anchorBounds = mainForm.WindowState == FormWindowState.Minimized
+                ? Screen.FromControl(mainForm).WorkingArea
+                : mainForm.Bounds;
+
+            var workingArea = Screen.FromRectangle(anchorBounds).WorkingArea;
+
+            var x = anchorBounds.Left + ((anchorBounds.Width - dialog.Width) / 2);
+            var y = anchorBounds.Top + ((anchorBounds.Height - dialog.Height) / 2);
+
+            x = Math.Max(workingArea.Left, Math.Min(x, workingArea.Right - dialog.Width));
+            y = Math.Max(workingArea.Top, Math.Min(y, workingArea.Bottom - dialog.Height));
+
+            dialog.StartPosition = FormStartPosition.Manual;
+            dialog.Location = new Point(x, y);
         }
 
         private sealed class MainFormPromptLock : IDisposable
