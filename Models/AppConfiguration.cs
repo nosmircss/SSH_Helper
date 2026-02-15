@@ -321,7 +321,8 @@ namespace SSH_Helper.Models
         public string? Username { get; set; }
 
         /// <summary>
-        /// Execution history entries (timestamp -> output).
+        /// Legacy in-config execution history entries used only for migration.
+        /// New history persistence is stored in external per-run files.
         /// </summary>
         public List<HistoryEntry> History { get; set; } = new();
     }

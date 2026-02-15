@@ -68,11 +68,10 @@ namespace SSH_Helper.Services
                 var config = ParseConfiguration(json);
                 var hadCompressedSavedState = !string.IsNullOrWhiteSpace(config.SavedStateCompressed);
                 InflateSavedStateFromCompressedPayload(config);
-                var trimmedForMemory = MemoryPressureGuard.TrimApplicationState(config.SavedState);
                 var shouldPersistCompressedState = !hadCompressedSavedState && config.SavedState != null;
                 _cachedConfig = config;
 
-                if (trimmedForMemory || shouldPersistCompressedState)
+                if (shouldPersistCompressedState)
                 {
                     try
                     {
@@ -80,7 +79,7 @@ namespace SSH_Helper.Services
                     }
                     catch
                     {
-                        // Best effort: keep the trimmed in-memory state even if write-back fails.
+                        // Best effort: keep the in-memory state even if write-back fails.
                     }
                 }
 
@@ -117,7 +116,6 @@ namespace SSH_Helper.Services
             {
                 NormalizeEnvironmentData(config);
                 NormalizeCommandEditorSettings(config);
-                MemoryPressureGuard.TrimApplicationState(config.SavedState);
 
                 // Keep a backup of the previous config in case the save is interrupted
                 if (File.Exists(_configFilePath))

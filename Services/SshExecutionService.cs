@@ -1035,7 +1035,10 @@ namespace SSH_Helper.Services
                 // Wire up context output to our events
                 context.OutputReceived += (s, e) =>
                 {
-                    var output = e.Message + Environment.NewLine;
+                    var output = FormatScriptOutput(e.Message, e.Type);
+                    if (string.IsNullOrEmpty(output))
+                        return;
+
                     outputBuilder.Append(output);
                     OnOutputReceived(host, output);
                 };
@@ -1183,7 +1186,10 @@ namespace SSH_Helper.Services
             // Wire up context output to our events
             context.OutputReceived += (s, e) =>
             {
-                var output = e.Message + Environment.NewLine;
+                var output = FormatScriptOutput(e.Message, e.Type);
+                if (string.IsNullOrEmpty(output))
+                    return;
+
                 outputBuilder.Append(output);
                 OnOutputReceived(host, output);
             };
@@ -1239,7 +1245,10 @@ namespace SSH_Helper.Services
 
             context.OutputReceived += (s, e) =>
             {
-                var output = e.Message + Environment.NewLine;
+                var output = FormatScriptOutput(e.Message, e.Type);
+                if (string.IsNullOrEmpty(output))
+                    return;
+
                 outputBuilder.Append(output);
                 OnOutputReceived(host, output);
             };
@@ -1590,6 +1599,31 @@ namespace SSH_Helper.Services
                 Host = host,
                 Output = output
             });
+        }
+
+        internal static string EnsureTrailingNewLine(string message)
+        {
+            if (string.IsNullOrEmpty(message))
+                return Environment.NewLine;
+
+            if (message.EndsWith("\r\n", StringComparison.Ordinal) ||
+                message.EndsWith("\n", StringComparison.Ordinal) ||
+                message.EndsWith("\r", StringComparison.Ordinal))
+            {
+                return message;
+            }
+
+            return message + Environment.NewLine;
+        }
+
+        internal static string FormatScriptOutput(string message, ScriptOutputType outputType)
+        {
+            if (outputType == ScriptOutputType.RawChunk)
+            {
+                return message ?? string.Empty;
+            }
+
+            return EnsureTrailingNewLine(message);
         }
 
         protected virtual void OnColumnUpdateRequested(HostConnection host, string columnName, string value)

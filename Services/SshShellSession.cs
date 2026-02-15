@@ -56,6 +56,7 @@ namespace SSH_Helper.Services
         private readonly Ssh _sshClient;
         private readonly RebexScripting _scripting;
         private readonly SshTimeoutOptions _timeouts;
+        private readonly IDisposable? _scriptingOwner;
         private readonly IDisposable? _terminalOwner;
         private Regex _promptPattern;
         private string _currentPrompt;
@@ -189,6 +190,7 @@ namespace SSH_Helper.Services
             _sshClient = sshClient ?? throw new ArgumentNullException(nameof(sshClient));
             _scripting = scripting ?? throw new ArgumentNullException(nameof(scripting));
             _timeouts = timeouts ?? SshTimeoutOptions.Default;
+            _scriptingOwner = scripting as IDisposable;
             _terminalOwner = terminalOwner;
             _currentPrompt = string.Empty;
             _promptPattern = Patterns.ShellPrompt;
@@ -1229,11 +1231,23 @@ namespace SSH_Helper.Services
                 _disposed = true;
                 try
                 {
-                    _terminalOwner?.Dispose();
+                    _scriptingOwner?.Dispose();
                 }
                 catch
                 {
-                    // Ignore terminal cleanup errors during session disposal.
+                    // Ignore scripting cleanup errors during session disposal.
+                }
+
+                if (!ReferenceEquals(_scriptingOwner, _terminalOwner))
+                {
+                    try
+                    {
+                        _terminalOwner?.Dispose();
+                    }
+                    catch
+                    {
+                        // Ignore terminal cleanup errors during session disposal.
+                    }
                 }
             }
         }

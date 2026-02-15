@@ -515,7 +515,7 @@ namespace SSH_Helper.Services.Terminal
 
                     if (ShouldMirrorCaptureChunk(mirrorOutput, capturedText))
                     {
-                        context.EmitOutput(capturedText, ScriptOutputType.CommandOutput);
+                        context.EmitOutput(capturedText, ScriptOutputType.RawChunk);
                     }
 
                     if (Volatile.Read(ref commandDispatched) == 1)
@@ -2091,21 +2091,21 @@ namespace SSH_Helper.Services.Terminal
         {
             try
             {
-                virtualTerminal?.Dispose();
+                if (scripting is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
             }
             catch
             {
                 // Ignore cleanup exceptions.
             }
 
-            if (virtualTerminal == null)
+            if (!ReferenceEquals(scripting, virtualTerminal))
             {
                 try
                 {
-                    if (scripting is IDisposable disposable)
-                    {
-                        disposable.Dispose();
-                    }
+                    virtualTerminal?.Dispose();
                 }
                 catch
                 {

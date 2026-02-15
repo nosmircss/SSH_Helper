@@ -57,6 +57,7 @@ namespace SSH_Helper.Services.Scripting
         Info,
         Command,
         CommandOutput,
+        RawChunk,
         Debug,
         Warning,
         Error,

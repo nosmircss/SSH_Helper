@@ -247,7 +247,7 @@ Settings are stored in `config.json` in the application directory (`%LocalAppDat
 - Command editor preferences
 - Font and appearance settings
 - Dark mode preference
-- Execution history with per-host details metadata
+- Execution history metadata in `history.index.json` and full per-run payloads in `history/<run-id>.json`
 - Update settings
 
 ## Building from Source

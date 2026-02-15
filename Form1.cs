@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel;
 using System.Data;
 using System.Diagnostics;
+using System.Runtime;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -45,6 +46,9 @@ namespace SSH_Helper
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
 
+        [DllImport("psapi.dll", SetLastError = true)]
+        public static extern bool EmptyWorkingSet(IntPtr hProcess);
+
         // Window message constants
         public const int WM_THEMECHANGED = 0x031A;
         public const int WM_SETREDRAW = 0x000B;
@@ -84,6 +88,10 @@ namespace SSH_Helper
         private const int UiOutputThrottleMs = 50;
         private const string FolderIcon = "\U0001F4C1";
         private const string StarIcon = "\u2605";
+        private const int LargeHistoryPayloadCharThreshold = 10_000_000;
+        private const int SmallHistoryPayloadCharThreshold = 500_000;
+        private const int OutputTextRecreateThresholdChars = 500_000;
+        private const int OutputTextRecreateTargetChars = 100_000;
         private static readonly string FolderSummarySeparator = new string('=', 60);
         private static readonly string FolderSummarySubSeparator = new string('=', 9);
 
@@ -99,6 +107,7 @@ namespace SSH_Helper
         private readonly ExecutionCoordinator _executionCoordinator;
         private readonly UpdateService _updateService;
         private readonly SshConfigService _sshConfigService;
+        private readonly HistoryStorageService _historyStorage;
 
         #endregion
 
@@ -137,6 +146,17 @@ namespace SSH_Helper
 
         // Per-host history data for the currently selected folder history entry
         private List<HostHistoryEntry>? _currentHostResults;
+        private readonly Dictionary<string, HistoryIndexEntry> _historyIndexEntries = new(StringComparer.Ordinal);
+        private bool _suppressHistorySelectionChanged;
+        private bool _suppressHostSelectionChanged;
+        private bool _historySelectionHandlingEnabled;
+        private bool _historySelectionArmPending;
+        private DateTime _historySelectionArmedAtUtc = DateTime.MaxValue;
+        private string _selectedHistoryOutput = string.Empty;
+        private string? _loadedHistoryPayloadId;
+        private HistoryRunPayload? _loadedHistoryPayload;
+        private bool _loadedHistoryPayloadHasDetails;
+        private bool _loadedHistoryPayloadHasHostOutputs;
 
         // Output state
         private readonly StringBuilder _outputBuffer = new();
@@ -192,6 +212,7 @@ namespace SSH_Helper
 
             // Initialize services
             _configService = new ConfigurationService();
+            _historyStorage = new HistoryStorageService(_configService.ConfigFilePath);
             _environmentService = new EnvironmentService(_configService);
             _presetManager = new PresetManager(_configService);
             _csvManager = new CsvManager();
@@ -227,6 +248,7 @@ namespace SSH_Helper
             InitializeDataGridView();
             InitializeScriptEditor();
             InitializeOutputHistory();
+            InitializeHistoryPersistence();
             InitializeEventHandlers();
             InitializeToolbarSync();
             InitializeEnvironmentToolbar();
@@ -251,6 +273,10 @@ namespace SSH_Helper
         {
             // Remove handler to only run once
             Shown -= Form1_Shown;
+            _historySelectionArmedAtUtc = DateTime.MaxValue;
+            _historySelectionArmPending = true;
+            Application.Idle -= ArmHistorySelectionOnIdle;
+            Application.Idle += ArmHistorySelectionOnIdle;
 
             // Restore folder expand/collapse state after form is fully shown
             RestoreFolderExpandState();
@@ -716,6 +742,247 @@ namespace SSH_Helper
             lstOutput.DisplayMember = nameof(HistoryListItem.Label);
         }
 
+        private void InitializeHistoryPersistence()
+        {
+            var config = _configService.GetCurrent();
+            var indexEntries = _historyStorage.LoadIndex();
+
+            if (indexEntries.Count == 0 && config.SavedState?.History != null && config.SavedState.History.Count > 0)
+            {
+                var imported = _historyStorage.ImportLegacyHistory(config.SavedState.History, config.MaxHistoryEntries);
+                if (imported > 0)
+                {
+                    config.SavedState.History.Clear();
+                    _configService.Save(config);
+                    indexEntries = _historyStorage.LoadIndex();
+                }
+            }
+
+            LoadHistoryIndexIntoList(indexEntries);
+        }
+
+        private void LoadHistoryIndexIntoList(IReadOnlyList<HistoryIndexEntry>? indexEntries = null, string? selectEntryId = null)
+        {
+            var entries = indexEntries ?? _historyStorage.LoadIndex();
+            var selectedIndexToApply = -1;
+
+            _suppressHistorySelectionChanged = true;
+            try
+            {
+                _historyIndexEntries.Clear();
+                _outputHistory.Clear();
+                foreach (var entry in entries)
+                {
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.Id))
+                        continue;
+
+                    _historyIndexEntries[entry.Id] = entry;
+                    _outputHistory.Add(new HistoryListItem(
+                        entry.Id,
+                        entry.Label,
+                        output: string.Empty,
+                        hasHostResults: entry.HasHostResults,
+                        hasDetails: entry.HasDetails));
+                }
+
+                _loadedHistoryPayloadId = null;
+                _loadedHistoryPayload = null;
+                _loadedHistoryPayloadHasDetails = false;
+                _loadedHistoryPayloadHasHostOutputs = false;
+                _selectedHistoryOutput = string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(selectEntryId))
+                {
+                    selectedIndexToApply = _outputHistory
+                        .Select((item, index) => new { item.Id, index })
+                        .FirstOrDefault(item => string.Equals(item.Id, selectEntryId, StringComparison.Ordinal))?.index ?? -1;
+                }
+
+                lstOutput.ClearSelected();
+                historySplitContainer.Panel2Collapsed = true;
+                lstHosts.Items.Clear();
+                _currentHostResults = null;
+
+                if (_outputHistory.Count == 0)
+                {
+                    ClearOutput();
+                }
+            }
+            finally
+            {
+                _suppressHistorySelectionChanged = false;
+            }
+
+            if (selectedIndexToApply >= 0)
+            {
+                EnableHistorySelectionHandling();
+                lstOutput.SelectedIndex = selectedIndexToApply;
+            }
+        }
+
+        private void EnableHistorySelectionHandling()
+        {
+            if (_historySelectionHandlingEnabled)
+                return;
+
+            _historySelectionHandlingEnabled = true;
+        }
+
+        private void ArmHistorySelectionOnIdle(object? sender, EventArgs e)
+        {
+            if (!_historySelectionArmPending)
+            {
+                Application.Idle -= ArmHistorySelectionOnIdle;
+                return;
+            }
+
+            // Ignore any carried-over launch click; arm only after input fully settles.
+            if (Control.MouseButtons != MouseButtons.None)
+                return;
+
+            _historySelectionArmedAtUtc = DateTime.UtcNow;
+            _historySelectionArmPending = false;
+            Application.Idle -= ArmHistorySelectionOnIdle;
+        }
+
+        private bool IsHistorySelectionArmed()
+        {
+            return !_historySelectionArmPending && DateTime.UtcNow >= _historySelectionArmedAtUtc;
+        }
+
+        private bool TryLoadHistoryPayload(
+            string entryId,
+            out HistoryRunPayload payload,
+            bool showError = true,
+            bool requireDetails = false,
+            bool requireHostOutputs = false)
+        {
+            payload = new HistoryRunPayload();
+            if (string.IsNullOrWhiteSpace(entryId))
+                return false;
+
+            var hasPersistedDetails = _historyIndexEntries.TryGetValue(entryId, out var indexEntry) && indexEntry.HasDetails;
+            var hasPersistedHostResults = indexEntry?.HasHostResults ?? false;
+            if (string.Equals(_loadedHistoryPayloadId, entryId, StringComparison.Ordinal) &&
+                _loadedHistoryPayload != null)
+            {
+                if (requireDetails && hasPersistedDetails && !_loadedHistoryPayloadHasDetails)
+                {
+                    // Cached payload was loaded in lightweight mode; reload with details on demand.
+                }
+                else if (requireHostOutputs && hasPersistedHostResults && !_loadedHistoryPayloadHasHostOutputs)
+                {
+                    // Cached payload was loaded without host output bodies; reload host outputs on demand.
+                }
+                else
+                {
+                    payload = _loadedHistoryPayload;
+                    return true;
+                }
+            }
+
+            if (_historyStorage.TryLoadRunPayload(
+                    entryId,
+                    out var loadedPayload,
+                    includeDetails: requireDetails,
+                    includeHostOutputs: requireHostOutputs,
+                    maxOutputChars: (!requireDetails && !requireHostOutputs)
+                        ? MemoryPressureGuard.MaxVisibleOutputChars
+                        : null) && loadedPayload != null)
+            {
+                var previousPayloadChars = EstimatePayloadTextChars(_loadedHistoryPayload);
+                _loadedHistoryPayloadId = entryId;
+                _loadedHistoryPayload = loadedPayload;
+                _loadedHistoryPayloadHasDetails = !hasPersistedDetails || requireDetails;
+                _loadedHistoryPayloadHasHostOutputs = !hasPersistedHostResults || requireHostOutputs;
+                payload = loadedPayload;
+                MaybeCompactAfterPayloadSwap(previousPayloadChars, loadedPayload);
+                return true;
+            }
+
+            if (showError)
+            {
+                MessageBox.Show(
+                    "History payload for this run could not be loaded.",
+                    "History Load Failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+
+            return false;
+        }
+
+        private static long EstimatePayloadTextChars(HistoryRunPayload? payload)
+        {
+            if (payload == null)
+                return 0;
+
+            long chars = payload.Output?.Length ?? 0;
+
+            if (payload.HostResults != null)
+            {
+                foreach (var host in payload.HostResults)
+                {
+                    chars += host?.Output?.Length ?? 0;
+                }
+            }
+
+            if (payload.Details != null)
+            {
+                chars += payload.Details.Commands?.Length ?? 0;
+                if (payload.Details.Hosts != null)
+                {
+                    foreach (var host in payload.Details.Hosts)
+                    {
+                        if (host?.Variables == null)
+                            continue;
+
+                        foreach (var kvp in host.Variables)
+                        {
+                            chars += kvp.Key?.Length ?? 0;
+                            chars += kvp.Value?.Length ?? 0;
+                        }
+                    }
+                }
+
+                if (payload.Details.InteractiveSessions != null)
+                {
+                    foreach (var session in payload.Details.InteractiveSessions)
+                    {
+                        chars += session?.Transcript?.Length ?? 0;
+                    }
+                }
+            }
+
+            return chars;
+        }
+
+        private static void MaybeCompactAfterPayloadSwap(long previousPayloadChars, HistoryRunPayload nextPayload)
+        {
+            if (previousPayloadChars < LargeHistoryPayloadCharThreshold)
+                return;
+
+            var nextPayloadChars = EstimatePayloadTextChars(nextPayload);
+            if (nextPayloadChars > SmallHistoryPayloadCharThreshold)
+                return;
+
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, blocking: false, compacting: true);
+        }
+
+        private static HistoryIndexEntry BuildHistoryIndexEntry(string id, string label, HistoryRunPayload payload)
+        {
+            return new HistoryIndexEntry
+            {
+                Id = id,
+                Label = label,
+                CreatedAtUtc = DateTime.UtcNow,
+                HasHostResults = payload.HostResults != null && payload.HostResults.Count > 0,
+                HasDetails = payload.Details != null,
+                RunFileName = $"{id}.json"
+            };
+        }
+
         private void InitializeCredentials()
         {
             var config = _configService.GetCurrent();
@@ -824,6 +1091,7 @@ namespace SSH_Helper
 
             // History and host list right-click selection and custom drawing
             lstOutput.MouseDown += LstOutput_MouseDown;
+            lstOutput.KeyDown += LstOutput_KeyDown;
             lstOutput.DrawItem += LstOutput_DrawItem;
             lstHosts.MouseDown += LstHosts_MouseDown;
 
@@ -977,27 +1245,7 @@ namespace SSH_Helper
                 SelectedPreset = savedState.SelectedPreset,
                 SelectedFolder = savedState.SelectedFolder,
                 Username = savedState.Username,
-                History = savedState.History?
-                    .Select(entry => new HistoryEntry
-                    {
-                        Id = entry.Id,
-                        Timestamp = entry.Timestamp,
-                        Output = entry.Output,
-                        HostResults = entry.HostResults?
-                            .Select(host => new HostHistoryEntry
-                            {
-                                HostAddress = host.HostAddress,
-                                Output = host.Output,
-                                Success = host.Success,
-                                Timestamp = host.Timestamp
-                            })
-                            .ToList(),
-                        Details = entry.Details == null
-                            ? null
-                            : CloneExecutionDetails(entry.Details)
-                    })
-                    .ToList()
-                    ?? new List<HistoryEntry>()
+                History = new List<HistoryEntry>()
             };
         }
 
@@ -1006,7 +1254,7 @@ namespace SSH_Helper
             return new ExecutionDetails
             {
                 PresetName = details.PresetName ?? string.Empty,
-                Commands = MemoryPressureGuard.TrimCommandSnapshot(details.Commands),
+                Commands = details.Commands ?? string.Empty,
                 PresetType = details.PresetType ?? string.Empty,
                 StartTimeUtc = details.StartTimeUtc,
                 EndTimeUtc = details.EndTimeUtc,
@@ -1025,7 +1273,7 @@ namespace SSH_Helper
                         HostAddress = host.HostAddress ?? string.Empty,
                         Success = host.Success,
                         TimestampUtc = host.TimestampUtc,
-                        Variables = CloneAndTrimDetailVariables(host.Variables)
+                        Variables = CloneDetailVariables(host.Variables)
                     })
                     .ToList()
                     ?? new List<SSH_Helper.Models.HostExecutionContext>(),
@@ -1040,14 +1288,14 @@ namespace SSH_Helper
                         EndedAtUtc = session.EndedAtUtc,
                         CloseReason = session.CloseReason ?? string.Empty,
                         Completed = session.Completed,
-                        Transcript = MemoryPressureGuard.TrimInteractiveTranscript(session.Transcript)
+                        Transcript = session.Transcript ?? string.Empty
                     })
                     .ToList()
                     ?? new List<InteractiveTerminalSessionDetails>()
             };
         }
 
-        private static Dictionary<string, string> CloneAndTrimDetailVariables(Dictionary<string, string>? source)
+        private static Dictionary<string, string> CloneDetailVariables(Dictionary<string, string>? source)
         {
             var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (source == null || source.Count == 0)
@@ -1058,7 +1306,7 @@ namespace SSH_Helper
                 if (string.IsNullOrWhiteSpace(kvp.Key))
                     continue;
 
-                variables[kvp.Key] = MemoryPressureGuard.TrimDetailVariableValue(kvp.Value);
+                variables[kvp.Key] = kvp.Value ?? string.Empty;
             }
 
             return variables;
@@ -1242,8 +1490,7 @@ namespace SSH_Helper
 
         private void SaveCurrentGridToEnvironment(string environmentName)
         {
-            var maxHistoryEntries = _configService.GetCurrent().MaxHistoryEntries;
-            var state = BuildApplicationState(maxHistoryEntries);
+            var state = BuildApplicationState();
             _environmentService.SaveCurrentGridToEnvironment(
                 environmentName,
                 state.HostColumns,
@@ -3966,7 +4213,11 @@ namespace SSH_Helper
 
         private void memoryDebuggerToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            using var dialog = new MemoryDebuggerDialog(CaptureMemoryDebuggerSnapshot, TrimMemoryPressureNow, _isDarkMode);
+            using var dialog = new MemoryDebuggerDialog(
+                CaptureMemoryDebuggerSnapshot,
+                TrimMemoryPressureNow,
+                AggressiveTrimMemoryNow,
+                _isDarkMode);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
             dialog.ShowDialog(this);
         }
@@ -3976,74 +4227,63 @@ namespace SSH_Helper
             var process = Process.GetCurrentProcess();
             process.Refresh();
 
-            var historyRows = new List<(string Label, int Length)>(_outputHistory.Count);
-            long historyChars = 0;
+            long historyLabelChars = 0;
             foreach (var entry in _outputHistory)
             {
-                var length = entry.Output?.Length ?? 0;
-                historyChars += length;
-                historyRows.Add((entry.Label, length));
+                historyLabelChars += entry.Label?.Length ?? 0;
             }
 
-            int hostOutputCount = 0;
-            long hostOutputChars = 0;
-            foreach (var kvp in _historyResults.EnumerateResults())
+            int selectedHostCacheCount = _currentHostResults?.Count ?? 0;
+            long selectedHostCacheChars = 0;
+            if (_currentHostResults != null)
             {
-                var hostResults = kvp.Value;
-                if (hostResults == null)
-                    continue;
-
-                foreach (var hostResult in hostResults)
+                foreach (var host in _currentHostResults)
                 {
-                    hostOutputCount++;
-                    hostOutputChars += hostResult?.Output?.Length ?? 0;
+                    selectedHostCacheChars += host?.Output?.Length ?? 0;
                 }
             }
 
-            int detailsCount = 0;
-            long commandChars = 0;
-            long variableChars = 0;
-            int transcriptCount = 0;
-            long transcriptChars = 0;
-            var transcriptRows = new List<(string Label, int Length)>();
-
-            foreach (var kvp in _historyResults.EnumerateDetails())
+            var loadedPayloadId = _loadedHistoryPayloadId;
+            var loadedPayload = _loadedHistoryPayload;
+            var loadedPayloadOutputChars = loadedPayload?.Output?.Length ?? 0;
+            var loadedPayloadHostOutputChars = 0L;
+            var loadedPayloadHostCount = loadedPayload?.HostResults?.Count ?? 0;
+            if (loadedPayload?.HostResults != null)
             {
-                var details = kvp.Value;
-                if (details == null)
-                    continue;
-
-                detailsCount++;
-                commandChars += details.Commands?.Length ?? 0;
-
-                if (details.Hosts != null)
+                foreach (var host in loadedPayload.HostResults)
                 {
-                    foreach (var host in details.Hosts)
-                    {
-                        if (host?.Variables == null)
-                            continue;
+                    loadedPayloadHostOutputChars += host?.Output?.Length ?? 0;
+                }
+            }
 
-                        foreach (var variable in host.Variables)
-                        {
-                            variableChars += (variable.Key?.Length ?? 0) + (variable.Value?.Length ?? 0);
-                        }
+            var loadedDetailsCommandChars = loadedPayload?.Details?.Commands?.Length ?? 0;
+            var loadedDetailsVariableChars = 0L;
+            var loadedDetailsTranscriptChars = 0L;
+            var loadedDetailsTranscriptCount = 0;
+            if (loadedPayload?.Details?.Hosts != null)
+            {
+                foreach (var host in loadedPayload.Details.Hosts)
+                {
+                    if (host?.Variables == null)
+                        continue;
+
+                    foreach (var kvp in host.Variables)
+                    {
+                        loadedDetailsVariableChars += (kvp.Key?.Length ?? 0) + (kvp.Value?.Length ?? 0);
                     }
                 }
+            }
 
-                if (details.InteractiveSessions != null)
+            if (loadedPayload?.Details?.InteractiveSessions != null)
+            {
+                foreach (var session in loadedPayload.Details.InteractiveSessions)
                 {
-                    foreach (var session in details.InteractiveSessions)
-                    {
-                        var transcriptLength = session?.Transcript?.Length ?? 0;
-                        if (transcriptLength <= 0)
-                            continue;
+                    var transcriptLength = session?.Transcript?.Length ?? 0;
+                    if (transcriptLength <= 0)
+                        continue;
 
-                        transcriptCount++;
-                        transcriptChars += transcriptLength;
-                        var hostLabel = string.IsNullOrWhiteSpace(session?.HostAddress) ? "unknown host" : session.HostAddress;
-                        var sessionNumber = session?.SessionNumber ?? 0;
-                        transcriptRows.Add(($"{hostLabel} (session {sessionNumber})", transcriptLength));
-                    }
+                    loadedDetailsTranscriptCount++;
+                    loadedDetailsTranscriptChars += transcriptLength;
                 }
             }
 
@@ -4073,6 +4313,8 @@ namespace SSH_Helper
 
             var scriptChars = txtCommand.Text?.Length ?? 0;
             var visibleOutputChars = txtOutput.TextLength;
+            var pooledConnectionCount = _sshService.ConnectionPool?.Count ?? 0;
+            var terminalHistoryLimit = SshTerminalOptionsFactory.DefaultHistoryMaxLength;
             int outputBufferChars;
             lock (_outputBufferLock)
             {
@@ -4081,169 +4323,94 @@ namespace SSH_Helper
 
             var configPath = _configService.ConfigFilePath;
             long configSizeBytes = 0;
+            var historyIndexPath = Path.Combine(Path.GetDirectoryName(configPath) ?? string.Empty, "history.index.json");
+            var historyRunFolderPath = Path.Combine(Path.GetDirectoryName(configPath) ?? string.Empty, "history");
+            long historyIndexSizeBytes = 0;
+            long historyRunFilesSizeBytes = 0;
+            int historyRunFileCount = 0;
             try
             {
                 if (File.Exists(configPath))
                 {
                     configSizeBytes = new FileInfo(configPath).Length;
                 }
+
+                if (File.Exists(historyIndexPath))
+                {
+                    historyIndexSizeBytes = new FileInfo(historyIndexPath).Length;
+                }
+
+                if (Directory.Exists(historyRunFolderPath))
+                {
+                    var runFiles = Directory.GetFiles(historyRunFolderPath, "*.json", SearchOption.TopDirectoryOnly);
+                    historyRunFileCount = runFiles.Length;
+                    foreach (var runFile in runFiles)
+                    {
+                        historyRunFilesSizeBytes += new FileInfo(runFile).Length;
+                    }
+                }
             }
             catch
             {
                 configSizeBytes = 0;
+                historyIndexSizeBytes = 0;
+                historyRunFilesSizeBytes = 0;
+                historyRunFileCount = 0;
             }
 
             var sb = new StringBuilder();
             sb.AppendLine($"Captured: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             sb.AppendLine($"Config path: {configPath}");
             sb.AppendLine($"Config size: {FormatBytes(configSizeBytes)}");
+            sb.AppendLine($"History index path: {historyIndexPath}");
+            sb.AppendLine($"History index size: {FormatBytes(historyIndexSizeBytes)}");
+            sb.AppendLine($"History run files: {historyRunFileCount:N0} ({FormatBytes(historyRunFilesSizeBytes)})");
+            sb.AppendLine($"SSH pooling: {(_sshService.UseConnectionPooling ? "enabled" : "disabled")} ({pooledConnectionCount:N0} pooled connection(s))");
+            sb.AppendLine($"Terminal history limit: {terminalHistoryLimit:N0} lines ({SshTerminalOptionsFactory.DefaultColumns}x{SshTerminalOptionsFactory.DefaultRows})");
+            sb.AppendLine($"Loaded history payload id: {loadedPayloadId ?? "[none]"}");
             sb.AppendLine();
             sb.AppendLine("Large managed text buckets (estimated):");
-            AppendMemoryBucket(sb, "History entry output", historyChars, _outputHistory.Count);
-            AppendMemoryBucket(sb, "Host output cache", hostOutputChars, hostOutputCount);
-            AppendMemoryBucket(sb, "Interactive transcripts", transcriptChars, transcriptCount);
-            AppendMemoryBucket(sb, "Execution command snapshots", commandChars, detailsCount);
-            AppendMemoryBucket(sb, "Execution detail variables", variableChars, detailsCount);
+            AppendMemoryBucket(sb, "History metadata labels", historyLabelChars, _outputHistory.Count);
+            AppendMemoryBucket(sb, "Selected host output cache", selectedHostCacheChars, selectedHostCacheCount);
+            AppendMemoryBucket(sb, "Loaded history payload output", loadedPayloadOutputChars, loadedPayload == null ? 0 : 1);
+            AppendMemoryBucket(sb, "Loaded history payload host output", loadedPayloadHostOutputChars, loadedPayloadHostCount);
+            AppendMemoryBucket(sb, "Loaded detail command snapshot", loadedDetailsCommandChars, loadedPayload?.Details == null ? 0 : 1);
+            AppendMemoryBucket(sb, "Loaded detail variable text", loadedDetailsVariableChars, loadedPayload?.Details?.Hosts?.Count ?? 0);
+            AppendMemoryBucket(sb, "Loaded detail interactive transcripts", loadedDetailsTranscriptChars, loadedDetailsTranscriptCount);
             AppendMemoryBucket(sb, "Preset command text", presetChars, _presetManager.Presets.Count);
             AppendMemoryBucket(sb, "Host grid cell text", hostGridChars, hostGridCellCount);
             AppendMemoryBucket(sb, "Script editor text", scriptChars, 1);
             AppendMemoryBucket(sb, "Output panel text", visibleOutputChars, 1);
             AppendMemoryBucket(sb, "Live output buffer", outputBufferChars, 1);
 
-            historyRows.Sort((a, b) => b.Length.CompareTo(a.Length));
-            transcriptRows.Sort((a, b) => b.Length.CompareTo(a.Length));
-
-            if (historyRows.Count > 0)
-            {
-                sb.AppendLine();
-                sb.AppendLine("Top history outputs:");
-                for (int i = 0; i < Math.Min(5, historyRows.Count); i++)
-                {
-                    if (historyRows[i].Length <= 0)
-                        continue;
-
-                    sb.AppendLine($"- {historyRows[i].Label}: {FormatBytes(historyRows[i].Length * 2L)}");
-                }
-            }
-
-            if (transcriptRows.Count > 0)
-            {
-                sb.AppendLine();
-                sb.AppendLine("Top interactive transcripts:");
-                for (int i = 0; i < Math.Min(5, transcriptRows.Count); i++)
-                {
-                    if (transcriptRows[i].Length <= 0)
-                        continue;
-
-                    sb.AppendLine($"- {transcriptRows[i].Label}: {FormatBytes(transcriptRows[i].Length * 2L)}");
-                }
-            }
-
             sb.AppendLine();
             sb.AppendLine("Notes:");
             sb.AppendLine("- Estimates assume UTF-16 string storage (~2 bytes per char).");
+            sb.AppendLine("- History payload files are stored on disk and loaded lazily per selected run.");
+            sb.AppendLine("- Loaded interactive transcripts can dominate managed memory when an entry with large details is selected.");
+            sb.AppendLine("- Terminal emulation buffers (cells/colors/scrollback) can consume large managed memory outside these text estimates.");
             sb.AppendLine("- Private bytes include native allocations from WinForms controls and SSH libraries.");
 
-            return (process.WorkingSet64, process.PrivateMemorySize64, GC.GetTotalMemory(false), sb.ToString());
+            var managedHeapBytes = GC.GetTotalMemory(true);
+            return (process.WorkingSet64, process.PrivateMemorySize64, managedHeapBytes, sb.ToString());
         }
 
         private string TrimMemoryPressureNow()
         {
             long removedChars = 0;
-            int trimmedHistoryEntries = 0;
-            int trimmedHostOutputs = 0;
-            int trimmedCommands = 0;
-            int trimmedTranscripts = 0;
-            int trimmedVariables = 0;
+            int trimmedOutputPanel = 0;
             int trimmedOutputBuffer = 0;
 
-            foreach (var entry in _outputHistory)
+            if (txtOutput.TextLength > MemoryPressureGuard.MaxVisibleOutputChars)
             {
-                var beforeLength = entry.Output?.Length ?? 0;
-                if (!MemoryPressureGuard.TrimRuntimeHistoryEntry(entry))
-                    continue;
-
-                trimmedHistoryEntries++;
-                removedChars += beforeLength - (entry.Output?.Length ?? 0);
-            }
-
-            foreach (var kvp in _historyResults.EnumerateResults())
-            {
-                var hostResults = kvp.Value;
-                if (hostResults == null)
-                    continue;
-
-                foreach (var hostResult in hostResults)
+                var currentText = txtOutput.Text;
+                var trimmedText = MemoryPressureGuard.TrimVisibleOutput(currentText);
+                if (!string.Equals(currentText, trimmedText, StringComparison.Ordinal))
                 {
-                    if (hostResult == null)
-                        continue;
-
-                    var currentOutput = hostResult.Output ?? string.Empty;
-                    var trimmedOutput = MemoryPressureGuard.TrimHostOutput(currentOutput);
-                    if (string.Equals(currentOutput, trimmedOutput, StringComparison.Ordinal))
-                        continue;
-
-                    hostResult.Output = trimmedOutput;
-                    trimmedHostOutputs++;
-                    removedChars += currentOutput.Length - trimmedOutput.Length;
-                }
-            }
-
-            foreach (var kvp in _historyResults.EnumerateDetails())
-            {
-                var details = kvp.Value;
-                if (details == null)
-                    continue;
-
-                var currentCommands = details.Commands ?? string.Empty;
-                var trimmedCommandsText = MemoryPressureGuard.TrimCommandSnapshot(currentCommands);
-                if (!string.Equals(currentCommands, trimmedCommandsText, StringComparison.Ordinal))
-                {
-                    details.Commands = trimmedCommandsText;
-                    trimmedCommands++;
-                    removedChars += currentCommands.Length - trimmedCommandsText.Length;
-                }
-
-                if (details.Hosts != null)
-                {
-                    foreach (var host in details.Hosts)
-                    {
-                        if (host?.Variables == null || host.Variables.Count == 0)
-                            continue;
-
-                        var keys = new List<string>(host.Variables.Keys);
-                        foreach (var key in keys)
-                        {
-                            var currentValue = host.Variables.TryGetValue(key, out var value)
-                                ? value ?? string.Empty
-                                : string.Empty;
-                            var trimmedValue = MemoryPressureGuard.TrimDetailVariableValue(currentValue);
-                            if (string.Equals(currentValue, trimmedValue, StringComparison.Ordinal))
-                                continue;
-
-                            host.Variables[key] = trimmedValue;
-                            trimmedVariables++;
-                            removedChars += currentValue.Length - trimmedValue.Length;
-                        }
-                    }
-                }
-
-                if (details.InteractiveSessions != null)
-                {
-                    foreach (var session in details.InteractiveSessions)
-                    {
-                        if (session == null)
-                            continue;
-
-                        var currentTranscript = session.Transcript ?? string.Empty;
-                        var trimmedTranscript = MemoryPressureGuard.TrimInteractiveTranscript(currentTranscript);
-                        if (string.Equals(currentTranscript, trimmedTranscript, StringComparison.Ordinal))
-                            continue;
-
-                        session.Transcript = trimmedTranscript;
-                        trimmedTranscripts++;
-                        removedChars += currentTranscript.Length - trimmedTranscript.Length;
-                    }
+                    txtOutput.Text = trimmedText;
+                    ScrollOutputToEnd();
+                    trimmedOutputPanel++;
+                    removedChars += currentText.Length - trimmedText.Length;
                 }
             }
 
@@ -4263,36 +4430,15 @@ namespace SSH_Helper
                 }
             }
 
-            var trimmedItemCount = trimmedHistoryEntries + trimmedHostOutputs + trimmedCommands + trimmedTranscripts + trimmedVariables + trimmedOutputBuffer;
-            if (trimmedItemCount > 0)
-            {
-                if (_currentHostResults != null && _currentHostResults.Count > 0)
-                {
-                    SetOutputText(BuildSelectedHostOutput());
-                }
-                else if (lstOutput.SelectedItem is HistoryListItem selectedEntry)
-                {
-                    SetOutputText(selectedEntry.Output);
-                }
-                else
-                {
-                    SetOutputText(txtOutput.Text);
-                }
-
-                SaveConfiguration();
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
-            }
+            var trimmedItemCount = trimmedOutputPanel + trimmedOutputBuffer;
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
 
             var sb = new StringBuilder();
             sb.AppendLine($"Trim complete. Estimated reduction: {FormatBytes(removedChars * 2L)}");
             sb.AppendLine($"Trimmed items: {trimmedItemCount:N0}");
-            sb.AppendLine($"- History outputs: {trimmedHistoryEntries:N0}");
-            sb.AppendLine($"- Host outputs: {trimmedHostOutputs:N0}");
-            sb.AppendLine($"- Command snapshots: {trimmedCommands:N0}");
-            sb.AppendLine($"- Interactive transcripts: {trimmedTranscripts:N0}");
-            sb.AppendLine($"- Detail variable values: {trimmedVariables:N0}");
+            sb.AppendLine($"- Output panel text: {trimmedOutputPanel:N0}");
             if (trimmedOutputBuffer > 0)
             {
                 sb.AppendLine($"- Live output buffer: {trimmedOutputBuffer:N0}");
@@ -4302,7 +4448,76 @@ namespace SSH_Helper
             {
                 sb.AppendLine("No oversized payloads needed trimming.");
             }
+            sb.AppendLine("- Forced full GC cycle executed.");
 
+            return sb.ToString();
+        }
+
+        private string AggressiveTrimMemoryNow()
+        {
+            var process = Process.GetCurrentProcess();
+            process.Refresh();
+
+            var beforeWorkingSet = process.WorkingSet64;
+            var beforePrivate = process.PrivateMemorySize64;
+            var beforeManaged = GC.GetTotalMemory(false);
+
+            var visibleText = MemoryPressureGuard.TrimVisibleOutput(txtOutput.Text);
+            RecreateOutputTextBoxIfNeeded(visibleText.Length, force: true);
+            txtOutput.Text = visibleText;
+            txtOutput.ClearUndo();
+            ScrollOutputToEnd();
+
+            ClearLoadedHistoryPayload();
+
+            lock (_outputBufferLock)
+            {
+                if (_outputBuffer.Length > MemoryPressureGuard.MaxInMemoryOutputBufferChars)
+                {
+                    var trimmedBuffer = MemoryPressureGuard.TrimInMemoryOutputBuffer(_outputBuffer.ToString());
+                    _outputBuffer.Clear();
+                    _outputBuffer.Append(trimmedBuffer);
+                }
+
+                ShrinkOutputBufferCapacityIfNeeded_NoLock();
+            }
+
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            var workingSetTrimApplied = false;
+            try
+            {
+                workingSetTrimApplied = NativeMethods.EmptyWorkingSet(process.Handle);
+            }
+            catch
+            {
+                // Best effort trim.
+            }
+
+            process.Refresh();
+            var afterWorkingSet = process.WorkingSet64;
+            var afterPrivate = process.PrivateMemorySize64;
+            var afterManaged = GC.GetTotalMemory(false);
+
+            var workingSetDelta = beforeWorkingSet - afterWorkingSet;
+            var privateDelta = beforePrivate - afterPrivate;
+            var managedDelta = beforeManaged - afterManaged;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Aggressive trim complete.");
+            sb.AppendLine($"Working set: {FormatBytes(beforeWorkingSet)} -> {FormatBytes(afterWorkingSet)}");
+            sb.AppendLine($"Private bytes: {FormatBytes(beforePrivate)} -> {FormatBytes(afterPrivate)}");
+            sb.AppendLine($"Managed heap: {FormatBytes(beforeManaged)} -> {FormatBytes(afterManaged)}");
+            sb.AppendLine($"Working set delta: {(workingSetDelta >= 0 ? "-" : "+")}{FormatBytes(Math.Abs(workingSetDelta))}");
+            sb.AppendLine($"Private bytes delta: {(privateDelta >= 0 ? "-" : "+")}{FormatBytes(Math.Abs(privateDelta))}");
+            sb.AppendLine($"Managed heap delta: {(managedDelta >= 0 ? "-" : "+")}{FormatBytes(Math.Abs(managedDelta))}");
+            sb.AppendLine(workingSetTrimApplied
+                ? "- Requested OS working-set trim."
+                : "- Could not apply OS working-set trim.");
+            sb.AppendLine("- Note: private bytes can remain high when native heaps keep committed pages for reuse.");
             return sb.ToString();
         }
 
@@ -4831,37 +5046,72 @@ namespace SSH_Helper
 
         private void lstOutput_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (lstOutput.SelectedItem is HistoryListItem entry)
-            {
-                // Try to get per-host results from in-memory cache or from saved state
-                _currentHostResults = GetHostResultsForEntry(entry.Id);
+            if (_suppressHistorySelectionChanged || !_historySelectionHandlingEnabled)
+                return;
 
-                if (_currentHostResults != null && _currentHostResults.Count > 0)
+            if (lstOutput.SelectedItem is not HistoryListItem entry)
+            {
+                _currentHostResults = null;
+                _selectedHistoryOutput = string.Empty;
+                lstHosts.Items.Clear();
+                historySplitContainer.Panel2Collapsed = true;
+                return;
+            }
+
+            if (!TryLoadHistoryPayload(entry.Id, out var payload))
+            {
+                historySplitContainer.Panel2Collapsed = true;
+                lstHosts.Items.Clear();
+                _currentHostResults = null;
+                _selectedHistoryOutput = string.Empty;
+                SetOutputText(string.Empty);
+                return;
+            }
+
+            _selectedHistoryOutput = payload.Output ?? string.Empty;
+            _currentHostResults = payload.HostResults != null && payload.HostResults.Count > 0
+                ? payload.HostResults
+                : null;
+            entry.HasHostResults = _currentHostResults != null;
+            var hasDetails = _historyIndexEntries.TryGetValue(entry.Id, out var existingIndexEntry)
+                ? existingIndexEntry.HasDetails
+                : payload.Details != null;
+            entry.HasDetails = hasDetails;
+
+            if (_historyIndexEntries.TryGetValue(entry.Id, out var indexEntry))
+            {
+                indexEntry.HasHostResults = entry.HasHostResults;
+                indexEntry.HasDetails = hasDetails;
+            }
+
+            if (_currentHostResults != null)
+            {
+                _suppressHostSelectionChanged = true;
+                lstHosts.BeginUpdate();
+                try
                 {
-                    // Populate and show the host list
                     lstHosts.Items.Clear();
                     foreach (var hostResult in _currentHostResults)
                     {
                         lstHosts.Items.Add(hostResult);
                     }
 
-                    // Show the host list panel
-                    historySplitContainer.Panel2Collapsed = false;
-
-                    // Select the first host to show its output
-                    if (lstHosts.Items.Count > 0)
-                    {
-                        lstHosts.SelectedIndex = 0;
-                    }
-                    return;
+                    lstHosts.ClearSelected();
+                }
+                finally
+                {
+                    lstHosts.EndUpdate();
+                    _suppressHostSelectionChanged = false;
                 }
 
-                // For entries without per-host data, hide the host list and show combined output
-                historySplitContainer.Panel2Collapsed = true;
-                lstHosts.Items.Clear();
-                _currentHostResults = null;
-                SetOutputText(entry.Output);
+                historySplitContainer.Panel2Collapsed = false;
+                SetOutputText(_selectedHistoryOutput);
+                return;
             }
+
+            historySplitContainer.Panel2Collapsed = true;
+            lstHosts.Items.Clear();
+            SetOutputText(_selectedHistoryOutput);
         }
 
         private void saveAsToolStripMenuItem_Click(object sender, EventArgs e)
@@ -4890,7 +5140,7 @@ namespace SSH_Helper
             saveAsToolStripMenuItem.Enabled = hasSelection;
             deleteEntryToolStripMenuItem.Enabled = hasSelection;
 
-            if (hasSelection && lstOutput.SelectedItem is HistoryListItem entry && _historyResults.HasDetails(entry.Id))
+            if (hasSelection && lstOutput.SelectedItem is HistoryListItem entry && entry.HasDetails)
             {
                 viewDetailsToolStripMenuItem.Enabled = true;
                 viewDetailsToolStripMenuItem.Text = "View Details...";
@@ -4906,7 +5156,7 @@ namespace SSH_Helper
         {
             if (lstOutput.SelectedItem is HistoryListItem entry &&
                 lstHosts.SelectedItem is HostHistoryEntry hostEntry &&
-                _historyResults.HasDetails(entry.Id))
+                entry.HasDetails)
             {
                 viewHostDetailsToolStripMenuItem.Enabled = true;
                 viewHostDetailsToolStripMenuItem.Text = $"View Details ({hostEntry.HostAddress})...";
@@ -4929,13 +5179,35 @@ namespace SSH_Helper
 
         private void LstOutput_MouseDown(object? sender, MouseEventArgs e)
         {
+            int index = lstOutput.IndexFromPoint(e.Location);
+            if (index < 0 || index >= lstOutput.Items.Count)
+                return;
+
+            if (!IsHistorySelectionArmed())
+                return;
+
+            EnableHistorySelectionHandling();
+
             if (e.Button == MouseButtons.Right)
             {
-                int index = lstOutput.IndexFromPoint(e.Location);
-                if (index >= 0 && index < lstOutput.Items.Count)
-                {
-                    lstOutput.SelectedIndex = index;
-                }
+                lstOutput.SelectedIndex = index;
+            }
+        }
+
+        private void LstOutput_KeyDown(object? sender, KeyEventArgs e)
+        {
+            switch (e.KeyCode)
+            {
+                case Keys.Up:
+                case Keys.Down:
+                case Keys.PageUp:
+                case Keys.PageDown:
+                case Keys.Home:
+                case Keys.End:
+                    if (!IsHistorySelectionArmed())
+                        return;
+                    EnableHistorySelectionHandling();
+                    break;
             }
         }
 
@@ -4953,13 +5225,76 @@ namespace SSH_Helper
 
         private void lstHosts_SelectedIndexChanged(object? sender, EventArgs e)
         {
+            if (_suppressHostSelectionChanged)
+                return;
+
+            if (lstHosts.SelectedIndices.Count == 0)
+            {
+                SetOutputText(_selectedHistoryOutput);
+                return;
+            }
+
+            if (!EnsureHostOutputsLoadedForSelection())
+            {
+                SetOutputText(_selectedHistoryOutput);
+                return;
+            }
+
             SetOutputText(BuildSelectedHostOutput());
+        }
+
+        private bool EnsureHostOutputsLoadedForSelection()
+        {
+            if (_loadedHistoryPayloadHasHostOutputs)
+                return true;
+
+            if (lstOutput.SelectedItem is not HistoryListItem entry)
+                return false;
+
+            var selectedIndices = lstHosts.SelectedIndices.Cast<int>().ToArray();
+            if (selectedIndices.Length == 0)
+                return false;
+
+            if (!TryLoadHistoryPayload(entry.Id, out var payload, requireHostOutputs: true))
+                return false;
+
+            _currentHostResults = payload.HostResults != null && payload.HostResults.Count > 0
+                ? payload.HostResults
+                : null;
+            if (_currentHostResults == null)
+                return false;
+
+            _suppressHostSelectionChanged = true;
+            lstHosts.BeginUpdate();
+            try
+            {
+                lstHosts.Items.Clear();
+                foreach (var hostResult in _currentHostResults)
+                {
+                    lstHosts.Items.Add(hostResult);
+                }
+
+                foreach (var index in selectedIndices)
+                {
+                    if (index >= 0 && index < lstHosts.Items.Count)
+                    {
+                        lstHosts.SetSelected(index, true);
+                    }
+                }
+            }
+            finally
+            {
+                lstHosts.EndUpdate();
+                _suppressHostSelectionChanged = false;
+            }
+
+            return true;
         }
 
         private string BuildSelectedHostOutput()
         {
             if (lstHosts.SelectedIndices.Count == 0)
-                return string.Empty;
+                return _selectedHistoryOutput;
 
             var combinedOutput = new StringBuilder();
             bool isFirstSelectedHost = true;
@@ -7452,24 +7787,27 @@ namespace SSH_Helper
 
             string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {FolderIcon} {folderName}";
             var entryId = HistoryIdGenerator.NewId();
-            var entry = new HistoryListItem(entryId, label, MemoryPressureGuard.TrimHistoryOutput(combinedOutput.ToString()));
+            var payload = new HistoryRunPayload
+            {
+                Id = entryId,
+                Output = combinedOutput.ToString(),
+                HostResults = hostResults.Count > 0 ? hostResults : null,
+                Details = details == null ? null : CloneExecutionDetails(details)
+            };
+            var indexEntry = BuildHistoryIndexEntry(entryId, label, payload);
 
             Invoke(() =>
             {
-                _outputHistory.Insert(0, entry);
-
-                if (hostResults.Count > 0)
+                try
                 {
-                    StoreHostResultsForEntry(entryId, hostResults);
+                    _historyStorage.SaveRun(indexEntry, payload, _configService.GetCurrent().MaxHistoryEntries);
+                    LoadHistoryIndexIntoList(selectEntryId: entryId);
+                    SaveConfiguration();
                 }
-
-                if (details != null)
+                catch (Exception ex)
                 {
-                    StoreExecutionDetailsForEntry(entryId, details);
+                    MessageBox.Show($"Failed to persist history run: {ex.Message}", "History Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
-
-                lstOutput.SelectedIndex = 0;
-                SaveConfiguration();
             });
 
             return entryId;
@@ -7495,7 +7833,7 @@ namespace SSH_Helper
             return new ExecutionDetails
             {
                 PresetName = presetName,
-                Commands = MemoryPressureGuard.TrimCommandSnapshot(commands),
+                Commands = commands ?? string.Empty,
                 PresetType = presetType,
                 StartTimeUtc = startTimeUtc,
                 EndTimeUtc = endTimeUtc,
@@ -7587,7 +7925,7 @@ namespace SSH_Helper
                         EndedAtUtc = session.EndedAtUtc,
                         CloseReason = session.CloseReason ?? string.Empty,
                         Completed = session.Completed,
-                        Transcript = MemoryPressureGuard.TrimInteractiveTranscript(session.Transcript)
+                        Transcript = session.Transcript ?? string.Empty
                     });
                 }
             }
@@ -7648,7 +7986,6 @@ namespace SSH_Helper
                 var output = result.Output;
                 if (i == 0)
                     output = output.TrimStart('\r', '\n');
-                output = MemoryPressureGuard.TrimHostOutput(output);
 
                 hostResults.Add(new HostHistoryEntry
                 {
@@ -7662,33 +7999,18 @@ namespace SSH_Helper
             return hostResults;
         }
 
-        // Store host results by history entry ID
-        private readonly HistoryResultStore _historyResults = new();
-
-        private void StoreHostResultsForEntry(string entryId, List<HostHistoryEntry> hostResults)
+        private void ClearLoadedHistoryPayload(string? entryId = null)
         {
-            if (string.IsNullOrWhiteSpace(entryId))
+            if (!string.IsNullOrWhiteSpace(entryId) &&
+                !string.Equals(_loadedHistoryPayloadId, entryId, StringComparison.Ordinal))
+            {
                 return;
+            }
 
-            _historyResults.SetResults(entryId, hostResults);
-        }
-
-        private List<HostHistoryEntry>? GetHostResultsForEntry(string entryId)
-        {
-            return _historyResults.TryGetResults(entryId, out var results) ? results : null;
-        }
-
-        private void StoreExecutionDetailsForEntry(string entryId, ExecutionDetails details)
-        {
-            if (string.IsNullOrWhiteSpace(entryId) || details == null)
-                return;
-
-            _historyResults.SetDetails(entryId, details);
-        }
-
-        private ExecutionDetails? GetExecutionDetailsForEntry(string entryId)
-        {
-            return _historyResults.TryGetDetails(entryId, out var details) ? details : null;
+            _loadedHistoryPayloadId = null;
+            _loadedHistoryPayload = null;
+            _loadedHistoryPayloadHasDetails = false;
+            _loadedHistoryPayloadHasHostOutputs = false;
         }
 
         private void StopExecution()
@@ -7855,12 +8177,6 @@ namespace SSH_Helper
                 }
 
                 _outputBuffer.Append(output);
-                if (_outputBuffer.Length > MemoryPressureGuard.MaxInMemoryOutputBufferChars)
-                {
-                    var trimmedBuffer = MemoryPressureGuard.TrimInMemoryOutputBuffer(_outputBuffer.ToString());
-                    _outputBuffer.Clear();
-                    _outputBuffer.Append(trimmedBuffer);
-                }
 
                 return output;
             }
@@ -7894,6 +8210,10 @@ namespace SSH_Helper
 
         private void SetOutputText(string text)
         {
+            var sourceText = text ?? string.Empty;
+            var visibleText = MemoryPressureGuard.TrimVisibleOutput(sourceText);
+            RecreateOutputTextBoxIfNeeded(visibleText.Length);
+
             // Suspend drawing to prevent flicker during text replacement
             NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
             try
@@ -7902,11 +8222,15 @@ namespace SSH_Helper
                 lock (_outputBufferLock)
                 {
                     _outputBuffer.Clear();
-                    if (!string.IsNullOrEmpty(text))
-                        _outputBuffer.Append(MemoryPressureGuard.TrimInMemoryOutputBuffer(text));
+                    var retainedBufferText = MemoryPressureGuard.TrimInMemoryOutputBuffer(sourceText);
+                    if (!string.IsNullOrEmpty(retainedBufferText))
+                        _outputBuffer.Append(retainedBufferText);
+
+                    ShrinkOutputBufferCapacityIfNeeded_NoLock();
                 }
 
-                txtOutput.Text = MemoryPressureGuard.TrimVisibleOutput(text);
+                txtOutput.Text = visibleText;
+                txtOutput.ClearUndo();
             }
             finally
             {
@@ -7919,6 +8243,8 @@ namespace SSH_Helper
 
         private void ClearOutput()
         {
+            RecreateOutputTextBoxIfNeeded(0);
+
             // Suspend drawing to prevent flicker during clear
             NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
             try
@@ -7927,8 +8253,10 @@ namespace SSH_Helper
                 lock (_outputBufferLock)
                 {
                     _outputBuffer.Clear();
+                    ShrinkOutputBufferCapacityIfNeeded_NoLock();
                 }
                 txtOutput.Clear();
+                txtOutput.ClearUndo();
             }
             finally
             {
@@ -7943,6 +8271,61 @@ namespace SSH_Helper
             txtOutput.SelectionStart = txtOutput.TextLength;
             txtOutput.SelectionLength = 0;
             txtOutput.ScrollToCaret();
+        }
+
+        private void RecreateOutputTextBoxIfNeeded(int incomingTextLength, bool force = false)
+        {
+            if (!force &&
+                (txtOutput.TextLength < OutputTextRecreateThresholdChars || incomingTextLength > OutputTextRecreateTargetChars))
+                return;
+
+            var oldTextBox = txtOutput;
+            var parent = oldTextBox.Parent;
+            if (parent == null)
+                return;
+
+            var insertIndex = parent.Controls.GetChildIndex(oldTextBox);
+            var replacement = new TextBox
+            {
+                BackColor = oldTextBox.BackColor,
+                BorderStyle = oldTextBox.BorderStyle,
+                Dock = oldTextBox.Dock,
+                Font = oldTextBox.Font,
+                ForeColor = oldTextBox.ForeColor,
+                HideSelection = oldTextBox.HideSelection,
+                MaxLength = oldTextBox.MaxLength,
+                Multiline = oldTextBox.Multiline,
+                Name = oldTextBox.Name,
+                ReadOnly = oldTextBox.ReadOnly,
+                ScrollBars = oldTextBox.ScrollBars,
+                ShortcutsEnabled = oldTextBox.ShortcutsEnabled,
+                TabIndex = oldTextBox.TabIndex,
+                WordWrap = oldTextBox.WordWrap
+            };
+
+            parent.SuspendLayout();
+            try
+            {
+                parent.Controls.Remove(oldTextBox);
+                txtOutput = replacement;
+                parent.Controls.Add(replacement);
+                parent.Controls.SetChildIndex(replacement, insertIndex);
+            }
+            finally
+            {
+                parent.ResumeLayout();
+                oldTextBox.Dispose();
+            }
+        }
+
+        private void ShrinkOutputBufferCapacityIfNeeded_NoLock()
+        {
+            var maxRetainedCapacity = MemoryPressureGuard.MaxInMemoryOutputBufferChars * 2;
+            if (_outputBuffer.Length <= MemoryPressureGuard.MaxInMemoryOutputBufferChars &&
+                _outputBuffer.Capacity > maxRetainedCapacity)
+            {
+                _outputBuffer.Capacity = MemoryPressureGuard.MaxInMemoryOutputBufferChars;
+            }
         }
 
         private void SshService_ColumnUpdateRequested(object? sender, SshColumnUpdateEventArgs e)
@@ -8016,30 +8399,31 @@ namespace SSH_Helper
             {
                 output = _outputBuffer.ToString();
             }
-            output = MemoryPressureGuard.TrimHistoryOutput(output);
 
             string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
             var entryId = HistoryIdGenerator.NewId();
-            var entry = new HistoryListItem(entryId, label, output);
+            var hostResults = BuildHostHistoryEntries(results);
+            var payload = new HistoryRunPayload
+            {
+                Id = entryId,
+                Output = output ?? string.Empty,
+                HostResults = hostResults.Count > 0 ? hostResults : null,
+                Details = details == null ? null : CloneExecutionDetails(details)
+            };
+            var indexEntry = BuildHistoryIndexEntry(entryId, label, payload);
 
             Invoke(() =>
             {
-                // Clear selection first to prevent auto-adjustment events when inserting at index 0
-                lstOutput.ClearSelected();
-                _outputHistory.Insert(0, entry);
-                var hostResults = BuildHostHistoryEntries(results);
-                if (hostResults.Count > 0)
+                try
                 {
-                    StoreHostResultsForEntry(entryId, hostResults);
+                    _historyStorage.SaveRun(indexEntry, payload, _configService.GetCurrent().MaxHistoryEntries);
+                    LoadHistoryIndexIntoList(selectEntryId: entryId);
+                    SaveConfiguration();
                 }
-
-                if (details != null)
+                catch (Exception ex)
                 {
-                    StoreExecutionDetailsForEntry(entryId, details);
+                    MessageBox.Show($"Failed to persist history run: {ex.Message}", "History Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
-
-                lstOutput.SelectedIndex = 0;
-                SaveConfiguration();
             });
 
             return entryId;
@@ -8068,7 +8452,10 @@ namespace SSH_Helper
             {
                 try
                 {
-                    File.WriteAllText(sfd.FileName, entry.Output);
+                    if (!TryLoadHistoryPayload(entry.Id, out var payload))
+                        return;
+
+                    File.WriteAllText(sfd.FileName, payload.Output ?? string.Empty);
                 }
                 catch (Exception ex)
                 {
@@ -8096,15 +8483,33 @@ namespace SSH_Helper
             {
                 try
                 {
+                    int missingPayloads = 0;
                     using var sw = new StreamWriter(sfd.FileName, false, new UTF8Encoding(false));
                     for (int i = 0; i < _outputHistory.Count; i++)
                     {
                         var entry = _outputHistory[i];
                         sw.WriteLine($"===== {entry.Label} =====");
                         sw.WriteLine();
-                        string body = (entry.Output ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n");
+                        if (!TryLoadHistoryPayload(entry.Id, out var payload, showError: false))
+                        {
+                            missingPayloads++;
+                            sw.WriteLine("[history payload unavailable]");
+                            if (i < _outputHistory.Count - 1) sw.WriteLine();
+                            continue;
+                        }
+
+                        string body = (payload.Output ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n");
                         if (!string.IsNullOrEmpty(body)) sw.WriteLine(body);
                         if (i < _outputHistory.Count - 1) sw.WriteLine();
+                    }
+
+                    if (missingPayloads > 0)
+                    {
+                        MessageBox.Show(
+                            $"{missingPayloads} history item(s) could not be loaded and were exported as placeholders.",
+                            "History Export Warning",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
                     }
                 }
                 catch (Exception ex)
@@ -8125,12 +8530,20 @@ namespace SSH_Helper
             if (MessageBox.Show($"Are you sure you want to delete {entry.Label}?", "Delete Entry", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                 return;
 
+            _historyStorage.DeleteRun(entry.Id);
+            _historyIndexEntries.Remove(entry.Id);
+            ClearLoadedHistoryPayload(entry.Id);
             _outputHistory.Remove(entry);
-            _historyResults.RemoveResults(entry.Id);
             if (lstOutput.Items.Count > 0)
                 lstOutput.SelectedIndex = 0;
             else
+            {
+                _currentHostResults = null;
+                _selectedHistoryOutput = string.Empty;
+                lstHosts.Items.Clear();
+                historySplitContainer.Panel2Collapsed = true;
                 ClearOutput();
+            }
         }
 
         private void DeleteAllHistory()
@@ -8138,8 +8551,14 @@ namespace SSH_Helper
             if (MessageBox.Show("Are you sure you want to delete all history?", "Delete History", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                 return;
 
+            _historyStorage.DeleteAll();
             _outputHistory.Clear();
-            _historyResults.Clear();
+            _historyIndexEntries.Clear();
+            _currentHostResults = null;
+            _selectedHistoryOutput = string.Empty;
+            lstHosts.Items.Clear();
+            historySplitContainer.Panel2Collapsed = true;
+            ClearLoadedHistoryPayload();
             ClearOutput();
         }
 
@@ -8148,7 +8567,10 @@ namespace SSH_Helper
             if (lstOutput.SelectedItem is not HistoryListItem entry)
                 return;
 
-            var details = GetExecutionDetailsForEntry(entry.Id);
+            if (!TryLoadHistoryPayload(entry.Id, out var payload, requireDetails: true))
+                return;
+
+            var details = payload.Details;
             if (details == null)
             {
                 MessageBox.Show("Execution details are not available for this history entry.",
@@ -8160,11 +8582,12 @@ namespace SSH_Helper
 
             using var dialog = new ExecutionDetailsDialog(
                 details,
-                scopedOutput ?? entry.Output,
+                scopedOutput ?? payload.Output ?? string.Empty,
                 hostAddressFilter,
                 _isDarkMode);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
             dialog.ShowDialog(this);
+            ClearLoadedHistoryPayload(entry.Id);
         }
 
         private void ViewExecutionDetailsForSelectedHost()
@@ -8178,7 +8601,18 @@ namespace SSH_Helper
                 return;
             }
 
-            ViewExecutionDetails(hostEntry.HostAddress, hostEntry.Output);
+            if (!EnsureHostOutputsLoadedForSelection())
+            {
+                MessageBox.Show(
+                    "Host output for this selection could not be loaded.",
+                    "History Load Failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            var scopedOutput = BuildSelectedHostOutput();
+            ViewExecutionDetails(hostEntry.HostAddress, scopedOutput);
         }
 
         #endregion
@@ -8410,7 +8844,7 @@ namespace SSH_Helper
                     // Save application state if enabled
                     if (config.RememberState)
                     {
-                        config.SavedState = BuildApplicationState(config.MaxHistoryEntries);
+                        config.SavedState = BuildApplicationState();
                     }
                     else
                     {
@@ -8432,7 +8866,7 @@ namespace SSH_Helper
             }
         }
 
-        private ApplicationState BuildApplicationState(int maxHistoryEntries = 30)
+        private ApplicationState BuildApplicationState()
         {
             var state = new ApplicationState();
 
@@ -8507,44 +8941,12 @@ namespace SSH_Helper
             // Save username (not password)
             state.Username = tsbUsername.Text;
 
-            // Save history (limited to maxHistoryEntries, keeping most recent)
-            state.History = new List<HistoryEntry>();
-            var historyToSave = _outputHistory.Take(maxHistoryEntries);
-            foreach (var entry in historyToSave)
-            {
-                var entryId = string.IsNullOrWhiteSpace(entry.Id)
-                    ? HistoryIdGenerator.NewId()
-                    : entry.Id;
-
-                var historyEntry = new HistoryEntry
-                {
-                    Id = entryId,
-                    Timestamp = entry.Label,
-                    Output = entry.Output
-                };
-
-                // Include per-host results if this is a folder entry
-                if (_historyResults.TryGetResults(entryId, out var hostResults))
-                {
-                    historyEntry.HostResults = hostResults;
-                }
-
-                if (_historyResults.TryGetDetails(entryId, out var details) && details != null)
-                {
-                    historyEntry.Details = CloneExecutionDetails(details);
-                }
-
-                state.History.Add(historyEntry);
-            }
-
-            MemoryPressureGuard.TrimApplicationState(state);
             return state;
         }
 
         private void RestoreApplicationState(ApplicationState state)
         {
             if (state == null) return;
-            MemoryPressureGuard.TrimApplicationState(state);
 
             if (dgv_variables.DataSource != null)
             {
@@ -8622,39 +9024,6 @@ namespace SSH_Helper
             {
                 tsbUsername.Text = state.Username;
                 txtUsername.Text = state.Username;
-            }
-
-            // Restore history
-            if (state.History != null && state.History.Count > 0)
-            {
-                _outputHistory.Clear();
-                _historyResults.Clear();
-
-                foreach (var entry in state.History)
-                {
-                    var entryId = string.IsNullOrWhiteSpace(entry.Id)
-                        ? HistoryIdGenerator.NewId()
-                        : entry.Id;
-                    var label = string.IsNullOrWhiteSpace(entry.Timestamp)
-                        ? entryId
-                        : entry.Timestamp;
-
-                    _outputHistory.Add(new HistoryListItem(entryId, label, entry.Output));
-
-                    // Restore per-host results if available
-                    if (entry.HostResults != null && entry.HostResults.Count > 0)
-                    {
-                        _historyResults.SetResults(entryId, entry.HostResults);
-                    }
-
-                    if (entry.Details != null)
-                    {
-                        _historyResults.SetDetails(entryId, CloneExecutionDetails(entry.Details));
-                    }
-                }
-
-                // Clear selection - don't auto-select any history item on load
-                lstOutput.ClearSelected();
             }
 
             // Restore selected preset or folder (do this last so it loads properly)

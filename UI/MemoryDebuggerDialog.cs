@@ -7,6 +7,7 @@ namespace SSH_Helper.UI
     {
         private readonly Func<(long WorkingSetBytes, long PrivateBytes, long ManagedHeapBytes, string Summary)> _snapshotProvider;
         private readonly Func<string> _trimAction;
+        private readonly Func<string> _aggressiveTrimAction;
         private readonly bool _darkMode;
         private readonly Font _summaryFont;
 
@@ -16,14 +17,17 @@ namespace SSH_Helper.UI
         private readonly TextBox _txtSummary;
         private readonly Button _btnRefresh;
         private readonly Button _btnTrim;
+        private readonly Button _btnAggressiveTrim;
 
         public MemoryDebuggerDialog(
             Func<(long WorkingSetBytes, long PrivateBytes, long ManagedHeapBytes, string Summary)> snapshotProvider,
             Func<string> trimAction,
+            Func<string> aggressiveTrimAction,
             bool darkMode)
         {
             _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
             _trimAction = trimAction ?? throw new ArgumentNullException(nameof(trimAction));
+            _aggressiveTrimAction = aggressiveTrimAction ?? throw new ArgumentNullException(nameof(aggressiveTrimAction));
             _darkMode = darkMode;
             _summaryFont = new Font("Consolas", 9f, FontStyle.Regular, GraphicsUnit.Point);
 
@@ -97,6 +101,14 @@ namespace SSH_Helper.UI
             };
             _btnTrim.Click += (_, __) => TrimAndRefresh();
 
+            _btnAggressiveTrim = new Button
+            {
+                Text = "Aggressive Trim",
+                Size = new Size(140, 30),
+                Location = new Point(252, 10)
+            };
+            _btnAggressiveTrim.Click += (_, __) => AggressiveTrimAndRefresh();
+
             var btnClose = new Button
             {
                 Text = "Close",
@@ -104,7 +116,7 @@ namespace SSH_Helper.UI
                 Size = new Size(100, 30),
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
-            buttonPanel.Controls.AddRange([_btnRefresh, _btnTrim, btnClose]);
+            buttonPanel.Controls.AddRange([_btnRefresh, _btnTrim, _btnAggressiveTrim, btnClose]);
 
             Controls.Add(_txtSummary);
             Controls.Add(buttonPanel);
@@ -121,6 +133,7 @@ namespace SSH_Helper.UI
             DialogTheme.ApplyTo(this, _darkMode);
             DialogTheme.StyleButton(_btnRefresh, _darkMode);
             DialogTheme.StyleButton(_btnTrim, _darkMode, isPrimary: true);
+            DialogTheme.StyleButton(_btnAggressiveTrim, _darkMode);
             DialogTheme.StyleButton(btnClose, _darkMode);
             DialogTheme.SetDarkTitleBar(this, _darkMode);
             DialogTheme.ApplyNativeTheme(_txtSummary, _darkMode);
@@ -168,6 +181,21 @@ namespace SSH_Helper.UI
             finally
             {
                 _btnTrim.Enabled = true;
+            }
+        }
+
+        private void AggressiveTrimAndRefresh()
+        {
+            _btnAggressiveTrim.Enabled = false;
+            try
+            {
+                var message = _aggressiveTrimAction();
+                RefreshSnapshot();
+                DialogTheme.ShowMessage(this, message, "Aggressive Memory Trim", MessageBoxIcon.Information, _darkMode, Font);
+            }
+            finally
+            {
+                _btnAggressiveTrim.Enabled = true;
             }
         }
 
