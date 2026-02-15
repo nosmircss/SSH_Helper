@@ -104,7 +104,7 @@ namespace SSH_Helper.Services.Scripting
                 ["choose"] = ["prompt", "into", "options", "default"],
                 ["multiselect"] = ["prompt", "into", "options", "min", "max"],
                 ["confirm"] = ["prompt", "into", "default"],
-                ["interactive"] = ["session", "command", "capture", "max_seconds", "mirror_output", "on_error"]
+                ["interactive"] = ["session", "command", "capture", "max_seconds", "max_lines", "mirror_output", "show_window", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -197,7 +197,8 @@ namespace SSH_Helper.Services.Scripting
                 ["allow_failure"] = ["true", "false"],
                 ["verify_tls"] = ["true", "false"],
                 ["session"] = ["separate", "shared"],
-                ["mirror_output"] = ["true", "false"]
+                ["mirror_output"] = ["true", "false"],
+                ["show_window"] = ["true", "false"]
             };
 
         /// <summary>
@@ -1632,7 +1633,7 @@ namespace SSH_Helper.Services.Scripting
             if (!parser.Accept<MappingStart>(out _))
             {
                 SkipValue(parser);
-                AddStepParseError(step, "interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'mirror_output', and 'on_error'");
+                AddStepParseError(step, "interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'max_lines', 'mirror_output', 'show_window', and 'on_error'");
                 return null;
             }
 
@@ -1688,8 +1689,23 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case "max_lines":
+                        if (int.TryParse(parser.Consume<Scalar>().Value, out var maxLines))
+                        {
+                            options.MaxLines = maxLines;
+                        }
+                        else
+                        {
+                            AddStepParseError(step, "interactive.max_lines must be a positive integer");
+                        }
+                        break;
+
                     case "mirror_output":
                         options.MirrorOutput = ParseBooleanOrDefault(parser, options.MirrorOutput);
+                        break;
+
+                    case "show_window":
+                        options.ShowWindow = ParseBooleanOrDefault(parser, options.ShowWindow);
                         break;
 
                     case "emulation":
@@ -2798,7 +2814,7 @@ namespace SSH_Helper.Services.Scripting
                         if (step.Interactive == null)
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'mirror_output', and 'on_error'{lineContent}");
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive must be a mapping with optional keys 'session', 'command', 'capture', 'max_seconds', 'max_lines', 'mirror_output', 'show_window', and 'on_error'{lineContent}");
                             break;
                         }
 
@@ -2814,6 +2830,28 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: interactive.max_seconds must be greater than 0{lineContent}");
+                        }
+
+                        if (step.Interactive.MaxLines.HasValue &&
+                            step.Interactive.MaxLines.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive.max_lines must be greater than 0{lineContent}");
+                        }
+
+                        if (!step.Interactive.ShowWindow &&
+                            string.IsNullOrWhiteSpace(step.Interactive.Command))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive.show_window=false requires interactive.command{lineContent}");
+                        }
+
+                        if (!step.Interactive.ShowWindow &&
+                            !step.Interactive.MaxSeconds.HasValue &&
+                            !step.Interactive.MaxLines.HasValue)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive.show_window=false requires interactive.max_seconds or interactive.max_lines{lineContent}");
                         }
                         break;
                 }

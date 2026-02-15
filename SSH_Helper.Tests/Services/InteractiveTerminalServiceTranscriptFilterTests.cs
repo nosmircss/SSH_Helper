@@ -157,6 +157,7 @@ public class InteractiveTerminalServiceTranscriptFilterTests
     {
         InteractiveTerminalService.IsDetachedCaptureCompletionReason("ctrl_c_continue").Should().BeTrue();
         InteractiveTerminalService.IsDetachedCaptureCompletionReason("timeout_continue").Should().BeTrue();
+        InteractiveTerminalService.IsDetachedCaptureCompletionReason("max_lines_continue").Should().BeTrue();
         InteractiveTerminalService.IsDetachedCaptureCompletionReason("natural_complete").Should().BeTrue();
     }
 
@@ -180,6 +181,34 @@ public class InteractiveTerminalServiceTranscriptFilterTests
         InteractiveTerminalService.ShouldMirrorCaptureChunk(false, "line").Should().BeFalse();
         InteractiveTerminalService.ShouldMirrorCaptureChunk(true, string.Empty).Should().BeFalse();
         InteractiveTerminalService.ShouldMirrorCaptureChunk(true, "line").Should().BeTrue();
+    }
+
+    [Fact]
+    public void CountLinesFromCapturedChunk_CountsCrlfAndLfWithoutDoubleCounting()
+    {
+        var previousChunkEndedWithCarriageReturn = false;
+        var lines = InteractiveTerminalService.CountLinesFromCapturedChunk(
+            "line1\r\nline2\nline3\rline4",
+            ref previousChunkEndedWithCarriageReturn);
+
+        lines.Should().Be(3);
+        previousChunkEndedWithCarriageReturn.Should().BeFalse();
+    }
+
+    [Fact]
+    public void CountLinesFromCapturedChunk_HandlesChunkBoundaryCrLf()
+    {
+        var previousChunkEndedWithCarriageReturn = false;
+        var first = InteractiveTerminalService.CountLinesFromCapturedChunk(
+            "line1\r",
+            ref previousChunkEndedWithCarriageReturn);
+        var second = InteractiveTerminalService.CountLinesFromCapturedChunk(
+            "\nline2\r\n",
+            ref previousChunkEndedWithCarriageReturn);
+
+        first.Should().Be(1);
+        second.Should().Be(1);
+        previousChunkEndedWithCarriageReturn.Should().BeFalse();
     }
 
     [Fact]

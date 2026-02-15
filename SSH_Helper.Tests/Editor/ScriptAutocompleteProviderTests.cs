@@ -127,7 +127,7 @@ public class ScriptAutocompleteProviderTests
         var completion = provider.GetCompletion(text, text.Length);
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
-        completion.Items.Select(item => item.Label).Should().Contain(["session", "command", "capture", "max_seconds", "mirror_output", "on_error"]);
+        completion.Items.Select(item => item.Label).Should().Contain(["session", "command", "capture", "max_seconds", "max_lines", "mirror_output", "show_window", "on_error"]);
         completion.Items.Select(item => item.Label).Should().NotContain("emulation");
     }
 
@@ -160,6 +160,18 @@ public class ScriptAutocompleteProviderTests
     {
         var provider = new ScriptAutocompleteProvider();
         var text = "steps:\n  - interactive:\n      mirror_output: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["true", "false"]);
+    }
+
+    [Fact]
+    public void GetCompletion_InteractiveShowWindowValue_SuggestsBooleanValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - interactive:\n      show_window: ";
 
         var completion = provider.GetCompletion(text, text.Length);
 

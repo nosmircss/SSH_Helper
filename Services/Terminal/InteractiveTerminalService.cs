@@ -65,6 +65,7 @@ namespace SSH_Helper.Services.Terminal
         private const string InteractiveCloseReasonError = "error";
         private const string InteractiveCloseReasonCtrlCContinue = "ctrl_c_continue";
         private const string InteractiveCloseReasonTimeoutContinue = "timeout_continue";
+        private const string InteractiveCloseReasonMaxLinesContinue = "max_lines_continue";
         private const string InteractiveCloseReasonEarlyClosePartial = "early_close_partial";
         private const string InteractiveCloseReasonNaturalComplete = "natural_complete";
 
@@ -88,6 +89,7 @@ namespace SSH_Helper.Services.Terminal
                 string.Equals(CloseReason, InteractiveCloseReasonDisconnected, StringComparison.Ordinal) ||
                 string.Equals(CloseReason, InteractiveCloseReasonCtrlCContinue, StringComparison.Ordinal) ||
                 string.Equals(CloseReason, InteractiveCloseReasonTimeoutContinue, StringComparison.Ordinal) ||
+                string.Equals(CloseReason, InteractiveCloseReasonMaxLinesContinue, StringComparison.Ordinal) ||
                 string.Equals(CloseReason, InteractiveCloseReasonEarlyClosePartial, StringComparison.Ordinal) ||
                 string.Equals(CloseReason, InteractiveCloseReasonNaturalComplete, StringComparison.Ordinal);
         }
@@ -119,6 +121,19 @@ namespace SSH_Helper.Services.Terminal
                 options.Session != InteractiveSessionMode.Separate)
             {
                 return InteractiveTerminalRunResult.Fail("Interactive command mode requires 'session: separate'.");
+            }
+
+            if (!options.ShowWindow &&
+                string.IsNullOrWhiteSpace(options.Command))
+            {
+                return InteractiveTerminalRunResult.Fail("interactive.show_window=false requires interactive.command.");
+            }
+
+            if (!options.ShowWindow &&
+                !options.MaxSeconds.HasValue &&
+                !options.MaxLines.HasValue)
+            {
+                return InteractiveTerminalRunResult.Fail("interactive.show_window=false requires interactive.max_seconds or interactive.max_lines.");
             }
 
             if (!string.IsNullOrWhiteSpace(options.Command))
@@ -339,18 +354,37 @@ namespace SSH_Helper.Services.Terminal
                     SshTerminalOptionsFactory.DefaultHistoryMaxLength);
                 startedAtUtc = DateTime.UtcNow;
 
-                runSummary = await RunCaptureWindowLoopAsync(
-                    title: $"{host} - Interactive Capture",
-                    context: context,
-                    scripting: scripting,
-                    terminal: virtualTerminal,
-                    command: options.Command,
-                    maxSeconds: options.MaxSeconds,
-                    mirrorOutput: options.MirrorOutput,
-                    keepAliveInterval: timeouts.KeepAliveInterval,
-                    cancellationToken: cancellationToken,
-                    isConnectionAlive: () => client != null && client.IsConnected,
-                    onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting));
+                if (options.ShowWindow)
+                {
+                    runSummary = await RunCaptureWindowLoopAsync(
+                        title: $"{host} - Interactive Capture",
+                        context: context,
+                        scripting: scripting,
+                        terminal: virtualTerminal,
+                        command: options.Command,
+                        maxSeconds: options.MaxSeconds,
+                        maxLines: options.MaxLines,
+                        mirrorOutput: options.MirrorOutput,
+                        keepAliveInterval: timeouts.KeepAliveInterval,
+                        cancellationToken: cancellationToken,
+                        isConnectionAlive: () => client != null && client.IsConnected,
+                        onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting));
+                }
+                else
+                {
+                    runSummary = await RunCaptureHeadlessLoopAsync(
+                        context: context,
+                        scripting: scripting,
+                        terminal: virtualTerminal,
+                        command: options.Command,
+                        maxSeconds: options.MaxSeconds,
+                        maxLines: options.MaxLines,
+                        mirrorOutput: options.MirrorOutput,
+                        keepAliveInterval: timeouts.KeepAliveInterval,
+                        cancellationToken: cancellationToken,
+                        isConnectionAlive: () => client != null && client.IsConnected,
+                        onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting));
+                }
 
                 if (runSummary.CancelledByToken)
                     throw new OperationCanceledException(cancellationToken);
@@ -397,6 +431,7 @@ namespace SSH_Helper.Services.Terminal
             ITerminal? terminal,
             string command,
             int? maxSeconds,
+            int? maxLines,
             bool mirrorOutput,
             TimeSpan keepAliveInterval,
             CancellationToken cancellationToken,
@@ -418,6 +453,8 @@ namespace SSH_Helper.Services.Terminal
             var inAlternateScreenState = 0;
             var commandDispatched = 0;
             var commandPromptArmed = 0;
+            var capturedLineCount = 0;
+            var previousChunkEndedWithCarriageReturn = false;
             InteractiveTerminalForm? form = null;
 
             EventHandler? disconnectedHandler = null;
@@ -496,6 +533,7 @@ namespace SSH_Helper.Services.Terminal
                 dataReceivedHandler = (_, args) =>
                 {
                     string capturedText = string.Empty;
+                    var reachedMaxLines = false;
 
                     lock (transcriptLock)
                     {
@@ -510,12 +548,27 @@ namespace SSH_Helper.Services.Terminal
                         if (!string.IsNullOrEmpty(capturedText))
                         {
                             transcriptBuilder.Append(capturedText);
+
+                            if (maxLines.HasValue && maxLines.Value > 0)
+                            {
+                                capturedLineCount += CountLinesFromCapturedChunk(
+                                    capturedText,
+                                    ref previousChunkEndedWithCarriageReturn);
+                                reachedMaxLines = capturedLineCount >= maxLines.Value;
+                            }
                         }
                     }
 
                     if (ShouldMirrorCaptureChunk(mirrorOutput, capturedText))
                     {
                         context.EmitOutput(capturedText, ScriptOutputType.RawChunk);
+                    }
+
+                    if (reachedMaxLines &&
+                        Interlocked.CompareExchange(ref completionSignaled, 0, 0) == 0)
+                    {
+                        TrySendCtrlC();
+                        TrySetCompletion(InteractiveCloseReasonMaxLinesContinue);
                     }
 
                     if (Volatile.Read(ref commandDispatched) == 1)
@@ -816,6 +869,290 @@ namespace SSH_Helper.Services.Terminal
             return new InteractiveWindowRunSummary
             {
                 WasLaunched = Volatile.Read(ref wasLaunched) == 1,
+                CancelledByToken = Volatile.Read(ref cancelledByToken) == 1 || cancellationToken.IsCancellationRequested,
+                CloseReason = completionReason,
+                Transcript = transcript
+            };
+        }
+
+        private async Task<InteractiveWindowRunSummary> RunCaptureHeadlessLoopAsync(
+            ScriptContext context,
+            RebexScripting scripting,
+            ITerminal? terminal,
+            string command,
+            int? maxSeconds,
+            int? maxLines,
+            bool mirrorOutput,
+            TimeSpan keepAliveInterval,
+            CancellationToken cancellationToken,
+            Func<bool>? isConnectionAlive,
+            Action? onCancellation)
+        {
+            var ioLock = new object();
+            var pendingInput = new ConcurrentQueue<Action<RebexScripting>>();
+            using var loopCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var completionTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var cancelledByToken = 0;
+            var pumpHadError = 0;
+            var completionSignaled = 0;
+            var completionReason = InteractiveCloseReasonError;
+            var transcriptBuilder = new StringBuilder();
+            var transcriptLock = new object();
+            var inAlternateScreen = false;
+            var inAlternateScreenState = 0;
+            var commandDispatched = 0;
+            var commandPromptArmed = 0;
+            var capturedLineCount = 0;
+            var previousChunkEndedWithCarriageReturn = false;
+
+            EventHandler? disconnectedHandler = null;
+            EventHandler<ActionRequestEventArgs>? actionRequestedHandler = null;
+            EventHandler<DataReceivedEventArgs>? dataReceivedHandler = null;
+
+            bool TrySetCompletion(string reason)
+            {
+                if (Interlocked.CompareExchange(ref completionSignaled, 1, 0) != 0)
+                    return false;
+
+                completionReason = reason;
+                completionTcs.TrySetResult(true);
+                return true;
+            }
+
+            void TrySendCtrlC()
+            {
+                try
+                {
+                    lock (ioLock)
+                    {
+                        scripting.Send(ConsoleKey.C, ConsoleModifiers.Control);
+                    }
+                }
+                catch
+                {
+                    // Ignore send failures while terminal is shutting down.
+                }
+            }
+
+            using var cancellationRegistration = cancellationToken.Register(() =>
+            {
+                Interlocked.Exchange(ref cancelledByToken, 1);
+                if (TrySetCompletion(InteractiveCloseReasonCancelled))
+                {
+                    onCancellation?.Invoke();
+                }
+
+                // Headless mode should never leave any terminal windows behind after Stop/cancel.
+                CloseAllInteractiveWindowsSafe();
+            });
+
+            var startupOutput = FlushCaptureStartupBuffer(scripting, cancellationToken);
+            var capturePromptRegex = TryBuildCapturePromptRegex(startupOutput);
+
+            if (terminal != null)
+            {
+                disconnectedHandler = (_, _) =>
+                {
+                    TrySetCompletion(InteractiveCloseReasonDisconnected);
+                };
+
+                actionRequestedHandler = (_, args) =>
+                {
+                    if (args.Action == RequestedAction.DisconnectRequest)
+                    {
+                        TrySetCompletion(InteractiveCloseReasonDisconnected);
+                    }
+                };
+
+                dataReceivedHandler = (_, args) =>
+                {
+                    string capturedText = string.Empty;
+                    var reachedMaxLines = false;
+
+                    lock (transcriptLock)
+                    {
+                        var captureResult = FilterTranscriptChunkForAudit(
+                            args.RawData,
+                            inAlternateScreen,
+                            () => args.StrippedData);
+
+                        inAlternateScreen = captureResult.InAlternateScreen;
+                        Volatile.Write(ref inAlternateScreenState, inAlternateScreen ? 1 : 0);
+                        capturedText = captureResult.CapturedText;
+                        if (!string.IsNullOrEmpty(capturedText))
+                        {
+                            transcriptBuilder.Append(capturedText);
+
+                            if (maxLines.HasValue && maxLines.Value > 0)
+                            {
+                                capturedLineCount += CountLinesFromCapturedChunk(
+                                    capturedText,
+                                    ref previousChunkEndedWithCarriageReturn);
+                                reachedMaxLines = capturedLineCount >= maxLines.Value;
+                            }
+                        }
+                    }
+
+                    if (ShouldMirrorCaptureChunk(mirrorOutput, capturedText))
+                    {
+                        context.EmitOutput(capturedText, ScriptOutputType.RawChunk);
+                    }
+
+                    if (reachedMaxLines &&
+                        Interlocked.CompareExchange(ref completionSignaled, 0, 0) == 0)
+                    {
+                        TrySendCtrlC();
+                        TrySetCompletion(InteractiveCloseReasonMaxLinesContinue);
+                    }
+
+                    if (Volatile.Read(ref commandDispatched) == 1)
+                    {
+                        var stripped = args.StrippedData;
+                        if (Interlocked.CompareExchange(ref commandPromptArmed, 0, 0) == 0 &&
+                            ShouldArmCaptureNaturalCompletion(stripped, command, capturePromptRegex))
+                        {
+                            Interlocked.Exchange(ref commandPromptArmed, 1);
+                        }
+
+                        if (Interlocked.CompareExchange(ref commandPromptArmed, 0, 0) == 1 &&
+                            ShouldCompleteCaptureOnPrompt(stripped, capturePromptRegex))
+                        {
+                            TrySetCompletion(InteractiveCloseReasonNaturalComplete);
+                        }
+                    }
+                };
+
+                terminal.Disconnected += disconnectedHandler;
+                terminal.ActionRequested += actionRequestedHandler;
+                terminal.DataReceived += dataReceivedHandler;
+            }
+            else
+            {
+                TrySetCompletion(InteractiveCloseReasonError);
+            }
+
+            pendingInput.Enqueue(stream =>
+            {
+                stream.Send(command + "\r");
+                Interlocked.Exchange(ref commandDispatched, 1);
+            });
+
+            Task timeoutTask = Task.CompletedTask;
+            if (maxSeconds.HasValue && maxSeconds.Value > 0)
+            {
+                timeoutTask = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(maxSeconds.Value), loopCancellation.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+
+                    if (Interlocked.CompareExchange(ref completionSignaled, 0, 0) != 0)
+                        return;
+
+                    TrySendCtrlC();
+                    TrySetCompletion(InteractiveCloseReasonTimeoutContinue);
+                }, CancellationToken.None);
+            }
+
+            var pumpTask = Task.Run(async () =>
+            {
+                try
+                {
+                    var hadPumpError = await PumpCaptureHeadlessAsync(
+                        scripting,
+                        terminal,
+                        ioLock,
+                        pendingInput,
+                        keepAliveInterval,
+                        isConnectionAlive,
+                        () => Interlocked.CompareExchange(ref completionSignaled, 0, 0) == 1,
+                        () => Volatile.Read(ref inAlternateScreenState) == 1,
+                        loopCancellation.Token);
+
+                    if (hadPumpError)
+                    {
+                        Interlocked.Exchange(ref pumpHadError, 1);
+                        TrySetCompletion(InteractiveCloseReasonError);
+                        return;
+                    }
+
+                    if (Interlocked.CompareExchange(ref completionSignaled, 0, 0) == 0)
+                    {
+                        TrySetCompletion(InteractiveCloseReasonDisconnected);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected while shutting down capture mode.
+                }
+                catch
+                {
+                    Interlocked.Exchange(ref pumpHadError, 1);
+                    TrySetCompletion(InteractiveCloseReasonError);
+                }
+            }, CancellationToken.None);
+
+            await completionTcs.Task;
+            loopCancellation.Cancel();
+            await pumpTask;
+            await timeoutTask;
+
+            if (terminal != null)
+            {
+                try
+                {
+                    if (disconnectedHandler != null)
+                        terminal.Disconnected -= disconnectedHandler;
+                }
+                catch
+                {
+                    // Ignore detach failures while terminal is shutting down.
+                }
+
+                try
+                {
+                    if (actionRequestedHandler != null)
+                        terminal.ActionRequested -= actionRequestedHandler;
+                }
+                catch
+                {
+                    // Ignore detach failures while terminal is shutting down.
+                }
+
+                try
+                {
+                    if (dataReceivedHandler != null)
+                        terminal.DataReceived -= dataReceivedHandler;
+                }
+                catch
+                {
+                    // Ignore detach failures while terminal is shutting down.
+                }
+            }
+
+            if (Volatile.Read(ref cancelledByToken) == 1 || cancellationToken.IsCancellationRequested)
+            {
+                completionReason = InteractiveCloseReasonCancelled;
+            }
+            else if (Volatile.Read(ref pumpHadError) == 1 && !IsCaptureSuccessCloseReason(completionReason))
+            {
+                completionReason = InteractiveCloseReasonError;
+            }
+
+            string transcript;
+            lock (transcriptLock)
+            {
+                transcript = transcriptBuilder.ToString();
+            }
+
+            return new InteractiveWindowRunSummary
+            {
+                WasLaunched = true,
                 CancelledByToken = Volatile.Read(ref cancelledByToken) == 1 || cancellationToken.IsCancellationRequested,
                 CloseReason = completionReason,
                 Transcript = transcript
@@ -1158,6 +1495,78 @@ namespace SSH_Helper.Services.Terminal
             };
         }
 
+        private static async Task<bool> PumpCaptureHeadlessAsync(
+            RebexScripting scripting,
+            ITerminal? terminal,
+            object ioLock,
+            ConcurrentQueue<Action<RebexScripting>> pendingInput,
+            TimeSpan keepAliveInterval,
+            Func<bool>? isConnectionAlive,
+            Func<bool>? isCaptureCompleted,
+            Func<bool>? isAlternateScreenActive,
+            CancellationToken cancellationToken)
+        {
+            if (terminal == null)
+            {
+                return true;
+            }
+
+            const int processTimeoutMs = 2;
+            const int idleDelayMs = 4;
+            var hadFatalError = false;
+            var nextKeepAliveAtUtc = ComputeNextKeepAliveUtc(keepAliveInterval);
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var hadPendingInput = !pendingInput.IsEmpty;
+                try
+                {
+                    lock (ioLock)
+                    {
+                        if (isCaptureCompleted != null && isCaptureCompleted())
+                            break;
+
+                        if (isConnectionAlive != null && !isConnectionAlive())
+                            break;
+
+                        TrySendKeepAliveIfDue(scripting, keepAliveInterval, ref nextKeepAliveAtUtc);
+
+                        FlushPendingInput(scripting, pendingInput);
+                        var terminalState = scripting.Process(processTimeoutMs);
+
+                        if ((terminalState & TerminalState.Disconnected) == TerminalState.Disconnected)
+                            break;
+
+                        if (isCaptureCompleted != null && isCaptureCompleted())
+                            break;
+
+                        if (isConnectionAlive != null && !isConnectionAlive())
+                            break;
+                    }
+                }
+                catch (Exception ex) when (IsTimeoutException(ex))
+                {
+                    await Task.Delay(25, cancellationToken);
+                    continue;
+                }
+                catch (Exception) when (!cancellationToken.IsCancellationRequested)
+                {
+                    hadFatalError = true;
+                    break;
+                }
+
+                // Retain API parity with the full-window pump and keep callback future-proof.
+                _ = isAlternateScreenActive?.Invoke();
+
+                if (hadPendingInput)
+                    continue;
+
+                await Task.Delay(idleDelayMs, cancellationToken);
+            }
+
+            return hadFatalError;
+        }
+
         private static async Task<bool> PumpFullAsync(
             InteractiveTerminalForm form,
             RebexScripting scripting,
@@ -1417,6 +1826,7 @@ namespace SSH_Helper.Services.Terminal
         {
             return string.Equals(closeReason, InteractiveCloseReasonCtrlCContinue, StringComparison.Ordinal) ||
                    string.Equals(closeReason, InteractiveCloseReasonTimeoutContinue, StringComparison.Ordinal) ||
+                   string.Equals(closeReason, InteractiveCloseReasonMaxLinesContinue, StringComparison.Ordinal) ||
                    string.Equals(closeReason, InteractiveCloseReasonNaturalComplete, StringComparison.Ordinal);
         }
 
@@ -1430,6 +1840,44 @@ namespace SSH_Helper.Services.Terminal
         internal static bool ShouldMirrorCaptureChunk(bool mirrorOutput, string? capturedText)
         {
             return mirrorOutput && !string.IsNullOrEmpty(capturedText);
+        }
+
+        internal static int CountLinesFromCapturedChunk(
+            string? capturedText,
+            ref bool previousChunkEndedWithCarriageReturn)
+        {
+            if (string.IsNullOrEmpty(capturedText))
+                return 0;
+
+            var lines = 0;
+            var previousWasCr = previousChunkEndedWithCarriageReturn;
+
+            for (var i = 0; i < capturedText.Length; i++)
+            {
+                var current = capturedText[i];
+                if (current == '\n')
+                {
+                    if (!previousWasCr)
+                    {
+                        lines++;
+                    }
+
+                    previousWasCr = false;
+                    continue;
+                }
+
+                if (current == '\r')
+                {
+                    lines++;
+                    previousWasCr = true;
+                    continue;
+                }
+
+                previousWasCr = false;
+            }
+
+            previousChunkEndedWithCarriageReturn = previousWasCr;
+            return lines;
         }
 
         internal static bool ShouldArmCaptureNaturalCompletion(string? text, string command, Regex? promptRegex = null)
@@ -2045,6 +2493,50 @@ namespace SSH_Helper.Services.Terminal
                 }
             }));
             return tcs.Task;
+        }
+
+        private static void CloseAllInteractiveWindowsSafe()
+        {
+            static void CloseWindowsOnUiThread()
+            {
+                var windowsToClose = new List<InteractiveTerminalForm>();
+                for (var i = 0; i < Application.OpenForms.Count; i++)
+                {
+                    if (Application.OpenForms[i] is InteractiveTerminalForm form && !form.IsDisposed)
+                    {
+                        windowsToClose.Add(form);
+                    }
+                }
+
+                foreach (var form in windowsToClose)
+                {
+                    try
+                    {
+                        if (!form.IsDisposed)
+                            form.Close();
+                    }
+                    catch
+                    {
+                        // Ignore close race if form is already disposing.
+                    }
+                }
+            }
+
+            try
+            {
+                var mainForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
+                if (mainForm == null || !mainForm.InvokeRequired)
+                {
+                    CloseWindowsOnUiThread();
+                    return;
+                }
+
+                mainForm.BeginInvoke(new Action(CloseWindowsOnUiThread));
+            }
+            catch
+            {
+                // Ignore cleanup failures during cancellation.
+            }
         }
 
         private static string FlushCaptureStartupBuffer(RebexScripting scripting, CancellationToken cancellationToken)

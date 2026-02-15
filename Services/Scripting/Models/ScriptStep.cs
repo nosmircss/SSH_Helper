@@ -582,9 +582,20 @@ namespace SSH_Helper.Services.Scripting.Models
         public int? MaxSeconds { get; set; }
 
         /// <summary>
+        /// Optional safety limit (lines) that auto-sends Ctrl+C in capture mode.
+        /// </summary>
+        public int? MaxLines { get; set; }
+
+        /// <summary>
         /// When true, captured terminal chunks are mirrored into the main script output stream.
         /// </summary>
         public bool MirrorOutput { get; set; }
+
+        /// <summary>
+        /// When true (default), the interactive terminal window is shown.
+        /// Set false for headless capture runs controlled by timeout/natural completion.
+        /// </summary>
+        public bool ShowWindow { get; set; } = true;
     }
 
     /// <summary>

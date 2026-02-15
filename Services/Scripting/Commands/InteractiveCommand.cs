@@ -70,7 +70,9 @@ namespace SSH_Helper.Services.Scripting.Commands
                     ? source.Capture
                     : context.SubstituteVariables(source.Capture),
                 MaxSeconds = source.MaxSeconds,
-                MirrorOutput = source.MirrorOutput
+                MaxLines = source.MaxLines,
+                MirrorOutput = source.MirrorOutput,
+                ShowWindow = source.ShowWindow
             };
         }
     }

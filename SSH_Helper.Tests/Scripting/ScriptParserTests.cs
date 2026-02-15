@@ -1239,6 +1239,7 @@ steps:
         step.GetStepType().Should().Be(StepType.Interactive);
         step.Interactive.Should().NotBeNull();
         step.Interactive!.Session.Should().Be(InteractiveSessionMode.Separate);
+        step.Interactive.ShowWindow.Should().BeTrue();
     }
 
     [Fact]
@@ -1252,7 +1253,9 @@ steps:
                   command: diagnose sniffer packet any 'host 10.0.0.1' 4 10 a
                   capture: sniffer_output
                   max_seconds: 120
+                  max_lines: 250
                   mirror_output: true
+                  show_window: false
             """;
 
         var script = _parser.Parse(yaml);
@@ -1263,7 +1266,9 @@ steps:
         step.Interactive.Command.Should().Be("diagnose sniffer packet any 'host 10.0.0.1' 4 10 a");
         step.Interactive.Capture.Should().Be("sniffer_output");
         step.Interactive.MaxSeconds.Should().Be(120);
+        step.Interactive.MaxLines.Should().Be(250);
         step.Interactive.MirrorOutput.Should().BeTrue();
+        step.Interactive.ShowWindow.Should().BeFalse();
     }
 
     [Fact]
@@ -1330,6 +1335,59 @@ steps:
         var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
 
         errors.Should().Contain(error => error.Contains("interactive.max_seconds must be greater than 0"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveMaxLinesNotPositive_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  command: tcpdump -i any
+                  max_lines: 0
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.max_lines must be greater than 0"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveShowWindowFalseWithoutCommand_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  show_window: false
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.show_window=false requires interactive.command"));
+    }
+
+    [Fact]
+    public void Validate_InteractiveShowWindowFalseWithoutLimits_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - interactive:
+                  session: separate
+                  command: tcpdump -i any
+                  show_window: false
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("interactive.show_window=false requires interactive.max_seconds or interactive.max_lines"));
     }
 
     [Fact]

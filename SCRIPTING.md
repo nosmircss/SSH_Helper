@@ -1788,6 +1788,7 @@ Opens an in-app SSH terminal window.
 
 - In normal mode (no `command`), the script pauses until the terminal window is closed.
 - In capture mode (`command` set), the command auto-runs and the step completes on Ctrl+C/timeout/natural completion/early close.
+- Set `show_window: false` for headless capture when no terminal UI should be displayed.
 
 **Syntax (map only):**
 ```yaml
@@ -1802,6 +1803,8 @@ Opens an in-app SSH terminal window.
     command: "diagnose sniffer packet any 'host 10.0.0.1' 4 10 a"
     capture: sniffer_output
     max_seconds: 120
+    max_lines: 500
+    show_window: true
     mirror_output: false
     on_error: stop
 ```
@@ -1813,8 +1816,11 @@ Opens an in-app SSH terminal window.
 - In `session: shared`, pressing `Ctrl+D` closes only the interactive window and does not send EOF to the shared SSH shell.
 - In `session: shared`, pressing Enter on `exit` or `logout` closes the interactive window (detach) and does not execute those commands on the shared SSH session.
 - Capture mode (`command`) is `session: separate` only.
+- `show_window: false` is capture-only and requires `command` plus at least one limiter: `max_seconds` or `max_lines`.
 - In capture mode, the command is auto-sent once the terminal is ready.
-- In capture mode, `Ctrl+C` (or timeout auto-Ctrl+C) completes the step and script continues while the terminal window remains open as detached read-only for copy/review.
+- In capture mode with `show_window: true`, `Ctrl+C` (or timeout auto-Ctrl+C) completes the step and script continues while the terminal window remains open as detached read-only for copy/review.
+- In capture mode with `show_window: false`, the step completes headlessly with no detached window.
+- `max_lines` auto-sends Ctrl+C after the captured transcript reaches the specified line count.
 - In capture mode, closing the window before completion succeeds with a partial transcript.
 - Capture transcript is written only when `capture` is set.
 - Stop/cancel while terminal is open force-closes the terminal/session and cancels script execution.
@@ -1830,8 +1836,12 @@ Opens an in-app SSH terminal window.
 | `command` | No | - | Enables capture mode and auto-runs this command in the interactive terminal |
 | `capture` | No | - | Variable name to receive the captured transcript at step completion |
 | `max_seconds` | No | - | Positive timeout in seconds; auto-sends Ctrl+C when reached |
+| `max_lines` | No | - | Positive line limit; auto-sends Ctrl+C when captured line count reaches this value |
+| `show_window` | No | `true` | When `false`, runs capture mode headlessly (no interactive window) |
 | `mirror_output` | No | `false` | Mirrors live captured chunks into script output while capture is running |
 | `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+
+When `show_window: false`, set `max_seconds` and/or `max_lines`.
 
 **Examples:**
 ```yaml
@@ -1854,6 +1864,8 @@ Opens an in-app SSH terminal window.
     command: "${sniffer_command}"
     capture: sniffer_output
     max_seconds: 300
+    max_lines: 1000
+    show_window: false
     mirror_output: true
 - print:
     message: "Captured output length: ${sniffer_output.length}"

@@ -139,6 +139,35 @@ public class InteractiveCommandTests
         context.GetVariableString("_output").Should().Contain("packet line 2");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_PropagatesShowWindowOption()
+    {
+        InteractiveOptions? receivedOptions = null;
+        var command = new InteractiveCommand(new StubInteractiveTerminalService(
+            (_, options, _) =>
+            {
+                receivedOptions = options;
+                return Task.FromResult(InteractiveTerminalRunResult.Ok());
+            }));
+
+        var step = new ScriptStep
+        {
+            Interactive = new InteractiveOptions
+            {
+                Command = "tcpdump -i any",
+                MaxLines = 150,
+                ShowWindow = false
+            }
+        };
+
+        var result = await command.ExecuteAsync(step, new ScriptContext(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        receivedOptions.Should().NotBeNull();
+        receivedOptions!.MaxLines.Should().Be(150);
+        receivedOptions!.ShowWindow.Should().BeFalse();
+    }
+
     private sealed class StubInteractiveTerminalService : IInteractiveTerminalService
     {
         private readonly Func<ScriptContext, InteractiveOptions, CancellationToken, Task<InteractiveTerminalRunResult>> _handler;
