@@ -337,8 +337,8 @@ namespace SSH_Helper
             // Don't restore expand state here - Form1_Shown will do it after the form is visible
             RefreshPresetList(restoreExpandState: false);
 
-            // Apply defaults to presets that don't have them
-            _presetManager.ApplyDefaults(config.Timeout);
+            // Show global default timeout as placeholder when preset has no override
+            txtTimeoutHeader.PlaceholderText = config.Timeout.ToString();
         }
 
         private void InitializeDataGridView()
@@ -4111,15 +4111,16 @@ namespace SSH_Helper
         private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             var previousCredentialManager = _configService.GetCurrent().Credentials.UseCredentialManager;
-            using var dialog = new SettingsDialog(_configService, _isDarkMode);
+            using var dialog = new SettingsDialog(_configService, _presetManager, _isDarkMode);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
-            if (dialog.ShowDialog(this) == DialogResult.OK)
+            var dialogResult = dialog.ShowDialog(this);
+            if (dialogResult == DialogResult.OK)
             {
-                // Settings saved - default timeout only applies to new presets
-                // Don't update the current timeout field as it's preset-specific
-
-                // Apply theme and font settings if changed
+                // Apply saved settings
                 var config = _configService.GetCurrent();
+
+                // Update timeout placeholder to reflect new global default
+                txtTimeoutHeader.PlaceholderText = config.Timeout.ToString();
                 ApplyTheme(config.DarkMode);
                 ApplyFontSettings(config.FontSettings);
                 ApplyCommandEditorSettings(config.CommandEditor);
@@ -4136,6 +4137,14 @@ namespace SSH_Helper
                         MigratePasswordsToCredentialManager();
                     }
                 }
+            }
+
+            // A timeout reset is persisted immediately in the settings dialog.
+            // Keep the active editor timeout field in sync to avoid reintroducing overrides on save.
+            if (dialog.PresetTimeoutsWereCleared && !string.IsNullOrEmpty(_activePresetName))
+            {
+                var activePreset = _presetManager.Get(_activePresetName);
+                txtTimeoutHeader.Text = activePreset?.Timeout?.ToString() ?? string.Empty;
             }
         }
 
@@ -6249,11 +6258,10 @@ namespace SSH_Helper
                 }
             }
 
-            // Get default timeout from config
-            var config = _configService.Load();
+            // New presets inherit the global default timeout unless an explicit override is entered.
             var newPreset = new PresetInfo
             {
-                Timeout = config.Timeout,
+                Timeout = null,
                 Folder = targetFolder
             };
 
@@ -6271,7 +6279,7 @@ namespace SSH_Helper
             // Load the new preset into the editor
             txtPreset.Text = presetName;
             txtCommand.Clear();
-            txtTimeoutHeader.Text = config.Timeout.ToString();
+            txtTimeoutHeader.Text = string.Empty;
             _activePresetName = presetName;
         }
 
@@ -7388,7 +7396,7 @@ namespace SSH_Helper
                 return;
 
             SshDebugLog("EXEC", "Preparing execution options", sw);
-            int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
+            int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, _configService.GetCurrent().Timeout);
             var preparation = _executionCoordinator.PrepareExecution(txtCommand.Text, commandTimeout);
             SshDebugLog("EXEC", $"Timeouts configured - command: {preparation.CommandTimeoutSeconds}s, connection: {preparation.ConnectionTimeoutSeconds}s", sw);
 
@@ -8920,7 +8928,6 @@ namespace SSH_Helper
                 _configService.Update(config =>
                 {
                     config.Username = tsbUsername.Text;
-                    config.Timeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, 10);
                     config.ActiveEnvironment = config.Environments.Count > 0
                         ? _activeEnvironmentName
                         : null;
