@@ -262,6 +262,11 @@ namespace SSH_Helper.Services.Terminal
                     columns,
                     rows,
                     SshTerminalOptionsFactory.DefaultHistoryMaxLength);
+                await InitializeSeparateSessionStartupAsync(
+                    scripting,
+                    timeouts,
+                    context.DebugMode,
+                    cancellationToken);
                 startedAtUtc = DateTime.UtcNow;
 
                 runSummary = await RunWindowLoopAsync(
@@ -363,6 +368,11 @@ namespace SSH_Helper.Services.Terminal
                     columns,
                     rows,
                     SshTerminalOptionsFactory.DefaultHistoryMaxLength);
+                var capturePromptRegex = await InitializeSeparateSessionStartupAsync(
+                    scripting,
+                    timeouts,
+                    context.DebugMode,
+                    cancellationToken);
                 startedAtUtc = DateTime.UtcNow;
 
                 if (options.ShowWindow)
@@ -376,6 +386,7 @@ namespace SSH_Helper.Services.Terminal
                         maxSeconds: options.MaxSeconds,
                         maxLines: options.MaxLines,
                         mirrorOutput: options.MirrorOutput,
+                        capturePromptRegex: capturePromptRegex,
                         keepAliveInterval: timeouts.KeepAliveInterval,
                         cancellationToken: cancellationToken,
                         isConnectionAlive: () => client != null && client.IsConnected,
@@ -395,6 +406,7 @@ namespace SSH_Helper.Services.Terminal
                         maxSeconds: options.MaxSeconds,
                         maxLines: options.MaxLines,
                         mirrorOutput: options.MirrorOutput,
+                        capturePromptRegex: capturePromptRegex,
                         keepAliveInterval: timeouts.KeepAliveInterval,
                         cancellationToken: cancellationToken,
                         isConnectionAlive: () => client != null && client.IsConnected,
@@ -448,6 +460,7 @@ namespace SSH_Helper.Services.Terminal
             int? maxSeconds,
             int? maxLines,
             bool mirrorOutput,
+            Regex? capturePromptRegex,
             TimeSpan keepAliveInterval,
             CancellationToken cancellationToken,
             Func<bool>? isConnectionAlive,
@@ -474,6 +487,8 @@ namespace SSH_Helper.Services.Terminal
             var commandPromptArmed = 0;
             var capturedLineCount = 0;
             var previousChunkEndedWithCarriageReturn = false;
+            var mirrorPendingBuffer = new StringBuilder();
+            var mirrorOutputLock = new object();
             InteractiveTerminalForm? form = null;
 
             EventHandler? disconnectedHandler = null;
@@ -523,9 +538,6 @@ namespace SSH_Helper.Services.Terminal
                 }
             });
 
-            var startupOutput = FlushCaptureStartupBuffer(scripting, cancellationToken);
-            var capturePromptRegex = TryBuildCapturePromptRegex(startupOutput);
-
             if (terminal != null)
             {
                 disconnectedHandler = (_, _) =>
@@ -552,6 +564,7 @@ namespace SSH_Helper.Services.Terminal
                 dataReceivedHandler = (_, args) =>
                 {
                     string capturedText = string.Empty;
+                    string mirroredChunk = string.Empty;
                     var reachedMaxLines = false;
 
                     lock (transcriptLock)
@@ -580,7 +593,18 @@ namespace SSH_Helper.Services.Terminal
 
                     if (ShouldMirrorCaptureChunk(mirrorOutput, capturedText))
                     {
-                        context.EmitOutput(capturedText, ScriptOutputType.RawChunk);
+                        lock (mirrorOutputLock)
+                        {
+                            mirroredChunk = PrepareMirroredChunkForEmission(
+                                capturedText,
+                                mirrorPendingBuffer,
+                                flush: false);
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(mirroredChunk))
+                    {
+                        context.EmitOutput(mirroredChunk, ScriptOutputType.RawChunk);
                     }
 
                     if (reachedMaxLines &&
@@ -821,6 +845,23 @@ namespace SSH_Helper.Services.Terminal
             await pumpTask;
             await timeoutTask;
 
+            if (mirrorOutput)
+            {
+                string mirroredTail;
+                lock (mirrorOutputLock)
+                {
+                    mirroredTail = PrepareMirroredChunkForEmission(
+                        null,
+                        mirrorPendingBuffer,
+                        flush: true);
+                }
+
+                if (!string.IsNullOrEmpty(mirroredTail))
+                {
+                    context.EmitOutput(mirroredTail, ScriptOutputType.RawChunk);
+                }
+            }
+
             if (terminal != null)
             {
                 try
@@ -907,6 +948,7 @@ namespace SSH_Helper.Services.Terminal
             int? maxSeconds,
             int? maxLines,
             bool mirrorOutput,
+            Regex? capturePromptRegex,
             TimeSpan keepAliveInterval,
             CancellationToken cancellationToken,
             Func<bool>? isConnectionAlive,
@@ -928,6 +970,8 @@ namespace SSH_Helper.Services.Terminal
             var commandPromptArmed = 0;
             var capturedLineCount = 0;
             var previousChunkEndedWithCarriageReturn = false;
+            var mirrorPendingBuffer = new StringBuilder();
+            var mirrorOutputLock = new object();
 
             EventHandler? disconnectedHandler = null;
             EventHandler<ActionRequestEventArgs>? actionRequestedHandler = null;
@@ -967,9 +1011,6 @@ namespace SSH_Helper.Services.Terminal
                 }
             });
 
-            var startupOutput = FlushCaptureStartupBuffer(scripting, cancellationToken);
-            var capturePromptRegex = TryBuildCapturePromptRegex(startupOutput);
-
             if (terminal != null)
             {
                 disconnectedHandler = (_, _) =>
@@ -988,6 +1029,7 @@ namespace SSH_Helper.Services.Terminal
                 dataReceivedHandler = (_, args) =>
                 {
                     string capturedText = string.Empty;
+                    string mirroredChunk = string.Empty;
                     var reachedMaxLines = false;
 
                     lock (transcriptLock)
@@ -1016,7 +1058,18 @@ namespace SSH_Helper.Services.Terminal
 
                     if (ShouldMirrorCaptureChunk(mirrorOutput, capturedText))
                     {
-                        context.EmitOutput(capturedText, ScriptOutputType.RawChunk);
+                        lock (mirrorOutputLock)
+                        {
+                            mirroredChunk = PrepareMirroredChunkForEmission(
+                                capturedText,
+                                mirrorPendingBuffer,
+                                flush: false);
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(mirroredChunk))
+                    {
+                        context.EmitOutput(mirroredChunk, ScriptOutputType.RawChunk);
                     }
 
                     if (reachedMaxLines &&
@@ -1122,6 +1175,23 @@ namespace SSH_Helper.Services.Terminal
             loopCancellation.Cancel();
             await pumpTask;
             await timeoutTask;
+
+            if (mirrorOutput)
+            {
+                string mirroredTail;
+                lock (mirrorOutputLock)
+                {
+                    mirroredTail = PrepareMirroredChunkForEmission(
+                        null,
+                        mirrorPendingBuffer,
+                        flush: true);
+                }
+
+                if (!string.IsNullOrEmpty(mirroredTail))
+                {
+                    context.EmitOutput(mirroredTail, ScriptOutputType.RawChunk);
+                }
+            }
 
             if (terminal != null)
             {
@@ -1872,6 +1942,49 @@ namespace SSH_Helper.Services.Terminal
             return mirrorOutput && !string.IsNullOrEmpty(capturedText);
         }
 
+        internal static string NormalizeMirroredTranscript(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return string.Empty;
+
+            return TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(text));
+        }
+
+        internal static string PrepareMirroredChunkForEmission(
+            string? capturedText,
+            StringBuilder pendingBuffer,
+            bool flush)
+        {
+            ArgumentNullException.ThrowIfNull(pendingBuffer);
+
+            if (!string.IsNullOrEmpty(capturedText))
+            {
+                pendingBuffer.Append(capturedText);
+            }
+
+            if (pendingBuffer.Length == 0)
+                return string.Empty;
+
+            var emitLength = flush ? pendingBuffer.Length : GetMirrorEmitLength(pendingBuffer);
+            if (emitLength <= 0)
+                return string.Empty;
+
+            var rawSegment = pendingBuffer.ToString(0, emitLength);
+            pendingBuffer.Remove(0, emitLength);
+            return NormalizeMirroredTranscript(rawSegment);
+        }
+
+        private static int GetMirrorEmitLength(StringBuilder pendingBuffer)
+        {
+            for (var i = pendingBuffer.Length - 1; i >= 0; i--)
+            {
+                if (pendingBuffer[i] == '\n')
+                    return i + 1;
+            }
+
+            return 0;
+        }
+
         internal static int CountLinesFromCapturedChunk(
             string? capturedText,
             ref bool previousChunkEndedWithCarriageReturn)
@@ -1985,6 +2098,112 @@ namespace SSH_Helper.Services.Terminal
             }
 
             return PromptDetector.BuildPromptRegex(startupPrompt);
+        }
+
+        private static async Task<Regex?> InitializeSeparateSessionStartupAsync(
+            RebexScripting scripting,
+            SshTimeoutOptions timeouts,
+            bool debugMode,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(scripting);
+            ArgumentNullException.ThrowIfNull(timeouts);
+
+            var startupOutput = new StringBuilder();
+            var anyDataEvent = ScriptEvent.FromRegex(@"[\s\S]");
+            var maxBannerAttempts = 3;
+            var maxBannerAccepts = 5;
+            var bannerAcceptCount = 0;
+            var pollInterval = debugMode ? 3000 : 1000;
+            var savedTimeout = scripting.Timeout;
+            var overallTimeout = Math.Max(1, (int)timeouts.InitialPromptTimeout.TotalMilliseconds);
+
+            try
+            {
+                scripting.Timeout = overallTimeout;
+
+                for (var attempt = 0; attempt < maxBannerAttempts; attempt++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var attemptSw = System.Diagnostics.Stopwatch.StartNew();
+
+                    while (attemptSw.ElapsedMilliseconds < overallTimeout)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        scripting.Timeout = pollInterval;
+
+                        string chunk;
+                        try
+                        {
+                            chunk = scripting.ReadUntil(anyDataEvent);
+                        }
+                        catch (Exception ex) when (IsTimeoutException(ex))
+                        {
+                            continue;
+                        }
+
+                        if (string.IsNullOrEmpty(chunk))
+                            continue;
+
+                        startupOutput.Append(chunk);
+                        var capturePromptRegex = TryBuildCapturePromptRegex(startupOutput.ToString());
+                        if (capturePromptRegex != null)
+                        {
+                            FlushCaptureStartupBuffer(scripting, cancellationToken);
+                            return capturePromptRegex;
+                        }
+
+                        var normalized = TerminalOutputProcessor.Normalize(
+                            TerminalOutputProcessor.Sanitize(startupOutput.ToString()));
+                        var bannerMatch = SshShellSession.Patterns.BannerAcceptPrompt.Match(normalized);
+                        if (!bannerMatch.Success)
+                            continue;
+
+                        var acceptKey = ResolveBannerAcceptKey(bannerMatch);
+                        if (bannerAcceptCount >= maxBannerAccepts)
+                        {
+                            scripting.Send(acceptKey + "\r");
+                            startupOutput.Clear();
+                            bannerAcceptCount++;
+                            await Task.Delay(500, cancellationToken);
+                            if (bannerAcceptCount > maxBannerAccepts + 2)
+                                break;
+
+                            continue;
+                        }
+
+                        bannerAcceptCount++;
+                        scripting.Send(acceptKey);
+                        startupOutput.Clear();
+                        await Task.Delay(500, cancellationToken);
+                    }
+
+                    if (attempt < maxBannerAttempts - 1)
+                    {
+                        scripting.Send("\r");
+                        await Task.Delay(200, cancellationToken);
+                    }
+                }
+
+                return TryBuildCapturePromptRegex(startupOutput.ToString());
+            }
+            finally
+            {
+                scripting.Timeout = savedTimeout;
+            }
+        }
+
+        internal static string ResolveBannerAcceptKey(Match bannerMatch)
+        {
+            for (var i = 1; i <= 4; i++)
+            {
+                if (bannerMatch.Groups[i].Success && !string.IsNullOrEmpty(bannerMatch.Groups[i].Value))
+                {
+                    return bannerMatch.Groups[i].Value.ToLowerInvariant();
+                }
+            }
+
+            return "a";
         }
 
         private static InteractiveTerminalSessionDetails CreateSessionDetails(

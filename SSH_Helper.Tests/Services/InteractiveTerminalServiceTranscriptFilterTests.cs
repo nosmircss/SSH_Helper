@@ -1,5 +1,7 @@
+using System.Text;
 using FluentAssertions;
 using SSH_Helper.Forms;
+using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting.Models;
 using SSH_Helper.Services.Terminal;
 using SSH_Helper.Utilities;
@@ -184,6 +186,36 @@ public class InteractiveTerminalServiceTranscriptFilterTests
     }
 
     [Fact]
+    public void NormalizeMirroredTranscript_RemovesControlArtifactsAndKeepsVisibleText()
+    {
+        const string raw = "FortiGate # ^D\b\bexit\r\n";
+
+        var normalized = InteractiveTerminalService.NormalizeMirroredTranscript(raw);
+
+        normalized.Should().Be("FortiGate # exit\r\n");
+        normalized.Should().NotContain("^D");
+        normalized.Should().NotContain("\b");
+    }
+
+    [Fact]
+    public void PrepareMirroredChunkForEmission_CarriesControlSequenceAcrossChunks()
+    {
+        var pending = new StringBuilder();
+
+        var first = InteractiveTerminalService.PrepareMirroredChunkForEmission(
+            "FortiGate # ^",
+            pending,
+            flush: false);
+        var second = InteractiveTerminalService.PrepareMirroredChunkForEmission(
+            "D\b\bexit\r\n",
+            pending,
+            flush: false);
+
+        first.Should().BeEmpty();
+        second.Should().Be("FortiGate # exit\r\n");
+    }
+
+    [Fact]
     public void CountLinesFromCapturedChunk_CountsCrlfAndLfWithoutDoubleCounting()
     {
         var previousChunkEndedWithCarriageReturn = false;
@@ -263,5 +295,25 @@ public class InteractiveTerminalServiceTranscriptFilterTests
             promptRegex);
 
         result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ResolveBannerAcceptKey_PressToAcceptPattern_ReturnsCapturedKey()
+    {
+        var match = SshShellSession.Patterns.BannerAcceptPrompt.Match("Press 'q' to accept:");
+
+        var key = InteractiveTerminalService.ResolveBannerAcceptKey(match);
+
+        key.Should().Be("q");
+    }
+
+    [Fact]
+    public void ResolveBannerAcceptKey_PressAnyKeyPattern_DefaultsToA()
+    {
+        var match = SshShellSession.Patterns.BannerAcceptPrompt.Match("Press any key to continue");
+
+        var key = InteractiveTerminalService.ResolveBannerAcceptKey(match);
+
+        key.Should().Be("a");
     }
 }

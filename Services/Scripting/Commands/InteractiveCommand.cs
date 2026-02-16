@@ -32,7 +32,12 @@ namespace SSH_Helper.Services.Scripting.Commands
                         string.IsNullOrWhiteSpace(runtimeOptions.Command) &&
                         !string.IsNullOrEmpty(runResult.CapturedTranscript))
                     {
-                        context.EmitOutput(runResult.CapturedTranscript, ScriptOutputType.RawChunk);
+                        var mirroredTranscript = InteractiveTerminalService.NormalizeMirroredTranscript(
+                            runResult.CapturedTranscript);
+                        if (!string.IsNullOrEmpty(mirroredTranscript))
+                        {
+                            context.EmitOutput(mirroredTranscript, ScriptOutputType.RawChunk);
+                        }
                     }
 
                     if (!string.IsNullOrWhiteSpace(runtimeOptions.Capture))
