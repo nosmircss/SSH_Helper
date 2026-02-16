@@ -167,7 +167,7 @@ namespace SSH_Helper
             AcceptButton = _btnSave;
             CancelButton = _btnCancel;
 
-            // Initialize controls — use recursive find since controls are nested in layout panels
+            // Initialize controls â€” use recursive find since controls are nested in layout panels
             _chkRememberState = FindControl<CheckBox>(tabGeneral, "chkRememberState");
             _numMaxHistory = FindControl<NumericUpDown>(tabGeneral, "numMaxHistory");
             _numDefaultTimeout = FindControl<NumericUpDown>(tabGeneral, "numDefaultTimeout");
@@ -849,7 +849,7 @@ namespace SSH_Helper
             scrollPanel.Controls.Add(_pnlPreview);
             y += 130;
 
-            // Reset appearance defaults button — inside the Appearance tab
+            // Reset appearance defaults button â€” inside the Appearance tab
             _btnResetDefaults = new Button
             {
                 Text = "Reset Appearance to Defaults",
@@ -1000,7 +1000,7 @@ namespace SSH_Helper
                 var buttonSize = (float)(_numButtonFontSize?.Value ?? 9m) * scale;
 
                 // Track fonts for disposal when the dialog closes.
-                // Do NOT dispose previous fonts here — GDI+ may share native
+                // Do NOT dispose previous fonts here â€” GDI+ may share native
                 // handles between Font objects with identical parameters, so
                 // disposing one can invalidate another that is still assigned
                 // to a control whose window handle hasn't been created yet.
@@ -1063,7 +1063,7 @@ namespace SSH_Helper
 
         private void BtnResetDefaults_Click(object? sender, EventArgs e)
         {
-            var result = MessageBox.Show(
+            var result = DialogTheme.Show(
                 "Reset all appearance settings to their default values?",
                 "Reset to Defaults",
                 MessageBoxButtons.YesNo,

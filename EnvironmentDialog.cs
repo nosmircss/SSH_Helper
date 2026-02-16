@@ -415,7 +415,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Create Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show(ex.Message, "Create Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -437,7 +437,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Duplicate Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show(ex.Message, "Duplicate Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -458,7 +458,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Rename Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show(ex.Message, "Rename Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -467,7 +467,7 @@ namespace SSH_Helper
             if (string.IsNullOrWhiteSpace(_currentEnvironmentName))
                 return;
 
-            if (MessageBox.Show(
+            if (DialogTheme.Show(
                     $"Delete environment '{_currentEnvironmentName}'?",
                     "Delete Environment",
                     MessageBoxButtons.YesNo,
@@ -483,7 +483,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Delete Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show(ex.Message, "Delete Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -521,7 +521,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Export Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show(ex.Message, "Export Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -548,7 +548,7 @@ namespace SSH_Helper
 
                 if (existingNames.Any(name => string.Equals(name, importedEnvironment.Name, StringComparison.OrdinalIgnoreCase)))
                 {
-                    var conflictResult = MessageBox.Show(
+                    var conflictResult = DialogTheme.Show(
                         $"Environment '{importedEnvironment.Name}' already exists. Choose Yes to overwrite, No to rename, or Cancel to abort.",
                         "Import Environment",
                         MessageBoxButtons.YesNoCancel,
@@ -577,7 +577,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Import Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show(ex.Message, "Import Environment", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 

@@ -82,7 +82,7 @@ namespace SSH_Helper
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.51.4";
+        private const string ApplicationVersion = "0.51.5";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -217,7 +217,7 @@ namespace SSH_Helper
             var config = _configService.Load();
             if (_configService.ConfigLoadError != null)
             {
-                MessageBox.Show(_configService.ConfigLoadError, "Configuration Warning",
+                DialogTheme.Show(_configService.ConfigLoadError, "Configuration Warning",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             var poolTimeouts = SshTimeoutOptions.Create(config.Timeout, config.ConnectionTimeout);
@@ -908,7 +908,7 @@ namespace SSH_Helper
 
             if (showError)
             {
-                MessageBox.Show(
+                DialogTheme.Show(
                     "History payload for this run could not be loaded.",
                     "History Load Failed",
                     MessageBoxButtons.OK,
@@ -1459,7 +1459,7 @@ namespace SSH_Helper
             bool saveCurrent = true;
             if (promptIfDirty && _csvDirty)
             {
-                var result = MessageBox.Show(
+                var result = DialogTheme.Show(
                     "You have unsaved host-grid changes. Save to the current environment before switching?",
                     "Switch Environment",
                     MessageBoxButtons.YesNoCancel,
@@ -3093,11 +3093,7 @@ namespace SSH_Helper
                 // Check for unsaved changes first
                 if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
                 {
-                    var result = MessageBox.Show(
-                        $"Save changes to preset '{_activePresetName}'?",
-                        "Unsaved Preset",
-                        MessageBoxButtons.YesNoCancel,
-                        MessageBoxIcon.Question);
+                    var result = ShowUnsavedPresetDiffPrompt();
 
                     if (result == DialogResult.Cancel)
                     {
@@ -3133,11 +3129,7 @@ namespace SSH_Helper
                 !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
                 IsPresetDirty())
             {
-                var result = MessageBox.Show(
-                    $"Save changes to preset '{_activePresetName}'?",
-                    "Unsaved Preset",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
+                var result = ShowUnsavedPresetDiffPrompt();
 
                 if (result == DialogResult.Cancel)
                 {
@@ -3639,11 +3631,7 @@ namespace SSH_Helper
                 // Check for unsaved changes first
                 if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
                 {
-                    var result = MessageBox.Show(
-                        $"Save changes to preset '{_activePresetName}'?",
-                        "Unsaved Preset",
-                        MessageBoxButtons.YesNoCancel,
-                        MessageBoxIcon.Question);
+                    var result = ShowUnsavedPresetDiffPrompt();
 
                     if (result == DialogResult.Cancel)
                     {
@@ -3673,11 +3661,7 @@ namespace SSH_Helper
                 !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
                 IsPresetDirty())
             {
-                var result = MessageBox.Show(
-                    $"Save changes to preset '{_activePresetName}'?",
-                    "Unsaved Preset",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
+                var result = ShowUnsavedPresetDiffPrompt();
 
                 if (result == DialogResult.Cancel)
                 {
@@ -4227,6 +4211,122 @@ namespace SSH_Helper
                 _isDarkMode);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
             dialog.ShowDialog(this);
+        }
+
+        private void viewAllPopupsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var demoSteps = new List<(string Name, Func<DialogResult> Show)>
+            {
+                (
+                    "No Icon (OK)",
+                    () => DialogTheme.Show(
+                        this,
+                        "Sample popup with no icon and OK button.",
+                        "Popup Gallery",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.None)
+                ),
+                (
+                    "Information (OK)",
+                    () => DialogTheme.Show(
+                        this,
+                        "Sample informational popup.\n\nUse this to review spacing, icon alignment, and button styling.",
+                        "Popup Gallery",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information)
+                ),
+                (
+                    "Warning (OK)",
+                    () => DialogTheme.Show(
+                        this,
+                        "Sample warning popup with wrapped text to verify multi-line readability in the themed dialog.",
+                        "Popup Gallery",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning)
+                ),
+                (
+                    "Error (OK)",
+                    () => DialogTheme.Show(
+                        this,
+                        "Sample error popup.",
+                        "Popup Gallery",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error)
+                ),
+                (
+                    "Question (Yes/No)",
+                    () => DialogTheme.Show(
+                        this,
+                        "Sample confirmation popup using Yes/No buttons.",
+                        "Popup Gallery",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question)
+                ),
+                (
+                    "Question (Yes/No/Cancel)",
+                    () => DialogTheme.Show(
+                        this,
+                        "Sample confirmation popup using Yes/No/Cancel buttons.",
+                        "Popup Gallery",
+                        MessageBoxButtons.YesNoCancel,
+                        MessageBoxIcon.Question)
+                ),
+                (
+                    "Unsaved Preset Diff",
+                    () =>
+                    {
+                        var savedCommands = "- print: Starting backup\n- send: show version\n- wait: 1000\n- send: show interfaces status";
+                        var currentCommands = "- print: Starting backup\n- send: show version\n- wait: 2500\n- send: show interfaces status\n- print: Backup completed";
+
+                        using var dialog = new UnsavedPresetDiffDialog(
+                            "Sample/QA Preset",
+                            "Sample/QA Preset",
+                            30,
+                            "45",
+                            savedCommands,
+                            currentCommands,
+                            _isDarkMode);
+                        DialogTheme.SetDialogFont(dialog, _dialogFont);
+                        return dialog.ShowDialog(this);
+                    }
+                )
+            };
+
+            var intro = DialogTheme.Show(
+                this,
+                $"Popup gallery will walk through {demoSteps.Count} popup styles.\n\nAfter each sample, you can continue or stop.",
+                "View All Popups",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Information);
+
+            if (intro != DialogResult.OK)
+                return;
+
+            for (var i = 0; i < demoSteps.Count; i++)
+            {
+                var step = demoSteps[i];
+                step.Show();
+
+                if (i == demoSteps.Count - 1)
+                    break;
+
+                var continueResult = DialogTheme.Show(
+                    this,
+                    $"Shown {i + 1} of {demoSteps.Count}: {step.Name}\n\nContinue to the next popup?",
+                    "View All Popups",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (continueResult != DialogResult.Yes)
+                    break;
+            }
+
+            DialogTheme.Show(
+                this,
+                "Popup gallery complete.",
+                "View All Popups",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
         private (long WorkingSetBytes, long PrivateBytes, long ManagedHeapBytes, string Summary) CaptureMemoryDebuggerSnapshot()
@@ -4925,7 +5025,7 @@ namespace SSH_Helper
             }
             else
             {
-                MessageBox.Show("A folder with that name already exists.", "Rename Folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show("A folder with that name already exists.", "Rename Folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -4962,7 +5062,7 @@ namespace SSH_Helper
                                $"No = Delete folder but move presets to {targetLocation}\n" +
                                $"Cancel = Abort";
 
-                var result = MessageBox.Show(message, "Delete Folder", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                var result = DialogTheme.Show(message, "Delete Folder", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
 
                 if (result == DialogResult.Cancel)
                     return;
@@ -4989,7 +5089,7 @@ namespace SSH_Helper
                 // No presets, just confirm deletion
                 string message = $"Delete folder '{folderName}'{contentsDescription}?";
 
-                if (MessageBox.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                if (DialogTheme.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                 {
                     _presetManager.DeleteFolder(folderPath, deletePresets: false);
                     RefreshPresetList();
@@ -5008,7 +5108,7 @@ namespace SSH_Helper
         {
             if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || !tag.IsFolder)
             {
-                MessageBox.Show("Please select a folder to delete.", "Delete Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show("Please select a folder to delete.", "Delete Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -5032,7 +5132,7 @@ namespace SSH_Helper
 
             string message = $"Are you sure you want to delete the folder '{folderName}'{contentsDescription}?\n\nThis action cannot be undone.";
 
-            if (MessageBox.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            if (DialogTheme.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
             {
                 // Clear editor before deleting to avoid "save changes?" prompt for deleted presets
                 _activePresetName = null;
@@ -5569,7 +5669,7 @@ namespace SSH_Helper
         {
             if (lstHosts.SelectedItem is not HostHistoryEntry hostEntry)
             {
-                MessageBox.Show("Please select a host to export.", "No Host Selected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show("Please select a host to export.", "No Host Selected", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -5588,7 +5688,7 @@ namespace SSH_Helper
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Failed to export: {ex.Message}", "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show($"Failed to export: {ex.Message}", "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -5629,7 +5729,7 @@ namespace SSH_Helper
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Failed to load CSV: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show($"Failed to load CSV: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -5673,7 +5773,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to save file:\r\n{ex.Message}", "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show($"Failed to save file:\r\n{ex.Message}", "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
         }
@@ -5723,7 +5823,7 @@ namespace SSH_Helper
 
             if (!_csvDirty) return true;
 
-            var result = MessageBox.Show(
+            var result = DialogTheme.Show(
                 "You have unsaved CSV changes. Save before opening another file?",
                 "Unsaved CSV",
                 MessageBoxButtons.YesNoCancel,
@@ -5761,7 +5861,7 @@ namespace SSH_Helper
 
             if (dgv_variables.Columns.Contains(columnName))
             {
-                MessageBox.Show("Column name already exists!");
+                DialogTheme.Show("Column name already exists!");
                 return;
             }
 
@@ -5789,7 +5889,7 @@ namespace SSH_Helper
             if (dgv_variables.Columns.Cast<DataGridViewColumn>()
                 .Any(c => c.HeaderText.Equals(newName, StringComparison.OrdinalIgnoreCase)))
             {
-                MessageBox.Show("This column name already exists.", "Rename Column Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show("This column name already exists.", "Rename Column Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -5804,7 +5904,7 @@ namespace SSH_Helper
 
             if (IsProtectedColumn(columnIndex))
             {
-                MessageBox.Show("The Host_IP column cannot be deleted.", "Delete Column", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show("The Host_IP column cannot be deleted.", "Delete Column", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -5816,14 +5916,14 @@ namespace SSH_Helper
         {
             if (rowIndex < 0 || rowIndex >= dgv_variables.Rows.Count)
             {
-                MessageBox.Show("No valid row selected.");
+                DialogTheme.Show("No valid row selected.");
                 return;
             }
 
             var row = dgv_variables.Rows[rowIndex];
             if (row.IsNewRow)
             {
-                MessageBox.Show("Cannot delete the new row placeholder.");
+                DialogTheme.Show("Cannot delete the new row placeholder.");
                 return;
             }
 
@@ -5981,7 +6081,7 @@ namespace SSH_Helper
 
             if (string.IsNullOrEmpty(presetName))
             {
-                MessageBox.Show("Preset name is required.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show("Preset name is required.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -6002,7 +6102,7 @@ namespace SSH_Helper
 
             if (nameChanged)
             {
-                var choice = MessageBox.Show(
+                var choice = DialogTheme.Show(
                     $"Preset name changed from '{originalPresetName}' to '{presetName}'.\n\n" +
                     "Yes = Rename the existing preset\n" +
                     "No = Create a new preset\n" +
@@ -6020,13 +6120,13 @@ namespace SSH_Helper
                 {
                     if (_presetManager.Presets.ContainsKey(presetName))
                     {
-                        MessageBox.Show("This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        DialogTheme.Show("This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
 
                     if (!_presetManager.Rename(originalPresetName!, presetName))
                     {
-                        MessageBox.Show("Unable to rename preset.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        DialogTheme.Show("Unable to rename preset.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
 
@@ -6042,7 +6142,7 @@ namespace SSH_Helper
                 {
                     if (_presetManager.Presets.ContainsKey(presetName))
                     {
-                        MessageBox.Show(
+                        DialogTheme.Show(
                             "A preset with this name already exists. Choose a different name to create a new preset.",
                             "Save Preset",
                             MessageBoxButtons.OK,
@@ -6108,11 +6208,7 @@ namespace SSH_Helper
             // Check for unsaved changes first
             if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
             {
-                var saveResult = MessageBox.Show(
-                    $"Save changes to preset '{_activePresetName}'?",
-                    "Unsaved Preset",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
+                var saveResult = ShowUnsavedPresetDiffPrompt();
 
                 if (saveResult == DialogResult.Cancel)
                     return;
@@ -6132,7 +6228,7 @@ namespace SSH_Helper
 
             if (_presetManager.Presets.ContainsKey(presetName))
             {
-                MessageBox.Show("Preset name already exists!");
+                DialogTheme.Show("Preset name already exists!");
                 return;
             }
 
@@ -6285,7 +6381,7 @@ namespace SSH_Helper
 
             if (_presetManager.Presets.ContainsKey(newName))
             {
-                MessageBox.Show("A preset with that name already exists.", "Copy Preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show("A preset with that name already exists.", "Copy Preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -6323,7 +6419,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -6342,7 +6438,7 @@ namespace SSH_Helper
 
             if (!_presetManager.Rename(selectedPreset, newName))
             {
-                MessageBox.Show("This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show("This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -6434,7 +6530,7 @@ namespace SSH_Helper
             string? presetName = ResolvePresetNameForActions(preferContextSource);
             if (string.IsNullOrWhiteSpace(presetName))
             {
-                MessageBox.Show("No preset selected to export.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show("No preset selected to export.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -6442,11 +6538,11 @@ namespace SSH_Helper
             {
                 string exportString = _presetManager.Export(presetName);
                 Clipboard.SetText(exportString);
-                MessageBox.Show("Preset exported to clipboard.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show("Preset exported to clipboard.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to export preset: {ex.Message}", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show($"Failed to export preset: {ex.Message}", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -6477,15 +6573,15 @@ namespace SSH_Helper
                 }
                 _activePresetName = finalName;
 
-                MessageBox.Show($"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show($"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (FormatException)
             {
-                MessageBox.Show("Invalid format or Base64 encoding.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show("Invalid format or Base64 encoding.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to import preset: {ex.Message}", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show($"Failed to import preset: {ex.Message}", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -6493,7 +6589,7 @@ namespace SSH_Helper
         {
             if (_presetManager.Presets.Count == 0)
             {
-                MessageBox.Show("No presets to export.", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show("No presets to export.", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -6511,12 +6607,12 @@ namespace SSH_Helper
             try
             {
                 _presetManager.ExportAllToFile(dialog.FileName);
-                MessageBox.Show($"Exported {_presetManager.Presets.Count} presets to:\n{dialog.FileName}",
+                DialogTheme.Show($"Exported {_presetManager.Presets.Count} presets to:\n{dialog.FileName}",
                     "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to export presets: {ex.Message}", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show($"Failed to export presets: {ex.Message}", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -6548,16 +6644,16 @@ namespace SSH_Helper
                         ? "Presets were imported to root level."
                         : $"Presets were imported to folder \"{targetFolder}\".";
 
-                MessageBox.Show($"Imported {count} presets.\n\n{locationMsg}\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
+                DialogTheme.Show($"Imported {count} presets.\n\n{locationMsg}\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
                     "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (FormatException ex)
             {
-                MessageBox.Show($"Invalid preset file format: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show($"Invalid preset file format: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to import presets: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show($"Failed to import presets: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -6573,7 +6669,7 @@ namespace SSH_Helper
         private string? PromptForImportDestination()
         {
             // Ask if user wants to import to a specific folder
-            var result = MessageBox.Show(
+            var result = DialogTheme.Show(
                 "Would you like to import these presets into a specific folder?\n\n" +
                 "• Yes - Choose a destination folder\n" +
                 "• No - Keep the original folder structure from the export",
@@ -7130,6 +7226,28 @@ namespace SSH_Helper
                 .Replace('\r', '\n');
         }
 
+        private DialogResult ShowUnsavedPresetDiffPrompt()
+        {
+            var activePresetName = _activePresetName;
+            if (string.IsNullOrEmpty(activePresetName))
+            {
+                return DialogResult.No;
+            }
+
+            var savedPreset = _presetManager.Get(activePresetName);
+
+            using var dialog = new UnsavedPresetDiffDialog(
+                activePresetName,
+                txtPreset.Text ?? string.Empty,
+                savedPreset?.Timeout,
+                txtTimeoutHeader.Text ?? string.Empty,
+                savedPreset?.Commands ?? string.Empty,
+                txtCommand.Text ?? string.Empty,
+                _isDarkMode);
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
+            return dialog.ShowDialog(this);
+        }
+
         private bool IsPresetDirty()
         {
             // When viewing a folder (not a preset), there's nothing to save
@@ -7349,7 +7467,7 @@ namespace SSH_Helper
             catch (Exception ex)
             {
                 SshDebugLog("EXEC", $"Exception: {ex.GetType().Name}: {ex.Message}", sw);
-                MessageBox.Show($"An error occurred: {ex.Message}");
+                DialogTheme.Show($"An error occurred: {ex.Message}");
                 UpdateStatusBar("Execution failed");
             }
             finally
@@ -7414,7 +7532,7 @@ namespace SSH_Helper
                           columnList +
                           "\n\nThese references will resolve to empty values.\n\nContinue with execution?";
 
-            var dialogResult = MessageBox.Show(
+            var dialogResult = DialogTheme.Show(
                 this,
                 message,
                 "Missing Column References",
@@ -7437,7 +7555,7 @@ namespace SSH_Helper
                 presetList +
                 "\n\nRun those presets directly against a single current host instead.";
 
-            MessageBox.Show(
+            DialogTheme.Show(
                 this,
                 message,
                 "Interactive Presets Not Allowed",
@@ -7535,7 +7653,7 @@ namespace SSH_Helper
 
             if (checkedRows.Count == 0)
             {
-                MessageBox.Show("No hosts selected. Check the boxes next to hosts you want to execute on.",
+                DialogTheme.Show("No hosts selected. Check the boxes next to hosts you want to execute on.",
                     "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -7553,7 +7671,7 @@ namespace SSH_Helper
             var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
             if (presetNames.Count == 0)
             {
-                MessageBox.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -7563,7 +7681,7 @@ namespace SSH_Helper
 
             if (hostRows.Count == 0)
             {
-                MessageBox.Show("No hosts available.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show("No hosts available.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -7609,7 +7727,7 @@ namespace SSH_Helper
             var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
             if (presetNames.Count == 0)
             {
-                MessageBox.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -7634,7 +7752,7 @@ namespace SSH_Helper
             var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
             if (presetNames.Count == 0)
             {
-                MessageBox.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -7768,7 +7886,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 UpdateStatusBar("Execution failed");
             }
             finally
@@ -7808,7 +7926,7 @@ namespace SSH_Helper
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Failed to persist history run: {ex.Message}", "History Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show($"Failed to persist history run: {ex.Message}", "History Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             });
 
@@ -8424,7 +8542,7 @@ namespace SSH_Helper
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Failed to persist history run: {ex.Message}", "History Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show($"Failed to persist history run: {ex.Message}", "History Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             });
 
@@ -8439,7 +8557,7 @@ namespace SSH_Helper
         {
             if (lstOutput.SelectedItem is not HistoryListItem entry)
             {
-                MessageBox.Show("Please select an item from the list to save.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show("Please select an item from the list to save.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -8461,7 +8579,7 @@ namespace SSH_Helper
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Failed to save the file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show($"Failed to save the file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -8470,7 +8588,7 @@ namespace SSH_Helper
         {
             if (_outputHistory.Count == 0)
             {
-                MessageBox.Show("There is no history to save.", "No History", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show("There is no history to save.", "No History", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -8507,7 +8625,7 @@ namespace SSH_Helper
 
                     if (missingPayloads > 0)
                     {
-                        MessageBox.Show(
+                        DialogTheme.Show(
                             $"{missingPayloads} history item(s) could not be loaded and were exported as placeholders.",
                             "History Export Warning",
                             MessageBoxButtons.OK,
@@ -8516,7 +8634,7 @@ namespace SSH_Helper
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Failed to save the file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show($"Failed to save the file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -8525,11 +8643,11 @@ namespace SSH_Helper
         {
             if (lstOutput.SelectedItem is not HistoryListItem entry)
             {
-                MessageBox.Show("Please select an item from the list to delete.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show("Please select an item from the list to delete.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            if (MessageBox.Show($"Are you sure you want to delete {entry.Label}?", "Delete Entry", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+            if (DialogTheme.Show($"Are you sure you want to delete {entry.Label}?", "Delete Entry", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                 return;
 
             _historyStorage.DeleteRun(entry.Id);
@@ -8550,7 +8668,7 @@ namespace SSH_Helper
 
         private void DeleteAllHistory()
         {
-            if (MessageBox.Show("Are you sure you want to delete all history?", "Delete History", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+            if (DialogTheme.Show("Are you sure you want to delete all history?", "Delete History", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                 return;
 
             _historyStorage.DeleteAll();
@@ -8575,7 +8693,7 @@ namespace SSH_Helper
             var details = payload.Details;
             if (details == null)
             {
-                MessageBox.Show("Execution details are not available for this history entry.",
+                DialogTheme.Show("Execution details are not available for this history entry.",
                     "Details Not Available",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -8596,7 +8714,7 @@ namespace SSH_Helper
         {
             if (lstHosts.SelectedItem is not HostHistoryEntry hostEntry)
             {
-                MessageBox.Show("Please select a host first.",
+                DialogTheme.Show("Please select a host first.",
                     "No Host Selected",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -8605,7 +8723,7 @@ namespace SSH_Helper
 
             if (!EnsureHostOutputsLoadedForSelection())
             {
-                MessageBox.Show(
+                DialogTheme.Show(
                     "Host output for this selection could not be loaded.",
                     "History Load Failed",
                     MessageBoxButtons.OK,
@@ -8822,7 +8940,7 @@ namespace SSH_Helper
                     if (debugModeToolStripMenuItem.Checked)
                     {
                         var folderStates = string.Join(", ", _presetManager.Folders.Select(f => $"{f.Key}={f.Value.IsExpanded}"));
-                        //MessageBox.Show($"Saving folder states: {folderStates}", "Debug - SaveConfiguration");
+                        //DialogTheme.Show($"Saving folder states: {folderStates}", "Debug - SaveConfiguration");
                     }
 
                     // Save window state
@@ -8864,7 +8982,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to save configuration: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show($"Failed to save configuration: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -9051,7 +9169,7 @@ namespace SSH_Helper
         {
             if (_sshService.IsRunning)
             {
-                if (MessageBox.Show("Execution is currently running. Stop and exit?", "Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+                if (DialogTheme.Show("Execution is currently running. Stop and exit?", "Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                     return false;
                 StopExecution();
             }
@@ -9061,21 +9179,14 @@ namespace SSH_Helper
 
             if (_csvDirty)
             {
-                var result = MessageBox.Show("You have unsaved CSV changes. Save before exiting?", "Save Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                var result = DialogTheme.Show("You have unsaved CSV changes. Save before exiting?", "Save Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
                 if (result == DialogResult.Cancel) return false;
                 if (result == DialogResult.Yes && !SaveCurrentCsv(promptIfNoPath: true)) return false;
             }
 
             if (IsPresetDirty())
             {
-                var message = "You have unsaved preset changes. Save before exiting?";
-
-                if (debugModeToolStripMenuItem.Checked)
-                {
-                    message = GetPresetDirtyDebugInfo();
-                }
-
-                var result = MessageBox.Show(message, "Save Preset", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                var result = ShowUnsavedPresetDiffPrompt();
                 if (result == DialogResult.Cancel) return false;
                 if (result == DialogResult.Yes) SaveCurrentPreset();
             }
