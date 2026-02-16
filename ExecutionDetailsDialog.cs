@@ -548,14 +548,14 @@ namespace SSH_Helper
             try
             {
                 Clipboard.SetText(FormatDetailsAsText(includeOutputWindow: false));
-                MessageBox.Show("Execution details copied to clipboard.",
+                DialogTheme.Show("Execution details copied to clipboard.",
                     "Copied",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to copy details: {ex.Message}",
+                DialogTheme.Show($"Failed to copy details: {ex.Message}",
                     "Copy Failed",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -580,7 +580,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to save details: {ex.Message}",
+                DialogTheme.Show($"Failed to save details: {ex.Message}",
                     "Save Failed",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);

@@ -187,6 +187,7 @@ namespace SSH_Helper
             validateScriptToolStripMenuItem = new ToolStripMenuItem();
 #if DEBUG
             memoryDebuggerToolStripMenuItem = new ToolStripMenuItem();
+            viewAllPopupsToolStripMenuItem = new ToolStripMenuItem();
 #endif
             toolStripSeparatorEdit1 = new ToolStripSeparator();
             debugModeToolStripMenuItem = new ToolStripMenuItem();
@@ -1519,6 +1520,7 @@ namespace SSH_Helper
             editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, validateScriptToolStripMenuItem,
 #if DEBUG
                 memoryDebuggerToolStripMenuItem,
+                viewAllPopupsToolStripMenuItem,
 #endif
                 toolStripSeparatorEdit1, debugModeToolStripMenuItem });
             editToolStripMenuItem.Name = "editToolStripMenuItem";
@@ -1548,6 +1550,13 @@ namespace SSH_Helper
             memoryDebuggerToolStripMenuItem.Size = new Size(188, 22);
             memoryDebuggerToolStripMenuItem.Text = "&Memory Debugger...";
             memoryDebuggerToolStripMenuItem.Click += memoryDebuggerToolStripMenuItem_Click;
+            //
+            // viewAllPopupsToolStripMenuItem
+            //
+            viewAllPopupsToolStripMenuItem.Name = "viewAllPopupsToolStripMenuItem";
+            viewAllPopupsToolStripMenuItem.Size = new Size(188, 22);
+            viewAllPopupsToolStripMenuItem.Text = "View All &Popups...";
+            viewAllPopupsToolStripMenuItem.Click += viewAllPopupsToolStripMenuItem_Click;
 #endif
             // 
             // toolStripSeparatorEdit1
@@ -1845,6 +1854,7 @@ namespace SSH_Helper
         private ToolStripMenuItem validateScriptToolStripMenuItem;
 #if DEBUG
         private ToolStripMenuItem memoryDebuggerToolStripMenuItem;
+        private ToolStripMenuItem viewAllPopupsToolStripMenuItem;
 #endif
         private ToolStripSeparator toolStripSeparatorEdit1;
         private ToolStripMenuItem debugModeToolStripMenuItem;

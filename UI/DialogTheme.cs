@@ -549,6 +549,55 @@ namespace SSH_Helper.UI
         /// </summary>
         public static void ShowMessage(IWin32Window? owner, string message, string title, MessageBoxIcon icon, bool darkMode, Font? font = null)
         {
+            ShowCore(owner, message, title, MessageBoxButtons.OK, icon, darkMode, font);
+        }
+
+        public static DialogResult Show(string message)
+        {
+            return ShowCore(
+                null,
+                message,
+                Application.ProductName ?? "Message",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.None,
+                ResolveDarkMode(null),
+                ResolveDialogFont(null));
+        }
+
+        public static DialogResult Show(string message, string title)
+        {
+            return ShowCore(null, message, title, MessageBoxButtons.OK, MessageBoxIcon.None, ResolveDarkMode(null), ResolveDialogFont(null));
+        }
+
+        public static DialogResult Show(string message, string title, MessageBoxButtons buttons)
+        {
+            return ShowCore(null, message, title, buttons, MessageBoxIcon.None, ResolveDarkMode(null), ResolveDialogFont(null));
+        }
+
+        public static DialogResult Show(string message, string title, MessageBoxButtons buttons, MessageBoxIcon icon)
+        {
+            return ShowCore(null, message, title, buttons, icon, ResolveDarkMode(null), ResolveDialogFont(null));
+        }
+
+        public static DialogResult Show(IWin32Window? owner, string message, string title, MessageBoxButtons buttons, MessageBoxIcon icon)
+        {
+            return ShowCore(owner, message, title, buttons, icon, ResolveDarkMode(owner), ResolveDialogFont(owner));
+        }
+
+        private static DialogResult ShowCore(
+            IWin32Window? owner,
+            string message,
+            string title,
+            MessageBoxButtons buttons,
+            MessageBoxIcon icon,
+            bool darkMode,
+            Font? font)
+        {
+            message ??= string.Empty;
+            title ??= string.Empty;
+
+            var buttonSpecs = GetButtonSpecs(buttons);
+
             using var dlg = new Form
             {
                 Text = title,
@@ -557,57 +606,150 @@ namespace SSH_Helper.UI
                 MaximizeBox = false,
                 MinimizeBox = false,
                 ShowInTaskbar = false,
-                AutoScaleMode = AutoScaleMode.Dpi,
-                Size = new Size(420, 180),
+                AutoScaleMode = AutoScaleMode.Dpi
             };
+
+            SetDialogFont(dlg, font);
 
             var iconImage = GetSystemIcon(icon);
             PictureBox? picIcon = null;
-            var textLeft = 20;
 
+            const int outerPadding = 16;
+            const int iconWidth = 32;
+            const int iconGap = 12;
+            const int minDialogWidth = 360;
+            const int maxTextWidth = 560;
+            const int buttonWidth = 90;
+            const int buttonHeight = 30;
+            const int buttonGap = 8;
+
+            var textLeft = outerPadding;
             if (iconImage != null)
             {
                 picIcon = new PictureBox
                 {
                     Image = iconImage,
-                    SizeMode = PictureBoxSizeMode.AutoSize,
-                    Location = new Point(20, 20),
+                    SizeMode = PictureBoxSizeMode.AutoSize
                 };
-                textLeft = 20 + 32 + 12;
+                textLeft += iconWidth + iconGap;
             }
 
             var lblMessage = new Label
             {
                 Text = message,
-                AutoSize = false,
-                TextAlign = ContentAlignment.TopLeft,
-                Location = new Point(textLeft, 20),
-                Size = new Size(420 - textLeft - 20, 80),
+                AutoSize = true,
+                MaximumSize = new Size(maxTextWidth, 0),
+                Location = new Point(textLeft, outerPadding),
+                TextAlign = ContentAlignment.TopLeft
             };
-
-            var btnOk = new Button
-            {
-                Text = "OK",
-                DialogResult = DialogResult.OK,
-                Size = new Size(80, 30),
-                Location = new Point(420 - 80 - 20, 110),
-            };
-
-            SetDialogFont(dlg, font);
+            dlg.Controls.Add(lblMessage);
 
             if (picIcon != null)
+            {
+                picIcon.Location = new Point(outerPadding, outerPadding);
                 dlg.Controls.Add(picIcon);
-            dlg.Controls.AddRange([lblMessage, btnOk]);
-            dlg.AcceptButton = btnOk;
-            dlg.CancelButton = btnOk;
+            }
+
+            var buttonRowWidth = (buttonSpecs.Count * buttonWidth) + (Math.Max(0, buttonSpecs.Count - 1) * buttonGap);
+            var contentWidth = textLeft + lblMessage.Width + outerPadding;
+            var dialogWidth = Math.Max(minDialogWidth, Math.Max(contentWidth, buttonRowWidth + (outerPadding * 2)));
+
+            lblMessage.MaximumSize = new Size(dialogWidth - textLeft - outerPadding, 0);
+            lblMessage.AutoSize = true;
+
+            var contentHeight = Math.Max(picIcon?.Height ?? 0, lblMessage.Height);
+            var buttonTop = outerPadding + contentHeight + 18;
+            var dialogHeight = buttonTop + buttonHeight + outerPadding;
+            dlg.ClientSize = new Size(dialogWidth, dialogHeight);
+
+            var buttonLeft = dialogWidth - outerPadding - buttonRowWidth;
+            var createdButtons = new List<Button>(buttonSpecs.Count);
+            for (var i = 0; i < buttonSpecs.Count; i++)
+            {
+                var spec = buttonSpecs[i];
+                var button = new Button
+                {
+                    Text = spec.Text,
+                    DialogResult = spec.Result,
+                    Size = new Size(buttonWidth, buttonHeight),
+                    Location = new Point(buttonLeft + (i * (buttonWidth + buttonGap)), buttonTop),
+                    TabIndex = i
+                };
+                dlg.Controls.Add(button);
+                createdButtons.Add(button);
+                StyleButton(button, darkMode, isPrimary: i == 0);
+            }
+
+            if (createdButtons.Count > 0)
+            {
+                dlg.AcceptButton = createdButtons[0];
+            }
+
+            var cancelButton = createdButtons.FirstOrDefault(btn => btn.DialogResult == DialogResult.Cancel)
+                ?? createdButtons.FirstOrDefault(btn => btn.DialogResult == DialogResult.No)
+                ?? createdButtons.FirstOrDefault(btn => btn.DialogResult == DialogResult.OK);
+            if (cancelButton != null)
+            {
+                dlg.CancelButton = cancelButton;
+            }
 
             ApplyTo(dlg, darkMode);
             if (picIcon != null)
+            {
                 picIcon.BackColor = Color.Transparent;
-            StyleButton(btnOk, darkMode, isPrimary: true);
-            SetDarkTitleBar(dlg, darkMode);
+            }
 
-            dlg.ShowDialog(owner);
+            SetDarkTitleBar(dlg, darkMode);
+            dlg.Load += (_, _) => ApplyNativeTheme(dlg, darkMode);
+
+            return dlg.ShowDialog(owner);
+        }
+
+        private static List<(string Text, DialogResult Result)> GetButtonSpecs(MessageBoxButtons buttons)
+        {
+            return buttons switch
+            {
+                MessageBoxButtons.OK => [("OK", DialogResult.OK)],
+                MessageBoxButtons.OKCancel => [("OK", DialogResult.OK), ("Cancel", DialogResult.Cancel)],
+                MessageBoxButtons.YesNo => [("Yes", DialogResult.Yes), ("No", DialogResult.No)],
+                MessageBoxButtons.YesNoCancel => [("Yes", DialogResult.Yes), ("No", DialogResult.No), ("Cancel", DialogResult.Cancel)],
+                MessageBoxButtons.RetryCancel => [("Retry", DialogResult.Retry), ("Cancel", DialogResult.Cancel)],
+                MessageBoxButtons.AbortRetryIgnore => [("Abort", DialogResult.Abort), ("Retry", DialogResult.Retry), ("Ignore", DialogResult.Ignore)],
+                _ => [("OK", DialogResult.OK)]
+            };
+        }
+
+        private static bool ResolveDarkMode(IWin32Window? owner)
+        {
+            if (owner is Control ownerControl)
+            {
+                var root = ownerControl.FindForm() ?? ownerControl;
+                return root.BackColor.GetBrightness() < 0.2f;
+            }
+
+            var mainForm = Application.OpenForms.Cast<Form>().FirstOrDefault();
+            if (mainForm != null)
+            {
+                return mainForm.BackColor.GetBrightness() < 0.2f;
+            }
+
+            return false;
+        }
+
+        private static Font? ResolveDialogFont(IWin32Window? owner)
+        {
+            if (owner is Control ownerControl)
+            {
+                return ownerControl.Font;
+            }
+
+            var mainForm = Application.OpenForms.Cast<Form>().FirstOrDefault();
+            if (mainForm != null)
+            {
+                return mainForm.Font;
+            }
+
+            return null;
         }
 
         private static Bitmap? GetSystemIcon(MessageBoxIcon icon)

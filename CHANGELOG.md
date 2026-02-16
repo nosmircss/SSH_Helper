@@ -1,5 +1,47 @@
 # Changelog
 
+## Changes Since `6901b46` (0.51.5)
+
+### Unsaved Preset Diff Dialog
+
+When switching away from or closing a preset with unsaved changes, the confirmation prompt now displays an inline diff view instead of a plain text question. `UnsavedPresetDiffDialog` compares the saved and current preset state, showing:
+
+- **Name changes** — displayed as a `~ Name: "old" -> "new"` meta line
+- **Timeout changes** — displayed as a `~ Timeout: old -> new` meta line
+- **Command text changes** — rendered as a color-coded inline diff with `+` (added), `-` (removed), and context lines
+
+The diff is computed by `InlineDiffBuilder`, a new LCS-based utility in `Utilities/InlineDiffBuilder.cs`. It normalizes line endings, computes the longest common subsequence between original and updated lines, and produces a list of `InlineDiffLine` entries tagged as `Context`, `Added`, `Removed`, or `Meta`. For very large inputs (over 2 million LCS cells), it falls back to a linear line-by-line comparison. Output is capped at a configurable `maxOutputLines` with a `... diff truncated` marker. An `includeAllLines` flag disables context-line collapsing to show the entire script body with changes highlighted.
+
+The dialog replaces the previous `MessageBox.Show("Save changes to preset?")` prompt at five call sites in `Form1.cs`: preset list selection changes, preset tree double-click, and application exit.
+
+### Themed Message Box Replacement
+
+All `MessageBox.Show` calls across the application (90 instances) are replaced with `DialogTheme.Show`, a new drop-in replacement that renders themed, dark-mode-aware message dialogs consistent with the rest of the UI.
+
+`DialogTheme.Show` provides overloads matching the standard `MessageBox.Show` signatures:
+
+| Overload | Parameters |
+|----------|------------|
+| `Show(string)` | Message only |
+| `Show(string, string)` | Message + title |
+| `Show(string, string, MessageBoxButtons)` | Message + title + buttons |
+| `Show(string, string, MessageBoxButtons, MessageBoxIcon)` | Full parameters |
+| `Show(IWin32Window?, string, string, MessageBoxButtons, MessageBoxIcon)` | With owner |
+
+The internal `ShowCore` method dynamically lays out the dialog based on content: auto-sized label with configurable maximum width, system icon alignment, and a variable-width button row generated from `GetButtonSpecs` for all standard `MessageBoxButtons` combinations (OK, OKCancel, YesNo, YesNoCancel, RetryCancel, AbortRetryIgnore). Dark mode and font are auto-resolved from the owner window or `Application.OpenForms` via `ResolveDarkMode` and `ResolveDialogFont`.
+
+Affected files: `Form1.cs` (72 replacements), `EnvironmentDialog.cs` (9), `ExecutionDetailsDialog.cs` (3), `UpdateDialog.cs` (6), `SettingsDialog.cs` (1).
+
+### Debug Popup Gallery
+
+A new debug-only menu item **Edit > View All Popups** (`viewAllPopupsToolStripMenuItem`) walks through all themed popup styles in sequence: No Icon, Information, Warning, Error, Question (Yes/No), Question (Yes/No/Cancel), and the Unsaved Preset Diff dialog. Each step shows a sample popup, then asks whether to continue to the next. This provides a single entry point for visually verifying dialog theming, layout, icon alignment, and button styling.
+
+### Test Coverage
+
+- **Utilities** — `InlineDiffBuilderTests` covering identical content with different line endings, replaced-line detection (removed + added lines), collapsed marker insertion for distant changes, and `includeAllLines` mode verification
+
+---
+
 ## Changes Since `c8e6a68` (0.51.4)
 
 ### Interactive Terminal Scripting

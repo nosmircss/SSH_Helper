@@ -480,7 +480,7 @@ namespace SSH_Helper
             {
                 if (!string.IsNullOrEmpty(_updateResult.ReleaseUrl))
                 {
-                    var result = MessageBox.Show(
+                    var result = DialogTheme.Show(
                         $"Version {_updateResult.LatestVersion} is available but no direct download was found.\n\n" +
                         "Would you like to open the GitHub release page to download it manually?",
                         "Download Not Available",
@@ -498,7 +498,7 @@ namespace SSH_Helper
                 }
                 else
                 {
-                    MessageBox.Show(
+                    DialogTheme.Show(
                         $"Version {_updateResult.LatestVersion} is available but no download information was found.\n\n" +
                         "Please check the GitHub repository for the latest release.",
                         "Download Not Available",
@@ -539,7 +539,7 @@ namespace SSH_Helper
 
                 if (string.IsNullOrWhiteSpace(_updateResult.ChecksumUrl))
                 {
-                    MessageBox.Show(
+                    DialogTheme.Show(
                         "This update does not include checksum information and cannot be verified. " +
                         "Please download the update manually from GitHub.",
                         "Verification Required",
@@ -579,7 +579,7 @@ namespace SSH_Helper
             }
             catch (InvalidDataException ex)
             {
-                MessageBox.Show(
+                DialogTheme.Show(
                     $"Update verification failed: {ex.Message}",
                     "Verification Error",
                     MessageBoxButtons.OK,
@@ -590,7 +590,7 @@ namespace SSH_Helper
             }
             catch (FileNotFoundException ex)
             {
-                MessageBox.Show(
+                DialogTheme.Show(
                     $"{ex.Message}\n\nThe release page will open so you can download manually.",
                     "Updater Not Found",
                     MessageBoxButtons.OK,
@@ -625,7 +625,7 @@ namespace SSH_Helper
                     ? MessageBoxButtons.YesNoCancel
                     : MessageBoxButtons.OK;
 
-                var result = MessageBox.Show(
+                var result = DialogTheme.Show(
                     message,
                     "Download Error",
                     buttons,
