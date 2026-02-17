@@ -1,5 +1,49 @@
 # Changelog
 
+## Changes Since `d588087` (0.51.6)
+
+### Interactive Terminal Transcript Handling
+
+**Mirrored transcript normalization** — When `mirror_output: true` is set on a non-capture interactive step (shared session without a `command`), the transcript text is now normalized through `InteractiveTerminalService.NormalizeMirroredTranscript` before emission. This removes control artifacts such as `^D`, backspace sequences, and ANSI escape codes from mirrored output that previously appeared as visual noise in the script output pane. The normalization pipeline chains `TerminalOutputProcessor.Sanitize` (strips ANSI codes) with `TerminalOutputProcessor.Normalize` (processes CR, LF, TAB, BS, CSI) to produce clean readable text.
+
+**Transcript and mirror output capping** — Interactive capture sessions now enforce line-count caps to prevent unbounded memory growth during long-running captures:
+
+| Limit | Default | Purpose |
+|-------|---------|---------|
+| `InteractiveTranscriptMaxLines` | 500,000 lines | Caps the internal `transcriptBuilder` used for `interactive.capture` variable storage |
+| `InteractiveMirrorOutputMaxLines` | 50,000 lines | Caps the chunks emitted to the script output pane via `mirror_output` |
+
+When a cap is reached, further chunks are dropped and a `[... interactive transcript capped ...]` or `[... interactive mirror output capped ...]` notice is appended. The capping logic uses `AppendTranscriptWithCap` and `ApplyMirrorOutputCap`, both exposed as `internal static` for testability.
+
+**Cross-chunk control sequence handling** — `PrepareMirroredChunkForEmission` buffers partial control sequences (e.g., `^` arriving at the end of one chunk and `D\b\b` at the start of the next) to avoid emitting half-processed escape artifacts. On final flush (`flush: true`), any remaining buffered content is normalized and emitted.
+
+### Preset Timeout Reset
+
+`PresetManager.ApplyDefaults(int)` is replaced by `PresetManager.ClearAllTimeouts()`, which clears `Timeout` overrides from all presets (setting them to `null`) so they inherit the global default. The method returns the count of modified presets.
+
+A new **Reset All Preset Timeouts to Default** button in `SettingsDialog` (General tab, under Default Values) calls `ClearAllTimeouts()` and reports the number of cleared presets. The result is tracked via `SettingsDialog.PresetTimeoutsWereCleared` so `Form1` can update the active editor timeout field after the dialog closes, preventing stale override values from being re-persisted on the next save.
+
+The timeout header field (`txtTimeoutHeader`) now uses `PlaceholderText` set to the global default timeout value, providing a visual hint of the inherited timeout when a preset has no explicit override.
+
+### Preset Tree View Improvements
+
+**Expand/Collapse All Subfolders** — Right-clicking a folder node that contains nested subfolders now shows **Expand All Subfolders** and **Collapse All Subfolders** context menu items (with a separator). These recursively expand or collapse all descendant folder nodes, persist the expanded state via `PresetManager.SetFolderExpanded`, and anchor the viewport to prevent scroll jumps during the operation.
+
+**Startup scroll-to-selection** — After startup restore, `Form1.EnsureSelectedPresetNodeVisible` scrolls the selected preset node into view unless it lives under a deliberately collapsed ancestor, preserving saved collapse state.
+
+### Autocomplete Popup Dismiss on External Click
+
+`ScintillaScriptEditorControl` registers a `CompletionDismissMessageFilter` (an `IMessageFilter`) that intercepts mouse-down messages (`WM_LBUTTONDOWN`, `WM_RBUTTONDOWN`, `WM_MBUTTONDOWN`, `WM_XBUTTONDOWN`, and their non-client variants). When a mouse-down targets a window outside the editor control hierarchy, the completion popup is dismissed. The filter uses a `WeakReference<ScintillaScriptEditorControl>` to avoid preventing garbage collection. Additionally, `_editor.LostFocus` now hides the popup. The message filter is removed in `Dispose`.
+
+### Test Coverage
+
+- **InteractiveCommandTests** — `ExecuteAsync_WithMirrorOutputInSharedMode_NormalizesControlArtifacts` verifies that `^D\b\b` sequences are stripped from mirrored transcript output
+- **InteractiveTerminalServiceTranscriptFilterTests** — 14 new tests covering `AppendTranscriptWithCap` (line capping, post-cap suppression, large single-line passthrough), `ApplyMirrorOutputCap` (cap triggering, post-cap suppression), `NormalizeMirroredTranscript` (control artifact removal), `BuildMirroredStartupPromptPrefix`, `PrependStartupPromptIfMissing` (empty/duplicate/normal), `ResolveStartupPromptLiteral` (preference order), `PrepareMirroredChunkForEmission` (cross-chunk control sequences), and `ResolveBannerAcceptKey` (press-to-accept and press-any-key patterns)
+- **SshExecutionServiceOutputFormattingTests** — 3 new tests for `NormalizeScriptOutputBoundary` covering non-raw-after-raw boundary insertion, duplicate boundary prevention, and raw-chunk passthrough
+- **ScintillaScriptEditorControlTests** — `CompletionPopup_OutsideClickDismissesSuggestions` verifies external-click dismissal via the message filter
+
+---
+
 ## Changes Since `6901b46` (0.51.5)
 
 ### Unsaved Preset Diff Dialog
