@@ -1,5 +1,7 @@
+using System.Text;
 using FluentAssertions;
 using SSH_Helper.Forms;
+using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting.Models;
 using SSH_Helper.Services.Terminal;
 using SSH_Helper.Utilities;
@@ -184,6 +186,228 @@ public class InteractiveTerminalServiceTranscriptFilterTests
     }
 
     [Fact]
+    public void AppendTranscriptWithCap_WhenExceeded_CapsAndKeepsTranscriptStart()
+    {
+        const int transcriptCap = 500_000;
+        var builder = new StringBuilder();
+        var lineCount = transcriptCap - 1;
+        var previousChunkEndedWithCarriageReturn = false;
+        var transcriptCapped = false;
+        const string chunk = "line-0\r\nline-1\r\n";
+
+        InteractiveTerminalService.AppendTranscriptWithCap(
+            builder,
+            chunk,
+            ref lineCount,
+            ref previousChunkEndedWithCarriageReturn,
+            ref transcriptCapped);
+
+        lineCount.Should().Be(transcriptCap);
+        transcriptCapped.Should().BeTrue();
+        builder.ToString().Should().Contain("line-0");
+        builder.ToString().Should().NotContain("line-1");
+        builder.ToString().Should().Contain("interactive transcript capped");
+    }
+
+    [Fact]
+    public void AppendTranscriptWithCap_LargeSingleLine_DoesNotTrimWithoutLineBreak()
+    {
+        var builder = new StringBuilder(new string('a', 500_000));
+        var lineCount = 0;
+        var previousChunkEndedWithCarriageReturn = false;
+        var transcriptCapped = false;
+
+        InteractiveTerminalService.AppendTranscriptWithCap(
+            builder,
+            new string('b', 60_000),
+            ref lineCount,
+            ref previousChunkEndedWithCarriageReturn,
+            ref transcriptCapped);
+
+        lineCount.Should().Be(0);
+        transcriptCapped.Should().BeFalse();
+        builder.Length.Should().Be(560_000);
+        builder.ToString().Should().NotContain("interactive transcript capped");
+    }
+
+    [Fact]
+    public void AppendTranscriptWithCap_AfterCapReached_DropsLaterChunks()
+    {
+        const int transcriptCap = 500_000;
+        var builder = new StringBuilder();
+        var lineCount = transcriptCap - 1;
+        var previousChunkEndedWithCarriageReturn = false;
+        var transcriptCapped = false;
+
+        const string firstChunk = "line\r\nline-should-not-fit\r\n";
+        InteractiveTerminalService.AppendTranscriptWithCap(
+            builder,
+            firstChunk,
+            ref lineCount,
+            ref previousChunkEndedWithCarriageReturn,
+            ref transcriptCapped);
+        var before = builder.ToString();
+
+        InteractiveTerminalService.AppendTranscriptWithCap(
+            builder,
+            "this should not be appended\r\n",
+            ref lineCount,
+            ref previousChunkEndedWithCarriageReturn,
+            ref transcriptCapped);
+
+        transcriptCapped.Should().BeTrue();
+        lineCount.Should().Be(transcriptCap);
+        builder.ToString().Should().Be(before);
+    }
+
+    [Fact]
+    public void ApplyMirrorOutputCap_WhenChunkExceedsLineCap_AppendsNoticeAndCaps()
+    {
+        const int mirrorCap = 50_000;
+        const string chunk = "line-0\r\nline-should-not-fit\r\n";
+
+        var result = InteractiveTerminalService.ApplyMirrorOutputCap(
+            chunk,
+            emittedLines: mirrorCap - 1,
+            isCapped: false,
+            previousChunkEndedWithCarriageReturn: false);
+
+        result.IsCapped.Should().BeTrue();
+        result.EmittedLines.Should().Be(mirrorCap);
+        result.Output.Should().Contain("interactive mirror output capped");
+    }
+
+    [Fact]
+    public void ApplyMirrorOutputCap_AfterCapReached_SuppressesFutureOutput()
+    {
+        const int mirrorCap = 50_000;
+        var first = InteractiveTerminalService.ApplyMirrorOutputCap(
+            "line\r\nline-should-not-fit\r\n",
+            emittedLines: mirrorCap - 1,
+            isCapped: false,
+            previousChunkEndedWithCarriageReturn: false);
+
+        var second = InteractiveTerminalService.ApplyMirrorOutputCap(
+            "more-data",
+            first.EmittedLines,
+            first.IsCapped,
+            first.PreviousChunkEndedWithCarriageReturn);
+
+        second.IsCapped.Should().BeTrue();
+        second.Output.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void NormalizeMirroredTranscript_RemovesControlArtifactsAndKeepsVisibleText()
+    {
+        const string raw = "FortiGate # ^D\b\bexit\r\n";
+
+        var normalized = InteractiveTerminalService.NormalizeMirroredTranscript(raw);
+
+        normalized.Should().Be("FortiGate # exit\r\n");
+        normalized.Should().NotContain("^D");
+        normalized.Should().NotContain("\b");
+    }
+
+    [Fact]
+    public void BuildMirroredStartupPromptPrefix_AppendsTrailingSpaceWhenMissing()
+    {
+        var prefix = InteractiveTerminalService.BuildMirroredStartupPromptPrefix("FGT-01 #");
+
+        prefix.Should().Be("FGT-01 # ");
+    }
+
+    [Fact]
+    public void BuildMirroredStartupPromptPrefix_EmptyInput_ReturnsEmpty()
+    {
+        var prefix = InteractiveTerminalService.BuildMirroredStartupPromptPrefix("   ");
+
+        prefix.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void PrependStartupPromptIfMissing_AddsPromptToTranscriptStart()
+    {
+        var transcript = "show system interface\r\nconfig system interface\r\n";
+
+        var result = InteractiveTerminalService.PrependStartupPromptIfMissing(
+            transcript,
+            "FortiGate-VM64-KVM #");
+
+        result.Should().StartWith("FortiGate-VM64-KVM # show system interface");
+    }
+
+    [Fact]
+    public void PrependStartupPromptIfMissing_AlreadyPrefixed_DoesNotDuplicate()
+    {
+        var transcript = "FortiGate-VM64-KVM # show system interface\r\n";
+
+        var result = InteractiveTerminalService.PrependStartupPromptIfMissing(
+            transcript,
+            "FortiGate-VM64-KVM #");
+
+        result.Should().Be(transcript);
+    }
+
+    [Fact]
+    public void PrependStartupPromptIfMissing_EmptyTranscript_RemainsEmpty()
+    {
+        var result = InteractiveTerminalService.PrependStartupPromptIfMissing(
+            string.Empty,
+            "FortiGate-VM64-KVM #");
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ResolveStartupPromptLiteral_PrefersDetectedPrompt()
+    {
+        var result = InteractiveTerminalService.ResolveStartupPromptLiteral(
+            "FGT-DETECTED #",
+            "FGT-FALLBACK #");
+
+        result.Should().Be("FGT-DETECTED #");
+    }
+
+    [Fact]
+    public void ResolveStartupPromptLiteral_UsesFallbackWhenDetectedMissing()
+    {
+        var result = InteractiveTerminalService.ResolveStartupPromptLiteral(
+            "   ",
+            "FGT-FALLBACK #");
+
+        result.Should().Be("FGT-FALLBACK #");
+    }
+
+    [Fact]
+    public void ResolveStartupPromptLiteral_EmptyWhenNoDetectedOrFallback()
+    {
+        var result = InteractiveTerminalService.ResolveStartupPromptLiteral(
+            "   ",
+            "   ");
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void PrepareMirroredChunkForEmission_CarriesControlSequenceAcrossChunks()
+    {
+        var pending = new StringBuilder();
+
+        var first = InteractiveTerminalService.PrepareMirroredChunkForEmission(
+            "FortiGate # ^",
+            pending,
+            flush: false);
+        var second = InteractiveTerminalService.PrepareMirroredChunkForEmission(
+            "D\b\bexit\r\n",
+            pending,
+            flush: false);
+
+        first.Should().BeEmpty();
+        second.Should().Be("FortiGate # exit\r\n");
+    }
+
+    [Fact]
     public void CountLinesFromCapturedChunk_CountsCrlfAndLfWithoutDoubleCounting()
     {
         var previousChunkEndedWithCarriageReturn = false;
@@ -263,5 +487,25 @@ public class InteractiveTerminalServiceTranscriptFilterTests
             promptRegex);
 
         result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ResolveBannerAcceptKey_PressToAcceptPattern_ReturnsCapturedKey()
+    {
+        var match = SshShellSession.Patterns.BannerAcceptPrompt.Match("Press 'q' to accept:");
+
+        var key = InteractiveTerminalService.ResolveBannerAcceptKey(match);
+
+        key.Should().Be("q");
+    }
+
+    [Fact]
+    public void ResolveBannerAcceptKey_PressAnyKeyPattern_DefaultsToA()
+    {
+        var match = SshShellSession.Patterns.BannerAcceptPrompt.Match("Press any key to continue");
+
+        var key = InteractiveTerminalService.ResolveBannerAcceptKey(match);
+
+        key.Should().Be("a");
     }
 }

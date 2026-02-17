@@ -356,25 +356,25 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Applies default timeout to presets that don't have it set.
+        /// Clears timeout overrides from all presets, causing them to inherit the global default.
         /// </summary>
-        public void ApplyDefaults(int defaultTimeout)
+        /// <returns>The number of presets that were modified.</returns>
+        public int ClearAllTimeouts()
         {
-            bool changed = false;
-
+            int count = 0;
             foreach (var preset in _presets.Values)
             {
-                if (!preset.Timeout.HasValue)
+                if (preset.Timeout.HasValue)
                 {
-                    preset.Timeout = defaultTimeout;
-                    changed = true;
+                    preset.Timeout = null;
+                    count++;
                 }
             }
 
-            if (changed)
-            {
+            if (count > 0)
                 PersistToConfig();
-            }
+
+            return count;
         }
 
         #region Folder Operations

@@ -46,4 +46,40 @@ public class SshExecutionServiceOutputFormattingTests
 
         output.Should().Be("line" + Environment.NewLine);
     }
+
+    [Fact]
+    public void NormalizeScriptOutputBoundary_NonRawAfterRawWithoutLineBreak_PrependsBoundaryNewLine()
+    {
+        var result = SshExecutionService.NormalizeScriptOutputBoundary(
+            output: "done" + Environment.NewLine,
+            outputType: ScriptOutputType.Info,
+            previousOutputEndedWithLineTerminator: false);
+
+        result.Output.Should().Be(Environment.NewLine + "done" + Environment.NewLine);
+        result.EndsWithLineTerminator.Should().BeTrue();
+    }
+
+    [Fact]
+    public void NormalizeScriptOutputBoundary_NonRawAlreadyStartingWithLineBreak_DoesNotDuplicateBoundary()
+    {
+        var result = SshExecutionService.NormalizeScriptOutputBoundary(
+            output: Environment.NewLine + "done" + Environment.NewLine,
+            outputType: ScriptOutputType.Info,
+            previousOutputEndedWithLineTerminator: false);
+
+        result.Output.Should().Be(Environment.NewLine + "done" + Environment.NewLine);
+        result.EndsWithLineTerminator.Should().BeTrue();
+    }
+
+    [Fact]
+    public void NormalizeScriptOutputBoundary_RawChunk_DoesNotPrependBoundary()
+    {
+        var result = SshExecutionService.NormalizeScriptOutputBoundary(
+            output: "terminal prompt",
+            outputType: ScriptOutputType.RawChunk,
+            previousOutputEndedWithLineTerminator: false);
+
+        result.Output.Should().Be("terminal prompt");
+        result.EndsWithLineTerminator.Should().BeFalse();
+    }
 }

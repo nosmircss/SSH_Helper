@@ -31,6 +31,26 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
+    public void CompletionPopup_OutsideClickDismissesSuggestions()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "st";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+        var popup = GetCompletionPopup(control);
+        popup.Visible.Should().BeTrue();
+
+        using var outside = new TextBox();
+        _ = outside.Handle;
+        InvokeNonPublic(control, "DismissCompletionOnExternalClick", outside.Handle);
+
+        popup.Visible.Should().BeFalse();
+    }
+
+    [WinFormsFact]
     public void CompletionPopup_UpdateUISelection_RepositionsToCaret()
     {
         using var control = new ScintillaScriptEditorControl();

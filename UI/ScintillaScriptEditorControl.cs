@@ -31,6 +31,14 @@ namespace SSH_Helper.UI
         private const int ErrorIndicatorIndex = 8;
         private const int WarningIndicatorIndex = 9;
         private const int CompletionPopupWidth = 262;
+        private const int WmLButtonDown = 0x0201;
+        private const int WmRButtonDown = 0x0204;
+        private const int WmMButtonDown = 0x0207;
+        private const int WmXButtonDown = 0x020B;
+        private const int WmNcLButtonDown = 0x00A1;
+        private const int WmNcRButtonDown = 0x00A4;
+        private const int WmNcMButtonDown = 0x00A7;
+        private const int WmNcXButtonDown = 0x00AB;
         private static readonly Color DarkLineNumberTextColor = Color.FromArgb(160, 160, 160);
         private static readonly Color LightLineNumberTextColor = Color.FromArgb(115, 115, 115);
         private static readonly Color DarkLineNumberBackColor = Color.FromArgb(30, 30, 30);
@@ -50,6 +58,8 @@ namespace SSH_Helper.UI
         private readonly ToolTip _toolTip;
         private readonly NonFocusableCompletionListBox _completionList;
         private readonly Panel _completionPopup;
+        private readonly CompletionDismissMessageFilter _completionDismissFilter;
+        private bool _completionDismissFilterRegistered;
 
         private IReadOnlyList<EditorDiagnostic> _diagnostics = Array.Empty<EditorDiagnostic>();
         private List<CompletionItem> _activeCompletionItems = new();
@@ -106,6 +116,7 @@ namespace SSH_Helper.UI
             _editor.MouseUp += Editor_MouseUp;
             _editor.MarginClick += Editor_MarginClick;
             _editor.MouseLeave += (_, _) => HideTooltip();
+            _editor.LostFocus += (_, _) => HideCompletionPopup();
             _editor.DwellStart += Editor_DwellStart;
             _editor.DwellEnd += (_, _) => HideTooltip();
             _editor.Click += (_, _) => OnClick(EventArgs.Empty);
@@ -154,6 +165,9 @@ namespace SSH_Helper.UI
             Controls.Add(_editor);
             Controls.Add(_completionPopup);
             _completionPopup.BringToFront();
+            _completionDismissFilter = new CompletionDismissMessageFilter(this);
+            Application.AddMessageFilter(_completionDismissFilter);
+            _completionDismissFilterRegistered = true;
             ApplyTheme(darkMode: false);
         }
 
@@ -850,6 +864,36 @@ namespace SSH_Helper.UI
             }
 
             _activeCompletionContext = CompletionContextKind.None;
+        }
+
+        private void DismissCompletionOnExternalClick(IntPtr targetHandle)
+        {
+            if (!_completionPopup.Visible)
+            {
+                return;
+            }
+
+            if (targetHandle != IntPtr.Zero &&
+                Control.FromHandle(targetHandle) is Control targetControl &&
+                IsControlInEditorHierarchy(targetControl))
+            {
+                return;
+            }
+
+            HideCompletionPopup();
+        }
+
+        private bool IsControlInEditorHierarchy(Control control)
+        {
+            for (Control? current = control; current != null; current = current.Parent)
+            {
+                if (ReferenceEquals(current, this))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void UpdateCompletionPopupSize(int itemCount)
@@ -1855,6 +1899,42 @@ namespace SSH_Helper.UI
             }
         }
 
+        private sealed class CompletionDismissMessageFilter : IMessageFilter
+        {
+            private readonly WeakReference<ScintillaScriptEditorControl> _owner;
+
+            public CompletionDismissMessageFilter(ScintillaScriptEditorControl owner)
+            {
+                _owner = new WeakReference<ScintillaScriptEditorControl>(owner);
+            }
+
+            public bool PreFilterMessage(ref Message m)
+            {
+                if (!IsMouseDownMessage(m.Msg) ||
+                    !_owner.TryGetTarget(out var owner) ||
+                    owner.IsDisposed)
+                {
+                    return false;
+                }
+
+                owner.DismissCompletionOnExternalClick(m.HWnd);
+                return false;
+            }
+
+            private static bool IsMouseDownMessage(int message)
+            {
+                return message is
+                    WmLButtonDown or
+                    WmRButtonDown or
+                    WmMButtonDown or
+                    WmXButtonDown or
+                    WmNcLButtonDown or
+                    WmNcRButtonDown or
+                    WmNcMButtonDown or
+                    WmNcXButtonDown;
+            }
+        }
+
         private static class ScrollbarThemeNative
         {
             [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
@@ -1937,6 +2017,12 @@ namespace SSH_Helper.UI
         {
             if (disposing)
             {
+                if (_completionDismissFilterRegistered)
+                {
+                    Application.RemoveMessageFilter(_completionDismissFilter);
+                    _completionDismissFilterRegistered = false;
+                }
+
                 if (_validationService != null)
                 {
                     _validationService.DiagnosticsUpdated -= ValidationService_DiagnosticsUpdated;

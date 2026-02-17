@@ -10,6 +10,7 @@ namespace SSH_Helper
     internal sealed class SettingsDialog : Form
     {
         private readonly ConfigurationService _configService;
+        private readonly PresetManager? _presetManager;
 
         private readonly BorderlessTabControl _tabControl;
 
@@ -93,8 +94,9 @@ namespace SSH_Helper
         private TextBox _txtPreviewCode = null!;
         private Button _btnPreviewButton = null!;
 
-        // Reset button (lives inside the Appearance tab)
+        // Reset buttons
         private Button _btnResetDefaults = null!;
+        private Button _btnResetPresetTimeouts = null!;
 
         private readonly Button _btnSave;
         private readonly Button _btnCancel;
@@ -102,10 +104,12 @@ namespace SSH_Helper
 
         private Color _customAccentColor = Color.FromArgb(0, 120, 215);
         private List<Font> _previewFonts = new();
+        public bool PresetTimeoutsWereCleared { get; private set; }
 
-        public SettingsDialog(ConfigurationService configService, bool darkMode = false)
+        public SettingsDialog(ConfigurationService configService, PresetManager? presetManager = null, bool darkMode = false)
         {
             _configService = configService;
+            _presetManager = presetManager;
 
             // Enable DPI scaling - must be set before any Size/Location values
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -218,6 +222,7 @@ namespace SSH_Helper
             DialogTheme.StyleButton(_btnSave, darkMode, isPrimary: true);
             DialogTheme.StyleButton(_btnCancel, darkMode);
             DialogTheme.StyleButton(_btnResetDefaults, darkMode);
+            DialogTheme.StyleButton(_btnResetPresetTimeouts, darkMode);
             DialogTheme.StyleButton(_btnChooseAccentColor, darkMode);
             DialogTheme.SetDarkTitleBar(this, darkMode);
             DialogTheme.StyleTabControl(_tabControl, darkMode);
@@ -312,6 +317,14 @@ namespace SSH_Helper
             flow.Controls.Add(SectionHeader("Default Values"));
             flow.Controls.Add(LabelSpinnerRow("Default command timeout (seconds):", "numDefaultTimeout", 10, 1, 300));
             flow.Controls.Add(LabelSpinnerRow("Connection timeout (seconds):", "numConnectionTimeout", 30, 5, 120));
+            _btnResetPresetTimeouts = new Button
+            {
+                Text = "Reset All Preset Timeouts to Default",
+                AutoSize = true,
+                Margin = new Padding(15, 8, 0, 0)
+            };
+            _btnResetPresetTimeouts.Click += BtnResetPresetTimeouts_Click;
+            flow.Controls.Add(_btnResetPresetTimeouts);
 
             // === Theme ===
             flow.Controls.Add(SectionHeader("Theme"));
@@ -1074,6 +1087,30 @@ namespace SSH_Helper
                 var defaults = FontSettings.CreateDefault();
                 ApplyFontSettingsToControls(defaults);
                 UpdatePreview();
+            }
+        }
+
+        private void BtnResetPresetTimeouts_Click(object? sender, EventArgs e)
+        {
+            if (_presetManager == null)
+                return;
+
+            var result = DialogTheme.Show(
+                "Clear custom timeout values from all presets?\n\n" +
+                "Presets will inherit the global default timeout instead.",
+                "Reset Preset Timeouts",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Yes)
+            {
+                int count = _presetManager.ClearAllTimeouts();
+                PresetTimeoutsWereCleared |= count > 0;
+                DialogTheme.Show(
+                    $"Cleared timeout overrides from {count} preset(s).",
+                    "Reset Preset Timeouts",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
             }
         }
 
