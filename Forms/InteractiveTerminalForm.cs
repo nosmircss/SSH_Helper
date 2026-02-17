@@ -29,6 +29,7 @@ namespace SSH_Helper.Forms
         public required char[] Characters { get; init; }
         public required int[] ForeColors { get; init; }
         public required int[] BackColors { get; init; }
+        public required int[] RowHashes { get; init; }
         public int CursorColumn { get; init; } = -1;
         public int CursorRow { get; init; } = -1;
         public int CursorForeColor { get; init; }
@@ -574,6 +575,7 @@ namespace SSH_Helper.Forms
             var characters = new char[count];
             var foreColors = new int[count];
             var backColors = new int[count];
+            var rowHashes = new int[rows];
             Array.Fill(characters, ' ');
 
             var defaultFore = Color.FromArgb(187, 187, 187).ToArgb();
@@ -582,29 +584,50 @@ namespace SSH_Helper.Forms
             Array.Fill(backColors, defaultBack);
 
             var displayPadding = Math.Max(0, rows - _detachedHistoryLines.Length);
-            var hash = new HashCode();
-            hash.Add(columns);
-            hash.Add(rows);
-            hash.Add(historyLength);
-            hash.Add(appliedOffset);
+            var hash = 17;
+            hash = CombineHash(hash, columns);
+            hash = CombineHash(hash, rows);
+            hash = CombineHash(hash, historyLength);
+            hash = CombineHash(hash, appliedOffset);
 
             for (var row = 0; row < rows; row++)
             {
+                var rowHash = 17;
                 var sourceRow = startRow + row;
                 if (sourceRow < 0 || sourceRow >= totalRows)
+                {
+                    rowHashes[row] = rowHash;
+                    hash = CombineHash(hash, rowHash);
                     continue;
+                }
 
                 var sourceLineIndex = sourceRow - displayPadding;
                 if (sourceLineIndex < 0 || sourceLineIndex >= _detachedHistoryLines.Length)
+                {
+                    rowHashes[row] = rowHash;
+                    hash = CombineHash(hash, rowHash);
                     continue;
+                }
 
                 var line = _detachedHistoryLines[sourceLineIndex] ?? string.Empty;
                 var copyLength = Math.Min(columns, line.Length);
                 if (copyLength <= 0)
+                {
+                    rowHashes[row] = rowHash;
+                    hash = CombineHash(hash, rowHash);
                     continue;
+                }
 
-                line.AsSpan(0, copyLength).CopyTo(characters.AsSpan(row * columns, copyLength));
-                hash.Add(line);
+                var destination = characters.AsSpan(row * columns, copyLength);
+                var source = line.AsSpan(0, copyLength);
+                source.CopyTo(destination);
+                for (var column = 0; column < copyLength; column++)
+                {
+                    rowHash = CombineHash(rowHash, source[column]);
+                }
+
+                rowHashes[row] = rowHash;
+                hash = CombineHash(hash, rowHash);
             }
 
             SetScreen(new TerminalScreenSnapshot
@@ -616,12 +639,21 @@ namespace SSH_Helper.Forms
                 Characters = characters,
                 ForeColors = foreColors,
                 BackColors = backColors,
+                RowHashes = rowHashes,
                 CursorColumn = -1,
                 CursorRow = -1,
                 CursorForeColor = defaultBack,
                 CursorBackColor = defaultFore,
-                Hash = hash.ToHashCode()
+                Hash = hash
             });
+        }
+
+        private static int CombineHash(int current, int value)
+        {
+            unchecked
+            {
+                return (current * 397) ^ value;
+            }
         }
 
         private static string[] NormalizeDetachedHistoryLines(string text)

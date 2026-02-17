@@ -68,6 +68,12 @@ namespace SSH_Helper.Services.Terminal
         private const string InteractiveCloseReasonMaxLinesContinue = "max_lines_continue";
         private const string InteractiveCloseReasonEarlyClosePartial = "early_close_partial";
         private const string InteractiveCloseReasonNaturalComplete = "natural_complete";
+        private const int InteractiveTranscriptMaxLines = 500_000;
+        private static readonly string InteractiveTranscriptCapNotice =
+            $"{Environment.NewLine}[... interactive transcript capped ...]{Environment.NewLine}";
+        private const int InteractiveMirrorOutputMaxLines = 50_000;
+        private static readonly string InteractiveMirrorOutputCapNotice =
+            $"{Environment.NewLine}[... interactive mirror output capped ...]{Environment.NewLine}";
 
         private enum InteractiveCloseReasonState
         {
@@ -103,6 +109,120 @@ namespace SSH_Helper.Services.Terminal
             {
                 CurrentLine.Clear();
                 SentCharactersOnLine = 0;
+            }
+        }
+
+        private readonly record struct CapturePromptSetup(Regex? PromptRegex, string PromptLiteral);
+
+        private sealed class ScreenUpdateDispatcher
+        {
+            private readonly InteractiveTerminalForm _form;
+            private readonly object _lock = new();
+            private TerminalScreenSnapshot? _latestSnapshot;
+            private bool _postQueued;
+
+            public bool IsBacklogged
+            {
+                get
+                {
+                    lock (_lock)
+                    {
+                        return _postQueued && _latestSnapshot != null;
+                    }
+                }
+            }
+
+            public ScreenUpdateDispatcher(InteractiveTerminalForm form)
+            {
+                _form = form;
+            }
+
+            public void Enqueue(TerminalScreenSnapshot snapshot)
+            {
+                if (_form.IsDisposed)
+                    return;
+
+                lock (_lock)
+                {
+                    _latestSnapshot = snapshot;
+                }
+
+                TryQueueDrain();
+            }
+
+            private void TryQueueDrain()
+            {
+                var shouldPost = false;
+                lock (_lock)
+                {
+                    if (!_postQueued)
+                    {
+                        _postQueued = true;
+                        shouldPost = true;
+                    }
+                }
+
+                if (!shouldPost)
+                    return;
+
+                try
+                {
+                    if (_form.InvokeRequired)
+                    {
+                        _form.BeginInvoke((Action)DrainOnUiThread);
+                    }
+                    else
+                    {
+                        DrainOnUiThread();
+                    }
+                }
+                catch
+                {
+                    lock (_lock)
+                    {
+                        _postQueued = false;
+                        _latestSnapshot = null;
+                    }
+                }
+            }
+
+            private void DrainOnUiThread()
+            {
+                TerminalScreenSnapshot? snapshot;
+                lock (_lock)
+                {
+                    snapshot = _latestSnapshot;
+                    _latestSnapshot = null;
+                    _postQueued = false;
+                }
+
+                if (snapshot != null && !_form.IsDisposed)
+                {
+                    try
+                    {
+                        _form.SetScreen(snapshot);
+                    }
+                    catch
+                    {
+                        lock (_lock)
+                        {
+                            _latestSnapshot = null;
+                            _postQueued = false;
+                        }
+                        return;
+                    }
+                }
+
+                var hasPendingSnapshot = false;
+                lock (_lock)
+                {
+                    hasPendingSnapshot = _latestSnapshot != null;
+                }
+
+                if (hasPendingSnapshot)
+                {
+                    TryQueueDrain();
+                }
             }
         }
 
@@ -262,11 +382,14 @@ namespace SSH_Helper.Services.Terminal
                     columns,
                     rows,
                     SshTerminalOptionsFactory.DefaultHistoryMaxLength);
-                await InitializeSeparateSessionStartupAsync(
+                var startupPromptSetup = await InitializeSeparateSessionStartupAsync(
                     scripting,
                     timeouts,
                     context.DebugMode,
                     cancellationToken);
+                var startupPromptLiteral = ResolveStartupPromptLiteral(
+                    startupPromptSetup.PromptLiteral,
+                    context.Session?.CurrentPrompt);
                 startedAtUtc = DateTime.UtcNow;
 
                 runSummary = await RunWindowLoopAsync(
@@ -278,6 +401,7 @@ namespace SSH_Helper.Services.Terminal
                     cancellationToken: cancellationToken,
                     isConnectionAlive: () => client != null && client.IsConnected,
                     onCancellation: () => CloseSeparateResources(client, virtualTerminal, scripting),
+                    startupPromptLiteral: startupPromptLiteral,
                     initialWindowWidth: options.Width,
                     initialWindowHeight: options.Height,
                     initialColumns: columns,
@@ -368,11 +492,15 @@ namespace SSH_Helper.Services.Terminal
                     columns,
                     rows,
                     SshTerminalOptionsFactory.DefaultHistoryMaxLength);
-                var capturePromptRegex = await InitializeSeparateSessionStartupAsync(
+                var capturePromptSetup = await InitializeSeparateSessionStartupAsync(
                     scripting,
                     timeouts,
                     context.DebugMode,
                     cancellationToken);
+                var capturePromptRegex = capturePromptSetup.PromptRegex;
+                var startupPromptLiteral = ResolveStartupPromptLiteral(
+                    capturePromptSetup.PromptLiteral,
+                    context.Session?.CurrentPrompt);
                 startedAtUtc = DateTime.UtcNow;
 
                 if (options.ShowWindow)
@@ -386,6 +514,7 @@ namespace SSH_Helper.Services.Terminal
                         maxSeconds: options.MaxSeconds,
                         maxLines: options.MaxLines,
                         mirrorOutput: options.MirrorOutput,
+                        startupPromptLiteral: startupPromptLiteral,
                         capturePromptRegex: capturePromptRegex,
                         keepAliveInterval: timeouts.KeepAliveInterval,
                         cancellationToken: cancellationToken,
@@ -406,6 +535,7 @@ namespace SSH_Helper.Services.Terminal
                         maxSeconds: options.MaxSeconds,
                         maxLines: options.MaxLines,
                         mirrorOutput: options.MirrorOutput,
+                        startupPromptLiteral: startupPromptLiteral,
                         capturePromptRegex: capturePromptRegex,
                         keepAliveInterval: timeouts.KeepAliveInterval,
                         cancellationToken: cancellationToken,
@@ -460,6 +590,7 @@ namespace SSH_Helper.Services.Terminal
             int? maxSeconds,
             int? maxLines,
             bool mirrorOutput,
+            string? startupPromptLiteral,
             Regex? capturePromptRegex,
             TimeSpan keepAliveInterval,
             CancellationToken cancellationToken,
@@ -487,8 +618,14 @@ namespace SSH_Helper.Services.Terminal
             var commandPromptArmed = 0;
             var capturedLineCount = 0;
             var previousChunkEndedWithCarriageReturn = false;
+            var transcriptLineCount = 0;
+            var transcriptPreviousChunkEndedWithCarriageReturn = false;
+            var transcriptCapped = false;
             var mirrorPendingBuffer = new StringBuilder();
             var mirrorOutputLock = new object();
+            var mirroredLinesEmitted = 0;
+            var mirrorOutputCapped = false;
+            var mirrorPreviousChunkEndedWithCarriageReturn = false;
             InteractiveTerminalForm? form = null;
 
             EventHandler? disconnectedHandler = null;
@@ -579,7 +716,12 @@ namespace SSH_Helper.Services.Terminal
                         capturedText = captureResult.CapturedText;
                         if (!string.IsNullOrEmpty(capturedText))
                         {
-                            transcriptBuilder.Append(capturedText);
+                            AppendTranscriptWithCap(
+                                transcriptBuilder,
+                                capturedText,
+                                ref transcriptLineCount,
+                                ref transcriptPreviousChunkEndedWithCarriageReturn,
+                                ref transcriptCapped);
 
                             if (maxLines.HasValue && maxLines.Value > 0)
                             {
@@ -599,6 +741,16 @@ namespace SSH_Helper.Services.Terminal
                                 capturedText,
                                 mirrorPendingBuffer,
                                 flush: false);
+                            var cappedMirrorChunk = ApplyMirrorOutputCap(
+                                mirroredChunk,
+                                mirroredLinesEmitted,
+                                mirrorOutputCapped,
+                                mirrorPreviousChunkEndedWithCarriageReturn);
+                            mirroredChunk = cappedMirrorChunk.Output;
+                            mirroredLinesEmitted = cappedMirrorChunk.EmittedLines;
+                            mirrorOutputCapped = cappedMirrorChunk.IsCapped;
+                            mirrorPreviousChunkEndedWithCarriageReturn =
+                                cappedMirrorChunk.PreviousChunkEndedWithCarriageReturn;
                         }
                     }
 
@@ -744,6 +896,42 @@ namespace SSH_Helper.Services.Terminal
                 form.FocusTerminal();
             });
 
+            if (mirrorOutput)
+            {
+                var promptPrefix = BuildMirroredStartupPromptPrefix(startupPromptLiteral);
+                if (!string.IsNullOrEmpty(promptPrefix))
+                {
+                    lock (transcriptLock)
+                    {
+                        AppendTranscriptWithCap(
+                            transcriptBuilder,
+                            promptPrefix,
+                            ref transcriptLineCount,
+                            ref transcriptPreviousChunkEndedWithCarriageReturn,
+                            ref transcriptCapped);
+                    }
+
+                    lock (mirrorOutputLock)
+                    {
+                        var cappedPromptPrefix = ApplyMirrorOutputCap(
+                            promptPrefix,
+                            mirroredLinesEmitted,
+                            mirrorOutputCapped,
+                            mirrorPreviousChunkEndedWithCarriageReturn);
+                        promptPrefix = cappedPromptPrefix.Output;
+                        mirroredLinesEmitted = cappedPromptPrefix.EmittedLines;
+                        mirrorOutputCapped = cappedPromptPrefix.IsCapped;
+                        mirrorPreviousChunkEndedWithCarriageReturn =
+                            cappedPromptPrefix.PreviousChunkEndedWithCarriageReturn;
+                    }
+
+                    if (!string.IsNullOrEmpty(promptPrefix))
+                    {
+                        context.EmitOutput(promptPrefix, ScriptOutputType.RawChunk);
+                    }
+                }
+            }
+
             pendingInput.Enqueue(stream =>
             {
                 stream.Send(command + "\r");
@@ -854,6 +1042,16 @@ namespace SSH_Helper.Services.Terminal
                         null,
                         mirrorPendingBuffer,
                         flush: true);
+                    var cappedMirrorTail = ApplyMirrorOutputCap(
+                        mirroredTail,
+                        mirroredLinesEmitted,
+                        mirrorOutputCapped,
+                        mirrorPreviousChunkEndedWithCarriageReturn);
+                    mirroredTail = cappedMirrorTail.Output;
+                    mirroredLinesEmitted = cappedMirrorTail.EmittedLines;
+                    mirrorOutputCapped = cappedMirrorTail.IsCapped;
+                    mirrorPreviousChunkEndedWithCarriageReturn =
+                        cappedMirrorTail.PreviousChunkEndedWithCarriageReturn;
                 }
 
                 if (!string.IsNullOrEmpty(mirroredTail))
@@ -930,6 +1128,7 @@ namespace SSH_Helper.Services.Terminal
             {
                 transcript = transcriptBuilder.ToString();
             }
+            transcript = PrependStartupPromptIfMissing(transcript, startupPromptLiteral);
 
             return new InteractiveWindowRunSummary
             {
@@ -948,6 +1147,7 @@ namespace SSH_Helper.Services.Terminal
             int? maxSeconds,
             int? maxLines,
             bool mirrorOutput,
+            string? startupPromptLiteral,
             Regex? capturePromptRegex,
             TimeSpan keepAliveInterval,
             CancellationToken cancellationToken,
@@ -970,8 +1170,14 @@ namespace SSH_Helper.Services.Terminal
             var commandPromptArmed = 0;
             var capturedLineCount = 0;
             var previousChunkEndedWithCarriageReturn = false;
+            var transcriptLineCount = 0;
+            var transcriptPreviousChunkEndedWithCarriageReturn = false;
+            var transcriptCapped = false;
             var mirrorPendingBuffer = new StringBuilder();
             var mirrorOutputLock = new object();
+            var mirroredLinesEmitted = 0;
+            var mirrorOutputCapped = false;
+            var mirrorPreviousChunkEndedWithCarriageReturn = false;
 
             EventHandler? disconnectedHandler = null;
             EventHandler<ActionRequestEventArgs>? actionRequestedHandler = null;
@@ -1044,7 +1250,12 @@ namespace SSH_Helper.Services.Terminal
                         capturedText = captureResult.CapturedText;
                         if (!string.IsNullOrEmpty(capturedText))
                         {
-                            transcriptBuilder.Append(capturedText);
+                            AppendTranscriptWithCap(
+                                transcriptBuilder,
+                                capturedText,
+                                ref transcriptLineCount,
+                                ref transcriptPreviousChunkEndedWithCarriageReturn,
+                                ref transcriptCapped);
 
                             if (maxLines.HasValue && maxLines.Value > 0)
                             {
@@ -1064,6 +1275,16 @@ namespace SSH_Helper.Services.Terminal
                                 capturedText,
                                 mirrorPendingBuffer,
                                 flush: false);
+                            var cappedMirrorChunk = ApplyMirrorOutputCap(
+                                mirroredChunk,
+                                mirroredLinesEmitted,
+                                mirrorOutputCapped,
+                                mirrorPreviousChunkEndedWithCarriageReturn);
+                            mirroredChunk = cappedMirrorChunk.Output;
+                            mirroredLinesEmitted = cappedMirrorChunk.EmittedLines;
+                            mirrorOutputCapped = cappedMirrorChunk.IsCapped;
+                            mirrorPreviousChunkEndedWithCarriageReturn =
+                                cappedMirrorChunk.PreviousChunkEndedWithCarriageReturn;
                         }
                     }
 
@@ -1103,6 +1324,42 @@ namespace SSH_Helper.Services.Terminal
             else
             {
                 TrySetCompletion(InteractiveCloseReasonError);
+            }
+
+            if (mirrorOutput)
+            {
+                var promptPrefix = BuildMirroredStartupPromptPrefix(startupPromptLiteral);
+                if (!string.IsNullOrEmpty(promptPrefix))
+                {
+                    lock (transcriptLock)
+                    {
+                        AppendTranscriptWithCap(
+                            transcriptBuilder,
+                            promptPrefix,
+                            ref transcriptLineCount,
+                            ref transcriptPreviousChunkEndedWithCarriageReturn,
+                            ref transcriptCapped);
+                    }
+
+                    lock (mirrorOutputLock)
+                    {
+                        var cappedPromptPrefix = ApplyMirrorOutputCap(
+                            promptPrefix,
+                            mirroredLinesEmitted,
+                            mirrorOutputCapped,
+                            mirrorPreviousChunkEndedWithCarriageReturn);
+                        promptPrefix = cappedPromptPrefix.Output;
+                        mirroredLinesEmitted = cappedPromptPrefix.EmittedLines;
+                        mirrorOutputCapped = cappedPromptPrefix.IsCapped;
+                        mirrorPreviousChunkEndedWithCarriageReturn =
+                            cappedPromptPrefix.PreviousChunkEndedWithCarriageReturn;
+                    }
+
+                    if (!string.IsNullOrEmpty(promptPrefix))
+                    {
+                        context.EmitOutput(promptPrefix, ScriptOutputType.RawChunk);
+                    }
+                }
             }
 
             pendingInput.Enqueue(stream =>
@@ -1185,6 +1442,16 @@ namespace SSH_Helper.Services.Terminal
                         null,
                         mirrorPendingBuffer,
                         flush: true);
+                    var cappedMirrorTail = ApplyMirrorOutputCap(
+                        mirroredTail,
+                        mirroredLinesEmitted,
+                        mirrorOutputCapped,
+                        mirrorPreviousChunkEndedWithCarriageReturn);
+                    mirroredTail = cappedMirrorTail.Output;
+                    mirroredLinesEmitted = cappedMirrorTail.EmittedLines;
+                    mirrorOutputCapped = cappedMirrorTail.IsCapped;
+                    mirrorPreviousChunkEndedWithCarriageReturn =
+                        cappedMirrorTail.PreviousChunkEndedWithCarriageReturn;
                 }
 
                 if (!string.IsNullOrEmpty(mirroredTail))
@@ -1259,6 +1526,7 @@ namespace SSH_Helper.Services.Terminal
             CancellationToken cancellationToken,
             Func<bool>? isConnectionAlive,
             Action? onCancellation,
+            string? startupPromptLiteral = null,
             int? initialWindowWidth = null,
             int? initialWindowHeight = null,
             int? initialColumns = null,
@@ -1273,6 +1541,9 @@ namespace SSH_Helper.Services.Terminal
             var wasLaunched = 0;
             var transcriptBuilder = new StringBuilder();
             var transcriptLock = new object();
+            var transcriptLineCount = 0;
+            var transcriptPreviousChunkEndedWithCarriageReturn = false;
+            var transcriptCapped = false;
             var inAlternateScreen = false;
             var inAlternateScreenState = 0;
             var sharedCommandGuard = sessionMode == InteractiveSessionMode.Shared ? new SharedCommandGuardState() : null;
@@ -1339,7 +1610,12 @@ namespace SSH_Helper.Services.Terminal
                         Volatile.Write(ref inAlternateScreenState, inAlternateScreen ? 1 : 0);
                         if (!string.IsNullOrEmpty(captureResult.CapturedText))
                         {
-                            transcriptBuilder.Append(captureResult.CapturedText);
+                            AppendTranscriptWithCap(
+                                transcriptBuilder,
+                                captureResult.CapturedText,
+                                ref transcriptLineCount,
+                                ref transcriptPreviousChunkEndedWithCarriageReturn,
+                                ref transcriptCapped);
                         }
                     }
 
@@ -1585,6 +1861,7 @@ namespace SSH_Helper.Services.Terminal
             {
                 transcript = transcriptBuilder.ToString();
             }
+            transcript = PrependStartupPromptIfMissing(transcript, startupPromptLiteral);
 
             return new InteractiveWindowRunSummary
             {
@@ -1688,12 +1965,21 @@ namespace SSH_Helper.Services.Terminal
             }
 
             const int processTimeoutMs = 2;
-            const int activeDelayMs = 1;
-            const int idleDelayMs = 4;
+            const int activeDelayMs = 2;
+            const int idleDelayMs = 8;
+            const int activeRenderIntervalMs = 20;
+            const int idleRenderIntervalMs = 120;
             var lastScreenHash = int.MinValue;
             var lastRenderedHistoryLength = 0;
+            var lastRequestedOffset = int.MinValue;
+            var lastAlternateScreenActive = false;
+            var lastObservedHistoryLength = -1;
+            var lastObservedCursorLeft = int.MinValue;
+            var lastObservedCursorTop = int.MinValue;
+            var lastSnapshotTick = Environment.TickCount64;
             var hadFatalError = false;
             var nextKeepAliveAtUtc = ComputeNextKeepAliveUtc(keepAliveInterval);
+            var screenUpdateDispatcher = new ScreenUpdateDispatcher(form);
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -1741,7 +2027,19 @@ namespace SSH_Helper.Services.Terminal
                             break;
                         }
 
+                        var screen = terminal.Screen;
                         var totalHistoryLength = Math.Max(0, terminal.HistoryLength);
+                        var cursorLeft = screen.CursorLeft;
+                        var cursorTop = screen.CursorTop;
+                        var hasTerminalActivity =
+                            totalHistoryLength != lastObservedHistoryLength ||
+                            cursorLeft != lastObservedCursorLeft ||
+                            cursorTop != lastObservedCursorTop;
+
+                        lastObservedHistoryLength = totalHistoryLength;
+                        lastObservedCursorLeft = cursorLeft;
+                        lastObservedCursorTop = cursorTop;
+
                         var alternateScreenActive = isAlternateScreenActive != null && isAlternateScreenActive();
                         var requestedOffset = alternateScreenActive ? 0 : form.ScrollbackOffset;
                         if (!alternateScreenActive &&
@@ -1754,11 +2052,27 @@ namespace SSH_Helper.Services.Terminal
                                 requestedOffset + (totalHistoryLength - lastRenderedHistoryLength));
                         }
 
-                        snapshot = BuildScreenSnapshot(
-                            terminal,
-                            requestedOffset,
-                            applyFollowTailAnchoring: !alternateScreenActive);
-                        lastRenderedHistoryLength = snapshot.HistoryLength;
+                        var viewportChanged =
+                            requestedOffset != lastRequestedOffset ||
+                            alternateScreenActive != lastAlternateScreenActive;
+                        var nowTick = Environment.TickCount64;
+                        var renderIntervalMs = hasTerminalActivity ? activeRenderIntervalMs : idleRenderIntervalMs;
+                        var rendererBacklogged = screenUpdateDispatcher.IsBacklogged;
+                        var renderDue =
+                            viewportChanged ||
+                            (!rendererBacklogged && unchecked(nowTick - lastSnapshotTick) >= renderIntervalMs);
+
+                        if (renderDue)
+                        {
+                            snapshot = BuildScreenSnapshot(
+                                terminal,
+                                requestedOffset,
+                                applyFollowTailAnchoring: !alternateScreenActive);
+                            lastSnapshotTick = nowTick;
+                            lastRenderedHistoryLength = snapshot.HistoryLength;
+                            lastRequestedOffset = requestedOffset;
+                            lastAlternateScreenActive = alternateScreenActive;
+                        }
                     }
                 }
                 catch (Exception ex) when (IsTimeoutException(ex))
@@ -1777,7 +2091,7 @@ namespace SSH_Helper.Services.Terminal
                 if (snapshot != null && snapshot.Hash != lastScreenHash)
                 {
                     lastScreenHash = snapshot.Hash;
-                    SetScreenSafe(form, snapshot);
+                    screenUpdateDispatcher.Enqueue(snapshot);
                     if (!hadPendingInput)
                     {
                         await Task.Delay(activeDelayMs, cancellationToken);
@@ -1942,12 +2256,185 @@ namespace SSH_Helper.Services.Terminal
             return mirrorOutput && !string.IsNullOrEmpty(capturedText);
         }
 
+        internal static void AppendTranscriptWithCap(
+            StringBuilder transcriptBuilder,
+            string? capturedText,
+            ref int transcriptLineCount,
+            ref bool previousChunkEndedWithCarriageReturn,
+            ref bool transcriptCapped)
+        {
+            ArgumentNullException.ThrowIfNull(transcriptBuilder);
+            if (transcriptCapped || string.IsNullOrEmpty(capturedText))
+                return;
+
+            transcriptLineCount = Math.Max(0, transcriptLineCount);
+            if (transcriptLineCount >= InteractiveTranscriptMaxLines)
+            {
+                AppendTranscriptCapNotice(
+                    transcriptBuilder,
+                    ref transcriptLineCount,
+                    ref previousChunkEndedWithCarriageReturn,
+                    ref transcriptCapped);
+                return;
+            }
+
+            var remainingLines = InteractiveTranscriptMaxLines - transcriptLineCount;
+            var prefixLength = GetMirrorChunkPrefixLengthWithinCaps(
+                capturedText,
+                remainingLines,
+                previousChunkEndedWithCarriageReturn,
+                out var addedLines,
+                out var endsWithCarriageReturn);
+            if (prefixLength > 0)
+            {
+                transcriptBuilder.Append(capturedText, 0, prefixLength);
+            }
+
+            transcriptLineCount += addedLines;
+            previousChunkEndedWithCarriageReturn = endsWithCarriageReturn;
+
+            if (prefixLength < capturedText.Length || transcriptLineCount >= InteractiveTranscriptMaxLines)
+            {
+                AppendTranscriptCapNotice(
+                    transcriptBuilder,
+                    ref transcriptLineCount,
+                    ref previousChunkEndedWithCarriageReturn,
+                    ref transcriptCapped);
+            }
+        }
+
         internal static string NormalizeMirroredTranscript(string? text)
         {
             if (string.IsNullOrEmpty(text))
                 return string.Empty;
 
             return TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(text));
+        }
+
+        internal static (
+            string Output,
+            int EmittedLines,
+            bool IsCapped,
+            bool PreviousChunkEndedWithCarriageReturn) ApplyMirrorOutputCap(
+            string? chunk,
+            int emittedLines,
+            bool isCapped,
+            bool previousChunkEndedWithCarriageReturn)
+        {
+            if (string.IsNullOrEmpty(chunk))
+            {
+                return (
+                    string.Empty,
+                    Math.Max(0, emittedLines),
+                    isCapped,
+                    previousChunkEndedWithCarriageReturn);
+            }
+
+            var safeEmittedLines = Math.Max(0, emittedLines);
+            if (isCapped || safeEmittedLines >= InteractiveMirrorOutputMaxLines)
+            {
+                return (
+                    string.Empty,
+                    InteractiveMirrorOutputMaxLines,
+                    true,
+                    previousChunkEndedWithCarriageReturn);
+            }
+
+            var remainingLines = InteractiveMirrorOutputMaxLines - safeEmittedLines;
+            var prefixLength = GetMirrorChunkPrefixLengthWithinCaps(
+                chunk,
+                remainingLines,
+                previousChunkEndedWithCarriageReturn,
+                out var addedLines,
+                out var endsWithCarriageReturn);
+            if (prefixLength >= chunk.Length)
+            {
+                var newLineCount = safeEmittedLines + addedLines;
+                var reachedCap = newLineCount >= InteractiveMirrorOutputMaxLines;
+                return (
+                    chunk,
+                    newLineCount,
+                    reachedCap,
+                    endsWithCarriageReturn);
+            }
+
+            var prefix = prefixLength > 0 ? chunk.Substring(0, prefixLength) : string.Empty;
+            return (
+                prefix + InteractiveMirrorOutputCapNotice,
+                InteractiveMirrorOutputMaxLines,
+                true,
+                false);
+        }
+
+        private static void AppendTranscriptCapNotice(
+            StringBuilder transcriptBuilder,
+            ref int transcriptLineCount,
+            ref bool previousChunkEndedWithCarriageReturn,
+            ref bool transcriptCapped)
+        {
+            if (transcriptCapped)
+                return;
+
+            transcriptBuilder.Append(InteractiveTranscriptCapNotice);
+            transcriptLineCount = InteractiveTranscriptMaxLines;
+            previousChunkEndedWithCarriageReturn = false;
+            transcriptCapped = true;
+        }
+
+        private static int GetMirrorChunkPrefixLengthWithinCaps(
+            string chunk,
+            int remainingLines,
+            bool previousChunkEndedWithCarriageReturn,
+            out int addedLines,
+            out bool endsWithCarriageReturn)
+        {
+            var takeLength = 0;
+            var linesAdded = 0;
+            var safeRemainingLines = Math.Max(0, remainingLines);
+            var previousWasCarriageReturn = previousChunkEndedWithCarriageReturn;
+
+            for (var i = 0; i < chunk.Length; i++)
+            {
+                var current = chunk[i];
+                if (safeRemainingLines <= 0 &&
+                    !(previousWasCarriageReturn && current == '\n'))
+                {
+                    break;
+                }
+
+                if (current == '\n')
+                {
+                    if (!previousWasCarriageReturn)
+                    {
+                        if (safeRemainingLines <= 0)
+                            break;
+
+                        safeRemainingLines--;
+                        linesAdded++;
+                    }
+
+                    previousWasCarriageReturn = false;
+                }
+                else if (current == '\r')
+                {
+                    if (safeRemainingLines <= 0)
+                        break;
+
+                    safeRemainingLines--;
+                    linesAdded++;
+                    previousWasCarriageReturn = true;
+                }
+                else
+                {
+                    previousWasCarriageReturn = false;
+                }
+
+                takeLength++;
+            }
+
+            addedLines = linesAdded;
+            endsWithCarriageReturn = previousWasCarriageReturn;
+            return takeLength;
         }
 
         internal static string PrepareMirroredChunkForEmission(
@@ -2085,22 +2572,24 @@ namespace SSH_Helper.Services.Terminal
             return false;
         }
 
-        private static Regex? TryBuildCapturePromptRegex(string? startupOutput)
+        private static CapturePromptSetup TryBuildCapturePromptSetup(string? startupOutput)
         {
             if (string.IsNullOrWhiteSpace(startupOutput))
-                return null;
+                return new CapturePromptSetup(null, string.Empty);
 
             var normalized = TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(startupOutput));
             if (!PromptDetector.TryDetectPromptFromTail(normalized, out var startupPrompt) ||
                 string.IsNullOrWhiteSpace(startupPrompt))
             {
-                return null;
+                return new CapturePromptSetup(null, string.Empty);
             }
 
-            return PromptDetector.BuildPromptRegex(startupPrompt);
+            return new CapturePromptSetup(
+                PromptDetector.BuildPromptRegex(startupPrompt),
+                startupPrompt.TrimEnd());
         }
 
-        private static async Task<Regex?> InitializeSeparateSessionStartupAsync(
+        private static async Task<CapturePromptSetup> InitializeSeparateSessionStartupAsync(
             RebexScripting scripting,
             SshTimeoutOptions timeouts,
             bool debugMode,
@@ -2146,11 +2635,11 @@ namespace SSH_Helper.Services.Terminal
                             continue;
 
                         startupOutput.Append(chunk);
-                        var capturePromptRegex = TryBuildCapturePromptRegex(startupOutput.ToString());
-                        if (capturePromptRegex != null)
+                        var capturePromptSetup = TryBuildCapturePromptSetup(startupOutput.ToString());
+                        if (capturePromptSetup.PromptRegex != null)
                         {
                             FlushCaptureStartupBuffer(scripting, cancellationToken);
-                            return capturePromptRegex;
+                            return capturePromptSetup;
                         }
 
                         var normalized = TerminalOutputProcessor.Normalize(
@@ -2185,12 +2674,67 @@ namespace SSH_Helper.Services.Terminal
                     }
                 }
 
-                return TryBuildCapturePromptRegex(startupOutput.ToString());
+                return TryBuildCapturePromptSetup(startupOutput.ToString());
             }
             finally
             {
                 scripting.Timeout = savedTimeout;
             }
+        }
+
+        internal static string BuildMirroredStartupPromptPrefix(string? startupPromptLiteral)
+        {
+            if (string.IsNullOrWhiteSpace(startupPromptLiteral))
+                return string.Empty;
+
+            var prompt = startupPromptLiteral.TrimEnd();
+            if (prompt.Length == 0)
+                return string.Empty;
+
+            var last = prompt[^1];
+            if (last == '\r' || last == '\n')
+                return prompt;
+
+            if (char.IsWhiteSpace(last))
+                return prompt;
+
+            return prompt + " ";
+        }
+
+        internal static string ResolveStartupPromptLiteral(string? detectedPromptLiteral, string? sessionPromptLiteral)
+        {
+            var detected = detectedPromptLiteral?.TrimEnd();
+            if (!string.IsNullOrWhiteSpace(detected))
+                return detected;
+
+            var fallback = sessionPromptLiteral?.TrimEnd();
+            if (!string.IsNullOrWhiteSpace(fallback))
+                return fallback;
+
+            return string.Empty;
+        }
+
+        internal static string PrependStartupPromptIfMissing(string? transcript, string? startupPromptLiteral)
+        {
+            if (string.IsNullOrEmpty(transcript))
+                return transcript ?? string.Empty;
+
+            var prefix = BuildMirroredStartupPromptPrefix(startupPromptLiteral);
+            if (string.IsNullOrEmpty(prefix))
+                return transcript;
+
+            if (transcript.StartsWith(prefix, StringComparison.Ordinal))
+                return transcript;
+
+            var promptLiteral = startupPromptLiteral?.TrimEnd();
+            if (!string.IsNullOrEmpty(promptLiteral) &&
+                transcript.StartsWith(promptLiteral, StringComparison.Ordinal))
+            {
+                return transcript;
+            }
+
+            var normalizedTranscript = transcript.TrimStart('\r', '\n');
+            return prefix + normalizedTranscript;
         }
 
         internal static string ResolveBannerAcceptKey(Match bannerMatch)
@@ -2255,9 +2799,10 @@ namespace SSH_Helper.Services.Terminal
 
             // Transcript audit should preserve what the user typed while removing
             // non-printable control artifacts (for example backspace squares).
-            return transcript
+            var cleanedTranscript = transcript
                 .Replace("\b", string.Empty, StringComparison.Ordinal)
                 .Replace("\u007F", string.Empty, StringComparison.Ordinal);
+            return cleanedTranscript;
         }
 
         private static bool ShouldBlockSharedShellCommandOnEnter(
@@ -2446,32 +2991,6 @@ namespace SSH_Helper.Services.Terminal
             }
         }
 
-        private static void SetScreenSafe(InteractiveTerminalForm form, TerminalScreenSnapshot snapshot)
-        {
-            if (form.IsDisposed)
-                return;
-
-            try
-            {
-                if (form.InvokeRequired)
-                {
-                    form.BeginInvoke(new Action(() =>
-                    {
-                        if (!form.IsDisposed)
-                            form.SetScreen(snapshot);
-                    }));
-                }
-                else
-                {
-                    form.SetScreen(snapshot);
-                }
-            }
-            catch
-            {
-                // UI closed while rendering.
-            }
-        }
-
         private static void RequestCloseSafe(InteractiveTerminalForm form)
         {
             if (form.IsDisposed)
@@ -2522,7 +3041,8 @@ namespace SSH_Helper.Services.Terminal
             var characters = new char[count];
             var foreColors = new int[count];
             var backColors = new int[count];
-            var hash = new HashCode();
+            var rowHashes = new int[rows];
+            var hash = 17;
             var paletteCache = new Dictionary<int, int>();
             var defaultForeColor = ResolvePaletteColorArgb(
                 palette,
@@ -2535,15 +3055,16 @@ namespace SSH_Helper.Services.Terminal
                 Color.Black.ToArgb(),
                 paletteCache);
 
-            hash.Add(columns);
-            hash.Add(rows);
-            hash.Add(historyLength);
-            hash.Add(appliedOffset);
-            hash.Add(effectiveOffset);
+            hash = CombineHash(hash, columns);
+            hash = CombineHash(hash, rows);
+            hash = CombineHash(hash, historyLength);
+            hash = CombineHash(hash, appliedOffset);
+            hash = CombineHash(hash, effectiveOffset);
 
             var absoluteIndex = 0;
             for (var row = 0; row < rows; row++)
             {
+                var rowHash = 17;
                 var sourceRow = row - effectiveOffset;
                 for (var column = 0; column < columns; column++)
                 {
@@ -2563,15 +3084,18 @@ namespace SSH_Helper.Services.Terminal
                         foreColor = defaultForeColor;
                     }
 
-                    hash.Add(character);
-                    hash.Add(foreColor);
-                    hash.Add(backColor);
+                    rowHash = CombineHash(rowHash, character);
+                    rowHash = CombineHash(rowHash, foreColor);
+                    rowHash = CombineHash(rowHash, backColor);
                     characters[absoluteIndex] = character;
                     foreColors[absoluteIndex] = foreColor;
                     backColors[absoluteIndex] = backColor;
 
                     absoluteIndex++;
                 }
+
+                rowHashes[row] = rowHash;
+                hash = CombineHash(hash, rowHash);
             }
 
             var cursorColumn = -1;
@@ -2607,10 +3131,10 @@ namespace SSH_Helper.Services.Terminal
                 }
             }
 
-            hash.Add(cursorColumn);
-            hash.Add(cursorRow);
-            hash.Add(cursorForeColor);
-            hash.Add(cursorBackColor);
+            hash = CombineHash(hash, cursorColumn);
+            hash = CombineHash(hash, cursorRow);
+            hash = CombineHash(hash, cursorForeColor);
+            hash = CombineHash(hash, cursorBackColor);
 
             return new TerminalScreenSnapshot
             {
@@ -2621,11 +3145,12 @@ namespace SSH_Helper.Services.Terminal
                 Characters = characters,
                 ForeColors = foreColors,
                 BackColors = backColors,
+                RowHashes = rowHashes,
                 CursorColumn = cursorColumn,
                 CursorRow = cursorRow,
                 CursorForeColor = cursorForeColor,
                 CursorBackColor = cursorBackColor,
-                Hash = hash.ToHashCode()
+                Hash = hash
             };
         }
 
@@ -2693,6 +3218,14 @@ namespace SSH_Helper.Services.Terminal
         private static void ResetTerminalState(ITerminal terminal)
         {
             terminal.Screen.Clear(true);
+        }
+
+        private static int CombineHash(int current, int value)
+        {
+            unchecked
+            {
+                return (current * 397) ^ value;
+            }
         }
 
         private static int ResolvePaletteColorArgb(

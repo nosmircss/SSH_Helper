@@ -1026,11 +1026,18 @@ namespace SSH_Helper.Services
                 context.Session = session;
                 context.DebugMode = DebugMode;
                 SeedConnectionVariables(context, host, username, password, timeouts);
+                var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
                 // Wire up context output to our events
                 context.OutputReceived += (s, e) =>
                 {
                     var output = FormatScriptOutput(e.Message, e.Type);
+                    var boundaryAdjusted = NormalizeScriptOutputBoundary(
+                        output,
+                        e.Type,
+                        previousOutputEndedWithLineTerminator);
+                    output = boundaryAdjusted.Output;
+                    previousOutputEndedWithLineTerminator = boundaryAdjusted.EndsWithLineTerminator;
                     if (string.IsNullOrEmpty(output))
                         return;
 
@@ -1171,11 +1178,18 @@ namespace SSH_Helper.Services
             context.Session = session;
             context.DebugMode = DebugMode;
             SeedConnectionVariables(context, host, username, password, timeouts);
+            var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
             // Wire up context output to our events
             context.OutputReceived += (s, e) =>
             {
                 var output = FormatScriptOutput(e.Message, e.Type);
+                var boundaryAdjusted = NormalizeScriptOutputBoundary(
+                    output,
+                    e.Type,
+                    previousOutputEndedWithLineTerminator);
+                output = boundaryAdjusted.Output;
+                previousOutputEndedWithLineTerminator = boundaryAdjusted.EndsWithLineTerminator;
                 if (string.IsNullOrEmpty(output))
                     return;
 
@@ -1231,10 +1245,17 @@ namespace SSH_Helper.Services
             context.Session = null;
             context.DebugMode = DebugMode;
             SeedConnectionVariables(context, host, username, password, SshTimeoutOptions.Default);
+            var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
             context.OutputReceived += (s, e) =>
             {
                 var output = FormatScriptOutput(e.Message, e.Type);
+                var boundaryAdjusted = NormalizeScriptOutputBoundary(
+                    output,
+                    e.Type,
+                    previousOutputEndedWithLineTerminator);
+                output = boundaryAdjusted.Output;
+                previousOutputEndedWithLineTerminator = boundaryAdjusted.EndsWithLineTerminator;
                 if (string.IsNullOrEmpty(output))
                     return;
 
@@ -1613,6 +1634,54 @@ namespace SSH_Helper.Services
             }
 
             return EnsureTrailingNewLine(message);
+        }
+
+        internal static (string Output, bool EndsWithLineTerminator) NormalizeScriptOutputBoundary(
+            string output,
+            ScriptOutputType outputType,
+            bool previousOutputEndedWithLineTerminator)
+        {
+            if (string.IsNullOrEmpty(output))
+                return (string.Empty, previousOutputEndedWithLineTerminator);
+
+            var normalized = output;
+            if (outputType != ScriptOutputType.RawChunk &&
+                !previousOutputEndedWithLineTerminator &&
+                !StartsWithLineTerminator(normalized))
+            {
+                normalized = Environment.NewLine + normalized;
+            }
+
+            return (normalized, EndsWithLineTerminator(normalized));
+        }
+
+        internal static bool StartsWithLineTerminator(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return false;
+
+            var first = value[0];
+            return first == '\r' || first == '\n';
+        }
+
+        internal static bool EndsWithLineTerminator(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return false;
+
+            var last = value[^1];
+            return last == '\r' || last == '\n';
+        }
+
+        internal static bool EndsWithLineTerminator(StringBuilder builder)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+
+            if (builder.Length == 0)
+                return true;
+
+            var last = builder[builder.Length - 1];
+            return last == '\r' || last == '\n';
         }
 
         protected virtual void OnColumnUpdateRequested(HostConnection host, string columnName, string value)

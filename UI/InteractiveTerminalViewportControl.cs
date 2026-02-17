@@ -32,6 +32,7 @@ namespace SSH_Helper.UI
         private Point _selectionCaret = InvalidCell;
         private bool _isSelecting;
         private bool _selectionDragged;
+        private readonly Dictionary<int, SolidBrush> _brushCache = new();
 
         public InteractiveTerminalViewportControl()
         {
@@ -85,9 +86,63 @@ namespace SSH_Helper.UI
 
         public void SetSnapshot(TerminalScreenSnapshot snapshot)
         {
+            var previousSnapshot = _snapshot;
             _snapshot = snapshot;
             NormalizeSelectionBounds(snapshot);
-            Invalidate();
+            InvalidateSnapshotDelta(previousSnapshot, snapshot);
+        }
+
+        private void InvalidateSnapshotDelta(TerminalScreenSnapshot? previousSnapshot, TerminalScreenSnapshot currentSnapshot)
+        {
+            if (previousSnapshot == null ||
+                previousSnapshot.Columns != currentSnapshot.Columns ||
+                previousSnapshot.Rows != currentSnapshot.Rows)
+            {
+                Invalidate();
+                return;
+            }
+
+            var rows = currentSnapshot.Rows;
+            var previousRowHashes = previousSnapshot.RowHashes;
+            var currentRowHashes = currentSnapshot.RowHashes;
+            if (previousRowHashes.Length != rows || currentRowHashes.Length != rows)
+            {
+                Invalidate();
+                return;
+            }
+
+            var rowScanCount = rows;
+            var minDirtyRow = int.MaxValue;
+            var maxDirtyRow = -1;
+
+            for (var row = 0; row < rowScanCount; row++)
+            {
+                if (previousRowHashes[row] == currentRowHashes[row])
+                    continue;
+
+                minDirtyRow = Math.Min(minDirtyRow, row);
+                maxDirtyRow = Math.Max(maxDirtyRow, row);
+            }
+
+            if (previousSnapshot.CursorRow >= 0 && previousSnapshot.CursorRow < rows)
+            {
+                minDirtyRow = Math.Min(minDirtyRow, previousSnapshot.CursorRow);
+                maxDirtyRow = Math.Max(maxDirtyRow, previousSnapshot.CursorRow);
+            }
+
+            if (currentSnapshot.CursorRow >= 0 && currentSnapshot.CursorRow < rows)
+            {
+                minDirtyRow = Math.Min(minDirtyRow, currentSnapshot.CursorRow);
+                maxDirtyRow = Math.Max(maxDirtyRow, currentSnapshot.CursorRow);
+            }
+
+            if (maxDirtyRow < minDirtyRow)
+                return;
+
+            var cellHeight = Math.Max(1, EnsureCellSize().Height);
+            var y = minDirtyRow * cellHeight;
+            var height = Math.Max(1, (maxDirtyRow - minDirtyRow + 1) * cellHeight);
+            Invalidate(new Rectangle(0, y, Math.Max(1, ClientSize.Width), height));
         }
 
         public void ClearSelection()
@@ -285,6 +340,11 @@ namespace SSH_Helper.UI
             if (disposing)
             {
                 _cursorBlinkTimer.Dispose();
+                foreach (var brush in _brushCache.Values)
+                {
+                    brush.Dispose();
+                }
+                _brushCache.Clear();
             }
 
             base.Dispose(disposing);
@@ -293,7 +353,7 @@ namespace SSH_Helper.UI
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            e.Graphics.Clear(BackColor);
+            FillBackground(e.Graphics, BackColor.ToArgb(), e.ClipRectangle);
 
             var snapshot = _snapshot;
             if (snapshot == null || snapshot.Columns <= 0 || snapshot.Rows <= 0)
@@ -308,79 +368,69 @@ namespace SSH_Helper.UI
             var characters = snapshot.Characters;
             var foreColors = snapshot.ForeColors;
             var backColors = snapshot.BackColors;
-            var brushCache = new Dictionary<int, SolidBrush>();
+            var clip = e.ClipRectangle;
+            var startRow = Math.Clamp(clip.Top / cellHeight, 0, rows - 1);
+            var endRow = Math.Clamp(Math.Max(0, clip.Bottom - 1) / cellHeight, 0, rows - 1);
+            var startColumn = Math.Clamp(clip.Left / cellWidth, 0, columns - 1);
+            var endColumn = Math.Clamp(Math.Max(0, clip.Right - 1) / cellWidth, 0, columns - 1);
 
-            try
+            for (var row = startRow; row <= endRow; row++)
             {
-                for (var row = 0; row < rows; row++)
+                var rowOffset = row * columns;
+                var y = row * cellHeight;
+                var column = startColumn;
+
+                while (column <= endColumn)
                 {
-                    var rowOffset = row * columns;
-                    var y = row * cellHeight;
-                    var column = 0;
+                    var runStart = column;
+                    var runIndex = rowOffset + column;
+                    var runSelected = hasSelection && runIndex >= selectedStartIndex && runIndex <= selectedEndIndex;
+                    var runFore = runSelected ? SelectionForeColorArgb : foreColors[runIndex];
+                    var runBack = runSelected ? SelectionBackColorArgb : backColors[runIndex];
+                    column++;
 
-                    while (column < columns)
+                    while (column <= endColumn)
                     {
-                        var runStart = column;
-                        var runIndex = rowOffset + column;
-                        var runSelected = hasSelection && runIndex >= selectedStartIndex && runIndex <= selectedEndIndex;
-                        var runFore = runSelected ? SelectionForeColorArgb : foreColors[runIndex];
-                        var runBack = runSelected ? SelectionBackColorArgb : backColors[runIndex];
+                        runIndex = rowOffset + column;
+                        var currentSelected = hasSelection && runIndex >= selectedStartIndex && runIndex <= selectedEndIndex;
+                        var currentFore = currentSelected ? SelectionForeColorArgb : foreColors[runIndex];
+                        var currentBack = currentSelected ? SelectionBackColorArgb : backColors[runIndex];
+                        if (currentFore != runFore || currentBack != runBack)
+                            break;
+
                         column++;
+                    }
 
-                        while (column < columns)
-                        {
-                            runIndex = rowOffset + column;
-                            var currentSelected = hasSelection && runIndex >= selectedStartIndex && runIndex <= selectedEndIndex;
-                            var currentFore = currentSelected ? SelectionForeColorArgb : foreColors[runIndex];
-                            var currentBack = currentSelected ? SelectionBackColorArgb : backColors[runIndex];
+                    var runLength = column - runStart;
+                    if (runLength <= 0)
+                        continue;
 
-                            if (currentFore != runFore || currentBack != runBack)
-                                break;
+                    var x = runStart * cellWidth;
+                    var width = runLength * cellWidth;
+                    var rect = new Rectangle(x, y, width, cellHeight);
+                    FillBackground(e.Graphics, runBack, rect);
 
-                            column++;
-                        }
-
-                        var runLength = column - runStart;
-                        if (runLength <= 0)
-                            continue;
-
-                        var x = runStart * cellWidth;
-                        var width = runLength * cellWidth;
-                        var rect = new Rectangle(x, y, width, cellHeight);
-                        FillBackground(e.Graphics, brushCache, runBack, rect);
-
-                        if (!AllSpaces(characters, rowOffset + runStart, runLength))
-                        {
-                            var text = new string(characters, rowOffset + runStart, runLength);
-                            TextRenderer.DrawText(
-                                e.Graphics,
-                                text,
-                                Font,
-                                rect,
-                                Color.FromArgb(runFore),
-                                Color.FromArgb(runBack),
-                                DrawTextFlags);
-                        }
+                    if (!AllSpaces(characters, rowOffset + runStart, runLength))
+                    {
+                        DrawRunText(
+                            e.Graphics,
+                            characters.AsSpan(rowOffset + runStart, runLength),
+                            rect,
+                            runFore,
+                            runBack);
                     }
                 }
+            }
 
-                DrawCursor(e.Graphics, snapshot, brushCache, cellWidth, cellHeight);
-            }
-            finally
-            {
-                foreach (var brush in brushCache.Values)
-                {
-                    brush.Dispose();
-                }
-            }
+            DrawCursor(e.Graphics, snapshot, cellWidth, cellHeight);
         }
 
-        private static void FillBackground(Graphics graphics, Dictionary<int, SolidBrush> brushCache, int backColorArgb, Rectangle rect)
+        private void FillBackground(Graphics graphics, int backColorArgb, Rectangle rect)
         {
-            if (!brushCache.TryGetValue(backColorArgb, out var brush))
+            if (!_brushCache.TryGetValue(backColorArgb, out var brush))
             {
                 brush = new SolidBrush(Color.FromArgb(backColorArgb));
-                brushCache[backColorArgb] = brush;
+                _brushCache[backColorArgb] = brush;
             }
 
             graphics.FillRectangle(brush, rect);
@@ -389,7 +439,6 @@ namespace SSH_Helper.UI
         private void DrawCursor(
             Graphics graphics,
             TerminalScreenSnapshot snapshot,
-            Dictionary<int, SolidBrush> brushCache,
             int cellWidth,
             int cellHeight)
         {
@@ -412,20 +461,51 @@ namespace SSH_Helper.UI
                 cellWidth,
                 cellHeight);
 
-            FillBackground(graphics, brushCache, snapshot.CursorBackColor, rect);
+            FillBackground(graphics, snapshot.CursorBackColor, rect);
 
             var character = snapshot.Characters[cellIndex];
             if (character != ' ')
             {
-                TextRenderer.DrawText(
+                Span<char> cursorText = stackalloc char[1];
+                cursorText[0] = character;
+                DrawRunText(
                     graphics,
-                    new string(character, 1),
-                    Font,
+                    cursorText,
                     rect,
-                    Color.FromArgb(snapshot.CursorForeColor),
-                    Color.FromArgb(snapshot.CursorBackColor),
-                    DrawTextFlags);
+                    snapshot.CursorForeColor,
+                    snapshot.CursorBackColor);
             }
+        }
+
+        private void DrawRunText(
+            Graphics graphics,
+            ReadOnlySpan<char> text,
+            Rectangle rect,
+            int foreColorArgb,
+            int backColorArgb)
+        {
+            var foreColor = Color.FromArgb(foreColorArgb);
+            var backColor = Color.FromArgb(backColorArgb);
+#if NET8_0_OR_GREATER
+            TextRenderer.DrawText(
+                graphics,
+                text,
+                Font,
+                rect,
+                foreColor,
+                backColor,
+                DrawTextFlags);
+#else
+            var textValue = text.ToString();
+            TextRenderer.DrawText(
+                graphics,
+                textValue,
+                Font,
+                rect,
+                foreColor,
+                backColor,
+                DrawTextFlags);
+#endif
         }
 
         private void NormalizeSelectionBounds(TerminalScreenSnapshot snapshot)

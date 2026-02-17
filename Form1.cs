@@ -92,6 +92,7 @@ namespace SSH_Helper
         private const int SmallHistoryPayloadCharThreshold = 500_000;
         private const int OutputTextRecreateThresholdChars = 500_000;
         private const int OutputTextRecreateTargetChars = 100_000;
+        private static readonly TimeSpan AutomaticHistoryCompactionCooldown = TimeSpan.FromSeconds(2);
         private static readonly string FolderSummarySeparator = new string('=', 60);
         private static readonly string FolderSummarySubSeparator = new string('=', 9);
 
@@ -157,8 +158,8 @@ namespace SSH_Helper
         private HistoryRunPayload? _loadedHistoryPayload;
         private bool _loadedHistoryPayloadHasDetails;
         private bool _loadedHistoryPayloadHasHostOutputs;
-        private bool _loadedHistoryPayloadHasFullOutput;
-
+        private DateTime _lastAutomaticHistoryCompactionUtc = DateTime.MinValue;
+        private string? _lastHistorySelectionGcEntryId;
         // Output state
         private readonly StringBuilder _outputBuffer = new();
         private readonly object _outputBufferLock = new();
@@ -169,6 +170,9 @@ namespace SSH_Helper
 
         // Track which TreeView triggered the context menu
         private TreeView? _contextMenuSourceTreeView;
+        private readonly ToolStripSeparator _ctxFolderExpandCollapseSeparator = new();
+        private readonly ToolStripMenuItem _ctxExpandAllSubfolders = new();
+        private readonly ToolStripMenuItem _ctxCollapseAllSubfolders = new();
 
         // Script editor services
         private ScriptAutocompleteProvider? _scriptAutocompleteProvider;
@@ -198,6 +202,7 @@ namespace SSH_Helper
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
             InitializeComponent();
+            InitializeFolderExpandCollapseContextMenuItems();
             Text = $"{ApplicationName} {ApplicationVersion}";
 
             var uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
@@ -286,6 +291,9 @@ namespace SSH_Helper
                 AutoSizeColumnsToContent();
             }
 
+            // After startup restore/layout, ensure selected preset is actually in viewport.
+            BeginInvoke((Action)EnsureSelectedPresetNodeVisible);
+
             var config = _configService.GetCurrent();
             if (config.UpdateSettings.CheckOnStartup)
             {
@@ -310,6 +318,39 @@ namespace SSH_Helper
                 }
             }
             _suppressExpandCollapseEvents = false;
+        }
+
+        private void EnsureSelectedPresetNodeVisible()
+        {
+            if (trvPresets.IsDisposed)
+                return;
+
+            var selectedNode = trvPresets.SelectedNode;
+            if (selectedNode == null)
+                return;
+
+            // Preserve saved collapse state: do not auto-expand collapsed branches.
+            if (HasCollapsedAncestor(selectedNode))
+                return;
+
+            if (!selectedNode.IsVisible)
+            {
+                selectedNode.EnsureVisible();
+            }
+        }
+
+        private static bool HasCollapsedAncestor(TreeNode node)
+        {
+            var parent = node.Parent;
+            while (parent != null)
+            {
+                if (!parent.IsExpanded)
+                    return true;
+
+                parent = parent.Parent;
+            }
+
+            return false;
         }
 
         #endregion
@@ -787,7 +828,6 @@ namespace SSH_Helper
                 _loadedHistoryPayload = null;
                 _loadedHistoryPayloadHasDetails = false;
                 _loadedHistoryPayloadHasHostOutputs = false;
-                _loadedHistoryPayloadHasFullOutput = false;
                 _selectedHistoryOutput = string.Empty;
 
                 if (!string.IsNullOrWhiteSpace(selectEntryId))
@@ -854,8 +894,7 @@ namespace SSH_Helper
             out HistoryRunPayload payload,
             bool showError = true,
             bool requireDetails = false,
-            bool requireHostOutputs = false,
-            bool requireFullOutput = false)
+            bool requireHostOutputs = false)
         {
             payload = new HistoryRunPayload();
             if (string.IsNullOrWhiteSpace(entryId))
@@ -874,10 +913,6 @@ namespace SSH_Helper
                 {
                     // Cached payload was loaded without host output bodies; reload host outputs on demand.
                 }
-                else if (requireFullOutput && !_loadedHistoryPayloadHasFullOutput)
-                {
-                    // Cached payload output was trimmed for lightweight display; reload full output on demand.
-                }
                 else
                 {
                     payload = _loadedHistoryPayload;
@@ -885,22 +920,17 @@ namespace SSH_Helper
                 }
             }
 
-            var shouldTrimOutput = !requireDetails && !requireHostOutputs && !requireFullOutput;
             if (_historyStorage.TryLoadRunPayload(
                     entryId,
                     out var loadedPayload,
                     includeDetails: requireDetails,
-                    includeHostOutputs: requireHostOutputs,
-                    maxOutputChars: shouldTrimOutput
-                        ? MemoryPressureGuard.MaxVisibleOutputChars
-                        : null) && loadedPayload != null)
+                    includeHostOutputs: requireHostOutputs) && loadedPayload != null)
             {
                 var previousPayloadChars = EstimatePayloadTextChars(_loadedHistoryPayload);
                 _loadedHistoryPayloadId = entryId;
                 _loadedHistoryPayload = loadedPayload;
                 _loadedHistoryPayloadHasDetails = !hasPersistedDetails || requireDetails;
                 _loadedHistoryPayloadHasHostOutputs = !hasPersistedHostResults || requireHostOutputs;
-                _loadedHistoryPayloadHasFullOutput = !shouldTrimOutput;
                 payload = loadedPayload;
                 MaybeCompactAfterPayloadSwap(previousPayloadChars, loadedPayload);
                 return true;
@@ -963,17 +993,42 @@ namespace SSH_Helper
             return chars;
         }
 
-        private static void MaybeCompactAfterPayloadSwap(long previousPayloadChars, HistoryRunPayload nextPayload)
+        private void MaybeCompactAfterPayloadSwap(long previousPayloadChars, HistoryRunPayload nextPayload)
         {
-            if (previousPayloadChars < LargeHistoryPayloadCharThreshold)
-                return;
-
             var nextPayloadChars = EstimatePayloadTextChars(nextPayload);
-            if (nextPayloadChars > SmallHistoryPayloadCharThreshold)
+            var releasedLargePayload =
+                previousPayloadChars >= LargeHistoryPayloadCharThreshold &&
+                nextPayloadChars <= SmallHistoryPayloadCharThreshold;
+            MaybeRunAutomaticHistoryCompaction(releasedLargePayload);
+        }
+
+        private void MaybeCompactAfterPayloadClear(long releasedPayloadChars)
+        {
+            MaybeRunAutomaticHistoryCompaction(releasedPayloadChars >= LargeHistoryPayloadCharThreshold);
+        }
+
+        private void MaybeRunAutomaticHistoryCompaction(bool shouldCompact)
+        {
+            if (!shouldCompact)
                 return;
 
+            var nowUtc = DateTime.UtcNow;
+            if (nowUtc - _lastAutomaticHistoryCompactionUtc < AutomaticHistoryCompactionCooldown)
+                return;
+
+            _lastAutomaticHistoryCompactionUtc = nowUtc;
             GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, blocking: false, compacting: true);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+
+        private static void RunHistorySwitchGc()
+        {
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
         }
 
         private static HistoryIndexEntry BuildHistoryIndexEntry(string id, string label, HistoryRunPayload payload)
@@ -4514,39 +4569,9 @@ namespace SSH_Helper
         private string TrimMemoryPressureNow()
         {
             long removedChars = 0;
-            int trimmedOutputPanel = 0;
             int trimmedOutputBuffer = 0;
 
-            if (txtOutput.TextLength > MemoryPressureGuard.MaxVisibleOutputChars)
-            {
-                var currentText = txtOutput.Text;
-                var trimmedText = MemoryPressureGuard.TrimVisibleOutput(currentText);
-                if (!string.Equals(currentText, trimmedText, StringComparison.Ordinal))
-                {
-                    txtOutput.Text = trimmedText;
-                    ScrollOutputToEnd();
-                    trimmedOutputPanel++;
-                    removedChars += currentText.Length - trimmedText.Length;
-                }
-            }
-
-            lock (_outputBufferLock)
-            {
-                if (_outputBuffer.Length > MemoryPressureGuard.MaxInMemoryOutputBufferChars)
-                {
-                    var currentBuffer = _outputBuffer.ToString();
-                    var trimmedBuffer = MemoryPressureGuard.TrimInMemoryOutputBuffer(currentBuffer);
-                    if (!string.Equals(currentBuffer, trimmedBuffer, StringComparison.Ordinal))
-                    {
-                        _outputBuffer.Clear();
-                        _outputBuffer.Append(trimmedBuffer);
-                        trimmedOutputBuffer++;
-                        removedChars += currentBuffer.Length - trimmedBuffer.Length;
-                    }
-                }
-            }
-
-            var trimmedItemCount = trimmedOutputPanel + trimmedOutputBuffer;
+            var trimmedItemCount = trimmedOutputBuffer;
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
@@ -4554,7 +4579,6 @@ namespace SSH_Helper
             var sb = new StringBuilder();
             sb.AppendLine($"Trim complete. Estimated reduction: {FormatBytes(removedChars * 2L)}");
             sb.AppendLine($"Trimmed items: {trimmedItemCount:N0}");
-            sb.AppendLine($"- Output panel text: {trimmedOutputPanel:N0}");
             if (trimmedOutputBuffer > 0)
             {
                 sb.AppendLine($"- Live output buffer: {trimmedOutputBuffer:N0}");
@@ -4578,25 +4602,13 @@ namespace SSH_Helper
             var beforePrivate = process.PrivateMemorySize64;
             var beforeManaged = GC.GetTotalMemory(false);
 
-            var visibleText = MemoryPressureGuard.TrimVisibleOutput(txtOutput.Text);
+            var visibleText = txtOutput.Text;
             RecreateOutputTextBoxIfNeeded(visibleText.Length, force: true);
             txtOutput.Text = visibleText;
             txtOutput.ClearUndo();
             ScrollOutputToEnd();
 
             ClearLoadedHistoryPayload();
-
-            lock (_outputBufferLock)
-            {
-                if (_outputBuffer.Length > MemoryPressureGuard.MaxInMemoryOutputBufferChars)
-                {
-                    var trimmedBuffer = MemoryPressureGuard.TrimInMemoryOutputBuffer(_outputBuffer.ToString());
-                    _outputBuffer.Clear();
-                    _outputBuffer.Append(trimmedBuffer);
-                }
-
-                ShrinkOutputBufferCapacityIfNeeded_NoLock();
-            }
 
             GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
             GC.Collect();
@@ -4805,6 +4817,204 @@ namespace SSH_Helper
             ctxToggleSorting.Text = $"Toggle Sorting ({_currentSortMode})";
         }
 
+        private void InitializeFolderExpandCollapseContextMenuItems()
+        {
+            _ctxFolderExpandCollapseSeparator.Name = "ctxFolderExpandCollapseSeparator";
+            _ctxExpandAllSubfolders.Name = "ctxExpandAllSubfolders";
+            _ctxExpandAllSubfolders.Text = "E&xpand All Subfolders";
+            _ctxExpandAllSubfolders.Click += CtxExpandAllSubfolders_Click;
+
+            _ctxCollapseAllSubfolders.Name = "ctxCollapseAllSubfolders";
+            _ctxCollapseAllSubfolders.Text = "C&ollapse All Subfolders";
+            _ctxCollapseAllSubfolders.Click += CtxCollapseAllSubfolders_Click;
+
+            if (contextPresetLst.Items.Contains(_ctxExpandAllSubfolders))
+            {
+                return;
+            }
+
+            contextPresetLst.Items.Add(_ctxFolderExpandCollapseSeparator);
+            contextPresetLst.Items.Add(_ctxExpandAllSubfolders);
+            contextPresetLst.Items.Add(_ctxCollapseAllSubfolders);
+        }
+
+        private void CtxExpandAllSubfolders_Click(object? sender, EventArgs e)
+        {
+            ExpandCollapseFolderSubtree(expand: true);
+        }
+
+        private void CtxCollapseAllSubfolders_Click(object? sender, EventArgs e)
+        {
+            ExpandCollapseFolderSubtree(expand: false);
+        }
+
+        private void ExpandCollapseFolderSubtree(bool expand)
+        {
+            var folderNode = ResolveContextMenuFolderNode();
+            if (folderNode?.Tag is not PresetNodeTag folderTag || !folderTag.IsFolder)
+            {
+                return;
+            }
+
+            var treeView = folderNode.TreeView;
+            var topNodeBefore = treeView?.TopNode;
+
+            var folderPaths = new List<string>();
+            CollectFolderPaths(folderNode, folderPaths);
+            if (folderPaths.Count == 0)
+            {
+                return;
+            }
+
+            _suppressExpandCollapseEvents = true;
+            treeView?.BeginUpdate();
+            try
+            {
+                if (expand)
+                {
+                    folderNode.ExpandAll();
+                }
+                else
+                {
+                    CollapseFolderNodeRecursive(folderNode);
+                }
+
+                // Keep viewport anchoring while redraw is still suspended
+                // so users never see the temporary scroll jump.
+                if (treeView != null && topNodeBefore != null)
+                {
+                    TryRestoreTopNode(treeView, topNodeBefore, folderNode);
+                }
+            }
+            finally
+            {
+                treeView?.EndUpdate();
+                _suppressExpandCollapseEvents = false;
+            }
+
+            foreach (var folderPath in folderPaths)
+            {
+                if (_presetManager.Folders.TryGetValue(folderPath, out var folderInfo) &&
+                    folderInfo.IsExpanded == expand)
+                {
+                    continue;
+                }
+
+                _presetManager.SetFolderExpanded(folderPath, expand);
+            }
+
+            UpdateStatusBar(expand
+                ? $"Expanded all folders under '{folderTag.Name}'"
+                : $"Collapsed all folders under '{folderTag.Name}'");
+        }
+
+        private static void TryRestoreTopNode(TreeView treeView, TreeNode preferredTopNode, TreeNode fallbackNode)
+        {
+            if (TrySetTopNode(treeView, preferredTopNode))
+            {
+                return;
+            }
+
+            var ancestor = preferredTopNode.Parent;
+            while (ancestor != null)
+            {
+                if (TrySetTopNode(treeView, ancestor))
+                {
+                    return;
+                }
+
+                ancestor = ancestor.Parent;
+            }
+
+            TrySetTopNode(treeView, fallbackNode);
+        }
+
+        private static bool TrySetTopNode(TreeView treeView, TreeNode node)
+        {
+            if (node.TreeView != treeView)
+            {
+                return false;
+            }
+
+            try
+            {
+                treeView.TopNode = node;
+                return true;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        private TreeNode? ResolveContextMenuFolderNode()
+        {
+            if (_contextMenuSourceTreeView?.SelectedNode?.Tag is PresetNodeTag sourceTag && sourceTag.IsFolder)
+            {
+                return _contextMenuSourceTreeView.SelectedNode;
+            }
+
+            if (trvPresets.SelectedNode?.Tag is PresetNodeTag presetTag && presetTag.IsFolder)
+            {
+                return trvPresets.SelectedNode;
+            }
+
+            return null;
+        }
+
+        private static bool HasFolderDescendants(TreeNode? folderNode)
+        {
+            if (folderNode == null)
+            {
+                return false;
+            }
+
+            foreach (TreeNode child in folderNode.Nodes)
+            {
+                if (child.Tag is PresetNodeTag childTag && childTag.IsFolder)
+                {
+                    return true;
+                }
+
+                if (HasFolderDescendants(child))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void CollectFolderPaths(TreeNode node, List<string> folderPaths)
+        {
+            if (node.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                folderPaths.Add(tag.Name);
+            }
+
+            foreach (TreeNode child in node.Nodes)
+            {
+                CollectFolderPaths(child, folderPaths);
+            }
+        }
+
+        private static void CollapseFolderNodeRecursive(TreeNode node)
+        {
+            foreach (TreeNode child in node.Nodes)
+            {
+                CollapseFolderNodeRecursive(child);
+            }
+
+            if (node.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                node.Collapse();
+            }
+        }
+
         private void ExportPreset_Click(object? sender, EventArgs e)
         {
             ExportPreset(preferContextSource: sender == ctxExportPreset);
@@ -4838,6 +5048,7 @@ namespace SSH_Helper
             bool isPreset = tag != null && !tag.IsFolder;
             bool hasSelection = tag != null;
             bool isFavoritesTab = _contextMenuSourceTreeView == trvFavorites;
+            bool hasSubfolders = isFolder && HasFolderDescendants(_contextMenuSourceTreeView?.SelectedNode);
 
             // On Favorites tab, only show limited options: Rename and Toggle Favorite
             if (isFavoritesTab)
@@ -4868,6 +5079,9 @@ namespace SSH_Helper
                 ctxRenameFolder.Visible = isFolder;
                 ctxDeleteFolder.Visible = false;
                 ctxMoveToFolder.Visible = false;
+                _ctxFolderExpandCollapseSeparator.Visible = false;
+                _ctxExpandAllSubfolders.Visible = false;
+                _ctxCollapseAllSubfolders.Visible = false;
 
                 // Hide all separators on Favorites tab
                 toolStripSeparator6.Visible = false;
@@ -4891,6 +5105,9 @@ namespace SSH_Helper
             ctxAddFolder.Visible = true;
             ctxRenameFolder.Visible = isFolder;
             ctxDeleteFolder.Visible = isFolder;
+            _ctxFolderExpandCollapseSeparator.Visible = hasSubfolders;
+            _ctxExpandAllSubfolders.Visible = hasSubfolders;
+            _ctxCollapseAllSubfolders.Visible = hasSubfolders;
 
             // Move to folder - only for presets
             ctxMoveToFolder.Visible = isPreset;
@@ -5160,69 +5377,86 @@ namespace SSH_Helper
             if (_suppressHistorySelectionChanged || !_historySelectionHandlingEnabled)
                 return;
 
-            if (lstOutput.SelectedItem is not HistoryListItem entry)
-            {
-                _currentHostResults = null;
-                _selectedHistoryOutput = string.Empty;
-                lstHosts.Items.Clear();
-                historySplitContainer.Panel2Collapsed = true;
-                return;
-            }
+            var selectedEntryId = (lstOutput.SelectedItem as HistoryListItem)?.Id;
+            var shouldRunHistorySwitchGc = !string.Equals(
+                _lastHistorySelectionGcEntryId,
+                selectedEntryId,
+                StringComparison.Ordinal);
 
-            if (!TryLoadHistoryPayload(entry.Id, out var payload))
+            try
             {
-                historySplitContainer.Panel2Collapsed = true;
-                lstHosts.Items.Clear();
-                _currentHostResults = null;
-                _selectedHistoryOutput = string.Empty;
-                SetOutputText(string.Empty);
-                return;
-            }
-
-            _selectedHistoryOutput = payload.Output ?? string.Empty;
-            _currentHostResults = payload.HostResults != null && payload.HostResults.Count > 0
-                ? payload.HostResults
-                : null;
-            entry.HasHostResults = _currentHostResults != null;
-            var hasDetails = _historyIndexEntries.TryGetValue(entry.Id, out var existingIndexEntry)
-                ? existingIndexEntry.HasDetails
-                : payload.Details != null;
-            entry.HasDetails = hasDetails;
-
-            if (_historyIndexEntries.TryGetValue(entry.Id, out var indexEntry))
-            {
-                indexEntry.HasHostResults = entry.HasHostResults;
-                indexEntry.HasDetails = hasDetails;
-            }
-
-            if (_currentHostResults != null)
-            {
-                _suppressHostSelectionChanged = true;
-                lstHosts.BeginUpdate();
-                try
+                if (lstOutput.SelectedItem is not HistoryListItem entry)
                 {
+                    _currentHostResults = null;
+                    _selectedHistoryOutput = string.Empty;
                     lstHosts.Items.Clear();
-                    foreach (var hostResult in _currentHostResults)
+                    historySplitContainer.Panel2Collapsed = true;
+                    return;
+                }
+
+                if (!TryLoadHistoryPayload(entry.Id, out var payload))
+                {
+                    historySplitContainer.Panel2Collapsed = true;
+                    lstHosts.Items.Clear();
+                    _currentHostResults = null;
+                    _selectedHistoryOutput = string.Empty;
+                    SetOutputText(string.Empty);
+                    return;
+                }
+
+                _selectedHistoryOutput = payload.Output ?? string.Empty;
+                _currentHostResults = payload.HostResults != null && payload.HostResults.Count > 0
+                    ? payload.HostResults
+                    : null;
+                entry.HasHostResults = _currentHostResults != null;
+                var hasDetails = _historyIndexEntries.TryGetValue(entry.Id, out var existingIndexEntry)
+                    ? existingIndexEntry.HasDetails
+                    : payload.Details != null;
+                entry.HasDetails = hasDetails;
+
+                if (_historyIndexEntries.TryGetValue(entry.Id, out var indexEntry))
+                {
+                    indexEntry.HasHostResults = entry.HasHostResults;
+                    indexEntry.HasDetails = hasDetails;
+                }
+
+                if (_currentHostResults != null)
+                {
+                    _suppressHostSelectionChanged = true;
+                    lstHosts.BeginUpdate();
+                    try
                     {
-                        lstHosts.Items.Add(hostResult);
+                        lstHosts.Items.Clear();
+                        foreach (var hostResult in _currentHostResults)
+                        {
+                            lstHosts.Items.Add(hostResult);
+                        }
+
+                        lstHosts.ClearSelected();
+                    }
+                    finally
+                    {
+                        lstHosts.EndUpdate();
+                        _suppressHostSelectionChanged = false;
                     }
 
-                    lstHosts.ClearSelected();
-                }
-                finally
-                {
-                    lstHosts.EndUpdate();
-                    _suppressHostSelectionChanged = false;
+                    historySplitContainer.Panel2Collapsed = false;
+                    SetOutputText(_selectedHistoryOutput);
+                    return;
                 }
 
-                historySplitContainer.Panel2Collapsed = false;
+                historySplitContainer.Panel2Collapsed = true;
+                lstHosts.Items.Clear();
                 SetOutputText(_selectedHistoryOutput);
-                return;
             }
-
-            historySplitContainer.Panel2Collapsed = true;
-            lstHosts.Items.Clear();
-            SetOutputText(_selectedHistoryOutput);
+            finally
+            {
+                _lastHistorySelectionGcEntryId = selectedEntryId;
+                if (shouldRunHistorySwitchGc)
+                {
+                    RunHistorySwitchGc();
+                }
+            }
         }
 
         private void saveAsToolStripMenuItem_Click(object sender, EventArgs e)
@@ -8135,11 +8369,12 @@ namespace SSH_Helper
                 return;
             }
 
+            var releasedPayloadChars = EstimatePayloadTextChars(_loadedHistoryPayload);
             _loadedHistoryPayloadId = null;
             _loadedHistoryPayload = null;
             _loadedHistoryPayloadHasDetails = false;
             _loadedHistoryPayloadHasHostOutputs = false;
-            _loadedHistoryPayloadHasFullOutput = false;
+            MaybeCompactAfterPayloadClear(releasedPayloadChars);
         }
 
         private void StopExecution()
@@ -8329,18 +8564,13 @@ namespace SSH_Helper
             }
 
             txtOutput.AppendText(output);
-            if (txtOutput.TextLength > MemoryPressureGuard.MaxVisibleOutputChars)
-            {
-                txtOutput.Text = MemoryPressureGuard.TrimVisibleOutput(txtOutput.Text);
-            }
             ScrollOutputToEnd();
         }
 
         private void SetOutputText(string text)
         {
             var sourceText = text ?? string.Empty;
-            var visibleText = MemoryPressureGuard.TrimVisibleOutput(sourceText);
-            RecreateOutputTextBoxIfNeeded(visibleText.Length);
+            RecreateOutputTextBoxIfNeeded(sourceText.Length);
 
             // Suspend drawing to prevent flicker during text replacement
             NativeMethods.SendMessage(txtOutput.Handle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
@@ -8350,14 +8580,13 @@ namespace SSH_Helper
                 lock (_outputBufferLock)
                 {
                     _outputBuffer.Clear();
-                    var retainedBufferText = MemoryPressureGuard.TrimInMemoryOutputBuffer(sourceText);
-                    if (!string.IsNullOrEmpty(retainedBufferText))
-                        _outputBuffer.Append(retainedBufferText);
+                    if (!string.IsNullOrEmpty(sourceText))
+                        _outputBuffer.Append(sourceText);
 
                     ShrinkOutputBufferCapacityIfNeeded_NoLock();
                 }
 
-                txtOutput.Text = visibleText;
+                txtOutput.Text = sourceText;
                 txtOutput.ClearUndo();
             }
             finally
@@ -8435,9 +8664,19 @@ namespace SSH_Helper
             try
             {
                 parent.Controls.Remove(oldTextBox);
+                _scrollbarThemedControls.Remove(oldTextBox);
                 txtOutput = replacement;
                 parent.Controls.Add(replacement);
                 parent.Controls.SetChildIndex(replacement, insertIndex);
+
+                if (_isDarkMode)
+                {
+                    ApplyDarkScrollbars(replacement);
+                }
+                else
+                {
+                    ApplyLightScrollbars(replacement);
+                }
             }
             finally
             {
@@ -8448,11 +8687,11 @@ namespace SSH_Helper
 
         private void ShrinkOutputBufferCapacityIfNeeded_NoLock()
         {
-            var maxRetainedCapacity = MemoryPressureGuard.MaxInMemoryOutputBufferChars * 2;
-            if (_outputBuffer.Length <= MemoryPressureGuard.MaxInMemoryOutputBufferChars &&
-                _outputBuffer.Capacity > maxRetainedCapacity)
+            const int retainedCapacityWhenEmpty = 16_384;
+            if (_outputBuffer.Length == 0 &&
+                _outputBuffer.Capacity > retainedCapacityWhenEmpty)
             {
-                _outputBuffer.Capacity = MemoryPressureGuard.MaxInMemoryOutputBufferChars;
+                _outputBuffer.Capacity = retainedCapacityWhenEmpty;
             }
         }
 
@@ -8580,7 +8819,7 @@ namespace SSH_Helper
             {
                 try
                 {
-                    if (!TryLoadHistoryPayload(entry.Id, out var payload, requireFullOutput: true))
+                    if (!TryLoadHistoryPayload(entry.Id, out var payload))
                         return;
 
                     File.WriteAllText(sfd.FileName, payload.Output ?? string.Empty);
@@ -8618,7 +8857,7 @@ namespace SSH_Helper
                         var entry = _outputHistory[i];
                         sw.WriteLine($"===== {entry.Label} =====");
                         sw.WriteLine();
-                        if (!TryLoadHistoryPayload(entry.Id, out var payload, showError: false, requireFullOutput: true))
+                        if (!TryLoadHistoryPayload(entry.Id, out var payload, showError: false))
                         {
                             missingPayloads++;
                             sw.WriteLine("[history payload unavailable]");
@@ -8661,17 +8900,22 @@ namespace SSH_Helper
             _historyStorage.DeleteRun(entry.Id);
             _historyIndexEntries.Remove(entry.Id);
             ClearLoadedHistoryPayload(entry.Id);
-            _outputHistory.Remove(entry);
-            if (lstOutput.Items.Count > 0)
-                lstOutput.SelectedIndex = 0;
-            else
+            _suppressHistorySelectionChanged = true;
+            try
             {
-                _currentHostResults = null;
-                _selectedHistoryOutput = string.Empty;
-                lstHosts.Items.Clear();
-                historySplitContainer.Panel2Collapsed = true;
-                ClearOutput();
+                _outputHistory.Remove(entry);
+                lstOutput.ClearSelected();
             }
+            finally
+            {
+                _suppressHistorySelectionChanged = false;
+            }
+
+            _currentHostResults = null;
+            _selectedHistoryOutput = string.Empty;
+            lstHosts.Items.Clear();
+            historySplitContainer.Panel2Collapsed = true;
+            ClearOutput();
         }
 
         private void DeleteAllHistory()

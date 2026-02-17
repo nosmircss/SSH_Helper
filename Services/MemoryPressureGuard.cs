@@ -12,7 +12,6 @@ namespace SSH_Helper.Services
         public const int MaxInteractiveTranscriptChars = 400_000;
         public const int MaxCommandSnapshotChars = 200_000;
         public const int MaxDetailVariableValueChars = 20_000;
-        public const int MaxVisibleOutputChars = 750_000;
         public const int MaxInMemoryOutputBufferChars = 1_500_000;
 
         public static bool TrimApplicationState(ApplicationState? state)
@@ -165,11 +164,6 @@ namespace SSH_Helper.Services
             return TrimMiddle(value, MaxDetailVariableValueChars, "detail variable value");
         }
 
-        public static string TrimVisibleOutput(string? value)
-        {
-            return KeepLatest(value, MaxVisibleOutputChars, "visible output");
-        }
-
         public static string TrimInMemoryOutputBuffer(string? value)
         {
             return KeepLatest(value, MaxInMemoryOutputBufferChars, "live output buffer");
@@ -206,13 +200,13 @@ namespace SSH_Helper.Services
                 return value;
 
             var removedChars = value.Length - maxChars;
-            var marker = $"[... {label} trimmed {removedChars:N0} chars from start ...]{Environment.NewLine}";
-            var tailChars = maxChars - marker.Length;
-            if (tailChars <= 0)
+            var marker = $"[... {label} trimmed {removedChars:N0} chars from end ...]{Environment.NewLine}";
+            var headChars = maxChars - marker.Length;
+            if (headChars <= 0)
                 return marker.Substring(0, Math.Min(marker.Length, maxChars));
 
-            var tail = value.Substring(value.Length - tailChars, tailChars);
-            return marker + tail;
+            var head = value.Substring(0, headChars);
+            return head + marker;
         }
     }
 }

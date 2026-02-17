@@ -210,12 +210,12 @@ namespace SSH_Helper.Services
                 return value;
 
             var removed = value.Length - maxChars.Value;
-            var marker = $"[... output trimmed {removed:N0} chars from start ...]{Environment.NewLine}";
-            var tailChars = maxChars.Value - marker.Length;
-            if (tailChars <= 0)
+            var marker = $"[... output trimmed {removed:N0} chars from end ...]{Environment.NewLine}";
+            var headChars = maxChars.Value - marker.Length;
+            if (headChars <= 0)
                 return marker.Substring(0, Math.Min(marker.Length, maxChars.Value));
 
-            return marker + value.Substring(value.Length - tailChars, tailChars);
+            return value.Substring(0, headChars) + marker;
         }
 
         private static string ReadStringValue(ref Utf8JsonReader reader)
