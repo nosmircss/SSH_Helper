@@ -914,8 +914,9 @@ namespace SSH_Helper.Services
             processed = TerminalOutputProcessor.StripZshPromptSp(processed);
 
             output.Append(processed);
-            // Normalize before sending to UI to handle backspaces and other control sequences
-            OnOutputReceived(TerminalOutputProcessor.Normalize(processed));
+            // Preserve trailing spaces on unfinished chunk lines to avoid word-joins
+            // when tokens arrive split across network chunks.
+            OnOutputReceived(TerminalOutputProcessor.Normalize(processed, preserveTrailingSpacesOnFinalLine: true));
 
             return hitPager;
         }

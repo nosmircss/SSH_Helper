@@ -33,6 +33,31 @@ public class TerminalOutputProcessorTests
         result.Should().Be("Hello World");
     }
 
+    [Fact]
+    public void Normalize_DefaultBehavior_TrimTrailingSpacesOnFinalLine()
+    {
+        var result = TerminalOutputProcessor.Normalize("set ");
+        result.Should().Be("set");
+    }
+
+    [Fact]
+    public void Normalize_PreserveTrailingSpacesOnFinalLine_KeepsTrailingSpaces()
+    {
+        var result = TerminalOutputProcessor.Normalize("set ", preserveTrailingSpacesOnFinalLine: true);
+        result.Should().Be("set ");
+    }
+
+    [Fact]
+    public void Normalize_PreserveTrailingSpacesOnFinalLine_AvoidsWordJoinAcrossChunks()
+    {
+        var firstChunk = TerminalOutputProcessor.Normalize("set ", preserveTrailingSpacesOnFinalLine: true);
+        var secondChunk = TerminalOutputProcessor.Normalize(
+            "resource \"http://cnn.com\"",
+            preserveTrailingSpacesOnFinalLine: true);
+
+        (firstChunk + secondChunk).Should().Be("set resource \"http://cnn.com\"");
+    }
+
     #endregion
 
     #region Normalize - Newline Handling Tests

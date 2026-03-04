@@ -45,8 +45,16 @@ namespace SSH_Helper.Utilities
         /// </summary>
         /// <param name="input">Raw terminal output</param>
         /// <param name="tabSize">Tab stop size (default 8)</param>
+        /// <param name="preserveTrailingSpacesOnFinalLine">
+        /// When true, preserves trailing spaces on the unfinished final line.
+        /// Useful for chunked real-time output where a token may be split across chunks
+        /// (for example, "set " then "resource").
+        /// </param>
         /// <returns>Normalized plain text output</returns>
-        public static string Normalize(string input, int tabSize = DefaultTabSize)
+        public static string Normalize(
+            string input,
+            int tabSize = DefaultTabSize,
+            bool preserveTrailingSpacesOnFinalLine = false)
         {
             if (string.IsNullOrEmpty(input))
                 return input;
@@ -99,7 +107,7 @@ namespace SSH_Helper.Utilities
             // Commit remaining line content without trailing newline
             if (line.Length > 0)
             {
-                output.Append(TrimTrailingSpaces(line));
+                output.Append(preserveTrailingSpacesOnFinalLine ? line.ToString() : TrimTrailingSpaces(line));
             }
 
             return output.ToString();
