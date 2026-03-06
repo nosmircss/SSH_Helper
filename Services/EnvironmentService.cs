@@ -116,7 +116,8 @@ namespace SSH_Helper.Services
             List<string> columns,
             List<Dictionary<string, string>> hosts,
             List<int> selectedIndices,
-            string? csvPath)
+            string? csvPath,
+            CsvFileFingerprint? csvFingerprint = null)
         {
             var environmentName = NormalizeName(name);
             var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
@@ -134,6 +135,7 @@ namespace SSH_Helper.Services
                 hosts,
                 selectedIndices,
                 csvPath,
+                csvFingerprint,
                 existing);
 
             environments[environmentName] = snapshot;
@@ -358,6 +360,7 @@ namespace SSH_Helper.Services
             List<Dictionary<string, string>> hosts,
             List<int> selectedIndices,
             string? csvPath,
+            CsvFileFingerprint? csvFingerprint,
             EnvironmentConfig? existing)
         {
             var environment = new EnvironmentConfig
@@ -373,6 +376,7 @@ namespace SSH_Helper.Services
                     ?? new List<Dictionary<string, string>>(),
                 SelectedHostIndices = selectedIndices?.ToList() ?? new List<int>(),
                 LastCsvPath = csvPath,
+                LastCsvFingerprint = csvFingerprint?.Clone(),
                 Variables = existing?.Variables != null
                     ? new Dictionary<string, string>(existing.Variables, StringComparer.OrdinalIgnoreCase)
                     : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

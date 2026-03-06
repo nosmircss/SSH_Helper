@@ -218,6 +218,33 @@ public class EnvironmentServiceTests : IDisposable
     }
 
     [Fact]
+    public void SaveCurrentGridToEnvironment_PersistsCsvFingerprint()
+    {
+        _environmentService.CreateEnvironment("prod");
+        var fingerprint = new CsvFileFingerprint
+        {
+            LastWriteTimeUtc = new DateTime(2026, 3, 6, 18, 0, 0, DateTimeKind.Utc),
+            FileSizeBytes = 128
+        };
+
+        _environmentService.SaveCurrentGridToEnvironment(
+            "prod",
+            new List<string> { CsvManager.HostColumnName },
+            new List<Dictionary<string, string>>
+            {
+                new() { [CsvManager.HostColumnName] = "203.0.113.11" }
+            },
+            new List<int>(),
+            @"C:\tmp\prod.csv",
+            fingerprint);
+
+        var environment = _environmentService.GetEnvironment("prod");
+        environment.LastCsvFingerprint.Should().NotBeNull();
+        environment.LastCsvFingerprint!.LastWriteTimeUtc.Should().Be(fingerprint.LastWriteTimeUtc);
+        environment.LastCsvFingerprint.FileSizeBytes.Should().Be(fingerprint.FileSizeBytes);
+    }
+
+    [Fact]
     public void ImportEnvironment_WhenEnvironmentExistsWithoutOverwrite_Throws()
     {
         _environmentService.CreateEnvironment("prod");

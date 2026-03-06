@@ -118,6 +118,8 @@ namespace SSH_Helper
         #region State
 
         private string? _loadedFilePath;
+        private CsvFileFingerprint? _loadedFileFingerprint;
+        private CsvFileSyncStatus _loadedFileSyncStatus = CsvFileSyncStatus.NotTracked;
         private string? _activePresetName;
         private string _activeEnvironmentName = EnvironmentConfig.DefaultName;
         private string _baseEnvironmentName = EnvironmentConfig.DefaultName;
@@ -1310,6 +1312,7 @@ namespace SSH_Helper
                     ?? new List<Dictionary<string, string>>(),
                 SelectedHostIndices = environment.SelectedHostIndices?.ToList() ?? new List<int>(),
                 LastCsvPath = environment.LastCsvPath,
+                LastCsvFingerprint = environment.LastCsvFingerprint?.Clone(),
                 SelectedPreset = savedState.SelectedPreset,
                 SelectedFolder = savedState.SelectedFolder,
                 Username = savedState.Username,
@@ -1438,7 +1441,7 @@ namespace SSH_Helper
             if (string.Equals(_activeEnvironmentName, resolution.EnvironmentName, StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            return TrySwitchEnvironment(resolution.EnvironmentName, promptIfDirty);
+            return TrySwitchEnvironment(resolution.EnvironmentName, promptIfDirty, out _);
         }
 
         private int? GetEnvironmentLabelColor(string environmentName)
@@ -1512,13 +1515,13 @@ namespace SSH_Helper
             if (string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
                 return;
 
-            if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true, updateBaseEnvironment: true))
+            if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true, out var switchStatusMessage, updateBaseEnvironment: true))
             {
                 RefreshEnvironmentSelector(_activeEnvironmentName);
                 return;
             }
 
-            UpdateStatusBar($"Active environment switched to '{_activeEnvironmentName}'. Base environment set to '{_baseEnvironmentName}'.");
+            UpdateStatusBar(switchStatusMessage ?? BuildEnvironmentSwitchStatusMessage(includeBaseEnvironment: true));
         }
 
         private void TsbManageEnvironments_Click(object? sender, EventArgs e)
@@ -1533,13 +1536,13 @@ namespace SSH_Helper
             var targetEnvironment = dialog.SelectedEnvironmentName ?? _environmentService.GetActiveEnvironmentName();
             if (!string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
             {
-                if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true, updateBaseEnvironment: true))
+                if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true, out var switchStatusMessage, updateBaseEnvironment: true))
                 {
                     RefreshEnvironmentSelector(_activeEnvironmentName);
                     return;
                 }
 
-                UpdateStatusBar($"Active environment switched to '{_activeEnvironmentName}'. Base environment set to '{_baseEnvironmentName}'.");
+                UpdateStatusBar(switchStatusMessage ?? BuildEnvironmentSwitchStatusMessage(includeBaseEnvironment: true));
                 return;
             }
 
@@ -1553,8 +1556,14 @@ namespace SSH_Helper
             UpdateStatusBar($"Active environment: {_activeEnvironmentName}");
         }
 
-        private bool TrySwitchEnvironment(string targetEnvironment, bool promptIfDirty, bool updateBaseEnvironment = false)
+        private bool TrySwitchEnvironment(
+            string targetEnvironment,
+            bool promptIfDirty,
+            out string? statusMessage,
+            bool updateBaseEnvironment = false)
         {
+            statusMessage = null;
+
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
 
@@ -1578,7 +1587,21 @@ namespace SSH_Helper
                 SaveCurrentGridToEnvironment(_activeEnvironmentName);
             }
 
-            var environment = _environmentService.SwitchEnvironment(targetEnvironment);
+            var environment = _environmentService.GetEnvironment(targetEnvironment);
+            var loadedFingerprint = environment.LastCsvFingerprint?.Clone();
+            var syncStatus = string.IsNullOrWhiteSpace(environment.LastCsvPath)
+                ? CsvFileSyncStatus.NotTracked
+                : CsvFileSyncStatus.Current;
+            string? syncDetailMessage = null;
+
+            ResolveEnvironmentCsvSyncBeforeSwitch(
+                targetEnvironment,
+                ref environment,
+                ref loadedFingerprint,
+                ref syncStatus,
+                ref syncDetailMessage);
+
+            environment = _environmentService.SwitchEnvironment(targetEnvironment);
             _activeEnvironmentName = environment.Name;
             if (updateBaseEnvironment)
             {
@@ -1586,7 +1609,10 @@ namespace SSH_Helper
             }
 
             _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
-            LoadEnvironmentIntoGrid(environment);
+            var environmentToLoad = syncStatus == CsvFileSyncStatus.Current && loadedFingerprint != null
+                ? _environmentService.GetEnvironment(targetEnvironment)
+                : environment;
+            LoadEnvironmentIntoGrid(environmentToLoad, loadedFingerprint, syncStatus);
             RefreshEnvironmentSelector(_activeEnvironmentName);
 
             if (updateBaseEnvironment && !string.IsNullOrWhiteSpace(_selectedFolderName))
@@ -1594,7 +1620,139 @@ namespace SSH_Helper
                 RefreshSelectedFolderSummary();
             }
 
+            if (!string.IsNullOrWhiteSpace(syncDetailMessage))
+            {
+                statusMessage = BuildEnvironmentSwitchStatusMessage(updateBaseEnvironment, syncDetailMessage);
+            }
+
             return true;
+        }
+
+        private void ResolveEnvironmentCsvSyncBeforeSwitch(
+            string targetEnvironment,
+            ref EnvironmentConfig environment,
+            ref CsvFileFingerprint? loadedFingerprint,
+            ref CsvFileSyncStatus syncStatus,
+            ref string? syncDetailMessage)
+        {
+            var evaluation = CsvFileSyncEvaluator.EvaluateEnvironment(environment, _csvManager);
+            var fileName = Path.GetFileName(environment.LastCsvPath ?? string.Empty);
+
+            switch (evaluation.Status)
+            {
+                case CsvFileSyncStatus.NotTracked:
+                    syncStatus = CsvFileSyncStatus.NotTracked;
+                    loadedFingerprint = null;
+                    return;
+
+                case CsvFileSyncStatus.Current:
+                    syncStatus = CsvFileSyncStatus.Current;
+                    loadedFingerprint = evaluation.CurrentFingerprint?.Clone() ?? environment.LastCsvFingerprint?.Clone();
+                    return;
+
+                case CsvFileSyncStatus.ChangedOnDisk:
+                    syncStatus = CsvFileSyncStatus.ChangedOnDisk;
+                    loadedFingerprint = environment.LastCsvFingerprint?.Clone();
+
+                    var reloadResult = DialogTheme.Show(
+                        $"The CSV file '{fileName}' changed on disk since environment '{targetEnvironment}' captured its hosts. Reload hosts from disk now?",
+                        "Reload Hosts",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question);
+
+                    if (reloadResult != DialogResult.Yes)
+                    {
+                        syncDetailMessage = $"Using the saved host snapshot; '{fileName}' changed on disk.";
+                        return;
+                    }
+
+                    if (TryReloadEnvironmentHostsFromDisk(targetEnvironment, environment.LastCsvPath!, out var reloadedEnvironment, out var reloadError))
+                    {
+                        environment = reloadedEnvironment;
+                        loadedFingerprint = reloadedEnvironment.LastCsvFingerprint?.Clone();
+                        syncStatus = CsvFileSyncStatus.Current;
+                        syncDetailMessage = $"Reloaded hosts from '{fileName}' because the file changed on disk.";
+                        return;
+                    }
+
+                    syncDetailMessage = $"Could not reload '{fileName}' from disk ({reloadError}). Using the saved host snapshot.";
+                    return;
+
+                case CsvFileSyncStatus.MissingOnDisk:
+                    syncStatus = CsvFileSyncStatus.MissingOnDisk;
+                    loadedFingerprint = environment.LastCsvFingerprint?.Clone();
+                    syncDetailMessage = $"Remembered CSV '{fileName}' is missing on disk.";
+                    return;
+
+                default:
+                    syncStatus = environment.LastCsvFingerprint != null
+                        ? CsvFileSyncStatus.Current
+                        : CsvFileSyncStatus.Unknown;
+                    loadedFingerprint = environment.LastCsvFingerprint?.Clone();
+                    if (!string.IsNullOrWhiteSpace(evaluation.ErrorMessage))
+                    {
+                        syncDetailMessage = $"Could not verify '{fileName}' against disk ({evaluation.ErrorMessage}).";
+                    }
+                    return;
+            }
+        }
+
+        private bool TryReloadEnvironmentHostsFromDisk(
+            string environmentName,
+            string csvPath,
+            out EnvironmentConfig reloadedEnvironment,
+            out string? errorMessage)
+        {
+            reloadedEnvironment = _environmentService.GetEnvironment(environmentName);
+            errorMessage = null;
+
+            try
+            {
+                var dataTable = _csvManager.LoadFromFile(csvPath);
+                var hostColumns = dataTable.Columns.Cast<DataColumn>()
+                    .Select(column => column.ColumnName)
+                    .ToList();
+                var hosts = dataTable.Rows.Cast<DataRow>()
+                    .Select(row =>
+                    {
+                        var rowData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var columnName in hostColumns)
+                        {
+                            rowData[columnName] = row[columnName]?.ToString() ?? string.Empty;
+                        }
+
+                        return rowData;
+                    })
+                    .ToList();
+                var fingerprint = CsvFileSyncEvaluator.Capture(csvPath);
+
+                _environmentService.SaveCurrentGridToEnvironment(
+                    environmentName,
+                    hostColumns,
+                    hosts,
+                    new List<int>(),
+                    csvPath,
+                    fingerprint);
+
+                reloadedEnvironment = _environmentService.GetEnvironment(environmentName);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                return false;
+            }
+        }
+
+        private string BuildEnvironmentSwitchStatusMessage(bool includeBaseEnvironment, string? detail = null)
+        {
+            var message = includeBaseEnvironment
+                ? $"Active environment switched to '{_activeEnvironmentName}'. Base environment set to '{_baseEnvironmentName}'."
+                : $"Active environment switched to '{_activeEnvironmentName}'.";
+
+            return string.IsNullOrWhiteSpace(detail)
+                ? message
+                : $"{message} {detail}";
         }
 
         private void LoadPresetIntoEditor(string presetName, PresetInfo preset)
@@ -1626,7 +1784,7 @@ namespace SSH_Helper
 
             if (transition.Kind == PresetEnvironmentLoadActionKind.RestoreBaseEnvironment)
             {
-                if (TrySwitchEnvironment(transition.TargetEnvironment!, promptIfDirty: true))
+                if (TrySwitchEnvironment(transition.TargetEnvironment!, promptIfDirty: true, out _))
                 {
                     UpdateStatusBar(PresetEnvironmentStatusFormatter.FormatRestoreMessage(presetName, effectiveBaseEnvironment));
                 }
@@ -1642,7 +1800,7 @@ namespace SSH_Helper
                 return;
             }
 
-            if (TrySwitchEnvironment(matchingEnvironment, promptIfDirty: true))
+            if (TrySwitchEnvironment(matchingEnvironment, promptIfDirty: true, out _))
             {
                 UpdateStatusBar(PresetEnvironmentStatusFormatter.FormatSwitchMessage(presetName, matchingEnvironment));
             }
@@ -1685,10 +1843,14 @@ namespace SSH_Helper
                 state.HostColumns,
                 state.Hosts,
                 state.SelectedHostIndices,
-                state.LastCsvPath);
+                state.LastCsvPath,
+                state.LastCsvFingerprint);
         }
 
-        private void LoadEnvironmentIntoGrid(EnvironmentConfig environment)
+        private void LoadEnvironmentIntoGrid(
+            EnvironmentConfig environment,
+            CsvFileFingerprint? loadedFingerprint = null,
+            CsvFileSyncStatus syncStatus = CsvFileSyncStatus.Current)
         {
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
@@ -1766,6 +1928,10 @@ namespace SSH_Helper
             }
 
             _loadedFilePath = environment.LastCsvPath;
+            _loadedFileFingerprint = loadedFingerprint?.Clone() ?? environment.LastCsvFingerprint?.Clone();
+            _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
+                ? CsvFileSyncStatus.NotTracked
+                : syncStatus;
             _pendingColumnAutoSize = true;
             _csvDirty = false;
             UpdateHostCount();
@@ -1775,9 +1941,36 @@ namespace SSH_Helper
 
         #region UI Helpers
 
+        private CsvFileSyncStatus ResolveLoadedFileSyncStatus()
+        {
+            if (string.IsNullOrWhiteSpace(_loadedFilePath))
+            {
+                _loadedFileSyncStatus = CsvFileSyncStatus.NotTracked;
+                return _loadedFileSyncStatus;
+            }
+
+            if (_loadedFileFingerprint == null)
+            {
+                return _loadedFileSyncStatus;
+            }
+
+            var evaluation = CsvFileSyncEvaluator.Evaluate(_loadedFilePath, _loadedFileFingerprint);
+            if (evaluation.Status == CsvFileSyncStatus.Current && evaluation.CurrentFingerprint != null)
+            {
+                _loadedFileFingerprint = evaluation.CurrentFingerprint.Clone();
+            }
+
+            if (evaluation.Status != CsvFileSyncStatus.Unknown)
+            {
+                _loadedFileSyncStatus = evaluation.Status;
+            }
+
+            return _loadedFileSyncStatus;
+        }
+
         private void UpdateHostsFileIndicator()
         {
-            lblHostsTitle.Text = $"Hosts: {HostsFileIndicatorFormatter.Format(_loadedFilePath, _csvDirty)}";
+            lblHostsTitle.Text = $"Hosts: {HostsFileIndicatorFormatter.Format(_loadedFilePath, _csvDirty, ResolveLoadedFileSyncStatus())}";
         }
 
         private void UpdateHostCount()
@@ -6154,6 +6347,10 @@ namespace SSH_Helper
                     }
 
                     _csvDirty = false;
+                    _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
+                    _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
+                        ? CsvFileSyncStatus.NotTracked
+                        : CsvFileSyncStatus.Current;
                     AutoSizeColumnsToContent();
                     UpdateHostCount();
                     UpdateStatusBar($"Loaded: {Path.GetFileName(ofd.FileName)}");
@@ -6180,6 +6377,8 @@ namespace SSH_Helper
             {
                 SaveCsvToFile(sfd.FileName);
                 _loadedFilePath = sfd.FileName;
+                _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
+                _loadedFileSyncStatus = CsvFileSyncStatus.Current;
                 UpdateHostsFileIndicator();
                 UpdateStatusBar($"Saved: {Path.GetFileName(sfd.FileName)}");
             }
@@ -6200,6 +6399,10 @@ namespace SSH_Helper
             try
             {
                 SaveCsvToFile(_loadedFilePath);
+                _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
+                _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
+                    ? CsvFileSyncStatus.NotTracked
+                    : CsvFileSyncStatus.Current;
                 UpdateHostsFileIndicator();
                 UpdateStatusBar($"Saved: {Path.GetFileName(_loadedFilePath)}");
                 return true;
@@ -6245,6 +6448,8 @@ namespace SSH_Helper
             EnsureSelectColumn();
             _csvDirty = true;
             _loadedFilePath = null;
+            _loadedFileFingerprint = null;
+            _loadedFileSyncStatus = CsvFileSyncStatus.NotTracked;
             UpdateHostCount();
             UpdateStatusBar("Grid cleared");
         }
@@ -9580,6 +9785,7 @@ namespace SSH_Helper
 
             // Save CSV path
             state.LastCsvPath = _loadedFilePath;
+            state.LastCsvFingerprint = _loadedFileFingerprint?.Clone();
 
             // Save selected preset or folder
             state.SelectedPreset = _activePresetName;
@@ -9665,6 +9871,10 @@ namespace SSH_Helper
 
             // Restore CSV path
             _loadedFilePath = state.LastCsvPath;
+            _loadedFileFingerprint = state.LastCsvFingerprint?.Clone();
+            _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
+                ? CsvFileSyncStatus.NotTracked
+                : CsvFileSyncStatus.Current;
 
             // Restore username (not password)
             if (!string.IsNullOrEmpty(state.Username))

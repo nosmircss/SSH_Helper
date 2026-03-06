@@ -310,6 +310,11 @@ namespace SSH_Helper.Models
         public string? LastCsvPath { get; set; }
 
         /// <summary>
+        /// Lightweight file identity for the last loaded CSV file.
+        /// </summary>
+        public CsvFileFingerprint? LastCsvFingerprint { get; set; }
+
+        /// <summary>
         /// The currently selected preset name.
         /// </summary>
         public string? SelectedPreset { get; set; }
