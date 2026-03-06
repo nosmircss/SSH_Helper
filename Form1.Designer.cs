@@ -401,15 +401,16 @@ namespace SSH_Helper
             // 
             // lblHostsTitle
             // 
-            lblHostsTitle.AutoSize = true;
-            lblHostsTitle.Dock = DockStyle.Left;
+            lblHostsTitle.AutoEllipsis = true;
+            lblHostsTitle.Dock = DockStyle.Fill;
             lblHostsTitle.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             lblHostsTitle.ForeColor = Color.FromArgb(33, 37, 41);
             lblHostsTitle.Location = new Point(12, 8);
             lblHostsTitle.Name = "lblHostsTitle";
-            lblHostsTitle.Size = new Size(44, 19);
+            lblHostsTitle.Size = new Size(401, 20);
             lblHostsTitle.TabIndex = 0;
             lblHostsTitle.Text = "Hosts";
+            lblHostsTitle.TextAlign = ContentAlignment.MiddleLeft;
             // 
             // lblHostCount
             // 

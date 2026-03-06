@@ -1775,6 +1775,11 @@ namespace SSH_Helper
 
         #region UI Helpers
 
+        private void UpdateHostsFileIndicator()
+        {
+            lblHostsTitle.Text = $"Hosts: {HostsFileIndicatorFormatter.Format(_loadedFilePath, _csvDirty)}";
+        }
+
         private void UpdateHostCount()
         {
             int count = dgv_variables.Rows.Cast<DataGridViewRow>()
@@ -1783,6 +1788,7 @@ namespace SSH_Helper
             string text = count == 1 ? "1 host" : $"{count} hosts";
             lblHostCount.Text = text;
             statusHostCount.Text = text;
+            UpdateHostsFileIndicator();
         }
 
         private int GetCheckedHostCount()
@@ -1815,6 +1821,7 @@ namespace SSH_Helper
                 statusHostCount.Text = text;
             }
 
+            UpdateHostsFileIndicator();
             UpdateRunButtonText();
         }
 
@@ -3180,7 +3187,11 @@ namespace SSH_Helper
             UpdateHostCount();
         }
 
-        private void Dgv_Variables_ColumnRemoved(object? sender, DataGridViewColumnEventArgs e) => _csvDirty = true;
+        private void Dgv_Variables_ColumnRemoved(object? sender, DataGridViewColumnEventArgs e)
+        {
+            _csvDirty = true;
+            UpdateHostsFileIndicator();
+        }
 
         private void Dgv_Variables_KeyPress(object? sender, KeyPressEventArgs e)
         {
@@ -6169,6 +6180,7 @@ namespace SSH_Helper
             {
                 SaveCsvToFile(sfd.FileName);
                 _loadedFilePath = sfd.FileName;
+                UpdateHostsFileIndicator();
                 UpdateStatusBar($"Saved: {Path.GetFileName(sfd.FileName)}");
             }
         }
@@ -6188,6 +6200,7 @@ namespace SSH_Helper
             try
             {
                 SaveCsvToFile(_loadedFilePath);
+                UpdateHostsFileIndicator();
                 UpdateStatusBar($"Saved: {Path.GetFileName(_loadedFilePath)}");
                 return true;
             }
@@ -6287,6 +6300,7 @@ namespace SSH_Helper
 
             dgv_variables.Columns.Add(columnName, columnName);
             _csvDirty = true;
+            UpdateHostsFileIndicator();
         }
 
         private void RenameColumn(int columnIndex)
@@ -6316,6 +6330,7 @@ namespace SSH_Helper
             column.HeaderText = newName;
             column.Name = newName;
             _csvDirty = true;
+            UpdateHostsFileIndicator();
         }
 
         private void DeleteColumn(int columnIndex)
@@ -6330,6 +6345,7 @@ namespace SSH_Helper
 
             dgv_variables.Columns.RemoveAt(columnIndex);
             _csvDirty = true;
+            UpdateHostsFileIndicator();
         }
 
         private void DeleteRow(int rowIndex)
@@ -6482,6 +6498,7 @@ namespace SSH_Helper
             }
             dgv_variables.Refresh();
             _csvDirty = true;
+            UpdateHostsFileIndicator();
         }
 
         #endregion
@@ -9666,13 +9683,12 @@ namespace SSH_Helper
                 SelectFolderByName(state.SelectedFolder);
             }
 
+            // Reset dirty flag since we're restoring saved state, not making new changes
+            _csvDirty = false;
             UpdateHostCount();
 
             // Flag for auto-sizing after the form is fully visible (handled in Form1_Shown)
             _pendingColumnAutoSize = true;
-
-            // Reset dirty flag since we're restoring saved state, not making new changes
-            _csvDirty = false;
         }
 
         private bool ConfirmExitWorkflow()
