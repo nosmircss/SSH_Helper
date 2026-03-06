@@ -419,6 +419,59 @@ public class TerminalOutputProcessorTests
 
     #endregion
 
+    #region StripZshPromptSp Tests
+
+    [Fact]
+    public void StripZshPromptSp_PromptRedrawSequence_StripsIndicatorAndClearSequence()
+    {
+        var input = "%                                                                 \r \r\rchris@host ~ %";
+
+        var result = TerminalOutputProcessor.StripZshPromptSp(input);
+
+        result.Should().Be("chris@host ~ %");
+    }
+
+    [Fact]
+    public void StripZshPromptSpStreaming_SplitAcrossChunks_StripsCrossChunkArtifact()
+    {
+        var carry = string.Empty;
+
+        var first = TerminalOutputProcessor.StripZshPromptSpStreaming("%", ref carry);
+        var second = TerminalOutputProcessor.StripZshPromptSpStreaming(
+            "                                                                 \r \r\rchris@host ~ %",
+            ref carry);
+
+        first.Should().BeEmpty();
+        second.Should().Be("chris@host ~ %");
+        carry.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void StripZshPromptSpStreaming_MidLinePercent_DoesNotHoldOrStripLegitimateContent()
+    {
+        var carry = string.Empty;
+
+        var result = TerminalOutputProcessor.StripZshPromptSpStreaming("Capacity 100%", ref carry);
+
+        result.Should().Be("Capacity 100%");
+        carry.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void StripZshPromptSpStreaming_FlushFinal_PreservesLegitimateStandalonePercent()
+    {
+        var carry = string.Empty;
+
+        var first = TerminalOutputProcessor.StripZshPromptSpStreaming("%", ref carry);
+        var flushed = TerminalOutputProcessor.StripZshPromptSpStreaming(string.Empty, ref carry, flushFinal: true);
+
+        first.Should().BeEmpty();
+        flushed.Should().Be("%");
+        carry.Should().BeEmpty();
+    }
+
+    #endregion
+
     #region StripTrailingPrompt Tests
 
     [Fact]

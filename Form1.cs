@@ -7735,12 +7735,34 @@ namespace SSH_Helper
         private bool ValidateColumnDependencies(IEnumerable<PresetInfo> presets)
         {
             var analyzer = new ScriptDependencyAnalyzer();
-            ColumnDependencyResult result;
+
+            // Collect existing grid column names
+            var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataGridViewColumn col in dgv_variables.Columns)
+            {
+                existingColumns.Add(col.Name);
+            }
+
+            var missingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             try
             {
                 var environmentVariableNames = _environmentService.GetActiveEnvironmentVariables().Keys;
-                result = analyzer.AnalyzePresets(presets, environmentVariableNames);
+                foreach (var preset in presets)
+                {
+                    var result = analyzer.AnalyzePresetDetails(preset, environmentVariableNames);
+                    if (result.SuppressMissingColumnWarning)
+                        continue;
+
+                    foreach (var referencedColumn in result.ReferencedColumns)
+                    {
+                        if (!string.IsNullOrWhiteSpace(referencedColumn) &&
+                            !existingColumns.Contains(referencedColumn))
+                        {
+                            missingColumns.Add(referencedColumn);
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -7750,26 +7772,14 @@ namespace SSH_Helper
                 return true;
             }
 
-            if (result.ReferencedColumns.Count == 0)
-                return true;
-
-            // Collect existing grid column names
-            var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (DataGridViewColumn col in dgv_variables.Columns)
-            {
-                existingColumns.Add(col.Name);
-            }
-
-            // Find referenced columns that don't exist in the grid
-            var missingColumns = result.ReferencedColumns
-                .Where(c => !existingColumns.Contains(c) && !string.IsNullOrWhiteSpace(c))
-                .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
             if (missingColumns.Count == 0)
                 return true;
 
-            var columnList = string.Join("\n", missingColumns.Select(c => $"  \u2022 {c}"));
+            var columnList = string.Join(
+                "\n",
+                missingColumns
+                    .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
+                    .Select(c => $"  \u2022 {c}"));
             var message = $"The following column(s) are referenced but do not exist in the grid:\n\n" +
                           columnList +
                           "\n\nThese references will resolve to empty values.\n\nContinue with execution?";

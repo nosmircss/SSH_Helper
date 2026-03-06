@@ -34,6 +34,12 @@ namespace SSH_Helper.Services.Scripting.Models
         public bool NoBanner { get; set; }
 
         /// <summary>
+        /// Suppress the pre-execution warning when referenced grid columns are missing.
+        /// Missing references still resolve to empty values at runtime.
+        /// </summary>
+        public bool SuppressMissingColumnWarning { get; set; }
+
+        /// <summary>
         /// Variables declared in the script with their default values.
         /// </summary>
         public Dictionary<string, object?> Vars { get; set; } = new();

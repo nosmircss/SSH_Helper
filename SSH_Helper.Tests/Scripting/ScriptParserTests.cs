@@ -67,6 +67,7 @@ steps:
     [InlineData("name: Test Script")]
     [InlineData("description: Uplink to core")]
     [InlineData("version: 1")]
+    [InlineData("suppress_missing_column_warning: true")]
     public void IsYamlScript_MetadataOnlyKeywords_ReturnsFalse(string input)
     {
         var result = ScriptParser.IsYamlScript(input);
@@ -203,6 +204,19 @@ steps:
         var script = _parser.Parse(yaml);
 
         script.Debug.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Parse_ScriptWithSuppressMissingColumnWarning_ParsesFlag()
+    {
+        var yaml = @"---
+suppress_missing_column_warning: true
+steps:
+  - print: test";
+
+        var script = _parser.Parse(yaml);
+
+        script.SuppressMissingColumnWarning.Should().BeTrue();
     }
 
     #endregion

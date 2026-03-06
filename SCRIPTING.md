@@ -59,6 +59,7 @@ description: "Description"       # Optional: what the script does
 version: 1                       # Optional: script version (default: 1)
 debug: false                     # Optional: enable debug output (default: false)
 nobanner: false                  # Optional: suppress script execution banner (default: false)
+suppress_missing_column_warning: false  # Optional: suppress missing-column preflight warning
 
 vars:                            # Optional: variable declarations
   variable_name: "default_value"
@@ -3483,6 +3484,28 @@ This is useful when:
 - You want cleaner output for reports or logs
 - You're processing many hosts and don't need the visual separators
 - You're using `writefile` to save output and don't want the banner included
+
+### Suppress Missing Column Warning
+
+Before execution, SSH Helper warns when a script references grid columns that do not exist. Those references still resolve to empty values at runtime.
+
+If your script is intentionally written to handle optional columns, you can suppress that dialog in the script header:
+
+```yaml
+---
+name: Optional Column Example
+suppress_missing_column_warning: true
+
+steps:
+  - if: "${optional_column}" == ""
+    then:
+      - input:
+          prompt: "Optional column missing. Enter a value:"
+          into: optional_column
+  - print: "Using ${optional_column}"
+```
+
+Use this only when the script already handles the missing-column case safely.
 
 ---
 

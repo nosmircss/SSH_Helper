@@ -25,12 +25,19 @@ namespace SSH_Helper.Utilities
             @"^ ?\r +\r",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-        // zsh PROMPT_SP: When output doesn't end with newline, zsh displays % indicator
-        // then clears it with spaces + \r \r sequence before showing the actual prompt.
-        // Pattern 1: % followed by spaces and clearing sequence
-        // Pattern 2: Standalone clearing sequence (spaces + multiple CRs)
-        private static readonly Regex ZshPromptSpRegex = new(
-            @"%[ ]*(?=\r)|(?<=\r)[ ]+\r+",
+        // zsh PROMPT_SP: When output doesn't end with newline, zsh displays a standalone
+        // '%' on its own line, then clears it with spaces + carriage returns before
+        // showing the actual prompt.
+        private static readonly Regex ZshPromptSpIndicatorRegex = new(
+            @"(?:^|(?<=[\r\n]))%(?=[ ]+\r)",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private static readonly Regex ZshPromptSpClearSequenceRegex = new(
+            @"(?:(?<=\r)|^)[ ]+\r+",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private static readonly Regex ZshPromptSpPendingSuffixRegex = new(
+            @"(?:^|(?<=[\r\n]))%[ ]*$|\r[ ]*$",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
         // Starship and similar prompts may prepend a timestamp/context line
@@ -178,7 +185,41 @@ namespace SSH_Helper.Utilities
             if (string.IsNullOrEmpty(chunk))
                 return chunk;
 
-            return ZshPromptSpRegex.Replace(chunk, string.Empty);
+            chunk = ZshPromptSpIndicatorRegex.Replace(chunk, string.Empty);
+            return ZshPromptSpClearSequenceRegex.Replace(chunk, string.Empty);
+        }
+
+        /// <summary>
+        /// Strips zsh PROMPT_SP artifacts from a live stream where the artifact may be split
+        /// across multiple chunks. Holds back only the minimal ambiguous suffix needed to
+        /// distinguish a real '%' output character from the prompt redraw sequence.
+        /// </summary>
+        /// <param name="chunk">Current input chunk</param>
+        /// <param name="carry">Pending suffix from the previous chunk</param>
+        /// <param name="flushFinal">When true, flushes any pending suffix at end of stream</param>
+        /// <returns>Chunk text safe to emit immediately</returns>
+        internal static string StripZshPromptSpStreaming(string chunk, ref string carry, bool flushFinal = false)
+        {
+            carry ??= string.Empty;
+
+            var combined = string.Concat(carry, chunk);
+            carry = string.Empty;
+
+            if (string.IsNullOrEmpty(combined))
+                return combined;
+
+            var stripped = StripZshPromptSp(combined);
+            if (flushFinal)
+                return stripped;
+
+            var match = ZshPromptSpPendingSuffixRegex.Match(stripped);
+            if (match.Success && match.Index + match.Length == stripped.Length)
+            {
+                carry = match.Value;
+                return stripped.Substring(0, match.Index);
+            }
+
+            return stripped;
         }
 
         /// <summary>

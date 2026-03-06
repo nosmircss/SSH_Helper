@@ -60,6 +60,7 @@ namespace SSH_Helper.Services.Scripting
             "version",
             "debug",
             "nobanner",
+            "suppress_missing_column_warning",
             "vars",
             "steps"
         };
@@ -374,12 +375,13 @@ namespace SSH_Helper.Services.Scripting
                                     script.Version = ver;
                                 break;
                             case "debug":
-                                var debugValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
-                                script.Debug = debugValue == "true" || debugValue == "yes" || debugValue == "1";
+                                script.Debug = ParseBooleanOrDefault(parser, script.Debug);
                                 break;
                             case "nobanner":
-                                var nobannerValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
-                                script.NoBanner = nobannerValue == "true" || nobannerValue == "yes" || nobannerValue == "1";
+                                script.NoBanner = ParseBooleanOrDefault(parser, script.NoBanner);
+                                break;
+                            case "suppress_missing_column_warning":
+                                script.SuppressMissingColumnWarning = ParseBooleanOrDefault(parser, script.SuppressMissingColumnWarning);
                                 break;
                             case "vars":
                                 script.Vars = ParseVars(parser);
