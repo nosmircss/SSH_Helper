@@ -64,6 +64,10 @@ namespace SSH_Helper.Models
         public string? SavedStateCompressed { get; set; }
         public Dictionary<string, EnvironmentConfig> Environments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public string? ActiveEnvironment { get; set; }
+        /// <summary>
+        /// The operator-selected base environment used when presets without an explicit environment restore context.
+        /// </summary>
+        public string? BaseEnvironment { get; set; }
 
         // History settings
         public int MaxHistoryEntries { get; set; } = 30;

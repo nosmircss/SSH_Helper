@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <DefaultItemExcludes>$(DefaultItemExcludes);SSH_Helper.Tests\**;RebexPOC\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**;bin/**;obj/**;SSH_Helper.Tests/**;RebexPOC/**</DefaultItemExcludes>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
@@ -26,6 +26,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="artifacts/**/*.cs;bin/**/*.cs;obj/**/*.cs;SSH_Helper.Tests/**/*.cs;RebexPOC/**/*.cs" />
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>BuildTimestamp</_Parameter1>
       <_Parameter2>$(BuildTimestamp)</_Parameter2>

@@ -117,6 +117,7 @@ namespace SSH_Helper
         private string? _loadedFilePath;
         private string? _activePresetName;
         private string _activeEnvironmentName = EnvironmentConfig.DefaultName;
+        private string _baseEnvironmentName = EnvironmentConfig.DefaultName;
         private bool _csvDirty;
         private bool _exitConfirmed;
         private bool _suppressPresetSelectionChange;
@@ -1182,6 +1183,7 @@ namespace SSH_Helper
         private void InitializeEnvironmentToolbar()
         {
             _activeEnvironmentName = _environmentService.GetActiveEnvironmentName();
+            _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
             RefreshEnvironmentSelector(_activeEnvironmentName);
         }
 
@@ -1405,9 +1407,18 @@ namespace SSH_Helper
             }
             tsbEnvironment.Text = _activeEnvironmentName;
             ApplyActiveEnvironmentLabelColor();
+            RefreshBaseEnvironmentIndicator();
             _suppressEnvironmentSelectionChange = false;
 
             UpdateWindowTitle();
+        }
+
+        private void RefreshBaseEnvironmentIndicator()
+        {
+            _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
+            var indicator = BaseEnvironmentIndicatorFormatter.Format(_activeEnvironmentName, _baseEnvironmentName);
+            toolStripLabelBaseEnvironment.Text = indicator.Text;
+            toolStripLabelBaseEnvironment.Visible = indicator.Visible;
         }
 
         private int? GetEnvironmentLabelColor(string environmentName)
@@ -1458,7 +1469,9 @@ namespace SSH_Helper
         private void EnvironmentService_EnvironmentChanged(object? sender, EnvironmentChangedEventArgs e)
         {
             _activeEnvironmentName = e.CurrentEnvironment;
+            _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
             ApplyActiveEnvironmentLabelColor();
+            RefreshBaseEnvironmentIndicator();
             UpdateWindowTitle();
         }
 
@@ -1474,10 +1487,13 @@ namespace SSH_Helper
             if (string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
                 return;
 
-            if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true))
+            if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true, updateBaseEnvironment: true))
             {
                 RefreshEnvironmentSelector(_activeEnvironmentName);
+                return;
             }
+
+            UpdateStatusBar($"Active environment switched to '{_activeEnvironmentName}'. Base environment set to '{_baseEnvironmentName}'.");
         }
 
         private void TsbManageEnvironments_Click(object? sender, EventArgs e)
@@ -1492,21 +1508,21 @@ namespace SSH_Helper
             var targetEnvironment = dialog.SelectedEnvironmentName ?? _environmentService.GetActiveEnvironmentName();
             if (!string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
             {
-                if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true))
+                if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true, updateBaseEnvironment: true))
                 {
                     RefreshEnvironmentSelector(_activeEnvironmentName);
                     return;
                 }
-            }
-            else
-            {
-                RefreshEnvironmentSelector(_activeEnvironmentName);
+
+                UpdateStatusBar($"Active environment switched to '{_activeEnvironmentName}'. Base environment set to '{_baseEnvironmentName}'.");
+                return;
             }
 
+            RefreshEnvironmentSelector(_activeEnvironmentName);
             UpdateStatusBar($"Active environment: {_activeEnvironmentName}");
         }
 
-        private bool TrySwitchEnvironment(string targetEnvironment, bool promptIfDirty)
+        private bool TrySwitchEnvironment(string targetEnvironment, bool promptIfDirty, bool updateBaseEnvironment = false)
         {
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
@@ -1533,9 +1549,80 @@ namespace SSH_Helper
 
             var environment = _environmentService.SwitchEnvironment(targetEnvironment);
             _activeEnvironmentName = environment.Name;
+            if (updateBaseEnvironment)
+            {
+                _environmentService.SetBaseEnvironment(environment.Name);
+            }
+
+            _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
             LoadEnvironmentIntoGrid(environment);
             RefreshEnvironmentSelector(_activeEnvironmentName);
             return true;
+        }
+
+        private void LoadPresetIntoEditor(string presetName, PresetInfo preset)
+        {
+            txtCommand.ReadOnly = false;
+            txtCommand.Text = preset.Commands;
+            txtPreset.Text = presetName;
+            txtTimeoutHeader.Text = preset.Timeout.HasValue
+                ? preset.Timeout.Value.ToString()
+                : string.Empty;
+            _activePresetName = presetName;
+            _selectedFolderName = null;
+            UpdateRunButtonText();
+
+            ApplyScriptDeclaredEnvironmentOnPresetLoad(presetName, preset.Commands);
+        }
+
+        private void ApplyScriptDeclaredEnvironmentOnPresetLoad(string presetName, string commandText)
+        {
+            var requestedEnvironment = TryGetScriptDeclaredEnvironment(commandText);
+            var transition = PresetEnvironmentLoadPlanner.Plan(
+                _activeEnvironmentName,
+                _baseEnvironmentName,
+                requestedEnvironment);
+
+            if (transition.Kind == PresetEnvironmentLoadActionKind.None)
+                return;
+
+            if (transition.Kind == PresetEnvironmentLoadActionKind.RestoreBaseEnvironment)
+            {
+                if (TrySwitchEnvironment(transition.TargetEnvironment!, promptIfDirty: true))
+                {
+                    UpdateStatusBar($"Preset '{presetName}' restored base environment '{_baseEnvironmentName}'.");
+                }
+                return;
+            }
+
+            var matchingEnvironment = _environmentService.GetEnvironmentNames()
+                .FirstOrDefault(name => string.Equals(name, transition.TargetEnvironment, StringComparison.OrdinalIgnoreCase));
+
+            if (string.IsNullOrWhiteSpace(matchingEnvironment))
+            {
+                UpdateStatusBar($"Preset '{presetName}' requested environment '{transition.TargetEnvironment}', but it was not found.");
+                return;
+            }
+
+            TrySwitchEnvironment(matchingEnvironment, promptIfDirty: true);
+        }
+
+        private static string? TryGetScriptDeclaredEnvironment(string commandText)
+        {
+            if (!ScriptParser.IsYamlScript(commandText))
+                return null;
+
+            try
+            {
+                var script = new ScriptParser().Parse(commandText);
+                return string.IsNullOrWhiteSpace(script.Environment)
+                    ? null
+                    : script.Environment.Trim();
+            }
+            catch (ScriptParseException)
+            {
+                return null;
+            }
         }
 
         private void EnsureDefaultEnvironmentForFirstAdoption()
@@ -3174,10 +3261,6 @@ namespace SSH_Helper
                 return;
             }
 
-            // Clear folder selection when a preset is selected
-            _selectedFolderName = null;
-            UpdateRunButtonText();
-
             string newPresetName = tag.Name;
 
             if (!string.IsNullOrEmpty(_activePresetName) &&
@@ -3203,20 +3286,8 @@ namespace SSH_Helper
             var preset = _presetManager.Get(newPresetName);
             if (preset != null)
             {
-                txtCommand.ReadOnly = false;
-                txtCommand.Text = preset.Commands;
-                txtPreset.Text = newPresetName;
-                if (preset.Timeout.HasValue)
-                {
-                    txtTimeoutHeader.Text = preset.Timeout.Value.ToString();
-                }
-                else
-                {
-                    txtTimeoutHeader.Text = string.Empty;
-                }
+                LoadPresetIntoEditor(newPresetName, preset);
             }
-
-            _activePresetName = newPresetName;
         }
 
         private void trvPresets_AfterCollapse(object? sender, TreeViewEventArgs e)
@@ -3732,22 +3803,8 @@ namespace SSH_Helper
             var preset = _presetManager.Get(newPresetName);
             if (preset != null)
             {
-                txtCommand.ReadOnly = false;
-                txtCommand.Text = preset.Commands;
-                txtPreset.Text = newPresetName;
-                if (preset.Timeout.HasValue)
-                {
-                    txtTimeoutHeader.Text = preset.Timeout.Value.ToString();
-                }
-                else
-                {
-                    txtTimeoutHeader.Text = string.Empty;
-                }
+                LoadPresetIntoEditor(newPresetName, preset);
             }
-
-            _activePresetName = newPresetName;
-            _selectedFolderName = null;
-            UpdateRunButtonText();
         }
 
         private void trvFavorites_MouseDown(object? sender, MouseEventArgs e)
@@ -6654,10 +6711,14 @@ namespace SSH_Helper
                 RefreshPresetList(expandStatesOverride: preActionExpandState);
                 SelectPresetByName(finalName, ensureVisible: false);
 
-                var preset = _presetManager.Get(finalName);
-                txtPreset.Text = finalName;
-                txtCommand.Text = preset?.Commands ?? "";
-                _activePresetName = finalName;
+                if (!string.Equals(_activePresetName, finalName, StringComparison.Ordinal))
+                {
+                    var preset = _presetManager.Get(finalName);
+                    if (preset != null)
+                    {
+                        LoadPresetIntoEditor(finalName, preset);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -6749,18 +6810,17 @@ namespace SSH_Helper
                 if (_presetManager.Presets.Count > 0)
                 {
                     var firstPreset = _presetManager.Presets.Keys.FirstOrDefault();
-                    if (!string.IsNullOrEmpty(firstPreset))
+                    if (!string.IsNullOrEmpty(firstPreset) &&
+                        !string.Equals(_activePresetName, firstPreset, StringComparison.Ordinal))
                     {
                         SelectPresetByName(firstPreset, ensureVisible: false);
-                        var preset = _presetManager.Get(firstPreset);
-                        if (preset != null)
+                        if (!string.Equals(_activePresetName, firstPreset, StringComparison.Ordinal))
                         {
-                            txtPreset.Text = firstPreset;
-                            txtCommand.Text = preset.Commands;
-                            txtTimeoutHeader.Text = preset.Timeout.HasValue
-                                ? preset.Timeout.Value.ToString()
-                                : string.Empty;
-                            _activePresetName = firstPreset;
+                            var preset = _presetManager.Get(firstPreset);
+                            if (preset != null)
+                            {
+                                LoadPresetIntoEditor(firstPreset, preset);
+                            }
                         }
                     }
                 }
@@ -6806,14 +6866,14 @@ namespace SSH_Helper
                 RefreshPresetList();
                 SelectPresetByName(finalName, ensureVisible: false);
 
-                var preset = _presetManager.Get(finalName);
-                if (preset != null)
+                if (!string.Equals(_activePresetName, finalName, StringComparison.Ordinal))
                 {
-                    txtPreset.Text = finalName;
-                    txtCommand.Text = preset.Commands;
-                    if (preset.Timeout.HasValue) txtTimeoutHeader.Text = preset.Timeout.Value.ToString();
+                    var preset = _presetManager.Get(finalName);
+                    if (preset != null)
+                    {
+                        LoadPresetIntoEditor(finalName, preset);
+                    }
                 }
-                _activePresetName = finalName;
 
                 DialogTheme.Show($"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }

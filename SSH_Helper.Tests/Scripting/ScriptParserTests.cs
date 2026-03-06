@@ -67,6 +67,7 @@ steps:
     [InlineData("name: Test Script")]
     [InlineData("description: Uplink to core")]
     [InlineData("version: 1")]
+    [InlineData("environment: prod")]
     [InlineData("suppress_missing_column_warning: true")]
     public void IsYamlScript_MetadataOnlyKeywords_ReturnsFalse(string input)
     {
@@ -175,6 +176,20 @@ steps:
         var script = _parser.Parse(yaml);
 
         script.Version.Should().Be(2);
+    }
+
+    [Fact]
+    public void Parse_ScriptWithEnvironment_ParsesEnvironmentWithoutWarnings()
+    {
+        var yaml = @"---
+environment: prod
+steps:
+  - print: test";
+
+        var script = _parser.Parse(yaml);
+
+        script.Environment.Should().Be("prod");
+        _parser.Warnings.Should().BeEmpty();
     }
 
     [Fact]

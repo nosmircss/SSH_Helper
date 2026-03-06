@@ -56,6 +56,18 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_TopLevelEnvironmentPrefix_SuggestsEnvironment()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "en";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.TopLevelKey);
+        completion.Items.Select(item => item.Label).Should().Contain("environment");
+    }
+
+    [Fact]
     public void GetCompletion_OptionValue_SuggestsEnumLikeValues()
     {
         var provider = new ScriptAutocompleteProvider();

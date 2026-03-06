@@ -35,6 +35,17 @@ public class YamlSshSyntaxHighlighterTests
         spans.Should().HaveCountGreaterThanOrEqualTo(3);
     }
 
+    [Fact]
+    public void BuildLineHighlights_RecognizesEnvironmentTopLevelKey()
+    {
+        var highlighter = new YamlSshSyntaxHighlighter();
+        var line = "environment: prod";
+
+        var spans = highlighter.BuildLineHighlights(line, lineStartIndex: 0, darkMode: false);
+
+        spans.Should().Contain(span => span.Start == 0 && span.Length == "environment".Length);
+    }
+
     private static int GetLineStart(string text, int lineIndex)
     {
         var currentLine = 0;

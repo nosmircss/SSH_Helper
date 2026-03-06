@@ -162,6 +162,7 @@ namespace SSH_Helper
             toolStripLabel2 = new ToolStripLabel();
             tsbPassword = new ToolStripTextBox();
             toolStripSeparatorEnv = new ToolStripSeparator();
+            toolStripLabelBaseEnvironment = new ToolStripLabel();
             toolStripLabelEnvironment = new ToolStripLabel();
             tsbEnvironment = new ToolStripDropDownButton();
             tsbManageEnvironments = new ToolStripButton();
@@ -1285,7 +1286,7 @@ namespace SSH_Helper
             // 
             mainToolStrip.BackColor = Color.FromArgb(248, 249, 250);
             mainToolStrip.GripStyle = ToolStripGripStyle.Hidden;
-            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword, toolStripSeparatorEnv, toolStripLabelEnvironment, tsbEnvironment, tsbManageEnvironments });
+            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword, toolStripSeparatorEnv, toolStripLabelBaseEnvironment, toolStripLabelEnvironment, tsbEnvironment, tsbManageEnvironments });
             mainToolStrip.Location = new Point(0, 24);
             mainToolStrip.Name = "mainToolStrip";
             mainToolStrip.Padding = new Padding(8, 0, 8, 0);
@@ -1367,6 +1368,14 @@ namespace SSH_Helper
             toolStripSeparatorEnv.Alignment = ToolStripItemAlignment.Right;
             toolStripSeparatorEnv.Name = "toolStripSeparatorEnv";
             toolStripSeparatorEnv.Size = new Size(6, 25);
+            // 
+            // toolStripLabelBaseEnvironment
+            // 
+            toolStripLabelBaseEnvironment.Alignment = ToolStripItemAlignment.Right;
+            toolStripLabelBaseEnvironment.Name = "toolStripLabelBaseEnvironment";
+            toolStripLabelBaseEnvironment.Size = new Size(84, 22);
+            toolStripLabelBaseEnvironment.Text = "Base: Default";
+            toolStripLabelBaseEnvironment.Visible = false;
             // 
             // toolStripLabelEnvironment
             // 
@@ -1749,6 +1758,7 @@ namespace SSH_Helper
         private ToolStripLabel toolStripLabel2;
         private ToolStripTextBox tsbPassword;
         private ToolStripSeparator toolStripSeparatorEnv;
+        private ToolStripLabel toolStripLabelBaseEnvironment;
         private ToolStripLabel toolStripLabelEnvironment;
         private ToolStripDropDownButton tsbEnvironment;
         private ToolStripButton tsbManageEnvironments;

@@ -58,6 +58,7 @@ namespace SSH_Helper.Services.Scripting
             "name",
             "description",
             "version",
+            "environment",
             "debug",
             "nobanner",
             "suppress_missing_column_warning",
@@ -373,6 +374,9 @@ namespace SSH_Helper.Services.Scripting
                             case "version":
                                 if (int.TryParse(parser.Consume<Scalar>().Value, out var ver))
                                     script.Version = ver;
+                                break;
+                            case "environment":
+                                script.Environment = parser.Consume<Scalar>().Value;
                                 break;
                             case "debug":
                                 script.Debug = ParseBooleanOrDefault(parser, script.Debug);

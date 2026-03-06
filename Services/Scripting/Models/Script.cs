@@ -23,6 +23,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public int Version { get; set; } = 1;
 
         /// <summary>
+        /// Optional environment name to activate when the preset is loaded.
+        /// </summary>
+        public string? Environment { get; set; }
+
+        /// <summary>
         /// Enable debug output for this script (shows Extract results, Set values, etc.).
         /// Useful for troubleshooting and building scripts.
         /// </summary>
