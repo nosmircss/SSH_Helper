@@ -6,6 +6,12 @@ namespace SSH_Helper.Models
     public class FolderInfo
     {
         /// <summary>
+        /// Optional folder-specific base environment override.
+        /// Null means inherit from the nearest ancestor folder or the global base environment.
+        /// </summary>
+        public string? BaseEnvironment { get; set; }
+
+        /// <summary>
         /// Whether the folder is expanded in the UI.
         /// </summary>
         public bool IsExpanded { get; set; } = true;
@@ -24,6 +30,7 @@ namespace SSH_Helper.Models
         {
             return new FolderInfo
             {
+                BaseEnvironment = BaseEnvironment,
                 IsExpanded = IsExpanded,
                 SortOrder = SortOrder,
                 IsFavorite = IsFavorite

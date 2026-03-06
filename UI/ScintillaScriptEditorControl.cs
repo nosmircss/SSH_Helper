@@ -186,7 +186,7 @@ namespace SSH_Helper.UI
                 _suppressTextProcessing = true;
                 try
                 {
-                    _editor.Text = newText;
+                    SetEditorTextPreservingReadOnly(newText);
                 }
                 finally
                 {
@@ -343,7 +343,7 @@ namespace SSH_Helper.UI
 
         public new bool Focus() => _editor.Focus();
 
-        public void Clear() => _editor.Text = string.Empty;
+        public void Clear() => Text = string.Empty;
 
         public void SelectAll() => _editor.SelectAll();
 
@@ -514,6 +514,27 @@ namespace SSH_Helper.UI
 
             RefreshEditorVisuals();
             RequestValidationOrClear();
+        }
+
+        private void SetEditorTextPreservingReadOnly(string value)
+        {
+            var wasReadOnly = _editor.ReadOnly;
+            if (wasReadOnly)
+            {
+                _editor.ReadOnly = false;
+            }
+
+            try
+            {
+                _editor.Text = value;
+            }
+            finally
+            {
+                if (wasReadOnly)
+                {
+                    _editor.ReadOnly = true;
+                }
+            }
         }
 
         private void Editor_KeyDown(object? sender, KeyEventArgs e)

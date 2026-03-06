@@ -9,6 +9,8 @@ using SSH_Helper.Models;
 using SSH_Helper.Services.Editor;
 using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
+using SSH_Helper.Services.Scripting.Commands;
+using SSH_Helper.Services.Scripting.Models;
 using SSH_Helper.UI;
 using SSH_Helper.Utilities;
 
@@ -88,6 +90,7 @@ namespace SSH_Helper
         private const int UiOutputThrottleMs = 50;
         private const string FolderIcon = "\U0001F4C1";
         private const string StarIcon = "\u2605";
+        private const string FolderBaseEnvironmentInheritChoiceValue = "__SSH_HELPER_FOLDER_BASE_INHERIT__";
         private const int LargeHistoryPayloadCharThreshold = 10_000_000;
         private const int SmallHistoryPayloadCharThreshold = 500_000;
         private const int OutputTextRecreateThresholdChars = 500_000;
@@ -171,6 +174,7 @@ namespace SSH_Helper
 
         // Track which TreeView triggered the context menu
         private TreeView? _contextMenuSourceTreeView;
+        private readonly ToolStripMenuItem _ctxFolderBaseEnvironment = new();
         private readonly ToolStripSeparator _ctxFolderExpandCollapseSeparator = new();
         private readonly ToolStripMenuItem _ctxExpandAllSubfolders = new();
         private readonly ToolStripMenuItem _ctxCollapseAllSubfolders = new();
@@ -203,6 +207,7 @@ namespace SSH_Helper
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
             InitializeComponent();
+            InitializeFolderBaseEnvironmentContextMenuItem();
             InitializeFolderExpandCollapseContextMenuItems();
             Text = $"{ApplicationName} {ApplicationVersion}";
 
@@ -1421,6 +1426,21 @@ namespace SSH_Helper
             toolStripLabelBaseEnvironment.Visible = indicator.Visible;
         }
 
+        private PresetBaseEnvironmentResolution ResolveEffectiveBaseEnvironment(string? folderPath)
+        {
+            _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
+            return PresetBaseEnvironmentResolver.Resolve(_baseEnvironmentName, folderPath, _presetManager.Folders);
+        }
+
+        private bool TryApplyFolderEnvironment(string folderPath, bool promptIfDirty)
+        {
+            var resolution = ResolveEffectiveBaseEnvironment(folderPath);
+            if (string.Equals(_activeEnvironmentName, resolution.EnvironmentName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return TrySwitchEnvironment(resolution.EnvironmentName, promptIfDirty);
+        }
+
         private int? GetEnvironmentLabelColor(string environmentName)
         {
             try
@@ -1473,6 +1493,11 @@ namespace SSH_Helper
             ApplyActiveEnvironmentLabelColor();
             RefreshBaseEnvironmentIndicator();
             UpdateWindowTitle();
+
+            if (!string.IsNullOrWhiteSpace(_selectedFolderName))
+            {
+                RefreshSelectedFolderSummary();
+            }
         }
 
         private void TsbEnvironment_DropDownItemClicked(object? sender, ToolStripItemClickedEventArgs e)
@@ -1500,7 +1525,7 @@ namespace SSH_Helper
         {
             EnsureDefaultEnvironmentForFirstAdoption();
 
-            using var dialog = new EnvironmentDialog(_environmentService, _configService, _isDarkMode);
+            using var dialog = new EnvironmentDialog(_environmentService, _configService, _presetManager, _isDarkMode);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
@@ -1519,6 +1544,12 @@ namespace SSH_Helper
             }
 
             RefreshEnvironmentSelector(_activeEnvironmentName);
+
+            if (!string.IsNullOrWhiteSpace(_selectedFolderName))
+            {
+                RefreshSelectedFolderSummary();
+            }
+
             UpdateStatusBar($"Active environment: {_activeEnvironmentName}");
         }
 
@@ -1557,6 +1588,12 @@ namespace SSH_Helper
             _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
             LoadEnvironmentIntoGrid(environment);
             RefreshEnvironmentSelector(_activeEnvironmentName);
+
+            if (updateBaseEnvironment && !string.IsNullOrWhiteSpace(_selectedFolderName))
+            {
+                RefreshSelectedFolderSummary();
+            }
+
             return true;
         }
 
@@ -1572,15 +1609,16 @@ namespace SSH_Helper
             _selectedFolderName = null;
             UpdateRunButtonText();
 
-            ApplyScriptDeclaredEnvironmentOnPresetLoad(presetName, preset.Commands);
+            ApplyPresetEnvironmentOnPresetLoad(presetName, preset);
         }
 
-        private void ApplyScriptDeclaredEnvironmentOnPresetLoad(string presetName, string commandText)
+        private void ApplyPresetEnvironmentOnPresetLoad(string presetName, PresetInfo preset)
         {
-            var requestedEnvironment = TryGetScriptDeclaredEnvironment(commandText);
+            var requestedEnvironment = TryGetScriptDeclaredEnvironment(preset.Commands);
+            var effectiveBaseEnvironment = ResolveEffectiveBaseEnvironment(preset.Folder);
             var transition = PresetEnvironmentLoadPlanner.Plan(
                 _activeEnvironmentName,
-                _baseEnvironmentName,
+                effectiveBaseEnvironment.EnvironmentName,
                 requestedEnvironment);
 
             if (transition.Kind == PresetEnvironmentLoadActionKind.None)
@@ -1590,7 +1628,7 @@ namespace SSH_Helper
             {
                 if (TrySwitchEnvironment(transition.TargetEnvironment!, promptIfDirty: true))
                 {
-                    UpdateStatusBar($"Preset '{presetName}' restored base environment '{_baseEnvironmentName}'.");
+                    UpdateStatusBar(PresetEnvironmentStatusFormatter.FormatRestoreMessage(presetName, effectiveBaseEnvironment));
                 }
                 return;
             }
@@ -1600,11 +1638,14 @@ namespace SSH_Helper
 
             if (string.IsNullOrWhiteSpace(matchingEnvironment))
             {
-                UpdateStatusBar($"Preset '{presetName}' requested environment '{transition.TargetEnvironment}', but it was not found.");
+                UpdateStatusBar(PresetEnvironmentStatusFormatter.FormatMissingEnvironmentMessage(presetName, transition.TargetEnvironment!));
                 return;
             }
 
-            TrySwitchEnvironment(matchingEnvironment, promptIfDirty: true);
+            if (TrySwitchEnvironment(matchingEnvironment, promptIfDirty: true))
+            {
+                UpdateStatusBar(PresetEnvironmentStatusFormatter.FormatSwitchMessage(presetName, matchingEnvironment));
+            }
         }
 
         private static string? TryGetScriptDeclaredEnvironment(string commandText)
@@ -3232,32 +3273,14 @@ namespace SSH_Helper
             // If a folder is selected, clear the editor to avoid confusion
             if (tag.IsFolder)
             {
-                // Check for unsaved changes first
-                if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
-                {
-                    var result = ShowUnsavedPresetDiffPrompt();
-
-                    if (result == DialogResult.Cancel)
+                HandleFolderSelection(
+                    tag.Name,
+                    onCancel: () =>
                     {
                         _suppressPresetSelectionChange = true;
                         SelectPresetByName(_activePresetName);
                         _suppressPresetSelectionChange = false;
-                        return;
-                    }
-
-                    if (result == DialogResult.Yes)
-                    {
-                        SaveCurrentPreset();
-                    }
-                }
-
-                // Display folder summary and track selected folder
-                _activePresetName = null;
-                _selectedFolderName = tag.Name;
-                txtPreset.Text = $"{FolderIcon} {tag.Name}";
-                txtTimeoutHeader.Clear();
-                DisplayFolderSummary(tag.Name);
-                UpdateRunButtonText();
+                    });
                 return;
             }
 
@@ -3379,6 +3402,11 @@ namespace SSH_Helper
             if (!_clickedOnPlusMinus && e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
             {
                 trvPresets.SelectedNode = e.Node;
+
+                if (e.Button == MouseButtons.Left)
+                {
+                    EnsureFolderSummaryCurrent(tag.Name);
+                }
             }
             // Reset flag after click is processed
             _clickedOnPlusMinus = false;
@@ -3754,29 +3782,7 @@ namespace SSH_Helper
             // Handle folder selection
             if (tag.IsFolder)
             {
-                // Check for unsaved changes first
-                if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
-                {
-                    var result = ShowUnsavedPresetDiffPrompt();
-
-                    if (result == DialogResult.Cancel)
-                    {
-                        return;
-                    }
-
-                    if (result == DialogResult.Yes)
-                    {
-                        SaveCurrentPreset();
-                    }
-                }
-
-                // Display folder summary
-                _activePresetName = null;
-                _selectedFolderName = tag.Name;
-                txtPreset.Text = $"{FolderIcon} {tag.Name}";
-                txtTimeoutHeader.Clear();
-                DisplayFolderSummary(tag.Name);
-                UpdateRunButtonText();
+                HandleFolderSelection(tag.Name);
                 return;
             }
 
@@ -3822,6 +3828,12 @@ namespace SSH_Helper
             if (e.Button == MouseButtons.Right && e.Node != null)
             {
                 trvFavorites.SelectedNode = e.Node;
+                return;
+            }
+
+            if (e.Button == MouseButtons.Left && e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
+            {
+                EnsureFolderSummaryCurrent(tag.Name);
             }
         }
 
@@ -4895,6 +4907,44 @@ namespace SSH_Helper
             contextPresetLst.Items.Add(_ctxCollapseAllSubfolders);
         }
 
+        private void InitializeFolderBaseEnvironmentContextMenuItem()
+        {
+            _ctxFolderBaseEnvironment.Name = "ctxFolderBaseEnvironment";
+            _ctxFolderBaseEnvironment.Text = "Folder Base En&vironment...";
+            _ctxFolderBaseEnvironment.Click += CtxFolderBaseEnvironment_Click;
+
+            if (contextPresetLst.Items.Contains(_ctxFolderBaseEnvironment))
+            {
+                return;
+            }
+
+            var deleteFolderIndex = contextPresetLst.Items.IndexOf(ctxDeleteFolder);
+            if (deleteFolderIndex >= 0)
+            {
+                contextPresetLst.Items.Insert(deleteFolderIndex, _ctxFolderBaseEnvironment);
+                return;
+            }
+
+            contextPresetLst.Items.Add(_ctxFolderBaseEnvironment);
+        }
+
+        private void CtxFolderBaseEnvironment_Click(object? sender, EventArgs e)
+        {
+            var folderNode = ResolveContextMenuFolderNode();
+            if (folderNode?.Tag is not PresetNodeTag folderTag || !folderTag.IsFolder)
+                return;
+
+            var folderPath = folderTag.Name;
+
+            BeginInvoke((Action)(() =>
+            {
+                if (IsDisposed)
+                    return;
+
+                ShowFolderBaseEnvironmentDialog(folderPath);
+            }));
+        }
+
         private void CtxExpandAllSubfolders_Click(object? sender, EventArgs e)
         {
             ExpandCollapseFolderSubtree(expand: true);
@@ -5135,6 +5185,7 @@ namespace SSH_Helper
                 ctxAddFolder.Visible = false;
                 ctxRenameFolder.Visible = isFolder;
                 ctxDeleteFolder.Visible = false;
+                _ctxFolderBaseEnvironment.Visible = false;
                 ctxMoveToFolder.Visible = false;
                 _ctxFolderExpandCollapseSeparator.Visible = false;
                 _ctxExpandAllSubfolders.Visible = false;
@@ -5162,6 +5213,7 @@ namespace SSH_Helper
             ctxAddFolder.Visible = true;
             ctxRenameFolder.Visible = isFolder;
             ctxDeleteFolder.Visible = isFolder;
+            _ctxFolderBaseEnvironment.Visible = isFolder && _contextMenuSourceTreeView == trvPresets;
             _ctxFolderExpandCollapseSeparator.Visible = hasSubfolders;
             _ctxExpandAllSubfolders.Visible = hasSubfolders;
             _ctxCollapseAllSubfolders.Visible = hasSubfolders;
@@ -5177,6 +5229,74 @@ namespace SSH_Helper
             toolStripSeparator6.Visible = isPreset;
             toolStripSeparator7.Visible = true;
             toolStripSeparatorFolders.Visible = true;
+        }
+
+        private void ShowFolderBaseEnvironmentDialog(string folderPath)
+        {
+            _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
+            _presetManager.Folders.TryGetValue(folderPath, out var folderInfo);
+            var explicitBaseEnvironment = folderInfo?.BaseEnvironment;
+            var inheritedResolution = ResolveEffectiveBaseEnvironment(FolderPathUtility.GetParentPath(folderPath));
+
+            var options = new List<ChoiceOption>
+            {
+                new()
+                {
+                    Label = FolderBaseEnvironmentSummaryFormatter.FormatInheritChoiceLabel(inheritedResolution),
+                    Value = FolderBaseEnvironmentInheritChoiceValue
+                }
+            };
+
+            foreach (var environmentName in _environmentService.GetEnvironmentNames())
+            {
+                options.Add(new ChoiceOption
+                {
+                    Label = environmentName,
+                    Value = environmentName
+                });
+            }
+
+            var defaultValue = string.IsNullOrWhiteSpace(explicitBaseEnvironment)
+                ? FolderBaseEnvironmentInheritChoiceValue
+                : explicitBaseEnvironment;
+
+            using var dialog = new ScriptChooseDialog(
+                $"Select the base environment for folder '{folderPath}'.",
+                options,
+                defaultValue,
+                "Folder Base Environment");
+            DialogTheme.SetDialogFont(dialog, _dialogFont);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            var selectedValue = dialog.SelectedValue;
+            if (string.IsNullOrWhiteSpace(selectedValue))
+                return;
+
+            if (string.Equals(selectedValue, FolderBaseEnvironmentInheritChoiceValue, StringComparison.Ordinal))
+            {
+                ApplyFolderBaseEnvironmentSelection(folderPath, null, inheritedResolution.EnvironmentName);
+                return;
+            }
+
+            ApplyFolderBaseEnvironmentSelection(folderPath, selectedValue, selectedValue);
+        }
+
+        private void ApplyFolderBaseEnvironmentSelection(string folderPath, string? explicitEnvironmentName, string statusEnvironmentName)
+        {
+            if (!_presetManager.SetFolderBaseEnvironment(folderPath, explicitEnvironmentName))
+                return;
+
+            TryApplyFolderEnvironment(folderPath, promptIfDirty: true);
+            DisplayFolderSummary(folderPath);
+
+            if (string.IsNullOrWhiteSpace(explicitEnvironmentName))
+            {
+                UpdateStatusBar($"Folder '{folderPath}' now inherits base environment '{statusEnvironmentName}'.");
+                return;
+            }
+
+            UpdateStatusBar($"Folder '{folderPath}' base environment set to '{statusEnvironmentName}'.");
         }
 
         private void BuildMoveToFolderSubmenu(string presetName)
@@ -7273,6 +7393,8 @@ namespace SSH_Helper
             var presetNames = GetSortedPresetsInFolder(folderPath, config).ToList();
             var subfolders = _presetManager.GetSubfolders(folderPath).ToList();
             var folderName = FolderPathUtility.GetFolderName(folderPath);
+            var effectiveBaseEnvironment = ResolveEffectiveBaseEnvironment(folderPath);
+            _presetManager.Folders.TryGetValue(folderPath, out var folderInfo);
 
             var sb = new StringBuilder();
             sb.AppendLine(FolderSummarySeparator);
@@ -7283,6 +7405,7 @@ namespace SSH_Helper
             }
             sb.AppendLine(FolderSummarySeparator);
             sb.AppendLine();
+            sb.AppendLine(FolderBaseEnvironmentSummaryFormatter.FormatSummaryLine(folderInfo?.BaseEnvironment, effectiveBaseEnvironment));
             sb.AppendLine($"  Presets: {presetNames.Count}");
             if (subfolders.Count > 0)
             {
@@ -7321,6 +7444,69 @@ namespace SSH_Helper
 
             txtCommand.Text = sb.ToString();
             txtCommand.ReadOnly = true;
+        }
+
+        private void LoadFolderIntoSummary(string folderPath)
+        {
+            _activePresetName = null;
+            _selectedFolderName = folderPath;
+            TryApplyFolderEnvironment(folderPath, promptIfDirty: true);
+            txtTimeoutHeader.Clear();
+            RefreshSelectedFolderSummary();
+        }
+
+        private void EnsureFolderSummaryCurrent(string folderPath)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                return;
+            }
+
+            if (string.IsNullOrEmpty(_activePresetName) &&
+                string.Equals(_selectedFolderName, folderPath, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            HandleFolderSelection(folderPath);
+        }
+
+        private void HandleFolderSelection(string folderPath, Action? onCancel = null)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
+            {
+                var result = ShowUnsavedPresetDiffPrompt();
+
+                if (result == DialogResult.Cancel)
+                {
+                    onCancel?.Invoke();
+                    return;
+                }
+
+                if (result == DialogResult.Yes)
+                {
+                    SaveCurrentPreset();
+                }
+            }
+
+            LoadFolderIntoSummary(folderPath);
+        }
+
+        private void RefreshSelectedFolderSummary()
+        {
+            if (string.IsNullOrWhiteSpace(_selectedFolderName))
+            {
+                return;
+            }
+
+            txtPreset.Text = $"{FolderIcon} {_selectedFolderName}";
+            DisplayFolderSummary(_selectedFolderName);
+            UpdateRunButtonText();
         }
 
         private void UpdateRunButtonText()
@@ -8113,6 +8299,9 @@ namespace SSH_Helper
                     .Select(i => hostRows[i])
                     .ToList();
             }
+
+            if (!TryApplyFolderEnvironment(folderName, promptIfDirty: true))
+                return;
 
             // Build preset dictionary
             var presets = new Dictionary<string, PresetInfo>();

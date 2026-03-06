@@ -157,6 +157,32 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
+    public void TextSetter_WhenReadOnly_StillAppliesProgrammaticUpdates()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "first folder";
+        control.ReadOnly = true;
+
+        control.Text = "second folder";
+
+        control.Text.Should().Be("second folder");
+        control.ReadOnly.Should().BeTrue();
+    }
+
+    [WinFormsFact]
+    public void Clear_WhenReadOnly_ClearsProgrammaticallyAndPreservesReadOnly()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "folder summary";
+        control.ReadOnly = true;
+
+        control.Clear();
+
+        control.Text.Should().BeEmpty();
+        control.ReadOnly.Should().BeTrue();
+    }
+
+    [WinFormsFact]
     public void ApplyCommandEditorSettings_VisualOptions_EnableScintillaVisualAids()
     {
         using var control = new ScintillaScriptEditorControl();
