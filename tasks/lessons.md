@@ -13,4 +13,7 @@
 - When a read-only custom editor is reused as a details pane, I must ensure programmatic `Text` and `Clear()` operations temporarily bypass read-only or subsequent detail refreshes will silently fail.
 - When a manual switch updates both the active environment and the base environment, I must refresh folder-detail UI after the final base-environment write, not only from the earlier environment-changed event.
 - When a user corrects autocomplete scope, I should encode the exact context boundary they asked for, not flatten it into a broader suppression rule; header-area and post-section behavior may need different completion rules.
+- When a user says autocomplete still leaks after a scope fix, I must verify popup lifecycle on caret movement as well as provider filtering; stale visible suggestions can survive even when fresh completion results are already correct.
+- When a user corrects autocomplete scope again, I must update the manual invocation rules too; preserving `Ctrl+Space` behavior from an earlier assumption can still violate the real boundary they want.
+- When a user reports Tab behavior on a blank editor line, I must verify trailing-newline indexing specifically; helpers that enumerate line starts often collapse the final blank line back onto the previous content line.
 - When adding a preset dirty indicator, I must place it in the active editor header the user sees while typing, not only in the presets tree pane.

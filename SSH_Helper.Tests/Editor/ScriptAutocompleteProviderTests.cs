@@ -93,16 +93,15 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
-    public void GetCompletion_BlankTopLevelLine_ManualRequest_SuggestsRootKeys()
+    public void GetCompletion_BlankTopLevelLine_AfterVarsAndSteps_ManualRequest_DoesNotSuggestRootKeys()
     {
         var provider = new ScriptAutocompleteProvider();
         var text = "name: demo\nvars:\n  token: abc\nsteps:\n  - send: ok\n";
 
-        var completion = provider.GetCompletion(text, text.Length, allowBlankTopLevelKeys: true);
+        var completion = provider.GetCompletion(text, text.Length);
 
-        completion.Context.Should().Be(CompletionContextKind.TopLevelKey);
-        completion.Items.Select(item => item.Label).Should().Contain("steps");
-        completion.Items.Select(item => item.Label).Should().Contain("name");
+        completion.Context.Should().Be(CompletionContextKind.None);
+        completion.Items.Should().BeEmpty();
     }
 
     [Fact]

@@ -20,6 +20,12 @@ namespace SSH_Helper.Services.Editor
 
     public sealed class YamlSshSyntaxHighlighter
     {
+        private static readonly string[] NestedTableColumnOptionKeys =
+        {
+            "header",
+            "field"
+        };
+
         private static readonly Regex TopLevelRegex =
             new(@"^\s*(?<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
@@ -46,13 +52,14 @@ namespace SSH_Helper.Services.Editor
 
         private readonly HashSet<string> _topLevelKeys;
         private readonly HashSet<string> _stepCommands;
-        private readonly HashSet<string> _stepOptionKeys;
+        private readonly HashSet<string> _highlightedOptionKeys;
 
         public YamlSshSyntaxHighlighter()
         {
             _topLevelKeys = new HashSet<string>(ScriptParser.GetKnownTopLevelKeys(), StringComparer.OrdinalIgnoreCase);
             _stepCommands = new HashSet<string>(ScriptParser.GetKnownStepCommands(), StringComparer.OrdinalIgnoreCase);
-            _stepOptionKeys = new HashSet<string>(ScriptParser.GetKnownStepOptionKeys(), StringComparer.OrdinalIgnoreCase);
+            _highlightedOptionKeys = new HashSet<string>(ScriptParser.GetKnownStepOptionKeys(), StringComparer.OrdinalIgnoreCase);
+            _highlightedOptionKeys.UnionWith(NestedTableColumnOptionKeys);
         }
 
         public IReadOnlyList<EditorHighlightSpan> BuildHighlights(
@@ -91,18 +98,27 @@ namespace SSH_Helper.Services.Editor
             }
 
             var stepMatch = StepCommandRegex.Match(lineText);
-            if (stepMatch.Success && _stepCommands.Contains(stepMatch.Groups["key"].Value))
+            var stepKey = stepMatch.Success ? stepMatch.Groups["key"].Value : string.Empty;
+            var isRecognizedStepCommand = stepMatch.Success && _stepCommands.Contains(stepKey);
+
+            if (isRecognizedStepCommand)
             {
                 spans.Add(new EditorHighlightSpan(
                     lineStartIndex + stepMatch.Groups["key"].Index,
                     stepMatch.Groups["key"].Length,
                     palette.StepCommand));
             }
+            else if (stepMatch.Success && _highlightedOptionKeys.Contains(stepKey))
+            {
+                spans.Add(new EditorHighlightSpan(
+                    lineStartIndex + stepMatch.Groups["key"].Index,
+                    stepMatch.Groups["key"].Length,
+                    palette.StepOption));
+            }
 
             var optionMatch = OptionKeyRegex.Match(lineText);
             if (optionMatch.Success &&
-                !stepMatch.Success &&
-                _stepOptionKeys.Contains(optionMatch.Groups["key"].Value))
+                _highlightedOptionKeys.Contains(optionMatch.Groups["key"].Value))
             {
                 spans.Add(new EditorHighlightSpan(
                     lineStartIndex + optionMatch.Groups["key"].Index,

@@ -129,7 +129,7 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
-    public void CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceShowsSuggestions()
+    public void CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceStaysHidden()
     {
         using var control = new ScintillaScriptEditorControl();
         control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
@@ -140,9 +140,47 @@ public class ScintillaScriptEditorControlTests
         InvokeNonPublic(control, "Editor_KeyDown", null, new KeyEventArgs(Keys.Control | Keys.Space));
 
         var popup = GetCompletionPopup(control);
-        var list = GetCompletionList(control);
+        popup.Visible.Should().BeFalse();
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_UpdateUISelection_HidesRootSuggestionsWhenCaretMovesBelowSteps()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "name: demo\n\nvars:\n  token: abc\nsteps:\n  - send:\n      command: ok\n";
+        control.SelectionStart = "name: demo\n".Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+        var popup = GetCompletionPopup(control);
         popup.Visible.Should().BeTrue();
-        list.Items.Count.Should().BeGreaterThan(0);
+
+        var editor = GetInnerEditor(control);
+        editor.GotoPosition(control.Text.Length);
+        InvokeNonPublic(control, "Editor_UpdateUI", null, new UpdateUIEventArgs(UpdateChange.Selection));
+
+        popup.Visible.Should().BeFalse();
+    }
+
+    [WinFormsFact]
+    public void Tab_OnTrailingBlankLine_IndentsCurrentBlankLine()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.ApplyCommandEditorSettings(new CommandEditorSettings
+        {
+            IndentSize = 2,
+            UseSpacesForTab = true
+        });
+        control.Text = "steps:\n  - print:\n      message: \"test\"\n";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "Editor_KeyDown", null, new KeyEventArgs(Keys.Tab));
+
+        NormalizeLineEndings(control.Text).Should().Be("steps:\n  - print:\n      message: \"test\"\n  ");
+        control.SelectionStart.Should().Be(control.Text.Length);
+        control.SelectionLength.Should().Be(0);
     }
 
     [WinFormsFact]

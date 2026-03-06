@@ -164,7 +164,7 @@ namespace SSH_Helper.Services.Editor
 
         public IReadOnlyDictionary<string, IReadOnlyList<string>> GetEnumLikeOptionValues() => _enumLikeOptionValues;
 
-        public CompletionResult GetCompletion(string text, int caretIndex, bool allowBlankTopLevelKeys = false)
+        public CompletionResult GetCompletion(string text, int caretIndex)
         {
             text ??= string.Empty;
             var safeCaret = Math.Clamp(caretIndex, 0, text.Length);
@@ -218,7 +218,6 @@ namespace SSH_Helper.Services.Editor
             {
                 var topLevelToken = linePrefix.Trim();
                 if (topLevelToken.Length == 0 &&
-                    !allowBlankTopLevelKeys &&
                     !ShouldAutoSuggestBlankTopLevelKeys(text, lineStart))
                 {
                     return new CompletionResult();

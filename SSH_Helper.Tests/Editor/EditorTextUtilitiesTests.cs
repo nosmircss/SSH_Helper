@@ -152,6 +152,24 @@ public class EditorTextUtilitiesTests
     }
 
     [Fact]
+    public void ApplyIndentation_OnTrailingBlankLine_IndentsBlankLineInsteadOfPreviousLine()
+    {
+        var text = "steps:\n  - print:\n      message: \"test\"\n";
+
+        var edit = EditorTextUtilities.ApplyIndentation(
+            text,
+            text.Length,
+            selectionLength: 0,
+            indentSize: 2,
+            outdent: false,
+            useSpacesForTab: true);
+
+        NormalizeLineEndings(edit.Text).Should().Be("steps:\n  - print:\n      message: \"test\"\n  ");
+        edit.SelectionStart.Should().Be(edit.Text.Length);
+        edit.SelectionLength.Should().Be(0);
+    }
+
+    [Fact]
     public void ApplySiblingStepEnter_FromCommandMapPayload_InsertsSiblingStepPrefix()
     {
         var text = "steps:\n  - send:\n      command: show version";

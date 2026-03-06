@@ -558,7 +558,7 @@ namespace SSH_Helper.UI
 
             if (_settings.EnableAutocomplete && e.Control && e.KeyCode == Keys.Space)
             {
-                ShowCompletionPopupCore(allowBlankTopLevelKeys: true);
+                ShowCompletionPopup();
                 e.Handled = true;
                 e.SuppressKeyPress = true;
                 return;
@@ -600,6 +600,12 @@ namespace SSH_Helper.UI
             var trackedChanges = UpdateChange.Selection | UpdateChange.VScroll | UpdateChange.HScroll;
             if ((e.Change & trackedChanges) == 0)
             {
+                return;
+            }
+
+            if ((e.Change & UpdateChange.Selection) != 0)
+            {
+                RefreshVisibleCompletionPopup();
                 return;
             }
 
@@ -798,10 +804,10 @@ namespace SSH_Helper.UI
 
         private void ShowCompletionPopup()
         {
-            ShowCompletionPopupCore(allowBlankTopLevelKeys: false);
+            ShowCompletionPopupCore();
         }
 
-        private void ShowCompletionPopupCore(bool allowBlankTopLevelKeys)
+        private void ShowCompletionPopupCore()
         {
             if (!_settings.EnableAutocomplete || _autocompleteProvider == null)
             {
@@ -809,10 +815,7 @@ namespace SSH_Helper.UI
                 return;
             }
 
-            var completion = _autocompleteProvider.GetCompletion(
-                _editor.Text,
-                _editor.CurrentPosition,
-                allowBlankTopLevelKeys);
+            var completion = _autocompleteProvider.GetCompletion(_editor.Text, _editor.CurrentPosition);
             if (completion.Items.Count == 0)
             {
                 HideCompletionPopup();
@@ -893,6 +896,16 @@ namespace SSH_Helper.UI
             }
 
             _activeCompletionContext = CompletionContextKind.None;
+        }
+
+        private void RefreshVisibleCompletionPopup()
+        {
+            if (!_completionPopup.Visible)
+            {
+                return;
+            }
+
+            ShowCompletionPopupCore();
         }
 
         private void DismissCompletionOnExternalClick(IntPtr targetHandle)
