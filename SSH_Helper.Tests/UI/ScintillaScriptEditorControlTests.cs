@@ -101,6 +101,51 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
+    public void CompletionPopup_BlankHeaderLine_AutoRequestShowsSuggestions()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "name: demo\nversion: 1\n";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+
+        GetCompletionPopup(control).Visible.Should().BeTrue();
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_BlankTopLevelLine_AfterSteps_AutoRequestStaysHidden()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "name: demo\nvars:\n  token: abc\nsteps:\n  - send: ok\n";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+
+        GetCompletionPopup(control).Visible.Should().BeFalse();
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceShowsSuggestions()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "name: demo\nvars:\n  token: abc\nsteps:\n  - send: ok\n";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "Editor_KeyDown", null, new KeyEventArgs(Keys.Control | Keys.Space));
+
+        var popup = GetCompletionPopup(control);
+        var list = GetCompletionList(control);
+        popup.Visible.Should().BeTrue();
+        list.Items.Count.Should().BeGreaterThan(0);
+    }
+
+    [WinFormsFact]
     public void ScrollPastEnd_IsEnabledByDefault()
     {
         using var control = new ScintillaScriptEditorControl();

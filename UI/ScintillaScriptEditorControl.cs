@@ -558,7 +558,7 @@ namespace SSH_Helper.UI
 
             if (_settings.EnableAutocomplete && e.Control && e.KeyCode == Keys.Space)
             {
-                ShowCompletionPopup();
+                ShowCompletionPopupCore(allowBlankTopLevelKeys: true);
                 e.Handled = true;
                 e.SuppressKeyPress = true;
                 return;
@@ -798,13 +798,21 @@ namespace SSH_Helper.UI
 
         private void ShowCompletionPopup()
         {
+            ShowCompletionPopupCore(allowBlankTopLevelKeys: false);
+        }
+
+        private void ShowCompletionPopupCore(bool allowBlankTopLevelKeys)
+        {
             if (!_settings.EnableAutocomplete || _autocompleteProvider == null)
             {
                 HideCompletionPopup();
                 return;
             }
 
-            var completion = _autocompleteProvider.GetCompletion(_editor.Text, _editor.CurrentPosition);
+            var completion = _autocompleteProvider.GetCompletion(
+                _editor.Text,
+                _editor.CurrentPosition,
+                allowBlankTopLevelKeys);
             if (completion.Items.Count == 0)
             {
                 HideCompletionPopup();

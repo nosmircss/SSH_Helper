@@ -267,6 +267,7 @@ namespace SSH_Helper
             EnableDoubleBuffering();
             RestoreWindowState();
             UpdateHostCount();
+            UpdatePresetHeaderIndicator();
             UpdateSortModeIndicator();
             UpdateStatusBar("Ready");
 
@@ -1168,6 +1169,9 @@ namespace SSH_Helper
             txtCommand.Click += TxtCommand_CursorPositionChanged;
             txtCommand.KeyUp += TxtCommand_CursorPositionChanged;
             txtCommand.MouseUp += TxtCommand_CursorPositionChanged;
+            txtCommand.TextChanged += (_, _) => UpdatePresetHeaderIndicator();
+            txtPreset.TextChanged += (_, _) => UpdatePresetHeaderIndicator();
+            txtTimeoutHeader.TextChanged += (_, _) => UpdatePresetHeaderIndicator();
             UpdateLinePosition();
         }
 
@@ -1766,6 +1770,7 @@ namespace SSH_Helper
             _activePresetName = presetName;
             _selectedFolderName = null;
             UpdateRunButtonText();
+            UpdatePresetHeaderIndicator();
 
             ApplyPresetEnvironmentOnPresetLoad(presetName, preset);
         }
@@ -1971,6 +1976,21 @@ namespace SSH_Helper
         private void UpdateHostsFileIndicator()
         {
             lblHostsTitle.Text = $"Hosts: {HostsFileIndicatorFormatter.Format(_loadedFilePath, _csvDirty, ResolveLoadedFileSyncStatus())}";
+        }
+
+        private void UpdatePresetHeaderIndicator()
+        {
+            var isDirty = IsPresetDirty();
+            var currentPresetName = string.IsNullOrWhiteSpace(txtPreset.Text)
+                ? _activePresetName
+                : txtPreset.Text.Trim();
+
+            lblPresetsTitle.Text = PresetHeaderIndicatorFormatter.Format(
+                _selectedFolderName,
+                currentPresetName,
+                isDirty);
+            lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty);
+            btnSavePreset.Text = PresetHeaderIndicatorFormatter.FormatSaveButtonLabel(isDirty);
         }
 
         private void UpdateHostCount()
@@ -6842,6 +6862,7 @@ namespace SSH_Helper
             }
 
             _activePresetName = presetName;
+            UpdatePresetHeaderIndicator();
             UpdateStatusBar($"Preset '{presetName}' saved");
         }
 
@@ -6914,6 +6935,9 @@ namespace SSH_Helper
             txtCommand.Clear();
             txtTimeoutHeader.Text = string.Empty;
             _activePresetName = presetName;
+            _selectedFolderName = null;
+            UpdateRunButtonText();
+            UpdatePresetHeaderIndicator();
         }
 
         private string? ResolvePresetNameForActions(bool preferContextSource)
@@ -7100,6 +7124,7 @@ namespace SSH_Helper
             SelectPresetByName(newName, ensureVisible: false);
             txtPreset.Text = newName;
             _activePresetName = newName;
+            UpdatePresetHeaderIndicator();
         }
 
         private void DeletePreset(bool preferContextSource = false)
@@ -7729,6 +7754,7 @@ namespace SSH_Helper
             txtPreset.Text = $"{FolderIcon} {_selectedFolderName}";
             DisplayFolderSummary(_selectedFolderName);
             UpdateRunButtonText();
+            UpdatePresetHeaderIndicator();
         }
 
         private void UpdateRunButtonText()

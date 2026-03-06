@@ -760,15 +760,16 @@ namespace SSH_Helper
             // 
             // lblPresetsTitle
             // 
-            lblPresetsTitle.AutoSize = true;
-            lblPresetsTitle.Dock = DockStyle.Left;
+            lblPresetsTitle.AutoEllipsis = true;
+            lblPresetsTitle.Dock = DockStyle.Fill;
             lblPresetsTitle.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             lblPresetsTitle.ForeColor = Color.FromArgb(33, 37, 41);
             lblPresetsTitle.Location = new Point(4, 4);
             lblPresetsTitle.Name = "lblPresetsTitle";
-            lblPresetsTitle.Size = new Size(53, 19);
+            lblPresetsTitle.Size = new Size(615, 24);
             lblPresetsTitle.TabIndex = 0;
             lblPresetsTitle.Text = "Presets";
+            lblPresetsTitle.TextAlign = ContentAlignment.MiddleLeft;
             // 
             // scriptPanel
             // 

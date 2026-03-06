@@ -164,7 +164,7 @@ namespace SSH_Helper.Services.Editor
 
         public IReadOnlyDictionary<string, IReadOnlyList<string>> GetEnumLikeOptionValues() => _enumLikeOptionValues;
 
-        public CompletionResult GetCompletion(string text, int caretIndex)
+        public CompletionResult GetCompletion(string text, int caretIndex, bool allowBlankTopLevelKeys = false)
         {
             text ??= string.Empty;
             var safeCaret = Math.Clamp(caretIndex, 0, text.Length);
@@ -217,6 +217,13 @@ namespace SSH_Helper.Services.Editor
             if (currentIndent == 0)
             {
                 var topLevelToken = linePrefix.Trim();
+                if (topLevelToken.Length == 0 &&
+                    !allowBlankTopLevelKeys &&
+                    !ShouldAutoSuggestBlankTopLevelKeys(text, lineStart))
+                {
+                    return new CompletionResult();
+                }
+
                 if (IsIdentifierLike(topLevelToken))
                 {
                     return BuildCompletion(
@@ -228,6 +235,47 @@ namespace SSH_Helper.Services.Editor
             }
 
             return new CompletionResult();
+        }
+
+        private static bool ShouldAutoSuggestBlankTopLevelKeys(string text, int currentLineStart)
+        {
+            var safeEnd = Math.Clamp(currentLineStart, 0, text.Length);
+            if (safeEnd == 0)
+            {
+                return true;
+            }
+
+            foreach (var line in SplitLines(text.Substring(0, safeEnd)))
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                var trimmedStart = line.TrimStart();
+                if (trimmedStart.StartsWith('#'))
+                {
+                    continue;
+                }
+
+                if (CountIndent(line) != 0)
+                {
+                    continue;
+                }
+
+                if (!TryParseMappingKeyLine(line, out var key))
+                {
+                    continue;
+                }
+
+                var canonicalKey = CanonicalizeKey(key);
+                if (canonicalKey is "vars" or "steps")
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public IReadOnlyList<string> GetInterpolationSymbols(string text)

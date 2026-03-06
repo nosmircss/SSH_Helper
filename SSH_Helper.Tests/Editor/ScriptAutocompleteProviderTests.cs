@@ -68,6 +68,44 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_BlankTopLevelLine_BeforeVarsAndSteps_AutoRequest_SuggestsRootKeys()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "name: demo\nversion: 1\n";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.TopLevelKey);
+        completion.Items.Select(item => item.Label).Should().Contain("steps");
+        completion.Items.Select(item => item.Label).Should().Contain("name");
+    }
+
+    [Fact]
+    public void GetCompletion_BlankTopLevelLine_AfterVarsAndSteps_AutoRequest_DoesNotSuggestRootKeys()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "name: demo\nvars:\n  token: abc\nsteps:\n  - send: ok\n";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.None);
+        completion.Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GetCompletion_BlankTopLevelLine_ManualRequest_SuggestsRootKeys()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "name: demo\nvars:\n  token: abc\nsteps:\n  - send: ok\n";
+
+        var completion = provider.GetCompletion(text, text.Length, allowBlankTopLevelKeys: true);
+
+        completion.Context.Should().Be(CompletionContextKind.TopLevelKey);
+        completion.Items.Select(item => item.Label).Should().Contain("steps");
+        completion.Items.Select(item => item.Label).Should().Contain("name");
+    }
+
+    [Fact]
     public void GetCompletion_OptionValue_SuggestsEnumLikeValues()
     {
         var provider = new ScriptAutocompleteProvider();
