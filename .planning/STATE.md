@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-03-07T20:32:26Z"
-last_activity: 2026-03-07 — Completed 03-02 Job Execution Service scaffold
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-03-07T20:37:36Z"
+last_activity: 2026-03-07 — Completed 03-03 Execution Core with SSH integration
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 10
-  completed_plans: 8
-  percent: 80
+  completed_plans: 9
+  percent: 90
 ---
 
 # Project State
@@ -26,18 +26,18 @@ See: .planning/PROJECT.md (updated 2026-03-07)
 ## Current Position
 
 Phase: 3 of 5 (Execution Pipeline)
-Plan: 2 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: Executing
-Last activity: 2026-03-07 — Completed 03-02 Job Execution Service scaffold
+Last activity: 2026-03-07 — Completed 03-03 Execution Core with SSH integration
 
-Progress: [████████░░] 80%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 3.4min
-- Total execution time: 0.45 hours
+- Total plans completed: 9
+- Average duration: 3.3min
+- Total execution time: 0.50 hours
 
 **By Phase:**
 
@@ -45,10 +45,10 @@ Progress: [████████░░] 80%
 |-------|-------|-------|----------|
 | 01 | 3 | 11min | 3.7min |
 | 02 | 3 | 10min | 3.3min |
-| 03 | 2 | 7min | 3.5min |
+| 03 | 3 | 10min | 3.3min |
 
 **Recent Trend:**
-- Last 5 plans: 02-02 (4min), 02-03 (3min), 03-01 (4min), 03-02 (3min)
+- Last 5 plans: 02-03 (3min), 03-01 (4min), 03-02 (3min), 03-03 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -89,6 +89,10 @@ Recent decisions affecting current work:
 - [Phase 03]: HandlePostExecution handles both success and failure paths for one-time jobs (03-02)
 - [Phase 03]: Failed one-time jobs remain enabled for user retry rather than auto-disabling (03-02)
 - [Phase 03]: RunningJobInfo is private nested class separate from persisted RunningJobState (03-02)
+- [Phase 03]: New SshExecutionService per job run, not shared with UI instance (03-03)
+- [Phase 03]: RunNowAsync bypasses SemaphoreSlim entirely, no concurrency slot needed (03-03)
+- [Phase 03]: Folder jobs use direct children only, no recursive subfolder inclusion (03-03)
+- [Phase 03]: PerHostColumn credential mode relies on BuildHostConnections embedding creds per host (03-03)
 
 ### Pending Todos
 
@@ -101,6 +105,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-07T20:32:26Z
-Stopped at: Completed 03-02-PLAN.md
-Resume file: .planning/phases/03-execution-pipeline/03-02-SUMMARY.md
+Last session: 2026-03-07T20:37:36Z
+Stopped at: Completed 03-03-PLAN.md
+Resume file: .planning/phases/03-execution-pipeline/03-03-SUMMARY.md

@@ -110,6 +110,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Job Definitions & Persistence | 3/3 | Complete | 2026-03-07 |
 | 2. Scheduling Engine | 3/3 | Complete | 2026-03-07 |
-| 3. Execution Pipeline | 0/4 | Not started | - |
+| 3. Execution Pipeline | 3/4 | In progress | - |
 | 4. History & Output | 0/1 | Not started | - |
 | 5. Scheduler UI & Integration | 0/2 | Not started | - |

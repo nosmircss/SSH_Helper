@@ -41,11 +41,11 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Execution
 
 - [x] **EXEC-01**: Scheduler evaluates due jobs and executes them automatically while the application is running
-- [ ] **EXEC-02**: User can trigger a job immediately via run-now action
-- [ ] **EXEC-03**: User can cancel a running job mid-execution
+- [x] **EXEC-02**: User can trigger a job immediately via run-now action
+- [x] **EXEC-03**: User can cancel a running job mid-execution
 - [x] **EXEC-04**: User can configure the maximum number of concurrent jobs
 - [x] **EXEC-05**: Excess due jobs queue until execution slots become available
-- [ ] **EXEC-06**: Folder jobs execute all presets in the target folder
+- [x] **EXEC-06**: Folder jobs execute all presets in the target folder
 - [x] **EXEC-07**: User can configure folder job execution order per job (sequential or parallel)
 
 ### History & Output
@@ -122,11 +122,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CRED-01 | Phase 1 | Complete |
 | CRED-02 | Phase 1 | Complete |
 | EXEC-01 | Phase 3 | Complete |
-| EXEC-02 | Phase 3 | Pending |
-| EXEC-03 | Phase 3 | Pending |
+| EXEC-02 | Phase 3 | Complete |
+| EXEC-03 | Phase 3 | Complete |
 | EXEC-04 | Phase 3 | Complete |
 | EXEC-05 | Phase 3 | Complete |
-| EXEC-06 | Phase 3 | Pending |
+| EXEC-06 | Phase 3 | Complete |
 | EXEC-07 | Phase 3 | Complete |
 | HIST-01 | Phase 4 | Pending |
 | HIST-02 | Phase 4 | Pending |
