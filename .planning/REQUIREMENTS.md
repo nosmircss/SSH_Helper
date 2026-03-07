@@ -9,10 +9,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Job Management
 
-- [ ] **JMGT-01**: User can create a scheduled job with a name, target preset or preset folder, schedule, host list, and credential configuration
-- [ ] **JMGT-02**: User can edit an existing scheduled job's definition
-- [ ] **JMGT-03**: User can delete a scheduled job
-- [ ] **JMGT-04**: User can enable or disable a job without deleting it
+- [x] **JMGT-01**: User can create a scheduled job with a name, target preset or preset folder, schedule, host list, and credential configuration
+- [x] **JMGT-02**: User can edit an existing scheduled job's definition
+- [x] **JMGT-03**: User can delete a scheduled job
+- [x] **JMGT-04**: User can enable or disable a job without deleting it
 - [ ] **JMGT-05**: User can export job definitions to a file for sharing between instances
 - [ ] **JMGT-06**: User can import job definitions from an exported file
 
@@ -29,8 +29,8 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Host Targets
 
 - [x] **HOST-01**: Each job maintains its own dedicated host list, independent of the main grid
-- [ ] **HOST-02**: User can populate a job's host list by importing from a CSV file
-- [ ] **HOST-03**: User can populate a job's host list by copying from the current main grid
+- [x] **HOST-02**: User can populate a job's host list by importing from a CSV file
+- [x] **HOST-03**: User can populate a job's host list by copying from the current main grid
 - [x] **HOST-04**: User can manually enter hosts directly in the job editor
 
 ### Credentials
@@ -63,7 +63,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Reliability
 
-- [ ] **RELY-01**: Job definitions persist across application restarts
+- [x] **RELY-01**: Job definitions persist across application restarts
 - [ ] **RELY-02**: Jobs orphaned by application crash are detected and marked as failed on next startup
 - [ ] **RELY-03**: Scheduler timer operates independently of UI thread (no freezing during modal dialogs)
 
@@ -102,10 +102,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| JMGT-01 | Phase 1 | Pending |
-| JMGT-02 | Phase 1 | Pending |
-| JMGT-03 | Phase 1 | Pending |
-| JMGT-04 | Phase 1 | Pending |
+| JMGT-01 | Phase 1 | Complete |
+| JMGT-02 | Phase 1 | Complete |
+| JMGT-03 | Phase 1 | Complete |
+| JMGT-04 | Phase 1 | Complete |
 | JMGT-05 | Phase 5 | Pending |
 | JMGT-06 | Phase 5 | Pending |
 | SCHD-01 | Phase 2 | Pending |
@@ -116,8 +116,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SCHD-06 | Phase 2 | Pending |
 | SCHD-07 | Phase 2 | Pending |
 | HOST-01 | Phase 1 | Complete |
-| HOST-02 | Phase 1 | Pending |
-| HOST-03 | Phase 1 | Pending |
+| HOST-02 | Phase 1 | Complete |
+| HOST-03 | Phase 1 | Complete |
 | HOST-04 | Phase 1 | Complete |
 | CRED-01 | Phase 1 | Complete |
 | CRED-02 | Phase 1 | Complete |
@@ -135,7 +135,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-01 | Phase 5 | Pending |
 | UI-02 | Phase 5 | Pending |
 | UI-03 | Phase 5 | Pending |
-| RELY-01 | Phase 1 | Pending |
+| RELY-01 | Phase 1 | Complete |
 | RELY-02 | Phase 3 | Pending |
 | RELY-03 | Phase 3 | Pending |
 
