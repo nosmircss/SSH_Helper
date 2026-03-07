@@ -24,6 +24,27 @@ namespace SSH_Helper.Models
     }
 
     /// <summary>
+    /// Determines the type of schedule attached to a job.
+    /// </summary>
+    public enum ScheduleType
+    {
+        /// <summary>
+        /// No schedule configured; job runs on demand only.
+        /// </summary>
+        None = 0,
+
+        /// <summary>
+        /// Uses a cron expression for recurring execution.
+        /// </summary>
+        Recurring = 1,
+
+        /// <summary>
+        /// Executes once at a specific date and time.
+        /// </summary>
+        OneTime = 2
+    }
+
+    /// <summary>
     /// Determines what kind of preset target the job executes.
     /// </summary>
     public enum JobTargetType
@@ -105,6 +126,11 @@ namespace SSH_Helper.Models
         /// Optional one-time scheduled execution time (placeholder for Phase 3).
         /// </summary>
         public DateTime? OneTimeScheduleUtc { get; set; }
+
+        /// <summary>
+        /// The type of schedule attached to this job (None, Recurring, or OneTime).
+        /// </summary>
+        public ScheduleType ScheduleType { get; set; } = ScheduleType.None;
 
         /// <summary>
         /// Indicates that the target preset content has changed since the job was saved.
