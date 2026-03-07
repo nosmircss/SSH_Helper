@@ -45,6 +45,35 @@ namespace SSH_Helper.Models
     }
 
     /// <summary>
+    /// Determines how presets within a folder job are executed.
+    /// </summary>
+    public enum FolderExecutionMode
+    {
+        /// <summary>
+        /// Presets are executed one after another in order.
+        /// </summary>
+        Sequential = 0,
+
+        /// <summary>
+        /// Presets are executed concurrently.
+        /// </summary>
+        Parallel = 1
+    }
+
+    /// <summary>
+    /// Tracks the lifecycle state of a job execution.
+    /// </summary>
+    public enum JobExecutionState
+    {
+        Queued,
+        Started,
+        Completed,
+        Failed,
+        Cancelled,
+        Skipped
+    }
+
+    /// <summary>
     /// Determines what kind of preset target the job executes.
     /// </summary>
     public enum JobTargetType
@@ -152,5 +181,23 @@ namespace SSH_Helper.Models
         /// When the job was last modified (UTC).
         /// </summary>
         public DateTime ModifiedUtc { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Tracks in-progress execution state for crash recovery.
+        /// Null when the job is not running. Persisted to jobs.json while executing.
+        /// </summary>
+        public RunningJobState? RunningState { get; set; }
+
+        /// <summary>
+        /// For folder targets: determines whether presets are executed sequentially or in parallel.
+        /// Default: Sequential (per user decision: continue through all presets in order).
+        /// </summary>
+        public FolderExecutionMode FolderExecutionMode { get; set; } = FolderExecutionMode.Sequential;
+
+        /// <summary>
+        /// When true, folder execution stops at the first preset that fails.
+        /// Default: false (per user decision: continue through all presets).
+        /// </summary>
+        public bool StopOnError { get; set; }
     }
 }
