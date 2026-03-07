@@ -30,11 +30,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can delete a job and confirm it no longer appears in the stored definitions
   4. User can enable or disable a job without losing its configuration
   5. User can populate a job's host list via CSV import, main grid copy, or manual entry, and each job's hosts are independent of the main grid
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
+- [ ] 01-01-PLAN.md — Job model, enums, ContentHasher, CredentialTargets extension
+- [ ] 01-02-PLAN.md — JobStorageService CRUD, persistence, CSV import
+- [ ] 01-03-PLAN.md — PresetManager integration for job reference integrity
 
 ### Phase 2: Scheduling Engine
 **Goal**: Users can attach cron or one-time schedules to jobs and see when they will next run, with predictable handling of missed runs
@@ -104,7 +105,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Job Definitions & Persistence | 0/2 | Not started | - |
+| 1. Job Definitions & Persistence | 0/3 | Planning complete | - |
 | 2. Scheduling Engine | 0/2 | Not started | - |
 | 3. Execution Pipeline | 0/2 | Not started | - |
 | 4. History & Output | 0/1 | Not started | - |
