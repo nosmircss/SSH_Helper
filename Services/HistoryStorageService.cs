@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using SSH_Helper.Models;
+using SSH_Helper.Utilities;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -730,72 +731,6 @@ namespace SSH_Helper.Services
         }
 
         private static void WriteJsonAtomic(string path, string json, bool createBackup)
-        {
-            var directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var tempPath = path + ".tmp";
-            try
-            {
-                File.WriteAllText(tempPath, json, Utf8NoBom);
-
-                if (File.Exists(path))
-                {
-                    if (createBackup)
-                    {
-                        try
-                        {
-                            File.Replace(tempPath, path, path + ".bak", ignoreMetadataErrors: true);
-                            return;
-                        }
-                        catch
-                        {
-                            // Fall back to copy + move path replacement.
-                            try
-                            {
-                                File.Copy(path, path + ".bak", overwrite: true);
-                            }
-                            catch
-                            {
-                                // Best effort backup.
-                            }
-                        }
-                    }
-                    else
-                    {
-                        try
-                        {
-                            File.Replace(tempPath, path, destinationBackupFileName: null, ignoreMetadataErrors: true);
-                            return;
-                        }
-                        catch
-                        {
-                            // Fall back to delete + move below.
-                        }
-                    }
-
-                    File.Delete(path);
-                }
-
-                File.Move(tempPath, path);
-            }
-            finally
-            {
-                if (File.Exists(tempPath))
-                {
-                    try
-                    {
-                        File.Delete(tempPath);
-                    }
-                    catch
-                    {
-                        // Best effort cleanup.
-                    }
-                }
-            }
-        }
+            => JsonFileWriter.WriteJsonAtomic(path, json, createBackup);
     }
 }

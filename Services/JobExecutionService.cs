@@ -442,7 +442,14 @@ namespace SSH_Helper.Services
                     results.Where(r => !r.Success)
                            .Select(r => r.ErrorMessage)
                            .Where(m => m != null)
-                           .Take(3))
+                           .Take(3)),
+                HostOutputs = results.Select(r => new JobHostOutput
+                {
+                    HostAddress = r.Host?.IpAddress ?? "unknown",
+                    Output = r.Output ?? string.Empty,
+                    Success = r.Success,
+                    ErrorMessage = r.ErrorMessage
+                }).ToList()
             };
 
             JobCompleted?.Invoke(this, runResult);
