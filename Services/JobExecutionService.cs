@@ -287,6 +287,7 @@ namespace SSH_Helper.Services
             }
             catch (Exception ex)
             {
+                HandlePostExecution(job, success: false);
                 OnJobFailed(job, ex.Message);
             }
             finally
@@ -402,6 +403,12 @@ namespace SSH_Helper.Services
 
         /// <summary>
         /// Handles post-execution logic including one-time job auto-disable.
+        /// Called after ExecuteJobCoreAsync completes. Plan 03-03 will preserve this call
+        /// when replacing the stub with real SSH execution.
+        ///
+        /// Re-trigger protection for one-time jobs:
+        /// After MarkOneTimeCompleted sets IsEnabled=false, the evaluation loop's
+        /// early "if (!job.IsEnabled) continue" check prevents re-triggering on the next cycle.
         /// </summary>
         private void HandlePostExecution(JobDefinition job, bool success)
         {
@@ -410,6 +417,18 @@ namespace SSH_Helper.Services
                 _schedulingService.MarkOneTimeCompleted(job);
                 _jobStorage.Save(job);
                 Debug.WriteLine($"One-time job '{job.Name}' auto-disabled after successful execution");
+            }
+            else if (!success && job.ScheduleType == ScheduleType.OneTime)
+            {
+                // Failed one-time jobs remain enabled so the user can retry or reschedule.
+                // They will not re-trigger automatically because OneTimeScheduleUtc <= now
+                // only fires once per evaluation window, and after failure the job stays
+                // in the _runningJobs dictionary until CompleteJob clears it.
+                Debug.WriteLine($"One-time job '{job.Name}' failed; remains enabled for retry");
+            }
+            else if (success)
+            {
+                Debug.WriteLine($"Job '{job.Name}' completed successfully");
             }
         }
 
