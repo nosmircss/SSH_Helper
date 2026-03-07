@@ -241,6 +241,136 @@ namespace SSH_Helper.Services
 
         #endregion
 
+        #region Query API
+
+        /// <summary>
+        /// Returns run records for a job, optionally filtered by status, date range,
+        /// and limited to a maximum number of results.
+        /// Entries are returned newest-first.
+        /// </summary>
+        public IReadOnlyList<JobRunRecord> GetRunsForJob(string jobId, JobRunFilter? filter = null)
+        {
+            var indexDoc = LoadJobIndex(jobId);
+            IEnumerable<JobRunRecord> entries = indexDoc.Entries;
+
+            if (filter != null)
+            {
+                if (filter.Success.HasValue)
+                    entries = entries.Where(r => r.Success == filter.Success.Value);
+
+                if (filter.FromUtc.HasValue)
+                    entries = entries.Where(r => r.CompletedUtc >= filter.FromUtc.Value);
+
+                if (filter.ToUtc.HasValue)
+                    entries = entries.Where(r => r.CompletedUtc <= filter.ToUtc.Value);
+            }
+
+            var maxResults = filter?.MaxResults ?? 50;
+            return entries.Take(maxResults).ToList().AsReadOnly();
+        }
+
+        /// <summary>
+        /// Loads the full run payload (including per-host output) for a specific run.
+        /// Returns null if the file does not exist or is corrupt.
+        /// </summary>
+        public JobRunPayload? LoadRunPayload(string jobId, string runFileName)
+        {
+            var path = GetRunFilePath(jobId, runFileName);
+
+            if (!File.Exists(path))
+                return null;
+
+            try
+            {
+                var json = File.ReadAllText(path);
+                return JsonConvert.DeserializeObject<JobRunPayload>(json);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Searches a single run's per-host output for the given text.
+        /// Matching is case-insensitive against both output content and host address.
+        /// </summary>
+        public IReadOnlyList<JobHostOutput> SearchRunOutput(string jobId, string runFileName, string searchText)
+        {
+            var payload = LoadRunPayload(jobId, runFileName);
+            if (payload == null)
+                return Array.Empty<JobHostOutput>();
+
+            return payload.HostOutputs
+                .Where(ho =>
+                    ho.Output.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                    ho.HostAddress.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+                .ToList()
+                .AsReadOnly();
+        }
+
+        #endregion
+
+        #region Deletion
+
+        /// <summary>
+        /// Deletes all history for a job by removing its entire subdirectory.
+        /// Best-effort: exceptions are swallowed.
+        /// </summary>
+        public void DeleteAllHistory(string jobId)
+        {
+            try
+            {
+                var jobDir = GetJobDirectory(jobId);
+                if (Directory.Exists(jobDir))
+                    Directory.Delete(jobDir, recursive: true);
+            }
+            catch
+            {
+                // Best-effort cleanup
+            }
+        }
+
+        /// <summary>
+        /// Deletes a single run record and its payload file from the job's history.
+        /// </summary>
+        public void DeleteRun(string jobId, string runId)
+        {
+            var indexDoc = LoadJobIndex(jobId);
+            var entry = indexDoc.Entries.FirstOrDefault(e => e.Id == runId);
+
+            if (entry == null)
+                return;
+
+            indexDoc.Entries.Remove(entry);
+            DeletePayloadFile(jobId, entry.RunFileName);
+
+            var indexPath = GetIndexPath(jobId);
+            JsonFileWriter.WriteJsonAtomic(indexPath, Serialize(indexDoc), createBackup: true);
+        }
+
+        /// <summary>
+        /// Returns the IDs of all jobs that have history stored.
+        /// </summary>
+        public IReadOnlyList<string> GetJobIds()
+        {
+            if (!Directory.Exists(_baseDirectory))
+                return Array.Empty<string>();
+
+            return Directory.GetDirectories(_baseDirectory)
+                .Select(Path.GetFileName)
+                .Where(name => !string.IsNullOrEmpty(name))
+                .ToList()
+                .AsReadOnly()!;
+        }
+
+        /// <summary>
+        /// Clears all history for a job. Alias for <see cref="DeleteAllHistory"/>.
+        /// </summary>
+        public void ClearHistory(string jobId) => DeleteAllHistory(jobId);
+
+        #endregion
+
         #region Path Helpers
 
         private string GetJobDirectory(string jobId)
