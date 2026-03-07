@@ -3,30 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 4 context gathered
-last_updated: "2026-03-07T21:29:29.459Z"
-last_activity: 2026-03-07 — Completed 03-04 Execution Pipeline Test Suite
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-03-07T21:51:35Z"
+last_activity: 2026-03-07 — Completed 04-01 History Data Models
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 10
-  completed_plans: 10
----
-
----
-gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-03-07T20:48:20Z"
-last_activity: 2026-03-07 — Completed 03-04 Execution Pipeline Test Suite
-progress:
-  total_phases: 5
-  completed_phases: 3
-  total_plans: 10
-  completed_plans: 10
-  percent: 100
+  total_plans: 13
+  completed_plans: 11
+  percent: 84
 ---
 
 # Project State
@@ -36,23 +21,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-07)
 
 **Core value:** Users can define scheduled jobs that automatically execute SSH presets against specific hosts on a recurring or one-time basis, with full run history and output retention.
-**Current focus:** Phase 3 - Execution Pipeline (complete)
+**Current focus:** Phase 4 - History & Output
 
 ## Current Position
 
-Phase: 3 of 5 (Execution Pipeline) -- COMPLETE
-Plan: 4 of 4 in current phase (all plans complete)
+Phase: 4 of 5 (History & Output)
+Plan: 1 of 3 in current phase (04-01 complete)
 Status: Executing
-Last activity: 2026-03-07 — Completed 03-04 Execution Pipeline Test Suite
+Last activity: 2026-03-07 — Completed 04-01 History Data Models
 
-Progress: [██████████] 100%
+Progress: [████████░░] 84%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
+- Total plans completed: 11
 - Average duration: 3.4min
-- Total execution time: 0.57 hours
+- Total execution time: 0.62 hours
 
 **By Phase:**
 
@@ -61,9 +46,10 @@ Progress: [██████████] 100%
 | 01 | 3 | 11min | 3.7min |
 | 02 | 3 | 10min | 3.3min |
 | 03 | 4 | 14min | 3.5min |
+| 04 | 1 | 4min | 4.0min |
 
 **Recent Trend:**
-- Last 5 plans: 03-01 (4min), 03-02 (3min), 03-03 (3min), 03-04 (4min)
+- Last 5 plans: 03-02 (3min), 03-03 (3min), 03-04 (4min), 04-01 (4min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -110,6 +96,9 @@ Recent decisions affecting current work:
 - [Phase 03]: PerHostColumn credential mode relies on BuildHostConnections embedding creds per host (03-03)
 - [Phase 03]: Real services with temp-directory isolation preferred over full mocking for test fidelity (03-04)
 - [Phase 03]: SSH connection failures used as valid execution paths in tests (03-04)
+- [Phase 04]: WriteJsonAtomic extracted with delegation pattern preserving all existing call sites (04-01)
+- [Phase 04]: HostOutputs uses HostConnection.IpAddress for address mapping (04-01)
+- [Phase 04]: Error-path JobCompleted events retain null HostOutputs for unreachable hosts (04-01)
 
 ### Pending Todos
 
@@ -122,6 +111,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-07T21:29:29.457Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-history-output/04-CONTEXT.md
+Last session: 2026-03-07T21:51:35Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: .planning/phases/04-history-output/04-01-SUMMARY.md

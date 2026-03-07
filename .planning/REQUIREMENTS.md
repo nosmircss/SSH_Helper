@@ -50,9 +50,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### History & Output
 
-- [ ] **HIST-01**: Each job run records start/end time, duration, success state, and per-host success/failure counts
-- [ ] **HIST-02**: Full SSH output is persisted per run in dedicated output files
-- [ ] **HIST-03**: History is automatically pruned by whichever limit hits first: max entries per job OR age-based retention
+- [x] **HIST-01**: Each job run records start/end time, duration, success state, and per-host success/failure counts
+- [x] **HIST-02**: Full SSH output is persisted per run in dedicated output files
+- [x] **HIST-03**: History is automatically pruned by whichever limit hits first: max entries per job OR age-based retention
 - [ ] **HIST-04**: User can search and filter within stored job output
 
 ### UI
@@ -128,9 +128,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXEC-05 | Phase 3 | Complete |
 | EXEC-06 | Phase 3 | Complete |
 | EXEC-07 | Phase 3 | Complete |
-| HIST-01 | Phase 4 | Pending |
-| HIST-02 | Phase 4 | Pending |
-| HIST-03 | Phase 4 | Pending |
+| HIST-01 | Phase 4 | Complete |
+| HIST-02 | Phase 4 | Complete |
+| HIST-03 | Phase 4 | Complete |
 | HIST-04 | Phase 4 | Pending |
 | UI-01 | Phase 5 | Pending |
 | UI-02 | Phase 5 | Pending |
