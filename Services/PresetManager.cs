@@ -168,6 +168,18 @@ namespace SSH_Helper.Services
             _presets.Remove(oldName);
             _presets[newName] = preset;
             PersistToConfig();
+
+            // Update job references to the renamed preset
+            if (_jobStorageService != null)
+            {
+                var referencingJobs = _jobStorageService.GetJobsReferencingPreset(oldName);
+                foreach (var job in referencingJobs)
+                {
+                    job.TargetName = newName;
+                    _jobStorageService.Save(job);
+                }
+            }
+
             OnPresetsChanged();
             return true;
         }
@@ -181,6 +193,19 @@ namespace SSH_Helper.Services
                 return false;
 
             PersistToConfig();
+
+            // Auto-disable jobs that reference the deleted preset
+            if (_jobStorageService != null)
+            {
+                var referencingJobs = _jobStorageService.GetJobsReferencingPreset(name);
+                foreach (var job in referencingJobs)
+                {
+                    job.IsEnabled = false;
+                    job.DisabledReason = $"Preset '{name}' was deleted";
+                    _jobStorageService.Save(job);
+                }
+            }
+
             OnPresetsChanged();
             return true;
         }
@@ -573,6 +598,19 @@ namespace SSH_Helper.Services
             }
 
             PersistToConfig();
+
+            // Auto-disable jobs that reference the deleted folder
+            if (_jobStorageService != null)
+            {
+                var referencingJobs = _jobStorageService.GetJobsReferencingFolder(path);
+                foreach (var job in referencingJobs)
+                {
+                    job.IsEnabled = false;
+                    job.DisabledReason = $"Folder '{path}' was deleted";
+                    _jobStorageService.Save(job);
+                }
+            }
+
             OnFoldersChanged();
             OnPresetsChanged();
             return true;
