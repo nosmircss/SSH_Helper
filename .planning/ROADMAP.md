@@ -97,11 +97,14 @@ Plans:
   2. User can create and edit jobs through a dedicated editor dialog that includes cron preview, host list management, and credential options
   3. User receives in-app notifications (popup or log entry) when a job completes or fails
   4. User can export job definitions to a file and import them on another instance of SSH_Helper
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
-- [ ] 05-01: TBD
-- [ ] 05-02: TBD
+- [ ] 05-01-PLAN.md — JobExportService with export/import serialization (file + clipboard formats)
+- [ ] 05-02-PLAN.md — RunOutputViewerDialog and ImportPreviewDialog (supporting dialogs)
+- [ ] 05-03-PLAN.md — JobEditorDialog (tabbed editor with cron, hosts, credentials, advanced)
+- [ ] 05-04-PLAN.md — JobListDialog (split-panel management dashboard with history)
+- [ ] 05-05-PLAN.md — Form1 integration (menu, status bar, notifications, service wiring)
 
 ## Progress
 
@@ -114,4 +117,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Scheduling Engine | 3/3 | Complete | 2026-03-07 |
 | 3. Execution Pipeline | 3/4 | In progress | - |
 | 4. History & Output | 0/3 | Not started | - |
-| 5. Scheduler UI & Integration | 0/2 | Not started | - |
+| 5. Scheduler UI & Integration | 0/5 | Not started | - |
