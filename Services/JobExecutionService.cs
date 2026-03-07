@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using SSH_Helper.Models;
+using SSH_Helper.Services;
 
 namespace SSH_Helper.Services
 {
@@ -58,6 +59,8 @@ namespace SSH_Helper.Services
         private readonly JobStorageService _jobStorage;
         private readonly SchedulingService _schedulingService;
         private readonly ConfigurationService _configService;
+        private readonly PresetManager _presetManager;
+        private readonly ICredentialProvider _credentialProvider;
 
         private System.Threading.Timer? _timer;
         private int _evaluating; // 0 = idle, 1 = evaluating (Interlocked guard)
@@ -89,11 +92,15 @@ namespace SSH_Helper.Services
         public JobExecutionService(
             JobStorageService jobStorage,
             SchedulingService schedulingService,
-            ConfigurationService configService)
+            ConfigurationService configService,
+            PresetManager presetManager,
+            ICredentialProvider credentialProvider)
         {
             _jobStorage = jobStorage ?? throw new ArgumentNullException(nameof(jobStorage));
             _schedulingService = schedulingService ?? throw new ArgumentNullException(nameof(schedulingService));
             _configService = configService ?? throw new ArgumentNullException(nameof(configService));
+            _presetManager = presetManager ?? throw new ArgumentNullException(nameof(presetManager));
+            _credentialProvider = credentialProvider ?? throw new ArgumentNullException(nameof(credentialProvider));
 
             var maxConcurrent = configService.GetCurrent().MaxConcurrentJobs;
             if (maxConcurrent <= 0) maxConcurrent = 3;
@@ -299,28 +306,224 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Placeholder for real SSH execution logic.
-        /// TODO: Plan 03-03 replaces this stub with real SSH execution
+        /// Core execution pipeline: resolves credentials, builds host connections,
+        /// creates a dedicated SshExecutionService instance, and dispatches to the
+        /// appropriate execution path (single preset or folder).
         /// </summary>
         private async Task ExecuteJobCoreAsync(JobDefinition job, bool isRunNow, CancellationToken ct)
         {
-            await Task.Delay(100, ct);
+            // Validate credential availability before attempting execution
+            var (username, password) = ResolveCredentials(job);
+            if (job.CredentialMode != CredentialMode.PerHostColumn
+                && string.IsNullOrEmpty(username) && string.IsNullOrEmpty(password))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot resolve credentials for job '{job.Name}' (mode: {job.CredentialMode})");
+            }
 
-            HandlePostExecution(job, success: true);
+            var hosts = BuildHostConnections(job);
+            if (hosts.Count == 0)
+                throw new InvalidOperationException($"Job '{job.Name}' has no valid hosts");
 
-            var result = new JobRunResult
+            var timeouts = BuildTimeouts(job);
+            List<ExecutionResult> results;
+
+            // Create a new SshExecutionService per job run (NOT shared with UI)
+            using var sshService = new SshExecutionService();
+            sshService.UseConnectionPooling = false; // Avoid pool conflicts with UI instance
+
+            // Link cancellation: when our CTS fires, stop the SSH service
+            using var reg = ct.Register(() => sshService.Stop());
+
+            if (job.TargetType == JobTargetType.Folder)
+            {
+                results = await ExecuteFolderJobAsync(job, sshService, username, password, hosts, timeouts, ct);
+            }
+            else
+            {
+                results = await ExecuteSinglePresetAsync(job, sshService, username, password, hosts, timeouts);
+            }
+
+            // Build result
+            var succeeded = results.Count(r => r.Success);
+            var failed = results.Count(r => !r.Success);
+            var overallSuccess = failed == 0;
+
+            var runResult = new JobRunResult
             {
                 JobId = job.Id,
                 JobName = job.Name,
                 StartedUtc = _runningJobs.TryGetValue(job.Id, out var info) ? info.StartedUtc : DateTime.UtcNow,
                 CompletedUtc = DateTime.UtcNow,
-                Success = true,
-                HostsSucceeded = 0,
-                HostsFailed = 0
+                Success = overallSuccess,
+                HostsSucceeded = succeeded,
+                HostsFailed = failed,
+                ErrorMessage = overallSuccess ? null : string.Join("; ",
+                    results.Where(r => !r.Success)
+                           .Select(r => r.ErrorMessage)
+                           .Where(m => m != null)
+                           .Take(3))
             };
 
-            JobCompleted?.Invoke(this, result);
-            OnJobStateChanged(job.Id, job.Name, JobExecutionState.Completed);
+            JobCompleted?.Invoke(this, runResult);
+            OnJobStateChanged(job.Id, job.Name,
+                overallSuccess ? JobExecutionState.Completed : JobExecutionState.Failed,
+                overallSuccess ? null : $"{failed} host(s) failed");
+
+            HandlePostExecution(job, overallSuccess);
+        }
+
+        /// <summary>
+        /// Builds HostConnection objects from the job's persisted host rows.
+        /// </summary>
+        private static List<HostConnection> BuildHostConnections(JobDefinition job)
+        {
+            var hosts = new List<HostConnection>();
+
+            foreach (var row in job.Hosts)
+            {
+                if (!row.TryGetValue("Host_IP", out var hostIp) || string.IsNullOrWhiteSpace(hostIp))
+                    continue;
+
+                var host = HostConnection.Parse(hostIp);
+
+                // Apply per-row overrides from columns
+                if (row.TryGetValue("port", out var portStr)
+                    && int.TryParse(portStr, out var port)
+                    && port > 0 && port <= 65535)
+                {
+                    host.Port = port;
+                }
+
+                if (row.TryGetValue("username", out var user) && !string.IsNullOrEmpty(user))
+                    host.Username = user;
+
+                if (row.TryGetValue("password", out var pass) && !string.IsNullOrEmpty(pass))
+                    host.Password = pass;
+
+                // Copy all row columns as variables for {{variable}} substitution
+                foreach (var kvp in row)
+                {
+                    host.Variables[kvp.Key] = kvp.Value;
+                }
+
+                hosts.Add(host);
+            }
+
+            return hosts;
+        }
+
+        /// <summary>
+        /// Resolves credentials based on the job's credential mode.
+        /// </summary>
+        private (string username, string password) ResolveCredentials(JobDefinition job)
+        {
+            switch (job.CredentialMode)
+            {
+                case CredentialMode.Stored:
+                    if (_credentialProvider.TryGetPassword(
+                            CredentialTargets.JobPasswordTarget(job.Id),
+                            out var storedUser, out var storedPass))
+                    {
+                        return (storedUser, storedPass);
+                    }
+                    Debug.WriteLine($"Warning: No stored credentials found for job '{job.Name}'");
+                    return (string.Empty, string.Empty);
+
+                case CredentialMode.InheritFromApp:
+                    var config = _configService.GetCurrent();
+                    var appUser = config.Username ?? string.Empty;
+                    var appPass = string.Empty;
+                    if (_credentialProvider.TryGetPassword(
+                            CredentialTargets.DefaultPasswordTarget,
+                            out _, out var defaultPass))
+                    {
+                        appPass = defaultPass;
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"Warning: No app-level password found for job '{job.Name}' (InheritFromApp)");
+                    }
+                    return (appUser, appPass);
+
+                case CredentialMode.PerHostColumn:
+                    // Per-host credentials are already embedded in HostConnection from BuildHostConnections
+                    return (string.Empty, string.Empty);
+
+                default:
+                    return (string.Empty, string.Empty);
+            }
+        }
+
+        /// <summary>
+        /// Builds SSH timeout options from preset and config defaults.
+        /// </summary>
+        private SshTimeoutOptions BuildTimeouts(JobDefinition job)
+        {
+            var config = _configService.GetCurrent();
+            var preset = _presetManager.Get(job.TargetName);
+
+            // Use preset's Timeout override if set, otherwise config default
+            var timeout = preset?.Timeout ?? config.Timeout;
+            var connectionTimeout = config.ConnectionTimeout;
+
+            return SshTimeoutOptions.Create(timeout, connectionTimeout);
+        }
+
+        /// <summary>
+        /// Executes a single preset against the job's hosts.
+        /// </summary>
+        private async Task<List<ExecutionResult>> ExecuteSinglePresetAsync(
+            JobDefinition job,
+            SshExecutionService sshService,
+            string username,
+            string password,
+            List<HostConnection> hosts,
+            SshTimeoutOptions timeouts)
+        {
+            var preset = _presetManager.Get(job.TargetName)
+                ?? throw new InvalidOperationException($"Preset '{job.TargetName}' not found");
+
+            return await sshService.ExecutePresetAsync(hosts, preset, username, password, timeouts);
+        }
+
+        /// <summary>
+        /// Executes all presets in a folder against the job's hosts.
+        /// Per locked decision: direct children only (no recursive subfolder inclusion).
+        /// Per locked decision: folder job counts as 1 concurrency slot regardless of preset count.
+        /// </summary>
+        private async Task<List<ExecutionResult>> ExecuteFolderJobAsync(
+            JobDefinition job,
+            SshExecutionService sshService,
+            string username,
+            string password,
+            List<HostConnection> hosts,
+            SshTimeoutOptions timeouts,
+            CancellationToken ct)
+        {
+            // Get direct children only (per locked decision: no recursive subfolder inclusion)
+            var presetNames = _presetManager.GetPresetsInFolder(job.TargetName).ToList();
+
+            // Build preset dictionary, skip null entries
+            var presets = new Dictionary<string, PresetInfo>();
+            foreach (var name in presetNames)
+            {
+                var preset = _presetManager.Get(name);
+                if (preset != null)
+                    presets[name] = preset;
+            }
+
+            if (presets.Count == 0)
+                throw new InvalidOperationException($"Folder '{job.TargetName}' contains no presets");
+
+            var options = new FolderExecutionOptions
+            {
+                SelectedPresets = presets.Keys.ToList(),
+                RunPresetsInParallel = job.FolderExecutionMode == FolderExecutionMode.Parallel,
+                StopOnFirstError = job.StopOnError
+            };
+
+            return await sshService.ExecuteFolderAsync(hosts, presets, username, password, timeouts, options);
         }
 
         #endregion
