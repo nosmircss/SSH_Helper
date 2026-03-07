@@ -15,6 +15,7 @@ namespace SSH_Helper.Services
         private readonly Dictionary<string, PresetInfo> _presets = new();
         private readonly Dictionary<string, FolderInfo> _folders = new();
         private readonly ConfigurationService _configService;
+        private JobStorageService? _jobStorageService;
 
         public event EventHandler? PresetsChanged;
         public event EventHandler? FoldersChanged;
@@ -26,6 +27,35 @@ namespace SSH_Helper.Services
 
         public IReadOnlyDictionary<string, PresetInfo> Presets => _presets;
         public IReadOnlyDictionary<string, FolderInfo> Folders => _folders;
+
+        /// <summary>
+        /// Sets or clears the optional JobStorageService used for job reference integrity.
+        /// Called after both services are constructed (not via constructor to avoid circular dependencies).
+        /// </summary>
+        public void SetJobStorageService(JobStorageService? service)
+        {
+            _jobStorageService = service;
+        }
+
+        /// <summary>
+        /// Returns all jobs that reference the specified preset name.
+        /// Returns empty list if JobStorageService is not set.
+        /// </summary>
+        public IReadOnlyList<Models.JobDefinition> GetJobsReferencingPreset(string presetName)
+        {
+            return _jobStorageService?.GetJobsReferencingPreset(presetName)
+                ?? Array.Empty<Models.JobDefinition>();
+        }
+
+        /// <summary>
+        /// Returns all jobs that reference the specified folder path.
+        /// Returns empty list if JobStorageService is not set.
+        /// </summary>
+        public IReadOnlyList<Models.JobDefinition> GetJobsReferencingFolder(string folderPath)
+        {
+            return _jobStorageService?.GetJobsReferencingFolder(folderPath)
+                ?? Array.Empty<Models.JobDefinition>();
+        }
 
         /// <summary>
         /// Loads presets and folders from configuration.
