@@ -64,11 +64,13 @@ Plans:
   3. When more jobs are due than the configured concurrency limit, excess jobs queue and execute as slots free up
   4. A folder job executes all presets in the target folder, respecting the per-job sequential or parallel configuration
   5. If the application crashes during a job run, the orphaned run is detected and marked as failed on next startup
-**Plans**: TBD
+**Plans:** 4 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
+- [ ] 03-01-PLAN.md — Execution pipeline models, enums, and AppConfiguration extension
+- [ ] 03-02-PLAN.md — JobExecutionService scaffold with timer, evaluation, concurrency, and crash recovery
+- [ ] 03-03-PLAN.md — SSH execution core, folder jobs, run-now, cancellation, credential resolution
+- [ ] 03-04-PLAN.md — Comprehensive unit tests for execution pipeline
 
 ### Phase 4: History & Output
 **Goal**: Every job run produces a complete record with full output, and old history is automatically pruned to prevent unbounded storage growth
@@ -108,6 +110,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Job Definitions & Persistence | 3/3 | Complete | 2026-03-07 |
 | 2. Scheduling Engine | 3/3 | Complete | 2026-03-07 |
-| 3. Execution Pipeline | 0/2 | Not started | - |
+| 3. Execution Pipeline | 0/4 | Not started | - |
 | 4. History & Output | 0/1 | Not started | - |
 | 5. Scheduler UI & Integration | 0/2 | Not started | - |
