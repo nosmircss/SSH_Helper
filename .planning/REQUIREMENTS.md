@@ -102,48 +102,48 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| JMGT-01 | — | Pending |
-| JMGT-02 | — | Pending |
-| JMGT-03 | — | Pending |
-| JMGT-04 | — | Pending |
-| JMGT-05 | — | Pending |
-| JMGT-06 | — | Pending |
-| SCHD-01 | — | Pending |
-| SCHD-02 | — | Pending |
-| SCHD-03 | — | Pending |
-| SCHD-04 | — | Pending |
-| SCHD-05 | — | Pending |
-| SCHD-06 | — | Pending |
-| SCHD-07 | — | Pending |
-| HOST-01 | — | Pending |
-| HOST-02 | — | Pending |
-| HOST-03 | — | Pending |
-| HOST-04 | — | Pending |
-| CRED-01 | — | Pending |
-| CRED-02 | — | Pending |
-| EXEC-01 | — | Pending |
-| EXEC-02 | — | Pending |
-| EXEC-03 | — | Pending |
-| EXEC-04 | — | Pending |
-| EXEC-05 | — | Pending |
-| EXEC-06 | — | Pending |
-| EXEC-07 | — | Pending |
-| HIST-01 | — | Pending |
-| HIST-02 | — | Pending |
-| HIST-03 | — | Pending |
-| HIST-04 | — | Pending |
-| UI-01 | — | Pending |
-| UI-02 | — | Pending |
-| UI-03 | — | Pending |
-| RELY-01 | — | Pending |
-| RELY-02 | — | Pending |
-| RELY-03 | — | Pending |
+| JMGT-01 | Phase 1 | Pending |
+| JMGT-02 | Phase 1 | Pending |
+| JMGT-03 | Phase 1 | Pending |
+| JMGT-04 | Phase 1 | Pending |
+| JMGT-05 | Phase 5 | Pending |
+| JMGT-06 | Phase 5 | Pending |
+| SCHD-01 | Phase 2 | Pending |
+| SCHD-02 | Phase 2 | Pending |
+| SCHD-03 | Phase 2 | Pending |
+| SCHD-04 | Phase 2 | Pending |
+| SCHD-05 | Phase 2 | Pending |
+| SCHD-06 | Phase 2 | Pending |
+| SCHD-07 | Phase 2 | Pending |
+| HOST-01 | Phase 1 | Pending |
+| HOST-02 | Phase 1 | Pending |
+| HOST-03 | Phase 1 | Pending |
+| HOST-04 | Phase 1 | Pending |
+| CRED-01 | Phase 1 | Pending |
+| CRED-02 | Phase 1 | Pending |
+| EXEC-01 | Phase 3 | Pending |
+| EXEC-02 | Phase 3 | Pending |
+| EXEC-03 | Phase 3 | Pending |
+| EXEC-04 | Phase 3 | Pending |
+| EXEC-05 | Phase 3 | Pending |
+| EXEC-06 | Phase 3 | Pending |
+| EXEC-07 | Phase 3 | Pending |
+| HIST-01 | Phase 4 | Pending |
+| HIST-02 | Phase 4 | Pending |
+| HIST-03 | Phase 4 | Pending |
+| HIST-04 | Phase 4 | Pending |
+| UI-01 | Phase 5 | Pending |
+| UI-02 | Phase 5 | Pending |
+| UI-03 | Phase 5 | Pending |
+| RELY-01 | Phase 1 | Pending |
+| RELY-02 | Phase 3 | Pending |
+| RELY-03 | Phase 3 | Pending |
 
 **Coverage:**
 - v1 requirements: 36 total
-- Mapped to phases: 0
-- Unmapped: 36
+- Mapped to phases: 36
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-07*
-*Last updated: 2026-03-07 after initial definition*
+*Last updated: 2026-03-07 after roadmap creation*
