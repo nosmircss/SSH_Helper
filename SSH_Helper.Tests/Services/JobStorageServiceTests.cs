@@ -456,5 +456,146 @@ namespace SSH_Helper.Tests.Services
         }
 
         #endregion
+
+        #region ImportHostsFromCsv
+
+        [Fact]
+        public void ImportHostsFromCsv_ValidFile_PopulatesJobHosts()
+        {
+            var service = CreateService();
+            service.Load();
+
+            var job = CreateTestJob();
+            service.Save(job);
+
+            var csvPath = Path.Combine(_tempDir, "hosts.csv");
+            File.WriteAllText(csvPath, "Host_IP,port,username\n10.0.0.1,22,admin\n10.0.0.2,2222,root\n");
+
+            service.ImportHostsFromCsv(job.Id, csvPath);
+
+            var updated = service.Get(job.Id)!;
+            updated.Hosts.Should().HaveCount(2);
+            updated.Hosts[0]["Host_IP"].Should().Be("10.0.0.1");
+            updated.Hosts[0]["port"].Should().Be("22");
+            updated.Hosts[1]["Host_IP"].Should().Be("10.0.0.2");
+            updated.HostColumns.Should().BeEquivalentTo(new[] { "Host_IP", "port", "username" });
+        }
+
+        [Fact]
+        public void ImportHostsFromCsv_MissingHostIPColumn_ThrowsArgumentException()
+        {
+            var service = CreateService();
+            service.Load();
+
+            var job = CreateTestJob();
+            service.Save(job);
+
+            var csvPath = Path.Combine(_tempDir, "bad.csv");
+            File.WriteAllText(csvPath, "name,port\nserver1,22\n");
+
+            var act = () => service.ImportHostsFromCsv(job.Id, csvPath);
+            act.Should().Throw<ArgumentException>().WithMessage("*Host_IP*");
+        }
+
+        [Fact]
+        public void ImportHostsFromCsv_NonExistentJob_ThrowsKeyNotFoundException()
+        {
+            var service = CreateService();
+            service.Load();
+
+            var csvPath = Path.Combine(_tempDir, "hosts.csv");
+            File.WriteAllText(csvPath, "Host_IP\n10.0.0.1\n");
+
+            var act = () => service.ImportHostsFromCsv("nonexistent", csvPath);
+            act.Should().Throw<KeyNotFoundException>();
+        }
+
+        [Fact]
+        public void ImportHostsFromCsv_QuotedFieldsWithCommas_ParsesCorrectly()
+        {
+            var service = CreateService();
+            service.Load();
+
+            var job = CreateTestJob();
+            service.Save(job);
+
+            var csvPath = Path.Combine(_tempDir, "quoted.csv");
+            File.WriteAllText(csvPath, "Host_IP,description\n10.0.0.1,\"server, main\"\n10.0.0.2,plain\n");
+
+            service.ImportHostsFromCsv(job.Id, csvPath);
+
+            var updated = service.Get(job.Id)!;
+            updated.Hosts[0]["description"].Should().Be("server, main");
+            updated.Hosts[1]["description"].Should().Be("plain");
+        }
+
+        [Fact]
+        public void ImportHostsFromCsv_EmptyFile_SetsEmptyHosts()
+        {
+            var service = CreateService();
+            service.Load();
+
+            var job = CreateTestJob();
+            service.Save(job);
+
+            var csvPath = Path.Combine(_tempDir, "empty.csv");
+            File.WriteAllText(csvPath, "Host_IP\n");
+
+            service.ImportHostsFromCsv(job.Id, csvPath);
+
+            var updated = service.Get(job.Id)!;
+            updated.Hosts.Should().BeEmpty();
+            updated.HostColumns.Should().Contain("Host_IP");
+        }
+
+        #endregion
+
+        #region ExtractHostDataFromRows
+
+        [Fact]
+        public void ExtractHostDataFromRows_ValidInput_ReturnsCopiedData()
+        {
+            var rows = new List<Dictionary<string, string>>
+            {
+                new() { ["Host_IP"] = "10.0.0.1", ["port"] = "22" },
+                new() { ["Host_IP"] = "10.0.0.2", ["port"] = "2222" }
+            };
+            var columns = new List<string> { "Host_IP", "port" };
+
+            var (hosts, cols) = JobStorageService.ExtractHostDataFromRows(rows, columns);
+
+            hosts.Should().HaveCount(2);
+            hosts[0]["Host_IP"].Should().Be("10.0.0.1");
+            cols.Should().BeEquivalentTo(columns);
+        }
+
+        [Fact]
+        public void ExtractHostDataFromRows_EmptyInput_ReturnsEmptyLists()
+        {
+            var (hosts, cols) = JobStorageService.ExtractHostDataFromRows(
+                new List<Dictionary<string, string>>(),
+                new List<string>());
+
+            hosts.Should().BeEmpty();
+            cols.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void ExtractHostDataFromRows_PreservesCustomColumns()
+        {
+            var rows = new List<Dictionary<string, string>>
+            {
+                new() { ["Host_IP"] = "10.0.0.1", ["custom_var"] = "value1" }
+            };
+            var columns = new List<string> { "Host_IP", "custom_var" };
+
+            var (hosts, cols) = JobStorageService.ExtractHostDataFromRows(rows, columns);
+
+            hosts[0].Should().ContainKey("custom_var");
+            hosts[0]["custom_var"].Should().Be("value1");
+            cols.Should().Contain("custom_var");
+        }
+
+        #endregion
     }
 }
