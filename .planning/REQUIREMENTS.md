@@ -22,7 +22,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **SCHD-02**: User can configure a one-time schedule at a specific date and time
 - [x] **SCHD-03**: One-time jobs auto-disable after successful execution
 - [x] **SCHD-04**: Scheduler displays human-readable cron text alongside the expression (e.g., "Every day at 3:00 AM")
-- [ ] **SCHD-05**: User can build cron expressions via a visual point-and-click builder
+- [x] **SCHD-05**: User can build cron expressions via a visual point-and-click builder
 - [x] **SCHD-06**: Scheduler shows next upcoming run times as a preview
 - [x] **SCHD-07**: Jobs missed while the application was closed are recorded as skipped, never auto-executed
 
@@ -112,7 +112,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SCHD-02 | Phase 2 | Complete |
 | SCHD-03 | Phase 2 | Complete |
 | SCHD-04 | Phase 2 | Complete |
-| SCHD-05 | Phase 2 | Pending |
+| SCHD-05 | Phase 2 | Complete |
 | SCHD-06 | Phase 2 | Complete |
 | SCHD-07 | Phase 2 | Complete |
 | HOST-01 | Phase 1 | Complete |

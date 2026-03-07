@@ -3,15 +3,31 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-03-07T16:45:57Z"
-last_activity: 2026-03-07 — Completed 02-01 Scheduling Service Foundation
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-03-07T16:52:36.564Z"
+last_activity: 2026-03-07 — Completed 02-03 Missed-Run Detection & Persistence
 progress:
   total_phases: 5
+  completed_phases: 2
+  total_plans: 6
+  completed_plans: 6
+  percent: 100
+---
+
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: executing
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-03-07T16:50:36Z"
+last_activity: 2026-03-07 — Completed 02-03 Missed-Run Detection & Persistence
+progress:
+  [██████████] 100%
   completed_phases: 1
   total_plans: 6
-  completed_plans: 4
-  percent: 67
+  completed_plans: 5
+  percent: 83
 ---
 
 # Project State
@@ -26,31 +42,32 @@ See: .planning/PROJECT.md (updated 2026-03-07)
 ## Current Position
 
 Phase: 2 of 5 (Scheduling Engine)
-Plan: 1 of 3 in current phase
+Plan: 3 of 3 in current phase
 Status: Executing
-Last activity: 2026-03-07 — Completed 02-01 Scheduling Service Foundation
+Last activity: 2026-03-07 — Completed 02-03 Missed-Run Detection & Persistence
 
-Progress: [███████░░░] 67%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 3.75min
-- Total execution time: 0.25 hours
+- Total plans completed: 5
+- Average duration: 3.6min
+- Total execution time: 0.30 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 3 | 11min | 3.7min |
-| 02 | 1 | 4min | 4min |
+| 02 | 2 | 7min | 3.5min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (3min), 01-02 (4min), 01-03 (4min), 02-01 (4min)
+- Last 5 plans: 01-02 (4min), 01-03 (4min), 02-01 (4min), 02-03 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
+| Phase 02 P02 | 4min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -74,6 +91,13 @@ Recent decisions affecting current work:
 - [Phase 02]: 5-field cron only enforced at both InputValidator and SchedulingService levels (02-01)
 - [Phase 02]: GetMissedOccurrences uses exclusive bounds to avoid double-counting (02-01)
 - [Phase 02]: MarkOneTimeCompleted preserves OneTimeScheduleUtc as visible record (02-01)
+- [Phase 02]: LastAppShutdownUtc placed at end of AppConfiguration as app-level state (02-03)
+- [Phase 02]: Newtonsoft.Json auto-serializes nullable DateTime, no ConfigurationService changes needed (02-03)
+- [Phase 02]: Integration tests use real services with temp-directory isolation (02-03)
+- [Phase 02]: Code-only layout for CronBuilderControl (no Designer.cs) matching project conventions (02-02)
+- [Phase 02]: Static internal methods for testable logic without WinForms UI thread (02-02)
+- [Phase 02]: Bidirectional sync via _suppressSyncEvents guard flag for loop prevention (02-02)
+- [Phase 02]: Custom indicator in dropdowns for complex cron expressions (02-02)
 
 ### Pending Todos
 
@@ -86,6 +110,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-07T16:45:57.025Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-03-07T16:52:36.562Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None
