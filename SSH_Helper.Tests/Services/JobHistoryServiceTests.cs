@@ -239,4 +239,321 @@ public sealed class JobHistoryServiceTests : IDisposable
     }
 
     #endregion
+
+    #region HIST-03: Retention / Pruning
+
+    [Fact]
+    public void EnforceRetention_CountBased_RemovesOldest()
+    {
+        // Save 5 runs with maxRuns=3; oldest 2 should be pruned
+        for (int i = 0; i < 5; i++)
+        {
+            var result = CreateTestResult(jobName: $"Run {i}");
+            result.CompletedUtc = DateTime.UtcNow.AddMinutes(i);
+            result.StartedUtc = result.CompletedUtc.AddSeconds(-5);
+            _service.SaveRun(result, maxRuns: 3);
+        }
+
+        var runs = _service.GetRunsForJob("testjob1");
+        runs.Should().HaveCount(3);
+        // Newest first: Run 4, Run 3, Run 2
+        runs[0].JobName.Should().Be("Run 4");
+        runs[1].JobName.Should().Be("Run 3");
+        runs[2].JobName.Should().Be("Run 2");
+    }
+
+    [Fact]
+    public void EnforceRetention_AgeBased_RemovesExpired()
+    {
+        // Save 3 runs with CompletedUtc set to 40 days ago (old),
+        // then save a new run with retentionDays=30 to prune them
+        for (int i = 0; i < 3; i++)
+        {
+            var result = CreateTestResult(jobName: $"Old Run {i}");
+            result.CompletedUtc = DateTime.UtcNow.AddDays(-40 + i); // 40, 39, 38 days ago
+            result.StartedUtc = result.CompletedUtc.AddSeconds(-5);
+            _service.SaveRun(result, retentionDays: 365);
+        }
+
+        _service.GetRunsForJob("testjob1").Should().HaveCount(3);
+
+        // Now save a fresh run with retentionDays=30 -- the 3 old entries (40, 39, 38 days ago) are pruned
+        var newResult = CreateTestResult(jobName: "Fresh Run");
+        newResult.CompletedUtc = DateTime.UtcNow;
+        newResult.StartedUtc = newResult.CompletedUtc.AddSeconds(-5);
+        _service.SaveRun(newResult, retentionDays: 30);
+
+        var runs = _service.GetRunsForJob("testjob1");
+        runs.Should().HaveCount(1);
+        runs[0].JobName.Should().Be("Fresh Run");
+    }
+
+    [Fact]
+    public void EnforceRetention_DualPruning_AppliesBothLimits()
+    {
+        // Save 5 runs with CompletedUtc 40 days ago (aged) plus some recent
+        // Then trigger dual pruning with both count and age limits
+        for (int i = 0; i < 3; i++)
+        {
+            var result = CreateTestResult(jobName: $"Old {i}");
+            result.CompletedUtc = DateTime.UtcNow.AddDays(-40 + i); // 40, 39, 38 days ago
+            result.StartedUtc = result.CompletedUtc.AddSeconds(-5);
+            _service.SaveRun(result, maxRuns: 50, retentionDays: 365);
+        }
+        for (int i = 0; i < 2; i++)
+        {
+            var result = CreateTestResult(jobName: $"Recent {i}");
+            result.CompletedUtc = DateTime.UtcNow.AddMinutes(-i);
+            result.StartedUtc = result.CompletedUtc.AddSeconds(-5);
+            _service.SaveRun(result, maxRuns: 50, retentionDays: 365);
+        }
+
+        _service.GetRunsForJob("testjob1").Should().HaveCount(5);
+
+        // Save with maxRuns=2 and retentionDays=30:
+        // - Age pruning removes 3 old entries (38-40 days old > 30 day limit)
+        // - Count pruning then keeps only 2 of the remaining 3 (2 recent + 1 new)
+        var newResult = CreateTestResult(jobName: "Final Run");
+        newResult.CompletedUtc = DateTime.UtcNow;
+        newResult.StartedUtc = newResult.CompletedUtc.AddSeconds(-5);
+        _service.SaveRun(newResult, maxRuns: 2, retentionDays: 30);
+
+        var runs = _service.GetRunsForJob("testjob1");
+        runs.Should().HaveCount(2, "age pruning removes 3 old, then count pruning trims to 2");
+        runs[0].JobName.Should().Be("Final Run");
+    }
+
+    [Fact]
+    public void EnforceRetention_DeletesPayloadFiles()
+    {
+        // Save 5 runs, then the oldest 2 should be pruned and their payload files deleted
+        var runFileNames = new List<string>();
+
+        for (int i = 0; i < 5; i++)
+        {
+            var result = CreateTestResult(jobName: $"Run {i}");
+            result.CompletedUtc = DateTime.UtcNow.AddMinutes(i);
+            result.StartedUtc = result.CompletedUtc.AddSeconds(-5);
+            _service.SaveRun(result, maxRuns: 3);
+        }
+
+        var jobDir = Path.Combine(_historyPath, "testjob1");
+        // Should have index.json + 3 run payload files (2 pruned)
+        var jsonFiles = Directory.GetFiles(jobDir, "*.json");
+        // index.json + 3 payload files = 4 total
+        jsonFiles.Should().HaveCount(4, "index.json + 3 payload files (2 pruned)");
+    }
+
+    #endregion
+
+    #region HIST-04: Query, Filter, Search, and Deletion
+
+    [Fact]
+    public void GetRunsForJob_FilterBySuccess_ReturnsOnlyMatching()
+    {
+        _service.SaveRun(CreateTestResult(success: true, jobName: "Success 1"));
+        _service.SaveRun(CreateTestResult(success: false, jobName: "Failure 1", hostsFailed: 1, hostsSucceeded: 1));
+        _service.SaveRun(CreateTestResult(success: true, jobName: "Success 2"));
+
+        var successOnly = _service.GetRunsForJob("testjob1", new JobRunFilter { Success = true });
+        successOnly.Should().HaveCount(2);
+        successOnly.Should().OnlyContain(r => r.Success);
+    }
+
+    [Fact]
+    public void GetRunsForJob_FilterByFailure_ReturnsOnlyFailed()
+    {
+        _service.SaveRun(CreateTestResult(success: true, jobName: "Success 1"));
+        _service.SaveRun(CreateTestResult(success: false, jobName: "Failure 1", hostsFailed: 2, hostsSucceeded: 0));
+        _service.SaveRun(CreateTestResult(success: true, jobName: "Success 2"));
+
+        var failedOnly = _service.GetRunsForJob("testjob1", new JobRunFilter { Success = false });
+        failedOnly.Should().HaveCount(1);
+        failedOnly[0].JobName.Should().Be("Failure 1");
+    }
+
+    [Fact]
+    public void GetRunsForJob_FilterByDateRange_ReturnsWithinRange()
+    {
+        var now = DateTime.UtcNow;
+
+        var oldResult = CreateTestResult(jobName: "Old");
+        oldResult.CompletedUtc = now.AddDays(-10);
+        oldResult.StartedUtc = oldResult.CompletedUtc.AddSeconds(-5);
+
+        var midResult = CreateTestResult(jobName: "Mid");
+        midResult.CompletedUtc = now.AddDays(-3);
+        midResult.StartedUtc = midResult.CompletedUtc.AddSeconds(-5);
+
+        var recentResult = CreateTestResult(jobName: "Recent");
+        recentResult.CompletedUtc = now;
+        recentResult.StartedUtc = recentResult.CompletedUtc.AddSeconds(-5);
+
+        _service.SaveRun(oldResult);
+        _service.SaveRun(midResult);
+        _service.SaveRun(recentResult);
+
+        var filter = new JobRunFilter
+        {
+            FromUtc = now.AddDays(-5),
+            ToUtc = now.AddDays(-1)
+        };
+
+        var filtered = _service.GetRunsForJob("testjob1", filter);
+        filtered.Should().HaveCount(1);
+        filtered[0].JobName.Should().Be("Mid");
+    }
+
+    [Fact]
+    public void GetRunsForJob_MaxResults_LimitsOutput()
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            _service.SaveRun(CreateTestResult(jobName: $"Run {i}"));
+        }
+
+        var filter = new JobRunFilter { MaxResults = 2 };
+        var runs = _service.GetRunsForJob("testjob1", filter);
+        runs.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void GetRunsForJob_NoFilter_ReturnsAll()
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            _service.SaveRun(CreateTestResult(jobName: $"Run {i}"));
+        }
+
+        var runs = _service.GetRunsForJob("testjob1");
+        runs.Should().HaveCount(5);
+    }
+
+    [Fact]
+    public void SearchRunOutput_FindsMatchingText()
+    {
+        var outputs = new List<JobHostOutput>
+        {
+            new() { HostAddress = "10.0.0.1", Output = "Router config backup complete", Success = true },
+            new() { HostAddress = "10.0.0.2", Output = "Switch interface status check", Success = true }
+        };
+        var result = CreateTestResult(hostOutputs: outputs);
+        _service.SaveRun(result);
+
+        var runs = _service.GetRunsForJob("testjob1");
+        var matches = _service.SearchRunOutput("testjob1", runs[0].RunFileName, "backup");
+
+        matches.Should().HaveCount(1);
+        matches[0].HostAddress.Should().Be("10.0.0.1");
+    }
+
+    [Fact]
+    public void SearchRunOutput_CaseInsensitive()
+    {
+        var outputs = new List<JobHostOutput>
+        {
+            new() { HostAddress = "10.0.0.1", Output = "Router config backup complete", Success = true },
+            new() { HostAddress = "10.0.0.2", Output = "Switch interface status check", Success = true }
+        };
+        var result = CreateTestResult(hostOutputs: outputs);
+        _service.SaveRun(result);
+
+        var runs = _service.GetRunsForJob("testjob1");
+        var matches = _service.SearchRunOutput("testjob1", runs[0].RunFileName, "STATUS");
+
+        matches.Should().HaveCount(1);
+        matches[0].HostAddress.Should().Be("10.0.0.2");
+    }
+
+    [Fact]
+    public void SearchRunOutput_NoMatch_ReturnsEmpty()
+    {
+        var result = CreateTestResult();
+        _service.SaveRun(result);
+
+        var runs = _service.GetRunsForJob("testjob1");
+        var matches = _service.SearchRunOutput("testjob1", runs[0].RunFileName, "nonexistent-text-xyz");
+
+        matches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void DeleteAllHistory_RemovesJobDirectory()
+    {
+        _service.SaveRun(CreateTestResult());
+        _service.SaveRun(CreateTestResult(jobName: "Run 2"));
+
+        _service.GetRunsForJob("testjob1").Should().HaveCount(2);
+
+        _service.DeleteAllHistory("testjob1");
+
+        _service.GetRunsForJob("testjob1").Should().BeEmpty();
+        var jobDir = Path.Combine(_historyPath, "testjob1");
+        Directory.Exists(jobDir).Should().BeFalse("job directory should be removed");
+    }
+
+    [Fact]
+    public void DeleteAllHistory_NonexistentJob_DoesNotThrow()
+    {
+        var act = () => _service.DeleteAllHistory("nonexistent-job-xyz");
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void DeleteRun_RemovesSpecificEntry()
+    {
+        _service.SaveRun(CreateTestResult(jobName: "Keep 1"));
+        _service.SaveRun(CreateTestResult(jobName: "Delete Me"));
+        _service.SaveRun(CreateTestResult(jobName: "Keep 2"));
+
+        var runs = _service.GetRunsForJob("testjob1");
+        runs.Should().HaveCount(3);
+
+        var toDelete = runs.First(r => r.JobName == "Delete Me");
+        _service.DeleteRun("testjob1", toDelete.Id);
+
+        var remaining = _service.GetRunsForJob("testjob1");
+        remaining.Should().HaveCount(2);
+        remaining.Should().NotContain(r => r.JobName == "Delete Me");
+        remaining.Should().Contain(r => r.JobName == "Keep 1");
+        remaining.Should().Contain(r => r.JobName == "Keep 2");
+    }
+
+    [Fact]
+    public void GetJobIds_ReturnsAllJobsWithHistory()
+    {
+        _service.SaveRun(CreateTestResult(jobId: "job-alpha"));
+        _service.SaveRun(CreateTestResult(jobId: "job-beta"));
+        _service.SaveRun(CreateTestResult(jobId: "job-gamma"));
+
+        var ids = _service.GetJobIds();
+        ids.Should().HaveCount(3);
+        ids.Should().Contain("job-alpha");
+        ids.Should().Contain("job-beta");
+        ids.Should().Contain("job-gamma");
+    }
+
+    [Fact]
+    public void CorruptIndex_RecoveredGracefully()
+    {
+        // Save a run to create valid index
+        _service.SaveRun(CreateTestResult());
+        _service.GetRunsForJob("testjob1").Should().HaveCount(1);
+
+        // Corrupt the index file
+        var indexPath = Path.Combine(_historyPath, "testjob1", "index.json");
+        File.WriteAllText(indexPath, "{{{{not json");
+
+        // GetRunsForJob should return empty (corrupt recovery)
+        var runs = _service.GetRunsForJob("testjob1");
+        runs.Should().BeEmpty();
+
+        // A backup file with .corrupt_ prefix should exist
+        var jobDir = Path.Combine(_historyPath, "testjob1");
+        var corruptBackups = Directory.GetFiles(jobDir, "index.json.corrupt_*");
+        corruptBackups.Should().NotBeEmpty("corrupt index should be backed up");
+    }
+
+    #endregion
 }
