@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-03-07T20:24:19Z"
-last_activity: 2026-03-07 — Completed 03-01 Execution Pipeline Models
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-03-07T20:32:26Z"
+last_activity: 2026-03-07 — Completed 03-02 Job Execution Service scaffold
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 10
-  completed_plans: 7
-  percent: 70
+  completed_plans: 8
+  percent: 80
 ---
 
 # Project State
@@ -26,18 +26,18 @@ See: .planning/PROJECT.md (updated 2026-03-07)
 ## Current Position
 
 Phase: 3 of 5 (Execution Pipeline)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: Executing
-Last activity: 2026-03-07 — Completed 03-01 Execution Pipeline Models
+Last activity: 2026-03-07 — Completed 03-02 Job Execution Service scaffold
 
-Progress: [███████░░░] 70%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
+- Total plans completed: 8
 - Average duration: 3.4min
-- Total execution time: 0.40 hours
+- Total execution time: 0.45 hours
 
 **By Phase:**
 
@@ -45,10 +45,10 @@ Progress: [███████░░░] 70%
 |-------|-------|-------|----------|
 | 01 | 3 | 11min | 3.7min |
 | 02 | 3 | 10min | 3.3min |
-| 03 | 1 | 4min | 4.0min |
+| 03 | 2 | 7min | 3.5min |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (4min), 02-02 (4min), 02-03 (3min), 03-01 (4min)
+- Last 5 plans: 02-02 (4min), 02-03 (3min), 03-01 (4min), 03-02 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -86,6 +86,9 @@ Recent decisions affecting current work:
 - [Phase 03]: RunningJobState kept minimal (StartedUtc only), expandable during service implementation (03-01)
 - [Phase 03]: QueuedJob uses constructor for required properties; in-memory only (03-01)
 - [Phase 03]: MaxConcurrentJobs defaults to 3, validation at service level not model level (03-01)
+- [Phase 03]: HandlePostExecution handles both success and failure paths for one-time jobs (03-02)
+- [Phase 03]: Failed one-time jobs remain enabled for user retry rather than auto-disabling (03-02)
+- [Phase 03]: RunningJobInfo is private nested class separate from persisted RunningJobState (03-02)
 
 ### Pending Todos
 
@@ -98,6 +101,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-07T20:24:19Z
-Stopped at: Completed 03-01-PLAN.md
-Resume file: .planning/phases/03-execution-pipeline/03-01-SUMMARY.md
+Last session: 2026-03-07T20:32:26Z
+Stopped at: Completed 03-02-PLAN.md
+Resume file: .planning/phases/03-execution-pipeline/03-02-SUMMARY.md
