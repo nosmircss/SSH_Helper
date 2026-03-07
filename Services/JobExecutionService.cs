@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using SSH_Helper.Models;
-using SSH_Helper.Services;
 
 namespace SSH_Helper.Services
 {
@@ -41,7 +40,7 @@ namespace SSH_Helper.Services
             public string JobId { get; }
             public DateTime StartedUtc { get; }
             public CancellationTokenSource Cts { get; }
-            public bool IsRunNow { get; }
+            public bool IsRunNow { get; set; }
 
             public RunningJobInfo(string jobId, DateTime startedUtc, CancellationTokenSource cts, bool isRunNow)
             {
@@ -168,6 +167,87 @@ namespace SSH_Helper.Services
         public IReadOnlyList<string> GetRunningJobIds()
         {
             return _runningJobs.Keys.ToList();
+        }
+
+        /// <summary>
+        /// Number of jobs currently waiting in the overflow queue.
+        /// </summary>
+        public int QueuedJobCount => _jobQueue.Count;
+
+        /// <summary>
+        /// Number of jobs currently executing.
+        /// </summary>
+        public int RunningJobCount => _runningJobs.Count;
+
+        /// <summary>
+        /// Immediately executes a job, bypassing the concurrency gate entirely.
+        /// Blocks if the same job is already running or has a drift warning.
+        /// </summary>
+        public async Task<bool> RunNowAsync(string jobId)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(JobExecutionService));
+
+            var job = _jobStorage.Get(jobId);
+            if (job == null) return false;
+
+            // Block if already running (per locked decision)
+            if (_runningJobs.ContainsKey(jobId))
+            {
+                OnJobStateChanged(jobId, job.Name, JobExecutionState.Skipped, "Already running");
+                return false;
+            }
+
+            // Block if drift warning (per locked decision: consistent blocking for both scheduled and run-now)
+            if (job.HasDriftWarning)
+            {
+                OnJobStateChanged(jobId, job.Name, JobExecutionState.Skipped,
+                    "Drift warning — re-acknowledge before execution");
+                return false;
+            }
+
+            // NO semaphore acquisition — run-now bypasses concurrency gate entirely
+            if (!TryStartJob(jobId))
+                return false;
+
+            // Mark this as a run-now execution
+            if (_runningJobs.TryGetValue(jobId, out var info))
+                info.IsRunNow = true;
+
+            try
+            {
+                await ExecuteJobCoreAsync(job, isRunNow: true, _disposalCts.Token);
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                OnJobStateChanged(jobId, job.Name, JobExecutionState.Cancelled);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                OnJobFailed(job, ex.Message);
+                return false;
+            }
+            finally
+            {
+                CompleteJob(jobId);
+                // No semaphore release — run-now never acquired one
+                // No DrainQueue — run-now doesn't affect the scheduled queue
+            }
+        }
+
+        /// <summary>
+        /// Cancels a running job via its CancellationTokenSource.
+        /// Returns true if the job was found and cancellation was requested.
+        /// </summary>
+        public bool CancelJob(string jobId)
+        {
+            if (_runningJobs.TryGetValue(jobId, out var info))
+            {
+                info.Cts.Cancel();
+                return true;
+            }
+            return false;
         }
 
         #endregion
