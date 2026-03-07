@@ -81,10 +81,12 @@ Plans:
   2. Full SSH output from each run is persisted to disk and viewable after the run completes
   3. History entries are automatically pruned when either the max-entries-per-job limit or the age-based retention limit is hit (whichever comes first)
   4. User can search and filter within stored job output to find specific results
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 04-01: TBD
+- [ ] 04-01-PLAN.md — History models, event handoff enhancement, config extensions, shared utility extraction
+- [ ] 04-02-PLAN.md — JobHistoryService implementation (save, prune, query, search, delete)
+- [ ] 04-03-PLAN.md — Comprehensive unit tests for job history service
 
 ### Phase 5: Scheduler UI & Integration
 **Goal**: Users can manage the full job lifecycle through dedicated management dialogs with in-app notifications and job portability via export/import
@@ -111,5 +113,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Job Definitions & Persistence | 3/3 | Complete | 2026-03-07 |
 | 2. Scheduling Engine | 3/3 | Complete | 2026-03-07 |
 | 3. Execution Pipeline | 3/4 | In progress | - |
-| 4. History & Output | 0/1 | Not started | - |
+| 4. History & Output | 0/3 | Not started | - |
 | 5. Scheduler UI & Integration | 0/2 | Not started | - |
