@@ -240,6 +240,121 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Imports hosts from a CSV file into the specified job.
+        /// </summary>
+        /// <param name="jobId">The job to update.</param>
+        /// <param name="filePath">Path to the CSV file.</param>
+        /// <exception cref="KeyNotFoundException">Job not found.</exception>
+        /// <exception cref="ArgumentException">CSV missing required Host_IP column.</exception>
+        public void ImportHostsFromCsv(string jobId, string filePath)
+        {
+            var job = Get(jobId)
+                ?? throw new KeyNotFoundException($"Job with ID '{jobId}' not found.");
+
+            var lines = File.ReadAllLines(filePath);
+            if (lines.Length == 0)
+                throw new ArgumentException("CSV file is empty and has no header row.", nameof(filePath));
+
+            var columns = ParseCsvLine(lines[0]);
+            if (!columns.Any(c => string.Equals(c, "Host_IP", StringComparison.OrdinalIgnoreCase)))
+                throw new ArgumentException("CSV file must contain a 'Host_IP' column.", nameof(filePath));
+
+            var hosts = new List<Dictionary<string, string>>();
+            for (int i = 1; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                var values = ParseCsvLine(line);
+                var row = new Dictionary<string, string>();
+                for (int j = 0; j < columns.Count && j < values.Count; j++)
+                {
+                    row[columns[j]] = values[j];
+                }
+                hosts.Add(row);
+            }
+
+            job.Hosts = hosts;
+            job.HostColumns = columns;
+            Save(job);
+        }
+
+        /// <summary>
+        /// Converts raw row data into the (hosts, columns) format used by JobDefinition.
+        /// Pure data transformation with no WinForms dependency.
+        /// </summary>
+        public static (List<Dictionary<string, string>> Hosts, List<string> Columns) ExtractHostDataFromRows(
+            IReadOnlyList<Dictionary<string, string>> rows,
+            IReadOnlyList<string> columnNames)
+        {
+            var columns = new List<string>(columnNames);
+            var hosts = new List<Dictionary<string, string>>();
+
+            foreach (var row in rows)
+            {
+                hosts.Add(new Dictionary<string, string>(row));
+            }
+
+            return (hosts, columns);
+        }
+
+        /// <summary>
+        /// Parses a single CSV line, handling quoted fields containing commas.
+        /// </summary>
+        private static List<string> ParseCsvLine(string line)
+        {
+            var fields = new List<string>();
+            var current = new System.Text.StringBuilder();
+            bool inQuotes = false;
+
+            for (int i = 0; i < line.Length; i++)
+            {
+                char c = line[i];
+
+                if (inQuotes)
+                {
+                    if (c == '"')
+                    {
+                        // Check for escaped quote ("")
+                        if (i + 1 < line.Length && line[i + 1] == '"')
+                        {
+                            current.Append('"');
+                            i++; // skip next quote
+                        }
+                        else
+                        {
+                            inQuotes = false;
+                        }
+                    }
+                    else
+                    {
+                        current.Append(c);
+                    }
+                }
+                else
+                {
+                    if (c == '"')
+                    {
+                        inQuotes = true;
+                    }
+                    else if (c == ',')
+                    {
+                        fields.Add(current.ToString());
+                        current.Clear();
+                    }
+                    else
+                    {
+                        current.Append(c);
+                    }
+                }
+            }
+
+            fields.Add(current.ToString());
+            return fields;
+        }
+
+        /// <summary>
         /// Wrapper for the jobs.json file format.
         /// </summary>
         private sealed class JobsFileWrapper
