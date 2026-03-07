@@ -117,6 +117,12 @@ namespace SSH_Helper.Models
         /// </summary>
         public int MaxRecentFiles { get; set; } = 10;
 
+        /// <summary>
+        /// UTC timestamp of the last application shutdown. Used by SchedulingService.DetectMissedRuns
+        /// to anchor the missed-run detection window. Null on first install (means clean slate, no missed runs).
+        /// </summary>
+        public DateTime? LastAppShutdownUtc { get; set; }
+
     }
 
     /// <summary>
