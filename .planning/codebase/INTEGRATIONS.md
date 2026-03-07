@@ -1,146 +1,216 @@
 # External Integrations
 
-**Analysis Date:** 2026-03-06
+**Analysis Date:** 2026-03-07
 
 ## APIs & External Services
 
 **GitHub API:**
-- Used for auto-update checks and downloads
-- Service: `Services/UpdateService.cs`
+- Purpose: Auto-update checking and release download
+- SDK/Client: `System.Net.Http.HttpClient` with `System.Text.Json` deserialization
+- Implementation: `Services/UpdateService.cs`
 - Endpoint: `https://api.github.com/repos/{owner}/{repo}/releases/latest`
-- Auth: None required (public API, rate-limited)
-- Headers: `User-Agent` and `Accept: application/vnd.github.v3+json`
-- Features: Version comparison, asset download with SHA256 verification, exponential backoff retry
-
-**Webhook HTTP Requests (Scripting Engine):**
-- Outbound HTTP requests from script `webhook` commands
-- Service: `Services/Scripting/Commands/WebhookCommand.cs`
-- Supports: GET, POST, and other HTTP methods
-- Headers and body support variable substitution from script context
-- Timeout: Configurable per-command (default 30s)
-- Note: No SSRF protection by design (allows localhost and internal IPs for infrastructure automation)
+- Auth: None (public repo, unauthenticated GitHub API)
+- Headers: `User-Agent: {repo}/{version}`, `Accept: application/vnd.github.v3+json`
+- Config: `Models/AppConfiguration.cs` > `UpdateSettings` class
+  - `GitHubOwner`: defaults to `"nosmircss"`
+  - `GitHubRepo`: defaults to `"SSH_Helper"`
+  - `CheckOnStartup`: defaults to `true`
+- Features: Version comparison, asset download with SHA256 verification, retry with exponential backoff (1s, 3s, 5s)
 
 ## SSH Connections
 
-**SSH.NET Library:**
-- Client: `Renci.SshNet` namespace
-- Service: `Services/SshExecutionService.cs`
-- Purpose: Primary SSH command execution against remote hosts
-- Auth: Username/password from grid columns or Windows Credential Manager
-- Connection details parsed from `Models/HostConnection.cs` (supports `host:port` format)
+**Rebex SSH (Primary Shell Engine):**
+- Library: Rebex.SshShell 7.0.9448
+- Purpose: Interactive SSH shell sessions with terminal emulation and scripting API
+- Implementation:
+  - `Services/SshShellSession.cs` - Individual shell session management with pattern-based prompt detection
+  - `Services/SshConnectionPool.cs` - Connection pooling with `ConcurrentDictionary` for reuse across command batches
+  - `Services/SshExecutionService.cs` - Execution orchestration with event-driven progress reporting
+  - `Services/SshTerminalOptionsFactory.cs` - Terminal option configuration
+  - `Services/SshTimeoutOptions.cs` - Timeout configuration
+- Auth methods: Password, SSH agent, SSH key (via `~/.ssh/config` integration)
+- Config: `Models/AppConfiguration.cs` > `SshConfigSettings`, `CredentialSettings`
+- License: Requires `REBEX_LICENSE_KEY` env var or `rebex.key` file
+- Scripting API: `Rebex.TerminalEmulation.Scripting` for pattern-based terminal matching, pager handling, and prompt detection
 
-**Rebex SSH Terminal:**
-- Client: `Rebex.Net.Ssh`, `Rebex.TerminalEmulation`
-- Services: `Services/SshShellSession.cs`, `Services/SshConnectionPool.cs`
-- Purpose: Interactive shell sessions with Scripting API for prompt detection, pager handling, and pattern matching
-- License: Via `REBEX_LICENSE_KEY` env var or `rebex.key` file
-- Connection pooling: `Services/SshConnectionPool.cs` manages reusable connections with health checks and idle cleanup
+**SSH.NET (SFTP Operations):**
+- Library: SSH.NET 2024.1.0 (`Renci.SshNet`)
+- Purpose: SFTP file transfers within scripts
+- Implementation: `Services/Scripting/Commands/SftpCommand.cs`
+- Operations: Upload and download with overwrite control and timeout
+- Auth: Uses host connection credentials from script context
 
-**SSH Config File Parsing:**
-- Service: `Services/SshConfigService.cs`
+**SSH Config File Integration:**
 - Parser: `Utilities/SshConfigParser.cs`
-- Reads: `%USERPROFILE%\.ssh\config`
+- Service: `Services/SshConfigService.cs`
 - Models: `Models/SshConfigFile.cs`, `Models/SshHostConfig.cs`
-- Caching: In-memory with 5-second staleness check
+- Reads: `%USERPROFILE%\.ssh\config`
+- Applies: IdentityFile, algorithms, and other SSH settings to connections
+- Toggle: `SshConfigSettings.EnableSshConfig` (default: `false`)
+- Caching: In-memory with staleness check
+
+## Script Commands (Network)
+
+**HTTP Requests (`http` command):**
+- Implementation: `Services/Scripting/Commands/HttpCommand.cs`
+- Methods: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
+- Auth modes: none, basic, bearer
+- Content types: json (`application/json`), form (`application/x-www-form-urlencoded`), text (`text/plain`), xml (`application/xml`)
+- Response capture: Status code, body, and headers into script variables
+- Testable: Uses injectable `Func<HttpOptions, HttpMessageHandler>` factory
+
+**Webhook Requests (`webhook` command):**
+- Implementation: `Services/Scripting/Commands/WebhookCommand.cs`
+- Simpler than HTTP command, primarily for outbound notifications
+- Static `HttpClient` reuse (Microsoft best practice)
+- Variable substitution in URL, body, and headers
+- Security note: No SSRF protection by design (allows localhost and RFC1918 for infrastructure automation)
+
+**DNS Resolution (`dns` command):**
+- Implementation: `Services/Scripting/Commands/DnsCommand.cs`
+- Uses `System.Net.Dns` via injectable `IDnsResolver` abstraction
+- Captures results as list variables
+
+**ICMP Ping (`ping` command):**
+- Implementation: `Services/Scripting/Commands/PingCommand.cs`
+- Uses `System.Net.NetworkInformation.Ping` via injectable `IPingProbe` abstraction
+- Captures status and round-trip metrics
+
+**TCP Port Check (`portcheck` command):**
+- Implementation: `Services/Scripting/Commands/PortcheckCommand.cs`
+- Uses `System.Net.Sockets.TcpClient`
+- Reports: open, closed, or timed out
+- Default port: 22, default timeout: 5s
 
 ## Data Storage
 
-**Local Filesystem (JSON):**
-- Config: `%LocalAppData%\SSH_Helper\config.json`
+**Configuration (JSON):**
+- Location: `%LocalAppData%\SSH_Helper\config.json`
+- Client: `Newtonsoft.Json` 13.0.3
 - Service: `Services/ConfigurationService.cs`
 - Model: `Models/AppConfiguration.cs`
-- Format: JSON via Newtonsoft.Json
-- Features: Caching, legacy format migration, GZip-compressed saved state
+- Contains: Presets, environments, window state, font settings, update settings, credential preferences, editor settings, SSH config settings
+- Features: Caching, legacy format migration, GZip-compressed saved state (`gz64:` prefix)
 
 **Execution History:**
 - Index: `%LocalAppData%\SSH_Helper\history.index.json`
-- Run data: `%LocalAppData%\SSH_Helper\history/` (per-run JSON files)
+- Run data: `%LocalAppData%\SSH_Helper\history/` directory (per-run JSON payload files)
 - Service: `Services/HistoryStorageService.cs`
-- Models: `Models/HistoryIndex.cs`, `Models/HistoryRunPayload.cs`
+- Models: `Models/HistoryIndex.cs`, `Models/HistoryRunPayload.cs`, `Models/HistoryListItem.cs`
+- ID generation: `Services/HistoryIdGenerator.cs`
 
-**CSV Files:**
+**CSV Host Files:**
 - Service: `Services/CsvManager.cs`
-- Purpose: Import/export host grids
 - Format: Standard CSV with proper quoting/escaping
 - Required column: `Host_IP`
+- Optional columns: `port`, `delay`, `timeout`, `transport`, `username`, `password`, `personality`
+- Custom columns usable as `{{column_name}}` variables in scripts
+- Freshness tracking: `Models/CsvFileFingerprint.cs`, `Utilities/CsvFileSyncEvaluator.cs`
 
-**No external databases.** All persistence is local filesystem.
+**File Storage:**
+- Local filesystem only, no external databases
+- Script file I/O: `Services/Scripting/Commands/ReadFileCommand.cs`, `Services/Scripting/Commands/WriteFileCommand.cs`
+- File access validation: `Services/Scripting/ScriptFileAccessValidator.cs`
+
+**Caching:**
+- In-memory config cache: `ConfigurationService._cachedConfig`
+- SSH connection pooling: `Services/SshConnectionPool.cs`
 
 ## Authentication & Identity
 
-**Windows Credential Manager:**
+**SSH Authentication:**
+- Password-based: Entered in UI or from CSV `password` column or Windows Credential Manager
+- SSH key-based: Via `~/.ssh/config` IdentityFile settings
+- SSH agent: Optional preference (`CredentialSettings.PreferSshAgent`)
+- Fallback chain: Per-host credential -> default credential -> UI-entered password
+
+**Credential Storage (Windows Credential Manager):**
 - Provider: `Services/Credentials/CredentialManagerProvider.cs`
 - Interface: `Services/Credentials/ICredentialProvider.cs`
 - Target naming: `Services/Credentials/CredentialTargets.cs`
-- Uses P/Invoke to `advapi32.dll` (`CredRead`, `CredWrite`, `CredDelete`, `CredFree`)
-- Stores SSH credentials per-host in Windows Credential Manager
-- Only available on Windows (`OperatingSystem.IsWindows()` check)
-
-**SSH Authentication:**
-- Username/password from DataGridView columns (`username`, `password`)
-- Fallback to global username from `AppConfiguration.Username`
-- Credential Manager lookup via target naming convention
+  - Default password: `SSH_Helper:default`
+  - Per-host password: `SSH_Helper:host:{host}|user:{username}`
+- Win32 P/Invoke: `CredRead`, `CredWrite`, `CredDelete`, `CredFree` from `advapi32.dll`
+- Toggle: `CredentialSettings.UseCredentialManager` (default: `false`)
+- Platform check: `OperatingSystem.IsWindows()`
 
 ## Monitoring & Observability
 
 **Error Tracking:**
 - None (no external error tracking service)
+- Errors reported via UI events and dialog messages
 
 **Logs:**
-- Console/debug output only
-- Event-driven progress reporting via `SshProgressEventArgs` and `SshOutputEventArgs`
-- Scripting engine log command: `Services/Scripting/Commands/LogCommand.cs`
+- No structured logging framework
+- Event-driven progress: `SshProgressEventArgs`, `SshOutputEventArgs` from `Services/SshExecutionService.cs`
+- Update process: Optional logging via `UpdateSettings.EnableUpdateLog`
+- Script engine: `log` command writes to script output (`Services/Scripting/Commands/LogCommand.cs`)
 
 ## CI/CD & Deployment
 
 **Hosting:**
 - Desktop application (no server hosting)
-- Distributed as self-contained single-file `.exe`
+- Distributed via GitHub Releases as single-file executable
 
 **CI Pipeline:**
 - GitHub Actions: `.github/workflows/build-release.yml`
 - Trigger: Push tags matching `v*` or manual `workflow_dispatch`
-- Runner: `windows-latest`
-- Steps: Restore, publish (single-file), upload artifact
-- Release: Auto-creates GitHub Release with exe, SHA256 checksum, README, and SCRIPTING.md
+- Build job (`windows-latest`):
+  - `dotnet restore` with `win-x64` runtime and Release config
+  - `dotnet publish` producing single-file self-contained executable
+  - Uploads build artifact
+- Release job (`ubuntu-latest`, runs only for tag pushes):
+  - Downloads build artifact
+  - Copies `README.md` and `SCRIPTING.md` documentation
+  - Generates `SHA256` checksum
+  - Creates GitHub Release via `softprops/action-gh-release@v1`
 - Secrets: `REBEX_LICENSE_KEY` (build), `GITHUB_TOKEN` (release creation)
+
+**Auto-Update Flow:**
+1. `UpdateService.CheckForUpdatesAsync()` queries GitHub API for latest release
+2. Compares semantic version with current version
+3. Downloads asset with retry and progress reporting (`DownloadProgressChanged` event)
+4. Verifies SHA256 checksum against `.sha256` companion file
+5. User-initiated install replaces current executable
 
 ## Environment Configuration
 
 **Required env vars:**
-- None required for basic operation
+- `REBEX_LICENSE_KEY` - Rebex SSH library license key (CI/CD builds; embedded at build time via `AssemblyMetadataAttribute`)
 
 **Optional env vars:**
-- `REBEX_LICENSE_KEY` - Rebex SSH library license (build-time only, embedded in assembly)
+- None detected beyond Rebex license
 
 **Secrets location:**
-- SSH credentials: Windows Credential Manager
-- Rebex license: Assembly metadata (injected at build) or `rebex.key` file
 - GitHub Actions secrets: `REBEX_LICENSE_KEY`, `GITHUB_TOKEN`
+- Local dev: `rebex.key` file in project root (gitignored)
+- Runtime SSH passwords: Windows Credential Manager
 
 ## Webhooks & Callbacks
 
 **Incoming:**
-- None (desktop application, no server)
+- None (desktop application, no server endpoints)
 
 **Outgoing:**
-- Script-driven HTTP webhooks via `Services/Scripting/Commands/WebhookCommand.cs`
-- Supports variable substitution in URL, headers, and body
-- Configurable method, headers, body, and timeout
+- Script-driven webhooks via `webhook` command (`Services/Scripting/Commands/WebhookCommand.cs`)
+- Script-driven HTTP requests via `http` command (`Services/Scripting/Commands/HttpCommand.cs`)
+- Configurable URL, method, headers, body, and timeout per script step
+- Variable substitution in all URL/header/body fields
 
 ## File System Access (Scripting)
 
 **Script File Operations:**
 - Read files: `Services/Scripting/Commands/ReadFileCommand.cs`
+- Write files: `Services/Scripting/Commands/WriteFileCommand.cs`
 - Access validation: `Services/Scripting/ScriptFileAccessValidator.cs`
-- Scripts can read local files and use content in command execution
+- Scripts can read/write local files and use content in command execution
 
 ## Native Interop
 
 **Win32 P/Invoke:**
-- Credential Manager: `advapi32.dll` (CredRead, CredWrite, CredDelete, CredFree)
-- Scintilla editor: Native DLLs loaded via `Utilities/ScintillaNativeBootstrap.cs`
+- Credential Manager: `advapi32.dll` (`CredRead`, `CredWrite`, `CredDelete`, `CredFree`) in `Services/Credentials/CredentialManagerProvider.cs`
+- Scintilla editor: Native `Scintilla.dll` and `Lexilla.dll` loaded via `Utilities/ScintillaNativeBootstrap.cs` (extracted from embedded resources)
 
 ---
 
-*Integration audit: 2026-03-06*
+*Integration audit: 2026-03-07*
