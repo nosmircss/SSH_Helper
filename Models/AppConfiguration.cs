@@ -106,6 +106,17 @@ namespace SSH_Helper.Models
         /// </summary>
         public CredentialSettings Credentials { get; set; } = new();
 
+        // Recent files
+        /// <summary>
+        /// Most recently opened CSV file paths, newest first.
+        /// </summary>
+        public List<string> RecentFiles { get; set; } = new();
+
+        /// <summary>
+        /// Maximum number of recent files to remember.
+        /// </summary>
+        public int MaxRecentFiles { get; set; } = 10;
+
     }
 
     /// <summary>

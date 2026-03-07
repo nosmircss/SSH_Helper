@@ -133,6 +133,22 @@ namespace SSH_Helper
         private int _rightClickedRowIndex = -1;
         private readonly BindingList<HistoryListItem> _outputHistory = new();
 
+        // Recent files menu
+        private ToolStripMenuItem? _recentFilesMenuItem;
+        private ToolStripSeparator? _recentFilesSeparator;
+
+        // Connection testing
+        private ToolStripMenuItem? _testConnectionMenuItem;
+        private ToolStripSeparator? _testConnectionSeparator;
+        private CancellationTokenSource? _connectionTestCts;
+        private bool _isTestingConnections;
+
+        // Preset search/filter
+        private Panel? _presetSearchPanel;
+        private TextBox? _txtPresetSearch;
+        private Label? _btnPresetSearchClear;
+        private System.Windows.Forms.Timer? _presetSearchDebounceTimer;
+
         // Find dialog state
         private FindDialog? _findDialog;
         private string _lastFindTerm = "";
@@ -269,6 +285,9 @@ namespace SSH_Helper
             UpdateHostCount();
             UpdatePresetHeaderIndicator();
             UpdateSortModeIndicator();
+            RebuildRecentFilesMenu();
+            InitializePresetSearchFilter();
+            InitializeConnectionTesting();
             UpdateStatusBar("Ready");
 
             // Apply saved theme and fonts
@@ -2555,6 +2574,13 @@ namespace SSH_Helper
             trvFavorites.BackColor = LightPanelBackground;
             trvFavorites.ForeColor = LightTextColor;
             lblFavoritesEmpty.ForeColor = LightSecondaryText;
+            if (_presetSearchPanel != null)
+            {
+                _presetSearchPanel.BackColor = LightBackground;
+                _txtPresetSearch!.BackColor = LightPanelBackground;
+                _txtPresetSearch.ForeColor = LightTextColor;
+                _btnPresetSearchClear!.ForeColor = LightSecondaryText;
+            }
 
             // Script panel
             scriptPanel.BackColor = LightPanelBackground;
@@ -2680,6 +2706,13 @@ namespace SSH_Helper
             trvFavorites.BackColor = DarkSurface1;
             trvFavorites.ForeColor = DarkTextPrimary;
             lblFavoritesEmpty.ForeColor = DarkTextSecondary;
+            if (_presetSearchPanel != null)
+            {
+                _presetSearchPanel.BackColor = DarkSurface2;
+                _txtPresetSearch!.BackColor = DarkInputBackground;
+                _txtPresetSearch.ForeColor = DarkInputText;
+                _btnPresetSearchClear!.ForeColor = DarkTextSecondary;
+            }
 
             // Script panel
             scriptPanel.BackColor = DarkSurface1;
@@ -3124,6 +3157,15 @@ namespace SSH_Helper
                 deleteColumnToolStripMenuItem.Enabled = !isProtected;
                 renameColumnToolStripMenuItem.Enabled = !isProtected;
 
+                // Show connection testing only for data rows
+                bool isDataRow = !isColumnHeader;
+                if (_testConnectionMenuItem != null)
+                    _testConnectionMenuItem.Visible = isDataRow;
+                if (_clearTestResultsMenuItem != null)
+                    _clearTestResultsMenuItem.Visible = isDataRow;
+                if (_testConnectionSeparator != null)
+                    _testConnectionSeparator.Visible = isDataRow;
+
                 UpdateHostGridContextMenuSeparators();
                 contextMenuStrip1.Show(dgv_variables, location);
             }
@@ -3362,6 +3404,16 @@ namespace SSH_Helper
 
             _csvDirty = true;
             UpdateHostCount();
+
+            // Clear connection test indicator when Host_IP is edited
+            if (e.ColumnIndex >= 0 && e.RowIndex >= 0 &&
+                dgv_variables.Columns[e.ColumnIndex].Name == "Host_IP")
+            {
+                var cell = dgv_variables.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                cell.Style.BackColor = Color.Empty;
+                cell.Style.ForeColor = Color.Empty;
+                cell.ToolTipText = "";
+            }
         }
 
         private void Dgv_Variables_ColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
@@ -3881,8 +3933,9 @@ namespace SSH_Helper
             }
         }
 
-        private void RefreshFavoritesList()
+        private void RefreshFavoritesList(string? filterText = null)
         {
+            var filter = string.IsNullOrWhiteSpace(filterText) ? null : filterText.Trim();
             trvFavorites.Nodes.Clear();
 
             // Get favorite folders
@@ -3896,6 +3949,13 @@ namespace SSH_Helper
                 .Where(kvp => kvp.Value.IsFavorite)
                 .Select(kvp => kvp.Key)
                 .ToHashSet();
+
+            // Apply filter to favorites
+            if (filter != null)
+            {
+                favoritePresets.RemoveWhere(p => !PresetMatchesFilter(p, filter));
+                favoriteFolders.RemoveWhere(f => !FolderHasMatchingPresets(f, filter));
+            }
 
             if (favoriteFolders.Count == 0 && favoritePresets.Count == 0)
             {
@@ -3928,6 +3988,9 @@ namespace SSH_Helper
                     var presetsInFolder = GetSortedPresetsInFolder(folderName, config);
                     foreach (var presetName in presetsInFolder)
                     {
+                        if (filter != null && !PresetMatchesFilter(presetName, filter))
+                            continue;
+
                         var presetNode = new TreeNode(presetName)
                         {
                             Tag = new PresetNodeTag { IsFolder = false, Name = presetName }
@@ -6339,46 +6402,374 @@ namespace SSH_Helper
 
         #endregion
 
-        #region CSV Operations
+        #region Connection Testing
 
-        private void OpenCsvFile()
+        private ToolStripMenuItem? _clearTestResultsMenuItem;
+
+        private void InitializeConnectionTesting()
         {
-            using var ofd = new OpenFileDialog
+            _testConnectionSeparator = new ToolStripSeparator();
+
+            _clearTestResultsMenuItem = new ToolStripMenuItem("Clear Test Results");
+            _clearTestResultsMenuItem.Click += (_, _) => ClearConnectionTestIndicators();
+
+            _testConnectionMenuItem = new ToolStripMenuItem("Test Connection(s)");
+            _testConnectionMenuItem.Click += async (_, _) => await TestSelectedConnections();
+
+            contextMenuStrip1.Items.Add(_testConnectionSeparator);
+            contextMenuStrip1.Items.Add(_clearTestResultsMenuItem);
+            contextMenuStrip1.Items.Add(_testConnectionMenuItem);
+        }
+
+        private void ClearConnectionTestIndicators()
+        {
+            var colIndex = dgv_variables.Columns["Host_IP"]?.Index ?? -1;
+            if (colIndex < 0) return;
+
+            foreach (DataGridViewRow row in dgv_variables.Rows)
             {
-                Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
-                Multiselect = false
+                if (row.IsNewRow) continue;
+                var cell = row.Cells[colIndex];
+                cell.Style.BackColor = Color.Empty;
+                cell.Style.ForeColor = Color.Empty;
+                cell.ToolTipText = "";
+            }
+        }
+
+        private async Task TestSelectedConnections()
+        {
+            if (_isTestingConnections) return;
+
+            var rows = new List<DataGridViewRow>();
+
+            // Use checked (selected) rows if any, otherwise just the right-clicked row
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (row.IsNewRow) continue;
+                if (row.Cells.Count > 0 && row.Cells[0] is DataGridViewCheckBoxCell chk && chk.Value is true)
+                    rows.Add(row);
+            }
+
+            if (rows.Count == 0 && _rightClickedRowIndex >= 0 && _rightClickedRowIndex < dgv_variables.Rows.Count)
+            {
+                var row = dgv_variables.Rows[_rightClickedRowIndex];
+                if (!row.IsNewRow)
+                    rows.Add(row);
+            }
+
+            if (rows.Count == 0) return;
+
+            _isTestingConnections = true;
+            _connectionTestCts = new CancellationTokenSource();
+            var ct = _connectionTestCts.Token;
+
+            var config = _configService.GetCurrent();
+            var timeoutMs = config.ConnectionTimeout * 1000;
+            var completed = 0;
+
+            statusProgress.Visible = true;
+            statusProgress.Maximum = rows.Count;
+            statusProgress.Value = 0;
+
+            try
+            {
+                // Test in parallel with concurrency limit
+                var semaphore = new SemaphoreSlim(5);
+                var tasks = rows.Select(async row =>
+                {
+                    await semaphore.WaitAsync(ct);
+                    try
+                    {
+                        var hosts = GetHostConnections(new[] { row }).ToList();
+                        if (hosts.Count == 0) return;
+                        var host = hosts[0];
+
+                        // Show "Testing..." in Host_IP cell
+                        var hostIpColIndex = dgv_variables.Columns["Host_IP"]?.Index ?? -1;
+                        if (hostIpColIndex >= 0)
+                        {
+                            BeginInvoke(() =>
+                            {
+                                row.Cells[hostIpColIndex].ToolTipText = "Testing...";
+                            });
+                        }
+
+                        var result = await _sshService.TestConnectionAsync(host, timeoutMs, ct);
+
+                        BeginInvoke(() =>
+                        {
+                            if (hostIpColIndex >= 0)
+                            {
+                                var cell = row.Cells[hostIpColIndex];
+                                bool dark = _configService.GetCurrent().DarkMode;
+                                if (result.Success)
+                                {
+                                    cell.Style.BackColor = dark ? Color.FromArgb(30, 70, 40) : Color.FromArgb(212, 237, 218);
+                                    cell.Style.ForeColor = dark ? Color.FromArgb(180, 230, 180) : Color.Empty;
+                                    cell.ToolTipText = $"Reachable ({result.LatencyMs}ms)";
+                                }
+                                else
+                                {
+                                    cell.Style.BackColor = dark ? Color.FromArgb(80, 30, 30) : Color.FromArgb(248, 215, 218);
+                                    cell.Style.ForeColor = dark ? Color.FromArgb(230, 150, 150) : Color.Empty;
+                                    cell.ToolTipText = $"{result.ErrorCategory}: {result.ErrorMessage}";
+                                }
+                            }
+
+                            var done = Interlocked.Increment(ref completed);
+                            statusProgress.Value = done;
+                            UpdateStatusBar($"Testing connections... {done} of {rows.Count}");
+                        });
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                });
+
+                await Task.WhenAll(tasks);
+                UpdateStatusBar($"Connection test complete ({completed} hosts)");
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateStatusBar("Connection test cancelled");
+            }
+            finally
+            {
+                statusProgress.Visible = false;
+                _isTestingConnections = false;
+                _connectionTestCts?.Dispose();
+                _connectionTestCts = null;
+            }
+        }
+
+        #endregion
+
+        #region Preset Search/Filter
+
+        private void InitializePresetSearchFilter()
+        {
+            _presetSearchPanel = new Panel
+            {
+                Height = 28,
+                Dock = DockStyle.Top,
+                Padding = new Padding(4, 4, 4, 2),
+                BackColor = presetsPanel.BackColor
             };
 
-            if (ofd.ShowDialog() == DialogResult.OK)
+            _txtPresetSearch = new TextBox
             {
-                try
-                {
-                    var dataTable = _csvManager.LoadFromFile(ofd.FileName);
-                    _loadedFilePath = ofd.FileName;
-                    dgv_variables.Columns.Clear();
-                    dgv_variables.DataSource = dataTable;
-                    EnsureSelectColumn();
+                Dock = DockStyle.Fill,
+                Font = trvPresets.Font,
+                BorderStyle = BorderStyle.FixedSingle,
+                PlaceholderText = "Filter presets..."
+            };
 
-                    // Apply row template height to all rows (DataSource binding doesn't use RowTemplate)
-                    foreach (DataGridViewRow row in dgv_variables.Rows)
-                    {
-                        if (!row.IsNewRow)
-                            row.Height = dgv_variables.RowTemplate.Height;
-                    }
+            _btnPresetSearchClear = new Label
+            {
+                Text = "\u2715", // X character
+                Dock = DockStyle.Right,
+                Width = 20,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Cursor = Cursors.Hand,
+                Visible = false,
+                Font = new Font("Segoe UI", 8f)
+            };
 
-                    _csvDirty = false;
-                    _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
-                    _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
-                        ? CsvFileSyncStatus.NotTracked
-                        : CsvFileSyncStatus.Current;
-                    AutoSizeColumnsToContent();
-                    UpdateHostCount();
-                    UpdateStatusBar($"Loaded: {Path.GetFileName(ofd.FileName)}");
-                }
-                catch (Exception ex)
+            _btnPresetSearchClear.Click += (_, _) =>
+            {
+                _txtPresetSearch.Clear();
+                _txtPresetSearch.Focus();
+            };
+
+            _presetSearchDebounceTimer = new System.Windows.Forms.Timer { Interval = 150 };
+            _presetSearchDebounceTimer.Tick += (_, _) =>
+            {
+                _presetSearchDebounceTimer.Stop();
+                var filter = _txtPresetSearch.Text.Trim();
+                RefreshPresetList(filterText: filter);
+                if (presetsTabControl.SelectedIndex == 1)
+                    RefreshFavoritesList(filterText: filter);
+            };
+
+            _txtPresetSearch.TextChanged += (_, _) =>
+            {
+                _btnPresetSearchClear!.Visible = _txtPresetSearch.TextLength > 0;
+                _presetSearchDebounceTimer!.Stop();
+                _presetSearchDebounceTimer.Start();
+            };
+
+            _txtPresetSearch.KeyDown += (_, e) =>
+            {
+                if (e.KeyCode == Keys.Escape && _txtPresetSearch.TextLength > 0)
                 {
-                    DialogTheme.Show($"Failed to load CSV: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    _txtPresetSearch.Clear();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
                 }
+            };
+
+            _presetSearchPanel.Controls.Add(_txtPresetSearch);
+            _presetSearchPanel.Controls.Add(_btnPresetSearchClear);
+
+            // Add inside the Presets tab page. The TreeView (DockStyle.Fill) must be higher in
+            // z-order than the search panel (DockStyle.Top) so the Top panel is laid out first
+            // and the Fill control occupies the remaining space without overlap.
+            tabPresets.Controls.Add(_presetSearchPanel);
+            trvPresets.BringToFront();
+        }
+
+        private string? _activePresetFilter;
+
+        private bool PresetMatchesFilter(string presetName, string? filterText)
+        {
+            if (string.IsNullOrEmpty(filterText))
+                return true;
+            return presetName.Contains(filterText, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool FolderHasMatchingPresets(string folderPath, string? filterText)
+        {
+            if (string.IsNullOrEmpty(filterText))
+                return true;
+
+            // Check direct presets in this folder
+            var presetsInFolder = _presetManager.GetPresetsInFolder(folderPath);
+            if (presetsInFolder.Any(p => PresetMatchesFilter(p, filterText)))
+                return true;
+
+            // Check descendant folders recursively
+            var subfolders = _presetManager.GetSubfolders(folderPath);
+            return subfolders.Any(sf => FolderHasMatchingPresets(sf, filterText));
+        }
+
+        #endregion
+
+        #region Recent Files
+
+        private void AddToRecentFiles(string filePath)
+        {
+            var fullPath = Path.GetFullPath(filePath);
+            _configService.Update(c =>
+            {
+                c.RecentFiles.RemoveAll(p => string.Equals(p, fullPath, StringComparison.OrdinalIgnoreCase));
+                c.RecentFiles.Insert(0, fullPath);
+                while (c.RecentFiles.Count > c.MaxRecentFiles)
+                    c.RecentFiles.RemoveAt(c.RecentFiles.Count - 1);
+            });
+            RebuildRecentFilesMenu();
+        }
+
+        private void RebuildRecentFilesMenu()
+        {
+            var config = _configService.GetCurrent();
+            var recentFiles = config.RecentFiles;
+
+            // Remove existing recent files menu items
+            if (_recentFilesMenuItem != null)
+            {
+                fileToolStripMenuItem.DropDownItems.Remove(_recentFilesMenuItem);
+                _recentFilesMenuItem.Dispose();
+                _recentFilesMenuItem = null;
+            }
+            if (_recentFilesSeparator != null)
+            {
+                fileToolStripMenuItem.DropDownItems.Remove(_recentFilesSeparator);
+                _recentFilesSeparator.Dispose();
+                _recentFilesSeparator = null;
+            }
+
+            if (recentFiles.Count == 0)
+                return;
+
+            _recentFilesMenuItem = new ToolStripMenuItem("Recent Files");
+            _recentFilesSeparator = new ToolStripSeparator();
+
+            foreach (var path in recentFiles)
+            {
+                var fileName = Path.GetFileName(path);
+                var parentDir = Path.GetDirectoryName(path);
+                var parentName = string.IsNullOrEmpty(parentDir) ? "" : Path.GetFileName(parentDir);
+                var displayText = string.IsNullOrEmpty(parentName) ? fileName : $"{fileName}  ({parentName})";
+
+                var item = new ToolStripMenuItem(displayText);
+                item.ToolTipText = path;
+
+                if (!File.Exists(path))
+                {
+                    item.Enabled = false;
+                    item.ToolTipText = $"{path} (file not found)";
+                }
+
+                var capturedPath = path;
+                item.Click += (_, _) => OpenCsvFile(capturedPath);
+                _recentFilesMenuItem.DropDownItems.Add(item);
+            }
+
+            _recentFilesMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            var clearItem = new ToolStripMenuItem("Clear Recent Files");
+            clearItem.Click += (_, _) =>
+            {
+                _configService.Update(c => c.RecentFiles.Clear());
+                RebuildRecentFilesMenu();
+            };
+            _recentFilesMenuItem.DropDownItems.Add(clearItem);
+
+            // Insert after "Open CSV..." (index 0)
+            var insertIndex = fileToolStripMenuItem.DropDownItems.IndexOf(openCSVToolStripMenuItem) + 1;
+            fileToolStripMenuItem.DropDownItems.Insert(insertIndex, _recentFilesMenuItem);
+            fileToolStripMenuItem.DropDownItems.Insert(insertIndex + 1, _recentFilesSeparator);
+        }
+
+        #endregion
+
+        #region CSV Operations
+
+        private void OpenCsvFile(string? filePath = null)
+        {
+            if (filePath == null)
+            {
+                using var ofd = new OpenFileDialog
+                {
+                    Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
+                    Multiselect = false
+                };
+
+                if (ofd.ShowDialog() != DialogResult.OK)
+                    return;
+
+                filePath = ofd.FileName;
+            }
+
+            try
+            {
+                var dataTable = _csvManager.LoadFromFile(filePath);
+                _loadedFilePath = filePath;
+                dgv_variables.Columns.Clear();
+                dgv_variables.DataSource = dataTable;
+                EnsureSelectColumn();
+
+                // Apply row template height to all rows (DataSource binding doesn't use RowTemplate)
+                foreach (DataGridViewRow row in dgv_variables.Rows)
+                {
+                    if (!row.IsNewRow)
+                        row.Height = dgv_variables.RowTemplate.Height;
+                }
+
+                _csvDirty = false;
+                _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
+                _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
+                    ? CsvFileSyncStatus.NotTracked
+                    : CsvFileSyncStatus.Current;
+                AutoSizeColumnsToContent();
+                UpdateHostCount();
+                UpdateStatusBar($"Loaded: {Path.GetFileName(filePath)}");
+
+                AddToRecentFiles(filePath);
+            }
+            catch (Exception ex)
+            {
+                DialogTheme.Show($"Failed to load CSV: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -7398,8 +7789,11 @@ namespace SSH_Helper
 
         private void RefreshPresetList(
             bool restoreExpandState = true,
-            IReadOnlyDictionary<string, bool>? expandStatesOverride = null)
+            IReadOnlyDictionary<string, bool>? expandStatesOverride = null,
+            string? filterText = null)
         {
+            _activePresetFilter = string.IsNullOrWhiteSpace(filterText) ? null : filterText.Trim();
+            var isFiltering = _activePresetFilter != null;
             string? currentSelection = null;
             if (trvPresets.SelectedNode?.Tag is PresetNodeTag selectedTag && !selectedTag.IsFolder)
             {
@@ -7435,6 +7829,10 @@ namespace SSH_Helper
             // Build nested folder hierarchy
             foreach (var folderPath in allFolders)
             {
+                // Skip folders with no matching presets when filtering
+                if (isFiltering && !FolderHasMatchingPresets(folderPath, _activePresetFilter))
+                    continue;
+
                 var folderName = FolderPathUtility.GetFolderName(folderPath);
                 var parentPath = FolderPathUtility.GetParentPath(folderPath);
                 var folderInfo = _presetManager.Folders.GetValueOrDefault(folderPath);
@@ -7465,6 +7863,9 @@ namespace SSH_Helper
                 var presetsInFolder = GetSortedPresetsInFolder(folderPath, config);
                 foreach (var presetName in presetsInFolder)
                 {
+                    if (isFiltering && !PresetMatchesFilter(presetName, _activePresetFilter))
+                        continue;
+
                     var preset = _presetManager.Get(presetName);
                     string displayName = preset?.IsFavorite == true ? $"{StarIcon} {presetName}" : presetName;
                     var presetNode = new TreeNode(displayName)
@@ -7480,6 +7881,9 @@ namespace SSH_Helper
             var rootPresets = GetSortedPresetsInFolder(null, config);
             foreach (var presetName in rootPresets)
             {
+                if (isFiltering && !PresetMatchesFilter(presetName, _activePresetFilter))
+                    continue;
+
                 var preset = _presetManager.Get(presetName);
                 string displayName = preset?.IsFavorite == true ? $"{StarIcon} {presetName}" : presetName;
                 var presetNode = new TreeNode(displayName)
@@ -7491,7 +7895,12 @@ namespace SSH_Helper
 
             // Final pass for expand/collapse state after the full hierarchy exists.
             // This avoids branch state drift when nodes are added after earlier Expand calls.
-            if (restoreExpandState)
+            // When filtering, expand all nodes to show matches.
+            if (isFiltering)
+            {
+                trvPresets.ExpandAll();
+            }
+            else if (restoreExpandState)
             {
                 foreach (var folderPath in allFolders)
                 {
@@ -7523,6 +7932,9 @@ namespace SSH_Helper
             }
 
             trvPresets.EndUpdate();
+
+            // Disable drag-drop during filtering to prevent reordering a filtered subset
+            trvPresets.AllowDrop = !isFiltering;
 
             // Restore selection
             if (!string.IsNullOrEmpty(currentSelection))
