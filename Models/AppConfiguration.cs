@@ -123,6 +123,12 @@ namespace SSH_Helper.Models
         /// </summary>
         public DateTime? LastAppShutdownUtc { get; set; }
 
+        /// <summary>
+        /// Maximum number of scheduled jobs that can execute concurrently.
+        /// Default: 3. User-configurable via settings.
+        /// </summary>
+        public int MaxConcurrentJobs { get; set; } = 3;
+
     }
 
     /// <summary>
