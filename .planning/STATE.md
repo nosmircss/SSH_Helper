@@ -3,30 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-03-07T19:31:54.669Z"
-last_activity: 2026-03-07 — Completed 02-03 Missed-Run Detection & Persistence
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-03-07T20:24:19Z"
+last_activity: 2026-03-07 — Completed 03-01 Execution Pipeline Models
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
----
-
----
-gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-03-07T16:52:36Z"
-last_activity: 2026-03-07 — Completed 02-03 Missed-Run Detection & Persistence
-progress:
-  total_phases: 5
-  completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
+  total_plans: 10
+  completed_plans: 7
+  percent: 70
 ---
 
 # Project State
@@ -36,23 +21,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-07)
 
 **Core value:** Users can define scheduled jobs that automatically execute SSH presets against specific hosts on a recurring or one-time basis, with full run history and output retention.
-**Current focus:** Phase 2 - Scheduling Engine (complete)
+**Current focus:** Phase 3 - Execution Pipeline (in progress)
 
 ## Current Position
 
-Phase: 2 of 5 (Scheduling Engine)
-Plan: 3 of 3 in current phase
-Status: Phase Complete
-Last activity: 2026-03-07 — Completed 02-03 Missed-Run Detection & Persistence
+Phase: 3 of 5 (Execution Pipeline)
+Plan: 1 of 4 in current phase
+Status: Executing
+Last activity: 2026-03-07 — Completed 03-01 Execution Pipeline Models
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 70%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
-- Average duration: 3.5min
-- Total execution time: 0.35 hours
+- Total plans completed: 7
+- Average duration: 3.4min
+- Total execution time: 0.40 hours
 
 **By Phase:**
 
@@ -60,9 +45,10 @@ Progress: [██████████] 100%
 |-------|-------|-------|----------|
 | 01 | 3 | 11min | 3.7min |
 | 02 | 3 | 10min | 3.3min |
+| 03 | 1 | 4min | 4.0min |
 
 **Recent Trend:**
-- Last 5 plans: 01-03 (4min), 02-01 (4min), 02-02 (4min), 02-03 (3min)
+- Last 5 plans: 02-01 (4min), 02-02 (4min), 02-03 (3min), 03-01 (4min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -96,6 +82,10 @@ Recent decisions affecting current work:
 - [Phase 02]: Static internal methods for testable logic without WinForms UI thread (02-02)
 - [Phase 02]: Bidirectional sync via _suppressSyncEvents guard flag for loop prevention (02-02)
 - [Phase 02]: Custom indicator in dropdowns for complex cron expressions (02-02)
+- [Phase 03]: FolderExecutionMode enum in JobDefinition.cs after existing enums for discoverability (03-01)
+- [Phase 03]: RunningJobState kept minimal (StartedUtc only), expandable during service implementation (03-01)
+- [Phase 03]: QueuedJob uses constructor for required properties; in-memory only (03-01)
+- [Phase 03]: MaxConcurrentJobs defaults to 3, validation at service level not model level (03-01)
 
 ### Pending Todos
 
@@ -108,6 +98,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-07T19:31:54.667Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-execution-pipeline/03-CONTEXT.md
+Last session: 2026-03-07T20:24:19Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: .planning/phases/03-execution-pipeline/03-01-SUMMARY.md
