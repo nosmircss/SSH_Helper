@@ -30,7 +30,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can delete a job and confirm it no longer appears in the stored definitions
   4. User can enable or disable a job without losing its configuration
   5. User can populate a job's host list via CSV import, main grid copy, or manual entry, and each job's hosts are independent of the main grid
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 
 Plans:
 - [ ] 01-01-PLAN.md — Job model, enums, ContentHasher, CredentialTargets extension
@@ -105,7 +105,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Job Definitions & Persistence | 0/3 | Planning complete | - |
+| 1. Job Definitions & Persistence | 1/3 | In Progress|  |
 | 2. Scheduling Engine | 0/2 | Not started | - |
 | 3. Execution Pipeline | 0/2 | Not started | - |
 | 4. History & Output | 0/1 | Not started | - |

@@ -28,15 +28,15 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Host Targets
 
-- [ ] **HOST-01**: Each job maintains its own dedicated host list, independent of the main grid
+- [x] **HOST-01**: Each job maintains its own dedicated host list, independent of the main grid
 - [ ] **HOST-02**: User can populate a job's host list by importing from a CSV file
 - [ ] **HOST-03**: User can populate a job's host list by copying from the current main grid
-- [ ] **HOST-04**: User can manually enter hosts directly in the job editor
+- [x] **HOST-04**: User can manually enter hosts directly in the job editor
 
 ### Credentials
 
-- [ ] **CRED-01**: User can configure credential mode per job: stored credentials, inherit from preset, or per-host grid column
-- [ ] **CRED-02**: Stored credentials are persisted securely for unattended execution
+- [x] **CRED-01**: User can configure credential mode per job: stored credentials, inherit from preset, or per-host grid column
+- [x] **CRED-02**: Stored credentials are persisted securely for unattended execution
 
 ### Execution
 
@@ -115,12 +115,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SCHD-05 | Phase 2 | Pending |
 | SCHD-06 | Phase 2 | Pending |
 | SCHD-07 | Phase 2 | Pending |
-| HOST-01 | Phase 1 | Pending |
+| HOST-01 | Phase 1 | Complete |
 | HOST-02 | Phase 1 | Pending |
 | HOST-03 | Phase 1 | Pending |
-| HOST-04 | Phase 1 | Pending |
-| CRED-01 | Phase 1 | Pending |
-| CRED-02 | Phase 1 | Pending |
+| HOST-04 | Phase 1 | Complete |
+| CRED-01 | Phase 1 | Complete |
+| CRED-02 | Phase 1 | Complete |
 | EXEC-01 | Phase 3 | Pending |
 | EXEC-02 | Phase 3 | Pending |
 | EXEC-03 | Phase 3 | Pending |
