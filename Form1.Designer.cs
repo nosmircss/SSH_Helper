@@ -162,6 +162,7 @@ namespace SSH_Helper
             toolStripLabel2 = new ToolStripLabel();
             tsbPassword = new ToolStripTextBox();
             toolStripSeparatorEnv = new ToolStripSeparator();
+            toolStripLabelBaseEnvironment = new ToolStripLabel();
             toolStripLabelEnvironment = new ToolStripLabel();
             tsbEnvironment = new ToolStripDropDownButton();
             tsbManageEnvironments = new ToolStripButton();
@@ -400,15 +401,16 @@ namespace SSH_Helper
             // 
             // lblHostsTitle
             // 
-            lblHostsTitle.AutoSize = true;
-            lblHostsTitle.Dock = DockStyle.Left;
+            lblHostsTitle.AutoEllipsis = true;
+            lblHostsTitle.Dock = DockStyle.Fill;
             lblHostsTitle.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             lblHostsTitle.ForeColor = Color.FromArgb(33, 37, 41);
             lblHostsTitle.Location = new Point(12, 8);
             lblHostsTitle.Name = "lblHostsTitle";
-            lblHostsTitle.Size = new Size(44, 19);
+            lblHostsTitle.Size = new Size(401, 20);
             lblHostsTitle.TabIndex = 0;
             lblHostsTitle.Text = "Hosts";
+            lblHostsTitle.TextAlign = ContentAlignment.MiddleLeft;
             // 
             // lblHostCount
             // 
@@ -758,15 +760,16 @@ namespace SSH_Helper
             // 
             // lblPresetsTitle
             // 
-            lblPresetsTitle.AutoSize = true;
-            lblPresetsTitle.Dock = DockStyle.Left;
+            lblPresetsTitle.AutoEllipsis = true;
+            lblPresetsTitle.Dock = DockStyle.Fill;
             lblPresetsTitle.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             lblPresetsTitle.ForeColor = Color.FromArgb(33, 37, 41);
             lblPresetsTitle.Location = new Point(4, 4);
             lblPresetsTitle.Name = "lblPresetsTitle";
-            lblPresetsTitle.Size = new Size(53, 19);
+            lblPresetsTitle.Size = new Size(615, 24);
             lblPresetsTitle.TabIndex = 0;
             lblPresetsTitle.Text = "Presets";
+            lblPresetsTitle.TextAlign = ContentAlignment.MiddleLeft;
             // 
             // scriptPanel
             // 
@@ -1285,7 +1288,7 @@ namespace SSH_Helper
             // 
             mainToolStrip.BackColor = Color.FromArgb(248, 249, 250);
             mainToolStrip.GripStyle = ToolStripGripStyle.Hidden;
-            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword, toolStripSeparatorEnv, toolStripLabelEnvironment, tsbEnvironment, tsbManageEnvironments });
+            mainToolStrip.Items.AddRange(new ToolStripItem[] { tsbOpenCsv, tsbSaveCsv, tsbSaveCsvAs, toolStripSeparator1, tsbClearGrid, toolStripSeparator2, toolStripLabel1, tsbUsername, toolStripLabel2, tsbPassword, toolStripSeparatorEnv, toolStripLabelBaseEnvironment, toolStripLabelEnvironment, tsbEnvironment, tsbManageEnvironments });
             mainToolStrip.Location = new Point(0, 24);
             mainToolStrip.Name = "mainToolStrip";
             mainToolStrip.Padding = new Padding(8, 0, 8, 0);
@@ -1367,6 +1370,14 @@ namespace SSH_Helper
             toolStripSeparatorEnv.Alignment = ToolStripItemAlignment.Right;
             toolStripSeparatorEnv.Name = "toolStripSeparatorEnv";
             toolStripSeparatorEnv.Size = new Size(6, 25);
+            // 
+            // toolStripLabelBaseEnvironment
+            // 
+            toolStripLabelBaseEnvironment.Alignment = ToolStripItemAlignment.Right;
+            toolStripLabelBaseEnvironment.Name = "toolStripLabelBaseEnvironment";
+            toolStripLabelBaseEnvironment.Size = new Size(84, 22);
+            toolStripLabelBaseEnvironment.Text = "Base: Default";
+            toolStripLabelBaseEnvironment.Visible = false;
             // 
             // toolStripLabelEnvironment
             // 
@@ -1749,6 +1760,7 @@ namespace SSH_Helper
         private ToolStripLabel toolStripLabel2;
         private ToolStripTextBox tsbPassword;
         private ToolStripSeparator toolStripSeparatorEnv;
+        private ToolStripLabel toolStripLabelBaseEnvironment;
         private ToolStripLabel toolStripLabelEnvironment;
         private ToolStripDropDownButton tsbEnvironment;
         private ToolStripButton tsbManageEnvironments;

@@ -64,6 +64,10 @@ namespace SSH_Helper.Models
         public string? SavedStateCompressed { get; set; }
         public Dictionary<string, EnvironmentConfig> Environments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public string? ActiveEnvironment { get; set; }
+        /// <summary>
+        /// The operator-selected base environment used when presets without an explicit environment restore context.
+        /// </summary>
+        public string? BaseEnvironment { get; set; }
 
         // History settings
         public int MaxHistoryEntries { get; set; } = 30;
@@ -101,6 +105,17 @@ namespace SSH_Helper.Models
         /// Credential and agent preferences.
         /// </summary>
         public CredentialSettings Credentials { get; set; } = new();
+
+        // Recent files
+        /// <summary>
+        /// Most recently opened CSV file paths, newest first.
+        /// </summary>
+        public List<string> RecentFiles { get; set; } = new();
+
+        /// <summary>
+        /// Maximum number of recent files to remember.
+        /// </summary>
+        public int MaxRecentFiles { get; set; } = 10;
 
     }
 
@@ -304,6 +319,11 @@ namespace SSH_Helper.Models
         /// The path to the last loaded CSV file (if any).
         /// </summary>
         public string? LastCsvPath { get; set; }
+
+        /// <summary>
+        /// Lightweight file identity for the last loaded CSV file.
+        /// </summary>
+        public CsvFileFingerprint? LastCsvFingerprint { get; set; }
 
         /// <summary>
         /// The currently selected preset name.

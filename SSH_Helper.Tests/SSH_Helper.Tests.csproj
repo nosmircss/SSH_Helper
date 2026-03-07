@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**;bin/**;obj/**</DefaultItemExcludes>
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -9,6 +10,10 @@
     <PublishSingleFile>false</PublishSingleFile>
     <IsPublishable>false</IsPublishable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="artifacts/**/*.cs;bin/**/*.cs;obj/**/*.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.9.0" />

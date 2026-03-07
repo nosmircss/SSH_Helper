@@ -35,6 +35,11 @@ namespace SSH_Helper.Services
             _presets.Clear();
             _folders.Clear();
             var config = _configService.Load();
+            var validEnvironmentNames = new HashSet<string>(config.Environments.Keys, StringComparer.OrdinalIgnoreCase)
+            {
+                EnvironmentConfig.DefaultName
+            };
+            bool needsPersist = false;
 
             foreach (var kvp in config.Presets)
             {
@@ -49,13 +54,27 @@ namespace SSH_Helper.Services
 
             foreach (var kvp in config.PresetFolders)
             {
-                _folders[kvp.Key] = kvp.Value;
+                var folderInfo = kvp.Value ?? new FolderInfo();
+                var normalizedBaseEnvironment = NormalizeFolderBaseEnvironment(folderInfo.BaseEnvironment);
+                if (!string.Equals(folderInfo.BaseEnvironment, normalizedBaseEnvironment, StringComparison.Ordinal))
+                {
+                    folderInfo.BaseEnvironment = normalizedBaseEnvironment;
+                    needsPersist = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(folderInfo.BaseEnvironment) &&
+                    !validEnvironmentNames.Contains(folderInfo.BaseEnvironment))
+                {
+                    folderInfo.BaseEnvironment = null;
+                    needsPersist = true;
+                }
+
+                _folders[kvp.Key] = folderInfo;
             }
 
             // Ensure all folders referenced by presets have entries in _folders
             // This handles legacy configs or manual edits where PresetFolders might be missing entries
             // Also ensures parent folders exist for nested paths
-            bool needsPersist = false;
             foreach (var preset in _presets.Values)
             {
                 if (!string.IsNullOrEmpty(preset.Folder))
@@ -649,6 +668,81 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Sets or clears a folder-specific base environment override.
+        /// </summary>
+        public bool SetFolderBaseEnvironment(string name, string? environmentName)
+        {
+            if (!_folders.TryGetValue(name, out var folderInfo))
+                return false;
+
+            var normalizedEnvironmentName = NormalizeFolderBaseEnvironment(environmentName);
+            if (string.Equals(folderInfo.BaseEnvironment, normalizedEnvironmentName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            folderInfo.BaseEnvironment = normalizedEnvironmentName;
+            PersistToConfig();
+            OnFoldersChanged();
+            return true;
+        }
+
+        /// <summary>
+        /// Updates folder base-environment references after an environment rename.
+        /// </summary>
+        public int RenameFolderBaseEnvironment(string oldName, string newName)
+        {
+            var sourceName = NormalizeFolderBaseEnvironment(oldName);
+            var targetName = NormalizeFolderBaseEnvironment(newName);
+            if (string.IsNullOrWhiteSpace(sourceName) || string.IsNullOrWhiteSpace(targetName))
+                return 0;
+
+            int updatedCount = 0;
+            foreach (var folderInfo in _folders.Values)
+            {
+                if (!string.Equals(folderInfo.BaseEnvironment, sourceName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                folderInfo.BaseEnvironment = targetName;
+                updatedCount++;
+            }
+
+            if (updatedCount > 0)
+            {
+                PersistToConfig();
+                OnFoldersChanged();
+            }
+
+            return updatedCount;
+        }
+
+        /// <summary>
+        /// Clears folder base-environment references that point to a deleted environment.
+        /// </summary>
+        public int ClearFolderBaseEnvironment(string environmentName)
+        {
+            var normalizedEnvironmentName = NormalizeFolderBaseEnvironment(environmentName);
+            if (string.IsNullOrWhiteSpace(normalizedEnvironmentName))
+                return 0;
+
+            int clearedCount = 0;
+            foreach (var folderInfo in _folders.Values)
+            {
+                if (!string.Equals(folderInfo.BaseEnvironment, normalizedEnvironmentName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                folderInfo.BaseEnvironment = null;
+                clearedCount++;
+            }
+
+            if (clearedCount > 0)
+            {
+                PersistToConfig();
+                OnFoldersChanged();
+            }
+
+            return clearedCount;
+        }
+
+        /// <summary>
         /// Gets a unique folder path by appending _1, _2, etc. to the last segment if needed.
         /// </summary>
         public string GetUniqueFolderName(string basePath)
@@ -739,6 +833,13 @@ namespace SSH_Helper.Services
             config.Presets = normalizedPresets;
             config.PresetFolders = new Dictionary<string, FolderInfo>(_folders);
             _configService.Save(config);
+        }
+
+        private static string? NormalizeFolderBaseEnvironment(string? environmentName)
+        {
+            return string.IsNullOrWhiteSpace(environmentName)
+                ? null
+                : environmentName.Trim();
         }
 
         private static string CompressAndEncode(string text)

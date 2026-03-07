@@ -174,19 +174,22 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Returns a deep-cloned snapshot of persisted environments and active environment name.
+        /// Returns a deep-cloned snapshot of persisted environments plus the active/base environment names.
         /// </summary>
-        public (Dictionary<string, EnvironmentConfig> Environments, string? ActiveEnvironment) LoadEnvironmentState()
+        public (Dictionary<string, EnvironmentConfig> Environments, string? ActiveEnvironment, string? BaseEnvironment) LoadEnvironmentState()
         {
             var config = GetCurrent();
             NormalizeEnvironmentData(config);
-            return (CloneEnvironmentMap(config.Environments), config.ActiveEnvironment);
+            return (CloneEnvironmentMap(config.Environments), config.ActiveEnvironment, config.BaseEnvironment);
         }
 
         /// <summary>
         /// Persists the complete environment state in one update operation.
         /// </summary>
-        public void SaveEnvironmentState(Dictionary<string, EnvironmentConfig> environments, string? activeEnvironment)
+        public void SaveEnvironmentState(
+            Dictionary<string, EnvironmentConfig> environments,
+            string? activeEnvironment,
+            string? baseEnvironment)
         {
             environments ??= new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase);
 
@@ -194,6 +197,7 @@ namespace SSH_Helper.Services
             {
                 config.Environments = CloneEnvironmentMap(environments);
                 config.ActiveEnvironment = string.IsNullOrWhiteSpace(activeEnvironment) ? null : activeEnvironment;
+                config.BaseEnvironment = string.IsNullOrWhiteSpace(baseEnvironment) ? null : baseEnvironment;
                 NormalizeEnvironmentData(config);
             });
         }
@@ -407,6 +411,20 @@ namespace SSH_Helper.Services
                 !config.Environments.ContainsKey(config.ActiveEnvironment))
             {
                 config.ActiveEnvironment = null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(config.BaseEnvironment) &&
+                !string.Equals(config.BaseEnvironment, EnvironmentConfig.DefaultName, StringComparison.OrdinalIgnoreCase) &&
+                !config.Environments.ContainsKey(config.BaseEnvironment))
+            {
+                config.BaseEnvironment = null;
+            }
+
+            if (string.IsNullOrWhiteSpace(config.BaseEnvironment))
+            {
+                config.BaseEnvironment = !string.IsNullOrWhiteSpace(config.ActiveEnvironment)
+                    ? config.ActiveEnvironment
+                    : EnvironmentConfig.DefaultName;
             }
         }
 

@@ -1538,8 +1538,46 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Checks if an SshException indicates an authentication error.
+        /// Tests TCP reachability of a host by opening and closing a TCP connection.
+        /// Uses a lightweight port check rather than SSH auth since hosts may not be SSH servers.
         /// </summary>
+        public async Task<Models.ConnectionTestResult> TestConnectionAsync(
+            Models.HostConnection host, int timeoutMs, CancellationToken ct)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                using var tcpClient = new System.Net.Sockets.TcpClient();
+                var connectTask = tcpClient.ConnectAsync(host.IpAddress, host.Port);
+                var timeoutTask = Task.Delay(timeoutMs, ct);
+
+                var completed = await Task.WhenAny(connectTask, timeoutTask);
+                if (completed == timeoutTask)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    return new Models.ConnectionTestResult(false, "Timeout", $"Connection timed out after {timeoutMs}ms", sw.ElapsedMilliseconds);
+                }
+
+                // Await to propagate any connection exception
+                await connectTask;
+
+                sw.Stop();
+                return new Models.ConnectionTestResult(true, null, null, sw.ElapsedMilliseconds);
+            }
+            catch (OperationCanceledException)
+            {
+                return new Models.ConnectionTestResult(false, "Cancelled", "Operation cancelled", sw.ElapsedMilliseconds);
+            }
+            catch (System.Net.Sockets.SocketException ex)
+            {
+                return new Models.ConnectionTestResult(false, "Network", ex.Message, sw.ElapsedMilliseconds);
+            }
+            catch (Exception ex)
+            {
+                return new Models.ConnectionTestResult(false, "Unknown", ex.Message, sw.ElapsedMilliseconds);
+            }
+        }
+
         private static bool IsAuthenticationError(SshException ex)
         {
             var msg = ex.Message.ToLowerInvariant();

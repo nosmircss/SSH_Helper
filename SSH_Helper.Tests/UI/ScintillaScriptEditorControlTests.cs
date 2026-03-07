@@ -101,6 +101,89 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
+    public void CompletionPopup_BlankHeaderLine_AutoRequestShowsSuggestions()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "name: demo\nversion: 1\n";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+
+        GetCompletionPopup(control).Visible.Should().BeTrue();
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_BlankTopLevelLine_AfterSteps_AutoRequestStaysHidden()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "name: demo\nvars:\n  token: abc\nsteps:\n  - send: ok\n";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+
+        GetCompletionPopup(control).Visible.Should().BeFalse();
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceStaysHidden()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "name: demo\nvars:\n  token: abc\nsteps:\n  - send: ok\n";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "Editor_KeyDown", null, new KeyEventArgs(Keys.Control | Keys.Space));
+
+        var popup = GetCompletionPopup(control);
+        popup.Visible.Should().BeFalse();
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_UpdateUISelection_HidesRootSuggestionsWhenCaretMovesBelowSteps()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "name: demo\n\nvars:\n  token: abc\nsteps:\n  - send:\n      command: ok\n";
+        control.SelectionStart = "name: demo\n".Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+        var popup = GetCompletionPopup(control);
+        popup.Visible.Should().BeTrue();
+
+        var editor = GetInnerEditor(control);
+        editor.GotoPosition(control.Text.Length);
+        InvokeNonPublic(control, "Editor_UpdateUI", null, new UpdateUIEventArgs(UpdateChange.Selection));
+
+        popup.Visible.Should().BeFalse();
+    }
+
+    [WinFormsFact]
+    public void Tab_OnTrailingBlankLine_IndentsCurrentBlankLine()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.ApplyCommandEditorSettings(new CommandEditorSettings
+        {
+            IndentSize = 2,
+            UseSpacesForTab = true
+        });
+        control.Text = "steps:\n  - print:\n      message: \"test\"\n";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "Editor_KeyDown", null, new KeyEventArgs(Keys.Tab));
+
+        NormalizeLineEndings(control.Text).Should().Be("steps:\n  - print:\n      message: \"test\"\n  ");
+        control.SelectionStart.Should().Be(control.Text.Length);
+        control.SelectionLength.Should().Be(0);
+    }
+
+    [WinFormsFact]
     public void ScrollPastEnd_IsEnabledByDefault()
     {
         using var control = new ScintillaScriptEditorControl();
@@ -154,6 +237,32 @@ public class ScintillaScriptEditorControlTests
 
         editor.Margins[1].Width.Should().BeGreaterThanOrEqualTo(8);
         combinedMarginWidth.Should().BeGreaterThan(lineDigitsWidth + 8);
+    }
+
+    [WinFormsFact]
+    public void TextSetter_WhenReadOnly_StillAppliesProgrammaticUpdates()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "first folder";
+        control.ReadOnly = true;
+
+        control.Text = "second folder";
+
+        control.Text.Should().Be("second folder");
+        control.ReadOnly.Should().BeTrue();
+    }
+
+    [WinFormsFact]
+    public void Clear_WhenReadOnly_ClearsProgrammaticallyAndPreservesReadOnly()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "folder summary";
+        control.ReadOnly = true;
+
+        control.Clear();
+
+        control.Text.Should().BeEmpty();
+        control.ReadOnly.Should().BeTrue();
     }
 
     [WinFormsFact]

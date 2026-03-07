@@ -19,6 +19,14 @@ namespace SSH_Helper.Services.Scripting
         public HashSet<string> ReferencedColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
+    public class PresetColumnDependencyResult : ColumnDependencyResult
+    {
+        /// <summary>
+        /// Indicates that the preset's script explicitly suppresses the missing-column warning dialog.
+        /// </summary>
+        public bool SuppressMissingColumnWarning { get; set; }
+    }
+
     public class SshRequirementResult
     {
         public bool RequiresSshSession { get; set; }
@@ -48,16 +56,34 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public ColumnDependencyResult AnalyzePreset(PresetInfo preset)
         {
+            var result = AnalyzePresetDetails(preset);
+            return new ColumnDependencyResult
+            {
+                ReferencedColumns = result.ReferencedColumns
+            };
+        }
+
+        /// <summary>
+        /// Analyzes a PresetInfo for column dependencies and exposes per-preset warning suppression metadata.
+        /// </summary>
+        public PresetColumnDependencyResult AnalyzePresetDetails(PresetInfo preset)
+        {
             if (preset.IsScript)
             {
                 var parser = new ScriptParser();
                 var script = parser.Parse(preset.Commands);
-                return AnalyzeScript(script);
+                var result = AnalyzeScript(script);
+                return new PresetColumnDependencyResult
+                {
+                    ReferencedColumns = result.ReferencedColumns,
+                    SuppressMissingColumnWarning = script.SuppressMissingColumnWarning
+                };
             }
-            else
+
+            return new PresetColumnDependencyResult
             {
-                return AnalyzeSimpleCommands(preset.Commands);
-            }
+                ReferencedColumns = AnalyzeSimpleCommands(preset.Commands).ReferencedColumns
+            };
         }
 
         /// <summary>
@@ -133,6 +159,27 @@ namespace SSH_Helper.Services.Scripting
 
             combined.ReferencedColumns.ExceptWith(resolvedSet);
             return combined;
+        }
+
+        /// <summary>
+        /// Analyzes a single preset and removes references that are resolved by external variable sources.
+        /// </summary>
+        public PresetColumnDependencyResult AnalyzePresetDetails(
+            PresetInfo preset,
+            IEnumerable<string>? externallyResolvedVariables)
+        {
+            var result = AnalyzePresetDetails(preset);
+            if (externallyResolvedVariables == null)
+                return result;
+
+            var resolvedSet = new HashSet<string>(
+                externallyResolvedVariables
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Select(v => v.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+
+            result.ReferencedColumns.ExceptWith(resolvedSet);
+            return result;
         }
 
         public SshRequirementResult AnalyzeSshRequirements(Script script)

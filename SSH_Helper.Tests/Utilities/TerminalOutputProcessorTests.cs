@@ -33,6 +33,31 @@ public class TerminalOutputProcessorTests
         result.Should().Be("Hello World");
     }
 
+    [Fact]
+    public void Normalize_DefaultBehavior_TrimTrailingSpacesOnFinalLine()
+    {
+        var result = TerminalOutputProcessor.Normalize("set ");
+        result.Should().Be("set");
+    }
+
+    [Fact]
+    public void Normalize_PreserveTrailingSpacesOnFinalLine_KeepsTrailingSpaces()
+    {
+        var result = TerminalOutputProcessor.Normalize("set ", preserveTrailingSpacesOnFinalLine: true);
+        result.Should().Be("set ");
+    }
+
+    [Fact]
+    public void Normalize_PreserveTrailingSpacesOnFinalLine_AvoidsWordJoinAcrossChunks()
+    {
+        var firstChunk = TerminalOutputProcessor.Normalize("set ", preserveTrailingSpacesOnFinalLine: true);
+        var secondChunk = TerminalOutputProcessor.Normalize(
+            "resource \"http://cnn.com\"",
+            preserveTrailingSpacesOnFinalLine: true);
+
+        (firstChunk + secondChunk).Should().Be("set resource \"http://cnn.com\"");
+    }
+
     #endregion
 
     #region Normalize - Newline Handling Tests
@@ -390,6 +415,59 @@ public class TerminalOutputProcessorTests
         var input = "\r           \rActual content";
         var result = TerminalOutputProcessor.StripPagerDismissalArtifacts(input);
         result.Should().Be("Actual content");
+    }
+
+    #endregion
+
+    #region StripZshPromptSp Tests
+
+    [Fact]
+    public void StripZshPromptSp_PromptRedrawSequence_StripsIndicatorAndClearSequence()
+    {
+        var input = "%                                                                 \r \r\rchris@host ~ %";
+
+        var result = TerminalOutputProcessor.StripZshPromptSp(input);
+
+        result.Should().Be("chris@host ~ %");
+    }
+
+    [Fact]
+    public void StripZshPromptSpStreaming_SplitAcrossChunks_StripsCrossChunkArtifact()
+    {
+        var carry = string.Empty;
+
+        var first = TerminalOutputProcessor.StripZshPromptSpStreaming("%", ref carry);
+        var second = TerminalOutputProcessor.StripZshPromptSpStreaming(
+            "                                                                 \r \r\rchris@host ~ %",
+            ref carry);
+
+        first.Should().BeEmpty();
+        second.Should().Be("chris@host ~ %");
+        carry.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void StripZshPromptSpStreaming_MidLinePercent_DoesNotHoldOrStripLegitimateContent()
+    {
+        var carry = string.Empty;
+
+        var result = TerminalOutputProcessor.StripZshPromptSpStreaming("Capacity 100%", ref carry);
+
+        result.Should().Be("Capacity 100%");
+        carry.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void StripZshPromptSpStreaming_FlushFinal_PreservesLegitimateStandalonePercent()
+    {
+        var carry = string.Empty;
+
+        var first = TerminalOutputProcessor.StripZshPromptSpStreaming("%", ref carry);
+        var flushed = TerminalOutputProcessor.StripZshPromptSpStreaming(string.Empty, ref carry, flushFinal: true);
+
+        first.Should().BeEmpty();
+        flushed.Should().Be("%");
+        carry.Should().BeEmpty();
     }
 
     #endregion

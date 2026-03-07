@@ -23,6 +23,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public int Version { get; set; } = 1;
 
         /// <summary>
+        /// Optional environment name to activate when the preset is loaded.
+        /// </summary>
+        public string? Environment { get; set; }
+
+        /// <summary>
         /// Enable debug output for this script (shows Extract results, Set values, etc.).
         /// Useful for troubleshooting and building scripts.
         /// </summary>
@@ -32,6 +37,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Suppress the script execution banner/header in output.
         /// </summary>
         public bool NoBanner { get; set; }
+
+        /// <summary>
+        /// Suppress the pre-execution warning when referenced grid columns are missing.
+        /// Missing references still resolve to empty values at runtime.
+        /// </summary>
+        public bool SuppressMissingColumnWarning { get; set; }
 
         /// <summary>
         /// Variables declared in the script with their default values.

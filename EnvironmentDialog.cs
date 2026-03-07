@@ -28,6 +28,7 @@ namespace SSH_Helper
 
         private readonly EnvironmentService _environmentService;
         private readonly ConfigurationService _configService;
+        private readonly PresetManager _presetManager;
         private readonly bool _darkMode;
         private readonly SplitContainer _mainSplitContainer;
         private readonly Panel _environmentListBorderPanel;
@@ -55,10 +56,11 @@ namespace SSH_Helper
         private int _contextMenuRowIndex = -1;
         private readonly int _savedSplitterDistance;
 
-        public EnvironmentDialog(EnvironmentService environmentService, ConfigurationService configService, bool darkMode)
+        public EnvironmentDialog(EnvironmentService environmentService, ConfigurationService configService, PresetManager presetManager, bool darkMode)
         {
             _environmentService = environmentService ?? throw new ArgumentNullException(nameof(environmentService));
             _configService = configService ?? throw new ArgumentNullException(nameof(configService));
+            _presetManager = presetManager ?? throw new ArgumentNullException(nameof(presetManager));
             _darkMode = darkMode;
             var windowState = _configService.GetCurrent().WindowState ?? new WindowState();
             _savedSplitterDistance = windowState.EnvironmentDialogSplitterDistance ?? DefaultEnvironmentSplitterDistance;
@@ -453,7 +455,9 @@ namespace SSH_Helper
 
             try
             {
-                _environmentService.RenameEnvironment(_currentEnvironmentName, input);
+                var previousName = _currentEnvironmentName;
+                _environmentService.RenameEnvironment(previousName, input);
+                _presetManager.RenameFolderBaseEnvironment(previousName, input);
                 LoadEnvironmentList(input);
             }
             catch (Exception ex)
@@ -478,7 +482,9 @@ namespace SSH_Helper
 
             try
             {
-                _environmentService.DeleteEnvironment(_currentEnvironmentName);
+                var deletedEnvironment = _currentEnvironmentName;
+                _environmentService.DeleteEnvironment(deletedEnvironment);
+                _presetManager.ClearFolderBaseEnvironment(deletedEnvironment);
                 LoadEnvironmentList(EnvironmentConfig.DefaultName);
             }
             catch (Exception ex)

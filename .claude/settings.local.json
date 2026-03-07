@@ -19,7 +19,9 @@
       "mcp__codex__codex",
       "Bash(codex:*)",
       "Bash(npx openspec validate:*)",
-      "Bash(npx openspec:*)"
+      "Bash(npx openspec:*)",
+      "Bash(grep -E '\\(sk-[a-zA-Z0-9]{20,}|sk_live_[a-zA-Z0-9]+|sk_test_[a-zA-Z0-9]+|ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|glpat-[a-zA-Z0-9_-]+|AKIA[A-Z0-9]{16}|xox[baprs]-[a-zA-Z0-9-]+|-----BEGIN.*PRIVATE KEY|eyJ[a-zA-Z0-9_-]+\\\\.eyJ[a-zA-Z0-9_-]+\\\\.\\)' .planning/codebase/*.md)",
+      "Bash(node C:/Users/nos/.claude/get-shit-done/bin/gsd-tools.cjs commit \"docs: map existing codebase\" --files .planning/codebase/*.md)"
     ],
     "deny": [
       "Read(.env)",

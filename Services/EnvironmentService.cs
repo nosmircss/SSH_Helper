@@ -35,7 +35,7 @@ namespace SSH_Helper.Services
 
         public List<string> GetEnvironmentNames()
         {
-            var (environments, _) = _configService.LoadEnvironmentState();
+            var (environments, _, _) = _configService.LoadEnvironmentState();
             var names = environments.Keys
                 .Where(name => !IsDefaultName(name))
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
@@ -47,14 +47,20 @@ namespace SSH_Helper.Services
 
         public string GetActiveEnvironmentName()
         {
-            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var (environments, activeEnvironment, _) = _configService.LoadEnvironmentState();
             return ResolveActiveName(activeEnvironment, environments);
+        }
+
+        public string GetBaseEnvironmentName()
+        {
+            var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
+            return ResolveBaseName(baseEnvironment, activeEnvironment, environments);
         }
 
         public EnvironmentConfig GetEnvironment(string name)
         {
             var environmentName = NormalizeName(name);
-            var (environments, _) = _configService.LoadEnvironmentState();
+            var (environments, _, _) = _configService.LoadEnvironmentState();
 
             if (environments.TryGetValue(environmentName, out var environment))
                 return environment.Clone();
@@ -68,8 +74,9 @@ namespace SSH_Helper.Services
         public EnvironmentConfig SwitchEnvironment(string name)
         {
             var target = NormalizeName(name);
-            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
             var previous = ResolveActiveName(activeEnvironment, environments);
+            var currentBase = ResolveBaseName(baseEnvironment, activeEnvironment, environments);
             EnvironmentConfig selected;
 
             if (environments.TryGetValue(target, out var explicitEnvironment))
@@ -85,9 +92,23 @@ namespace SSH_Helper.Services
                 throw new KeyNotFoundException($"Environment '{target}' was not found.");
             }
 
-            _configService.SaveEnvironmentState(environments, target);
+            _configService.SaveEnvironmentState(environments, target, currentBase);
             RaiseEnvironmentChanged(previous, target, selected);
             return selected;
+        }
+
+        public void SetBaseEnvironment(string name)
+        {
+            var target = NormalizeName(name);
+            var (environments, activeEnvironment, _) = _configService.LoadEnvironmentState();
+
+            if (!IsDefaultName(target) && !environments.ContainsKey(target))
+                throw new KeyNotFoundException($"Environment '{target}' was not found.");
+
+            _configService.SaveEnvironmentState(
+                environments,
+                ResolveActiveName(activeEnvironment, environments),
+                target);
         }
 
         public void SaveCurrentGridToEnvironment(
@@ -95,10 +116,11 @@ namespace SSH_Helper.Services
             List<string> columns,
             List<Dictionary<string, string>> hosts,
             List<int> selectedIndices,
-            string? csvPath)
+            string? csvPath,
+            CsvFileFingerprint? csvFingerprint = null)
         {
             var environmentName = NormalizeName(name);
-            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
 
             // First explicit environment adoption: capture legacy state into Default.
             if (environments.Count == 0 && !IsDefaultName(environmentName))
@@ -113,13 +135,17 @@ namespace SSH_Helper.Services
                 hosts,
                 selectedIndices,
                 csvPath,
+                csvFingerprint,
                 existing);
 
             environments[environmentName] = snapshot;
             var active = string.IsNullOrWhiteSpace(activeEnvironment)
                 ? environmentName
                 : activeEnvironment;
-            _configService.SaveEnvironmentState(environments, active);
+            _configService.SaveEnvironmentState(
+                environments,
+                active,
+                ResolveBaseName(baseEnvironment, activeEnvironment, environments));
         }
 
         public EnvironmentConfig CreateEnvironment(string name, string? copyFrom = null)
@@ -128,7 +154,7 @@ namespace SSH_Helper.Services
             if (IsDefaultName(newName))
                 throw new InvalidOperationException($"'{EnvironmentConfig.DefaultName}' is reserved.");
 
-            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
 
             if (environments.ContainsKey(newName))
                 throw new InvalidOperationException($"Environment '{newName}' already exists.");
@@ -151,7 +177,10 @@ namespace SSH_Helper.Services
 
             environments[newName] = source;
             var active = ResolveActiveName(activeEnvironment, environments);
-            _configService.SaveEnvironmentState(environments, active);
+            _configService.SaveEnvironmentState(
+                environments,
+                active,
+                ResolveBaseName(baseEnvironment, activeEnvironment, environments));
             return source.Clone();
         }
 
@@ -161,8 +190,9 @@ namespace SSH_Helper.Services
             if (IsDefaultName(environmentName))
                 throw new InvalidOperationException($"'{EnvironmentConfig.DefaultName}' cannot be deleted.");
 
-            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
             var previous = ResolveActiveName(activeEnvironment, environments);
+            var currentBase = ResolveBaseName(baseEnvironment, activeEnvironment, environments);
 
             if (!environments.Remove(environmentName))
                 throw new KeyNotFoundException($"Environment '{environmentName}' was not found.");
@@ -171,7 +201,10 @@ namespace SSH_Helper.Services
                 ? EnvironmentConfig.DefaultName
                 : ResolveActiveName(activeEnvironment, environments);
 
-            _configService.SaveEnvironmentState(environments, next);
+            var nextBase = string.Equals(currentBase, environmentName, StringComparison.OrdinalIgnoreCase)
+                ? next
+                : currentBase;
+            _configService.SaveEnvironmentState(environments, next, nextBase);
 
             if (!string.Equals(previous, next, StringComparison.OrdinalIgnoreCase))
             {
@@ -191,8 +224,9 @@ namespace SSH_Helper.Services
             if (IsDefaultName(targetName))
                 throw new InvalidOperationException($"'{EnvironmentConfig.DefaultName}' is reserved.");
 
-            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
             var previous = ResolveActiveName(activeEnvironment, environments);
+            var currentBase = ResolveBaseName(baseEnvironment, activeEnvironment, environments);
 
             if (!environments.TryGetValue(sourceName, out var existing))
                 throw new KeyNotFoundException($"Environment '{sourceName}' was not found.");
@@ -209,7 +243,10 @@ namespace SSH_Helper.Services
                 ? targetName
                 : ResolveActiveName(activeEnvironment, environments);
 
-            _configService.SaveEnvironmentState(environments, next);
+            var nextBase = string.Equals(currentBase, sourceName, StringComparison.OrdinalIgnoreCase)
+                ? targetName
+                : currentBase;
+            _configService.SaveEnvironmentState(environments, next, nextBase);
 
             if (!string.Equals(previous, next, StringComparison.OrdinalIgnoreCase))
             {
@@ -219,7 +256,7 @@ namespace SSH_Helper.Services
 
         public Dictionary<string, string> GetActiveEnvironmentVariables()
         {
-            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var (environments, activeEnvironment, _) = _configService.LoadEnvironmentState();
             var active = ResolveActiveName(activeEnvironment, environments);
 
             if (environments.TryGetValue(active, out var environment))
@@ -238,7 +275,7 @@ namespace SSH_Helper.Services
                 throw new ArgumentException("Environment variable name is required.", nameof(variableName));
 
             var variableKey = variableName.Trim();
-            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
             var active = ResolveActiveName(activeEnvironment, environments);
 
             // Ensure a persisted default exists before mutating active Default.
@@ -255,13 +292,16 @@ namespace SSH_Helper.Services
             environment.Normalize(active);
             environments[active] = environment;
 
-            _configService.SaveEnvironmentState(environments, active);
+            _configService.SaveEnvironmentState(
+                environments,
+                active,
+                ResolveBaseName(baseEnvironment, activeEnvironment, environments));
         }
 
         public void UpdateEnvironmentDetails(string name, string? description, int? labelColor, Dictionary<string, string> variables)
         {
             var environmentName = NormalizeName(name);
-            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
 
             if (IsDefaultName(environmentName) && !environments.ContainsKey(EnvironmentConfig.DefaultName))
             {
@@ -279,7 +319,10 @@ namespace SSH_Helper.Services
             environment.Normalize(environmentName);
             environments[environmentName] = environment;
 
-            _configService.SaveEnvironmentState(environments, ResolveActiveName(activeEnvironment, environments));
+            _configService.SaveEnvironmentState(
+                environments,
+                ResolveActiveName(activeEnvironment, environments),
+                ResolveBaseName(baseEnvironment, activeEnvironment, environments));
         }
 
         public EnvironmentConfig ImportEnvironment(EnvironmentConfig environment, bool overwriteExisting = false)
@@ -288,7 +331,7 @@ namespace SSH_Helper.Services
                 throw new ArgumentNullException(nameof(environment));
 
             var environmentName = NormalizeName(environment.Name);
-            var (environments, activeEnvironment) = _configService.LoadEnvironmentState();
+            var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
 
             // First explicit environment adoption: capture legacy state into Default.
             if (environments.Count == 0 && !IsDefaultName(environmentName))
@@ -304,7 +347,10 @@ namespace SSH_Helper.Services
             imported.Normalize(environmentName);
             environments[environmentName] = imported;
 
-            _configService.SaveEnvironmentState(environments, ResolveActiveName(activeEnvironment, environments));
+            _configService.SaveEnvironmentState(
+                environments,
+                ResolveActiveName(activeEnvironment, environments),
+                ResolveBaseName(baseEnvironment, activeEnvironment, environments));
             return imported.Clone();
         }
 
@@ -314,6 +360,7 @@ namespace SSH_Helper.Services
             List<Dictionary<string, string>> hosts,
             List<int> selectedIndices,
             string? csvPath,
+            CsvFileFingerprint? csvFingerprint,
             EnvironmentConfig? existing)
         {
             var environment = new EnvironmentConfig
@@ -329,6 +376,7 @@ namespace SSH_Helper.Services
                     ?? new List<Dictionary<string, string>>(),
                 SelectedHostIndices = selectedIndices?.ToList() ?? new List<int>(),
                 LastCsvPath = csvPath,
+                LastCsvFingerprint = csvFingerprint?.Clone(),
                 Variables = existing?.Variables != null
                     ? new Dictionary<string, string>(existing.Variables, StringComparer.OrdinalIgnoreCase)
                     : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -347,6 +395,20 @@ namespace SSH_Helper.Services
             }
 
             return EnvironmentConfig.DefaultName;
+        }
+
+        private static string ResolveBaseName(
+            string? baseEnvironment,
+            string? activeEnvironment,
+            Dictionary<string, EnvironmentConfig> environments)
+        {
+            if (!string.IsNullOrWhiteSpace(baseEnvironment))
+            {
+                if (IsDefaultName(baseEnvironment) || environments.ContainsKey(baseEnvironment))
+                    return baseEnvironment;
+            }
+
+            return ResolveActiveName(activeEnvironment, environments);
         }
 
         private static bool IsDefaultName(string name)

@@ -1,5 +1,129 @@
 # Changelog
 
+## Changes Since `12c1b7f` (0.51.7)
+
+### Environment CSV Freshness Detection
+
+A file fingerprinting system detects when a remembered CSV file has changed on disk since it was last loaded into an environment. `CsvFileFingerprint` records `LastWriteTimeUtc` and `FileSizeBytes` for each loaded CSV. `CsvFileSyncEvaluator` compares the stored fingerprint against the current file state and returns a `CsvFileSyncStatus`:
+
+| Status | Meaning |
+|--------|---------|
+| `NotTracked` | No CSV file associated with the environment |
+| `Current` | File on disk matches the stored fingerprint |
+| `ChangedOnDisk` | File has been modified externally since last load |
+| `MissingOnDisk` | Remembered file no longer exists at the stored path |
+| `Unknown` | Fingerprint unavailable or comparison error |
+
+When switching to an environment whose CSV has changed on disk, the user is prompted to reload or keep the in-memory version. `EnvironmentConfig` now stores `LastCsvFingerprint` alongside `LastCsvPath`, and `ApplicationState` carries the fingerprint through save/restore cycles.
+
+**Hosts file indicator** — `HostsFileIndicatorFormatter.Format` produces a display string for the loaded CSV status, combining the filename with state suffixes such as `(unsaved)`, `(disk changed)`, or `(missing on disk)`.
+
+### Folder-Level Base Environment Inheritance
+
+Preset folders can now declare a **base environment override** that applies to all presets within that folder and its subfolders. `FolderInfo.BaseEnvironment` stores an optional environment name per folder.
+
+**Resolution chain** — `PresetBaseEnvironmentResolver.Resolve` walks from the preset's folder up through ancestor folders, returning the first non-null `BaseEnvironment` it finds. If no folder in the chain declares an override, the global base environment is used. The result includes `SourceKind` (`GlobalBase` or `FolderBase`) and `SourceFolderPath` for UI display.
+
+**Folder context menu** — A new **Base Environment** submenu on the folder right-click context menu lists all available environments plus an inherit option. Selecting an environment calls `PresetManager.SetFolderBaseEnvironment`. The inherit choice label shows the resolved parent environment via `FolderBaseEnvironmentSummaryFormatter.FormatInheritChoiceLabel`.
+
+**Environment rename/delete propagation** — `PresetManager.RenameFolderBaseEnvironment` updates all folder references when an environment is renamed. `PresetManager.ClearFolderBaseEnvironment` removes references to a deleted environment. Both are called from `EnvironmentDialog` during rename/delete operations.
+
+**Base environment toolbar indicator** — `BaseEnvironmentIndicatorFormatter.Format` produces a `Base: <name>` label visible in the toolbar only when the active environment differs from the resolved base environment.
+
+### Script-Declared Environment Switching on Preset Load
+
+Scripts can now declare a top-level `environment` key that triggers an automatic environment switch when the preset is loaded into the editor:
+
+```yaml
+---
+name: Production Health Check
+environment: prod
+
+steps:
+  - print: "Running against ${Host_IP}"
+```
+
+**Load behavior** — `PresetEnvironmentLoadPlanner.Plan` determines the action when a preset is selected:
+- If the script declares an `environment` that differs from the active environment, the active environment switches to the declared one
+- If the script has no `environment` declaration, the active environment restores to the base environment
+- If the declared environment does not exist, the current environment stays active and a non-blocking status message is shown via `PresetEnvironmentStatusFormatter.FormatMissingEnvironmentMessage`
+
+The base environment (set by manual environment switches or folder overrides) is never changed by script declarations — only the active environment is affected.
+
+### Suppress Missing Column Warning
+
+A new `suppress_missing_column_warning` script header flag disables the pre-execution dialog that warns about referenced grid columns not present in the current host grid. `ScriptDependencyAnalyzer.AnalyzePresetDetails` returns a `PresetColumnDependencyResult` that includes the `SuppressMissingColumnWarning` flag from the parsed script.
+
+```yaml
+---
+suppress_missing_column_warning: true
+steps:
+  - if: "${optional_column}" == ""
+    then:
+      - input:
+          prompt: "Column missing. Enter a value:"
+          into: optional_column
+```
+
+### Preset Header Unsaved State Indicator
+
+`PresetHeaderIndicatorFormatter` formats the preset tree header label with contextual information:
+- When a folder is selected: `Folder: <name>`
+- When a preset is selected: `Preset: <name>` or `Preset: <name> (unsaved)` when dirty
+- When no preset is selected: `Presets` or `Presets (unsaved)`
+
+`FormatCommandSectionTitle` and `FormatSaveButtonLabel` provide parallel formatting for the command section header and save button, appending `(unsaved)` or `*` respectively when changes are pending. The indicators auto-refresh via `TextChanged` handlers on the command editor, preset name, and timeout fields.
+
+### Connection Testing
+
+`SshExecutionService.TestConnectionAsync` performs a lightweight TCP reachability check against a host, returning a `ConnectionTestResult` record with `Success`, `ErrorCategory` (`Timeout`, `Network`, `Cancelled`, `Unknown`), `ErrorMessage`, and `LatencyMs`. This is a TCP connect/disconnect test rather than full SSH authentication.
+
+### Recent Files Menu
+
+`AppConfiguration.RecentFiles` stores the most recently opened CSV file paths (newest first), capped at `MaxRecentFiles` (default 10). A **Recent Files** submenu is added to the File menu, rebuilt dynamically as files are opened.
+
+### Autocomplete Behavior Improvements
+
+**Trailing blank line suppression** — `ScriptAutocompleteProvider.ShouldAutoSuggestBlankTopLevelKeys` prevents the autocomplete popup from appearing on blank lines after `vars:` or `steps:` blocks, where top-level key suggestions are no longer contextually appropriate.
+
+**Nested table column highlighting** — `YamlSshSyntaxHighlighter` now recognizes `header` and `field` as step option keys within `table` column definitions, applying syntax highlighting to nested column configuration keys.
+
+### Terminal Output Chunked Streaming Improvements
+
+**Trailing space preservation** — `TerminalOutputProcessor.Normalize` accepts a new `preserveTrailingSpacesOnFinalLine` parameter. When true, trailing spaces on the final (unfinished) line are preserved to prevent word-joining artifacts when tokens arrive split across network chunks (e.g., `"set "` then `"resource"`). `SshShellSession.ProcessChunk` enables this for real-time UI output.
+
+**Streaming zsh PROMPT_SP stripping** — `TerminalOutputProcessor.StripZshPromptSpStreaming` replaces the single-pass `StripZshPromptSp` for live stream processing. It buffers ambiguous suffixes (a `%` that might be a real character or the start of a prompt redraw sequence) across chunks and flushes on stream completion, preventing half-processed artifacts from appearing in output.
+
+### Editor Line Index Fix
+
+`EditorTextUtilities` line-start computation now includes the final line even when the text ends with a newline character, fixing off-by-one issues in syntax highlighting and autocomplete positioning for files with trailing blank lines.
+
+### Grep Command for Sensitive Data Detection
+
+A new grep-based search command in settings scans configuration data for patterns matching sensitive information such as credentials, tokens, and connection strings.
+
+### Build Configuration
+
+`SSH_Helper.csproj` `DefaultItemExcludes` and a new `Compile Remove` item use forward-slash glob patterns (`artifacts/**`, `bin/**`, `obj/**`) for more robust exclusion of non-source directories.
+
+### Documentation
+
+`SCRIPTING.md` updated with:
+- New `environment` top-level key in the script structure reference with behavior documentation and examples
+- New `suppress_missing_column_warning` header flag with usage guidance
+- `environment` added to the list of metadata-only keys that do not trigger YAML script detection
+
+### Test Coverage
+
+New test suites added:
+
+- **Utilities** — `CsvFileSyncEvaluatorTests` (file fingerprint matching, missing file detection, column/row snapshot comparison), `HostsFileIndicatorFormatterTests` (label formatting with dirty/sync combinations), `BaseEnvironmentIndicatorFormatterTests` (visibility logic when active differs from base), `PresetBaseEnvironmentResolverTests` (folder chain walk, global fallback), `PresetEnvironmentLoadPlannerTests` (switch/restore/no-op decisions), `PresetEnvironmentStatusFormatterTests` (restore, switch, and missing environment message formatting), `FolderBaseEnvironmentSummaryFormatterTests` (explicit, inherited, and global summary lines), `PresetHeaderIndicatorFormatterTests` (folder/preset/dirty label permutations), `TerminalOutputProcessorTests` (trailing space preservation, streaming zsh PROMPT_SP stripping)
+- **Services** — `EnvironmentServiceTests` (expanded with base environment get/set, fingerprint round-trip), `PresetManagerFolderBaseEnvironmentTests` (set, clear, rename folder base environments, orphan cleanup on load)
+- **Scripting** — `ScriptParserTests` (expanded with `environment` and `suppress_missing_column_warning` parsing), `ScriptDependencyAnalyzerTests` (expanded with `SuppressMissingColumnWarning` detection)
+- **Editor** — `ScriptAutocompleteProviderTests` (expanded with trailing blank line suppression), `YamlSshSyntaxHighlighterTests` (expanded with nested table column key highlighting), `EditorTextUtilitiesTests` (expanded with trailing newline line-start fix), `ScintillaScriptEditorControlTests` (expanded with additional editor behavior tests)
+
+---
+
 ## Changes Since `d588087` (0.51.6)
 
 ### Interactive Terminal Transcript Handling

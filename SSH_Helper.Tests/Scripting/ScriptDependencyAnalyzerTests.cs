@@ -161,6 +161,26 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresetDetails_ScriptWithSuppressionFlag_ReportsSuppression()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                suppress_missing_column_warning: true
+                steps:
+                  - print: "${optional_column}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresetDetails(preset);
+
+        result.SuppressMissingColumnWarning.Should().BeTrue();
+        result.ReferencedColumns.Should().Contain("optional_column");
+    }
+
+    [Fact]
     public void AnalyzeSshRequirements_SendAtRoot_RequiresSshSession()
     {
         var result = AnalyzeSshRequirements("""

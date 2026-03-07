@@ -684,6 +684,7 @@ namespace SSH_Helper.Services
         {
             var output = new StringBuilder();
             var rawBuffer = new StringBuilder();
+            var zshPromptSpCarry = string.Empty;
             var maxPages = 50000;
             var pageCount = 0;
 
@@ -773,7 +774,7 @@ namespace SSH_Helper.Services
                     var chunk = batch.ToString();
                     EmitDebug($"[+{overallSw.ElapsedMilliseconds}ms] Received {chunk.Length} chars. RAW: {EscapeForDebug(chunk, 300)}");
 
-                    bool hitPager = ProcessChunk(chunk, rawBuffer, output, ref seenNewlineAfterEcho, overallSw);
+                    bool hitPager = ProcessChunk(chunk, rawBuffer, output, ref seenNewlineAfterEcho, ref zshPromptSpCarry, overallSw);
 
                     if (hitPager)
                     {
@@ -813,7 +814,7 @@ namespace SSH_Helper.Services
                         if (!string.IsNullOrEmpty(ch))
                         {
                             // Got data after idle wait — put it back in the buffer and continue
-                            bool hitPager = ProcessChunk(ch, rawBuffer, output, ref seenNewlineAfterEcho, overallSw, "Idle read received");
+                            bool hitPager = ProcessChunk(ch, rawBuffer, output, ref seenNewlineAfterEcho, ref zshPromptSpCarry, overallSw, "Idle read received");
                             if (hitPager)
                             {
                                 pageCount++;
@@ -872,6 +873,7 @@ namespace SSH_Helper.Services
 
             // Restore original timeout
             _scripting.Timeout = savedTimeout;
+            FlushPendingZshPromptSp(output, ref zshPromptSpCarry);
 
             var result = output.ToString();
             EmitDebug($"ReadUntilPrompt finished. Total chars: {result.Length}");
@@ -883,6 +885,7 @@ namespace SSH_Helper.Services
             StringBuilder rawBuffer,
             StringBuilder output,
             ref bool seenNewlineAfterEcho,
+            ref string zshPromptSpCarry,
             System.Diagnostics.Stopwatch overallSw,
             string? debugLabel = null)
         {
@@ -911,11 +914,15 @@ namespace SSH_Helper.Services
             var processed = TerminalOutputProcessor.Sanitize(chunk);
             processed = TerminalOutputProcessor.StripPagerArtifacts(processed, out _);
             processed = TerminalOutputProcessor.StripPagerDismissalArtifacts(processed);
-            processed = TerminalOutputProcessor.StripZshPromptSp(processed);
+            processed = TerminalOutputProcessor.StripZshPromptSpStreaming(processed, ref zshPromptSpCarry);
 
             output.Append(processed);
-            // Normalize before sending to UI to handle backspaces and other control sequences
-            OnOutputReceived(TerminalOutputProcessor.Normalize(processed));
+            // Preserve trailing spaces on unfinished chunk lines to avoid word-joins
+            // when tokens arrive split across network chunks.
+            if (!string.IsNullOrEmpty(processed))
+            {
+                OnOutputReceived(TerminalOutputProcessor.Normalize(processed, preserveTrailingSpacesOnFinalLine: true));
+            }
 
             return hitPager;
         }
@@ -937,6 +944,7 @@ namespace SSH_Helper.Services
         {
             var output = new StringBuilder();
             var rawBuffer = new StringBuilder();
+            var zshPromptSpCarry = string.Empty;
             var maxPages = 50000;
             var pageCount = 0;
 
@@ -1016,7 +1024,7 @@ namespace SSH_Helper.Services
                     var chunk = batch.ToString();
                     EmitDebug($"[+{overallSw.ElapsedMilliseconds}ms] Received {chunk.Length} chars. RAW: {EscapeForDebug(chunk, 300)}");
 
-                    bool hitPager = ProcessChunk(chunk, rawBuffer, output, ref seenNewlineAfterEcho, overallSw);
+                    bool hitPager = ProcessChunk(chunk, rawBuffer, output, ref seenNewlineAfterEcho, ref zshPromptSpCarry, overallSw);
 
                     if (hitPager)
                     {
@@ -1049,7 +1057,7 @@ namespace SSH_Helper.Services
                         var ch = _scripting.ReadUntil(anyDataEvent);
                         if (!string.IsNullOrEmpty(ch))
                         {
-                            bool hitPager = ProcessChunk(ch, rawBuffer, output, ref seenNewlineAfterEcho, overallSw, "Idle read received");
+                            bool hitPager = ProcessChunk(ch, rawBuffer, output, ref seenNewlineAfterEcho, ref zshPromptSpCarry, overallSw, "Idle read received");
                             if (hitPager)
                             {
                                 pageCount++;
@@ -1089,10 +1097,29 @@ namespace SSH_Helper.Services
             }
 
             _scripting.Timeout = savedTimeout;
+            FlushPendingZshPromptSp(output, ref zshPromptSpCarry);
 
             var result = output.ToString();
             EmitDebug($"ReadUntilExpect finished. Total chars: {result.Length}");
             return TerminalOutputProcessor.Normalize(result);
+        }
+
+        private void FlushPendingZshPromptSp(StringBuilder output, ref string zshPromptSpCarry)
+        {
+            if (string.IsNullOrEmpty(zshPromptSpCarry))
+                return;
+
+            var flushed = TerminalOutputProcessor.StripZshPromptSpStreaming(string.Empty, ref zshPromptSpCarry, flushFinal: true);
+            if (string.IsNullOrEmpty(flushed))
+                return;
+
+            output.Append(flushed);
+
+            var normalized = TerminalOutputProcessor.Normalize(flushed, preserveTrailingSpacesOnFinalLine: true);
+            if (!string.IsNullOrEmpty(normalized))
+            {
+                OnOutputReceived(normalized);
+            }
         }
 
         /// <summary>

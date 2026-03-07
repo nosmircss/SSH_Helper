@@ -35,6 +35,41 @@ public class YamlSshSyntaxHighlighterTests
         spans.Should().HaveCountGreaterThanOrEqualTo(3);
     }
 
+    [Fact]
+    public void BuildLineHighlights_RecognizesEnvironmentTopLevelKey()
+    {
+        var highlighter = new YamlSshSyntaxHighlighter();
+        var line = "environment: prod";
+
+        var spans = highlighter.BuildLineHighlights(line, lineStartIndex: 0, darkMode: false);
+
+        spans.Should().Contain(span => span.Start == 0 && span.Length == "environment".Length);
+    }
+
+    [Fact]
+    public void BuildLineHighlights_RecognizesNestedTableColumnSequenceKey()
+    {
+        var highlighter = new YamlSshSyntaxHighlighter();
+        var line = "      - header: Port";
+        var keyStart = line.IndexOf("header", StringComparison.Ordinal);
+
+        var spans = highlighter.BuildLineHighlights(line, lineStartIndex: 0, darkMode: true);
+
+        spans.Should().Contain(span => span.Start == keyStart && span.Length == "header".Length);
+    }
+
+    [Fact]
+    public void BuildLineHighlights_RecognizesNestedTableColumnMappingKey()
+    {
+        var highlighter = new YamlSshSyntaxHighlighter();
+        var line = "        field: Port";
+        var keyStart = line.IndexOf("field", StringComparison.Ordinal);
+
+        var spans = highlighter.BuildLineHighlights(line, lineStartIndex: 0, darkMode: true);
+
+        spans.Should().Contain(span => span.Start == keyStart && span.Length == "field".Length);
+    }
+
     private static int GetLineStart(string text, int lineIndex)
     {
         var currentLine = 0;

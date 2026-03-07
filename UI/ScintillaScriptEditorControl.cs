@@ -186,7 +186,7 @@ namespace SSH_Helper.UI
                 _suppressTextProcessing = true;
                 try
                 {
-                    _editor.Text = newText;
+                    SetEditorTextPreservingReadOnly(newText);
                 }
                 finally
                 {
@@ -343,7 +343,7 @@ namespace SSH_Helper.UI
 
         public new bool Focus() => _editor.Focus();
 
-        public void Clear() => _editor.Text = string.Empty;
+        public void Clear() => Text = string.Empty;
 
         public void SelectAll() => _editor.SelectAll();
 
@@ -516,6 +516,27 @@ namespace SSH_Helper.UI
             RequestValidationOrClear();
         }
 
+        private void SetEditorTextPreservingReadOnly(string value)
+        {
+            var wasReadOnly = _editor.ReadOnly;
+            if (wasReadOnly)
+            {
+                _editor.ReadOnly = false;
+            }
+
+            try
+            {
+                _editor.Text = value;
+            }
+            finally
+            {
+                if (wasReadOnly)
+                {
+                    _editor.ReadOnly = true;
+                }
+            }
+        }
+
         private void Editor_KeyDown(object? sender, KeyEventArgs e)
         {
             OnKeyDown(e);
@@ -579,6 +600,12 @@ namespace SSH_Helper.UI
             var trackedChanges = UpdateChange.Selection | UpdateChange.VScroll | UpdateChange.HScroll;
             if ((e.Change & trackedChanges) == 0)
             {
+                return;
+            }
+
+            if ((e.Change & UpdateChange.Selection) != 0)
+            {
+                RefreshVisibleCompletionPopup();
                 return;
             }
 
@@ -777,6 +804,11 @@ namespace SSH_Helper.UI
 
         private void ShowCompletionPopup()
         {
+            ShowCompletionPopupCore();
+        }
+
+        private void ShowCompletionPopupCore()
+        {
             if (!_settings.EnableAutocomplete || _autocompleteProvider == null)
             {
                 HideCompletionPopup();
@@ -864,6 +896,16 @@ namespace SSH_Helper.UI
             }
 
             _activeCompletionContext = CompletionContextKind.None;
+        }
+
+        private void RefreshVisibleCompletionPopup()
+        {
+            if (!_completionPopup.Visible)
+            {
+                return;
+            }
+
+            ShowCompletionPopupCore();
         }
 
         private void DismissCompletionOnExternalClick(IntPtr targetHandle)

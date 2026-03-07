@@ -14,6 +14,7 @@ namespace SSH_Helper.Models
         public List<Dictionary<string, string>> Hosts { get; set; } = new();
         public List<int> SelectedHostIndices { get; set; } = new();
         public string? LastCsvPath { get; set; }
+        public CsvFileFingerprint? LastCsvFingerprint { get; set; }
         public Dictionary<string, string> Variables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         public static EnvironmentConfig FromApplicationState(string name, ApplicationState? state)
@@ -34,6 +35,7 @@ namespace SSH_Helper.Models
                 ?? new List<Dictionary<string, string>>();
             environment.SelectedHostIndices = state.SelectedHostIndices?.ToList() ?? new List<int>();
             environment.LastCsvPath = state.LastCsvPath;
+            environment.LastCsvFingerprint = state.LastCsvFingerprint?.Clone();
             return environment;
         }
 
@@ -52,6 +54,7 @@ namespace SSH_Helper.Models
                     ?? new List<Dictionary<string, string>>(),
                 SelectedHostIndices = SelectedHostIndices?.ToList() ?? new List<int>(),
                 LastCsvPath = LastCsvPath,
+                LastCsvFingerprint = LastCsvFingerprint?.Clone(),
                 Variables = Variables != null
                     ? new Dictionary<string, string>(Variables, StringComparer.OrdinalIgnoreCase)
                     : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -64,6 +67,8 @@ namespace SSH_Helper.Models
             HostColumns ??= new List<string>();
             Hosts ??= new List<Dictionary<string, string>>();
             SelectedHostIndices ??= new List<int>();
+            LastCsvFingerprint = LastCsvFingerprint?.Clone();
+            LastCsvFingerprint?.Normalize();
             Variables = Variables != null
                 ? new Dictionary<string, string>(Variables, StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

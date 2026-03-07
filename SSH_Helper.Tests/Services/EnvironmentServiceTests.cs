@@ -111,7 +111,7 @@ public class EnvironmentServiceTests : IDisposable
                 }
             }
         };
-        _configService.SaveEnvironmentState(map, EnvironmentConfig.DefaultName);
+        _configService.SaveEnvironmentState(map, EnvironmentConfig.DefaultName, EnvironmentConfig.DefaultName);
 
         EnvironmentChangedEventArgs? raised = null;
         _environmentService.EnvironmentChanged += (_, args) => raised = args;
@@ -130,6 +130,60 @@ public class EnvironmentServiceTests : IDisposable
     {
         Action act = () => _environmentService.DeleteEnvironment(EnvironmentConfig.DefaultName);
         act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void GetBaseEnvironmentName_WhenPersistedBaseIsMissing_ReturnsActiveEnvironment()
+    {
+        _configService.Update(config =>
+        {
+            config.Environments = new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase)
+            {
+                [EnvironmentConfig.DefaultName] = new EnvironmentConfig { Name = EnvironmentConfig.DefaultName },
+                ["prod"] = new EnvironmentConfig { Name = "prod" }
+            };
+            config.ActiveEnvironment = "prod";
+            config.BaseEnvironment = null;
+        });
+
+        _environmentService.GetBaseEnvironmentName().Should().Be("prod");
+        _configService.GetCurrent().BaseEnvironment.Should().Be("prod");
+    }
+
+    [Fact]
+    public void SetBaseEnvironment_PersistsAcrossReload()
+    {
+        var map = new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase)
+        {
+            [EnvironmentConfig.DefaultName] = new EnvironmentConfig { Name = EnvironmentConfig.DefaultName },
+            ["prod"] = new EnvironmentConfig { Name = "prod" }
+        };
+        _configService.SaveEnvironmentState(map, EnvironmentConfig.DefaultName, EnvironmentConfig.DefaultName);
+
+        _environmentService.SetBaseEnvironment("prod");
+
+        _environmentService.GetBaseEnvironmentName().Should().Be("prod");
+
+        var reloadedConfig = new ConfigurationService(_configPath);
+        var reloadedService = new EnvironmentService(reloadedConfig);
+        reloadedConfig.Load();
+        reloadedService.GetBaseEnvironmentName().Should().Be("prod");
+    }
+
+    [Fact]
+    public void SwitchEnvironment_DoesNotChangeBaseEnvironment()
+    {
+        var map = new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase)
+        {
+            [EnvironmentConfig.DefaultName] = new EnvironmentConfig { Name = EnvironmentConfig.DefaultName },
+            ["prod"] = new EnvironmentConfig { Name = "prod" }
+        };
+        _configService.SaveEnvironmentState(map, EnvironmentConfig.DefaultName, EnvironmentConfig.DefaultName);
+
+        _environmentService.SwitchEnvironment("prod");
+
+        _environmentService.GetActiveEnvironmentName().Should().Be("prod");
+        _environmentService.GetBaseEnvironmentName().Should().Be(EnvironmentConfig.DefaultName);
     }
 
     [Fact]
@@ -161,6 +215,33 @@ public class EnvironmentServiceTests : IDisposable
         environment.LabelColor.Should().Be(labelColor);
         environment.Hosts.Should().HaveCount(1);
         environment.Hosts[0][CsvManager.HostColumnName].Should().Be("203.0.113.10");
+    }
+
+    [Fact]
+    public void SaveCurrentGridToEnvironment_PersistsCsvFingerprint()
+    {
+        _environmentService.CreateEnvironment("prod");
+        var fingerprint = new CsvFileFingerprint
+        {
+            LastWriteTimeUtc = new DateTime(2026, 3, 6, 18, 0, 0, DateTimeKind.Utc),
+            FileSizeBytes = 128
+        };
+
+        _environmentService.SaveCurrentGridToEnvironment(
+            "prod",
+            new List<string> { CsvManager.HostColumnName },
+            new List<Dictionary<string, string>>
+            {
+                new() { [CsvManager.HostColumnName] = "203.0.113.11" }
+            },
+            new List<int>(),
+            @"C:\tmp\prod.csv",
+            fingerprint);
+
+        var environment = _environmentService.GetEnvironment("prod");
+        environment.LastCsvFingerprint.Should().NotBeNull();
+        environment.LastCsvFingerprint!.LastWriteTimeUtc.Should().Be(fingerprint.LastWriteTimeUtc);
+        environment.LastCsvFingerprint.FileSizeBytes.Should().Be(fingerprint.FileSizeBytes);
     }
 
     [Fact]
@@ -265,6 +346,39 @@ public class EnvironmentServiceTests : IDisposable
         persisted.Environments.Should().ContainKey("staging");
         persisted.Environments[EnvironmentConfig.DefaultName].Hosts.Should().ContainSingle();
         persisted.Environments[EnvironmentConfig.DefaultName].Hosts[0][CsvManager.HostColumnName].Should().Be("203.0.113.50");
+        persisted.BaseEnvironment.Should().Be(EnvironmentConfig.DefaultName);
+    }
+
+    [Fact]
+    public void RenameEnvironment_WhenBaseEnvironmentMatches_UpdatesBaseEnvironment()
+    {
+        var map = new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase)
+        {
+            [EnvironmentConfig.DefaultName] = new EnvironmentConfig { Name = EnvironmentConfig.DefaultName },
+            ["prod"] = new EnvironmentConfig { Name = "prod" }
+        };
+        _configService.SaveEnvironmentState(map, EnvironmentConfig.DefaultName, "prod");
+
+        _environmentService.RenameEnvironment("prod", "production");
+
+        _environmentService.GetBaseEnvironmentName().Should().Be("production");
+    }
+
+    [Fact]
+    public void DeleteEnvironment_WhenBaseEnvironmentMatches_FallsBackToActiveEnvironment()
+    {
+        var map = new Dictionary<string, EnvironmentConfig>(StringComparer.OrdinalIgnoreCase)
+        {
+            [EnvironmentConfig.DefaultName] = new EnvironmentConfig { Name = EnvironmentConfig.DefaultName },
+            ["prod"] = new EnvironmentConfig { Name = "prod" },
+            ["staging"] = new EnvironmentConfig { Name = "staging" }
+        };
+        _configService.SaveEnvironmentState(map, "staging", "prod");
+
+        _environmentService.DeleteEnvironment("prod");
+
+        _environmentService.GetActiveEnvironmentName().Should().Be("staging");
+        _environmentService.GetBaseEnvironmentName().Should().Be("staging");
     }
 
     [Fact]
@@ -289,7 +403,7 @@ public class EnvironmentServiceTests : IDisposable
                 }
             }
         };
-        _configService.SaveEnvironmentState(map, "prod");
+        _configService.SaveEnvironmentState(map, "prod", EnvironmentConfig.DefaultName);
 
         _environmentService.UpdateActiveEnvironmentVariable("api_token", "new-token");
 
@@ -324,5 +438,6 @@ public class EnvironmentServiceTests : IDisposable
         persisted.Environments[EnvironmentConfig.DefaultName].Hosts[0][CsvManager.HostColumnName].Should().Be("198.51.100.20");
         persisted.Environments[EnvironmentConfig.DefaultName]
             .Variables.Should().ContainKey("api_token").WhoseValue.Should().Be("legacy-token");
+        persisted.BaseEnvironment.Should().Be(EnvironmentConfig.DefaultName);
     }
 }

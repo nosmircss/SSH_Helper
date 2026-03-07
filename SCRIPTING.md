@@ -57,8 +57,10 @@ Scripts are YAML documents with the following structure:
 name: "Script Name"              # Optional: human-readable name
 description: "Description"       # Optional: what the script does
 version: 1                       # Optional: script version (default: 1)
+environment: "prod"              # Optional: switch to this environment when the preset is loaded
 debug: false                     # Optional: enable debug output (default: false)
 nobanner: false                  # Optional: suppress script execution banner (default: false)
+suppress_missing_column_warning: false  # Optional: suppress missing-column preflight warning
 
 vars:                            # Optional: variable declarations
   variable_name: "default_value"
@@ -78,7 +80,7 @@ The system automatically detects YAML scripts by looking for:
 - Distinctive top-level sections: `vars:`, `steps:`
 - Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
 
-Metadata-only keys (for example `name:` or `description:`) are not treated as strong YAML indicators by themselves.
+Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.
 
 Plain text (without YAML markers) is treated as simple commands to execute line by line.
 
@@ -3483,6 +3485,59 @@ This is useful when:
 - You want cleaner output for reports or logs
 - You're processing many hosts and don't need the visual separators
 - You're using `writefile` to save output and don't want the banner included
+
+### Suppress Missing Column Warning
+
+Before execution, SSH Helper warns when a script references grid columns that do not exist. Those references still resolve to empty values at runtime.
+
+If your script is intentionally written to handle optional columns, you can suppress that dialog in the script header:
+
+```yaml
+---
+name: Optional Column Example
+suppress_missing_column_warning: true
+
+steps:
+  - if: "${optional_column}" == ""
+    then:
+      - input:
+          prompt: "Optional column missing. Enter a value:"
+          into: optional_column
+  - print: "Using ${optional_column}"
+```
+
+Use this only when the script already handles the missing-column case safely.
+
+---
+
+### Script Root Environment
+
+If a YAML script includes a top-level `environment`, SSH Helper will try to switch the active environment to that environment when the preset is loaded into the editor:
+
+```yaml
+---
+name: Production Health Check
+environment: prod
+
+steps:
+  - print: "Running against ${Host_IP}"
+```
+
+Behavior:
+- Manual environment changes define the persisted base environment.
+- If the environment exists, the active environment switches using the normal environment-switch flow and the base environment stays unchanged.
+- If the environment is already active, nothing changes.
+- If a later preset has no top-level `environment`, SSH Helper restores the active environment back to the base environment.
+- If the environment does not exist, the current environment stays active and SSH Helper shows a non-blocking status message.
+- The toolbar shows `Base: <name>` next to the environment controls only while the active environment and base environment differ.
+
+Example:
+- Start in `Default`
+- Load a preset with `environment: test1` -> active becomes `test1`, base stays `Default`
+- Load a preset with `environment: test2` -> active becomes `test2`, base stays `Default`
+- Load a preset with no top-level `environment` -> active restores to `Default`
+
+This only affects preset loading. To persist environment variable values during execution, use `updateenvironment`.
 
 ---
 
