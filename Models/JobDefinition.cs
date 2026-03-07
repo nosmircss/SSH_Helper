@@ -199,5 +199,17 @@ namespace SSH_Helper.Models
         /// Default: false (per user decision: continue through all presets).
         /// </summary>
         public bool StopOnError { get; set; }
+
+        /// <summary>
+        /// Optional per-job override for maximum history entries retained.
+        /// Null uses the global default from AppConfiguration.
+        /// </summary>
+        public int? MaxHistoryRuns { get; set; }
+
+        /// <summary>
+        /// Optional per-job override for history retention period in days.
+        /// Null uses the global default from AppConfiguration.
+        /// </summary>
+        public int? HistoryRetentionDays { get; set; }
     }
 }

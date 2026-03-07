@@ -45,4 +45,11 @@ public class JobRunResult
     /// Optional error message if the job failed.
     /// </summary>
     public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// Per-host execution outputs for history recording.
+    /// Populated by ExecuteJobCoreAsync for the JobCompleted event.
+    /// May be null for error-path completions where no hosts were reached.
+    /// </summary>
+    public List<JobHostOutput>? HostOutputs { get; set; }
 }

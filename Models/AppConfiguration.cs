@@ -129,6 +129,24 @@ namespace SSH_Helper.Models
         /// </summary>
         public int MaxConcurrentJobs { get; set; } = 3;
 
+        /// <summary>
+        /// Default maximum number of history entries retained per job.
+        /// Individual jobs can override via JobDefinition.MaxHistoryRuns.
+        /// </summary>
+        public int DefaultMaxHistoryRuns { get; set; } = 50;
+
+        /// <summary>
+        /// Default maximum age in days for history entries.
+        /// Individual jobs can override via JobDefinition.HistoryRetentionDays.
+        /// </summary>
+        public int DefaultHistoryRetentionDays { get; set; } = 30;
+
+        /// <summary>
+        /// Maximum number of characters to retain per host in job history output.
+        /// Output exceeding this limit is truncated with a marker.
+        /// </summary>
+        public int MaxJobOutputCharsPerHost { get; set; } = 1_048_576;
+
     }
 
     /// <summary>
