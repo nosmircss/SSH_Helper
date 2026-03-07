@@ -47,11 +47,12 @@ Plans:
   3. User can assign a one-time schedule to a job, and after it executes, the job auto-disables
   4. User can see upcoming next-run times for all scheduled jobs
   5. After restarting the application, any jobs that were due while it was closed are recorded as skipped (never auto-executed)
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
+- [ ] 02-01-PLAN.md — SchedulingService, ScheduleType enum, SkippedRunEntry model, InputValidator cron extensions
+- [ ] 02-02-PLAN.md — CronBuilderControl visual cron builder UserControl
+- [ ] 02-03-PLAN.md — LastAppShutdownUtc persistence, missed-run and one-time integration tests
 
 ### Phase 3: Execution Pipeline
 **Goal**: Scheduled jobs execute automatically at their due times, with manual run-now, cancellation, concurrency control, and folder job support
@@ -106,7 +107,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Job Definitions & Persistence | 1/3 | In Progress|  |
-| 2. Scheduling Engine | 0/2 | Not started | - |
+| 2. Scheduling Engine | 0/3 | Not started | - |
 | 3. Execution Pipeline | 0/2 | Not started | - |
 | 4. History & Output | 0/1 | Not started | - |
 | 5. Scheduler UI & Integration | 0/2 | Not started | - |
