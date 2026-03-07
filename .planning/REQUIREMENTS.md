@@ -18,13 +18,13 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Scheduling
 
-- [ ] **SCHD-01**: User can configure a cron-based recurring schedule with standard cron expressions
-- [ ] **SCHD-02**: User can configure a one-time schedule at a specific date and time
-- [ ] **SCHD-03**: One-time jobs auto-disable after successful execution
-- [ ] **SCHD-04**: Scheduler displays human-readable cron text alongside the expression (e.g., "Every day at 3:00 AM")
+- [x] **SCHD-01**: User can configure a cron-based recurring schedule with standard cron expressions
+- [x] **SCHD-02**: User can configure a one-time schedule at a specific date and time
+- [x] **SCHD-03**: One-time jobs auto-disable after successful execution
+- [x] **SCHD-04**: Scheduler displays human-readable cron text alongside the expression (e.g., "Every day at 3:00 AM")
 - [ ] **SCHD-05**: User can build cron expressions via a visual point-and-click builder
-- [ ] **SCHD-06**: Scheduler shows next upcoming run times as a preview
-- [ ] **SCHD-07**: Jobs missed while the application was closed are recorded as skipped, never auto-executed
+- [x] **SCHD-06**: Scheduler shows next upcoming run times as a preview
+- [x] **SCHD-07**: Jobs missed while the application was closed are recorded as skipped, never auto-executed
 
 ### Host Targets
 
@@ -108,13 +108,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | JMGT-04 | Phase 1 | Complete |
 | JMGT-05 | Phase 5 | Pending |
 | JMGT-06 | Phase 5 | Pending |
-| SCHD-01 | Phase 2 | Pending |
-| SCHD-02 | Phase 2 | Pending |
-| SCHD-03 | Phase 2 | Pending |
-| SCHD-04 | Phase 2 | Pending |
+| SCHD-01 | Phase 2 | Complete |
+| SCHD-02 | Phase 2 | Complete |
+| SCHD-03 | Phase 2 | Complete |
+| SCHD-04 | Phase 2 | Complete |
 | SCHD-05 | Phase 2 | Pending |
-| SCHD-06 | Phase 2 | Pending |
-| SCHD-07 | Phase 2 | Pending |
+| SCHD-06 | Phase 2 | Complete |
+| SCHD-07 | Phase 2 | Complete |
 | HOST-01 | Phase 1 | Complete |
 | HOST-02 | Phase 1 | Complete |
 | HOST-03 | Phase 1 | Complete |
