@@ -122,7 +122,7 @@ namespace SSH_Helper
             btnSearchClose.Click += (_, _) =>
             {
                 _searchPanel.Visible = false;
-                _rtbOutput.Focus();
+                _rtbOutput?.Focus();
             };
 
             _searchPanel.Controls.Add(_txtSearch);
