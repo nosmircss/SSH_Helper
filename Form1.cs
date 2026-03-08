@@ -113,6 +113,17 @@ namespace SSH_Helper
         private readonly SshConfigService _sshConfigService;
         private readonly HistoryStorageService _historyStorage;
 
+        // Scheduler services
+        private JobStorageService? _jobStorage;
+        private SchedulingService? _schedulingService;
+        private JobExecutionService? _jobExecutionService;
+        private JobHistoryService? _jobHistoryService;
+        private JobExportService? _jobExportService;
+        private ToolStripStatusLabel? _statusScheduler;
+        private System.Windows.Forms.Timer? _statusBarTimer;
+        private readonly HashSet<string> _runNowJobIds = new();
+        private bool _schedulerStatusDirty = true;
+
         #endregion
 
         #region State
@@ -10456,6 +10467,182 @@ namespace SSH_Helper
         {
             await CheckForUpdatesAsync(silent: false);
         }
+
+        #endregion
+
+        #region Scheduler
+
+        /// <summary>
+        /// Creates and wires all scheduler services with the correct dependency chain.
+        /// </summary>
+        private void InitializeSchedulerServices()
+        {
+            if (_credentialProvider == null)
+                return;
+
+            _schedulingService = new SchedulingService();
+            _jobStorage = new JobStorageService(_credentialProvider);
+            _jobStorage.Load();
+            _jobExportService = new JobExportService();
+            _jobExecutionService = new JobExecutionService(
+                _jobStorage, _schedulingService, _configService, _presetManager, _credentialProvider);
+            _jobHistoryService = new JobHistoryService();
+            _jobHistoryService.SubscribeTo(_jobExecutionService);
+
+            // Subscribe to execution events for output panel notifications
+            _jobExecutionService.JobCompleted += OnSchedulerJobCompleted;
+            _jobExecutionService.JobStateChanged += OnSchedulerJobStateChanged;
+
+            // Refresh status bar when jobs change
+            _jobStorage.JobsChanged += (s, e) =>
+            {
+                _schedulerStatusDirty = true;
+                if (InvokeRequired) { BeginInvoke(() => UpdateSchedulerStatusBar()); return; }
+                UpdateSchedulerStatusBar();
+            };
+
+            // Set up reference integrity with preset manager
+            _presetManager.SetJobStorageService(_jobStorage);
+
+            // Crash recovery and start timer
+            _jobExecutionService.Initialize();
+            _jobExecutionService.Start();
+        }
+
+        /// <summary>
+        /// Sets up the scheduler status bar label and refresh timer.
+        /// </summary>
+        private void InitializeSchedulerStatusBar()
+        {
+            // Add scheduler status label to status strip
+            var statusScheduler = new ToolStripStatusLabel
+            {
+                Name = "_statusScheduler",
+                Spring = false,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Text = "Scheduler: 0 active",
+                IsLink = true,
+                LinkBehavior = LinkBehavior.HoverUnderline
+            };
+            statusScheduler.Click += (s, e) => ShowJobListDialog();
+            statusStrip.Items.Add(statusScheduler);
+            _statusScheduler = statusScheduler;
+
+            // Add Scheduler menu item to menu bar (before Help)
+            var menuScheduler = new ToolStripMenuItem
+            {
+                Name = "_menuScheduler",
+                Text = "&Scheduler",
+                Size = new Size(69, 20)
+            };
+            menuScheduler.Click += (s, e) => ShowJobListDialog();
+            var helpIndex = menuStrip1.Items.IndexOf(helpToolStripMenuItem);
+            if (helpIndex >= 0)
+                menuStrip1.Items.Insert(helpIndex, menuScheduler);
+            else
+                menuStrip1.Items.Add(menuScheduler);
+
+            // Start status bar refresh timer
+            _statusBarTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+            _statusBarTimer.Tick += (s, e) => UpdateSchedulerStatusBar();
+            _statusBarTimer.Start();
+            UpdateSchedulerStatusBar(); // initial update
+        }
+
+        /// <summary>
+        /// Shows the job list dialog (modeless, single-instance pattern).
+        /// </summary>
+        private void ShowJobListDialog()
+        {
+            // Scheduler services not available (no credential provider)
+            if (_jobStorage == null || _jobExecutionService == null ||
+                _schedulingService == null || _jobHistoryService == null || _jobExportService == null)
+                return;
+
+            // Stub: JobListDialog not yet created in this plan
+            // Will be wired when JobListDialog is available from a prior plan
+        }
+
+        /// <summary>
+        /// Updates the scheduler status bar label with active job count and next-run countdown.
+        /// </summary>
+        private void UpdateSchedulerStatusBar()
+        {
+            if (_statusScheduler == null || _jobStorage == null || _schedulingService == null)
+                return;
+
+            var activeCount = _jobStorage.Jobs.Values.Count(j => j.IsEnabled);
+
+            // Find next scheduled run across all enabled recurring jobs
+            string? nextJobName = null;
+            TimeSpan? timeUntilNext = null;
+
+            foreach (var job in _jobStorage.Jobs.Values)
+            {
+                if (!job.IsEnabled || job.ScheduleType != ScheduleType.Recurring ||
+                    string.IsNullOrEmpty(job.CronExpression))
+                    continue;
+
+                var nextRun = _schedulingService.GetNextRunLocal(job.CronExpression);
+                if (nextRun == null) continue;
+
+                var remaining = nextRun.Value - DateTime.Now;
+                if (remaining <= TimeSpan.Zero) continue;
+
+                if (timeUntilNext == null || remaining < timeUntilNext.Value)
+                {
+                    timeUntilNext = remaining;
+                    nextJobName = job.Name;
+                }
+            }
+
+            _statusScheduler.Text = SchedulerNotificationFormatter.FormatStatusBar(
+                activeCount, nextJobName, timeUntilNext);
+            _schedulerStatusDirty = false;
+        }
+
+        /// <summary>
+        /// Handles job completion events -- formats and appends notification to output panel.
+        /// </summary>
+        private void OnSchedulerJobCompleted(object? sender, JobRunResult result)
+        {
+            if (InvokeRequired) { BeginInvoke(() => OnSchedulerJobCompleted(sender, result)); return; }
+
+            var isRunNow = _runNowJobIds.Remove(result.JobId);
+            var duration = result.CompletedUtc - result.StartedUtc;
+
+            var line = SchedulerNotificationFormatter.FormatCompletion(
+                result.JobName, isRunNow, result.Success,
+                result.HostsSucceeded, result.HostsFailed,
+                duration, DateTime.Now);
+
+            AppendOutputText(Environment.NewLine + line + Environment.NewLine);
+            UpdateSchedulerStatusBar();
+        }
+
+        /// <summary>
+        /// Handles job state change events -- formats and appends notification to output panel.
+        /// </summary>
+        private void OnSchedulerJobStateChanged(object? sender, JobExecutionService.JobStateChangedEventArgs e)
+        {
+            if (InvokeRequired) { BeginInvoke(() => OnSchedulerJobStateChanged(sender, e)); return; }
+
+            var isRunNow = _runNowJobIds.Contains(e.JobId);
+            var line = SchedulerNotificationFormatter.FormatStateChange(
+                e.JobName, e.State, isRunNow, e.Message, DateTime.Now);
+
+            if (line != null)
+            {
+                AppendOutputText(Environment.NewLine + line + Environment.NewLine);
+            }
+
+            UpdateSchedulerStatusBar();
+        }
+
+        /// <summary>
+        /// Registers a job ID as a "Run Now" trigger so notifications use the correct prefix.
+        /// </summary>
+        internal void TrackRunNow(string jobId) => _runNowJobIds.Add(jobId);
 
         #endregion
 
