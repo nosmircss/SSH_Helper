@@ -52,15 +52,19 @@ namespace SSH_Helper.UI
 
         private SchedulingService? _schedulingService;
         private bool _suppressSyncEvents;
+        private bool _isRefreshingLayout;
 
         // Controls
+        private readonly Label _lblPresets;
         private readonly FlowLayoutPanel _presetPanel;
+        private readonly Label _lblFields;
         private readonly TableLayoutPanel _dropdownPanel;
         private readonly ComboBox _cboMinute;
         private readonly ComboBox _cboHour;
         private readonly ComboBox _cboDayOfMonth;
         private readonly ComboBox _cboMonth;
         private readonly ComboBox _cboDayOfWeek;
+        private readonly Label _lblExpression;
         private readonly TextBox _txtRawExpression;
         private readonly Label _lblDescription;
         private readonly Label _lblNextRun;
@@ -111,13 +115,16 @@ namespace SSH_Helper.UI
         public CronBuilderControl()
         {
             // Initialize controls
+            _lblPresets = new Label();
             _presetPanel = new FlowLayoutPanel();
+            _lblFields = new Label();
             _dropdownPanel = new TableLayoutPanel();
             _cboMinute = new ComboBox();
             _cboHour = new ComboBox();
             _cboDayOfMonth = new ComboBox();
             _cboMonth = new ComboBox();
             _cboDayOfWeek = new ComboBox();
+            _lblExpression = new Label();
             _txtRawExpression = new TextBox();
             _lblDescription = new Label();
             _lblNextRun = new Label();
@@ -127,6 +134,7 @@ namespace SSH_Helper.UI
             BuildLayout();
             WireEvents();
             ResumeLayout(true);
+            RefreshMeasuredLayout();
         }
 
         #endregion
@@ -163,21 +171,21 @@ namespace SSH_Helper.UI
 
         private void BuildPresetPanel(ref int yPos)
         {
-            var lblPresets = new Label
-            {
-                Text = "Presets:",
-                AutoSize = true,
-                Location = new Point(8, yPos),
-                Font = new Font(Font.FontFamily, Font.Size, FontStyle.Bold)
-            };
-            Controls.Add(lblPresets);
-            yPos += lblPresets.Height + 4;
+            _lblPresets.Text = "Presets:";
+            _lblPresets.AutoSize = true;
+            _lblPresets.Location = new Point(8, yPos);
+            _lblPresets.Font = new Font(Font.FontFamily, Font.Size, FontStyle.Bold);
+            Controls.Add(_lblPresets);
+            yPos += _lblPresets.Height + 4;
 
             _presetPanel.Location = new Point(8, yPos);
-            _presetPanel.Size = new Size(Width - 24, 64);
+            _presetPanel.Size = new Size(Width - 24, 32);
             _presetPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _presetPanel.WrapContents = true;
             _presetPanel.AutoSize = false;
+            _presetPanel.AutoScroll = false;
+            _presetPanel.Margin = Padding.Empty;
+            _presetPanel.Padding = Padding.Empty;
 
             foreach (var (label, _) in Presets)
             {
@@ -202,21 +210,20 @@ namespace SSH_Helper.UI
 
         private void BuildDropdownPanel(ref int yPos)
         {
-            var lblDropdowns = new Label
-            {
-                Text = "Fields:",
-                AutoSize = true,
-                Location = new Point(8, yPos),
-                Font = new Font(Font.FontFamily, Font.Size, FontStyle.Bold)
-            };
-            Controls.Add(lblDropdowns);
-            yPos += lblDropdowns.Height + 4;
+            _lblFields.Text = "Fields:";
+            _lblFields.AutoSize = true;
+            _lblFields.Location = new Point(8, yPos);
+            _lblFields.Font = new Font(Font.FontFamily, Font.Size, FontStyle.Bold);
+            Controls.Add(_lblFields);
+            yPos += _lblFields.Height + 4;
 
             _dropdownPanel.Location = new Point(8, yPos);
             _dropdownPanel.Size = new Size(Width - 24, 52);
             _dropdownPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _dropdownPanel.ColumnCount = 5;
             _dropdownPanel.RowCount = 2;
+            _dropdownPanel.Margin = Padding.Empty;
+            _dropdownPanel.Padding = Padding.Empty;
 
             // Equal column widths
             for (var i = 0; i < 5; i++)
@@ -269,15 +276,12 @@ namespace SSH_Helper.UI
 
         private void BuildRawExpressionRow(ref int yPos)
         {
-            var lblRaw = new Label
-            {
-                Text = "Expression:",
-                AutoSize = true,
-                Location = new Point(8, yPos),
-                Font = new Font(Font.FontFamily, Font.Size, FontStyle.Bold)
-            };
-            Controls.Add(lblRaw);
-            yPos += lblRaw.Height + 4;
+            _lblExpression.Text = "Expression:";
+            _lblExpression.AutoSize = true;
+            _lblExpression.Location = new Point(8, yPos);
+            _lblExpression.Font = new Font(Font.FontFamily, Font.Size, FontStyle.Bold);
+            Controls.Add(_lblExpression);
+            yPos += _lblExpression.Height + 4;
 
             _txtRawExpression.Location = new Point(8, yPos);
             _txtRawExpression.Size = new Size(Width - 24, 23);
@@ -323,6 +327,125 @@ namespace SSH_Helper.UI
             _lblValidation.Visible = false;
             Controls.Add(_lblValidation);
             yPos += _lblValidation.Height + 4;
+        }
+
+        private void RefreshMeasuredLayout()
+        {
+            if (_isRefreshingLayout || IsDisposed)
+            {
+                return;
+            }
+
+            var contentWidth = ClientSize.Width - Padding.Horizontal;
+            if (contentWidth <= 0)
+            {
+                return;
+            }
+
+            _isRefreshingLayout = true;
+            SuspendLayout();
+
+            try
+            {
+                var x = Padding.Left;
+                var y = Padding.Top;
+
+                y = LayoutSectionLabel(_lblPresets, x, y, contentWidth);
+
+                _presetPanel.Location = new Point(x, y);
+                _presetPanel.Width = contentWidth;
+                _presetPanel.Height = 1;
+                _presetPanel.PerformLayout();
+                _presetPanel.Height = MeasureFlowLayoutHeight(_presetPanel);
+                y += _presetPanel.Height + 8;
+
+                y = LayoutSectionLabel(_lblFields, x, y, contentWidth);
+
+                _dropdownPanel.Location = new Point(x, y);
+                _dropdownPanel.Width = contentWidth;
+                _dropdownPanel.Height = Math.Max(_dropdownPanel.GetPreferredSize(new Size(contentWidth, 0)).Height, 52);
+                y += _dropdownPanel.Height + 8;
+
+                y = LayoutSectionLabel(_lblExpression, x, y, contentWidth);
+
+                _txtRawExpression.Location = new Point(x, y);
+                _txtRawExpression.Width = contentWidth;
+                _txtRawExpression.Height = Math.Max(_txtRawExpression.PreferredHeight, 23);
+                y += _txtRawExpression.Height + 8;
+
+                y = LayoutSingleLineLabel(_lblDescription, x, y, contentWidth, reserveSpaceWhenHidden: true);
+                y = LayoutSingleLineLabel(_lblNextRun, x, y, contentWidth, reserveSpaceWhenHidden: true);
+                y = LayoutSingleLineLabel(_lblValidation, x, y, contentWidth, reserveSpaceWhenHidden: false);
+
+                var contentHeight = y + Padding.Bottom + 8;
+                if (AutoScrollMinSize.Height != contentHeight)
+                {
+                    AutoScrollMinSize = new Size(0, contentHeight);
+                }
+
+                if (MinimumSize.Width != 460 || MinimumSize.Height != contentHeight)
+                {
+                    MinimumSize = new Size(460, contentHeight);
+                }
+
+                if (Height != contentHeight)
+                {
+                    Height = contentHeight;
+                }
+            }
+            finally
+            {
+                ResumeLayout(true);
+                _isRefreshingLayout = false;
+            }
+        }
+
+        private static int LayoutSectionLabel(Label label, int x, int y, int width)
+        {
+            label.Location = new Point(x, y);
+            var size = label.GetPreferredSize(new Size(width, 0));
+            label.Size = size;
+            return y + size.Height + 4;
+        }
+
+        private static int LayoutSingleLineLabel(
+            Label label,
+            int x,
+            int y,
+            int width,
+            bool reserveSpaceWhenHidden)
+        {
+            label.Location = new Point(x, y);
+
+            if (!label.Visible && !reserveSpaceWhenHidden)
+            {
+                label.Size = new Size(width, 0);
+                return y;
+            }
+
+            var height = Math.Max(TextRenderer.MeasureText("Ag", label.Font).Height + 2, 20);
+            label.Size = new Size(width, height);
+            return y + height + 4;
+        }
+
+        private static int MeasureFlowLayoutHeight(FlowLayoutPanel flow)
+        {
+            var contentBottom = 0;
+            foreach (Control control in flow.Controls)
+            {
+                if (!control.Visible)
+                {
+                    continue;
+                }
+
+                var candidateBottom = control.Bottom + control.Margin.Bottom;
+                if (candidateBottom > contentBottom)
+                {
+                    contentBottom = candidateBottom;
+                }
+            }
+
+            return Math.Max(contentBottom, 0);
         }
 
         #endregion
@@ -461,6 +584,7 @@ namespace SSH_Helper.UI
                 _lblNextRun.Text = "Next run: --";
                 _lblValidation.Text = "Cron expression cannot be empty.";
                 _lblValidation.Visible = true;
+                RefreshMeasuredLayout();
                 return;
             }
 
@@ -471,6 +595,7 @@ namespace SSH_Helper.UI
                 _lblNextRun.Text = "Next run: --";
                 _lblValidation.Text = string.Empty;
                 _lblValidation.Visible = false;
+                RefreshMeasuredLayout();
                 return;
             }
 
@@ -481,6 +606,7 @@ namespace SSH_Helper.UI
                 _lblNextRun.Text = "Next run: --";
                 _lblValidation.Text = validationError;
                 _lblValidation.Visible = true;
+                RefreshMeasuredLayout();
                 return;
             }
 
@@ -497,6 +623,8 @@ namespace SSH_Helper.UI
             _lblNextRun.Text = nextRun.HasValue
                 ? $"Next run: {nextRun.Value:g}"
                 : "Next run: --";
+
+            RefreshMeasuredLayout();
         }
 
         #endregion
@@ -535,6 +663,25 @@ namespace SSH_Helper.UI
 
             // Validation label stays red regardless of theme
             _lblValidation.ForeColor = Color.Red;
+            RefreshMeasuredLayout();
+        }
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            RefreshMeasuredLayout();
+        }
+
+        protected override void OnFontChanged(EventArgs e)
+        {
+            base.OnFontChanged(e);
+            RefreshMeasuredLayout();
+        }
+
+        protected override void OnCreateControl()
+        {
+            base.OnCreateControl();
+            RefreshMeasuredLayout();
         }
 
         #endregion

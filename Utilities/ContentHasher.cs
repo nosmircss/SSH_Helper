@@ -4,7 +4,7 @@ using System.Text;
 namespace SSH_Helper.Utilities
 {
     /// <summary>
-    /// Produces deterministic SHA256 content hashes for preset drift detection.
+    /// Produces deterministic SHA256 content hashes for scheduler target snapshots.
     /// </summary>
     public static class ContentHasher
     {

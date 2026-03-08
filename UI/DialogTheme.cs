@@ -292,6 +292,7 @@ namespace SSH_Helper.UI
                 case ListBox:
                 case TreeView:
                 case ListView:
+                case DataGridView:
                 case TextBox txt when txt.Multiline:
                 case RichTextBox:
                     ApplyScrollbarThemeToHandle(control.Handle, darkMode);

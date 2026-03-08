@@ -339,5 +339,73 @@ namespace SSH_Helper.Tests.Services
         }
 
         #endregion
+
+        #region Legacy Drift Compatibility
+
+        [Fact]
+        public void Save_ModifiedPreset_DoesNotAlterLegacyDriftFlag()
+        {
+            _presetManager.SetJobStorageService(_jobStorageService);
+            _presetManager.Load();
+            _presetManager.Save("DriftPreset", new PresetInfo { Commands = "echo before" });
+
+            var job = new JobDefinition
+            {
+                Name = "Drift Job",
+                TargetType = JobTargetType.Preset,
+                TargetName = "DriftPreset",
+                HasDriftWarning = true
+            };
+            _jobStorageService.Save(job);
+
+            _presetManager.Save("DriftPreset", new PresetInfo { Commands = "echo after" });
+
+            _jobStorageService.Get(job.Id)!.HasDriftWarning.Should().BeTrue();
+        }
+
+        [Fact]
+        public void Save_NewDirectChildPreset_DoesNotSetLegacyDriftFlag()
+        {
+            _presetManager.SetJobStorageService(_jobStorageService);
+            _presetManager.Load();
+            _presetManager.CreateFolder("Schedulers");
+            _presetManager.Save("FirstPreset", new PresetInfo { Commands = "echo first", Folder = "Schedulers" });
+
+            var job = new JobDefinition
+            {
+                Name = "Folder Drift Job",
+                TargetType = JobTargetType.Folder,
+                TargetName = "Schedulers",
+                HasDriftWarning = false
+            };
+            _jobStorageService.Save(job);
+
+            _presetManager.Save("SecondPreset", new PresetInfo { Commands = "echo second", Folder = "Schedulers" });
+
+            _jobStorageService.Get(job.Id)!.HasDriftWarning.Should().BeFalse();
+        }
+
+        [Fact]
+        public void RenameFolder_DoesNotRecomputeLegacyDriftFlag()
+        {
+            _presetManager.SetJobStorageService(_jobStorageService);
+            _presetManager.Load();
+            _presetManager.CreateFolder("EmptyFolder");
+
+            var job = new JobDefinition
+            {
+                Name = "Empty Folder Job",
+                TargetType = JobTargetType.Folder,
+                TargetName = "EmptyFolder",
+                HasDriftWarning = true
+            };
+            _jobStorageService.Save(job);
+
+            _presetManager.RenameFolder("EmptyFolder", "RenamedFolder");
+
+            _jobStorageService.Get(job.Id)!.HasDriftWarning.Should().BeTrue();
+        }
+
+        #endregion
     }
 }

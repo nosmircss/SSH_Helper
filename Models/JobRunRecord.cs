@@ -52,6 +52,33 @@ namespace SSH_Helper.Models
         public string? ErrorMessage { get; set; }
 
         /// <summary>
+        /// Number of consecutive identical failures collapsed into this record.
+        /// Zero indicates legacy data that predates failure-streak tracking.
+        /// </summary>
+        public int ConsecutiveFailureCount { get; set; }
+
+        /// <summary>
+        /// Whether this record represents a skipped run recorded during scheduler startup.
+        /// </summary>
+        public bool WasSkipped { get; set; }
+
+        /// <summary>
+        /// Number of skipped recurring runs summarized by this entry.
+        /// Zero indicates a legacy single skipped record without summary metadata.
+        /// </summary>
+        public int SkippedRunCount { get; set; }
+
+        /// <summary>
+        /// Earliest missed scheduled time covered by this skipped summary, in UTC.
+        /// </summary>
+        public DateTime? SkippedWindowStartUtc { get; set; }
+
+        /// <summary>
+        /// Latest missed scheduled time covered by this skipped summary, in UTC.
+        /// </summary>
+        public DateTime? SkippedWindowEndUtc { get; set; }
+
+        /// <summary>
         /// File name of the corresponding payload file (e.g., "abc123.json").
         /// </summary>
         public string RunFileName { get; set; } = string.Empty;

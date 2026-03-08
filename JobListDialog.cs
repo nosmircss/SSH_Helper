@@ -2,6 +2,7 @@ using Newtonsoft.Json;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
 using SSH_Helper.UI;
+using SSH_Helper.Utilities;
 
 namespace SSH_Helper
 {
@@ -19,6 +20,8 @@ namespace SSH_Helper
         private readonly SchedulingService _schedulingService;
         private readonly PresetManager _presetManager;
         private readonly JobExportService _exportService;
+        private readonly ICredentialProvider? _credentialProvider;
+        private readonly Func<string, Task<bool>>? _runNowInvoker;
         private readonly Func<IReadOnlyList<Dictionary<string, string>>>? _getMainGridRows;
         private readonly Func<IReadOnlyList<string>>? _getMainGridColumns;
         private readonly bool _darkMode;
@@ -37,6 +40,10 @@ namespace SSH_Helper
 
         // Track selected job for preservation across refreshes
         private string? _selectedJobId;
+        private string? _selectedHistoryRunFileName;
+        private bool _suppressJobSelectionChanged;
+        private bool _suppressHistorySelectionChanged;
+        private readonly Dictionary<string, JobRunRecord> _visibleHistoryRuns = new(StringComparer.Ordinal);
 
         #endregion
 
@@ -49,6 +56,8 @@ namespace SSH_Helper
             SchedulingService schedulingService,
             PresetManager presetManager,
             JobExportService exportService,
+            ICredentialProvider? credentialProvider,
+            Func<string, Task<bool>>? runNowInvoker,
             Func<IReadOnlyList<Dictionary<string, string>>>? getMainGridRows,
             Func<IReadOnlyList<string>>? getMainGridColumns,
             bool darkMode,
@@ -61,6 +70,8 @@ namespace SSH_Helper
             _schedulingService = schedulingService ?? throw new ArgumentNullException(nameof(schedulingService));
             _presetManager = presetManager ?? throw new ArgumentNullException(nameof(presetManager));
             _exportService = exportService ?? throw new ArgumentNullException(nameof(exportService));
+            _credentialProvider = credentialProvider;
+            _runNowInvoker = runNowInvoker;
             _getMainGridRows = getMainGridRows;
             _getMainGridColumns = getMainGridColumns;
             _darkMode = darkMode;
@@ -99,7 +110,7 @@ namespace SSH_Helper
 
             _gridHistory = BuildHistoryGrid();
 
-            _btnViewOutput = new Button { Text = "View Output", AutoSize = true, Margin = new Padding(4) };
+            _btnViewOutput = new Button { Text = "View Output", AutoSize = true, Margin = new Padding(4), Enabled = false };
             _btnClearHistory = new Button { Text = "Clear History", AutoSize = true, Margin = new Padding(4) };
 
             var historyButtonPanel = new FlowLayoutPanel
@@ -265,7 +276,7 @@ namespace SSH_Helper
                 AllowUserToDeleteRows = false,
                 AllowUserToResizeRows = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = true,
+                MultiSelect = false,
                 RowHeadersVisible = false,
                 AutoGenerateColumns = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
@@ -382,6 +393,7 @@ namespace SSH_Helper
             // Grid events
             _gridJobs.SelectionChanged += OnJobSelectionChanged;
             _gridJobs.CellDoubleClick += OnJobGridDoubleClick;
+            _gridHistory.SelectionChanged += OnHistorySelectionChanged;
             _gridHistory.CellDoubleClick += OnHistoryGridDoubleClick;
 
             // Button events
@@ -440,18 +452,10 @@ namespace SSH_Helper
         {
             if (InvokeRequired)
             {
-                BeginInvoke(() =>
-                {
-                    RefreshJobList();
-                    // If the completed job is the selected one, also refresh history
-                    if (_selectedJobId == e.JobId)
-                        RefreshHistory();
-                });
+                BeginInvoke(RefreshJobList);
                 return;
             }
             RefreshJobList();
-            if (_selectedJobId == e.JobId)
-                RefreshHistory();
         }
 
         #endregion
@@ -460,133 +464,191 @@ namespace SSH_Helper
 
         private void RefreshJobList()
         {
-            // Preserve selection
-            var savedJobId = GetSelectedJobId();
+            // Preserve the logical active job even if WinForms clears selection during the rebuild.
+            var savedJobId = _selectedJobId;
+            var currentJobId = GetCurrentGridJobId();
 
             _gridJobs.SuspendLayout();
-            _gridJobs.Rows.Clear();
+            _suppressJobSelectionChanged = true;
 
-            var jobs = _jobStorage.Jobs.Values.OrderBy(j => j.Name).ToList();
-
-            foreach (var job in jobs)
+            try
             {
-                // Compute schedule description
-                var scheduleText = GetScheduleDescription(job);
+                _gridJobs.Rows.Clear();
 
-                // Compute next run
-                var nextRunText = GetNextRunText(job);
+                var jobs = _jobStorage.Jobs.Values.OrderBy(j => j.Name).ToList();
 
-                // Compute last result
-                var lastResultText = GetLastResultText(job);
-
-                // Target display
-                var targetText = job.TargetType == JobTargetType.Folder
-                    ? $"[F] {job.TargetName}"
-                    : job.TargetName;
-
-                // Display name with drift indicator
-                var displayName = job.HasDriftWarning
-                    ? $"{job.Name} [DRIFT]"
-                    : job.Name;
-
-                var rowIndex = _gridJobs.Rows.Add(
-                    displayName,
-                    job.IsEnabled,
-                    scheduleText,
-                    nextRunText,
-                    lastResultText,
-                    targetText);
-
-                var row = _gridJobs.Rows[rowIndex];
-                row.Tag = job.Id;
-
-                // Visual indicators for running and drift
-                var nameCell = row.Cells["Name"];
-                if (_executionService.IsJobRunning(job.Id))
+                foreach (var job in jobs)
                 {
-                    nameCell.Style.ForeColor = _darkMode
-                        ? Color.FromArgb(0, 255, 0)  // Lime for dark mode
-                        : Color.FromArgb(0, 128, 0);  // Green for light mode
-                }
-                else if (job.HasDriftWarning)
-                {
-                    nameCell.Style.ForeColor = Color.Orange;
-                }
+                    // Compute schedule description
+                    var scheduleText = GetScheduleDescription(job);
 
-                // Disabled job visual
-                if (!job.IsEnabled)
-                {
-                    row.DefaultCellStyle.ForeColor = _darkMode
-                        ? DialogTheme.DarkSecondaryText
-                        : DialogTheme.LightSecondaryText;
-                }
-            }
+                    // Compute next run
+                    var nextRunText = GetNextRunText(job);
 
-            _gridJobs.ResumeLayout();
+                    // Compute last result
+                    var lastResultText = GetLastResultText(job);
 
-            // Restore selection
-            if (savedJobId != null)
-            {
-                foreach (DataGridViewRow row in _gridJobs.Rows)
-                {
-                    if (row.Tag as string == savedJobId)
+                    // Target display
+                    var targetText = job.TargetType == JobTargetType.Folder
+                        ? $"[F] {job.TargetName}"
+                        : job.TargetName;
+
+                    var rowIndex = _gridJobs.Rows.Add(
+                        job.Name,
+                        job.IsEnabled,
+                        scheduleText,
+                        nextRunText,
+                        lastResultText,
+                        targetText);
+
+                    var row = _gridJobs.Rows[rowIndex];
+                    row.Tag = job.Id;
+
+                    // Visual indicators for running jobs
+                    var nameCell = row.Cells["Name"];
+                    if (_executionService.IsJobRunning(job.Id))
                     {
-                        row.Selected = true;
-                        _gridJobs.CurrentCell = row.Cells[0];
-                        break;
+                        nameCell.Style.ForeColor = _darkMode
+                            ? Color.FromArgb(0, 255, 0)  // Lime for dark mode
+                            : Color.FromArgb(0, 128, 0);  // Green for light mode
+                    }
+
+                    // Disabled job visual
+                    if (!job.IsEnabled)
+                    {
+                        row.DefaultCellStyle.ForeColor = _darkMode
+                            ? DialogTheme.DarkSecondaryText
+                            : DialogTheme.LightSecondaryText;
                     }
                 }
+
+                _selectedJobId = SelectActiveJob(savedJobId, currentJobId);
+            }
+            finally
+            {
+                _suppressJobSelectionChanged = false;
+                _gridJobs.ResumeLayout();
             }
 
-            _selectedJobId = GetSelectedJobId();
+            RefreshHistory(_selectedJobId);
+        }
+
+        private string? SelectActiveJob(string? preferredJobId, string? secondaryJobId)
+        {
+            _gridJobs.ClearSelection();
+
+            if (TrySelectJobRow(preferredJobId))
+                return preferredJobId;
+
+            if (TrySelectJobRow(secondaryJobId))
+                return secondaryJobId;
+
+            foreach (DataGridViewRow row in _gridJobs.Rows)
+            {
+                if (TrySelectJobRow(row.Tag as string))
+                {
+                    return row.Tag as string;
+                }
+            }
+
+            _gridJobs.CurrentCell = null;
+            return null;
+        }
+
+        private bool TrySelectJobRow(string? jobId)
+        {
+            if (string.IsNullOrEmpty(jobId))
+            {
+                return false;
+            }
+
+            foreach (DataGridViewRow row in _gridJobs.Rows)
+            {
+                if (!string.Equals(row.Tag as string, jobId, StringComparison.Ordinal))
+                    continue;
+
+                row.Selected = true;
+                _gridJobs.CurrentCell = row.Cells[0];
+                return true;
+            }
+
+            return false;
         }
 
         private void RefreshHistory()
+            => RefreshHistory(GetActiveJobId());
+
+        private void RefreshHistory(string? jobId)
         {
-            _gridHistory.Rows.Clear();
+            var savedRunFileName = _selectedHistoryRunFileName ?? GetCurrentGridHistoryRunFileName();
 
-            var jobId = GetSelectedJobId();
-            if (string.IsNullOrEmpty(jobId))
-                return;
+            _gridHistory.SuspendLayout();
+            _suppressHistorySelectionChanged = true;
 
-            var runs = _historyService.GetRunsForJob(jobId);
-
-            foreach (var run in runs)
+            try
             {
-                var startedText = run.CompletedUtc.ToLocalTime().ToString("g");
-                var duration = run.CompletedUtc - run.StartedUtc;
-                var durationText = duration.TotalHours >= 1
-                    ? duration.ToString(@"hh\:mm\:ss")
-                    : duration.ToString(@"mm\:ss");
+                _gridHistory.Rows.Clear();
+                _visibleHistoryRuns.Clear();
 
-                var total = run.HostsSucceeded + run.HostsFailed;
-                var resultText = run.Success
-                    ? $"OK ({run.HostsSucceeded}/{total})"
-                    : $"FAIL ({run.HostsSucceeded}/{total})";
-
-                var errorText = run.ErrorMessage ?? string.Empty;
-
-                var rowIndex = _gridHistory.Rows.Add(
-                    startedText,
-                    durationText,
-                    resultText,
-                    errorText);
-
-                var row = _gridHistory.Rows[rowIndex];
-                row.Tag = run.RunFileName;
-
-                // Color-code result
-                var resultCell = row.Cells["Result"];
-                if (run.Success)
+                if (string.IsNullOrEmpty(jobId))
                 {
-                    resultCell.Style.ForeColor = _darkMode
-                        ? Color.FromArgb(0, 255, 0)
-                        : Color.FromArgb(0, 128, 0);
+                    _selectedHistoryRunFileName = null;
+                    _gridHistory.CurrentCell = null;
+                    UpdateHistoryActionState();
+                    return;
                 }
-                else
+
+                var runs = _historyService.GetRunsForJob(jobId);
+
+                foreach (var run in runs)
                 {
-                    resultCell.Style.ForeColor = Color.FromArgb(220, 53, 69);
+                    var startedText = run.StartedUtc.ToLocalTime().ToString("g");
+                    var duration = run.CompletedUtc >= run.StartedUtc
+                        ? run.CompletedUtc - run.StartedUtc
+                        : TimeSpan.Zero;
+                    var durationText = duration.TotalHours >= 1
+                        ? duration.ToString(@"hh\:mm\:ss")
+                        : duration.ToString(@"mm\:ss");
+
+                    var resultText = GetRunResultText(run);
+
+                    var errorText = run.ErrorMessage ?? string.Empty;
+
+                    var rowIndex = _gridHistory.Rows.Add(
+                        startedText,
+                        durationText,
+                        resultText,
+                        errorText);
+
+                    var row = _gridHistory.Rows[rowIndex];
+                    row.Tag = run.RunFileName;
+                    _visibleHistoryRuns[run.RunFileName] = run;
+
+                    // Color-code result
+                    var resultCell = row.Cells["Result"];
+                    if (run.WasSkipped)
+                    {
+                        resultCell.Style.ForeColor = Color.Orange;
+                    }
+                    else if (run.Success)
+                    {
+                        resultCell.Style.ForeColor = _darkMode
+                            ? Color.FromArgb(0, 255, 0)
+                            : Color.FromArgb(0, 128, 0);
+                    }
+                    else
+                    {
+                        resultCell.Style.ForeColor = Color.FromArgb(220, 53, 69);
+                    }
                 }
+
+                _selectedHistoryRunFileName = SelectActiveHistoryRun(savedRunFileName);
+                UpdateHistoryActionState();
+            }
+            finally
+            {
+                _suppressHistorySelectionChanged = false;
+                _gridHistory.ResumeLayout();
             }
         }
 
@@ -632,10 +694,7 @@ namespace SSH_Helper
                 return "Never run";
 
             var lastRun = runs[0];
-            var total = lastRun.HostsSucceeded + lastRun.HostsFailed;
-            return lastRun.Success
-                ? $"OK ({lastRun.HostsSucceeded}/{total})"
-                : $"FAIL ({lastRun.HostsSucceeded}/{total})";
+            return GetRunResultText(lastRun);
         }
 
         private string? GetSelectedJobId()
@@ -645,10 +704,36 @@ namespace SSH_Helper
             return _gridJobs.SelectedRows[0].Tag as string;
         }
 
+        private string? GetCurrentGridJobId()
+        {
+            if (_gridJobs.CurrentRow?.Tag is string currentRowJobId)
+                return currentRowJobId;
+
+            return GetSelectedJobId();
+        }
+
+        private string? GetActiveJobId()
+            => _selectedJobId ?? GetCurrentGridJobId();
+
         private List<JobDefinition> GetSelectedJobs()
         {
             var jobs = new List<JobDefinition>();
-            foreach (DataGridViewRow row in _gridJobs.SelectedRows)
+            var selectedRows = _gridJobs.SelectedRows;
+
+            if (selectedRows.Count == 0)
+            {
+                var activeJobId = GetActiveJobId();
+                if (activeJobId == null)
+                    return jobs;
+
+                var activeJob = _jobStorage.Get(activeJobId);
+                if (activeJob != null)
+                    jobs.Add(activeJob);
+
+                return jobs;
+            }
+
+            foreach (DataGridViewRow row in selectedRows)
             {
                 var jobId = row.Tag as string;
                 if (jobId != null)
@@ -668,14 +753,118 @@ namespace SSH_Helper
             return _gridHistory.SelectedRows[0].Tag as string;
         }
 
+        private string? GetCurrentGridHistoryRunFileName()
+        {
+            if (_gridHistory.CurrentRow?.Tag is string currentRowRunFileName)
+                return currentRowRunFileName;
+
+            return GetSelectedHistoryRunFileName();
+        }
+
+        private string? GetActiveHistoryRunFileName()
+            => _selectedHistoryRunFileName ?? GetCurrentGridHistoryRunFileName();
+
+        private JobRunRecord? GetActiveHistoryRunRecord()
+        {
+            var runFileName = GetActiveHistoryRunFileName();
+            if (string.IsNullOrEmpty(runFileName))
+                return null;
+
+            return _visibleHistoryRuns.TryGetValue(runFileName, out var run)
+                ? run
+                : null;
+        }
+
+        private string? SelectActiveHistoryRun(string? preferredRunFileName)
+        {
+            _gridHistory.ClearSelection();
+
+            if (TrySelectHistoryRunRow(preferredRunFileName))
+                return preferredRunFileName;
+
+            foreach (DataGridViewRow row in _gridHistory.Rows)
+            {
+                if (TrySelectHistoryRunRow(row.Tag as string))
+                {
+                    return row.Tag as string;
+                }
+            }
+
+            _gridHistory.CurrentCell = null;
+            return null;
+        }
+
+        private bool TrySelectHistoryRunRow(string? runFileName)
+        {
+            if (string.IsNullOrEmpty(runFileName))
+                return false;
+
+            foreach (DataGridViewRow row in _gridHistory.Rows)
+            {
+                if (!string.Equals(row.Tag as string, runFileName, StringComparison.Ordinal))
+                    continue;
+
+                row.Selected = true;
+                _gridHistory.CurrentCell = row.Cells[0];
+                return true;
+            }
+
+            return false;
+        }
+
+        private void UpdateHistoryActionState()
+        {
+            var run = GetActiveHistoryRunRecord();
+            _btnViewOutput.Enabled = run != null && !IsSkippedSummary(run);
+        }
+
+        private static bool IsSkippedSummary(JobRunRecord run)
+            => run.WasSkipped && run.SkippedRunCount > 0;
+
+        private static int GetSkippedRunCount(JobRunRecord run)
+            => run.WasSkipped ? Math.Max(run.SkippedRunCount, 1) : 0;
+
+        private static int GetConsecutiveFailureCount(JobRunRecord run)
+            => !run.Success && !run.WasSkipped ? Math.Max(run.ConsecutiveFailureCount, 1) : 0;
+
+        private static string GetRunResultText(JobRunRecord run)
+        {
+            if (run.WasSkipped)
+            {
+                var skippedRunCount = GetSkippedRunCount(run);
+                return skippedRunCount > 1
+                    ? $"SKIPPED ({skippedRunCount})"
+                    : "SKIPPED";
+            }
+
+            var total = run.HostsSucceeded + run.HostsFailed;
+            return run.Success
+                ? $"OK ({run.HostsSucceeded}/{total})"
+                : GetConsecutiveFailureCount(run) > 1
+                    ? $"FAIL x{GetConsecutiveFailureCount(run)} ({run.HostsSucceeded}/{total})"
+                    : $"FAIL ({run.HostsSucceeded}/{total})";
+        }
+
         #endregion
 
         #region Grid Event Handlers
 
         private void OnJobSelectionChanged(object? sender, EventArgs e)
         {
-            _selectedJobId = GetSelectedJobId();
-            RefreshHistory();
+            if (_suppressJobSelectionChanged)
+                return;
+
+            _selectedJobId = GetCurrentGridJobId();
+            RefreshHistory(_selectedJobId);
+        }
+
+        private void OnHistorySelectionChanged(object? sender, EventArgs e)
+        {
+            if (_suppressHistorySelectionChanged)
+                return;
+
+            _selectedHistoryRunFileName = GetCurrentGridHistoryRunFileName();
+            UpdateHistoryActionState();
         }
 
         private void OnJobGridDoubleClick(object? sender, DataGridViewCellEventArgs e)
@@ -721,6 +910,7 @@ namespace SSH_Helper
         {
             using var editor = new JobEditorDialog(
                 null, _presetManager, _schedulingService,
+                _credentialProvider,
                 _getMainGridRows, _getMainGridColumns,
                 _darkMode, _fontFamily, _fontSize);
 
@@ -746,24 +936,24 @@ namespace SSH_Helper
 
         private async void OnRunNowClick(object? sender, EventArgs e)
         {
-            var jobId = GetSelectedJobId();
+            var jobId = GetActiveJobId();
             if (jobId == null) return;
 
             var job = _jobStorage.Get(jobId);
             if (job == null) return;
 
-            var result = await _executionService.RunNowAsync(jobId);
+            var result = await RunNowJobAsync(jobId);
             if (!result)
             {
                 DialogTheme.Show(this,
-                    $"Cannot run job '{job.Name}'. It may already be running or have a drift warning.",
+                    $"Cannot run job '{job.Name}'. It may already be running.",
                     "Run Now", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
         private void OnEnableDisableClick(object? sender, EventArgs e)
         {
-            var jobId = GetSelectedJobId();
+            var jobId = GetActiveJobId();
             if (jobId == null) return;
 
             var job = _jobStorage.Get(jobId);
@@ -792,7 +982,7 @@ namespace SSH_Helper
 
         private void OnDuplicateClick(object? sender, EventArgs e)
         {
-            var jobId = GetSelectedJobId();
+            var jobId = GetActiveJobId();
             if (jobId == null) return;
 
             var job = _jobStorage.Get(jobId);
@@ -936,7 +1126,7 @@ namespace SSH_Helper
 
         private void OnClearHistoryClick(object? sender, EventArgs e)
         {
-            var jobId = GetSelectedJobId();
+            var jobId = GetActiveJobId();
             if (jobId == null) return;
 
             var job = _jobStorage.Get(jobId);
@@ -948,7 +1138,7 @@ namespace SSH_Helper
                 return;
 
             _historyService.DeleteAllHistory(jobId);
-            RefreshHistory();
+            RefreshHistory(jobId);
         }
 
         #endregion
@@ -957,7 +1147,7 @@ namespace SSH_Helper
 
         private void EditSelectedJob()
         {
-            var jobId = GetSelectedJobId();
+            var jobId = GetActiveJobId();
             if (jobId == null) return;
 
             var job = _jobStorage.Get(jobId);
@@ -965,6 +1155,7 @@ namespace SSH_Helper
 
             using var editor = new JobEditorDialog(
                 job, _presetManager, _schedulingService,
+                _credentialProvider,
                 _getMainGridRows, _getMainGridColumns,
                 _darkMode, _fontFamily, _fontSize);
 
@@ -985,7 +1176,7 @@ namespace SSH_Helper
 
         private void DeleteSelectedJob()
         {
-            var jobId = GetSelectedJobId();
+            var jobId = GetActiveJobId();
             if (jobId == null) return;
 
             var job = _jobStorage.Get(jobId);
@@ -1003,12 +1194,21 @@ namespace SSH_Helper
 
         private void ViewSelectedOutput()
         {
-            var jobId = GetSelectedJobId();
-            var runFileName = GetSelectedHistoryRunFileName();
+            var jobId = GetActiveJobId();
+            var runFileName = GetActiveHistoryRunFileName();
 
             if (jobId == null || runFileName == null)
             {
                 DialogTheme.Show(this, "Select a run in the history list to view output.",
+                    "View Output", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var run = GetActiveHistoryRunRecord();
+            if (run != null && IsSkippedSummary(run))
+            {
+                DialogTheme.Show(this,
+                    "Output is not available for skipped downtime summary entries.",
                     "View Output", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -1063,6 +1263,11 @@ namespace SSH_Helper
                 try
                 {
                     entry.Job.Name = entry.ResolvedName;
+                    if (entry.MissingTarget)
+                    {
+                        SchedulerJobIntegrityUtilities.ApplyMissingTargetImportState(entry.Job);
+                    }
+
                     _jobStorage.Save(entry.Job);
                     savedCount++;
                 }
@@ -1080,6 +1285,16 @@ namespace SSH_Helper
                     $"Imported {savedCount} job(s) successfully.",
                     "Import Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+        }
+
+        private Task<bool> RunNowJobAsync(string jobId)
+        {
+            if (_runNowInvoker != null)
+            {
+                return _runNowInvoker(jobId);
+            }
+
+            return _executionService.RunNowAsync(jobId);
         }
 
         #endregion

@@ -244,6 +244,30 @@ public class SchedulingServiceMissedRunIntegrationTests : IDisposable
         skipped.Should().BeEmpty();
     }
 
+    [Fact]
+    public void DetectMissedRunSummaries_LongDowntime_CompressesMultipleMissesIntoOneSummary()
+    {
+        var jobs = new Dictionary<string, JobDefinition>
+        {
+            ["job1"] = new JobDefinition
+            {
+                Id = "job1",
+                Name = "Every Minute Job",
+                IsEnabled = true,
+                ScheduleType = ScheduleType.Recurring,
+                CronExpression = "*/1 * * * *"
+            }
+        };
+
+        var lastShutdown = DateTime.UtcNow.AddMinutes(-30);
+        var skipped = _scheduling.DetectMissedRuns(jobs, lastShutdown);
+        var summaries = _scheduling.DetectMissedRunSummaries(jobs, lastShutdown);
+
+        skipped.Count.Should().BeGreaterThan(1);
+        summaries.Should().ContainSingle();
+        summaries[0].MissedRunCount.Should().Be(skipped.Count);
+    }
+
     #endregion
 
     #region One-Time Completion Tests

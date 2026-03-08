@@ -40,7 +40,8 @@ public sealed class JobHistoryServiceTests : IDisposable
         bool success = true,
         int hostsSucceeded = 2,
         int hostsFailed = 0,
-        List<JobHostOutput>? hostOutputs = null)
+        List<JobHostOutput>? hostOutputs = null,
+        string? errorMessage = null)
     {
         var now = DateTime.UtcNow;
         return new JobRunResult
@@ -52,6 +53,7 @@ public sealed class JobHistoryServiceTests : IDisposable
             Success = success,
             HostsSucceeded = hostsSucceeded,
             HostsFailed = hostsFailed,
+            ErrorMessage = errorMessage,
             HostOutputs = hostOutputs ?? new List<JobHostOutput>
             {
                 new()
@@ -159,6 +161,245 @@ public sealed class JobHistoryServiceTests : IDisposable
         _service.SaveRun(result);
 
         Directory.Exists(jobDir).Should().BeTrue("job directory should be created by SaveRun");
+    }
+
+    [Fact]
+    public void SaveRun_ConsecutiveMatchingFailures_CollapsesIntoSingleRecordWithIncrementedCount()
+    {
+        var firstFailureUtc = new DateTime(2026, 3, 8, 14, 10, 0, DateTimeKind.Utc);
+        var secondFailureUtc = firstFailureUtc.AddMinutes(5);
+
+        var firstFailure = CreateTestResult(
+            success: false,
+            hostsSucceeded: 0,
+            hostsFailed: 1,
+            hostOutputs: new List<JobHostOutput>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.1",
+                    Output = "first failure output",
+                    Success = false,
+                    ErrorMessage = "Authentication failed"
+                }
+            },
+            errorMessage: "Authentication failed");
+        firstFailure.StartedUtc = firstFailureUtc.AddSeconds(-30);
+        firstFailure.CompletedUtc = firstFailureUtc;
+
+        var secondFailure = CreateTestResult(
+            success: false,
+            hostsSucceeded: 0,
+            hostsFailed: 1,
+            hostOutputs: new List<JobHostOutput>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.1",
+                    Output = "second failure output",
+                    Success = false,
+                    ErrorMessage = "Authentication failed"
+                }
+            },
+            errorMessage: "Authentication failed");
+        secondFailure.StartedUtc = secondFailureUtc.AddSeconds(-20);
+        secondFailure.CompletedUtc = secondFailureUtc;
+
+        _service.SaveRun(firstFailure);
+        _service.SaveRun(secondFailure);
+
+        var runs = _service.GetRunsForJob("testjob1");
+        runs.Should().HaveCount(1);
+        runs[0].Success.Should().BeFalse();
+        runs[0].ConsecutiveFailureCount.Should().Be(2);
+        runs[0].StartedUtc.Should().Be(secondFailure.StartedUtc);
+        runs[0].CompletedUtc.Should().Be(secondFailure.CompletedUtc);
+        runs[0].ErrorMessage.Should().Be("Authentication failed");
+
+        var payload = _service.LoadRunPayload("testjob1", runs[0].RunFileName);
+        payload.Should().NotBeNull();
+        payload!.ConsecutiveFailureCount.Should().Be(2);
+        payload.HostOutputs.Should().ContainSingle();
+        payload.HostOutputs[0].Output.Should().Be("second failure output");
+
+        var jsonFiles = Directory.GetFiles(Path.Combine(_historyPath, "testjob1"), "*.json");
+        jsonFiles.Should().HaveCount(2, "index.json plus one collapsed payload file should remain");
+    }
+
+    [Fact]
+    public void SaveRun_DifferentFailure_DoesNotCollapse()
+    {
+        var authFailure = CreateTestResult(
+            success: false,
+            hostsSucceeded: 0,
+            hostsFailed: 1,
+            hostOutputs: new List<JobHostOutput>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.1",
+                    Output = "auth output",
+                    Success = false,
+                    ErrorMessage = "Authentication failed"
+                }
+            },
+            errorMessage: "Authentication failed");
+
+        var connectionFailure = CreateTestResult(
+            success: false,
+            hostsSucceeded: 0,
+            hostsFailed: 1,
+            hostOutputs: new List<JobHostOutput>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.1",
+                    Output = "connection output",
+                    Success = false,
+                    ErrorMessage = "Connection failed"
+                }
+            },
+            errorMessage: "Connection failed");
+
+        _service.SaveRun(authFailure);
+        _service.SaveRun(connectionFailure);
+
+        var runs = _service.GetRunsForJob("testjob1");
+        runs.Should().HaveCount(2);
+        runs[0].ErrorMessage.Should().Be("Connection failed");
+        runs[0].ConsecutiveFailureCount.Should().Be(1);
+        runs[1].ErrorMessage.Should().Be("Authentication failed");
+        runs[1].ConsecutiveFailureCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void SaveRun_SuccessBetweenMatchingFailures_DoesNotCollapseAcrossReset()
+    {
+        var failure = CreateTestResult(
+            success: false,
+            hostsSucceeded: 0,
+            hostsFailed: 1,
+            hostOutputs: new List<JobHostOutput>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.1",
+                    Output = "auth output",
+                    Success = false,
+                    ErrorMessage = "Authentication failed"
+                }
+            },
+            errorMessage: "Authentication failed");
+
+        var success = CreateTestResult(
+            success: true,
+            hostsSucceeded: 1,
+            hostsFailed: 0,
+            hostOutputs: new List<JobHostOutput>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.1",
+                    Output = "success output",
+                    Success = true
+                }
+            });
+
+        var repeatedFailure = CreateTestResult(
+            success: false,
+            hostsSucceeded: 0,
+            hostsFailed: 1,
+            hostOutputs: new List<JobHostOutput>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.1",
+                    Output = "auth output again",
+                    Success = false,
+                    ErrorMessage = "Authentication failed"
+                }
+            },
+            errorMessage: "Authentication failed");
+
+        _service.SaveRun(failure);
+        _service.SaveRun(success);
+        _service.SaveRun(repeatedFailure);
+
+        var runs = _service.GetRunsForJob("testjob1");
+        runs.Should().HaveCount(3);
+        runs[0].Success.Should().BeFalse();
+        runs[0].ConsecutiveFailureCount.Should().Be(1);
+        runs[1].Success.Should().BeTrue();
+        runs[2].Success.Should().BeFalse();
+        runs[2].ConsecutiveFailureCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void SaveSkippedRun_PersistsSkippedHistoryEntry()
+    {
+        var scheduledUtc = new DateTime(2026, 3, 8, 12, 0, 0, DateTimeKind.Utc);
+        var skipped = new SkippedRunEntry
+        {
+            JobId = "missed-job",
+            JobName = "Missed Job",
+            ScheduledTimeUtc = scheduledUtc
+        };
+
+        _service.SaveSkippedRun(skipped, errorMessage: "Missed while closed");
+
+        var runs = _service.GetRunsForJob("missed-job");
+        runs.Should().HaveCount(1);
+        runs[0].WasSkipped.Should().BeTrue();
+        runs[0].StartedUtc.Should().Be(scheduledUtc);
+        runs[0].CompletedUtc.Should().Be(scheduledUtc);
+        runs[0].ErrorMessage.Should().Be("Missed while closed");
+        runs[0].SkippedRunCount.Should().Be(0);
+        runs[0].SkippedWindowStartUtc.Should().BeNull();
+        runs[0].SkippedWindowEndUtc.Should().BeNull();
+
+        var payload = _service.LoadRunPayload("missed-job", runs[0].RunFileName);
+        payload.Should().NotBeNull();
+        payload!.WasSkipped.Should().BeTrue();
+        payload.SkippedRunCount.Should().Be(0);
+        payload.SkippedWindowStartUtc.Should().BeNull();
+        payload.SkippedWindowEndUtc.Should().BeNull();
+        payload.HostOutputs.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SaveSkippedRunSummary_PersistsAggregatedSkippedHistoryEntry()
+    {
+        var firstScheduledUtc = new DateTime(2026, 3, 8, 12, 0, 0, DateTimeKind.Utc);
+        var lastScheduledUtc = new DateTime(2026, 3, 8, 12, 10, 0, DateTimeKind.Utc);
+        var summary = new SkippedRunSummaryEntry
+        {
+            JobId = "summary-job",
+            JobName = "Summary Job",
+            MissedRunCount = 3,
+            FirstScheduledTimeUtc = firstScheduledUtc,
+            LastScheduledTimeUtc = lastScheduledUtc
+        };
+
+        _service.SaveSkippedRunSummary(summary);
+
+        var runs = _service.GetRunsForJob("summary-job");
+        runs.Should().HaveCount(1);
+        runs[0].WasSkipped.Should().BeTrue();
+        runs[0].StartedUtc.Should().Be(lastScheduledUtc);
+        runs[0].CompletedUtc.Should().Be(lastScheduledUtc);
+        runs[0].SkippedRunCount.Should().Be(3);
+        runs[0].SkippedWindowStartUtc.Should().Be(firstScheduledUtc);
+        runs[0].SkippedWindowEndUtc.Should().Be(lastScheduledUtc);
+        runs[0].ErrorMessage.Should().Be(
+            $"Missed 3 scheduled runs while the application was closed. Range: {firstScheduledUtc.ToLocalTime():g} to {lastScheduledUtc.ToLocalTime():g}.");
+
+        var payload = _service.LoadRunPayload("summary-job", runs[0].RunFileName);
+        payload.Should().NotBeNull();
+        payload!.WasSkipped.Should().BeTrue();
+        payload.SkippedRunCount.Should().Be(3);
+        payload.SkippedWindowStartUtc.Should().Be(firstScheduledUtc);
+        payload.SkippedWindowEndUtc.Should().Be(lastScheduledUtc);
+        payload.HostOutputs.Should().BeEmpty();
     }
 
     #endregion

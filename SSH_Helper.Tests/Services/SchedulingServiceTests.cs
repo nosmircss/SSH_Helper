@@ -301,6 +301,100 @@ public class SchedulingServiceTests
 
     #endregion
 
+    #region DetectMissedRunSummaries Tests
+
+    [Fact]
+    public void DetectMissedRunSummaries_EnabledRecurringJob_ReturnsSingleSummary()
+    {
+        var jobs = new Dictionary<string, JobDefinition>
+        {
+            ["job1"] = new JobDefinition
+            {
+                Id = "job1",
+                Name = "Test Job",
+                IsEnabled = true,
+                ScheduleType = ScheduleType.Recurring,
+                CronExpression = "*/1 * * * *"
+            }
+        };
+
+        var summaries = _sut.DetectMissedRunSummaries(jobs, DateTime.UtcNow.AddMinutes(-5));
+
+        summaries.Should().ContainSingle();
+        summaries[0].JobId.Should().Be("job1");
+        summaries[0].JobName.Should().Be("Test Job");
+        summaries[0].MissedRunCount.Should().BeGreaterThan(0);
+        summaries[0].FirstScheduledTimeUtc.Should().BeOnOrBefore(summaries[0].LastScheduledTimeUtc);
+    }
+
+    [Fact]
+    public void DetectMissedRunSummaries_MultipleEnabledRecurringJobs_ReturnsOneSummaryPerJob()
+    {
+        var jobs = new Dictionary<string, JobDefinition>
+        {
+            ["job1"] = new JobDefinition
+            {
+                Id = "job1",
+                Name = "Job A",
+                IsEnabled = true,
+                ScheduleType = ScheduleType.Recurring,
+                CronExpression = "*/1 * * * *"
+            },
+            ["job2"] = new JobDefinition
+            {
+                Id = "job2",
+                Name = "Job B",
+                IsEnabled = true,
+                ScheduleType = ScheduleType.Recurring,
+                CronExpression = "*/1 * * * *"
+            }
+        };
+
+        var summaries = _sut.DetectMissedRunSummaries(jobs, DateTime.UtcNow.AddMinutes(-5));
+
+        summaries.Should().HaveCount(2);
+        summaries.Select(summary => summary.JobId)
+            .Should().Contain("job1").And.Contain("job2");
+    }
+
+    [Fact]
+    public void DetectMissedRunSummaries_DisabledOneTimeAndInvalidJobs_ReturnEmptyList()
+    {
+        var jobs = new Dictionary<string, JobDefinition>
+        {
+            ["disabled"] = new JobDefinition
+            {
+                Id = "disabled",
+                Name = "Disabled Job",
+                IsEnabled = false,
+                ScheduleType = ScheduleType.Recurring,
+                CronExpression = "*/1 * * * *"
+            },
+            ["one-time"] = new JobDefinition
+            {
+                Id = "one-time",
+                Name = "One-Time Job",
+                IsEnabled = true,
+                ScheduleType = ScheduleType.OneTime,
+                CronExpression = "*/1 * * * *"
+            },
+            ["invalid"] = new JobDefinition
+            {
+                Id = "invalid",
+                Name = "Invalid Cron Job",
+                IsEnabled = true,
+                ScheduleType = ScheduleType.Recurring,
+                CronExpression = "invalid"
+            }
+        };
+
+        var summaries = _sut.DetectMissedRunSummaries(jobs, DateTime.UtcNow.AddMinutes(-5));
+
+        summaries.Should().BeEmpty();
+    }
+
+    #endregion
+
     #region MarkOneTimeCompleted Tests
 
     [Fact]

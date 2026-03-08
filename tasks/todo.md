@@ -1,5 +1,197 @@
 # TODO
 
+## 37. Restore Unified Preset Save Diff
+- [x] 37.1 Refactor the preset save confirmation UI so the diff dialog can also show optional scheduled-job impact details and rename/create-new actions.
+- [x] 37.2 Route `Form1` preset-save confirmation flows through the unified dialog while preserving no-op saves and non-impact save behavior.
+- [x] 37.3 Update OpenSpec/task artifacts and focused WinForms coverage for combined diff-plus-impact behavior, collapsed affected-job listing, and rename-choice flows.
+- [x] 37.4 Run focused verification, clean build, OpenSpec validation, and capture the review outcome below.
+
+### 37 Review
+- `UnsavedPresetDiffDialog` now serves as the single preset-save confirmation surface: it preserves the existing diff-first review layout, adds an optional scheduled-impact header, and keeps the affected-job list behind a collapsed toggle so the diff remains dominant.
+- `Form1.ShowPresetSavePrompt(...)` now routes referenced preset saves, rename-vs-create decisions, and unsaved-change confirmations for existing presets through that unified dialog instead of splitting between the old diff dialog, the impact-only dialog, and a rename message box.
+- Referenced rename flows keep the one-dialog behavior while clarifying that `Rename Existing` carries scheduled jobs forward and `Create New` saves a separate preset; non-impacted dirty saves still retain the diff prompt without showing scheduler impact controls.
+- Retired the dedicated `PresetSaveImpactDialog` implementation and replaced its coverage with unified-dialog WinForms tests for impact summary visibility, collapsed/expanded affected-job lists, rename-choice buttons, and the non-impacted diff regression.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~UnsavedPresetDiffDialogTests|FullyQualifiedName~PresetSaveImpactResolverTests"` passed (7/7).
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~UnsavedPresetDiffDialogTests|FullyQualifiedName~PresetSaveImpactResolverTests|FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~PresetManagerJobReferenceTests|FullyQualifiedName~JobListDialogRunNowTests|FullyQualifiedName~JobEditorDialogStoredCredentialTests" -p:BaseOutputPath=artifacts\\preset-save-unified-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\preset-save-unified-tests\\obj\\` passed (75/75).
+- Verification: `dotnet build .\\SSH_Helper.sln` passed.
+- Verification: `dotnet build .\\SSH_Helper.sln -p:BaseOutputPath=artifacts\\preset-save-unified-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\preset-save-unified-build\\obj\\` passed.
+- Verification: `openspec validate replace-scheduler-drift-with-save-warning --strict --no-interactive` passed.
+
+## 36. Replace Scheduler Drift With Save-Time Warning
+- [x] 36.1 Add OpenSpec change artifacts for replacing scheduler drift blocking with a preset save-time warning.
+- [x] 36.2 Add preset save impact resolution and a single save confirmation dialog for referenced preset saves, including rename-vs-create-new handling without stacked popups.
+- [x] 36.3 Remove drift reevaluation, UI indicators, and execution blocking while keeping legacy drift fields file-compatible.
+- [x] 36.4 Add focused tests for preset save impact resolution, referenced-save dialog flows, and legacy `HasDriftWarning` execution behavior.
+- [x] 36.5 Run focused verification, clean build, OpenSpec validation, and capture the review outcome below.
+
+### 36 Review
+- `Form1` now routes referenced preset saves through `PresetSaveImpactResolver` plus the new `PresetSaveImpactDialog`, so users see one save-time confirmation with affected scheduled job names instead of discovering drift later in the scheduler UI.
+- Referenced-save prompts cover direct preset jobs and folder jobs targeting the preset's current folder, sort those jobs by name, and de-duplicate by job ID before display.
+- Direct save, unsaved-change save, and referenced rename flows now share the same warning surface without a follow-up drift acknowledgement step; unreferenced saves continue using the existing lightweight flows.
+- `PresetManager` no longer reevaluates or writes drift state when presets or folders change, `JobListDialog` no longer renders `[DRIFT]` or drift-colored rows, and `JobExecutionService` no longer blocks scheduled or Run Now execution on legacy `HasDriftWarning`.
+- Legacy scheduler compatibility stays intact: job JSON still carries `TargetContentHash`, `FolderPresetHashes`, and `HasDriftWarning`, and job save/export paths normalize `HasDriftWarning` to `false` without using it as active runtime behavior.
+- Added focused coverage for preset save impact resolution, the new save confirmation dialog modes, `PresetManager` no-longer-recomputes behavior, `SchedulerJobIntegrityUtilities` remaining helpers, and legacy-drift execution through both Run Now and scheduler evaluation.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PresetSaveImpactResolverTests|FullyQualifiedName~PresetSaveImpactDialogTests|FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~PresetManagerJobReferenceTests|FullyQualifiedName~SchedulerJobIntegrityUtilitiesTests|FullyQualifiedName~JobListDialogRunNowTests|FullyQualifiedName~JobEditorDialogStoredCredentialTests"` passed (77/77).
+- Verification: `dotnet build .\\SSH_Helper.sln` passed.
+- Verification: `openspec validate replace-scheduler-drift-with-save-warning --strict --no-interactive` passed.
+
+## 35. Audit Scheduler Drift Touchpoints
+- [x] 35.1 Identify production code paths and symbols for scheduler drift state, target-hash drift detection, UI banners/indicators, and save/run blocking.
+- [x] 35.2 Identify scheduler drift test coverage and relevant OpenSpec references.
+- [x] 35.3 Summarize dependencies that remain if drift indicators/blocking are removed but preset-save warnings are introduced.
+- [x] 35.4 Capture the audit review below.
+
+### 35 Review
+- Drift state is modeled on `JobDefinition` via `TargetContentHash`, `FolderPresetHashes`, and `HasDriftWarning`; preset/folder mutations flow through `PresetManager.ReevaluateAffectedJobDriftStates(...)`, which delegates comparison to `SchedulerJobIntegrityUtilities.IsDrifted(...)` and persists changed flags through `JobStorageService`.
+- UI drift touchpoints are limited to `JobEditorDialog` (banner visibility, acknowledge action, save-time snapshot recompute and drift clear) and `JobListDialog` (name suffix/color indicator plus generic Run Now warning when service-level blocking returns false).
+- Execution blocking lives only in `JobExecutionService`: `RunNowAsync(...)` returns false and emits `Skipped` when `HasDriftWarning` is set, and the recurring evaluation loop silently skips drifted jobs.
+- Export/import integrity touchpoints are `JobExportService.CloneForExport(...)` clearing `HasDriftWarning` while preserving target hashes and `SchedulerJobIntegrityUtilities.ApplyMissingTargetImportState(...)` disabling missing-target imports with explicit reasons.
+- Test coverage exists for model fields/defaults, hash utility behavior, reference lookups, drift activation in `PresetManager`, service-level run blocking, and export stripping. No direct automated coverage exists for the `JobEditorDialog` drift banner/acknowledge flow or the `JobListDialog` `[DRIFT]` indicator/warning dialog.
+- If drift indicators/blocking are removed and preset-save warnings are added, the minimal surviving backend is the preset-save entry point plus reference lookup (`Form1.SaveCurrentPreset`, `PresetManager.GetJobsReferencingPreset/GetJobsReferencingFolder`, `JobStorageService` queries). Saved hashes and `SchedulerJobIntegrityUtilities.IsDrifted(...)` remain necessary only if the new warning should be content-aware or limited to actual snapshot changes rather than warning on every referenced preset save.
+
+## 34. Collapse Consecutive Identical Scheduler Failures
+- [x] 34.1 Extend job-history persistence so the newest matching failed run for a job is updated with an incrementing repeat counter instead of adding another row.
+- [x] 34.2 Surface collapsed failure counts in the scheduler history UI and last-result column without changing success or skipped-run behavior.
+- [x] 34.3 Add focused service and WinForms regression coverage for repeated-failure collapse and reset behavior.
+- [x] 34.4 Run focused and full verification, then capture the review outcome below.
+
+### 34 Review
+- `JobHistoryService` now collapses only the newest consecutive identical failure for a job: same failure counts, same top-level error text, same per-host success/error signature, not skipped, and still failure-only.
+- Collapsed failures keep a single history row/payload file, overwrite that payload with the latest run details, and increment a persisted `ConsecutiveFailureCount` on both the index record and payload so the count survives refresh and restart.
+- `JobListDialog` now renders collapsed failures as `FAIL xN (...)` in both the run-history grid and the jobs list `Last Result` column while leaving success and skipped summary formatting unchanged.
+- Added service coverage for collapse, no-collapse on different failures, and no-collapse after a success resets the streak, plus a WinForms regression that verifies two identical failures render as one `FAIL x2` history row.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~JobListDialogRunNowTests"` passed (40/40).
+- Verification: `dotnet build .\\SSH_Helper.sln` passed.
+- Manual interactive UI verification was not run from this CLI environment.
+
+## 33. Fix Cron Builder Dialog Clipping
+- [x] 33.1 Replace fixed cron-builder height assumptions with measured responsive layout inside `CronBuilderControl`.
+- [x] 33.2 Make `JobEditorDialog` size the recurring schedule host panel from the cron builder's computed height.
+- [x] 33.3 Add WinForms regression coverage for cron control layout and New Job recurring-panel visibility.
+- [x] 33.4 Run focused and full verification, then capture the review outcome below.
+
+### 33 Review
+- `CronBuilderControl` now remeasures its preset flow panel, dropdown row, raw expression row, and status labels whenever content, width, or font-related layout changes occur, then updates its own `Height`, `MinimumSize`, and `AutoScrollMinSize` from the actual visible content bottom instead of fixed constants.
+- The preset button area no longer assumes a fixed two-row `64` px slot, so narrower widths or larger fonts can wrap buttons without hiding the fields and expression controls below.
+- `JobEditorDialog` now syncs `_panelCron.Height` to the embedded cron builder's computed height and refreshes that sizing on dialog/tab resize, cron-builder size changes, schedule-mode switches, prepopulation, and post-theme initialization.
+- Added WinForms regressions covering both the cron control's wrapped preset layout and the New Job dialog's recurring schedule section at the current default window size.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CronBuilderControl|FullyQualifiedName~JobEditorDialog"` passed (41/41).
+- Verification: `dotnet build .\\SSH_Helper.sln` passed.
+- Manual interactive UI verification was not run from this CLI environment.
+
+
+## 32. Collapse Scheduler Downtime Misses Into One Summary Entry
+- [x] 32.1 Add a scheduling summary model/path that groups missed recurring runs by job for a startup downtime window.
+- [x] 32.2 Persist one skipped summary history entry per affected job, including skipped-count and downtime-window metadata.
+- [x] 32.3 Update the scheduler history UI to render summarized skipped rows compactly and block output viewing for new skipped-summary entries.
+- [x] 32.4 Add focused service and WinForms regression coverage for skipped-run aggregation, rendering, and history-slot compression.
+- [x] 32.5 Update the scheduler spec text and capture verification results in the review section.
+
+### 32 Review
+- `SchedulingService` now exposes `DetectMissedRunSummaries(...)`, which collapses all missed recurring occurrences for a job into one `SkippedRunSummaryEntry` with count plus first/last scheduled timestamps.
+- `Form1.RecordMissedSchedulerRunsOnStartup()` now persists one skipped history summary per affected job/startup window instead of one history row per missed cron slot.
+- `JobHistoryService` now persists skipped-summary metadata (`SkippedRunCount`, `SkippedWindowStartUtc`, `SkippedWindowEndUtc`) on both the index record and payload while keeping legacy single skipped rows compatible through the old `SaveSkippedRun(...)` path.
+- `JobListDialog` now renders summarized skipped rows as `SKIPPED (N)`, keeps the `Started` column on the most recent missed time, shows compact downtime messages in `Error`, and disables `View Output` for the new skipped-summary entries so they do not open an empty viewer.
+- Added focused coverage for summary detection, summary persistence, single-summary and multi-summary UI rendering, legacy skipped-row rendering, and the regression that a long downtime window now compresses into one history slot per job.
+- Verification: `dotnet build .\\SSH_Helper.sln` failed because `bin\\Debug\\net8.0-windows\\SSH_Helper.exe` was locked by a running `SSH_Helper` process (PID 81020).
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SchedulingServiceTests|FullyQualifiedName~SchedulingServiceMissedRunIntegrationTests|FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~JobListDialogRunNowTests"` failed for the same locked default `obj\\Debug\\net8.0-windows\\SSH_Helper.dll` path.
+- Verification: `dotnet build .\\SSH_Helper.sln -p:BaseOutputPath=artifacts\\downtime-summary-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\downtime-summary-build\\obj\\` passed.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SchedulingServiceTests|FullyQualifiedName~SchedulingServiceMissedRunIntegrationTests|FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~JobListDialogRunNowTests" -p:BaseOutputPath=artifacts\\downtime-summary-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\downtime-summary-tests\\obj\\` passed (82/82).
+- Verification: `openspec validate update-scheduler-runtime-history --strict --no-interactive` passed.
+
+## 31. Scheduler Notification Output Suppression
+- [x] 31.1 Confirm which scheduler event paths append lifecycle messages into the main output pane.
+- [x] 31.2 Stop appending scheduler start/completion/skipped messages into the shared output pane while preserving scheduler history and status updates.
+- [x] 31.3 Run focused verification and capture the review results.
+
+### 31 Review
+- Root cause: `Form1` appended scheduler lifecycle lines directly into the same output buffer used for live host command output from `OnSchedulerJobCompleted(...)`, `OnSchedulerJobStateChanged(...)`, and startup skipped-run reporting, which merged scheduler metadata into normal terminal output.
+- `Form1` now keeps scheduler lifecycle updates out of the shared output pane while still persisting skipped runs and refreshing scheduler status-bar state.
+- Focused verification used the existing scheduler/history/dialog test suite plus a clean solution build; there is not yet a dedicated `Form1` output-routing test harness that asserts against the live output textbox directly.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SchedulerNotificationTests|FullyQualifiedName~JobListDialogRunNowTests|FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~SchedulingServiceMissedRunIntegrationTests" -p:BaseOutputPath=artifacts\\scheduler-output-suppression-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-output-suppression-tests\\obj\\` passed (61/61).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:BaseOutputPath=artifacts\\scheduler-output-suppression-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-output-suppression-build\\obj\\` passed.
+
+## 30. Scheduler History Row Selection Stability
+- [x] 30.1 Confirm why the run-history grid falls back to the first row after the scheduler dialog refresh timer ticks.
+- [x] 30.2 Preserve the active history run selection across timer-driven and event-driven history refreshes.
+- [x] 30.3 Add focused WinForms regression coverage for selecting a non-first history row before refresh.
+- [x] 30.4 Run focused verification and capture the review results.
+
+### 30 Review
+- Root cause: `JobListDialog` runs a 5-second `_refreshTimer` that calls `RefreshJobList()`, which in turn rebuilds `_gridHistory` via `RefreshHistory(...)`; the old code cleared and repopulated the history rows without restoring the selected run, so WinForms fell back to the first row.
+- `JobListDialog` now tracks the active history `RunFileName`, suppresses history selection churn while the grid is rebuilt, and reapplies the matching history row after timer-driven and event-driven refreshes.
+- `ViewSelectedOutput()` now resolves the active history run through the preserved selection state instead of depending only on the transient current `SelectedRows` collection.
+- Added a focused WinForms regression test that selects the second history row, invokes `RefreshJobList()`, and verifies the same run remains selected afterward.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobListDialogRunNowTests" -p:BaseOutputPath=artifacts\\history-row-selection-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\history-row-selection-tests\\obj\\` passed (5/5).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:BaseOutputPath=artifacts\\history-row-selection-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\history-row-selection-build\\obj\\` passed.
+
+## 23. Scheduler History Dialog Selection Stability
+- [x] 23.1 Make scheduler job selection deterministic on dialog load and refresh.
+- [x] 23.2 Keep history rendering bound to a stable active job ID instead of transient grid selection state.
+- [x] 23.3 Add WinForms regression coverage for initial history population and post-refresh stability.
+- [x] 23.4 Run focused verification with isolated build output paths and capture review results.
+
+### 23 Review
+- `JobListDialog` now uses a stable `_selectedJobId` plus deterministic fallback selection order (`previous active job -> current row -> first available row`) so the Run History pane populates immediately on dialog load and survives job-grid rebuilds.
+- The jobs grid now runs as single-select, suppresses selection-change handling while rows are rebuilt, and refreshes the history pane explicitly after the active job row is restored.
+- Job actions and history actions now resolve the active job through the stabilized selection path instead of depending on transient `SelectedRows` state during refresh timing.
+- Added WinForms regression coverage for first-load history population without manual clicking and for preserving the active job/history after a completion-driven refresh.
+- Verification: `dotnet build .\\SSH_Helper.sln -p:BaseOutputPath=artifacts\\scheduler-history-dialog-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-history-dialog-build\\obj\\` passed.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobListDialogRunNowTests|FullyQualifiedName~JobHistoryServiceTests" -p:BaseOutputPath=artifacts\\scheduler-history-dialog-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-history-dialog-tests\\obj\\` passed (31/31).
+
+## 22. Scheduler Runtime History Correctness
+- [x] 22.1 Read `openspec/changes/update-scheduler-runtime-history/proposal.md`, `tasks.md`, and related scheduler/runtime code paths to confirm scope.
+- [x] 22.2 Wire persisted shutdown timestamps into scheduler startup so missed recurring runs are recorded as skipped without auto-running them.
+- [x] 22.3 Apply per-job scheduler history retention overrides with fallback to global defaults and output caps.
+- [x] 22.4 Correct scheduler history presentation to show persisted run start time and derived duration.
+- [x] 22.5 Add focused regression tests for missed-run recording, retention selection, and history timestamp display.
+- [x] 22.6 Run verification, update OpenSpec task checkboxes, and capture review results.
+
+### 22 Review
+- Scheduler startup now reads `LastAppShutdownUtc`, detects recurring runs missed while the app was closed, appends skipped scheduler notifications, and persists skipped history rows without auto-executing those jobs.
+- Scheduler shutdown now stops the execution timer during form close and persists a fresh `LastAppShutdownUtc` anchor before configuration save.
+- Scheduler history persistence now resolves per-job `MaxHistoryRuns` and `HistoryRetentionDays` overrides with fallback to global config defaults and the global per-host output cap.
+- Skipped startup runs are persisted with an explicit `WasSkipped` flag so the history list can render `SKIPPED` instead of misclassifying them as failures.
+- Scheduler history rows now display `StartedUtc` in the `Started` column and derive duration from the stored start/completion timestamps, clamping invalid negative durations to zero.
+- Added focused regression coverage for skipped-run persistence, retention policy resolution, and the scheduler history grid timestamp/duration display.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~SchedulingServiceMissedRunIntegrationTests|FullyQualifiedName~SchedulerHistoryPolicyResolverTests|FullyQualifiedName~JobListDialogRunNowTests" -p:BaseOutputPath=artifacts\\runtime-history-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\runtime-history-tests\\obj\\` passed (45/45).
+- Verification: `dotnet build SSH_Helper.sln -p:BaseOutputPath=artifacts\\runtime-history-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\runtime-history-build\\obj\\` passed.
+- Verification: `openspec validate update-scheduler-runtime-history --strict --no-interactive` passed.
+
+## 21. Scheduler OpenSpec Follow-Up Proposals
+- [x] 21.1 Create a scheduler integrity proposal covering stored credentials, drift activation, safe import disabling, run-now attribution, and single-instance dialog behavior.
+- [x] 21.2 Create a scheduler host-grid parity proposal covering column operations, keyboard/clipboard behavior, CSV import parity, and host-count refresh rules.
+- [x] 21.3 Create a scheduler runtime/history proposal covering missed-run recording, retention-policy enforcement, and history timestamp correctness.
+- [x] 21.4 Validate all new OpenSpec changes with strict validation and capture results.
+- [x] 21.5 Amend the scheduler host-grid parity proposal to include visual/styling parity with the main hosts grid.
+
+### 21 Review
+- Added standalone OpenSpec change `update-scheduler-job-integrity` with proposal, tasks, design, and `job-scheduler` spec deltas for stored credentials, drift activation, safe missing-target imports, run-now attribution, and single-instance scheduler dialog behavior.
+- Added standalone OpenSpec change `update-scheduler-host-grid-parity` with proposal, tasks, and `job-scheduler` spec deltas for host-grid column parity, keyboard/clipboard parity, CSV/copy parity, live host-count refresh, and visual/styling parity with the main hosts grid.
+- Added standalone OpenSpec change `update-scheduler-runtime-history` with proposal, tasks, and `job-scheduler` spec deltas for missed-run recording, retention policy enforcement, and correct history timestamps.
+- Validation: `openspec validate update-scheduler-job-integrity --strict --no-interactive` passed.
+- Validation: `openspec validate update-scheduler-host-grid-parity --strict --no-interactive` passed.
+- Validation: `openspec validate update-scheduler-runtime-history --strict --no-interactive` passed.
+- Validation: `openspec validate update-scheduler-host-grid-parity --strict --no-interactive` passed again after adding visual parity requirements.
+
+## 20. Scheduler Implementation Review
+- [x] 20.1 Cross-check `.planning/phases` scheduler requirements, plans, and validation notes against the implemented code paths.
+- [x] 20.2 Review scheduler UI behavior with explicit comparison between the scheduler hosts grid and the main form hosts grid.
+- [x] 20.3 Review scheduler persistence, execution, history, import/export, and notification flows for functional gaps or regressions.
+- [x] 20.4 Run targeted verification and capture concrete review results.
+
+### 20 Review
+- Stored-credential jobs are not actually persisted or reloaded: the editor collects username/password text but save logic only stores `CredentialMode`, while execution expects credentials to already exist in Credential Manager.
+- Missed-run recording is not wired into startup/shutdown flow: `SchedulingService.DetectMissedRuns(...)` and `AppConfiguration.LastAppShutdownUtc` exist, but the scheduler initialization path never uses them.
+- Drift detection is incomplete: the editor saves target hashes and can clear `HasDriftWarning`, but no reviewed code path marks jobs drifted after preset or folder content changes.
+- Scheduler host-grid parity is materially incomplete versus the main hosts grid: no column add/rename/delete flow, no copy/paste/delete keyboard behavior, no checked-row copy semantics, and no immediate host-count refresh on inline `Host_IP` edits.
+- Import preview warns that missing-target jobs will be disabled, but the import save path persists them without disabling them.
+- Run-now notifications are misclassified because Form1 only labels them as run-now when `TrackRunNow(...)` is called, and the current Job List run-now action never calls it.
+- Per-job history retention overrides are captured in the editor but not used by `JobHistoryService`, which always applies hard-coded defaults on `JobCompleted`.
+- Job history UI labels completion time as the run start time in the history grid.
+- Verification: `dotnet build SSH_Helper.sln -p:BaseOutputPath=artifacts\\review-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\review-build\\obj\\` passed.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~JobStorageServiceTests|FullyQualifiedName~SchedulingService|FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~JobExportServiceTests|FullyQualifiedName~SchedulerNotificationTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~PresetManagerJobReferenceTests" -p:BaseOutputPath=artifacts\\review-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\review-tests\\obj\\` passed (217/217).
+
 ## 5. Base Environment Rebase and Restore
 - [x] 5.1 Extend environment persistence with a separate base-environment value and normalization rules.
 - [x] 5.2 Update environment service operations so base environment survives rename/delete and can be manually rebased.
@@ -278,7 +470,63 @@
 - [x] 24.3 Add focused regression coverage for nested table-column key highlighting.
 - [x] 24.4 Run focused verification and capture outcome.
 
+## 25. Scheduler Code Map
+- [x] 25.1 Inspect scheduler UI entry points in `JobListDialog.cs`, `JobEditorDialog.cs`, and `Form1.cs`.
+- [x] 25.2 Inspect implemented scheduler models, services, and utilities without reading planning docs.
+- [x] 25.3 Inspect scheduler-focused tests and note covered versus uncovered behaviors.
+- [x] 25.4 Produce a concise architecture/code map with file references and likely weak spots.
+
+## 26. Scheduler Planning Artifact Review
+- [x] 26.1 Read `.planning/REQUIREMENTS.md` and scheduler phase artifacts `01-job-definitions-persistence` through `05-scheduler-ui-integration` only.
+- [x] 26.2 Extract required scheduler behaviors, validations, and explicit UX/functional details from those planning documents.
+- [x] 26.3 Deliver a concise referenced summary for the user and capture the review result below.
+
+## 27. Implement update-scheduler-host-grid-parity
+- [x] 27.1 Read the approved OpenSpec change artifacts for `update-scheduler-host-grid-parity` and map the main-grid behaviors that must be mirrored in `JobEditorDialog`.
+- [x] 27.2 Add scheduler Hosts-tab column, keyboard/clipboard, import/copy, and host-count parity with minimal shared helper logic.
+- [x] 27.3 Align the scheduler host-grid visual treatment with the main hosts grid, including row sizing, row numbers, selection styling, and themed scroll handling.
+- [x] 27.4 Add focused automated coverage for scheduler host-grid parity helpers and dialog behaviors.
+- [x] 27.5 Run verification, update the OpenSpec checklist, and capture the review outcome below.
+
+## 28. Implement update-scheduler-job-integrity
+- [x] 28.1 Read the approved OpenSpec change artifacts for `update-scheduler-job-integrity` and map the affected credential, drift, import, and Form1 integration paths.
+- [x] 28.2 Add secure stored-credential round-trip support for scheduler jobs without persisting plaintext to `jobs.json`.
+- [x] 28.3 Recompute scheduler drift state when referenced preset or folder snapshots change, and normalize missing-target imports into disabled jobs with explicit reasons.
+- [x] 28.4 Fix Run Now attribution and modeless scheduler single-instance reuse from Form1/job-list entry points.
+- [x] 28.5 Add focused automated coverage and run verification, then update the OpenSpec checklist and capture the outcome below.
+
+## 29. Inspect update-scheduler-runtime-history
+- [x] 29.1 Read the approved OpenSpec change artifacts for `update-scheduler-runtime-history` and confirm the required behavior deltas.
+- [x] 29.2 Trace the current shutdown timestamp persistence/read paths and startup missed-run detection entry points.
+- [x] 29.3 Trace scheduler event/history recording plus history UI bindings for started/duration values.
+- [x] 29.4 Return the concrete files, methods, behavior gaps, and smallest likely edit points.
+
+### 29 Review
+- `LastAppShutdownUtc` exists on `AppConfiguration` and round-trips through `ConfigurationService`, but no production path sets it on shutdown or reads it during scheduler startup.
+- Startup missed-run detection logic exists only as pure helpers in `SchedulingService`; production scheduler startup goes through `Form1.InitializeSchedulerServices()` and `JobExecutionService.Initialize()` without calling `DetectMissedRuns(...)`.
+- Scheduler history persistence is driven solely by `JobHistoryService.SubscribeTo(JobExecutionService)` -> `OnJobCompleted(...)`, which always saves with hard-coded retention/output defaults and has no skipped-run write path.
+- Scheduler history UI binds `Started` from `CompletedUtc` in `JobListDialog.RefreshHistory()`, while duration correctly uses `CompletedUtc - StartedUtc`; result rendering also only supports `OK`/`FAIL`, not a skipped state.
+
+### 29 Review
+- OpenSpec change `update-scheduler-runtime-history` requires a persisted shutdown anchor plus startup-time missed recurring runs to be recorded as skipped without auto-execution; see `openspec/changes/update-scheduler-runtime-history/proposal.md` and `openspec/changes/update-scheduler-runtime-history/specs/job-scheduler/spec.md`.
+- `AppConfiguration.LastAppShutdownUtc` exists in the config model, and `ConfigurationService` will serialize/deserialize it generically, but production runtime code does not currently set or read that property anywhere.
+- Actual startup wiring in `Form1.InitializeSchedulerServices()` loads jobs, creates scheduler services, runs `JobExecutionService.Initialize()` crash recovery, and starts the timer immediately; no startup path calls `SchedulingService.DetectMissedRuns(...)`.
+- `JobExecutionService` does call `SchedulingService.GetMissedOccurrences(...)`, but only inside the live 30-second evaluation loop using `_lastEvaluationUtc`, which is initialized to `DateTime.UtcNow`; that covers only in-process gaps between timer evaluations, not downtime between app shutdown and restart.
+- There is also no production consumer for `SkippedRunEntry`: `JobHistoryService` only persists `JobRunResult` instances received from the `JobCompleted` event, so startup-detected missed occurrences currently have no path into persisted scheduler history.
+- Smallest likely edit points are `Form1_FormClosing()` for writing a dedicated shutdown anchor, `Form1.InitializeSchedulerServices()` for reading it and invoking missed-run detection before `_jobExecutionService.Start()`, and a narrow bridge in `JobHistoryService` (or adjacent startup wiring) to persist/report each `SkippedRunEntry`.
+- Source inspection only; no code changes or test runs were performed for this task.
+
 ## Review Addendum
+- Reviewed scheduler implementation only from code and tests: `Form1`, `JobListDialog`, `JobEditorDialog`, scheduler-related models/services/utilities, and scheduler-focused tests. No planning docs were read for this task.
+- Confirmed the implemented scheduler stack is split into UI wiring (`Form1`/dialogs), pure cron helpers (`SchedulingService`, `CronBuilderControl`, validators/formatters), persistence (`JobStorageService`, `JobHistoryService`, `JobExportService`), and timer-driven execution (`JobExecutionService`).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SchedulingServiceTests|FullyQualifiedName~SchedulingServiceMissedRunIntegrationTests|FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~JobStorageServiceTests|FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~JobExportServiceTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~SchedulerNotificationTests|FullyQualifiedName~CronBuilderControlTests|FullyQualifiedName~JobDefinitionTests|FullyQualifiedName~MaxConcurrentJobsTests|FullyQualifiedName~ExecutionPipelineModelTests|FullyQualifiedName~PresetManagerJobReferenceTests" -p:BaseOutputPath=artifacts\\verify-scheduler-map\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\verify-scheduler-map\\obj\\` passed (292/292). Build emitted two existing warnings about unused `_schedulerStatusDirty` and `_loaded` fields.
+- Main implementation risks found: missed-run detection exists but is not wired into production flow; stored job credentials UI appears to validate input without persisting it; per-job/global history retention settings are modeled in UI/config but not applied by the event-driven history writer; cancellation and run-now notification paths have disconnected plumbing; drift metadata is saved/checked but no production path sets `HasDriftWarning = true`.
+- Reviewed only `.planning/REQUIREMENTS.md` plus scheduler phase artifacts `01-job-definitions-persistence` through `05-scheduler-ui-integration`; implementation code was intentionally not inspected.
+- Consolidated the planned scheduler contract across job persistence, scheduling, execution, history, export/import, and Form1/UI integration with file/line references for user review.
+- Noted one planning nuance for follow-up: `.planning/REQUIREMENTS.md` still marks `UI-03` notifications as pending even though Phase 5 planning specifies the intended notification/status-bar behavior in detail.
+- Focused scheduler hosts-grid parity review completed against the phase note that calls for the Hosts tab mini-grid to use the same column structure as the main grid.
+- Findings from the comparison: the scheduler grid lacks manual column add/rename/delete/reorder flows, its host count label does not refresh on inline `Host_IP` edits, its CSV import path diverges from the main grid's `CsvManager` behavior, keyboard clipboard/selection workflows are not carried over, and visual parity is only partial because the main grid adds custom scrollbars and painting on top of shared theme colors.
+- Verification: source review only for this parity check; no tests were run.
 - Root cause confirmed for the table-column highlighting inconsistency: the editor only colored top-level keys, step commands, and global step-option keys, so nested `table.columns` keys like `header` and `field` were left white.
 - Extended the YAML highlighter's option-key set with nested table-column keys and taught list-item mappings like `- header:` to render as option keys when they are not actual step commands.
 - Added focused regression tests for both `- header:` and `field:` under `table.columns`.
@@ -291,3 +539,18 @@
 - Verification: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~EditorTextUtilitiesTests|FullyQualifiedName~ScintillaScriptEditorControlTests"` failed for the same locked-output reason while rebuilding the app project.
 - Verification: `dotnet build SSH_Helper.csproj -p:BaseOutputPath=artifacts\\verify-trailing-tab\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\verify-trailing-tab\\obj\\` passed.
 - Verification: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~EditorTextUtilitiesTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -p:BaseOutputPath=artifacts\\verify-trailing-tab-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\verify-trailing-tab-tests\\obj\\` passed (41/41).
+- Implemented scheduler host-grid parity in `JobEditorDialog` with add/rename/delete/reorder support, main-grid-style keyboard/clipboard editing, shared CSV import semantics, and immediate host-count refresh on inline `Host_IP` edits.
+- Added shared `HostGridUtilities` coverage for scheduler copy-source selection, DataTable snapshot conversion, and paste expansion, plus WinForms dialog tests for grid parity properties, copy-from-main behavior, host-count refresh, and persisted display-order extraction.
+- Implemented scheduler job-integrity fixes across `JobEditorDialog`, `JobListDialog`, `Form1`, `PresetManager`, and supporting utilities so stored credentials round-trip through Credential Manager, missing-target imports save disabled, preset/folder mutations activate drift warnings, and the scheduler window/run-now flows reuse Form1-owned integration seams.
+- Added focused coverage for stored-credential save/reopen behavior, preset/folder drift activation, missing-target import normalization helpers, run-now callback routing, and modeless dialog reuse.
+- Verification: `dotnet build SSH_Helper.sln -p:BaseOutputPath=artifacts\\job-integrity-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\job-integrity-build\\obj\\` passed.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PresetManagerJobReferenceTests|FullyQualifiedName~SchedulerJobIntegrityUtilitiesTests|FullyQualifiedName~JobEditorDialogStoredCredentialTests|FullyQualifiedName~JobListDialogRunNowTests|FullyQualifiedName~ModelessDialogManagerTests" -p:BaseOutputPath=artifacts\\job-integrity-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\job-integrity-tests\\obj\\` passed (28/28).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~JobStorageServiceTests|FullyQualifiedName~PresetManagerJobReferenceTests|FullyQualifiedName~JobExportServiceTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~JobEditorDialogStoredCredentialTests|FullyQualifiedName~JobListDialogRunNowTests|FullyQualifiedName~ModelessDialogManagerTests|FullyQualifiedName~SchedulerJobIntegrityUtilitiesTests" -p:BaseOutputPath=artifacts\\job-integrity-regression-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\job-integrity-regression-tests\\obj\\` passed (144/144).
+- Verification: `openspec validate update-scheduler-job-integrity --strict --no-interactive` passed.
+- Updated the main-form scheduler handoff to copy checked rows first when any host rows are checked, otherwise all eligible host rows, while excluding the select-checkbox column.
+- Updated `DialogTheme.ApplyNativeTheme(...)` to theme `DataGridView` scrollbars so the scheduler grid inherits themed scroll treatment in dark/light modes.
+- Verification: `dotnet build SSH_Helper.sln -p:BaseOutputPath=artifacts\\host-grid-parity-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\host-grid-parity-build\\obj\\` passed.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~HostGridUtilitiesTests|FullyQualifiedName~JobEditorDialogHostGridParityTests" -p:BaseOutputPath=artifacts\\host-grid-parity-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\host-grid-parity-tests\\obj\\` passed (7/7).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CsvManagerTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~HostGridUtilitiesTests|FullyQualifiedName~JobEditorDialogHostGridParityTests" -p:BaseOutputPath=artifacts\\host-grid-parity-tests2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\host-grid-parity-tests2\\obj\\` passed (50/50).
+- Verification: `openspec validate update-scheduler-host-grid-parity --strict --no-interactive` passed.
+- Manual interactive UI verification was not run from this CLI environment; OpenSpec task `5.2` remains unchecked pending a live click-through.

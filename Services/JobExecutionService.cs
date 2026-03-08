@@ -181,7 +181,7 @@ namespace SSH_Helper.Services
 
         /// <summary>
         /// Immediately executes a job, bypassing the concurrency gate entirely.
-        /// Blocks if the same job is already running or has a drift warning.
+        /// Blocks only if the same job is already running.
         /// </summary>
         public async Task<bool> RunNowAsync(string jobId)
         {
@@ -194,14 +194,6 @@ namespace SSH_Helper.Services
             if (_runningJobs.ContainsKey(jobId))
             {
                 OnJobStateChanged(jobId, job.Name, JobExecutionState.Skipped, "Already running");
-                return false;
-            }
-
-            // Block if drift warning (per locked decision: consistent blocking for both scheduled and run-now)
-            if (job.HasDriftWarning)
-            {
-                OnJobStateChanged(jobId, job.Name, JobExecutionState.Skipped,
-                    "Drift warning — re-acknowledge before execution");
                 return false;
             }
 
@@ -284,12 +276,6 @@ namespace SSH_Helper.Services
 
                     if (!job.IsEnabled)
                         continue;
-
-                    if (job.HasDriftWarning)
-                    {
-                        Debug.WriteLine($"Skipping job '{job.Name}': drift warning active");
-                        continue;
-                    }
 
                     if (_runningJobs.ContainsKey(job.Id))
                     {
@@ -776,3 +762,4 @@ namespace SSH_Helper.Services
         #endregion
     }
 }
+

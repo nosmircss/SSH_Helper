@@ -11,11 +11,8 @@ namespace SSH_Helper.Services
     /// </summary>
     public sealed class JobHistoryService
     {
-        private const int DefaultMaxRuns = 50;
-        private const int DefaultRetentionDays = 30;
-        private const int DefaultMaxOutputChars = 1_048_576;
-
         private readonly string _baseDirectory;
+        private Func<JobRunResult, JobHistoryRetentionOptions>? _retentionOptionsResolver;
 
         /// <summary>
         /// Creates a new JobHistoryService.
@@ -39,14 +36,17 @@ namespace SSH_Helper.Services
         /// Subscribes to a JobExecutionService's JobCompleted event so that
         /// every completed job run is automatically persisted.
         /// </summary>
-        public void SubscribeTo(JobExecutionService executionService)
+        public void SubscribeTo(
+            JobExecutionService executionService,
+            Func<JobRunResult, JobHistoryRetentionOptions>? retentionOptionsResolver = null)
         {
+            _retentionOptionsResolver = retentionOptionsResolver;
             executionService.JobCompleted += OnJobCompleted;
         }
 
         private void OnJobCompleted(object? sender, JobRunResult result)
         {
-            SaveRun(result, DefaultMaxRuns, DefaultRetentionDays, DefaultMaxOutputChars);
+            SaveRun(result, _retentionOptionsResolver?.Invoke(result));
         }
 
         #endregion
@@ -59,59 +59,293 @@ namespace SSH_Helper.Services
         /// </summary>
         public void SaveRun(
             JobRunResult result,
-            int maxRuns = DefaultMaxRuns,
-            int retentionDays = DefaultRetentionDays,
-            int maxOutputChars = DefaultMaxOutputChars)
+            int maxRuns = JobHistoryRetentionOptions.DefaultMaxRuns,
+            int retentionDays = JobHistoryRetentionOptions.DefaultRetentionDays,
+            int maxOutputChars = JobHistoryRetentionOptions.DefaultMaxOutputChars)
         {
-            var runId = HistoryIdGenerator.NewId();
-            var runFileName = $"{runId}.json";
+            SaveRun(result, new JobHistoryRetentionOptions
+            {
+                MaxRuns = maxRuns,
+                RetentionDays = retentionDays,
+                MaxOutputChars = maxOutputChars
+            });
+        }
 
-            // Build payload with truncated output
+        /// <summary>
+        /// Persists a job run to history using the provided retention policy.
+        /// </summary>
+        public void SaveRun(JobRunResult result, JobHistoryRetentionOptions? options)
+        {
+            ArgumentNullException.ThrowIfNull(result);
+
+            SaveRunCore(
+                jobId: result.JobId,
+                jobName: result.JobName,
+                startedUtc: result.StartedUtc,
+                completedUtc: result.CompletedUtc,
+                success: result.Success,
+                hostsSucceeded: result.HostsSucceeded,
+                hostsFailed: result.HostsFailed,
+                errorMessage: result.ErrorMessage,
+                hostOutputs: result.HostOutputs,
+                wasSkipped: false,
+                skippedRunCount: 0,
+                skippedWindowStartUtc: null,
+                skippedWindowEndUtc: null,
+                options: NormalizeOptions(options));
+        }
+
+        /// <summary>
+        /// Persists a skipped run detected during scheduler startup.
+        /// </summary>
+        public void SaveSkippedRun(
+            SkippedRunEntry skippedRun,
+            JobHistoryRetentionOptions? options = null,
+            string? errorMessage = null)
+        {
+            ArgumentNullException.ThrowIfNull(skippedRun);
+
+            var localScheduledTime = skippedRun.ScheduledTimeUtc.ToLocalTime().ToString("g");
+            SaveRunCore(
+                jobId: skippedRun.JobId,
+                jobName: skippedRun.JobName,
+                startedUtc: skippedRun.ScheduledTimeUtc,
+                completedUtc: skippedRun.ScheduledTimeUtc,
+                success: false,
+                hostsSucceeded: 0,
+                hostsFailed: 0,
+                errorMessage: errorMessage ?? $"Missed scheduled run at {localScheduledTime} while the application was closed.",
+                hostOutputs: null,
+                wasSkipped: true,
+                skippedRunCount: 0,
+                skippedWindowStartUtc: null,
+                skippedWindowEndUtc: null,
+                options: NormalizeOptions(options));
+        }
+
+        /// <summary>
+        /// Persists a summarized skipped run detected during scheduler startup.
+        /// </summary>
+        public void SaveSkippedRunSummary(
+            SkippedRunSummaryEntry skippedSummary,
+            JobHistoryRetentionOptions? options = null,
+            string? errorMessage = null)
+        {
+            ArgumentNullException.ThrowIfNull(skippedSummary);
+
+            SaveRunCore(
+                jobId: skippedSummary.JobId,
+                jobName: skippedSummary.JobName,
+                startedUtc: skippedSummary.LastScheduledTimeUtc,
+                completedUtc: skippedSummary.LastScheduledTimeUtc,
+                success: false,
+                hostsSucceeded: 0,
+                hostsFailed: 0,
+                errorMessage: errorMessage ?? BuildSkippedSummaryMessage(skippedSummary),
+                hostOutputs: null,
+                wasSkipped: true,
+                skippedRunCount: skippedSummary.MissedRunCount,
+                skippedWindowStartUtc: skippedSummary.FirstScheduledTimeUtc,
+                skippedWindowEndUtc: skippedSummary.LastScheduledTimeUtc,
+                options: NormalizeOptions(options));
+        }
+
+        private void SaveRunCore(
+            string jobId,
+            string jobName,
+            DateTime startedUtc,
+            DateTime completedUtc,
+            bool success,
+            int hostsSucceeded,
+            int hostsFailed,
+            string? errorMessage,
+            List<JobHostOutput>? hostOutputs,
+            bool wasSkipped,
+            int skippedRunCount,
+            DateTime? skippedWindowStartUtc,
+            DateTime? skippedWindowEndUtc,
+            JobHistoryRetentionOptions options)
+        {
             var payload = new JobRunPayload
             {
-                Id = runId,
-                JobId = result.JobId,
-                JobName = result.JobName,
-                StartedUtc = result.StartedUtc,
-                CompletedUtc = result.CompletedUtc,
-                Success = result.Success,
-                HostsSucceeded = result.HostsSucceeded,
-                HostsFailed = result.HostsFailed,
-                ErrorMessage = result.ErrorMessage,
-                HostOutputs = BuildTruncatedOutputs(result.HostOutputs, maxOutputChars)
+                JobId = jobId,
+                JobName = jobName,
+                StartedUtc = startedUtc,
+                CompletedUtc = completedUtc,
+                Success = success,
+                HostsSucceeded = hostsSucceeded,
+                HostsFailed = hostsFailed,
+                ErrorMessage = errorMessage,
+                ConsecutiveFailureCount = !success && !wasSkipped ? 1 : 0,
+                WasSkipped = wasSkipped,
+                SkippedRunCount = skippedRunCount,
+                SkippedWindowStartUtc = skippedWindowStartUtc,
+                SkippedWindowEndUtc = skippedWindowEndUtc,
+                HostOutputs = BuildTruncatedOutputs(hostOutputs, options.MaxOutputChars)
             };
 
-            // Build lightweight index entry
             var record = new JobRunRecord
             {
-                Id = runId,
-                JobId = result.JobId,
-                JobName = result.JobName,
-                StartedUtc = result.StartedUtc,
-                CompletedUtc = result.CompletedUtc,
-                Success = result.Success,
-                HostsSucceeded = result.HostsSucceeded,
-                HostsFailed = result.HostsFailed,
-                ErrorMessage = result.ErrorMessage,
-                RunFileName = runFileName
+                JobId = jobId,
+                JobName = jobName,
+                StartedUtc = startedUtc,
+                CompletedUtc = completedUtc,
+                Success = success,
+                HostsSucceeded = hostsSucceeded,
+                HostsFailed = hostsFailed,
+                ErrorMessage = errorMessage,
+                ConsecutiveFailureCount = payload.ConsecutiveFailureCount,
+                WasSkipped = wasSkipped,
+                SkippedRunCount = skippedRunCount,
+                SkippedWindowStartUtc = skippedWindowStartUtc,
+                SkippedWindowEndUtc = skippedWindowEndUtc
             };
 
             // Ensure job subdirectory exists
-            var jobDir = GetJobDirectory(result.JobId);
+            var jobDir = GetJobDirectory(jobId);
             Directory.CreateDirectory(jobDir);
 
+            var indexDoc = LoadJobIndex(jobId);
+            if (TryCollapseLatestFailure(jobId, indexDoc, record, payload))
+            {
+                SaveIndex(jobId, indexDoc);
+                EnforceRetention(jobId, options.MaxRuns, options.RetentionDays);
+                return;
+            }
+
+            var runId = HistoryIdGenerator.NewId();
+            var runFileName = $"{runId}.json";
+            payload.Id = runId;
+            record.Id = runId;
+            record.RunFileName = runFileName;
+
             // Write payload atomically (no backup needed for individual run files)
-            var payloadPath = GetRunFilePath(result.JobId, runFileName);
+            var payloadPath = GetRunFilePath(jobId, runFileName);
             JsonFileWriter.WriteJsonAtomic(payloadPath, Serialize(payload), createBackup: false);
 
             // Load existing index, prepend new record (newest first), save atomically
-            var indexDoc = LoadJobIndex(result.JobId);
             indexDoc.Entries.Insert(0, record);
-            var indexPath = GetIndexPath(result.JobId);
-            JsonFileWriter.WriteJsonAtomic(indexPath, Serialize(indexDoc), createBackup: true);
+            SaveIndex(jobId, indexDoc);
 
             // Enforce retention limits
-            EnforceRetention(result.JobId, maxRuns, retentionDays);
+            EnforceRetention(jobId, options.MaxRuns, options.RetentionDays);
+        }
+
+        private bool TryCollapseLatestFailure(
+            string jobId,
+            JobRunIndexDocument indexDoc,
+            JobRunRecord candidateRecord,
+            JobRunPayload candidatePayload)
+        {
+            if (candidateRecord.Success || candidateRecord.WasSkipped || indexDoc.Entries.Count == 0)
+            {
+                return false;
+            }
+
+            var latestRecord = indexDoc.Entries[0];
+            if (!CanCollapseFailure(latestRecord, candidateRecord))
+            {
+                return false;
+            }
+
+            var latestPayload = LoadRunPayload(jobId, latestRecord.RunFileName);
+            if (latestPayload == null || !CanCollapseFailure(latestPayload, candidatePayload))
+            {
+                return false;
+            }
+
+            var nextCount = Math.Max(latestRecord.ConsecutiveFailureCount, 1) + 1;
+
+            latestRecord.JobName = candidateRecord.JobName;
+            latestRecord.StartedUtc = candidateRecord.StartedUtc;
+            latestRecord.CompletedUtc = candidateRecord.CompletedUtc;
+            latestRecord.HostsSucceeded = candidateRecord.HostsSucceeded;
+            latestRecord.HostsFailed = candidateRecord.HostsFailed;
+            latestRecord.ErrorMessage = candidateRecord.ErrorMessage;
+            latestRecord.ConsecutiveFailureCount = nextCount;
+
+            latestPayload.JobName = candidatePayload.JobName;
+            latestPayload.StartedUtc = candidatePayload.StartedUtc;
+            latestPayload.CompletedUtc = candidatePayload.CompletedUtc;
+            latestPayload.HostsSucceeded = candidatePayload.HostsSucceeded;
+            latestPayload.HostsFailed = candidatePayload.HostsFailed;
+            latestPayload.ErrorMessage = candidatePayload.ErrorMessage;
+            latestPayload.ConsecutiveFailureCount = nextCount;
+            latestPayload.HostOutputs = candidatePayload.HostOutputs;
+
+            var payloadPath = GetRunFilePath(jobId, latestRecord.RunFileName);
+            JsonFileWriter.WriteJsonAtomic(payloadPath, Serialize(latestPayload), createBackup: false);
+            return true;
+        }
+
+        private static bool CanCollapseFailure(JobRunRecord existingRecord, JobRunRecord candidateRecord)
+        {
+            return !existingRecord.Success
+                && !existingRecord.WasSkipped
+                && existingRecord.HostsSucceeded == candidateRecord.HostsSucceeded
+                && existingRecord.HostsFailed == candidateRecord.HostsFailed
+                && string.Equals(
+                    NormalizeComparableText(existingRecord.ErrorMessage),
+                    NormalizeComparableText(candidateRecord.ErrorMessage),
+                    StringComparison.Ordinal);
+        }
+
+        private static bool CanCollapseFailure(JobRunPayload existingPayload, JobRunPayload candidatePayload)
+        {
+            return !existingPayload.Success
+                && !existingPayload.WasSkipped
+                && existingPayload.HostsSucceeded == candidatePayload.HostsSucceeded
+                && existingPayload.HostsFailed == candidatePayload.HostsFailed
+                && string.Equals(
+                    NormalizeComparableText(existingPayload.ErrorMessage),
+                    NormalizeComparableText(candidatePayload.ErrorMessage),
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    BuildHostFailureSignature(existingPayload.HostOutputs),
+                    BuildHostFailureSignature(candidatePayload.HostOutputs),
+                    StringComparison.Ordinal);
+        }
+
+        private static string BuildHostFailureSignature(IEnumerable<JobHostOutput>? hostOutputs)
+        {
+            if (hostOutputs == null)
+            {
+                return string.Empty;
+            }
+
+            return string.Join(
+                "\n",
+                hostOutputs
+                    .OrderBy(output => output.HostAddress, StringComparer.OrdinalIgnoreCase)
+                    .Select(output =>
+                        $"{NormalizeComparableText(output.HostAddress)}|{output.Success}|{NormalizeComparableText(output.ErrorMessage)}"));
+        }
+
+        private static string NormalizeComparableText(string? text)
+            => (text ?? string.Empty).Trim();
+
+        private static JobHistoryRetentionOptions NormalizeOptions(JobHistoryRetentionOptions? options)
+        {
+            var effective = options ?? new JobHistoryRetentionOptions();
+            return new JobHistoryRetentionOptions
+            {
+                MaxRuns = effective.MaxRuns > 0 ? effective.MaxRuns : JobHistoryRetentionOptions.DefaultMaxRuns,
+                RetentionDays = effective.RetentionDays > 0 ? effective.RetentionDays : JobHistoryRetentionOptions.DefaultRetentionDays,
+                MaxOutputChars = effective.MaxOutputChars > 0 ? effective.MaxOutputChars : JobHistoryRetentionOptions.DefaultMaxOutputChars
+            };
+        }
+
+        private static string BuildSkippedSummaryMessage(SkippedRunSummaryEntry skippedSummary)
+        {
+            if (skippedSummary.MissedRunCount <= 1)
+            {
+                var localScheduledTime = skippedSummary.LastScheduledTimeUtc.ToLocalTime().ToString("g");
+                return $"Missed 1 scheduled run at {localScheduledTime} while the application was closed.";
+            }
+
+            var firstLocalTime = skippedSummary.FirstScheduledTimeUtc.ToLocalTime().ToString("g");
+            var lastLocalTime = skippedSummary.LastScheduledTimeUtc.ToLocalTime().ToString("g");
+            return $"Missed {skippedSummary.MissedRunCount} scheduled runs while the application was closed. Range: {firstLocalTime} to {lastLocalTime}.";
         }
 
         #endregion
@@ -175,6 +409,12 @@ namespace SSH_Helper.Services
                 TryBackupCorruptFile(indexPath);
                 return new JobRunIndexDocument();
             }
+        }
+
+        private void SaveIndex(string jobId, JobRunIndexDocument indexDoc)
+        {
+            var indexPath = GetIndexPath(jobId);
+            JsonFileWriter.WriteJsonAtomic(indexPath, Serialize(indexDoc), createBackup: true);
         }
 
         private static void TryBackupCorruptFile(string path)

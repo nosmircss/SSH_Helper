@@ -2,6 +2,7 @@ using FluentAssertions;
 using Moq;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using System.Reflection;
 using Xunit;
 
 namespace SSH_Helper.Tests.Services;
@@ -89,6 +90,15 @@ public class JobExecutionServiceTests : IDisposable
             _jobStorage, _schedulingService, _configService, _presetManager, _mockCredentialProvider.Object);
     }
 
+    private static Task InvokePrivateAsync(object instance, string methodName)
+    {
+        var method = instance.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
+        method.Should().NotBeNull($"method '{methodName}' should exist on {instance.GetType().Name}");
+        var task = method!.Invoke(instance, Array.Empty<object?>());
+        task.Should().BeAssignableTo<Task>();
+        return (Task)task!;
+    }
+
     #endregion
 
     #region EXEC-01: Scheduled execution (Initialize/Start/Stop basics)
@@ -138,7 +148,7 @@ public class JobExecutionServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RunNowAsync_ReturnsFalse_WhenDriftWarning()
+    public async Task RunNowAsync_IgnoresLegacyDriftWarning()
     {
         // Arrange
         SetupDefaultCredentials();
@@ -149,23 +159,26 @@ public class JobExecutionServiceTests : IDisposable
         _jobStorage.Save(job);
 
         using var service = CreateService();
+        var states = new List<JobExecutionState>();
+        service.JobStateChanged += (s, e) => states.Add(e.State);
 
         // Act
-        var result = await service.RunNowAsync(job.Id);
+        await service.RunNowAsync(job.Id);
 
         // Assert
-        result.Should().BeFalse();
+        states.Should().Contain(JobExecutionState.Started);
     }
 
     [Fact]
-    public async Task RunNowAsync_RaisesJobStateChanged_Skipped_WhenDriftWarning()
+    public async Task ScheduledEvaluation_IgnoresLegacyDriftWarning()
     {
         // Arrange
         SetupDefaultCredentials();
         SavePreset("DriftPreset2");
 
-        var job = CreateTestJob(name: "DriftJob2", schedule: ScheduleType.None, presetName: "DriftPreset2");
+        var job = CreateTestJob(name: "DriftJob2", schedule: ScheduleType.OneTime, presetName: "DriftPreset2");
         job.HasDriftWarning = true;
+        job.OneTimeScheduleUtc = DateTime.UtcNow.AddSeconds(-1);
         _jobStorage.Save(job);
 
         using var service = CreateService();
@@ -174,10 +187,11 @@ public class JobExecutionServiceTests : IDisposable
         service.JobStateChanged += (s, e) => states.Add(e.State);
 
         // Act
-        await service.RunNowAsync(job.Id);
+        await InvokePrivateAsync(service, "EvaluateAndExecuteDueJobsAsync");
 
         // Assert
-        states.Should().Contain(JobExecutionState.Skipped);
+        SpinWait.SpinUntil(() => states.Contains(JobExecutionState.Started), millisecondsTimeout: 1500)
+            .Should().BeTrue();
     }
 
     [Fact]

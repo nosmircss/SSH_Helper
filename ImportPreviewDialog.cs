@@ -229,7 +229,9 @@ namespace SSH_Helper
                 }
                 else if (entry.MissingTarget)
                 {
-                    statusText = "Target preset not found - will be disabled";
+                    statusText = job.TargetType == JobTargetType.Folder
+                        ? "Target folder not found - will be disabled"
+                        : "Target preset not found - will be disabled";
                     statusColor = Color.FromArgb(220, 50, 50); // Red
                 }
                 else

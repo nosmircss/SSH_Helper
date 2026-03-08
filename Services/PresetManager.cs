@@ -189,9 +189,10 @@ namespace SSH_Helper.Services
         /// </summary>
         public bool Delete(string name)
         {
-            if (!_presets.Remove(name))
+            if (!_presets.TryGetValue(name, out var preset))
                 return false;
 
+            _presets.Remove(name);
             PersistToConfig();
 
             // Auto-disable jobs that reference the deleted preset
@@ -373,6 +374,7 @@ namespace SSH_Helper.Services
             }
 
             int count = 0;
+            var affectedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in importedPresets)
             {
                 string name = kvp.Key;
@@ -406,6 +408,7 @@ namespace SSH_Helper.Services
                 // Ensure folder and its parents exist if preset has one
                 if (!string.IsNullOrEmpty(kvp.Value.Folder))
                 {
+                    affectedFolders.Add(kvp.Value.Folder);
                     foreach (var path in FolderPathUtility.GetAllPathsInHierarchy(kvp.Value.Folder))
                     {
                         if (!_folders.ContainsKey(path))

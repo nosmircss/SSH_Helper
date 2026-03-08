@@ -138,7 +138,7 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Deep clones a job and strips credentials, running state, and drift warning for export.
+        /// Deep clones a job and strips credentials, running state, and any legacy drift flag for export.
         /// </summary>
         private static JobDefinition CloneForExport(JobDefinition source)
         {

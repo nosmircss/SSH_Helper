@@ -12,7 +12,6 @@ namespace SSH_Helper.Services
         private readonly string _jobsFilePath;
         private readonly ICredentialProvider _credentialProvider;
         private readonly Dictionary<string, JobDefinition> _jobs = new();
-        private bool _loaded;
 
         /// <summary>
         /// Creates a new JobStorageService instance.
@@ -73,7 +72,6 @@ namespace SSH_Helper.Services
 
             if (!File.Exists(_jobsFilePath))
             {
-                _loaded = true;
                 return;
             }
 
@@ -91,8 +89,6 @@ namespace SSH_Helper.Services
                             _jobs[job.Id] = job;
                     }
                 }
-
-                _loaded = true;
             }
             catch (Exception ex)
             {
@@ -110,7 +106,6 @@ namespace SSH_Helper.Services
                 LoadError = "Jobs file was corrupted and could not be loaded. A backup was saved to jobs.json.corrupt. Starting with empty job list.";
 
                 _jobs.Clear();
-                _loaded = true;
             }
         }
 
@@ -120,7 +115,6 @@ namespace SSH_Helper.Services
         public void Reload()
         {
             _jobs.Clear();
-            _loaded = false;
             Load();
         }
 

@@ -121,8 +121,8 @@ namespace SSH_Helper
         private JobExportService? _jobExportService;
         private ToolStripStatusLabel? _statusScheduler;
         private System.Windows.Forms.Timer? _statusBarTimer;
+        private readonly ModelessDialogManager<JobListDialog> _jobListDialogManager = new();
         private readonly HashSet<string> _runNowJobIds = new();
-        private bool _schedulerStatusDirty = true;
 
         #endregion
 
@@ -3110,6 +3110,8 @@ namespace SSH_Helper
                 }
             }
 
+            _jobExecutionService?.Stop();
+            _configService.GetCurrent().LastAppShutdownUtc = DateTime.UtcNow;
             SaveConfiguration();
         }
 
@@ -3579,19 +3581,14 @@ namespace SSH_Helper
                 !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
                 IsPresetDirty())
             {
-                var result = ShowUnsavedPresetDiffPrompt();
-
-                if (result == DialogResult.Cancel)
+                if (!TryResolvePendingPresetChanges(() =>
+                    {
+                        _suppressPresetSelectionChange = true;
+                        SelectPresetByName(_activePresetName);
+                        _suppressPresetSelectionChange = false;
+                    }))
                 {
-                    _suppressPresetSelectionChange = true;
-                    SelectPresetByName(_activePresetName);
-                    _suppressPresetSelectionChange = false;
                     return;
-                }
-
-                if (result == DialogResult.Yes)
-                {
-                    SaveCurrentPreset();
                 }
             }
 
@@ -4093,16 +4090,9 @@ namespace SSH_Helper
                 !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
                 IsPresetDirty())
             {
-                var result = ShowUnsavedPresetDiffPrompt();
-
-                if (result == DialogResult.Cancel)
+                if (!TryResolvePendingPresetChanges())
                 {
                     return;
-                }
-
-                if (result == DialogResult.Yes)
-                {
-                    SaveCurrentPreset();
                 }
             }
 
@@ -7134,27 +7124,28 @@ namespace SSH_Helper
 
         #region Preset Operations
 
-        private void SaveCurrentPreset()
+        private bool SaveCurrentPreset(PresetSaveImpactAction? selectedAction = null)
         {
             // Don't save when a folder is selected (folder summary is displayed)
             if (!string.IsNullOrEmpty(_selectedFolderName))
             {
-                return;
+                return false;
             }
 
             string presetName = txtPreset.Text.Trim();
             string commands = txtCommand.Text;
+            int? timeout = int.TryParse(txtTimeoutHeader.Text, out var parsedTimeout) ? parsedTimeout : null;
 
             if (string.IsNullOrEmpty(presetName))
             {
                 DialogTheme.Show("Preset name is required.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
+                return false;
             }
 
             // Prevent saving preset with folder icon prefix (safety check)
             if (presetName.StartsWith(FolderIcon, StringComparison.Ordinal))
             {
-                return;
+                return false;
             }
 
             var preActionExpandState = CapturePresetTreeExpandState();
@@ -7166,34 +7157,32 @@ namespace SSH_Helper
             bool nameChanged = hasActivePreset &&
                 !string.Equals(presetName, originalPresetName, StringComparison.Ordinal);
 
+            var action = selectedAction ?? ShowPresetSavePrompt(
+                presetName,
+                commands,
+                txtTimeoutHeader.Text ?? string.Empty,
+                timeout,
+                allowDiscard: false);
+
+            if (action is PresetSaveImpactAction.Cancel or PresetSaveImpactAction.Discard)
+            {
+                return false;
+            }
+
             if (nameChanged)
             {
-                var choice = DialogTheme.Show(
-                    $"Preset name changed from '{originalPresetName}' to '{presetName}'.\n\n" +
-                    "Yes = Rename the existing preset\n" +
-                    "No = Create a new preset\n" +
-                    "Cancel = Keep editing",
-                    "Save Preset",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (choice == DialogResult.Cancel)
-                {
-                    return;
-                }
-
-                if (choice == DialogResult.Yes)
+                if (action == PresetSaveImpactAction.RenameExisting)
                 {
                     if (_presetManager.Presets.ContainsKey(presetName))
                     {
                         DialogTheme.Show("This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
+                        return false;
                     }
 
                     if (!_presetManager.Rename(originalPresetName!, presetName))
                     {
                         DialogTheme.Show("Unable to rename preset.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
+                        return false;
                     }
 
                     int orderIndex = _manualPresetOrder.IndexOf(originalPresetName!);
@@ -7204,7 +7193,7 @@ namespace SSH_Helper
 
                     refreshPresetList = true;
                 }
-                else
+                else if (action == PresetSaveImpactAction.CreateNew)
                 {
                     if (_presetManager.Presets.ContainsKey(presetName))
                     {
@@ -7213,8 +7202,12 @@ namespace SSH_Helper
                             "Save Preset",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Warning);
-                        return;
+                        return false;
                     }
+                }
+                else
+                {
+                    return false;
                 }
             }
 
@@ -7229,7 +7222,7 @@ namespace SSH_Helper
             var preset = new PresetInfo
             {
                 Commands = commands,
-                Timeout = int.TryParse(txtTimeoutHeader.Text, out var t) ? t : null,
+                Timeout = timeout,
                 IsFavorite = existingPreset?.IsFavorite ?? false,
                 Folder = existingPreset?.Folder
             };
@@ -7268,6 +7261,7 @@ namespace SSH_Helper
             _activePresetName = presetName;
             UpdatePresetHeaderIndicator();
             UpdateStatusBar($"Preset '{presetName}' saved");
+            return true;
         }
 
         private void AddPreset()
@@ -7275,14 +7269,9 @@ namespace SSH_Helper
             // Check for unsaved changes first
             if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
             {
-                var saveResult = ShowUnsavedPresetDiffPrompt();
-
-                if (saveResult == DialogResult.Cancel)
-                    return;
-
-                if (saveResult == DialogResult.Yes)
+                if (!TryResolvePendingPresetChanges())
                 {
-                    SaveCurrentPreset();
+                    return;
                 }
             }
 
@@ -8152,17 +8141,9 @@ namespace SSH_Helper
 
             if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
             {
-                var result = ShowUnsavedPresetDiffPrompt();
-
-                if (result == DialogResult.Cancel)
+                if (!TryResolvePendingPresetChanges(onCancel))
                 {
-                    onCancel?.Invoke();
                     return;
-                }
-
-                if (result == DialogResult.Yes)
-                {
-                    SaveCurrentPreset();
                 }
             }
 
@@ -8387,26 +8368,154 @@ namespace SSH_Helper
                 .Replace('\r', '\n');
         }
 
-        private DialogResult ShowUnsavedPresetDiffPrompt()
+        private PresetInfo? GetExistingPresetForPendingSave(string presetName, out string? existingPresetName)
         {
-            var activePresetName = _activePresetName;
-            if (string.IsNullOrEmpty(activePresetName))
+            if (!string.IsNullOrWhiteSpace(_activePresetName))
             {
-                return DialogResult.No;
+                var activePreset = _presetManager.Get(_activePresetName);
+                if (activePreset != null)
+                {
+                    existingPresetName = _activePresetName;
+                    return activePreset;
+                }
             }
 
-            var savedPreset = _presetManager.Get(activePresetName);
+            var matchingPreset = _presetManager.Get(presetName);
+            if (matchingPreset != null)
+            {
+                existingPresetName = presetName;
+                return matchingPreset;
+            }
+
+            existingPresetName = null;
+            return null;
+        }
+
+        private static bool HasPendingPresetChanges(
+            string presetName,
+            string commands,
+            int? timeout,
+            PresetInfo? existingPreset,
+            string? existingPresetName)
+        {
+            if (existingPreset == null || string.IsNullOrWhiteSpace(existingPresetName))
+            {
+                return true;
+            }
+
+            bool nameChanged = !string.Equals(presetName, existingPresetName, StringComparison.Ordinal);
+            bool commandsChanged = !string.Equals(
+                NormalizeCommandTextForComparison(commands),
+                NormalizeCommandTextForComparison(existingPreset.Commands),
+                StringComparison.Ordinal);
+            bool timeoutChanged = existingPreset.Timeout != timeout;
+
+            return nameChanged || commandsChanged || timeoutChanged;
+        }
+
+        private PresetSaveImpactAction ShowPresetSavePrompt(
+            string presetName,
+            string commands,
+            string currentTimeoutText,
+            int? timeout,
+            bool allowDiscard)
+        {
+            var existingPreset = GetExistingPresetForPendingSave(presetName, out var existingPresetName);
+            if (existingPreset == null || string.IsNullOrWhiteSpace(existingPresetName))
+            {
+                return allowDiscard
+                    ? PresetSaveImpactAction.Discard
+                    : PresetSaveImpactAction.SaveExisting;
+            }
+
+            var nameChanged = !string.Equals(presetName, existingPresetName, StringComparison.Ordinal);
+            var hasPendingChanges = HasPendingPresetChanges(
+                presetName,
+                commands,
+                timeout,
+                existingPreset,
+                existingPresetName);
+
+            if (!hasPendingChanges)
+            {
+                return PresetSaveImpactAction.SaveExisting;
+            }
+
+            var impact = PresetSaveImpactResolver.Resolve(
+                _presetManager,
+                existingPresetName!,
+                existingPreset.Folder);
+
+            if (!impact.HasAffectedJobs && !nameChanged && !allowDiscard)
+            {
+                return PresetSaveImpactAction.SaveExisting;
+            }
 
             using var dialog = new UnsavedPresetDiffDialog(
-                activePresetName,
-                txtPreset.Text ?? string.Empty,
-                savedPreset?.Timeout,
-                txtTimeoutHeader.Text ?? string.Empty,
-                savedPreset?.Commands ?? string.Empty,
-                txtCommand.Text ?? string.Empty,
-                _isDarkMode);
+                existingPresetName!,
+                presetName,
+                existingPreset.Timeout,
+                currentTimeoutText,
+                existingPreset.Commands,
+                commands,
+                _isDarkMode,
+                impact,
+                GetPresetSavePromptMode(nameChanged, allowDiscard));
             DialogTheme.SetDialogFont(dialog, _dialogFont);
-            return dialog.ShowDialog(this);
+            dialog.ShowDialog(this);
+            return dialog.SelectedAction;
+        }
+
+        private bool TryResolvePendingPresetChanges(Action? onCancel = null)
+        {
+            if (!IsPresetDirty())
+            {
+                return true;
+            }
+
+            string presetName = txtPreset.Text.Trim();
+            string commands = txtCommand.Text;
+            int? timeout = int.TryParse(txtTimeoutHeader.Text, out var parsedTimeout) ? parsedTimeout : null;
+
+            var action = ShowPresetSavePrompt(
+                presetName,
+                commands,
+                txtTimeoutHeader.Text ?? string.Empty,
+                timeout,
+                allowDiscard: true);
+
+            if (action == PresetSaveImpactAction.Cancel)
+            {
+                onCancel?.Invoke();
+                return false;
+            }
+
+            if (action == PresetSaveImpactAction.Discard)
+            {
+                return true;
+            }
+
+            if (!SaveCurrentPreset(action))
+            {
+                onCancel?.Invoke();
+                return false;
+            }
+
+            return true;
+        }
+
+        private static PresetSavePromptMode GetPresetSavePromptMode(bool nameChanged, bool allowDiscard)
+        {
+            if (nameChanged)
+            {
+                return allowDiscard
+                    ? PresetSavePromptMode.RenameExistingCreateNewDiscardCancel
+                    : PresetSavePromptMode.RenameExistingCreateNewCancel;
+            }
+
+            return allowDiscard
+                ? PresetSavePromptMode.SaveDiscardCancel
+                : PresetSavePromptMode.SaveCancel;
         }
 
         private bool IsPresetDirty()
@@ -10373,9 +10482,10 @@ namespace SSH_Helper
 
             if (IsPresetDirty())
             {
-                var result = ShowUnsavedPresetDiffPrompt();
-                if (result == DialogResult.Cancel) return false;
-                if (result == DialogResult.Yes) SaveCurrentPreset();
+                if (!TryResolvePendingPresetChanges())
+                {
+                    return false;
+                }
             }
 
             return true;
@@ -10489,7 +10599,7 @@ namespace SSH_Helper
             _jobExecutionService = new JobExecutionService(
                 _jobStorage, _schedulingService, _configService, _presetManager, _credentialProvider);
             _jobHistoryService = new JobHistoryService();
-            _jobHistoryService.SubscribeTo(_jobExecutionService);
+            _jobHistoryService.SubscribeTo(_jobExecutionService, ResolveSchedulerHistoryRetention);
 
             // Subscribe to execution events for output panel notifications
             _jobExecutionService.JobCompleted += OnSchedulerJobCompleted;
@@ -10498,7 +10608,6 @@ namespace SSH_Helper
             // Refresh status bar when jobs change
             _jobStorage.JobsChanged += (s, e) =>
             {
-                _schedulerStatusDirty = true;
                 if (InvokeRequired) { BeginInvoke(() => UpdateSchedulerStatusBar()); return; }
                 UpdateSchedulerStatusBar();
             };
@@ -10511,6 +10620,7 @@ namespace SSH_Helper
 
             // Crash recovery and start timer
             _jobExecutionService.Initialize();
+            RecordMissedSchedulerRunsOnStartup();
             _jobExecutionService.Start();
         }
 
@@ -10564,40 +10674,30 @@ namespace SSH_Helper
                 return;
 
             var config = _configService.GetCurrent();
-            var dialog = new JobListDialog(
-                _jobStorage,
-                _jobExecutionService,
-                _jobHistoryService,
-                _schedulingService,
-                _presetManager,
-                _jobExportService,
-                getMainGridRows: () =>
-                {
-                    var rows = new List<Dictionary<string, string>>();
-                    foreach (DataGridViewRow row in dgv_variables.Rows)
+            _jobListDialogManager.ShowOrActivate(
+                () => new JobListDialog(
+                    _jobStorage,
+                    _jobExecutionService,
+                    _jobHistoryService,
+                    _schedulingService,
+                    _presetManager,
+                    _jobExportService,
+                    _credentialProvider,
+                    RunTrackedJobNowAsync,
+                    getMainGridRows: () =>
                     {
-                        if (row.IsNewRow) continue;
-                        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                        foreach (DataGridViewColumn col in dgv_variables.Columns)
-                        {
-                            if (col.Name == "Select") continue;
-                            dict[col.Name] = row.Cells[col.Name].Value?.ToString() ?? "";
-                        }
-                        rows.Add(dict);
-                    }
-                    return rows;
-                },
-                getMainGridColumns: () =>
-                {
-                    return dgv_variables.Columns.Cast<DataGridViewColumn>()
-                        .Where(c => c.Name != "Select")
-                        .Select(c => c.Name)
-                        .ToList();
-                },
-                darkMode: _isDarkMode,
-                fontFamily: config.FontSettings.UIFontFamily,
-                fontSize: config.FontSettings.MenuFontSize);
-            dialog.Show(this);
+                        return HostGridUtilities.BuildSchedulerCopySnapshot(dgv_variables).Rows
+                            .ToList();
+                    },
+                    getMainGridColumns: () =>
+                    {
+                        return HostGridUtilities.BuildSchedulerCopySnapshot(dgv_variables).Columns
+                            .ToList();
+                    },
+                    darkMode: _isDarkMode,
+                    fontFamily: config.FontSettings.UIFontFamily,
+                    fontSize: config.FontSettings.MenuFontSize),
+                this);
         }
 
         /// <summary>
@@ -10635,43 +10735,63 @@ namespace SSH_Helper
 
             _statusScheduler.Text = SchedulerNotificationFormatter.FormatStatusBar(
                 activeCount, nextJobName, timeUntilNext);
-            _schedulerStatusDirty = false;
         }
 
         /// <summary>
-        /// Handles job completion events -- formats and appends notification to output panel.
+        /// Handles job completion events and refreshes scheduler UI state.
         /// </summary>
         private void OnSchedulerJobCompleted(object? sender, JobRunResult result)
         {
             if (InvokeRequired) { BeginInvoke(() => OnSchedulerJobCompleted(sender, result)); return; }
 
-            var isRunNow = _runNowJobIds.Remove(result.JobId);
-            var duration = result.CompletedUtc - result.StartedUtc;
-
-            var line = SchedulerNotificationFormatter.FormatCompletion(
-                result.JobName, isRunNow, result.Success,
-                result.HostsSucceeded, result.HostsFailed,
-                duration, DateTime.Now);
-
-            AppendOutputText(Environment.NewLine + line + Environment.NewLine);
+            _runNowJobIds.Remove(result.JobId);
             UpdateSchedulerStatusBar();
         }
 
+        private void RecordMissedSchedulerRunsOnStartup()
+        {
+            if (_jobStorage == null || _schedulingService == null || _jobHistoryService == null)
+            {
+                return;
+            }
+
+            var lastShutdownUtc = _configService.GetCurrent().LastAppShutdownUtc;
+            if (!lastShutdownUtc.HasValue)
+            {
+                return;
+            }
+
+            var skippedSummaries = _schedulingService
+                .DetectMissedRunSummaries(_jobStorage.Jobs, lastShutdownUtc.Value)
+                .OrderBy(entry => entry.LastScheduledTimeUtc)
+                .ToList();
+
+            foreach (var skippedSummary in skippedSummaries)
+            {
+                var job = _jobStorage.Get(skippedSummary.JobId);
+                _jobHistoryService.SaveSkippedRunSummary(
+                    skippedSummary,
+                    ResolveSchedulerHistoryRetention(job));
+            }
+        }
+
+        private JobHistoryRetentionOptions ResolveSchedulerHistoryRetention(JobRunResult result)
+        {
+            var job = _jobStorage?.Get(result.JobId);
+            return ResolveSchedulerHistoryRetention(job);
+        }
+
+        private JobHistoryRetentionOptions ResolveSchedulerHistoryRetention(JobDefinition? job)
+        {
+            return SchedulerHistoryPolicyResolver.Resolve(_configService.GetCurrent(), job);
+        }
+
         /// <summary>
-        /// Handles job state change events -- formats and appends notification to output panel.
+        /// Handles job state change events and refreshes scheduler UI state.
         /// </summary>
         private void OnSchedulerJobStateChanged(object? sender, JobExecutionService.JobStateChangedEventArgs e)
         {
             if (InvokeRequired) { BeginInvoke(() => OnSchedulerJobStateChanged(sender, e)); return; }
-
-            var isRunNow = _runNowJobIds.Contains(e.JobId);
-            var line = SchedulerNotificationFormatter.FormatStateChange(
-                e.JobName, e.State, isRunNow, e.Message, DateTime.Now);
-
-            if (line != null)
-            {
-                AppendOutputText(Environment.NewLine + line + Environment.NewLine);
-            }
 
             UpdateSchedulerStatusBar();
         }
@@ -10680,6 +10800,23 @@ namespace SSH_Helper
         /// Registers a job ID as a "Run Now" trigger so notifications use the correct prefix.
         /// </summary>
         internal void TrackRunNow(string jobId) => _runNowJobIds.Add(jobId);
+
+        internal async Task<bool> RunTrackedJobNowAsync(string jobId)
+        {
+            if (_jobExecutionService == null)
+            {
+                return false;
+            }
+
+            TrackRunNow(jobId);
+            var result = await _jobExecutionService.RunNowAsync(jobId);
+            if (!result)
+            {
+                _runNowJobIds.Remove(jobId);
+            }
+
+            return result;
+        }
 
         /// <summary>
         /// Stops and disposes scheduler services, unsubscribes event handlers.

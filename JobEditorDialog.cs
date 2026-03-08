@@ -9,8 +9,8 @@ namespace SSH_Helper
     /// <summary>
     /// Tabbed modal dialog for creating and editing job definitions.
     /// Provides General, Hosts, Credentials, and Advanced tabs with
-    /// cron preview, host list management, credential configuration,
-    /// and drift warning banner. Works on a deep clone so cancellation
+    /// cron preview, host list management, and credential configuration.
+    /// Works on a deep clone so cancellation
     /// discards all changes.
     /// </summary>
     internal sealed class JobEditorDialog : Form
@@ -19,6 +19,8 @@ namespace SSH_Helper
 
         private readonly PresetManager _presetManager;
         private readonly SchedulingService _schedulingService;
+        private readonly CsvManager _csvManager;
+        private readonly ICredentialProvider? _credentialProvider;
         private readonly Func<IReadOnlyList<Dictionary<string, string>>>? _getMainGridRows;
         private readonly Func<IReadOnlyList<string>>? _getMainGridColumns;
         private readonly bool _darkMode;
@@ -30,11 +32,6 @@ namespace SSH_Helper
         private readonly Panel _bottomPanel;
         private readonly Button _btnSave;
         private readonly Button _btnCancel;
-
-        // Drift warning banner
-        private readonly Panel _driftBanner;
-        private readonly Label _lblDriftWarning;
-        private readonly Button _btnAcknowledgeDrift;
 
         // General tab controls
         private readonly TextBox _txtName;
@@ -49,8 +46,11 @@ namespace SSH_Helper
 
         // Hosts tab controls
         private readonly ToolStrip _hostsToolStrip;
+        private readonly ContextMenuStrip _hostsContextMenu;
         private readonly DataGridView _gridHosts;
         private readonly Label _lblHostCount;
+        private int _hostsRightClickedColumnIndex = -1;
+        private int _hostsRightClickedRowIndex = -1;
 
         // Credentials tab controls
         private readonly RadioButton _rbInheritFromApp;
@@ -59,7 +59,9 @@ namespace SSH_Helper
         private readonly Panel _panelStoredCreds;
         private readonly TextBox _txtUsername;
         private readonly TextBox _txtPassword;
+        private readonly Label _lblStoredCredNote;
         private readonly Panel _panelPerHost;
+        private bool _hasStoredPassword;
 
         // Advanced tab controls
         private readonly GroupBox _grpFolderExecution;
@@ -71,6 +73,7 @@ namespace SSH_Helper
         private readonly NumericUpDown _numMaxRuns;
         private readonly CheckBox _chkOverrideRetention;
         private readonly NumericUpDown _numRetentionDays;
+        private bool _syncingCronPanelLayout;
 
         #endregion
 
@@ -89,6 +92,7 @@ namespace SSH_Helper
             JobDefinition? existingJob,
             PresetManager presetManager,
             SchedulingService schedulingService,
+            ICredentialProvider? credentialProvider,
             Func<IReadOnlyList<Dictionary<string, string>>>? getMainGridRows,
             Func<IReadOnlyList<string>>? getMainGridColumns,
             bool darkMode,
@@ -97,6 +101,8 @@ namespace SSH_Helper
         {
             _presetManager = presetManager;
             _schedulingService = schedulingService;
+            _csvManager = new CsvManager();
+            _credentialProvider = credentialProvider;
             _getMainGridRows = getMainGridRows;
             _getMainGridColumns = getMainGridColumns;
             _darkMode = darkMode;
@@ -119,10 +125,6 @@ namespace SSH_Helper
             _btnSave = new Button();
             _btnCancel = new Button();
 
-            _driftBanner = new Panel();
-            _lblDriftWarning = new Label();
-            _btnAcknowledgeDrift = new Button();
-
             _txtName = new TextBox();
             _rbPreset = new RadioButton();
             _rbFolder = new RadioButton();
@@ -134,6 +136,7 @@ namespace SSH_Helper
             _dtpOneTime = new DateTimePicker();
 
             _hostsToolStrip = new ToolStrip();
+            _hostsContextMenu = new ContextMenuStrip();
             _gridHosts = new DataGridView();
             _lblHostCount = new Label();
 
@@ -143,6 +146,7 @@ namespace SSH_Helper
             _panelStoredCreds = new Panel();
             _txtUsername = new TextBox();
             _txtPassword = new TextBox();
+            _lblStoredCredNote = new Label();
             _panelPerHost = new Panel();
 
             _grpFolderExecution = new GroupBox();
@@ -157,7 +161,6 @@ namespace SSH_Helper
 
             SuspendLayout();
             BuildDialogChrome();
-            BuildDriftBanner();
             BuildGeneralTab();
             BuildHostsTab();
             BuildCredentialsTab();
@@ -174,11 +177,12 @@ namespace SSH_Helper
             DialogTheme.SetDarkTitleBar(this, darkMode);
             DialogTheme.StyleTabControl(_tabControl, darkMode);
             DialogTheme.StyleDataGridView(_gridHosts, darkMode);
+            ApplyHostGridParityStyle();
             DialogTheme.StyleButton(_btnSave, darkMode, isPrimary: true);
             DialogTheme.StyleButton(_btnCancel, darkMode);
-            DialogTheme.StyleButton(_btnAcknowledgeDrift, darkMode);
             _cronBuilder.ApplyTheme(darkMode);
             _cronBuilder.SetSchedulingService(schedulingService);
+            RefreshCronPanelLayout();
 
             // Style toolstrip for dark mode
             if (darkMode)
@@ -187,14 +191,17 @@ namespace SSH_Helper
                 _hostsToolStrip.ForeColor = DialogTheme.DarkText;
                 _hostsToolStrip.Renderer = new ToolStripProfessionalRenderer(
                     new DarkToolStripColorTable());
+                _hostsContextMenu.BackColor = DialogTheme.DarkSurface2;
+                _hostsContextMenu.ForeColor = DialogTheme.DarkText;
+                _hostsContextMenu.Renderer = new ToolStripProfessionalRenderer(
+                    new DarkToolStripColorTable());
             }
 
-            // Drift banner theming override (always yellow regardless of mode)
-            _driftBanner.BackColor = Color.FromArgb(255, 243, 205);
-            _lblDriftWarning.ForeColor = Color.FromArgb(133, 100, 4);
-            _lblDriftWarning.BackColor = Color.FromArgb(255, 243, 205);
-
-            Load += (_, _) => DialogTheme.ApplyNativeTheme(this, darkMode);
+            Load += (_, _) =>
+            {
+                DialogTheme.ApplyNativeTheme(this, darkMode);
+                RefreshCronPanelLayout();
+            };
         }
 
         #endregion
@@ -256,35 +263,6 @@ namespace SSH_Helper
             CancelButton = _btnCancel;
 
             Controls.Add(_bottomPanel);
-        }
-
-        #endregion
-
-        #region Drift Warning Banner
-
-        private void BuildDriftBanner()
-        {
-            _driftBanner.Dock = DockStyle.Top;
-            _driftBanner.Height = 40;
-            _driftBanner.BackColor = Color.FromArgb(255, 243, 205);
-            _driftBanner.Visible = false;
-            _driftBanner.Padding = new Padding(8, 4, 8, 4);
-
-            _lblDriftWarning.Text = "Target preset has changed since this job was saved. Execution blocked until reviewed.";
-            _lblDriftWarning.AutoSize = false;
-            _lblDriftWarning.TextAlign = ContentAlignment.MiddleLeft;
-            _lblDriftWarning.Dock = DockStyle.Fill;
-            _lblDriftWarning.ForeColor = Color.FromArgb(133, 100, 4);
-
-            _btnAcknowledgeDrift.Text = "Review && Acknowledge";
-            _btnAcknowledgeDrift.AutoSize = true;
-            _btnAcknowledgeDrift.Dock = DockStyle.Right;
-            _btnAcknowledgeDrift.Padding = new Padding(4, 0, 4, 0);
-
-            _driftBanner.Controls.Add(_lblDriftWarning);
-            _driftBanner.Controls.Add(_btnAcknowledgeDrift);
-
-            Controls.Add(_driftBanner);
         }
 
         #endregion
@@ -387,12 +365,12 @@ namespace SSH_Helper
         private void BuildCronPanel(TabPage tab, ref int yPos)
         {
             _panelCron.Location = new Point(16, yPos);
-            _panelCron.Size = new Size(tab.Width - 48, 280);
+            _panelCron.Size = new Size(tab.Width - 48, Math.Max(_cronBuilder.MinimumSize.Height, _cronBuilder.Height));
             _panelCron.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _panelCron.Visible = false;
 
             _cronBuilder.Location = new Point(0, 0);
-            _cronBuilder.Size = new Size(_panelCron.Width, 260);
+            _cronBuilder.Size = new Size(_panelCron.Width, Math.Max(_cronBuilder.MinimumSize.Height, _cronBuilder.Height));
             _cronBuilder.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
             _panelCron.Controls.Add(_cronBuilder);
@@ -427,6 +405,51 @@ namespace SSH_Helper
             _panelOneTime.Controls.Add(_dtpOneTime);
 
             tab.Controls.Add(_panelOneTime);
+        }
+
+        private void RefreshCronPanelLayout()
+        {
+            if (_syncingCronPanelLayout || IsDisposed || _panelCron.IsDisposed || _cronBuilder.IsDisposed)
+            {
+                return;
+            }
+
+            var panelWidth = _panelCron.ClientSize.Width;
+            if (panelWidth <= 0)
+            {
+                return;
+            }
+
+            _syncingCronPanelLayout = true;
+
+            try
+            {
+                _cronBuilder.Location = Point.Empty;
+
+                if (_cronBuilder.Width != panelWidth)
+                {
+                    _cronBuilder.Width = panelWidth;
+                }
+
+                _cronBuilder.PerformLayout();
+
+                var desiredHeight = Math.Max(_cronBuilder.Height, _cronBuilder.MinimumSize.Height);
+                if (_cronBuilder.Height != desiredHeight)
+                {
+                    _cronBuilder.Height = desiredHeight;
+                }
+
+                if (_panelCron.Height != desiredHeight)
+                {
+                    _panelCron.Height = desiredHeight;
+                }
+
+                _panelCron.Parent?.PerformLayout();
+            }
+            finally
+            {
+                _syncingCronPanelLayout = false;
+            }
         }
 
         private void PopulateTargetCombo()
@@ -477,11 +500,26 @@ namespace SSH_Helper
             {
                 ToolTipText = "Remove selected rows"
             };
+            var btnAddColumn = new ToolStripButton("Add Column")
+            {
+                ToolTipText = "Add a host column"
+            };
+            var btnRenameColumn = new ToolStripButton("Rename Column")
+            {
+                ToolTipText = "Rename the current host column"
+            };
+            var btnDeleteColumn = new ToolStripButton("Delete Column")
+            {
+                ToolTipText = "Delete the current host column"
+            };
 
             btnImportCsv.Click += BtnImportCsv_Click;
             btnCopyFromMain.Click += BtnCopyFromMain_Click;
             btnAddRow.Click += BtnAddRow_Click;
             btnRemoveSelected.Click += BtnRemoveSelected_Click;
+            btnAddColumn.Click += (_, _) => AddHostColumn();
+            btnRenameColumn.Click += (_, _) => RenameHostColumn(GetActiveHostColumnIndex());
+            btnDeleteColumn.Click += (_, _) => DeleteHostColumn(GetActiveHostColumnIndex());
 
             _hostsToolStrip.Items.Add(btnImportCsv);
             _hostsToolStrip.Items.Add(new ToolStripSeparator());
@@ -489,6 +527,10 @@ namespace SSH_Helper
             _hostsToolStrip.Items.Add(new ToolStripSeparator());
             _hostsToolStrip.Items.Add(btnAddRow);
             _hostsToolStrip.Items.Add(btnRemoveSelected);
+            _hostsToolStrip.Items.Add(new ToolStripSeparator());
+            _hostsToolStrip.Items.Add(btnAddColumn);
+            _hostsToolStrip.Items.Add(btnRenameColumn);
+            _hostsToolStrip.Items.Add(btnDeleteColumn);
 
             tab.Controls.Add(_hostsToolStrip);
 
@@ -500,81 +542,39 @@ namespace SSH_Helper
             _lblHostCount.Padding = new Padding(8, 0, 0, 0);
             tab.Controls.Add(_lblHostCount);
 
-            // DataGridView fills remaining space
             _gridHosts.Dock = DockStyle.Fill;
             _gridHosts.AllowUserToAddRows = true;
             _gridHosts.AllowUserToDeleteRows = true;
+            _gridHosts.AllowUserToResizeRows = false;
+            _gridHosts.AllowUserToOrderColumns = true;
             _gridHosts.ReadOnly = false;
             _gridHosts.MultiSelect = true;
-            _gridHosts.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            _gridHosts.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            _gridHosts.SelectionMode = DataGridViewSelectionMode.CellSelect;
+            _gridHosts.EditMode = DataGridViewEditMode.EditProgrammatically;
+            _gridHosts.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            _gridHosts.ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableAlwaysIncludeHeaderText;
             _gridHosts.RowHeadersVisible = true;
-            _gridHosts.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            _gridHosts.ContextMenuStrip = _hostsContextMenu;
 
-            // Default Host_IP column
-            var colHostIp = new DataGridViewTextBoxColumn
-            {
-                Name = "Host_IP",
-                HeaderText = "Host_IP",
-                SortMode = DataGridViewColumnSortMode.NotSortable
-            };
-            _gridHosts.Columns.Add(colHostIp);
+            BuildHostsContextMenu();
+            ApplyHostGridSnapshot(new List<string> { CsvManager.HostColumnName }, Array.Empty<Dictionary<string, string>>());
 
             tab.Controls.Add(_gridHosts);
-
-            // Correct z-order: grid fills between toolbar and status label
             _gridHosts.BringToFront();
         }
 
         private void UpdateHostCount()
         {
-            var count = 0;
-            foreach (DataGridViewRow row in _gridHosts.Rows)
-            {
-                if (row.IsNewRow) continue;
-                var hostIp = row.Cells["Host_IP"]?.Value?.ToString();
-                if (!string.IsNullOrWhiteSpace(hostIp))
-                    count++;
-            }
-            _lblHostCount.Text = $"{count} host(s)";
+            _lblHostCount.Text = $"{HostGridUtilities.CountHosts(_gridHosts)} host(s)";
         }
 
         private void PopulateHostGrid()
         {
-            _gridHosts.Rows.Clear();
-            _gridHosts.Columns.Clear();
-
-            // Build columns from job.HostColumns or default to Host_IP
             var columns = _editingJob.HostColumns.Count > 0
                 ? _editingJob.HostColumns
-                : new List<string> { "Host_IP" };
+                : new List<string> { CsvManager.HostColumnName };
 
-            foreach (var colName in columns)
-            {
-                var col = new DataGridViewTextBoxColumn
-                {
-                    Name = colName,
-                    HeaderText = colName,
-                    SortMode = DataGridViewColumnSortMode.NotSortable
-                };
-                _gridHosts.Columns.Add(col);
-            }
-
-            // Populate rows
-            foreach (var hostRow in _editingJob.Hosts)
-            {
-                var rowIndex = _gridHosts.Rows.Add();
-                var gridRow = _gridHosts.Rows[rowIndex];
-                foreach (var colName in columns)
-                {
-                    if (hostRow.TryGetValue(colName, out var value))
-                    {
-                        gridRow.Cells[colName].Value = value;
-                    }
-                }
-            }
-
-            UpdateHostCount();
+            ApplyHostGridSnapshot(columns, _editingJob.Hosts);
         }
 
         private List<Dictionary<string, string>> ExtractHostsFromGrid()
@@ -603,12 +603,227 @@ namespace SSH_Helper
 
         private List<string> ExtractHostColumnsFromGrid()
         {
-            var columns = new List<string>();
-            foreach (DataGridViewColumn col in _gridHosts.Columns)
+            return _gridHosts.Columns
+                .Cast<DataGridViewColumn>()
+                .OrderBy(column => column.DisplayIndex)
+                .Select(column => column.Name)
+                .ToList();
+        }
+
+        private void BuildHostsContextMenu()
+        {
+            _hostsContextMenu.Items.Clear();
+
+            var addColumnItem = new ToolStripMenuItem("Add Column");
+            addColumnItem.Click += (_, _) => AddHostColumn();
+
+            var renameColumnItem = new ToolStripMenuItem("Rename Column");
+            renameColumnItem.Click += (_, _) => RenameHostColumn(_hostsRightClickedColumnIndex);
+
+            var deleteColumnItem = new ToolStripMenuItem("Delete Column");
+            deleteColumnItem.Click += (_, _) => DeleteHostColumn(_hostsRightClickedColumnIndex);
+
+            var deleteRowItem = new ToolStripMenuItem("Delete Row");
+            deleteRowItem.Click += (_, _) => DeleteHostRow(_hostsRightClickedRowIndex);
+
+            _hostsContextMenu.Items.Add(addColumnItem);
+            _hostsContextMenu.Items.Add(renameColumnItem);
+            _hostsContextMenu.Items.Add(deleteColumnItem);
+            _hostsContextMenu.Items.Add(new ToolStripSeparator());
+            _hostsContextMenu.Items.Add(deleteRowItem);
+
+            _hostsContextMenu.Opening += (_, _) =>
             {
-                columns.Add(col.Name);
+                var renameEnabled = _hostsRightClickedColumnIndex >= 0 &&
+                    _hostsRightClickedColumnIndex < _gridHosts.Columns.Count &&
+                    !HostGridUtilities.IsProtectedHostColumn(_gridHosts.Columns[_hostsRightClickedColumnIndex]);
+                var deleteEnabled = renameEnabled;
+
+                renameColumnItem.Visible = _hostsRightClickedColumnIndex >= 0;
+                renameColumnItem.Enabled = renameEnabled;
+                deleteColumnItem.Visible = _hostsRightClickedColumnIndex >= 0;
+                deleteColumnItem.Enabled = deleteEnabled;
+
+                deleteRowItem.Visible = _hostsRightClickedRowIndex >= 0;
+                deleteRowItem.Enabled = _hostsRightClickedRowIndex >= 0;
+            };
+        }
+
+        private void ApplyHostGridParityStyle()
+        {
+            _gridHosts.ColumnHeadersHeight = HostGridUtilities.DefaultColumnHeaderHeight;
+            _gridHosts.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            _gridHosts.RowHeadersWidth = HostGridUtilities.DefaultRowHeaderWidth;
+            _gridHosts.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.DisableResizing;
+            _gridHosts.RowTemplate.Height = HostGridUtilities.DefaultRowHeight;
+            _gridHosts.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
+            _gridHosts.ColumnHeadersDefaultCellStyle.Padding = new Padding(8, 4, 8, 4);
+            _gridHosts.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
+
+            if (_darkMode)
+            {
+                _gridHosts.RowHeadersDefaultCellStyle.BackColor = DialogTheme.GridDarkHeader;
+                _gridHosts.RowHeadersDefaultCellStyle.ForeColor = DialogTheme.DarkSecondaryText;
             }
-            return columns;
+            else
+            {
+                _gridHosts.RowHeadersDefaultCellStyle.BackColor = DialogTheme.LightBackground;
+                _gridHosts.RowHeadersDefaultCellStyle.ForeColor = DialogTheme.LightSecondaryText;
+            }
+        }
+
+        private void ApplyHostGridSnapshot(
+            IReadOnlyList<string> columns,
+            IEnumerable<Dictionary<string, string>> rows)
+        {
+            var normalizedColumns = columns
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (!normalizedColumns.Contains(CsvManager.HostColumnName, StringComparer.OrdinalIgnoreCase))
+            {
+                normalizedColumns.Insert(0, CsvManager.HostColumnName);
+            }
+
+            if (normalizedColumns.Count == 0)
+            {
+                normalizedColumns.Add(CsvManager.HostColumnName);
+            }
+
+            _gridHosts.Rows.Clear();
+            _gridHosts.Columns.Clear();
+
+            foreach (var columnName in normalizedColumns)
+            {
+                _gridHosts.Columns.Add(HostGridUtilities.CreateTextColumn(columnName));
+            }
+
+            foreach (var hostRow in rows)
+            {
+                var rowIndex = _gridHosts.Rows.Add();
+                var gridRow = _gridHosts.Rows[rowIndex];
+                foreach (var columnName in normalizedColumns)
+                {
+                    if (hostRow.TryGetValue(columnName, out var value))
+                    {
+                        gridRow.Cells[columnName].Value = value;
+                    }
+                }
+            }
+
+            UpdateHostCount();
+        }
+
+        private int GetActiveHostColumnIndex()
+        {
+            if (_gridHosts.CurrentCell != null)
+            {
+                return _gridHosts.CurrentCell.ColumnIndex;
+            }
+
+            if (_gridHosts.SelectedCells.Count > 0)
+            {
+                return _gridHosts.SelectedCells[0].ColumnIndex;
+            }
+
+            return -1;
+        }
+
+        private void AddHostColumn()
+        {
+            string defaultName = HostGridUtilities.GetNextGeneratedColumnName(_gridHosts.Columns);
+            string columnName = Microsoft.VisualBasic.Interaction.InputBox(
+                "Enter the name of the new column:",
+                "Add Column",
+                defaultName);
+
+            if (string.IsNullOrWhiteSpace(columnName))
+            {
+                return;
+            }
+
+            columnName = InputValidator.SanitizeColumnName(columnName);
+            if (_gridHosts.Columns.Cast<DataGridViewColumn>()
+                .Any(column => string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)))
+            {
+                DialogTheme.Show("Column name already exists!", "Add Column");
+                return;
+            }
+
+            _gridHosts.Columns.Add(HostGridUtilities.CreateTextColumn(columnName));
+        }
+
+        private void RenameHostColumn(int columnIndex)
+        {
+            if (columnIndex < 0 || columnIndex >= _gridHosts.Columns.Count)
+            {
+                return;
+            }
+
+            var column = _gridHosts.Columns[columnIndex];
+            if (HostGridUtilities.IsProtectedHostColumn(column))
+            {
+                DialogTheme.Show("The Host_IP column cannot be renamed.", "Rename Column");
+                return;
+            }
+
+            var currentName = column.HeaderText;
+            string newName = Microsoft.VisualBasic.Interaction.InputBox(
+                $"Enter a new name for the column '{currentName}':",
+                "Rename Column",
+                currentName);
+
+            if (string.IsNullOrWhiteSpace(newName) || string.Equals(newName, currentName, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            newName = InputValidator.SanitizeColumnName(newName);
+            if (_gridHosts.Columns.Cast<DataGridViewColumn>()
+                .Any(existing => !ReferenceEquals(existing, column) &&
+                                 string.Equals(existing.Name, newName, StringComparison.OrdinalIgnoreCase)))
+            {
+                DialogTheme.Show("This column name already exists.", "Rename Column Error");
+                return;
+            }
+
+            column.HeaderText = newName;
+            column.Name = newName;
+        }
+
+        private void DeleteHostColumn(int columnIndex)
+        {
+            if (columnIndex < 0 || columnIndex >= _gridHosts.Columns.Count)
+            {
+                return;
+            }
+
+            if (HostGridUtilities.IsProtectedHostColumn(_gridHosts.Columns[columnIndex]))
+            {
+                DialogTheme.Show("The Host_IP column cannot be deleted.", "Delete Column");
+                return;
+            }
+
+            _gridHosts.Columns.RemoveAt(columnIndex);
+            UpdateHostCount();
+        }
+
+        private void DeleteHostRow(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= _gridHosts.Rows.Count)
+            {
+                return;
+            }
+
+            var row = _gridHosts.Rows[rowIndex];
+            if (row.IsNewRow)
+            {
+                return;
+            }
+
+            _gridHosts.Rows.RemoveAt(rowIndex);
+            UpdateHostCount();
         }
 
         #endregion
@@ -676,19 +891,17 @@ namespace SSH_Helper
             _txtPassword.Size = new Size(250, 23);
             _txtPassword.UseSystemPasswordChar = true;
 
-            var lblCredNote = new Label
-            {
-                Text = "Credentials are stored in Windows Credential Manager",
-                Location = new Point(0, 66),
-                AutoSize = true,
-                ForeColor = Color.FromArgb(108, 117, 125)
-            };
+            _lblStoredCredNote.Text = SchedulerJobIntegrityUtilities.FormatStoredCredentialNote(hasStoredPassword: false);
+            _lblStoredCredNote.Location = new Point(0, 66);
+            _lblStoredCredNote.AutoSize = true;
+            _lblStoredCredNote.ForeColor = Color.FromArgb(108, 117, 125);
+            _txtPassword.PlaceholderText = "Leave blank to keep the stored password";
 
             _panelStoredCreds.Controls.Add(lblUsername);
             _panelStoredCreds.Controls.Add(_txtUsername);
             _panelStoredCreds.Controls.Add(lblPassword);
             _panelStoredCreds.Controls.Add(_txtPassword);
-            _panelStoredCreds.Controls.Add(lblCredNote);
+            _panelStoredCreds.Controls.Add(_lblStoredCredNote);
             tab.Controls.Add(_panelStoredCreds);
             yPos += _panelStoredCreds.Height + 8;
 
@@ -826,7 +1039,12 @@ namespace SSH_Helper
                 var index = _cboScheduleType.SelectedIndex;
                 _panelCron.Visible = index == 1;    // Recurring (Cron)
                 _panelOneTime.Visible = index == 2; // One-Time
+                RefreshCronPanelLayout();
             };
+
+            _panelCron.SizeChanged += (_, _) => RefreshCronPanelLayout();
+            _cronBuilder.SizeChanged += (_, _) => RefreshCronPanelLayout();
+            _tabControl.TabPages[0].Resize += (_, _) => RefreshCronPanelLayout();
 
             // Credential mode radio buttons
             _rbInheritFromApp.CheckedChanged += (_, _) => UpdateCredentialPanels();
@@ -839,18 +1057,58 @@ namespace SSH_Helper
             _chkOverrideRetention.CheckedChanged += (_, _) =>
                 _numRetentionDays.Enabled = _chkOverrideRetention.Checked;
 
-            // Host grid row changes update count
-            _gridHosts.RowsAdded += (_, _) => UpdateHostCount();
-            _gridHosts.RowsRemoved += (_, _) => UpdateHostCount();
+            _gridHosts.MouseDown += GridHosts_MouseDown;
+            _gridHosts.RowPostPaint += GridHosts_RowPostPaint;
+            _gridHosts.CellPainting += GridHosts_CellPainting;
+            _gridHosts.CellClick += GridHosts_CellClick;
+            _gridHosts.ColumnAdded += GridHosts_ColumnAdded;
+            _gridHosts.CellLeave += GridHosts_CellLeave;
+            _gridHosts.CellValueChanged += GridHosts_CellValueChanged;
+            _gridHosts.RowsAdded += GridHosts_RowsAdded;
+            _gridHosts.RowsRemoved += GridHosts_RowsRemoved;
+            _gridHosts.KeyPress += GridHosts_KeyPress;
+            _gridHosts.KeyDown += GridHosts_KeyDown;
+            _gridHosts.CellDoubleClick += GridHosts_CellDoubleClick;
 
-            // Drift banner acknowledge
-            _btnAcknowledgeDrift.Click += BtnAcknowledgeDrift_Click;
         }
 
         private void UpdateCredentialPanels()
         {
             _panelStoredCreds.Visible = _rbStored.Checked;
             _panelPerHost.Visible = _rbPerHostColumn.Checked;
+            UpdateStoredCredentialNote();
+        }
+
+        private void LoadStoredCredentials()
+        {
+            _hasStoredPassword = false;
+
+            if (_credentialProvider?.IsAvailable != true || _editingJob.CredentialMode != CredentialMode.Stored)
+            {
+                UpdateStoredCredentialNote();
+                return;
+            }
+
+            if (_credentialProvider.TryGetPassword(
+                    CredentialTargets.JobPasswordTarget(_editingJob.Id),
+                    out var storedUsername,
+                    out var storedPassword))
+            {
+                if (!string.IsNullOrWhiteSpace(storedUsername))
+                {
+                    _txtUsername.Text = storedUsername;
+                }
+
+                _hasStoredPassword = !string.IsNullOrEmpty(storedPassword);
+            }
+
+            _txtPassword.Clear();
+            UpdateStoredCredentialNote();
+        }
+
+        private void UpdateStoredCredentialNote()
+        {
+            _lblStoredCredNote.Text = SchedulerJobIntegrityUtilities.FormatStoredCredentialNote(_hasStoredPassword);
         }
 
         #endregion
@@ -908,6 +1166,7 @@ namespace SSH_Helper
                     _rbPerHostColumn.Checked = true;
                     break;
             }
+            LoadStoredCredentials();
             UpdateCredentialPanels();
 
             // Advanced - Folder execution
@@ -930,10 +1189,176 @@ namespace SSH_Helper
                 _numRetentionDays.Enabled = true;
             }
 
-            // Drift warning
-            if (!_isNew && _editingJob.HasDriftWarning)
+            RefreshCronPanelLayout();
+        }
+
+        #endregion
+
+        #region Host Grid Events
+
+        private void GridHosts_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Right)
             {
-                _driftBanner.Visible = true;
+                return;
+            }
+
+            var hit = _gridHosts.HitTest(e.X, e.Y);
+            _hostsRightClickedColumnIndex = hit.ColumnIndex;
+            _hostsRightClickedRowIndex = hit.Type == DataGridViewHitTestType.Cell ||
+                                         hit.Type == DataGridViewHitTestType.RowHeader
+                ? hit.RowIndex
+                : -1;
+
+            if (hit.Type == DataGridViewHitTestType.Cell && hit.RowIndex >= 0 && hit.ColumnIndex >= 0)
+            {
+                _gridHosts.CurrentCell = _gridHosts[hit.ColumnIndex, hit.RowIndex];
+            }
+        }
+
+        private void GridHosts_RowPostPaint(object? sender, DataGridViewRowPostPaintEventArgs e)
+        {
+            if (sender is not DataGridView grid)
+            {
+                return;
+            }
+
+            var rowIndexText = (e.RowIndex + 1).ToString();
+            var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
+            var rowNumberColor = _darkMode ? DialogTheme.DarkSecondaryText : DialogTheme.LightSecondaryText;
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                rowIndexText,
+                grid.Font,
+                headerBounds,
+                rowNumberColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+
+        private void GridHosts_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || e.Graphics == null)
+            {
+                return;
+            }
+
+            var cell = _gridHosts.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            if (!cell.Selected)
+            {
+                return;
+            }
+
+            var selectionColor = _darkMode ? DialogTheme.GridDarkSelection : DialogTheme.GridLightSelection;
+
+            e.Paint(e.CellBounds, DataGridViewPaintParts.Background);
+            using var brush = new SolidBrush(selectionColor);
+            e.Graphics.FillRectangle(brush, e.CellBounds);
+            e.Paint(e.CellBounds, DataGridViewPaintParts.ContentForeground | DataGridViewPaintParts.Border);
+            e.Handled = true;
+        }
+
+        private void GridHosts_CellClick(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex == -1 && e.ColumnIndex >= 0)
+            {
+                _gridHosts.ClearSelection();
+                foreach (DataGridViewRow row in _gridHosts.Rows)
+                {
+                    if (!row.IsNewRow)
+                    {
+                        row.Cells[e.ColumnIndex].Selected = true;
+                    }
+                }
+            }
+        }
+
+        private void GridHosts_ColumnAdded(object? sender, DataGridViewColumnEventArgs e)
+        {
+            e.Column.SortMode = DataGridViewColumnSortMode.NotSortable;
+            e.Column.Width = string.Equals(e.Column.Name, CsvManager.HostColumnName, StringComparison.OrdinalIgnoreCase)
+                ? HostGridUtilities.DefaultHostColumnWidth
+                : HostGridUtilities.DefaultAdditionalColumnWidth;
+        }
+
+        private void GridHosts_CellLeave(object? sender, DataGridViewCellEventArgs e)
+        {
+            _gridHosts.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        }
+
+        private void GridHosts_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+        {
+            UpdateHostCount();
+        }
+
+        private void GridHosts_RowsAdded(object? sender, DataGridViewRowsAddedEventArgs e)
+        {
+            for (int i = 0; i < e.RowCount; i++)
+            {
+                _gridHosts.Rows[e.RowIndex + i].Height = HostGridUtilities.DefaultRowHeight;
+            }
+
+            UpdateHostCount();
+        }
+
+        private void GridHosts_RowsRemoved(object? sender, DataGridViewRowsRemovedEventArgs e)
+        {
+            UpdateHostCount();
+        }
+
+        private void GridHosts_KeyPress(object? sender, KeyPressEventArgs e)
+        {
+            if (_gridHosts.IsCurrentCellInEditMode || char.IsControl(e.KeyChar) || _gridHosts.CurrentCell == null)
+            {
+                return;
+            }
+
+            _gridHosts.BeginEdit(true);
+            if (_gridHosts.EditingControl is TextBox editingTextBox)
+            {
+                editingTextBox.Text = e.KeyChar.ToString();
+                editingTextBox.SelectionStart = editingTextBox.Text.Length;
+            }
+
+            e.Handled = true;
+        }
+
+        private void GridHosts_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.Control && e.KeyCode == Keys.A)
+            {
+                _gridHosts.SelectAll();
+                e.Handled = true;
+            }
+            else if (e.Control && e.KeyCode == Keys.C)
+            {
+                Clipboard.SetText(HostGridUtilities.BuildClipboardText(_gridHosts));
+                e.Handled = true;
+            }
+            else if (e.Control && e.KeyCode == Keys.V)
+            {
+                if (Clipboard.ContainsText())
+                {
+                    HostGridUtilities.PasteClipboardText(_gridHosts, Clipboard.GetText());
+                    UpdateHostCount();
+                }
+
+                e.Handled = true;
+            }
+            else if (e.KeyCode == Keys.Delete || e.KeyCode == Keys.Back)
+            {
+                HostGridUtilities.ClearSelectedCells(_gridHosts);
+                _gridHosts.Refresh();
+                UpdateHostCount();
+                e.Handled = true;
+            }
+        }
+
+        private void GridHosts_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0)
+            {
+                _gridHosts.BeginEdit(true);
             }
         }
 
@@ -954,49 +1379,15 @@ namespace SSH_Helper
 
             try
             {
-                var lines = File.ReadAllLines(ofd.FileName);
-                if (lines.Length == 0) return;
-
-                // Parse header line
-                var headers = ParseCsvLine(lines[0]);
-                if (headers.Count == 0) return;
-
-                // Require Host_IP column
-                if (!headers.Contains("Host_IP", StringComparer.OrdinalIgnoreCase))
+                var dataTable = _csvManager.LoadFromFile(ofd.FileName);
+                var snapshot = HostGridUtilities.BuildSnapshot(dataTable);
+                if (!snapshot.Columns.Contains(CsvManager.HostColumnName, StringComparer.OrdinalIgnoreCase))
                 {
                     DialogTheme.Show("CSV must contain a 'Host_IP' column.", "Import Error");
                     return;
                 }
 
-                // Rebuild grid columns from CSV
-                _gridHosts.Rows.Clear();
-                _gridHosts.Columns.Clear();
-                foreach (var h in headers)
-                {
-                    _gridHosts.Columns.Add(new DataGridViewTextBoxColumn
-                    {
-                        Name = h,
-                        HeaderText = h,
-                        SortMode = DataGridViewColumnSortMode.NotSortable
-                    });
-                }
-
-                // Parse data rows
-                for (var i = 1; i < lines.Length; i++)
-                {
-                    var values = ParseCsvLine(lines[i]);
-                    if (values.Count == 0) continue;
-
-                    var rowIndex = _gridHosts.Rows.Add();
-                    var row = _gridHosts.Rows[rowIndex];
-                    for (var c = 0; c < Math.Min(values.Count, headers.Count); c++)
-                    {
-                        row.Cells[headers[c]].Value = values[c];
-                    }
-                }
-
-                DialogTheme.StyleDataGridView(_gridHosts, _darkMode);
-                UpdateHostCount();
+                ApplyHostGridSnapshot(snapshot.Columns, snapshot.Rows);
             }
             catch (Exception ex)
             {
@@ -1021,35 +1412,7 @@ namespace SSH_Helper
                 return;
             }
 
-            // Rebuild grid columns from main grid
-            _gridHosts.Rows.Clear();
-            _gridHosts.Columns.Clear();
-            foreach (var colName in columns)
-            {
-                _gridHosts.Columns.Add(new DataGridViewTextBoxColumn
-                {
-                    Name = colName,
-                    HeaderText = colName,
-                    SortMode = DataGridViewColumnSortMode.NotSortable
-                });
-            }
-
-            // Populate rows
-            foreach (var hostRow in rows)
-            {
-                var rowIndex = _gridHosts.Rows.Add();
-                var row = _gridHosts.Rows[rowIndex];
-                foreach (var colName in columns)
-                {
-                    if (hostRow.TryGetValue(colName, out var value))
-                    {
-                        row.Cells[colName].Value = value;
-                    }
-                }
-            }
-
-            DialogTheme.StyleDataGridView(_gridHosts, _darkMode);
-            UpdateHostCount();
+            ApplyHostGridSnapshot(columns, rows);
         }
 
         private void BtnAddRow_Click(object? sender, EventArgs e)
@@ -1060,46 +1423,28 @@ namespace SSH_Helper
 
         private void BtnRemoveSelected_Click(object? sender, EventArgs e)
         {
-            var selectedRows = _gridHosts.SelectedRows
-                .Cast<DataGridViewRow>()
-                .Where(r => !r.IsNewRow)
-                .OrderByDescending(r => r.Index)
+            var selectedRowIndices = _gridHosts.SelectedCells
+                .Cast<DataGridViewCell>()
+                .Select(cell => cell.RowIndex)
+                .Concat(_gridHosts.SelectedRows.Cast<DataGridViewRow>().Select(row => row.Index))
+                .Where(index => index >= 0 && index < _gridHosts.Rows.Count && !_gridHosts.Rows[index].IsNewRow)
+                .Distinct()
+                .OrderByDescending(index => index)
                 .ToList();
 
-            foreach (var row in selectedRows)
+            if (selectedRowIndices.Count == 0 &&
+                _gridHosts.CurrentCell != null &&
+                !_gridHosts.Rows[_gridHosts.CurrentCell.RowIndex].IsNewRow)
             {
-                _gridHosts.Rows.Remove(row);
+                selectedRowIndices.Add(_gridHosts.CurrentCell.RowIndex);
             }
+
+            foreach (var rowIndex in selectedRowIndices)
+            {
+                _gridHosts.Rows.RemoveAt(rowIndex);
+            }
+
             UpdateHostCount();
-        }
-
-        #endregion
-
-        #region Drift Banner
-
-        private void BtnAcknowledgeDrift_Click(object? sender, EventArgs e)
-        {
-            // Show diff between saved and current content hash
-            var currentContent = string.Empty;
-            if (_editingJob.TargetType == JobTargetType.Preset &&
-                _presetManager.Presets.TryGetValue(_editingJob.TargetName, out var preset))
-            {
-                currentContent = preset.Commands;
-            }
-
-            var currentHash = ContentHasher.ComputeHash(currentContent);
-            var savedHash = _editingJob.TargetContentHash;
-
-            var message = $"Saved content hash: {savedHash}\n" +
-                          $"Current content hash: {currentHash}\n\n" +
-                          "The target preset has been modified since this job was saved.\n" +
-                          "Click Yes to acknowledge and clear the drift warning.";
-
-            if (DialogTheme.Confirm(this, message, "Review Preset Changes", _darkMode))
-            {
-                _editingJob.HasDriftWarning = false;
-                _driftBanner.Visible = false;
-            }
         }
 
         #endregion
@@ -1123,6 +1468,45 @@ namespace SSH_Helper
             return CredentialMode.InheritFromApp;
         }
 
+        private bool TryPersistStoredCredentials(string username, string passwordText)
+        {
+            if (_credentialProvider?.IsAvailable != true)
+            {
+                DialogTheme.Show(
+                    "Windows Credential Manager is not available, so stored job credentials cannot be saved.",
+                    "Stored Credentials");
+                return false;
+            }
+
+            var target = CredentialTargets.JobPasswordTarget(_editingJob.Id);
+            string passwordToStore = passwordText;
+
+            if (string.IsNullOrEmpty(passwordToStore))
+            {
+                if (!_hasStoredPassword ||
+                    !_credentialProvider.TryGetPassword(target, out _, out passwordToStore))
+                {
+                    DialogTheme.Show(
+                        "Password is required the first time you save stored credentials for this job.",
+                        "Stored Credentials");
+                    return false;
+                }
+            }
+
+            if (!_credentialProvider.SavePassword(target, username, passwordToStore, "Scheduler job credential"))
+            {
+                DialogTheme.Show(
+                    "Failed to save the job password to Windows Credential Manager.",
+                    "Stored Credentials");
+                return false;
+            }
+
+            _hasStoredPassword = true;
+            _txtPassword.Clear();
+            UpdateStoredCredentialNote();
+            return true;
+        }
+
         private void ValidateAndSave()
         {
             // Extract current form values
@@ -1137,6 +1521,8 @@ namespace SSH_Helper
             var credentialMode = GetSelectedCredentialMode();
             var storedUsername = credentialMode == CredentialMode.Stored
                 ? _txtUsername.Text : null;
+            var storedPassword = credentialMode == CredentialMode.Stored
+                ? _txtPassword.Text : string.Empty;
 
             // Delegate ALL validation to JobEditorValidator
             var error = JobEditorValidator.ValidateAll(
@@ -1146,6 +1532,12 @@ namespace SSH_Helper
             if (error != null)
             {
                 DialogTheme.Show(error, "Validation Error");
+                return;
+            }
+
+            if (credentialMode == CredentialMode.Stored &&
+                !TryPersistStoredCredentials(storedUsername!.Trim(), storedPassword))
+            {
                 return;
             }
 
@@ -1197,71 +1589,11 @@ namespace SSH_Helper
 
             // Metadata
             _editingJob.ModifiedUtc = DateTime.UtcNow;
-            _editingJob.HasDriftWarning = false; // Fresh save clears drift
+            _editingJob.HasDriftWarning = false; // Legacy compatibility: new saves do not carry an active drift flag.
 
             Result = _editingJob;
             DialogResult = DialogResult.OK;
             Close();
-        }
-
-        #endregion
-
-        #region CSV Parsing
-
-        /// <summary>
-        /// Simple CSV line parser that handles quoted fields with escaped double-quotes.
-        /// </summary>
-        private static List<string> ParseCsvLine(string line)
-        {
-            var fields = new List<string>();
-            if (string.IsNullOrEmpty(line)) return fields;
-
-            var inQuotes = false;
-            var field = new System.Text.StringBuilder();
-
-            for (var i = 0; i < line.Length; i++)
-            {
-                var c = line[i];
-
-                if (inQuotes)
-                {
-                    if (c == '"')
-                    {
-                        if (i + 1 < line.Length && line[i + 1] == '"')
-                        {
-                            field.Append('"');
-                            i++; // skip escaped quote
-                        }
-                        else
-                        {
-                            inQuotes = false;
-                        }
-                    }
-                    else
-                    {
-                        field.Append(c);
-                    }
-                }
-                else
-                {
-                    if (c == '"')
-                    {
-                        inQuotes = true;
-                    }
-                    else if (c == ',')
-                    {
-                        fields.Add(field.ToString().Trim());
-                        field.Clear();
-                    }
-                    else
-                    {
-                        field.Append(c);
-                    }
-                }
-            }
-
-            fields.Add(field.ToString().Trim());
-            return fields;
         }
 
         #endregion

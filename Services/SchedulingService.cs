@@ -145,6 +145,50 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Detects missed recurring runs since the last application shutdown and aggregates
+        /// them into one summary per affected job for the startup downtime window.
+        /// </summary>
+        /// <param name="jobs">All known job definitions.</param>
+        /// <param name="lastAppShutdownUtc">The UTC time the application was last shut down.</param>
+        /// <returns>List of skipped run summaries, one per affected job.</returns>
+        public IReadOnlyList<SkippedRunSummaryEntry> DetectMissedRunSummaries(
+            IReadOnlyDictionary<string, JobDefinition> jobs,
+            DateTime lastAppShutdownUtc)
+        {
+            var summaries = new List<SkippedRunSummaryEntry>();
+
+            foreach (var job in jobs.Values)
+            {
+                if (!job.IsEnabled)
+                    continue;
+
+                if (job.ScheduleType != ScheduleType.Recurring)
+                    continue;
+
+                if (string.IsNullOrEmpty(job.CronExpression))
+                    continue;
+
+                var missed = GetMissedOccurrences(job.CronExpression, lastAppShutdownUtc)
+                    .OrderBy(time => time)
+                    .ToList();
+
+                if (missed.Count == 0)
+                    continue;
+
+                summaries.Add(new SkippedRunSummaryEntry
+                {
+                    JobId = job.Id,
+                    JobName = job.Name,
+                    MissedRunCount = missed.Count,
+                    FirstScheduledTimeUtc = missed[0],
+                    LastScheduledTimeUtc = missed[missed.Count - 1]
+                });
+            }
+
+            return summaries.AsReadOnly();
+        }
+
+        /// <summary>
         /// Marks a one-time job as completed by disabling it with a reason.
         /// Preserves the OneTimeScheduleUtc value as a visible record.
         /// </summary>

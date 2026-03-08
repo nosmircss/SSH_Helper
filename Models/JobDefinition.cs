@@ -120,12 +120,12 @@ namespace SSH_Helper.Models
         public string TargetName { get; set; } = string.Empty;
 
         /// <summary>
-        /// SHA256 hash of the target preset content at the time the job was saved, for drift detection.
+        /// Legacy compatibility field storing the target preset content hash captured when the job was saved.
         /// </summary>
         public string TargetContentHash { get; set; } = string.Empty;
 
         /// <summary>
-        /// For folder targets: maps each preset name to its content hash at save time.
+        /// Legacy compatibility field for folder targets: maps each preset name to its content hash at save time.
         /// Null for single-preset targets.
         /// </summary>
         public Dictionary<string, string>? FolderPresetHashes { get; set; }
@@ -162,7 +162,7 @@ namespace SSH_Helper.Models
         public ScheduleType ScheduleType { get; set; } = ScheduleType.None;
 
         /// <summary>
-        /// Indicates that the target preset content has changed since the job was saved.
+        /// Legacy compatibility flag retained for older job files. Scheduler execution no longer blocks on this value.
         /// </summary>
         public bool HasDriftWarning { get; set; }
 
