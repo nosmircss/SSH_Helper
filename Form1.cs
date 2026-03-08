@@ -10504,6 +10504,9 @@ namespace SSH_Helper
             // Set up reference integrity with preset manager
             _presetManager.SetJobStorageService(_jobStorage);
 
+            // Register cleanup on form close
+            FormClosed += (_, __) => CleanupSchedulerServices();
+
             // Crash recovery and start timer
             _jobExecutionService.Initialize();
             _jobExecutionService.Start();
@@ -10643,6 +10646,23 @@ namespace SSH_Helper
         /// Registers a job ID as a "Run Now" trigger so notifications use the correct prefix.
         /// </summary>
         internal void TrackRunNow(string jobId) => _runNowJobIds.Add(jobId);
+
+        /// <summary>
+        /// Stops and disposes scheduler services, unsubscribes event handlers.
+        /// Called from Dispose override in Form1.Designer.cs.
+        /// </summary>
+        private void CleanupSchedulerServices()
+        {
+            _statusBarTimer?.Stop();
+            _statusBarTimer?.Dispose();
+            if (_jobExecutionService != null)
+            {
+                _jobExecutionService.JobCompleted -= OnSchedulerJobCompleted;
+                _jobExecutionService.JobStateChanged -= OnSchedulerJobStateChanged;
+                _jobExecutionService.Stop();
+                _jobExecutionService.Dispose();
+            }
+        }
 
         #endregion
 
