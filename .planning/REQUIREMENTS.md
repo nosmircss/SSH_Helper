@@ -13,8 +13,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **JMGT-02**: User can edit an existing scheduled job's definition
 - [x] **JMGT-03**: User can delete a scheduled job
 - [x] **JMGT-04**: User can enable or disable a job without deleting it
-- [ ] **JMGT-05**: User can export job definitions to a file for sharing between instances
-- [ ] **JMGT-06**: User can import job definitions from an exported file
+- [x] **JMGT-05**: User can export job definitions to a file for sharing between instances
+- [x] **JMGT-06**: User can import job definitions from an exported file
 
 ### Scheduling
 
@@ -57,7 +57,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### UI
 
-- [ ] **UI-01**: User can view all jobs in a list showing status, next run time, and last result
+- [x] **UI-01**: User can view all jobs in a list showing status, next run time, and last result
 - [ ] **UI-02**: User can create and edit jobs via a dedicated editor dialog with cron preview and host/credential options
 - [ ] **UI-03**: User receives in-app notifications (popup or log) on job completion and failures
 
@@ -106,8 +106,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | JMGT-02 | Phase 1 | Complete |
 | JMGT-03 | Phase 1 | Complete |
 | JMGT-04 | Phase 1 | Complete |
-| JMGT-05 | Phase 5 | Pending |
-| JMGT-06 | Phase 5 | Pending |
+| JMGT-05 | Phase 5 | Complete |
+| JMGT-06 | Phase 5 | Complete |
 | SCHD-01 | Phase 2 | Complete |
 | SCHD-02 | Phase 2 | Complete |
 | SCHD-03 | Phase 2 | Complete |
@@ -132,7 +132,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HIST-02 | Phase 4 | Complete |
 | HIST-03 | Phase 4 | Complete |
 | HIST-04 | Phase 4 | Complete |
-| UI-01 | Phase 5 | Pending |
+| UI-01 | Phase 5 | Complete |
 | UI-02 | Phase 5 | Pending |
 | UI-03 | Phase 5 | Pending |
 | RELY-01 | Phase 1 | Complete |
