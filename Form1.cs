@@ -299,6 +299,8 @@ namespace SSH_Helper
             RebuildRecentFilesMenu();
             InitializePresetSearchFilter();
             InitializeConnectionTesting();
+            InitializeSchedulerServices();
+            InitializeSchedulerStatusBar();
             UpdateStatusBar("Ready");
 
             // Apply saved theme and fonts
@@ -10557,13 +10559,45 @@ namespace SSH_Helper
         /// </summary>
         private void ShowJobListDialog()
         {
-            // Scheduler services not available (no credential provider)
             if (_jobStorage == null || _jobExecutionService == null ||
                 _schedulingService == null || _jobHistoryService == null || _jobExportService == null)
                 return;
 
-            // Stub: JobListDialog not yet created in this plan
-            // Will be wired when JobListDialog is available from a prior plan
+            var config = _configService.GetCurrent();
+            var dialog = new JobListDialog(
+                _jobStorage,
+                _jobExecutionService,
+                _jobHistoryService,
+                _schedulingService,
+                _presetManager,
+                _jobExportService,
+                getMainGridRows: () =>
+                {
+                    var rows = new List<Dictionary<string, string>>();
+                    foreach (DataGridViewRow row in dgv_variables.Rows)
+                    {
+                        if (row.IsNewRow) continue;
+                        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (DataGridViewColumn col in dgv_variables.Columns)
+                        {
+                            if (col.Name == "Select") continue;
+                            dict[col.Name] = row.Cells[col.Name].Value?.ToString() ?? "";
+                        }
+                        rows.Add(dict);
+                    }
+                    return rows;
+                },
+                getMainGridColumns: () =>
+                {
+                    return dgv_variables.Columns.Cast<DataGridViewColumn>()
+                        .Where(c => c.Name != "Select")
+                        .Select(c => c.Name)
+                        .ToList();
+                },
+                darkMode: _isDarkMode,
+                fontFamily: config.FontSettings.UIFontFamily,
+                fontSize: config.FontSettings.MenuFontSize);
+            dialog.Show(this);
         }
 
         /// <summary>
