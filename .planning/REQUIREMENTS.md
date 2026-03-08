@@ -58,7 +58,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### UI
 
 - [x] **UI-01**: User can view all jobs in a list showing status, next run time, and last result
-- [ ] **UI-02**: User can create and edit jobs via a dedicated editor dialog with cron preview and host/credential options
+- [x] **UI-02**: User can create and edit jobs via a dedicated editor dialog with cron preview and host/credential options
 - [ ] **UI-03**: User receives in-app notifications (popup or log) on job completion and failures
 
 ### Reliability
@@ -133,7 +133,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HIST-03 | Phase 4 | Complete |
 | HIST-04 | Phase 4 | Complete |
 | UI-01 | Phase 5 | Complete |
-| UI-02 | Phase 5 | Pending |
+| UI-02 | Phase 5 | Complete |
 | UI-03 | Phase 5 | Pending |
 | RELY-01 | Phase 1 | Complete |
 | RELY-02 | Phase 3 | Complete |
