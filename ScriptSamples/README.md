@@ -170,6 +170,7 @@ The `generic/` folder contains samples specifically designed to demonstrate all 
 | `health_check_retry.yaml` | `while`, `wait`, `log` levels, `_iteration` | Retry loop with escalating log messages |
 | `data_extraction.yaml` | `extract` (single/all), `updatecolumn`, `foreach` when | Extract system metrics to grid columns |
 | `api_lookup.yaml` | `webhook` GET, `json.get/exists/len/items` | Query threat intel API, parse JSON response |
+| `portchecker_api_query.yaml` | `input`, `http` POST, `json.items`, `table` | Prompt for ports and display open/closed status from portchecker.io |
 | `event_logging.yaml` | `writefile` (jsonl), `json()`, timestamps | Audit trail in JSON Lines format |
 | `csv_export.yaml` | `writefile` (csv), headers, string building | Export metrics to CSV for spreadsheets |
 | `compliance_report.yaml` | `json.merge/set/keys`, complex conditionals | Security compliance scan with JSON report |

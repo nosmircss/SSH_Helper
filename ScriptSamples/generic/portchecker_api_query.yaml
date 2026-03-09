@@ -1,0 +1,129 @@
+---
+# Demonstrates: input validation, split/trim, http POST, json.items, table output
+# Scenario: Prompt for TCP ports, query portchecker.io API, and print a clean status table
+
+name: PortChecker API Query
+description: Prompts for comma-separated ports and checks them via https://portchecker.io/api/query
+
+steps:
+  - print:
+      message: "=== PortChecker API Query ==="
+  - print:
+      message: "Target host: ${Host_IP}"
+
+  - set:
+      expression: ports_input = trim(replace("${ports}", '"', ""))
+  - set:
+      expression: ports_input = replace(ports_input, " ", "")
+
+  - if:
+      condition: length(ports_input) == 0
+      then:
+        - input:
+            title: "Port Check"
+            prompt: "Enter one or more ports (comma-separated, e.g. 22,80,443):"
+            into: ports_input
+            validate: "^\\s*\\d{1,5}(\\s*,\\s*\\d{1,5})*\\s*$"
+            validation_error: "Enter ports as comma-separated numbers, like 22,80,443"
+        - set:
+            expression: ports_input = replace(trim(ports_input), " ", "")
+
+  - if:
+      condition: not (ports_input matches '^[0-9]{1,5}(,[0-9]{1,5})*$')
+      then:
+        - exit:
+            status: failure
+            message: "Invalid port format in 'ports' column. Use comma-separated numbers, e.g. 22,80,443"
+
+  - set:
+      expression: raw_ports = split(ports_input, ",")
+  - set:
+      expression: port_list = json([])
+
+  - foreach:
+      iterator: p in raw_ports
+      do:
+        - set:
+            expression: clean_port = trim(p)
+        - if:
+            condition: clean_port is not empty
+            then:
+              - set:
+                  expression: port_list = json.push(port_list, ${clean_port})
+
+  - set:
+      expression: request_body = json("host", ${Host_IP}, "ports", ${port_list})
+
+  - http:
+      url: "https://portchecker.io/api/query"
+      method: POST
+      content_type: json
+      body: ${request_body}
+      into: portcheck_response
+
+  - if:
+      condition: json.get(portcheck_response, "error", true) == true
+      then:
+        - set:
+            expression: api_msg = json.get(portcheck_response, "msg", "Unknown API error")
+        - exit:
+            status: failure
+            message: "Port check API error: ${api_msg}"
+
+  - set:
+      expression: rows = json([])
+  - set:
+      expression: check_items = json.items(portcheck_response, "check")
+
+  - if:
+      condition: check_items.length == 0
+      then:
+        - print:
+            message: "No port results were returned by the API."
+        - print:
+            message: "HTTP status: ${portcheck_response_status}"
+        - print:
+            message: "Response body: ${portcheck_response}"
+        - exit:
+            status: failure
+            message: "Port check returned no results"
+
+  - foreach:
+      iterator: item in check_items
+      do:
+        - set:
+            expression: result_port = json.get(item, "port", "")
+        - set:
+            expression: result_status = json.get(item, "status", false)
+        - if:
+            condition: result_status == true
+            then:
+              - set:
+                  expression: status_text = "open"
+            else:
+              - set:
+                  expression: status_text = "closed"
+        - set:
+            expression: row = json("Port", ${result_port}, "Status", ${status_text})
+        - set:
+            expression: rows = json.push(rows, ${row})
+
+  - print:
+      message: " "
+  - print:
+      message: "Port status results for ${Host_IP}:"
+  - table:
+      data: "${rows}"
+      columns:
+        - header: Port
+          field: Port
+          align: right
+          width: 8
+        - header: Status
+          field: Status
+          align: left
+          width: 10
+
+  - exit:
+      status: success
+      message: "Port check complete"
