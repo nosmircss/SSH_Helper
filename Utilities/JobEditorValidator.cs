@@ -103,6 +103,46 @@ namespace SSH_Helper.Utilities
         }
 
         /// <summary>
+        /// Validates per-host credentials when credential mode is PerHostColumn.
+        /// </summary>
+        public static string? ValidatePerHostCredentials(
+            CredentialMode mode,
+            IReadOnlyList<Dictionary<string, string>>? hosts,
+            IReadOnlyList<string>? hostColumns)
+        {
+            if (mode != CredentialMode.PerHostColumn)
+                return null;
+
+            var hasUsernameColumn = hostColumns?.Any(column =>
+                string.Equals(column, "username", StringComparison.OrdinalIgnoreCase)) == true;
+            var hasPasswordColumn = hostColumns?.Any(column =>
+                string.Equals(column, "password", StringComparison.OrdinalIgnoreCase)) == true;
+
+            if (!hasUsernameColumn || !hasPasswordColumn)
+                return "Per-host credentials require 'username' and 'password' columns in the Hosts tab.";
+
+            if (hosts == null)
+                return null;
+
+            for (var index = 0; index < hosts.Count; index++)
+            {
+                var row = hosts[index];
+                if (!row.Values.Any(value => !string.IsNullOrWhiteSpace(value)))
+                    continue;
+
+                if (!TryGetRowValue(row, "username", out var username)
+                    || !TryGetRowValue(row, "password", out var password)
+                    || string.IsNullOrWhiteSpace(username)
+                    || string.IsNullOrWhiteSpace(password))
+                {
+                    return $"Host row {index + 1} is missing username or password required for per-host credentials.";
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// Runs all validators in sequence, returning the first error or null if all valid.
         /// </summary>
         public static string? ValidateAll(
@@ -112,6 +152,7 @@ namespace SSH_Helper.Utilities
             string? cronExpression,
             DateTime? oneTimeUtc,
             IReadOnlyList<Dictionary<string, string>>? hosts,
+            IReadOnlyList<string>? hostColumns,
             CredentialMode credentialMode,
             string? storedUsername)
         {
@@ -120,7 +161,26 @@ namespace SSH_Helper.Utilities
                 ?? ValidateCron(scheduleType, cronExpression)
                 ?? ValidateOneTimeDate(scheduleType, oneTimeUtc)
                 ?? ValidateHosts(hosts)
+                ?? ValidatePerHostCredentials(credentialMode, hosts, hostColumns)
                 ?? ValidateStoredCredentials(credentialMode, storedUsername);
+        }
+
+        private static bool TryGetRowValue(
+            IReadOnlyDictionary<string, string> row,
+            string key,
+            out string value)
+        {
+            foreach (var kvp in row)
+            {
+                if (string.Equals(kvp.Key, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = kvp.Value;
+                    return true;
+                }
+            }
+
+            value = string.Empty;
+            return false;
         }
     }
 }

@@ -1257,8 +1257,26 @@ namespace SSH_Helper
             if (preview.ShowDialog(this) != DialogResult.OK || preview.AcceptedEntries == null)
                 return;
 
+            var (savedCount, failures) = CommitImportedEntries(_jobStorage, preview.AcceptedEntries);
+
+            RefreshJobList();
+
+            DialogTheme.Show(this,
+                BuildImportCompletionMessage(savedCount, failures),
+                "Import Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        internal static (int SavedCount, IReadOnlyList<string> Failures) CommitImportedEntries(
+            JobStorageService jobStorage,
+            IEnumerable<JobExportService.ImportJobEntry> entries)
+        {
+            ArgumentNullException.ThrowIfNull(jobStorage);
+            ArgumentNullException.ThrowIfNull(entries);
+
             var savedCount = 0;
-            foreach (var entry in preview.AcceptedEntries)
+            var failures = new List<string>();
+
+            foreach (var entry in entries)
             {
                 try
                 {
@@ -1268,23 +1286,34 @@ namespace SSH_Helper
                         SchedulerJobIntegrityUtilities.ApplyMissingTargetImportState(entry.Job);
                     }
 
-                    _jobStorage.Save(entry.Job);
+                    jobStorage.Save(entry.Job);
                     savedCount++;
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Best-effort: skip individual save failures
+                    failures.Add($"{entry.ResolvedName}: {ex.GetBaseException().Message}");
                 }
             }
 
-            RefreshJobList();
+            return (savedCount, failures);
+        }
 
-            if (savedCount > 0)
-            {
-                DialogTheme.Show(this,
-                    $"Imported {savedCount} job(s) successfully.",
-                    "Import Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
+        internal static string BuildImportCompletionMessage(int savedCount, IReadOnlyList<string> failures)
+        {
+            failures ??= Array.Empty<string>();
+
+            if (savedCount > 0 && failures.Count == 0)
+                return $"Imported {savedCount} job(s) successfully.";
+
+            if (savedCount == 0 && failures.Count == 0)
+                return "No jobs were imported.";
+
+            var heading = savedCount > 0
+                ? $"Imported {savedCount} job(s). {failures.Count} job(s) failed to import."
+                : $"No jobs were imported. {failures.Count} job(s) failed to import.";
+
+            return heading + Environment.NewLine + Environment.NewLine
+                + string.Join(Environment.NewLine, failures);
         }
 
         private Task<bool> RunNowJobAsync(string jobId)

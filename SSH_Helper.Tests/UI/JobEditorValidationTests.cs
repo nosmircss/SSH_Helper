@@ -198,6 +198,65 @@ namespace SSH_Helper.Tests.UI
 
         #endregion
 
+        #region ValidatePerHostCredentials
+
+        [Fact]
+        public void ValidatePerHostCredentials_MissingColumns_ReturnsError()
+        {
+            var hosts = new List<Dictionary<string, string>>
+            {
+                new() { { "Host_IP", "10.0.0.1" } }
+            };
+
+            JobEditorValidator.ValidatePerHostCredentials(
+                CredentialMode.PerHostColumn,
+                hosts,
+                new List<string> { "Host_IP", "username" })
+                .Should().Be("Per-host credentials require 'username' and 'password' columns in the Hosts tab.");
+        }
+
+        [Fact]
+        public void ValidatePerHostCredentials_BlankRowCredential_ReturnsRowError()
+        {
+            var hosts = new List<Dictionary<string, string>>
+            {
+                new()
+                {
+                    { "Host_IP", "10.0.0.1" },
+                    { "username", "admin" },
+                    { "password", "" }
+                }
+            };
+
+            JobEditorValidator.ValidatePerHostCredentials(
+                CredentialMode.PerHostColumn,
+                hosts,
+                new List<string> { "Host_IP", "username", "password" })
+                .Should().Be("Host row 1 is missing username or password required for per-host credentials.");
+        }
+
+        [Fact]
+        public void ValidatePerHostCredentials_CaseInsensitiveColumnsAndValues_ReturnsNull()
+        {
+            var hosts = new List<Dictionary<string, string>>
+            {
+                new()
+                {
+                    { "Host_IP", "10.0.0.1" },
+                    { "Username", "admin" },
+                    { "PASSWORD", "secret" }
+                }
+            };
+
+            JobEditorValidator.ValidatePerHostCredentials(
+                CredentialMode.PerHostColumn,
+                hosts,
+                new List<string> { "Host_IP", "Username", "PASSWORD" })
+                .Should().BeNull();
+        }
+
+        #endregion
+
         #region ValidateAll
 
         [Fact]
@@ -211,7 +270,7 @@ namespace SSH_Helper.Tests.UI
             var result = JobEditorValidator.ValidateAll(
                 "MyJob", "MyPreset",
                 ScheduleType.None, null, null,
-                hosts, CredentialMode.InheritFromApp, null);
+                hosts, new List<string> { "Host_IP" }, CredentialMode.InheritFromApp, null);
 
             result.Should().BeNull();
         }
@@ -227,7 +286,7 @@ namespace SSH_Helper.Tests.UI
             var result = JobEditorValidator.ValidateAll(
                 "", "MyPreset",
                 ScheduleType.None, null, null,
-                hosts, CredentialMode.InheritFromApp, null);
+                hosts, new List<string> { "Host_IP" }, CredentialMode.InheritFromApp, null);
 
             result.Should().Be("Job name is required");
         }
@@ -243,9 +302,25 @@ namespace SSH_Helper.Tests.UI
             var result = JobEditorValidator.ValidateAll(
                 "MyJob", "",
                 ScheduleType.None, null, null,
-                hosts, CredentialMode.InheritFromApp, null);
+                hosts, new List<string> { "Host_IP" }, CredentialMode.InheritFromApp, null);
 
             result.Should().Be("Please select a target preset/folder");
+        }
+
+        [Fact]
+        public void ValidateAll_PerHostCredentials_RequiresCredentialColumns()
+        {
+            var hosts = new List<Dictionary<string, string>>
+            {
+                new() { { "Host_IP", "10.0.0.1" } }
+            };
+
+            var result = JobEditorValidator.ValidateAll(
+                "MyJob", "MyPreset",
+                ScheduleType.None, null, null,
+                hosts, new List<string> { "Host_IP", "username" }, CredentialMode.PerHostColumn, null);
+
+            result.Should().Be("Per-host credentials require 'username' and 'password' columns in the Hosts tab.");
         }
 
         #endregion

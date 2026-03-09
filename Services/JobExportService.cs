@@ -22,7 +22,7 @@ namespace SSH_Helper.Services
             /// <summary>Whether this job's name conflicts with an existing job.</summary>
             public bool HasConflict { get; set; }
 
-            /// <summary>The resolved name (original or with " (imported)" suffix).</summary>
+            /// <summary>The resolved name (original or with deterministic import suffix).</summary>
             public string ResolvedName { get; set; } = string.Empty;
 
             /// <summary>Whether the target preset/folder was not found (caller sets this).</summary>
@@ -110,7 +110,7 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Prepares imported jobs with conflict detection and new GUID assignment.
         /// Generates new IDs for all imported jobs to avoid ID collision.
-        /// Appends " (imported)" suffix to names that conflict with existing names.
+        /// Resolves conflicting names using deterministic imported suffixes.
         /// </summary>
         public List<ImportJobEntry> PrepareImport(IReadOnlyList<JobDefinition> importJobs,
             IReadOnlyCollection<string> existingNames)
@@ -123,8 +123,7 @@ namespace SSH_Helper.Services
                 var cloned = DeepClone(job);
                 cloned.Id = Guid.NewGuid().ToString("N");
 
-                bool hasConflict = nameSet.Contains(cloned.Name);
-                string resolvedName = hasConflict ? $"{cloned.Name} (imported)" : cloned.Name;
+                string resolvedName = ReserveImportName(cloned.Name, nameSet, out var hasConflict);
 
                 entries.Add(new ImportJobEntry
                 {
@@ -156,6 +155,27 @@ namespace SSH_Helper.Services
         {
             var json = JsonConvert.SerializeObject(source);
             return JsonConvert.DeserializeObject<JobDefinition>(json)!;
+        }
+
+        private static string ReserveImportName(string originalName, HashSet<string> reservedNames, out bool hasConflict)
+        {
+            if (reservedNames.Add(originalName))
+            {
+                hasConflict = false;
+                return originalName;
+            }
+
+            hasConflict = true;
+
+            for (var suffixIndex = 1; ; suffixIndex++)
+            {
+                var candidate = suffixIndex == 1
+                    ? $"{originalName} (imported)"
+                    : $"{originalName} (imported {suffixIndex})";
+
+                if (reservedNames.Add(candidate))
+                    return candidate;
+            }
         }
 
         private static string CompressAndEncode(string text)

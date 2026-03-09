@@ -232,6 +232,44 @@ namespace SSH_Helper.Tests.Services
         }
 
         [Fact]
+        public void PrepareImport_UsesNumberedImportedSuffixWhenFirstSuffixAlreadyExists()
+        {
+            var importJobs = new List<JobDefinition>
+            {
+                CreateTestJob("ExistingJob")
+            };
+            var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "ExistingJob",
+                "ExistingJob (imported)"
+            };
+
+            var entries = _service.PrepareImport(importJobs, existingNames);
+
+            entries.Should().ContainSingle();
+            entries[0].HasConflict.Should().BeTrue();
+            entries[0].ResolvedName.Should().Be("ExistingJob (imported 2)");
+        }
+
+        [Fact]
+        public void PrepareImport_ReservesNamesAcrossImportedBatch()
+        {
+            var importJobs = new List<JobDefinition>
+            {
+                CreateTestJob("SharedJob"),
+                CreateTestJob("SharedJob"),
+                CreateTestJob("SharedJob")
+            };
+
+            var entries = _service.PrepareImport(importJobs, Array.Empty<string>());
+
+            entries.Select(entry => entry.ResolvedName).Should().Equal(
+                "SharedJob",
+                "SharedJob (imported)",
+                "SharedJob (imported 2)");
+        }
+
+        [Fact]
         public void PrepareImport_GeneratesNewGuids()
         {
             var job = CreateTestJob("SomeJob");

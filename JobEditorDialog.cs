@@ -1518,6 +1518,7 @@ namespace SSH_Helper
             var oneTimeUtc = scheduleType == ScheduleType.OneTime
                 ? _dtpOneTime.Value.ToUniversalTime() : (DateTime?)null;
             var hosts = ExtractHostsFromGrid();
+            var hostColumns = ExtractHostColumnsFromGrid();
             var credentialMode = GetSelectedCredentialMode();
             var storedUsername = credentialMode == CredentialMode.Stored
                 ? _txtUsername.Text : null;
@@ -1527,7 +1528,7 @@ namespace SSH_Helper
             // Delegate ALL validation to JobEditorValidator
             var error = JobEditorValidator.ValidateAll(
                 name, targetName, scheduleType, cronExpression,
-                oneTimeUtc, hosts, credentialMode, storedUsername);
+                oneTimeUtc, hosts, hostColumns, credentialMode, storedUsername);
 
             if (error != null)
             {
@@ -1572,7 +1573,7 @@ namespace SSH_Helper
 
             // Hosts
             _editingJob.Hosts = hosts;
-            _editingJob.HostColumns = ExtractHostColumnsFromGrid();
+            _editingJob.HostColumns = hostColumns;
 
             // Credentials
             _editingJob.CredentialMode = credentialMode;

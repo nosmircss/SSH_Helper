@@ -745,6 +745,71 @@ public class JobListDialogRunNowTests : IDisposable
         historyGrid.SelectedRows[0].Tag.Should().Be(selectedRunFileName);
     }
 
+    [Fact]
+    public void CommitImportedEntries_SavesSuccessfulRowsAndReportsFailures()
+    {
+        var jobStorage = new JobStorageService(new FakeCredentialProvider(), _jobsPath);
+        jobStorage.Load();
+        jobStorage.Save(CreateTestJob("Existing Job"));
+
+        var successfulEntry = new JobExportService.ImportJobEntry
+        {
+            Job = CreateTestJob("Imported Source"),
+            ResolvedName = "Imported Job"
+        };
+        var failingEntry = new JobExportService.ImportJobEntry
+        {
+            Job = CreateTestJob("Duplicate Source"),
+            ResolvedName = "Existing Job"
+        };
+
+        var (savedCount, failures) = JobListDialog.CommitImportedEntries(
+            jobStorage,
+            new[] { successfulEntry, failingEntry });
+
+        savedCount.Should().Be(1);
+        failures.Should().ContainSingle();
+        failures[0].Should().Contain("Existing Job");
+        failures[0].Should().Contain("already exists");
+        jobStorage.Jobs.Values.Should().Contain(job => job.Name == "Imported Job");
+    }
+
+    [Fact]
+    public void CommitImportedEntries_AppliesMissingTargetStateBeforeSave()
+    {
+        var jobStorage = new JobStorageService(new FakeCredentialProvider(), _jobsPath);
+        jobStorage.Load();
+
+        var missingTargetEntry = new JobExportService.ImportJobEntry
+        {
+            Job = CreateTestJob("Missing Target Source"),
+            ResolvedName = "Missing Target Imported",
+            MissingTarget = true
+        };
+
+        var (savedCount, failures) = JobListDialog.CommitImportedEntries(
+            jobStorage,
+            new[] { missingTargetEntry });
+
+        savedCount.Should().Be(1);
+        failures.Should().BeEmpty();
+        var savedJob = jobStorage.Jobs.Values.Should().ContainSingle().Subject;
+        savedJob.Name.Should().Be("Missing Target Imported");
+        savedJob.IsEnabled.Should().BeFalse();
+        savedJob.DisabledReason.Should().Be("Missing preset target 'Nightly'");
+    }
+
+    [Fact]
+    public void BuildImportCompletionMessage_IncludesFailureDetails()
+    {
+        var message = JobListDialog.BuildImportCompletionMessage(
+            1,
+            new[] { "Bad Job: A job with the name 'Bad Job' already exists." });
+
+        message.Should().Contain("Imported 1 job(s). 1 job(s) failed to import.");
+        message.Should().Contain("Bad Job: A job with the name 'Bad Job' already exists.");
+    }
+
     private static JobDefinition CreateTestJob(string name)
     {
         return new JobDefinition

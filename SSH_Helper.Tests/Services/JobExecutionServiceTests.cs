@@ -99,6 +99,20 @@ public class JobExecutionServiceTests : IDisposable
         return (Task)task!;
     }
 
+    private static void InvokePrivate(object instance, string methodName)
+    {
+        var method = instance.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
+        method.Should().NotBeNull($"method '{methodName}' should exist on {instance.GetType().Name}");
+        method!.Invoke(instance, Array.Empty<object?>());
+    }
+
+    private static T GetPrivateField<T>(object instance, string fieldName) where T : class
+    {
+        var field = instance.GetType().GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
+        field.Should().NotBeNull($"field '{fieldName}' should exist on {instance.GetType().Name}");
+        return field!.GetValue(instance).Should().BeAssignableTo<T>().Subject;
+    }
+
     #endregion
 
     #region EXEC-01: Scheduled execution (Initialize/Start/Stop basics)
@@ -428,6 +442,100 @@ public class JobExecutionServiceTests : IDisposable
 
         // Assert
         service.RunningJobCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ScheduledOneTimeFailure_AutoDisablesJob()
+    {
+        // Arrange
+        SetupDefaultCredentials();
+
+        var job = CreateTestJob(name: "OneTimeFail", schedule: ScheduleType.OneTime, presetName: "MissingPreset");
+        job.OneTimeScheduleUtc = DateTime.UtcNow.AddSeconds(-1);
+        _jobStorage.Save(job);
+
+        using var service = CreateService();
+
+        // Act
+        await InvokePrivateAsync(service, "EvaluateAndExecuteDueJobsAsync");
+
+        // Assert
+        SpinWait.SpinUntil(() =>
+        {
+            var stored = _jobStorage.Get(job.Id);
+            return stored != null && !stored.IsEnabled;
+        }, millisecondsTimeout: 2000).Should().BeTrue();
+
+        var reloaded = _jobStorage.Get(job.Id);
+        reloaded.Should().NotBeNull();
+        reloaded!.IsEnabled.Should().BeFalse();
+        reloaded.DisabledReason.Should().Be("One-time schedule failed");
+    }
+
+    [Fact]
+    public async Task EvaluateAndExecuteDueJobsAsync_DoesNotQueueSameJobTwice()
+    {
+        // Arrange
+        var config = _configService.GetCurrent();
+        config.MaxConcurrentJobs = 1;
+        _configService.Save(config);
+
+        var job = CreateTestJob(name: "QueuedOnce", schedule: ScheduleType.OneTime, presetName: "QueuedPreset");
+        job.OneTimeScheduleUtc = DateTime.UtcNow.AddSeconds(-1);
+        _jobStorage.Save(job);
+
+        using var service = CreateService();
+        var concurrencyGate = GetPrivateField<SemaphoreSlim>(service, "_concurrencyGate");
+        concurrencyGate.Wait(0).Should().BeTrue();
+
+        try
+        {
+            // Act
+            await InvokePrivateAsync(service, "EvaluateAndExecuteDueJobsAsync");
+            await InvokePrivateAsync(service, "EvaluateAndExecuteDueJobsAsync");
+
+            // Assert
+            service.QueuedJobCount.Should().Be(1);
+        }
+        finally
+        {
+            concurrencyGate.Release();
+        }
+    }
+
+    [Fact]
+    public async Task DrainQueue_ClearsQueuedTrackingAfterDequeue()
+    {
+        // Arrange
+        SetupDefaultCredentials();
+
+        var config = _configService.GetCurrent();
+        config.MaxConcurrentJobs = 1;
+        _configService.Save(config);
+
+        var job = CreateTestJob(name: "DrainQueued", schedule: ScheduleType.OneTime, presetName: "MissingPreset");
+        job.OneTimeScheduleUtc = DateTime.UtcNow.AddSeconds(-1);
+        _jobStorage.Save(job);
+
+        using var service = CreateService();
+        var concurrencyGate = GetPrivateField<SemaphoreSlim>(service, "_concurrencyGate");
+        var queuedIds = GetPrivateField<System.Collections.Concurrent.ConcurrentDictionary<string, byte>>(
+            service, "_queuedJobIds");
+
+        concurrencyGate.Wait(0).Should().BeTrue();
+        await InvokePrivateAsync(service, "EvaluateAndExecuteDueJobsAsync");
+        service.QueuedJobCount.Should().Be(1);
+        queuedIds.Should().ContainKey(job.Id);
+
+        // Act
+        concurrencyGate.Release();
+        InvokePrivate(service, "DrainQueue");
+
+        // Assert
+        SpinWait.SpinUntil(() => service.QueuedJobCount == 0, millisecondsTimeout: 2000)
+            .Should().BeTrue();
+        SpinWait.SpinUntil(() => !queuedIds.ContainsKey(job.Id), millisecondsTimeout: 2000)
+            .Should().BeTrue();
     }
 
     #endregion

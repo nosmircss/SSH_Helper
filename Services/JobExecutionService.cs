@@ -66,6 +66,7 @@ namespace SSH_Helper.Services
         private readonly SemaphoreSlim _concurrencyGate;
         private readonly ConcurrentDictionary<string, RunningJobInfo> _runningJobs = new();
         private readonly ConcurrentQueue<QueuedJob> _jobQueue = new();
+        private readonly ConcurrentDictionary<string, byte> _queuedJobIds = new();
         private readonly CancellationTokenSource _disposalCts = new();
         private bool _disposed;
         private DateTime _lastEvaluationUtc = DateTime.UtcNow;
@@ -217,6 +218,7 @@ namespace SSH_Helper.Services
             }
             catch (Exception ex)
             {
+                HandlePostExecution(job, success: false, isRunNow: true);
                 OnJobFailed(job, ex.Message);
                 return false;
             }
@@ -283,6 +285,12 @@ namespace SSH_Helper.Services
                         continue;
                     }
 
+                    if (_queuedJobIds.ContainsKey(job.Id))
+                    {
+                        Debug.WriteLine($"Skipping job '{job.Name}': already queued");
+                        continue;
+                    }
+
                     bool isDue = false;
 
                     switch (job.ScheduleType)
@@ -313,10 +321,7 @@ namespace SSH_Helper.Services
                     }
                     else
                     {
-                        _jobQueue.Enqueue(new QueuedJob(job.Id, DateTime.UtcNow));
-                        OnJobStateChanged(job.Id, job.Name, JobExecutionState.Queued,
-                            "Waiting for concurrency slot");
-                        Debug.WriteLine($"Job '{job.Name}' queued: all concurrency slots in use");
+                        TryQueueJob(job);
                     }
                 }
 
@@ -360,7 +365,7 @@ namespace SSH_Helper.Services
             }
             catch (Exception ex)
             {
-                HandlePostExecution(job, success: false);
+                HandlePostExecution(job, success: false, isRunNow: false);
                 OnJobFailed(job, ex.Message);
             }
             finally
@@ -443,7 +448,7 @@ namespace SSH_Helper.Services
                 overallSuccess ? JobExecutionState.Completed : JobExecutionState.Failed,
                 overallSuccess ? null : $"{failed} host(s) failed");
 
-            HandlePostExecution(job, overallSuccess);
+            HandlePostExecution(job, overallSuccess, isRunNow);
         }
 
         /// <summary>
@@ -455,23 +460,23 @@ namespace SSH_Helper.Services
 
             foreach (var row in job.Hosts)
             {
-                if (!row.TryGetValue("Host_IP", out var hostIp) || string.IsNullOrWhiteSpace(hostIp))
+                if (!TryGetRowValue(row, "Host_IP", out var hostIp) || string.IsNullOrWhiteSpace(hostIp))
                     continue;
 
                 var host = HostConnection.Parse(hostIp);
 
                 // Apply per-row overrides from columns
-                if (row.TryGetValue("port", out var portStr)
+                if (TryGetRowValue(row, "port", out var portStr)
                     && int.TryParse(portStr, out var port)
                     && port > 0 && port <= 65535)
                 {
                     host.Port = port;
                 }
 
-                if (row.TryGetValue("username", out var user) && !string.IsNullOrEmpty(user))
+                if (TryGetRowValue(row, "username", out var user) && !string.IsNullOrEmpty(user))
                     host.Username = user;
 
-                if (row.TryGetValue("password", out var pass) && !string.IsNullOrEmpty(pass))
+                if (TryGetRowValue(row, "password", out var pass) && !string.IsNullOrEmpty(pass))
                     host.Password = pass;
 
                 // Copy all row columns as variables for {{variable}} substitution
@@ -484,6 +489,24 @@ namespace SSH_Helper.Services
             }
 
             return hosts;
+        }
+
+        private static bool TryGetRowValue(
+            IReadOnlyDictionary<string, string> row,
+            string key,
+            out string value)
+        {
+            foreach (var kvp in row)
+            {
+                if (string.Equals(kvp.Key, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = kvp.Value;
+                    return true;
+                }
+            }
+
+            value = string.Empty;
+            return false;
         }
 
         /// <summary>
@@ -630,6 +653,32 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Adds a job to the overflow queue once per pending execution.
+        /// </summary>
+        private bool TryQueueJob(JobDefinition job)
+        {
+            if (!_queuedJobIds.TryAdd(job.Id, 0))
+            {
+                Debug.WriteLine($"Skipping queue add for job '{job.Name}': already queued");
+                return false;
+            }
+
+            _jobQueue.Enqueue(new QueuedJob(job.Id, DateTime.UtcNow));
+            OnJobStateChanged(job.Id, job.Name, JobExecutionState.Queued,
+                "Waiting for concurrency slot");
+            Debug.WriteLine($"Job '{job.Name}' queued: all concurrency slots in use");
+            return true;
+        }
+
+        /// <summary>
+        /// Clears queued tracking for a job once its queued entry is consumed or discarded.
+        /// </summary>
+        private void ClearQueuedJob(string jobId)
+        {
+            _queuedJobIds.TryRemove(jobId, out _);
+        }
+
+        /// <summary>
         /// Clears job tracking and persisted RunningState after execution completes.
         /// </summary>
         private void CompleteJob(string jobId)
@@ -656,6 +705,7 @@ namespace SSH_Helper.Services
             {
                 if (_jobQueue.TryDequeue(out queued))
                 {
+                    ClearQueuedJob(queued.JobId);
                     var job = _jobStorage.Get(queued.JobId);
                     if (job != null && job.IsEnabled && !_runningJobs.ContainsKey(job.Id))
                     {
@@ -686,7 +736,7 @@ namespace SSH_Helper.Services
         /// After MarkOneTimeCompleted sets IsEnabled=false, the evaluation loop's
         /// early "if (!job.IsEnabled) continue" check prevents re-triggering on the next cycle.
         /// </summary>
-        private void HandlePostExecution(JobDefinition job, bool success)
+        private void HandlePostExecution(JobDefinition job, bool success, bool isRunNow)
         {
             if (success && job.ScheduleType == ScheduleType.OneTime)
             {
@@ -694,13 +744,12 @@ namespace SSH_Helper.Services
                 _jobStorage.Save(job);
                 Debug.WriteLine($"One-time job '{job.Name}' auto-disabled after successful execution");
             }
-            else if (!success && job.ScheduleType == ScheduleType.OneTime)
+            else if (!success && job.ScheduleType == ScheduleType.OneTime && !isRunNow)
             {
-                // Failed one-time jobs remain enabled so the user can retry or reschedule.
-                // They will not re-trigger automatically because OneTimeScheduleUtc <= now
-                // only fires once per evaluation window, and after failure the job stays
-                // in the _runningJobs dictionary until CompleteJob clears it.
-                Debug.WriteLine($"One-time job '{job.Name}' failed; remains enabled for retry");
+                job.IsEnabled = false;
+                job.DisabledReason = "One-time schedule failed";
+                _jobStorage.Save(job);
+                Debug.WriteLine($"One-time job '{job.Name}' auto-disabled after failed scheduled execution");
             }
             else if (success)
             {

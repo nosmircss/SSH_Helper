@@ -1,5 +1,8 @@
 # Lessons
 
+## 2026-03-09
+- When a user narrows a follow-up implementation to a specific subset of review findings, I must implement only that approved scope and drop adjacent enhancements I suggested on my own.
+
 ## 2026-03-08
 - When scheduler lifecycle notifications share the same pane as live host output, I should remove or relocate them instead of mixing them into the merged output stream.
 - When a user reports scheduler history flooding with the same repeated failure, I should collapse consecutive identical failures in persisted history instead of only tweaking the grid presentation.

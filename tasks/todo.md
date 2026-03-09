@@ -1,5 +1,61 @@
 # TODO
 
+## 41. Review Connection Pooling Feature
+- [x] 41.1 Trace the UI/config toggle and runtime execution paths that enable or bypass SSH connection pooling.
+- [x] 41.2 Inspect the pool lifecycle, health-check, keep-alive, and session-leasing behavior plus any focused specs/tests.
+- [x] 41.3 Deliver a concise review of concrete benefits, drawbacks, and implementation-specific risks below.
+
+### 41 Review
+- The settings/UI wiring is straightforward: the checkbox in `SettingsDialog` persists `UseConnectionPooling`, `Form1` keeps a long-lived `SshExecutionService` with an internal pool, and manual runs switch between pooled and non-pooled execution by checking `UseConnectionPooling`.
+- Real benefits in this implementation are limited to repeated manual UI runs against the same `host:port:username` within one app session: pooled execution skips reconnect/login work, preserves timeout/algorithm/UTF-8 parity with non-pooled execution, and leases a host key so one pooled connection is not shared concurrently.
+- The feature is narrower than the label suggests: scheduler jobs create a fresh `SshExecutionService` and force `UseConnectionPooling = false`, so scheduled runs and `Run Now` job execution do not benefit from this toggle at all.
+- Operational drawbacks: pooled connections stay alive via a background timer/SSH keepalive sweep, active reuse can issue a real `echo 1` shell command as a health check, and disabling the setting only stops future reuse; it does not immediately clear already pooled connections.
+- Implementation risk: when a same-host pooled connection is already leased, `CreateSessionAsync(...)` falls back to a standalone SSH client, but the pooled execution callers only dispose the `SshShellSession` and release the lease. I do not see an explicit `client.Dispose()`/`Disconnect()` path for that fallback client, so concurrent same-host pooled runs appear capable of leaking standalone SSH connections.
+- Coverage gap: I did not find direct unit/integration tests for `SshConnectionPool` behavior or the pooled execution branches. Current tests only cover persisting the `UseConnectionPooling` flag inside execution-details/history metadata.
+- Verification: source review only; no build or test run was needed for this analysis task.
+
+## 40. Fix Scheduler Retry, Import Naming, and Per-Host Validation
+- [x] 40.1 De-duplicate queued scheduled jobs and correct one-time failure handling so scheduled one-time jobs do not requeue or auto-retry after a failed scheduled attempt.
+- [x] 40.2 Implement deterministic import conflict naming with `(imported)`, `(imported 2)`, etc., and surface partial import save failures in the completion message.
+- [x] 40.3 Tighten per-host credential validation so every populated host row requires non-blank `username` and `password` values in per-host mode.
+- [x] 40.4 Add focused regression coverage for scheduler queueing/one-time behavior, import naming and failure reporting, and per-host validation.
+- [x] 40.5 Run focused verification and capture the review outcome below.
+
+### 40 Review
+- `JobExecutionService` now tracks queued job IDs to prevent duplicate pending entries, skips re-queueing jobs that are already waiting, clears that tracking on dequeue, and auto-disables failed scheduled one-time jobs with `DisabledReason = "One-time schedule failed"` while preserving manual `Run Now` behavior.
+- `JobExportService.PrepareImport(...)` now reserves names across the full import batch and resolves conflicts deterministically as `Name (imported)`, `Name (imported 2)`, `Name (imported 3)`, etc. `JobListDialog` now records per-entry save failures and reports them in the import completion message instead of silently swallowing them.
+- `JobEditorValidator.ValidateAll(...)` now accepts host-column input, enforces per-host `username` and `password` columns case-insensitively, and blocks save on the first populated row missing either value. `JobExecutionService.BuildHostConnections(...)` now reads those per-host credential fields case-insensitively at runtime so validation and execution match.
+- Added focused regression coverage in `JobExecutionServiceTests`, `JobExportServiceTests`, `JobEditorValidationTests`, and `JobListDialogRunNowTests` for the new scheduler, import, and per-host validation behavior.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj -p:BaseOutputPath=artifacts\\test-output\\ -p:BaseIntermediateOutputPath=artifacts\\test-obj\\ --filter "FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~JobExportServiceTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~JobListDialogRunNowTests"` passed (101/101).
+- Verification: `dotnet build .\\SSH_Helper.csproj` passed.
+
+## 39. Review UI Diff Since 3937c252
+- [x] 39.1 Collect the UI/interaction diff for the requested dialogs, control, and related UI utilities since `3937c2522f7b2eb12931594746d1bd7754da48ed`.
+- [x] 39.2 Inspect the changed behavior in `JobEditorDialog`, `JobListDialog`, `ImportPreviewDialog`, `RunOutputViewerDialog`, `UI/CronBuilderControl`, `UI/UnsavedPresetDiffDialog`, and any directly related UI helpers.
+- [x] 39.3 Consult targeted tests only if needed to confirm expected behavior, then record concrete bugs, regressions, and worthwhile enhancements below.
+
+### 39 Review
+- Review scope stayed limited to the requested UI/interaction files plus directly related helpers: `JobEditorDialog`, `JobListDialog`, `ImportPreviewDialog`, `RunOutputViewerDialog`, `UI/CronBuilderControl`, `UI/UnsavedPresetDiffDialog`, `Utilities/JobEditorValidator`, `Utilities/HostGridUtilities`, `Utilities/ModelessDialogManager`, `Utilities/PresetSaveImpactResolver`, and `Utilities/SchedulerNotificationFormatter`.
+- Confirmed four concrete issues worth raising: stored-credential duplication produces a new job with no matching saved secret, per-host credential mode is not validated despite the UI promising required columns, clear-history leaves the jobs list's `Last Result` stale until a later refresh, and import save failures are silently swallowed after the preview step.
+- Reviewed targeted WinForms/unit coverage only where it clarified intent (`JobListDialogRunNowTests`, `JobEditorValidationTests`, `JobEditorDialogStoredCredentialTests`, `UnsavedPresetDiffDialogTests`, `CronBuilderControl*Tests`, `HostGridUtilitiesTests`, `ModelessDialogManagerTests`). Those tests do not currently cover the four issues above.
+
+## 38. Review Scoped Storage Export Integrity Diff
+- [ ] 38.1 Inspect the scoped git diff for the targeted storage, export, preset-integrity, model, and credential-target files since `3937c2522f7b2eb12931594746d1bd7754da48ed`.
+- [ ] 38.2 Check only relevant tests as supporting evidence for the reviewed behaviors.
+- [ ] 38.3 Deliver prioritized findings with concrete file/line references, plus up to two worthwhile enhancements, and capture the review below.
+
+## 39. Review Scheduler Runtime Diff
+- [x] 39.1 Inspect the git diff since `3937c2522f7b2eb12931594746d1bd7754da48ed` for `SchedulingService`, `JobExecutionService`, `JobHistoryService`, `HistoryStorageService`, `SchedulerHistoryPolicyResolver`, and `Form1` scheduler wiring.
+- [x] 39.2 Verify related models/utilities only where needed to confirm behavior, edge cases, and line-accurate findings.
+- [x] 39.3 Deliver concrete review findings with severity ordering, file/line references, and up to two worthwhile enhancements.
+
+### 39 Review
+- Reviewed the scoped diff in the scheduler runtime/history path plus directly implicated supporting types (`JobDefinition`, run-history models, `JsonFileWriter`, `JobStorageService`, status-bar wiring, and cron UI consumption points).
+- Main findings: recurring cron execution currently evaluates against UTC overloads while the UI surfaces local next-run times; failed/cancelled one-time jobs are left eligible and will re-trigger every evaluation cycle; startup missed-run handling can both over-count downtime after crashes and double-handle occurrences that land between service construction and the first timer tick.
+- Additional execution risks: concurrent scheduler threads persist `RunningState` through unsynchronized `JobStorageService.Save(...)` calls, shutdown disposal can race with background semaphore release, and the per-job cancellation token created in `TryStartJob(...)` is never passed into execution so `CancelJob(...)` does not stop a running job.
+- No material regression stood out in the `HistoryStorageService` refactor itself; the risky behavior in this range is concentrated in scheduling/execution startup and concurrency handling rather than the extracted atomic JSON writer.
+- Verification: source review only; no tests were run for this review task.
+
 ## 37. Restore Unified Preset Save Diff
 - [x] 37.1 Refactor the preset save confirmation UI so the diff dialog can also show optional scheduled-job impact details and rename/create-new actions.
 - [x] 37.2 Route `Form1` preset-save confirmation flows through the unified dialog while preserving no-op saves and non-impact save behavior.
