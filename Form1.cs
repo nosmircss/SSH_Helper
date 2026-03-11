@@ -1471,13 +1471,13 @@ namespace SSH_Helper
             return PresetBaseEnvironmentResolver.Resolve(_baseEnvironmentName, folderPath, _presetManager.Folders);
         }
 
-        private bool TryApplyFolderEnvironment(string folderPath, bool promptIfDirty)
+        private bool TryApplyFolderEnvironment(string folderPath)
         {
             var resolution = ResolveEffectiveBaseEnvironment(folderPath);
             if (string.Equals(_activeEnvironmentName, resolution.EnvironmentName, StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            return TrySwitchEnvironment(resolution.EnvironmentName, promptIfDirty, out _);
+            return TrySwitchEnvironment(resolution.EnvironmentName, out _);
         }
 
         private int? GetEnvironmentLabelColor(string environmentName)
@@ -1551,7 +1551,7 @@ namespace SSH_Helper
             if (string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
                 return;
 
-            if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true, out var switchStatusMessage, updateBaseEnvironment: true))
+            if (!TrySwitchEnvironment(targetEnvironment, out var switchStatusMessage, updateBaseEnvironment: true))
             {
                 RefreshEnvironmentSelector(_activeEnvironmentName);
                 return;
@@ -1572,7 +1572,7 @@ namespace SSH_Helper
             var targetEnvironment = dialog.SelectedEnvironmentName ?? _environmentService.GetActiveEnvironmentName();
             if (!string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
             {
-                if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true, out var switchStatusMessage, updateBaseEnvironment: true))
+                if (!TrySwitchEnvironment(targetEnvironment, out var switchStatusMessage, updateBaseEnvironment: true))
                 {
                     RefreshEnvironmentSelector(_activeEnvironmentName);
                     return;
@@ -1594,7 +1594,6 @@ namespace SSH_Helper
 
         private bool TrySwitchEnvironment(
             string targetEnvironment,
-            bool promptIfDirty,
             out string? statusMessage,
             bool updateBaseEnvironment = false)
         {
@@ -1603,25 +1602,7 @@ namespace SSH_Helper
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
 
-            bool saveCurrent = true;
-            if (promptIfDirty && _csvDirty)
-            {
-                var result = DialogTheme.Show(
-                    "You have unsaved host-grid changes. Save to the current environment before switching?",
-                    "Switch Environment",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (result == DialogResult.Cancel)
-                    return false;
-
-                saveCurrent = result == DialogResult.Yes;
-            }
-
-            if (saveCurrent)
-            {
-                SaveCurrentGridToEnvironment(_activeEnvironmentName);
-            }
+            SaveCurrentGridToEnvironment(_activeEnvironmentName);
 
             var environment = _environmentService.GetEnvironment(targetEnvironment);
             var loadedFingerprint = environment.LastCsvFingerprint?.Clone();
@@ -1821,7 +1802,7 @@ namespace SSH_Helper
 
             if (transition.Kind == PresetEnvironmentLoadActionKind.RestoreBaseEnvironment)
             {
-                if (TrySwitchEnvironment(transition.TargetEnvironment!, promptIfDirty: true, out _))
+                if (TrySwitchEnvironment(transition.TargetEnvironment!, out _))
                 {
                     UpdateStatusBar(PresetEnvironmentStatusFormatter.FormatRestoreMessage(presetName, effectiveBaseEnvironment));
                 }
@@ -1837,7 +1818,7 @@ namespace SSH_Helper
                 return;
             }
 
-            if (TrySwitchEnvironment(matchingEnvironment, promptIfDirty: true, out _))
+            if (TrySwitchEnvironment(matchingEnvironment, out _))
             {
                 UpdateStatusBar(PresetEnvironmentStatusFormatter.FormatSwitchMessage(presetName, matchingEnvironment));
             }
@@ -5577,7 +5558,7 @@ namespace SSH_Helper
             if (!_presetManager.SetFolderBaseEnvironment(folderPath, explicitEnvironmentName))
                 return;
 
-            TryApplyFolderEnvironment(folderPath, promptIfDirty: true);
+            TryApplyFolderEnvironment(folderPath);
             DisplayFolderSummary(folderPath);
 
             if (string.IsNullOrWhiteSpace(explicitEnvironmentName))
@@ -8130,7 +8111,7 @@ namespace SSH_Helper
         {
             _activePresetName = null;
             _selectedFolderName = folderPath;
-            TryApplyFolderEnvironment(folderPath, promptIfDirty: true);
+            TryApplyFolderEnvironment(folderPath);
             txtTimeoutHeader.Clear();
             RefreshSelectedFolderSummary();
         }
@@ -9101,7 +9082,7 @@ namespace SSH_Helper
                     .ToList();
             }
 
-            if (!TryApplyFolderEnvironment(folderName, promptIfDirty: true))
+            if (!TryApplyFolderEnvironment(folderName))
                 return;
 
             // Build preset dictionary

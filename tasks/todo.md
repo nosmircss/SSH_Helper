@@ -1,5 +1,16 @@
 # TODO
 
+## 45. Autosave Dirty Grid On Environment Switch
+- [x] 45.1 Replace the dirty host-grid environment-switch prompt with automatic save-to-environment behavior.
+- [x] 45.2 Verify all environment-switch entry points still complete cleanly after autosave.
+- [x] 45.3 Capture the implementation and verification notes in the review section below.
+
+### 45 Review
+- Removed the dirty host-grid confirmation from the environment-switch path and kept the existing save-to-environment snapshot behavior unconditional inside `TrySwitchEnvironment(...)`.
+- Simplified the related folder-selection and preset-driven switch callers by dropping the now-unused `promptIfDirty` plumbing from `TrySwitchEnvironment(...)` and `TryApplyFolderEnvironment(...)`.
+- Verified the remaining switch entry points still compile and route through the same shared switch helper: toolbar environment changes, Manage Environments selection changes, folder base-environment application, folder selection, and preset-driven environment restore/switch.
+- Verification: `dotnet build .\\SSH_Helper.csproj -p:BaseOutputPath=artifacts\\env-switch-autosave-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\env-switch-autosave-build\\obj\\` passed with 0 warnings and 0 errors.
+
 ## 43. Investigate CSV Save Exit Hang
 - [x] 43.1 Trace the normal exit path in `Form1` and identify all conditions that can cancel shutdown.
 - [x] 43.2 Trace CSV save/save-as flows and any dialog interactions that can leave the form in a state where exit requests are ignored.
