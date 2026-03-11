@@ -26,6 +26,77 @@ public class HostGridUtilitiesTests
     }
 
     [WinFormsFact]
+    public void BuildSnapshot_FromDataGridView_UsesDisplayOrderAndExcludesSelectionColumn()
+    {
+        using var grid = new DataGridView { AllowUserToAddRows = true };
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = string.Empty, HeaderText = string.Empty });
+        grid.Columns.Add(HostGridUtilities.CreateTextColumn(CsvManager.HostColumnName));
+        grid.Columns.Add(HostGridUtilities.CreateTextColumn("username"));
+        grid.Columns.Add(HostGridUtilities.CreateTextColumn("role"));
+
+        grid.Columns["role"].DisplayIndex = 1;
+        grid.Columns[CsvManager.HostColumnName].DisplayIndex = 2;
+        grid.Columns["username"].DisplayIndex = 3;
+
+        var rowIndex = grid.Rows.Add();
+        grid.Rows[rowIndex].Cells[CsvManager.HostColumnName].Value = "10.0.0.1";
+        grid.Rows[rowIndex].Cells["username"].Value = "admin";
+        grid.Rows[rowIndex].Cells["role"].Value = "edge";
+
+        var snapshot = HostGridUtilities.BuildSnapshot(grid);
+
+        snapshot.Columns.Should().Equal("role", CsvManager.HostColumnName, "username");
+        snapshot.Rows.Should().HaveCount(1);
+        snapshot.Rows[0]["role"].Should().Be("edge");
+        snapshot.Rows[0][CsvManager.HostColumnName].Should().Be("10.0.0.1");
+        snapshot.Rows[0]["username"].Should().Be("admin");
+    }
+
+    [WinFormsFact]
+    public void SnapshotsMatch_WhenGridAndTableContentMatch_ReturnsTrue()
+    {
+        using var grid = new DataGridView { AllowUserToAddRows = true };
+        grid.Columns.Add(HostGridUtilities.CreateTextColumn(CsvManager.HostColumnName));
+        grid.Columns.Add(HostGridUtilities.CreateTextColumn("username"));
+
+        var rowIndex = grid.Rows.Add();
+        grid.Rows[rowIndex].Cells[CsvManager.HostColumnName].Value = "10.0.0.1";
+        grid.Rows[rowIndex].Cells["username"].Value = "admin";
+
+        var table = new DataTable();
+        table.Columns.Add(CsvManager.HostColumnName);
+        table.Columns.Add("username");
+        table.Rows.Add("10.0.0.1", "admin");
+
+        var gridSnapshot = HostGridUtilities.BuildSnapshot(grid);
+        var tableSnapshot = HostGridUtilities.BuildSnapshot(table);
+
+        HostGridUtilities.SnapshotsMatch(gridSnapshot, tableSnapshot).Should().BeTrue();
+    }
+
+    [WinFormsFact]
+    public void SnapshotsMatch_WhenGridValueDiffers_ReturnsFalse()
+    {
+        using var grid = new DataGridView { AllowUserToAddRows = true };
+        grid.Columns.Add(HostGridUtilities.CreateTextColumn(CsvManager.HostColumnName));
+        grid.Columns.Add(HostGridUtilities.CreateTextColumn("username"));
+
+        var rowIndex = grid.Rows.Add();
+        grid.Rows[rowIndex].Cells[CsvManager.HostColumnName].Value = "10.0.0.1";
+        grid.Rows[rowIndex].Cells["username"].Value = "root";
+
+        var table = new DataTable();
+        table.Columns.Add(CsvManager.HostColumnName);
+        table.Columns.Add("username");
+        table.Rows.Add("10.0.0.1", "admin");
+
+        var gridSnapshot = HostGridUtilities.BuildSnapshot(grid);
+        var tableSnapshot = HostGridUtilities.BuildSnapshot(table);
+
+        HostGridUtilities.SnapshotsMatch(gridSnapshot, tableSnapshot).Should().BeFalse();
+    }
+
+    [WinFormsFact]
     public void BuildSchedulerCopySnapshot_WhenCheckedRowsExist_UsesOnlyCheckedEligibleRows()
     {
         using var grid = new DataGridView { AllowUserToAddRows = true };

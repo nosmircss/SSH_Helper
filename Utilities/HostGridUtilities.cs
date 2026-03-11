@@ -48,6 +48,26 @@ namespace SSH_Helper.Utilities
             return new HostGridSnapshot(columns, rows);
         }
 
+        public static HostGridSnapshot BuildSnapshot(DataGridView grid)
+        {
+            ArgumentNullException.ThrowIfNull(grid);
+
+            var columns = grid.Columns
+                .Cast<DataGridViewColumn>()
+                .Where(column => !string.IsNullOrWhiteSpace(column.Name))
+                .OrderBy(column => column.DisplayIndex)
+                .Select(column => column.Name)
+                .ToList();
+
+            var rows = grid.Rows
+                .Cast<DataGridViewRow>()
+                .Where(row => !row.IsNewRow)
+                .Select(row => BuildRowSnapshot(row, columns))
+                .ToList();
+
+            return new HostGridSnapshot(columns, rows);
+        }
+
         public static HostGridSnapshot BuildSnapshot(DataTable table)
         {
             var columns = table.Columns
@@ -71,6 +91,50 @@ namespace SSH_Helper.Utilities
                 .ToList();
 
             return new HostGridSnapshot(columns, rows);
+        }
+
+        public static bool SnapshotsMatch(HostGridSnapshot? left, HostGridSnapshot? right)
+        {
+            if (left == null || right == null)
+            {
+                return false;
+            }
+
+            if (left.Columns.Count != right.Columns.Count)
+            {
+                return false;
+            }
+
+            for (int columnIndex = 0; columnIndex < left.Columns.Count; columnIndex++)
+            {
+                if (!string.Equals(left.Columns[columnIndex], right.Columns[columnIndex], StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            if (left.Rows.Count != right.Rows.Count)
+            {
+                return false;
+            }
+
+            for (int rowIndex = 0; rowIndex < left.Rows.Count; rowIndex++)
+            {
+                var leftRow = left.Rows[rowIndex];
+                var rightRow = right.Rows[rowIndex];
+
+                foreach (var columnName in left.Columns)
+                {
+                    leftRow.TryGetValue(columnName, out var leftValue);
+                    rightRow.TryGetValue(columnName, out var rightValue);
+                    if (!string.Equals(leftValue ?? string.Empty, rightValue ?? string.Empty, StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
         }
 
         public static int CountHosts(DataGridView grid)

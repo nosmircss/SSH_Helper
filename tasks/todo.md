@@ -1,5 +1,18 @@
 # TODO
 
+## 46. Refine Hosts Unsaved Indicator
+- [x] 46.1 Update the Hosts header so `unsaved` only appears for CSV-backed grids when the current grid actually differs from the CSV-backed snapshot.
+- [x] 46.2 Preserve existing `disk changed` and `missing on disk` indicator behavior.
+- [x] 46.3 Add focused regression coverage and capture verification notes below.
+
+### 46 Review
+- Added a cached CSV-backed host-grid snapshot in `Form1` and switched the Hosts header to derive `unsaved` from a pure snapshot comparison instead of the raw `_csvDirty` flag.
+- The header now stops showing `unsaved` after a user edits a CSV-backed grid and then returns it to the same row/column/value state as the last loaded or saved CSV-backed snapshot.
+- Existing `disk changed` and `missing on disk` handling remains in the fingerprint-based sync path; this change only refines when the `unsaved` suffix appears.
+- Added focused host-grid utility coverage for DataGridView snapshot capture and snapshot equality comparisons.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~HostGridUtilitiesTests" -p:BaseOutputPath=artifacts\\host-indicator-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\host-indicator-tests\\obj\\` passed (6/6).
+- Verification: `dotnet build .\\SSH_Helper.csproj -p:BaseOutputPath=artifacts\\host-indicator-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\host-indicator-build\\obj\\` passed with 0 warnings and 0 errors.
+
 ## 45. Autosave Dirty Grid On Environment Switch
 - [x] 45.1 Replace the dirty host-grid environment-switch prompt with automatic save-to-environment behavior.
 - [x] 45.2 Verify all environment-switch entry points still complete cleanly after autosave.

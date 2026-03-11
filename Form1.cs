@@ -130,6 +130,7 @@ namespace SSH_Helper
 
         private string? _loadedFilePath;
         private CsvFileFingerprint? _loadedFileFingerprint;
+        private HostGridSnapshot? _loadedFileSnapshot;
         private CsvFileSyncStatus _loadedFileSyncStatus = CsvFileSyncStatus.NotTracked;
         private string? _activePresetName;
         private string _activeEnvironmentName = EnvironmentConfig.DefaultName;
@@ -1952,6 +1953,7 @@ namespace SSH_Helper
                 : syncStatus;
             _pendingColumnAutoSize = true;
             _csvDirty = false;
+            CaptureLoadedFileSnapshotFromGrid();
             UpdateHostCount();
         }
 
@@ -1988,7 +1990,34 @@ namespace SSH_Helper
 
         private void UpdateHostsFileIndicator()
         {
-            lblHostsTitle.Text = $"Hosts: {HostsFileIndicatorFormatter.Format(_loadedFilePath, _csvDirty, ResolveLoadedFileSyncStatus())}";
+            lblHostsTitle.Text = $"Hosts: {HostsFileIndicatorFormatter.Format(_loadedFilePath, IsHostsGridUnsaved(), ResolveLoadedFileSyncStatus())}";
+        }
+
+        private bool IsHostsGridUnsaved()
+        {
+            if (string.IsNullOrWhiteSpace(_loadedFilePath))
+            {
+                return true;
+            }
+
+            if (!_csvDirty)
+            {
+                return false;
+            }
+
+            if (_loadedFileSnapshot == null)
+            {
+                return true;
+            }
+
+            return !HostGridUtilities.SnapshotsMatch(HostGridUtilities.BuildSnapshot(dgv_variables), _loadedFileSnapshot);
+        }
+
+        private void CaptureLoadedFileSnapshotFromGrid()
+        {
+            _loadedFileSnapshot = string.IsNullOrWhiteSpace(_loadedFilePath)
+                ? null
+                : HostGridUtilities.BuildSnapshot(dgv_variables);
         }
 
         private void UpdatePresetHeaderIndicator()
@@ -6752,6 +6781,7 @@ namespace SSH_Helper
                 _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
                     ? CsvFileSyncStatus.NotTracked
                     : CsvFileSyncStatus.Current;
+                CaptureLoadedFileSnapshotFromGrid();
                 AutoSizeColumnsToContent();
                 UpdateHostCount();
                 UpdateStatusBar($"Loaded: {Path.GetFileName(filePath)}");
@@ -6817,6 +6847,7 @@ namespace SSH_Helper
                 _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
                     ? CsvFileSyncStatus.NotTracked
                     : CsvFileSyncStatus.Current;
+                CaptureLoadedFileSnapshotFromGrid();
                 UpdateHostsFileIndicator();
                 UpdateStatusBar($"Saved: {Path.GetFileName(filename)}");
                 return CsvSaveAttemptResult.Saved;
@@ -6863,6 +6894,7 @@ namespace SSH_Helper
             _csvDirty = true;
             _loadedFilePath = null;
             _loadedFileFingerprint = null;
+            _loadedFileSnapshot = null;
             _loadedFileSyncStatus = CsvFileSyncStatus.NotTracked;
             UpdateHostCount();
             UpdateStatusBar("Grid cleared");
@@ -10455,6 +10487,7 @@ namespace SSH_Helper
 
             // Reset dirty flag since we're restoring saved state, not making new changes
             _csvDirty = false;
+            CaptureLoadedFileSnapshotFromGrid();
             UpdateHostCount();
 
             // Flag for auto-sizing after the form is fully visible (handled in Form1_Shown)
