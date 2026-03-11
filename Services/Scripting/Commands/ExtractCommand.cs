@@ -32,6 +32,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             var sourceText = context.GetVariableString(options.From);
             if (string.IsNullOrEmpty(sourceText))
             {
+                SetEmptyResults(options.Into, context);
                 context.EmitOutput($"Extract: source variable '{options.From}' is empty", ScriptOutputType.Warning);
                 return Task.FromResult(CommandResult.Ok());
             }

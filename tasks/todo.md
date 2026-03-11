@@ -1,5 +1,19 @@
 # TODO
 
+## 47. Fix Empty Send Into Variable Evaluation
+- [x] 47.1 Trace the `send ... into ...` capture path and confirm how no-output commands populate the target variable.
+- [x] 47.2 Patch the null/empty handling so `if: <var> is empty` evaluates safely after a no-output send.
+- [x] 47.3 Add focused regression coverage for empty send output captured into a variable and checked with `is empty`.
+- [x] 47.4 Run focused verification and capture the review below.
+
+### 47 Review
+- Root cause was in `ExtractCommand`, not the `send` capture itself: when the source variable was empty, `ExecuteAsync(...)` emitted a warning and returned before initializing the `into` target variable(s).
+- That left follow-up conditions like `if: version is empty` checking an unset variable instead of an explicit empty string, which broke the intended empty-result flow after commands that produced no output.
+- Patched `ExtractCommand` so the early empty-source branch now calls `SetEmptyResults(...)` before returning, keeping `into` variables defined and empty.
+- Added a focused regression test that sets an empty captured source, runs `extract ... into version`, and verifies both `HasVariable("version")` and `ExpressionEvaluator.Evaluate("version is empty")`.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExtractCommandTests|FullyQualifiedName~ExpressionEvaluatorTests" -p:BaseOutputPath=artifacts\\empty-extract-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\empty-extract-tests\\obj\\` passed (11/11).
+- Verification: `dotnet build .\\SSH_Helper.csproj -p:BaseOutputPath=artifacts\\empty-extract-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\empty-extract-build\\obj\\` passed with 0 warnings and 0 errors.
+
 ## 46. Refine Hosts Unsaved Indicator
 - [x] 46.1 Update the Hosts header so `unsaved` only appears for CSV-backed grids when the current grid actually differs from the CSV-backed snapshot.
 - [x] 46.2 Preserve existing `disk changed` and `missing on disk` indicator behavior.
