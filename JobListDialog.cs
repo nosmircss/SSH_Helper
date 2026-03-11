@@ -1001,7 +1001,7 @@ namespace SSH_Helper
 
             try
             {
-                _jobStorage.Save(clone);
+                SaveDuplicatedJob(job, clone);
                 RefreshJobList();
             }
             catch (Exception ex)
@@ -1137,13 +1137,57 @@ namespace SSH_Helper
                 "Clear History", _darkMode))
                 return;
 
-            _historyService.DeleteAllHistory(jobId);
-            RefreshHistory(jobId);
+            ClearHistoryForJob(jobId);
         }
 
         #endregion
 
         #region Action Helpers
+
+        private void SaveDuplicatedJob(JobDefinition sourceJob, JobDefinition duplicateJob)
+        {
+            _jobStorage.Save(duplicateJob);
+
+            try
+            {
+                CopyStoredCredentialForDuplicate(sourceJob, duplicateJob);
+            }
+            catch
+            {
+                _jobStorage.Delete(duplicateJob.Id, cleanupCredentials: false);
+                throw;
+            }
+        }
+
+        private void CopyStoredCredentialForDuplicate(JobDefinition sourceJob, JobDefinition duplicateJob)
+        {
+            if (sourceJob.CredentialMode != CredentialMode.Stored || _credentialProvider?.IsAvailable != true)
+            {
+                return;
+            }
+
+            var sourceTarget = CredentialTargets.JobPasswordTarget(sourceJob.Id);
+            if (!_credentialProvider.TryGetPassword(sourceTarget, out var username, out var password))
+            {
+                return;
+            }
+
+            var duplicateTarget = CredentialTargets.JobPasswordTarget(duplicateJob.Id);
+            if (!_credentialProvider.SavePassword(
+                    duplicateTarget,
+                    username,
+                    password,
+                    "Scheduler job credential"))
+            {
+                throw new InvalidOperationException("Failed to copy the duplicated job credential.");
+            }
+        }
+
+        private void ClearHistoryForJob(string jobId)
+        {
+            _historyService.DeleteAllHistory(jobId);
+            RefreshJobList();
+        }
 
         private void EditSelectedJob()
         {

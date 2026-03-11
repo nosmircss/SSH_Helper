@@ -745,6 +745,144 @@ public class JobListDialogRunNowTests : IDisposable
         historyGrid.SelectedRows[0].Tag.Should().Be(selectedRunFileName);
     }
 
+    [WinFormsFact]
+    public void DuplicateClick_StoredCredentialJob_CopiesCredentialToDuplicatedJob()
+    {
+        var configService = new ConfigurationService(_configPath);
+        var presetManager = new PresetManager(configService);
+        presetManager.Load();
+        presetManager.Save("Nightly", new PresetInfo { Commands = "echo nightly" });
+
+        var credentialProvider = new FakeCredentialProvider();
+        var schedulingService = new SchedulingService();
+        var historyService = new JobHistoryService(Path.Combine(_testDirectory, "history"));
+        var exportService = new JobExportService();
+        var jobStorage = new JobStorageService(credentialProvider, _jobsPath);
+        jobStorage.Load();
+
+        var job = CreateTestJob("Stored Duplicate Source");
+        job.CredentialMode = CredentialMode.Stored;
+        jobStorage.Save(job);
+        credentialProvider.SavePassword(
+            CredentialTargets.JobPasswordTarget(job.Id),
+            "stored-user",
+            "stored-secret");
+
+        using var executionService = new JobExecutionService(
+            jobStorage,
+            schedulingService,
+            configService,
+            presetManager,
+            credentialProvider);
+
+        using var dialog = new JobListDialog(
+            jobStorage,
+            executionService,
+            historyService,
+            schedulingService,
+            presetManager,
+            exportService,
+            credentialProvider,
+            runNowInvoker: null,
+            getMainGridRows: null,
+            getMainGridColumns: null,
+            darkMode: false);
+
+        dialog.Show();
+        Application.DoEvents();
+
+        var jobsGrid = GetField<DataGridView>(dialog, "_gridJobs");
+        SelectJobRow(jobsGrid, job.Id);
+        InvokeMethod(dialog, "OnJobSelectionChanged", jobsGrid, EventArgs.Empty);
+        Application.DoEvents();
+
+        InvokeMethod(dialog, "OnDuplicateClick", null, EventArgs.Empty);
+        Application.DoEvents();
+
+        jobStorage.Jobs.Count.Should().Be(2);
+        var duplicateJob = jobStorage.Jobs.Values.Single(savedJob => savedJob.Id != job.Id);
+        duplicateJob.Name.Should().Be("Stored Duplicate Source (copy)");
+        duplicateJob.CredentialMode.Should().Be(CredentialMode.Stored);
+
+        credentialProvider.TryGetPassword(
+            CredentialTargets.JobPasswordTarget(duplicateJob.Id),
+            out var duplicateUsername,
+            out var duplicatePassword).Should().BeTrue();
+        duplicateUsername.Should().Be("stored-user");
+        duplicatePassword.Should().Be("stored-secret");
+    }
+
+    [WinFormsFact]
+    public void ClearHistoryForJob_RefreshesLastResultToNeverRun()
+    {
+        var configService = new ConfigurationService(_configPath);
+        var presetManager = new PresetManager(configService);
+        presetManager.Load();
+        presetManager.Save("Nightly", new PresetInfo { Commands = "echo nightly" });
+
+        var credentialProvider = new FakeCredentialProvider();
+        var schedulingService = new SchedulingService();
+        var historyService = new JobHistoryService(Path.Combine(_testDirectory, "history"));
+        var exportService = new JobExportService();
+        var jobStorage = new JobStorageService(credentialProvider, _jobsPath);
+        jobStorage.Load();
+
+        var job = CreateTestJob("Clear History Job");
+        jobStorage.Save(job);
+        historyService.SaveRun(new JobRunResult
+        {
+            JobId = job.Id,
+            JobName = job.Name,
+            StartedUtc = new DateTime(2026, 3, 8, 14, 0, 0, DateTimeKind.Utc),
+            CompletedUtc = new DateTime(2026, 3, 8, 14, 1, 0, DateTimeKind.Utc),
+            Success = true,
+            HostsSucceeded = 1,
+            HostsFailed = 0,
+            HostOutputs = new List<JobHostOutput>()
+        });
+
+        using var executionService = new JobExecutionService(
+            jobStorage,
+            schedulingService,
+            configService,
+            presetManager,
+            credentialProvider);
+
+        using var dialog = new JobListDialog(
+            jobStorage,
+            executionService,
+            historyService,
+            schedulingService,
+            presetManager,
+            exportService,
+            credentialProvider,
+            runNowInvoker: null,
+            getMainGridRows: null,
+            getMainGridColumns: null,
+            darkMode: false);
+
+        dialog.Show();
+        Application.DoEvents();
+
+        var jobsGrid = GetField<DataGridView>(dialog, "_gridJobs");
+        var historyGrid = GetField<DataGridView>(dialog, "_gridHistory");
+
+        SelectJobRow(jobsGrid, job.Id);
+        InvokeMethod(dialog, "OnJobSelectionChanged", jobsGrid, EventArgs.Empty);
+        Application.DoEvents();
+
+        jobsGrid.Rows[0].Cells["LastResult"].Value.Should().Be("OK (1/1)");
+        historyGrid.Rows.Count.Should().Be(1);
+
+        InvokeMethod(dialog, "ClearHistoryForJob", job.Id);
+        Application.DoEvents();
+
+        jobsGrid.Rows[0].Cells["LastResult"].Value.Should().Be("Never run");
+        historyGrid.Rows.Count.Should().Be(0);
+        jobsGrid.CurrentRow.Should().NotBeNull();
+        jobsGrid.CurrentRow!.Tag.Should().Be(job.Id);
+    }
+
     [Fact]
     public void CommitImportedEntries_SavesSuccessfulRowsAndReportsFailures()
     {
@@ -882,10 +1020,20 @@ public class JobListDialogRunNowTests : IDisposable
 
     private sealed class FakeCredentialProvider : ICredentialProvider
     {
+        private readonly Dictionary<string, (string Username, string Password)> _credentials =
+            new(StringComparer.Ordinal);
+
         public bool IsAvailable => true;
 
         public bool TryGetPassword(string target, out string username, out string password)
         {
+            if (_credentials.TryGetValue(target, out var credential))
+            {
+                username = credential.Username;
+                password = credential.Password;
+                return true;
+            }
+
             username = string.Empty;
             password = string.Empty;
             return false;
@@ -893,12 +1041,13 @@ public class JobListDialogRunNowTests : IDisposable
 
         public bool SavePassword(string target, string username, string password, string? comment = null)
         {
+            _credentials[target] = (username, password);
             return true;
         }
 
         public bool DeletePassword(string target)
         {
-            return true;
+            return _credentials.Remove(target);
         }
     }
 }

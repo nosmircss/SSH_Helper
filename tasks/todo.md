@@ -1,5 +1,32 @@
 # TODO
 
+## 49. Fix Low-Hanging Scheduler Job List Bugs
+- [x] 49.1 Patch job duplication so stored-credential jobs copy their saved credential to the duplicated job ID.
+- [x] 49.2 Patch Clear History so the jobs grid refreshes immediately and `Last Result` no longer shows stale data.
+- [x] 49.3 Add focused regression coverage for both scheduler job list behaviors.
+- [x] 49.4 Run focused verification and capture the review below.
+
+### 49 Review
+- `JobListDialog` duplication now routes through a small helper that copies any existing stored credential from the source job's credential-manager target to the duplicate job's new target after the clone is saved.
+- If that credential copy fails, the new duplicate job is rolled back immediately so the UI does not leave behind a broken stored-credential clone.
+- `Clear History` now routes through `ClearHistoryForJob(...)`, which deletes persisted history and refreshes the jobs grid, so the top `Last Result` column switches back to `Never run` immediately instead of staying stale until a later refresh.
+- Added focused WinForms regressions covering both behaviors: duplicating a stored-credential job now preserves the copied secret under the new job ID, and clearing a job's history now empties the history grid while updating `Last Result` in-place.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobListDialogRunNowTests" -p:BaseOutputPath=artifacts\\job-list-low-hanging-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\job-list-low-hanging-tests\\obj\\` passed (14/14).
+- Verification: `dotnet build .\\SSH_Helper.csproj` passed with 0 warnings and 0 errors.
+
+## 48. Investigate SSH Reverse-DNS-Like Connect Delay
+- [x] 48.1 Trace the SSH connection and login code paths used by normal execution, pooled execution, and interactive terminal sessions.
+- [x] 48.2 Verify whether the client performs hostname canonicalization or reverse DNS lookups when connecting to a literal IP address.
+- [x] 48.3 If a client-side fix exists, implement and verify it; otherwise capture the root-cause guidance and evidence in the review below.
+
+### 48 Review
+- The app connects directly with Rebex `Ssh.Connect(host.IpAddress, host.Port)` in every SSH path: normal execution, pooled execution, and interactive terminal. There is no shell-out to `ssh.exe`, no client-side OpenSSH config canonicalization layer, and no hostname preprocessing beyond storing the host string in `HostConnection.IpAddress`.
+- The only SSH config options this app imports are `HostName`, `Port`, `User`, `IdentityFile`, `HostKeyAlgorithms`, and `Ciphers`. There is no app-level support for `CanonicalizeHostname`, `UseDNS`, or any reverse-DNS-related client toggle.
+- The current Rebex `SshSettings` surface used by this project also does not expose a reverse-DNS or hostname-canonicalization option. Official Rebex docs for `SshSettings` list authentication, buffering, tunnel, and welcome-message settings, but nothing DNS-related.
+- Because the app already passes a literal dotted address straight into the SSH client, a slow connect-by-IP flow is more likely server-side behavior after accept/authentication or post-login shell startup than a client-side reverse lookup inside this repo.
+- The repo already has enough debug timing to separate those phases: SSH Debug mode logs `client.Connect()`, `client.Login()`, and `session.InitializeAsync` timing independently. If the delay is during `client.Connect()` or `client.Login()` against an IP, the likely fix is on the SSH server (`sshd_config UseDNS no` where applicable). If the delay is after login during `session.InitializeAsync`, the bottleneck is more likely shell/banner/prompt startup rather than DNS.
+- Verification: source review only; no code change was made because there is no client-side reverse-DNS toggle in the current implementation to disable.
+
 ## 47. Fix Empty Send Into Variable Evaluation
 - [x] 47.1 Trace the `send ... into ...` capture path and confirm how no-output commands populate the target variable.
 - [x] 47.2 Patch the null/empty handling so `if: <var> is empty` evaluates safely after a no-output send.
