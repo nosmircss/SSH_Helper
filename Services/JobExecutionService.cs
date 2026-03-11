@@ -60,6 +60,7 @@ namespace SSH_Helper.Services
         private readonly ConfigurationService _configService;
         private readonly PresetManager _presetManager;
         private readonly ICredentialProvider _credentialProvider;
+        private readonly Func<JobDefinition, bool, CancellationToken, Task>? _jobExecutionOverride;
 
         private System.Threading.Timer? _timer;
         private int _evaluating; // 0 = idle, 1 = evaluating (Interlocked guard)
@@ -95,12 +96,24 @@ namespace SSH_Helper.Services
             ConfigurationService configService,
             PresetManager presetManager,
             ICredentialProvider credentialProvider)
+            : this(jobStorage, schedulingService, configService, presetManager, credentialProvider, null)
+        {
+        }
+
+        internal JobExecutionService(
+            JobStorageService jobStorage,
+            SchedulingService schedulingService,
+            ConfigurationService configService,
+            PresetManager presetManager,
+            ICredentialProvider credentialProvider,
+            Func<JobDefinition, bool, CancellationToken, Task>? jobExecutionOverride)
         {
             _jobStorage = jobStorage ?? throw new ArgumentNullException(nameof(jobStorage));
             _schedulingService = schedulingService ?? throw new ArgumentNullException(nameof(schedulingService));
             _configService = configService ?? throw new ArgumentNullException(nameof(configService));
             _presetManager = presetManager ?? throw new ArgumentNullException(nameof(presetManager));
             _credentialProvider = credentialProvider ?? throw new ArgumentNullException(nameof(credentialProvider));
+            _jobExecutionOverride = jobExecutionOverride;
 
             var maxConcurrent = configService.GetCurrent().MaxConcurrentJobs;
             if (maxConcurrent <= 0) maxConcurrent = 3;
@@ -208,7 +221,7 @@ namespace SSH_Helper.Services
 
             try
             {
-                await ExecuteJobCoreAsync(job, isRunNow: true, _disposalCts.Token);
+                await ExecuteTrackedJobAsync(job, isRunNow: true);
                 return true;
             }
             catch (OperationCanceledException)
@@ -357,7 +370,7 @@ namespace SSH_Helper.Services
 
             try
             {
-                await ExecuteJobCoreAsync(job, false, _disposalCts.Token);
+                await ExecuteTrackedJobAsync(job, isRunNow: false);
             }
             catch (OperationCanceledException)
             {
@@ -449,6 +462,15 @@ namespace SSH_Helper.Services
                 overallSuccess ? null : $"{failed} host(s) failed");
 
             HandlePostExecution(job, overallSuccess, isRunNow);
+        }
+
+        private Task ExecuteTrackedJobAsync(JobDefinition job, bool isRunNow)
+        {
+            var cancellationToken = GetTrackedJobCancellationToken(job.Id);
+            if (_jobExecutionOverride != null)
+                return _jobExecutionOverride(job, isRunNow, cancellationToken);
+
+            return ExecuteJobCoreAsync(job, isRunNow, cancellationToken);
         }
 
         /// <summary>
@@ -650,6 +672,14 @@ namespace SSH_Helper.Services
 
             OnJobStateChanged(jobId, job?.Name ?? jobId, JobExecutionState.Started);
             return true;
+        }
+
+        private CancellationToken GetTrackedJobCancellationToken(string jobId)
+        {
+            if (_runningJobs.TryGetValue(jobId, out var info))
+                return info.Cts.Token;
+
+            return _disposalCts.Token;
         }
 
         /// <summary>

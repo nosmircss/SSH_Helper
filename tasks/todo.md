@@ -1,5 +1,27 @@
 # TODO
 
+## 51. Fix Scheduler Per-Job Cancellation
+- [x] 51.1 Patch `JobExecutionService` so run-now and scheduled executions pass the per-job cancellation token into the execution pipeline instead of the disposal-only token.
+- [x] 51.2 Add focused regression coverage proving `CancelJob(...)` now reaches the active job execution path.
+- [x] 51.3 Run focused verification and capture the review below.
+
+### 51 Review
+- `JobExecutionService` now routes both run-now and scheduled execution through a shared tracked-job helper that resolves the active job's own `CancellationTokenSource` token, so `CancelJob(jobId)` cancels the token the running execution is actually listening to instead of only the service-disposal token.
+- Added a narrow internal execution override seam for tests and used it to block on `Task.Delay(..., token)` until cancellation, which lets the tests prove that both run-now and scheduled execution paths observe per-job cancellation and emit `Cancelled`.
+- Verification: `dotnet build .\\SSH_Helper.csproj` failed because `bin\\Debug\\net8.0-windows\\SSH_Helper.exe` was locked by a running `SSH_Helper` process (PID 31936).
+- Verification: `dotnet build .\\SSH_Helper.csproj -p:BaseOutputPath=artifacts\\job-cancel-fix-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\job-cancel-fix-build\\obj\\` passed with 0 warnings and 0 errors.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobExecutionServiceTests" -p:BaseOutputPath=artifacts\\job-cancel-fix-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\job-cancel-fix-tests\\obj\\` passed (40/40).
+
+## 50. Review Approval-Ready Runtime Bugs
+- [x] 50.1 Inspect current runtime code for concrete defects that are still present after the recent scheduler/UI fixes.
+- [x] 50.2 Validate two approval-ready bugs with exact file/line references and current behavior impact.
+- [x] 50.3 Present the findings for approval and capture the review below.
+
+### 50 Review
+- Confirmed a pooled-session ownership bug in `Services/SshConnectionPool.cs` and `Services/SshExecutionService.cs`: when the pooled key is already leased, `CreateSessionAsync(...)` falls back to a standalone `Ssh` client, but the callers still always route cleanup through `ReleaseSession(...)`. That unconditionally clears the pooled lease for the host key and never disposes the standalone fallback client, so same-host overlapping pooled runs can both leak extra SSH connections and let a later execution reuse the pooled connection while the original leased session is still active.
+- Confirmed a scheduler cancellation bug in `Services/JobExecutionService.cs`: `CancelJob(jobId)` cancels the per-job `RunningJobInfo.Cts`, but both `RunNowAsync(...)` and `ExecuteScheduledJobAsync(...)` pass `_disposalCts.Token` into `ExecuteJobCoreAsync(...)` instead of the per-job token. That means per-job cancellation never reaches the registered `sshService.Stop()` callback, so cancel requests do not actually stop a running job unless the whole service is disposing.
+- Verification: source review only; no code changes or automated tests were run for this review task.
+
 ## 49. Fix Low-Hanging Scheduler Job List Bugs
 - [x] 49.1 Patch job duplication so stored-credential jobs copy their saved credential to the duplicated job ID.
 - [x] 49.2 Patch Clear History so the jobs grid refreshes immediately and `Last Result` no longer shows stale data.

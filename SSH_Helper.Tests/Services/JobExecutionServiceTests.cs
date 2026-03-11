@@ -90,20 +90,20 @@ public class JobExecutionServiceTests : IDisposable
             _jobStorage, _schedulingService, _configService, _presetManager, _mockCredentialProvider.Object);
     }
 
-    private static Task InvokePrivateAsync(object instance, string methodName)
+    private static Task InvokePrivateAsync(object instance, string methodName, params object?[]? args)
     {
         var method = instance.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
         method.Should().NotBeNull($"method '{methodName}' should exist on {instance.GetType().Name}");
-        var task = method!.Invoke(instance, Array.Empty<object?>());
+        var task = method!.Invoke(instance, args ?? Array.Empty<object?>());
         task.Should().BeAssignableTo<Task>();
         return (Task)task!;
     }
 
-    private static void InvokePrivate(object instance, string methodName)
+    private static void InvokePrivate(object instance, string methodName, params object?[]? args)
     {
         var method = instance.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
         method.Should().NotBeNull($"method '{methodName}' should exist on {instance.GetType().Name}");
-        method!.Invoke(instance, Array.Empty<object?>());
+        method!.Invoke(instance, args ?? Array.Empty<object?>());
     }
 
     private static T GetPrivateField<T>(object instance, string fieldName) where T : class
@@ -348,7 +348,7 @@ public class JobExecutionServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CancelJob_RaisesJobStateChanged_Cancelled_WhenRunning()
+    public async Task CancelJob_RunNow_CancelsActiveExecutionToken()
     {
         // Arrange
         SetupDefaultCredentials();
@@ -357,21 +357,104 @@ public class JobExecutionServiceTests : IDisposable
         var job = CreateTestJob(name: "CancelJob", schedule: ScheduleType.None, presetName: "CancelPreset");
         _jobStorage.Save(job);
 
-        using var service = CreateService();
+        var executionStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var service = new JobExecutionService(
+            _jobStorage,
+            _schedulingService,
+            _configService,
+            _presetManager,
+            _mockCredentialProvider.Object,
+            async (_, _, token) =>
+            {
+                executionStarted.TrySetResult(true);
+
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    cancellationObserved.TrySetResult(true);
+                    throw;
+                }
+            });
 
         var states = new List<JobExecutionState>();
         service.JobStateChanged += (s, e) => states.Add(e.State);
 
         // Start execution
         var runTask = service.RunNowAsync(job.Id);
+        await executionStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
-        // Attempt to cancel -- it may or may not still be running when we get here
-        service.CancelJob(job.Id);
+        // Act
+        service.CancelJob(job.Id).Should().BeTrue();
 
-        await runTask;
+        await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var result = await runTask;
 
-        // Assert -- the job went through Started and then either Cancelled or Failed
+        // Assert
+        result.Should().BeFalse();
         states.Should().Contain(JobExecutionState.Started);
+        states.Should().Contain(JobExecutionState.Cancelled);
+        service.IsJobRunning(job.Id).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CancelJob_ScheduledExecution_CancelsActiveExecutionToken()
+    {
+        // Arrange
+        SetupDefaultCredentials();
+        SavePreset("ScheduledCancelPreset");
+
+        var job = CreateTestJob(name: "ScheduledCancelJob", schedule: ScheduleType.Recurring, presetName: "ScheduledCancelPreset");
+        _jobStorage.Save(job);
+
+        var executionStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var service = new JobExecutionService(
+            _jobStorage,
+            _schedulingService,
+            _configService,
+            _presetManager,
+            _mockCredentialProvider.Object,
+            async (_, _, token) =>
+            {
+                executionStarted.TrySetResult(true);
+
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    cancellationObserved.TrySetResult(true);
+                    throw;
+                }
+            });
+
+        var states = new List<JobExecutionState>();
+        service.JobStateChanged += (s, e) => states.Add(e.State);
+
+        var concurrencyGate = GetPrivateField<SemaphoreSlim>(service, "_concurrencyGate");
+        concurrencyGate.Wait(0).Should().BeTrue();
+
+        // Start scheduled execution on the internal path that assumes the semaphore slot is already acquired.
+        var scheduledTask = InvokePrivateAsync(service, "ExecuteScheduledJobAsync", job);
+        await executionStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        // Act
+        service.CancelJob(job.Id).Should().BeTrue();
+
+        await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await scheduledTask;
+
+        // Assert
+        states.Should().Contain(JobExecutionState.Started);
+        states.Should().Contain(JobExecutionState.Cancelled);
+        service.IsJobRunning(job.Id).Should().BeFalse();
     }
 
     #endregion
