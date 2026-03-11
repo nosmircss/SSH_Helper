@@ -528,6 +528,7 @@ namespace SSH_Helper
             trvPresets.ItemDrag += trvPresets_ItemDrag;
             trvPresets.DragOver += trvPresets_DragOver;
             trvPresets.DragDrop += trvPresets_DragDrop;
+            trvPresets.DragLeave += (s, e) => ClearDropIndicator();
             trvPresets.AllowDrop = true;
             //
             // trvFavorites

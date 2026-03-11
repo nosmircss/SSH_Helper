@@ -80,6 +80,8 @@ namespace SSH_Helper
         public string Name { get; set; } = string.Empty;
     }
 
+    internal enum DropPosition { None, Above, Inside, Below }
+
     public partial class Form1 : Form
     {
         #region Constants
@@ -174,7 +176,9 @@ namespace SSH_Helper
 
         // Preset TreeView drag-drop state
         private TreeNode? _draggedNode;
-        private TreeNode? _lastHighlightedNode;
+        private TreeNode? _dropTargetNode;
+        private DropPosition _dropPosition = DropPosition.None;
+        private TreeNode? _favLastHighlightedNode;
 
         // Track selected folder for Run button (TreeView selection can be unreliable on button click)
         private string? _selectedFolderName;
@@ -3743,43 +3747,45 @@ namespace SSH_Helper
             var pt = trvPresets.PointToClient(new Point(e.X, e.Y));
             var targetNode = trvPresets.GetNodeAt(pt);
 
-            // Reset previous highlight
-            if (_lastHighlightedNode != null && _lastHighlightedNode != targetNode)
+            if (targetNode != null)
             {
-                _lastHighlightedNode.BackColor = trvPresets.BackColor;
-            }
-
-            if (targetNode != null && CanDropOn(_draggedNode, targetNode))
-            {
-                e.Effect = DragDropEffects.Move;
-                targetNode.BackColor = Color.LightBlue;
-                _lastHighlightedNode = targetNode;
-            }
-            else if (targetNode == null)
-            {
-                // Dropping on empty area = move to root
-                e.Effect = DragDropEffects.Move;
+                var position = GetDropPosition(targetNode, pt);
+                if (CanDropAt(_draggedNode, targetNode, position))
+                {
+                    e.Effect = DragDropEffects.Move;
+                    if (_dropTargetNode != targetNode || _dropPosition != position)
+                    {
+                        _dropTargetNode = targetNode;
+                        _dropPosition = position;
+                        trvPresets.Invalidate();
+                    }
+                }
+                else
+                {
+                    e.Effect = DragDropEffects.None;
+                    ClearDropIndicator();
+                }
             }
             else
             {
-                e.Effect = DragDropEffects.None;
+                // Dropping on empty area = move to root
+                e.Effect = DragDropEffects.Move;
+                ClearDropIndicator();
             }
         }
 
         private void trvPresets_DragDrop(object? sender, DragEventArgs e)
         {
-            // Reset highlight
-            if (_lastHighlightedNode != null)
-            {
-                _lastHighlightedNode.BackColor = trvPresets.BackColor;
-                _lastHighlightedNode = null;
-            }
+            // Capture and clear visual indicator state
+            var dropTarget = _dropTargetNode;
+            var dropPos = _dropPosition;
+            ClearDropIndicator();
 
             if (_draggedNode == null)
                 return;
 
             var pt = trvPresets.PointToClient(new Point(e.X, e.Y));
-            var targetNode = trvPresets.GetNodeAt(pt);
+            var targetNode = dropTarget ?? trvPresets.GetNodeAt(pt);
             var draggedTag = _draggedNode.Tag as PresetNodeTag;
 
             if (draggedTag == null)
@@ -3788,79 +3794,128 @@ namespace SSH_Helper
                 return;
             }
 
+            // If we don't have a position from the indicator, calculate it
+            if (dropPos == DropPosition.None && targetNode != null)
+                dropPos = GetDropPosition(targetNode, pt);
+
             try
             {
-                if (draggedTag.IsFolder)
+                string finalName = draggedTag.Name;
+
+                if (targetNode == null)
                 {
-                    if (targetNode?.Tag is PresetNodeTag targetTag && targetTag.IsFolder)
-                    {
-                        // Check if this is a reorder within the same parent level
-                        var draggedParent = FolderPathUtility.GetParentPath(draggedTag.Name);
-                        var targetParent = FolderPathUtility.GetParentPath(targetTag.Name);
-
-                        if (_currentSortMode == PresetSortMode.Manual && draggedParent == targetParent)
-                        {
-                            // Folder reordering within same level
-                            ReorderFolders(draggedTag.Name, targetTag.Name);
-                        }
-                        else
-                        {
-                            // Move folder into target folder (make it a subfolder)
-                            var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
-                            var newPath = FolderPathUtility.CombinePath(targetTag.Name, folderName);
-
-                            // Get unique name if conflict
-                            newPath = _presetManager.GetUniqueFolderName(newPath);
-
-                            _presetManager.RenameFolder(draggedTag.Name, newPath);
-                        }
-                    }
-                    else if (targetNode == null)
-                    {
-                        // Drop on empty area = move folder to root level
-                        var currentParent = FolderPathUtility.GetParentPath(draggedTag.Name);
-                        if (currentParent != null)
-                        {
-                            var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
-                            var newPath = _presetManager.GetUniqueFolderName(folderName);
-                            _presetManager.RenameFolder(draggedTag.Name, newPath);
-                        }
-                    }
+                    finalName = HandleDropOnEmptySpace(draggedTag);
                 }
-                else
+                else if (dropPos == DropPosition.Inside)
                 {
-                    // Preset being dragged
-                    if (targetNode == null)
-                    {
-                        // Drop on empty area = move to root
-                        _presetManager.MovePresetToFolder(draggedTag.Name, null);
-                    }
-                    else if (targetNode.Tag is PresetNodeTag targetTag)
-                    {
-                        if (targetTag.IsFolder)
-                        {
-                            // Drop on folder = move into folder
-                            _presetManager.MovePresetToFolder(draggedTag.Name, targetTag.Name);
-                        }
-                        else if (_currentSortMode == PresetSortMode.Manual)
-                        {
-                            // Drop on preset = reorder within same folder
-                            var sourcePreset = _presetManager.Get(draggedTag.Name);
-                            var targetPreset = _presetManager.Get(targetTag.Name);
-                            if (sourcePreset?.Folder == targetPreset?.Folder)
-                            {
-                                ReorderPresetsInFolder(draggedTag.Name, targetTag.Name, sourcePreset?.Folder);
-                            }
-                        }
-                    }
+                    finalName = HandleDropInside(draggedTag, targetNode);
+                }
+                else if (dropPos == DropPosition.Above || dropPos == DropPosition.Below)
+                {
+                    finalName = HandleDropAdjacentTo(draggedTag, targetNode, dropPos);
                 }
 
                 RefreshPresetList();
-                SelectPresetByName(draggedTag.IsFolder ? null : draggedTag.Name);
+                SelectTreeNodeByTagName(finalName, draggedTag.IsFolder);
             }
             finally
             {
                 _draggedNode = null;
+            }
+        }
+
+        private string HandleDropOnEmptySpace(PresetNodeTag draggedTag)
+        {
+            if (draggedTag.IsFolder)
+            {
+                var currentParent = FolderPathUtility.GetParentPath(draggedTag.Name);
+                if (currentParent != null)
+                {
+                    var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
+                    var newPath = _presetManager.GetUniqueFolderName(folderName);
+                    _presetManager.RenameFolder(draggedTag.Name, newPath);
+                    return newPath;
+                }
+                return draggedTag.Name;
+            }
+            else
+            {
+                _presetManager.MovePresetToFolder(draggedTag.Name, null);
+                return draggedTag.Name;
+            }
+        }
+
+        private string HandleDropInside(PresetNodeTag draggedTag, TreeNode targetNode)
+        {
+            var targetTag = targetNode.Tag as PresetNodeTag;
+            if (targetTag == null || !targetTag.IsFolder)
+                return draggedTag.Name;
+
+            if (draggedTag.IsFolder)
+            {
+                var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
+                var newPath = FolderPathUtility.CombinePath(targetTag.Name, folderName);
+                newPath = _presetManager.GetUniqueFolderName(newPath);
+                _presetManager.RenameFolder(draggedTag.Name, newPath);
+                return newPath;
+            }
+            else
+            {
+                _presetManager.MovePresetToFolder(draggedTag.Name, targetTag.Name);
+                return draggedTag.Name;
+            }
+        }
+
+        private string HandleDropAdjacentTo(PresetNodeTag draggedTag, TreeNode targetNode, DropPosition position)
+        {
+            var targetTag = targetNode.Tag as PresetNodeTag;
+            if (targetTag == null) return draggedTag.Name;
+
+            // Determine the target's parent level — this is where the dragged item will end up
+            string? targetParentPath;
+            if (targetTag.IsFolder)
+                targetParentPath = FolderPathUtility.GetParentPath(targetTag.Name);
+            else
+                targetParentPath = _presetManager.Get(targetTag.Name)?.Folder;
+
+            if (draggedTag.IsFolder)
+            {
+                // Move folder to the target's parent level
+                var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
+                var newPath = FolderPathUtility.CombinePath(targetParentPath, folderName);
+
+                if (newPath != draggedTag.Name)
+                {
+                    newPath = _presetManager.GetUniqueFolderName(newPath);
+                    _presetManager.RenameFolder(draggedTag.Name, newPath);
+                }
+
+                // Position in manual order relative to the target
+                if (targetTag.IsFolder)
+                    InsertIntoFolderOrder(newPath, targetTag.Name, position);
+                else
+                    InsertIntoFolderOrder(newPath, null, position);
+
+                return newPath;
+            }
+            else
+            {
+                // Move preset to the target's parent folder
+                string? targetFolder;
+                if (targetTag.IsFolder)
+                    targetFolder = targetParentPath;
+                else
+                    targetFolder = _presetManager.Get(targetTag.Name)?.Folder;
+
+                var currentPreset = _presetManager.Get(draggedTag.Name);
+                if (currentPreset?.Folder != targetFolder)
+                    _presetManager.MovePresetToFolder(draggedTag.Name, targetFolder);
+
+                // Position in manual order
+                if (!targetTag.IsFolder)
+                    InsertIntoPresetOrder(draggedTag.Name, targetFolder, targetTag.Name, position);
+
+                return draggedTag.Name;
             }
         }
 
@@ -3892,6 +3947,82 @@ namespace SSH_Helper
             {
                 // Presets can drop on folders or other presets (for reordering)
                 return targetTag.IsFolder || _currentSortMode == PresetSortMode.Manual;
+            }
+        }
+
+        private DropPosition GetDropPosition(TreeNode targetNode, Point clientPoint)
+        {
+            var bounds = targetNode.Bounds;
+            if (bounds.Height == 0) return DropPosition.Inside;
+
+            float relativeY = clientPoint.Y - bounds.Top;
+            float ratio = relativeY / bounds.Height;
+
+            bool isFolder = targetNode.Tag is PresetNodeTag tag && tag.IsFolder;
+
+            if (isFolder)
+            {
+                if (ratio < 0.25f) return DropPosition.Above;
+                if (ratio > 0.75f) return DropPosition.Below;
+                return DropPosition.Inside;
+            }
+            else
+            {
+                return ratio < 0.5f ? DropPosition.Above : DropPosition.Below;
+            }
+        }
+
+        private bool CanDropAt(TreeNode draggedNode, TreeNode targetNode, DropPosition position)
+        {
+            if (draggedNode == targetNode)
+                return false;
+
+            var draggedTag = draggedNode.Tag as PresetNodeTag;
+            var targetTag = targetNode.Tag as PresetNodeTag;
+
+            if (draggedTag == null || targetTag == null)
+                return false;
+
+            if (draggedTag.IsFolder)
+            {
+                // Prevent dropping folder into itself or its descendants
+                if (draggedTag.Name == targetTag.Name ||
+                    FolderPathUtility.IsDescendantOf(targetTag.Name, draggedTag.Name))
+                    return false;
+
+                if (position == DropPosition.Inside)
+                {
+                    // Can only drop inside another folder
+                    return targetTag.IsFolder;
+                }
+                else
+                {
+                    // Above/Below: can drop next to any folder
+                    // Next to a preset: only if the folder would be at same level
+                    return true;
+                }
+            }
+            else
+            {
+                if (position == DropPosition.Inside)
+                {
+                    return targetTag.IsFolder;
+                }
+                else
+                {
+                    // Above/Below: always allowed (moves preset to target's level)
+                    return true;
+                }
+            }
+        }
+
+        private void ClearDropIndicator()
+        {
+            if (_dropTargetNode != null || _dropPosition != DropPosition.None)
+            {
+                _dropTargetNode = null;
+                _dropPosition = DropPosition.None;
+                trvPresets.Invalidate();
             }
         }
 
@@ -3936,6 +4067,77 @@ namespace SSH_Helper
 
             presetOrder.RemoveAt(sourceIndex);
             presetOrder.Insert(targetIndex, sourcePresetName);
+
+            config.ManualPresetOrderByFolder[folderKey] = presetOrder;
+            _configService.Save(config);
+        }
+
+        private void InsertIntoFolderOrder(string folderToInsert, string? referenceItem, DropPosition position)
+        {
+            var config = _configService.Load();
+            var folderOrder = config.ManualFolderOrder;
+
+            // Ensure all existing folders are in the manual order list
+            foreach (var folder in _presetManager.GetFolders())
+            {
+                if (!folderOrder.Contains(folder))
+                    folderOrder.Add(folder);
+            }
+
+            folderOrder.Remove(folderToInsert);
+
+            if (referenceItem != null)
+            {
+                int refIndex = folderOrder.IndexOf(referenceItem);
+                if (refIndex >= 0)
+                {
+                    int insertIndex = position == DropPosition.Below ? refIndex + 1 : refIndex;
+                    folderOrder.Insert(insertIndex, folderToInsert);
+                }
+                else
+                {
+                    folderOrder.Add(folderToInsert);
+                }
+            }
+            else
+            {
+                folderOrder.Add(folderToInsert);
+            }
+
+            config.ManualFolderOrder = folderOrder;
+            _configService.Save(config);
+        }
+
+        private void InsertIntoPresetOrder(string presetToInsert, string? folder, string referenceItem, DropPosition position)
+        {
+            var config = _configService.Load();
+            string folderKey = folder ?? "";
+
+            if (!config.ManualPresetOrderByFolder.TryGetValue(folderKey, out var presetOrder))
+            {
+                presetOrder = _presetManager.GetPresetsInFolder(folder).ToList();
+                config.ManualPresetOrderByFolder[folderKey] = presetOrder;
+            }
+
+            // Ensure all presets in this folder are tracked
+            foreach (var p in _presetManager.GetPresetsInFolder(folder))
+            {
+                if (!presetOrder.Contains(p))
+                    presetOrder.Add(p);
+            }
+
+            presetOrder.Remove(presetToInsert);
+
+            int refIndex = presetOrder.IndexOf(referenceItem);
+            if (refIndex >= 0)
+            {
+                int insertIndex = position == DropPosition.Below ? refIndex + 1 : refIndex;
+                presetOrder.Insert(insertIndex, presetToInsert);
+            }
+            else
+            {
+                presetOrder.Add(presetToInsert);
+            }
 
             config.ManualPresetOrderByFolder[folderKey] = presetOrder;
             _configService.Save(config);
@@ -4167,16 +4369,16 @@ namespace SSH_Helper
             var targetNode = trvFavorites.GetNodeAt(pt);
 
             // Reset previous highlight
-            if (_lastHighlightedNode != null && _lastHighlightedNode != targetNode)
+            if (_favLastHighlightedNode != null && _favLastHighlightedNode != targetNode)
             {
-                _lastHighlightedNode.BackColor = trvFavorites.BackColor;
+                _favLastHighlightedNode.BackColor = trvFavorites.BackColor;
             }
 
             if (targetNode != null && CanDropOnFavorites(_draggedNode, targetNode))
             {
                 e.Effect = DragDropEffects.Move;
                 targetNode.BackColor = Color.LightBlue;
-                _lastHighlightedNode = targetNode;
+                _favLastHighlightedNode = targetNode;
             }
             else
             {
@@ -4187,10 +4389,10 @@ namespace SSH_Helper
         private void trvFavorites_DragDrop(object? sender, DragEventArgs e)
         {
             // Reset highlight
-            if (_lastHighlightedNode != null)
+            if (_favLastHighlightedNode != null)
             {
-                _lastHighlightedNode.BackColor = trvFavorites.BackColor;
-                _lastHighlightedNode = null;
+                _favLastHighlightedNode.BackColor = trvFavorites.BackColor;
+                _favLastHighlightedNode = null;
             }
 
             if (_draggedNode == null)
@@ -6383,6 +6585,45 @@ namespace SSH_Helper
             using var textBrush = new SolidBrush(textColor);
             using var sf = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
             SafeDrawString(e.Graphics, nodeText, treeView.Font, textBrush, textBounds, sf);
+
+            // Draw drop position indicator
+            if (treeView == trvPresets && _dropTargetNode == e.Node && _dropPosition != DropPosition.None)
+            {
+                var indicatorColor = _isDarkMode
+                    ? Color.FromArgb(0, 122, 204)
+                    : Color.FromArgb(10, 88, 202);
+
+                int lineLeft = e.Node.Level * treeView.Indent + 4;
+                int lineRight = treeView.ClientSize.Width - 4;
+
+                if (_dropPosition == DropPosition.Above)
+                {
+                    int y = rowBounds.Top + 1;
+                    using var pen = new Pen(indicatorColor, 2f);
+                    using var brush = new SolidBrush(indicatorColor);
+                    e.Graphics.FillEllipse(brush, lineLeft - 3, y - 3, 6, 6);
+                    e.Graphics.DrawLine(pen, lineLeft + 3, y, lineRight, y);
+                }
+                else if (_dropPosition == DropPosition.Below)
+                {
+                    int y = rowBounds.Bottom - 2;
+                    using var pen = new Pen(indicatorColor, 2f);
+                    using var brush = new SolidBrush(indicatorColor);
+                    e.Graphics.FillEllipse(brush, lineLeft - 3, y - 3, 6, 6);
+                    e.Graphics.DrawLine(pen, lineLeft + 3, y, lineRight, y);
+                }
+                else if (_dropPosition == DropPosition.Inside)
+                {
+                    var highlightColor = _isDarkMode
+                        ? Color.FromArgb(50, 0, 122, 204)
+                        : Color.FromArgb(50, 10, 88, 202);
+                    using var highlightBrush = new SolidBrush(highlightColor);
+                    e.Graphics.FillRectangle(highlightBrush, rowBounds);
+
+                    using var borderPen = new Pen(indicatorColor, 1f);
+                    e.Graphics.DrawRectangle(borderPen, rowBounds.X, rowBounds.Y, rowBounds.Width - 1, rowBounds.Height - 1);
+                }
+            }
         }
 
         private void exportHostOutputToolStripMenuItem_Click(object? sender, EventArgs e)
@@ -8276,6 +8517,14 @@ namespace SSH_Helper
                 }
                 _suppressExpandCollapseEvents = false;
             }
+        }
+
+        private void SelectTreeNodeByTagName(string? name, bool isFolder)
+        {
+            if (isFolder)
+                SelectFolderByName(name);
+            else
+                SelectPresetByName(name);
         }
 
         private void SelectFolderByName(string? folderName, bool ensureVisible = true)
