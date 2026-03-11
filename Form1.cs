@@ -6728,6 +6728,13 @@ namespace SSH_Helper
 
         #region CSV Operations
 
+        private enum CsvSaveAttemptResult
+        {
+            Saved,
+            Cancelled,
+            Failed
+        }
+
         private void OpenCsvFile(string? filePath = null)
         {
             if (filePath == null)
@@ -6778,6 +6785,11 @@ namespace SSH_Helper
 
         private void SaveCsvAs()
         {
+            _ = SaveCsvAsInternal();
+        }
+
+        private CsvSaveAttemptResult SaveCsvAsInternal()
+        {
             using var sfd = new SaveFileDialog
             {
                 Filter = "CSV files (*.csv)|*.csv",
@@ -6787,44 +6799,51 @@ namespace SSH_Helper
             if (!string.IsNullOrEmpty(_loadedFilePath))
                 sfd.FileName = Path.GetFileName(_loadedFilePath);
 
-            if (sfd.ShowDialog() == DialogResult.OK)
-            {
-                SaveCsvToFile(sfd.FileName);
-                _loadedFilePath = sfd.FileName;
-                _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
-                _loadedFileSyncStatus = CsvFileSyncStatus.Current;
-                UpdateHostsFileIndicator();
-                UpdateStatusBar($"Saved: {Path.GetFileName(sfd.FileName)}");
-            }
+            if (sfd.ShowDialog(this) != DialogResult.OK)
+                return CsvSaveAttemptResult.Cancelled;
+
+            return TrySaveCsvToPath(sfd.FileName);
         }
 
         private bool SaveCurrentCsv(bool promptIfNoPath)
+        {
+            return SaveCurrentCsvInternal(promptIfNoPath) == CsvSaveAttemptResult.Saved;
+        }
+
+        private CsvSaveAttemptResult SaveCurrentCsvInternal(bool promptIfNoPath)
         {
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
 
             if (string.IsNullOrWhiteSpace(_loadedFilePath))
             {
-                if (!promptIfNoPath) return false;
-                SaveCsvAs();
-                return !string.IsNullOrWhiteSpace(_loadedFilePath);
+                if (!promptIfNoPath)
+                    return CsvSaveAttemptResult.Cancelled;
+
+                return SaveCsvAsInternal();
             }
 
+            return TrySaveCsvToPath(_loadedFilePath);
+        }
+
+        private CsvSaveAttemptResult TrySaveCsvToPath(string filename)
+        {
             try
             {
-                SaveCsvToFile(_loadedFilePath);
+                SaveCsvToFile(filename);
+                _loadedFilePath = filename;
                 _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
                 _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
                     ? CsvFileSyncStatus.NotTracked
                     : CsvFileSyncStatus.Current;
                 UpdateHostsFileIndicator();
-                UpdateStatusBar($"Saved: {Path.GetFileName(_loadedFilePath)}");
-                return true;
+                UpdateStatusBar($"Saved: {Path.GetFileName(filename)}");
+                return CsvSaveAttemptResult.Saved;
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Failed to save file:\r\n{ex.Message}", "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return false;
+                DialogTheme.Show(this, $"Failed to save file:\r\n{ex.Message}", "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return CsvSaveAttemptResult.Failed;
             }
         }
 
@@ -10465,7 +10484,7 @@ namespace SSH_Helper
         {
             if (_sshService.IsRunning)
             {
-                if (DialogTheme.Show("Execution is currently running. Stop and exit?", "Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+                if (DialogTheme.Show(this, "Execution is currently running. Stop and exit?", "Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                     return false;
                 StopExecution();
             }
@@ -10473,11 +10492,9 @@ namespace SSH_Helper
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
 
-            if (_csvDirty)
+            if (!TryResolvePendingCsvChangesForExit())
             {
-                var result = DialogTheme.Show("You have unsaved CSV changes. Save before exiting?", "Save Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-                if (result == DialogResult.Cancel) return false;
-                if (result == DialogResult.Yes && !SaveCurrentCsv(promptIfNoPath: true)) return false;
+                return false;
             }
 
             if (IsPresetDirty())
@@ -10489,6 +10506,44 @@ namespace SSH_Helper
             }
 
             return true;
+        }
+
+        private bool TryResolvePendingCsvChangesForExit()
+        {
+            if (!_csvDirty)
+                return true;
+
+            var result = DialogTheme.Show(
+                this,
+                "You have unsaved CSV changes. Save before exiting?",
+                "Save Changes",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Cancel)
+                return false;
+
+            if (result != DialogResult.Yes)
+                return true;
+
+            var saveResult = SaveCurrentCsvInternal(promptIfNoPath: true);
+            return saveResult switch
+            {
+                CsvSaveAttemptResult.Saved => true,
+                CsvSaveAttemptResult.Cancelled => ConfirmExitWithoutSavingCsv("CSV save was canceled. Exit without saving your CSV changes?"),
+                CsvSaveAttemptResult.Failed => ConfirmExitWithoutSavingCsv("CSV save failed. Exit without saving your CSV changes?"),
+                _ => false
+            };
+        }
+
+        private bool ConfirmExitWithoutSavingCsv(string message)
+        {
+            return DialogTheme.Show(
+                this,
+                message,
+                "Exit Without Saving",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) == DialogResult.Yes;
         }
 
         #endregion

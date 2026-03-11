@@ -1,5 +1,41 @@
 # TODO
 
+## 43. Investigate CSV Save Exit Hang
+- [x] 43.1 Trace the normal exit path in `Form1` and identify all conditions that can cancel shutdown.
+- [x] 43.2 Trace CSV save/save-as flows and any dialog interactions that can leave the form in a state where exit requests are ignored.
+- [x] 43.3 Verify the most plausible failure mode against related event handlers/background work and capture the findings below.
+
+### 43 Review
+- Both `File -> Exit` and the window close button funnel through `ConfirmExitWorkflow()` (`Form1_FormClosing` for X, `ExitMenuItem_Click` for the menu). That method cancels shutdown whenever execution is running and the user declines to stop, whenever the dirty-CSV prompt returns `Cancel`, whenever dirty-CSV save returns `false`, or whenever dirty-preset resolution returns `false`.
+- The most plausible “exit does nothing but app stays responsive” path is the dirty-CSV save branch: `ConfirmExitWorkflow()` calls `SaveCurrentCsv(promptIfNoPath: true)`, which returns `false` if the user answers `Yes` to save but then cancels `Save As`, or if saving throws and the error path returns `false`. In that case `ConfirmExitWorkflow()` returns `false`, `FormClosing` sets `e.Cancel = true`, and both exit routes appear to do nothing.
+- `SaveCurrentCsv(...)` makes that behavior easy to hit because the no-path branch calls `SaveCsvAs()` and infers success only from whether `_loadedFilePath` ended up non-empty after the dialog. There is no follow-up status explaining that the close was canceled because the save dialog was canceled.
+- A second close-cancel path still exists even after CSV save succeeds: if `IsPresetDirty()` is true, `TryResolvePendingPresetChanges()` can also veto shutdown. That means a user can associate the issue with the CSV prompt even though the actual final cancellation came from unsaved preset changes.
+- I did not find a stronger hard-lock path in the main-form shutdown flow. This looks like repeated close cancellation rather than the app getting stuck in an unresponsive state.
+- Verification: source review only; no code changes or UI automation run for this investigation.
+
+## 44. Patch CSV Exit Cancellation UX
+- [x] 44.1 Refactor the CSV save/save-as path so close handling can distinguish save success, save cancellation, and save failure.
+- [x] 44.2 Update the exit workflow to offer exit-without-saving when the CSV save attempt is canceled or fails, instead of silently canceling shutdown.
+- [x] 44.3 Verify the patch builds cleanly and capture the review below.
+
+### 44 Review
+- Added a small `CsvSaveAttemptResult` flow in `Form1` so CSV save/save-as now distinguishes successful save, canceled save dialog, and failed save instead of collapsing everything to `true`/`false`.
+- `SaveCsvAs()` now uses an owned `SaveFileDialog` (`ShowDialog(this)`) and both save paths share one `TrySaveCsvToPath(...)` method that updates `_loadedFilePath`, fingerprint, status bar, and save-error messaging consistently.
+- `ConfirmExitWorkflow()` now routes CSV handling through `TryResolvePendingCsvChangesForExit()`. If the user says `Yes` to save but then cancels `Save As`, or if saving fails, the app now asks whether to exit without saving instead of silently canceling the close.
+- Verification: `dotnet build .\\SSH_Helper.csproj -p:BaseOutputPath=artifacts\\csv-exit-fix\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\csv-exit-fix\\obj\\` passed with 0 warnings and 0 errors.
+- Automated tests were not added for this patch because the affected behavior is inside the WinForms main-form dialog workflow; verification here was compile-only.
+
+## 42. Rebase Branch Onto origin/master
+- [x] 42.1 Confirm the current branch/worktree state before rebasing.
+- [x] 42.2 Fetch the latest `origin/master`.
+- [x] 42.3 Rebase the current branch onto `origin/master` and capture whether conflicts were encountered.
+
+### 42 Review
+- Confirmed the current branch was `0.51.8` and the worktree was clean before I wrote the task plan.
+- Fetched the latest `origin/master`.
+- Temporarily stashed the local `tasks/todo.md` planning edit, rebased `0.51.8` onto `origin/master`, and restored the stash afterward.
+- The rebase completed successfully with no conflicts.
+
 ## 41. Review Connection Pooling Feature
 - [x] 41.1 Trace the UI/config toggle and runtime execution paths that enable or bypass SSH connection pooling.
 - [x] 41.2 Inspect the pool lifecycle, health-check, keep-alive, and session-leasing behavior plus any focused specs/tests.
