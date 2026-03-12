@@ -86,6 +86,25 @@ public class ExecutionDetailsDialogTests
         }
     }
 
+    [WinFormsFact]
+    public void Constructor_WithCancelledExecution_ShowsCancelledOutcome()
+    {
+        var details = CreateDetailsWithMultipleHosts();
+        details.WasCancelled = true;
+        details.Hosts[1].WasCancelled = true;
+
+        using var dialog = new ExecutionDetailsDialog(details, string.Empty, darkMode: false);
+
+        var summary = GetField<TextBox>(dialog, "_txtSummary");
+        summary.Text.Should().Contain("Outcome: Cancelled");
+        summary.Text.Should().ContainEquivalentOf("cancelled");
+
+        var hostsGrid = GetField<DataGridView>(dialog, "_gridHosts");
+        hostsGrid.Rows.Cast<DataGridViewRow>()
+            .Select(row => Convert.ToString(row.Cells["Status"].Value))
+            .Should().Contain("Cancelled");
+    }
+
     private static ExecutionDetails CreateDetailsWithInteractiveSessions()
     {
         var now = DateTime.UtcNow;

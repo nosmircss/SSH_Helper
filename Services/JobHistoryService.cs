@@ -84,6 +84,7 @@ namespace SSH_Helper.Services
                 startedUtc: result.StartedUtc,
                 completedUtc: result.CompletedUtc,
                 success: result.Success,
+                wasCancelled: result.WasCancelled,
                 hostsSucceeded: result.HostsSucceeded,
                 hostsFailed: result.HostsFailed,
                 errorMessage: result.ErrorMessage,
@@ -112,6 +113,7 @@ namespace SSH_Helper.Services
                 startedUtc: skippedRun.ScheduledTimeUtc,
                 completedUtc: skippedRun.ScheduledTimeUtc,
                 success: false,
+                wasCancelled: false,
                 hostsSucceeded: 0,
                 hostsFailed: 0,
                 errorMessage: errorMessage ?? $"Missed scheduled run at {localScheduledTime} while the application was closed.",
@@ -139,6 +141,7 @@ namespace SSH_Helper.Services
                 startedUtc: skippedSummary.LastScheduledTimeUtc,
                 completedUtc: skippedSummary.LastScheduledTimeUtc,
                 success: false,
+                wasCancelled: false,
                 hostsSucceeded: 0,
                 hostsFailed: 0,
                 errorMessage: errorMessage ?? BuildSkippedSummaryMessage(skippedSummary),
@@ -156,6 +159,7 @@ namespace SSH_Helper.Services
             DateTime startedUtc,
             DateTime completedUtc,
             bool success,
+            bool wasCancelled,
             int hostsSucceeded,
             int hostsFailed,
             string? errorMessage,
@@ -173,10 +177,11 @@ namespace SSH_Helper.Services
                 StartedUtc = startedUtc,
                 CompletedUtc = completedUtc,
                 Success = success,
+                WasCancelled = wasCancelled,
                 HostsSucceeded = hostsSucceeded,
                 HostsFailed = hostsFailed,
                 ErrorMessage = errorMessage,
-                ConsecutiveFailureCount = !success && !wasSkipped ? 1 : 0,
+                ConsecutiveFailureCount = !success && !wasSkipped && !wasCancelled ? 1 : 0,
                 WasSkipped = wasSkipped,
                 SkippedRunCount = skippedRunCount,
                 SkippedWindowStartUtc = skippedWindowStartUtc,
@@ -191,6 +196,7 @@ namespace SSH_Helper.Services
                 StartedUtc = startedUtc,
                 CompletedUtc = completedUtc,
                 Success = success,
+                WasCancelled = wasCancelled,
                 HostsSucceeded = hostsSucceeded,
                 HostsFailed = hostsFailed,
                 ErrorMessage = errorMessage,
@@ -237,7 +243,7 @@ namespace SSH_Helper.Services
             JobRunRecord candidateRecord,
             JobRunPayload candidatePayload)
         {
-            if (candidateRecord.Success || candidateRecord.WasSkipped || indexDoc.Entries.Count == 0)
+            if (candidateRecord.Success || candidateRecord.WasSkipped || candidateRecord.WasCancelled || indexDoc.Entries.Count == 0)
             {
                 return false;
             }
@@ -282,6 +288,7 @@ namespace SSH_Helper.Services
         {
             return !existingRecord.Success
                 && !existingRecord.WasSkipped
+                && !existingRecord.WasCancelled
                 && existingRecord.HostsSucceeded == candidateRecord.HostsSucceeded
                 && existingRecord.HostsFailed == candidateRecord.HostsFailed
                 && string.Equals(
@@ -294,6 +301,7 @@ namespace SSH_Helper.Services
         {
             return !existingPayload.Success
                 && !existingPayload.WasSkipped
+                && !existingPayload.WasCancelled
                 && existingPayload.HostsSucceeded == candidatePayload.HostsSucceeded
                 && existingPayload.HostsFailed == candidatePayload.HostsFailed
                 && string.Equals(
@@ -367,6 +375,7 @@ namespace SSH_Helper.Services
                     HostAddress = ho.HostAddress,
                     Output = TruncateOutput(ho.Output, maxOutputChars),
                     Success = ho.Success,
+                    WasCancelled = ho.WasCancelled,
                     ErrorMessage = ho.ErrorMessage
                 });
             }

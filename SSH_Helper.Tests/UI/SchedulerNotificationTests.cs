@@ -75,6 +75,18 @@ namespace SSH_Helper.Tests.UI
             result.Should().Be("[08:00:00] [Run Now: QueuedJob] Queued");
         }
 
+        [Fact]
+        public void FormatStateChange_Cancelled_FormatsCorrectly()
+        {
+            var timestamp = new DateTime(2026, 3, 7, 8, 30, 0, DateTimeKind.Utc);
+
+            var result = SchedulerNotificationFormatter.FormatStateChange(
+                "CancelledJob", JobExecutionState.Cancelled, isRunNow: false,
+                null, timestamp);
+
+            result.Should().Be("[08:30:00] [Scheduled: CancelledJob] Cancelled");
+        }
+
         #endregion
 
         #region FormatDuration

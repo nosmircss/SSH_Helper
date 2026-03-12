@@ -470,6 +470,32 @@ public class TerminalOutputProcessorTests
         carry.Should().BeEmpty();
     }
 
+    [Fact]
+    public void BufferIncompleteFinalLineStreaming_SplitBackspaceEditedEcho_EmitsCorrectedCompletedLine()
+    {
+        var carry = string.Empty;
+
+        var first = TerminalOutputProcessor.BufferIncompleteFinalLineStreaming("d", ref carry);
+        var second = TerminalOutputProcessor.BufferIncompleteFinalLineStreaming("\bdf\r\r\nFilesystem", ref carry);
+        var flushed = TerminalOutputProcessor.BufferIncompleteFinalLineStreaming(string.Empty, ref carry, flushFinal: true);
+
+        first.Should().BeEmpty();
+        TerminalOutputProcessor.Normalize(second).Should().Be("df\r\n");
+        TerminalOutputProcessor.Normalize(flushed, preserveTrailingSpacesOnFinalLine: true).Should().Be("Filesystem");
+        carry.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BufferIncompleteFinalLineStreaming_CompletedLine_EmitsImmediately()
+    {
+        var carry = string.Empty;
+
+        var result = TerminalOutputProcessor.BufferIncompleteFinalLineStreaming("d\bdf\r\r\n", ref carry);
+
+        TerminalOutputProcessor.Normalize(result).Should().Be("df\r\n");
+        carry.Should().BeEmpty();
+    }
+
     #endregion
 
     #region StripTrailingPrompt Tests

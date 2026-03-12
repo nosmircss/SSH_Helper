@@ -133,6 +133,7 @@ public class ExecutionPipelineModelTests
             StartedUtc = started,
             CompletedUtc = completed,
             Success = true,
+            WasCancelled = false,
             HostsSucceeded = 5,
             HostsFailed = 1,
             ErrorMessage = null
@@ -143,6 +144,7 @@ public class ExecutionPipelineModelTests
         result.StartedUtc.Should().Be(started);
         result.CompletedUtc.Should().Be(completed);
         result.Success.Should().BeTrue();
+        result.WasCancelled.Should().BeFalse();
         result.HostsSucceeded.Should().Be(5);
         result.HostsFailed.Should().Be(1);
         result.ErrorMessage.Should().BeNull();
@@ -156,10 +158,12 @@ public class ExecutionPipelineModelTests
             JobId = "err",
             JobName = "Failed",
             Success = false,
+            WasCancelled = true,
             ErrorMessage = "Connection refused"
         };
 
         result.ErrorMessage.Should().Be("Connection refused");
+        result.WasCancelled.Should().BeTrue();
     }
 
     #endregion

@@ -38,6 +38,7 @@ public sealed class JobHistoryServiceTests : IDisposable
         string jobId = "testjob1",
         string jobName = "Test Job",
         bool success = true,
+        bool wasCancelled = false,
         int hostsSucceeded = 2,
         int hostsFailed = 0,
         List<JobHostOutput>? hostOutputs = null,
@@ -51,6 +52,7 @@ public sealed class JobHistoryServiceTests : IDisposable
             StartedUtc = now.AddSeconds(-5),
             CompletedUtc = now,
             Success = success,
+            WasCancelled = wasCancelled,
             HostsSucceeded = hostsSucceeded,
             HostsFailed = hostsFailed,
             ErrorMessage = errorMessage,
@@ -270,6 +272,65 @@ public sealed class JobHistoryServiceTests : IDisposable
         runs[0].ConsecutiveFailureCount.Should().Be(1);
         runs[1].ErrorMessage.Should().Be("Authentication failed");
         runs[1].ConsecutiveFailureCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void SaveRun_CancelledRuns_DoNotCollapseIntoFailureStreaks()
+    {
+        var firstCancelled = CreateTestResult(
+            success: false,
+            wasCancelled: true,
+            hostsSucceeded: 0,
+            hostsFailed: 1,
+            hostOutputs: new List<JobHostOutput>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.1",
+                    Output = "cancelled output 1",
+                    Success = false,
+                    WasCancelled = true,
+                    ErrorMessage = "Operation cancelled"
+                }
+            },
+            errorMessage: "Cancelled by user.");
+        firstCancelled.CompletedUtc = new DateTime(2026, 3, 12, 16, 0, 0, DateTimeKind.Utc);
+        firstCancelled.StartedUtc = firstCancelled.CompletedUtc.AddSeconds(-10);
+
+        var secondCancelled = CreateTestResult(
+            success: false,
+            wasCancelled: true,
+            hostsSucceeded: 0,
+            hostsFailed: 1,
+            hostOutputs: new List<JobHostOutput>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.1",
+                    Output = "cancelled output 2",
+                    Success = false,
+                    WasCancelled = true,
+                    ErrorMessage = "Operation cancelled"
+                }
+            },
+            errorMessage: "Cancelled by user.");
+        secondCancelled.CompletedUtc = firstCancelled.CompletedUtc.AddMinutes(5);
+        secondCancelled.StartedUtc = secondCancelled.CompletedUtc.AddSeconds(-8);
+
+        _service.SaveRun(firstCancelled);
+        _service.SaveRun(secondCancelled);
+
+        var runs = _service.GetRunsForJob("testjob1");
+        runs.Should().HaveCount(2);
+        runs.Should().OnlyContain(run => run.WasCancelled);
+        runs[0].ConsecutiveFailureCount.Should().Be(0);
+        runs[1].ConsecutiveFailureCount.Should().Be(0);
+
+        var payload = _service.LoadRunPayload("testjob1", runs[0].RunFileName);
+        payload.Should().NotBeNull();
+        payload!.WasCancelled.Should().BeTrue();
+        payload.HostOutputs.Should().ContainSingle();
+        payload.HostOutputs[0].WasCancelled.Should().BeTrue();
     }
 
     [Fact]

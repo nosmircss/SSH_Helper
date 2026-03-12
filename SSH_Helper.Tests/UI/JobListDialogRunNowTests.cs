@@ -489,6 +489,165 @@ public class JobListDialogRunNowTests : IDisposable
     }
 
     [WinFormsFact]
+    public void HistoryGrid_CancelledRun_RendersCancelledStatus()
+    {
+        var configService = new ConfigurationService(_configPath);
+        var presetManager = new PresetManager(configService);
+        presetManager.Load();
+        presetManager.Save("Nightly", new PresetInfo { Commands = "echo nightly" });
+
+        var credentialProvider = new FakeCredentialProvider();
+        var schedulingService = new SchedulingService();
+        var historyService = new JobHistoryService(Path.Combine(_testDirectory, "history"));
+        var exportService = new JobExportService();
+        var jobStorage = new JobStorageService(credentialProvider, _jobsPath);
+        jobStorage.Load();
+
+        var job = CreateTestJob("Cancelled Job");
+        jobStorage.Save(job);
+
+        historyService.SaveRun(new JobRunResult
+        {
+            JobId = job.Id,
+            JobName = job.Name,
+            StartedUtc = new DateTime(2026, 3, 12, 17, 0, 0, DateTimeKind.Utc),
+            CompletedUtc = new DateTime(2026, 3, 12, 17, 0, 10, DateTimeKind.Utc),
+            Success = false,
+            WasCancelled = true,
+            HostsSucceeded = 0,
+            HostsFailed = 1,
+            ErrorMessage = "Cancelled by user.",
+            HostOutputs = new List<JobHostOutput>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.9",
+                    Output = "partial output",
+                    Success = false,
+                    WasCancelled = true,
+                    ErrorMessage = "Operation cancelled"
+                }
+            }
+        });
+
+        using var executionService = new JobExecutionService(
+            jobStorage,
+            schedulingService,
+            configService,
+            presetManager,
+            credentialProvider);
+
+        using var dialog = new JobListDialog(
+            jobStorage,
+            executionService,
+            historyService,
+            schedulingService,
+            presetManager,
+            exportService,
+            credentialProvider,
+            runNowInvoker: null,
+            getMainGridRows: null,
+            getMainGridColumns: null,
+            darkMode: false);
+
+        dialog.Show();
+        Application.DoEvents();
+
+        var jobsGrid = GetField<DataGridView>(dialog, "_gridJobs");
+        var historyGrid = GetField<DataGridView>(dialog, "_gridHistory");
+
+        SelectJobRow(jobsGrid, job.Id);
+        InvokeMethod(dialog, "OnJobSelectionChanged", jobsGrid, EventArgs.Empty);
+        Application.DoEvents();
+
+        jobsGrid.Rows[0].Cells["LastResult"].Value.Should().Be("CANCELLED (0/1)");
+        historyGrid.Rows.Count.Should().Be(1);
+        historyGrid.Rows[0].Cells["Result"].Value.Should().Be("CANCELLED (0/1)");
+        historyGrid.Rows[0].Cells["Error"].Value.Should().Be("Cancelled by user.");
+    }
+
+    [WinFormsFact]
+    public async Task CancelButton_IsEnabledOnlyForRunningJob()
+    {
+        var configService = new ConfigurationService(_configPath);
+        var presetManager = new PresetManager(configService);
+        presetManager.Load();
+
+        var credentialProvider = new FakeCredentialProvider();
+        var schedulingService = new SchedulingService();
+        var historyService = new JobHistoryService(Path.Combine(_testDirectory, "history"));
+        var exportService = new JobExportService();
+        var jobStorage = new JobStorageService(credentialProvider, _jobsPath);
+        jobStorage.Load();
+
+        var job = CreateTestJob("Running Job");
+        jobStorage.Save(job);
+
+        var executionStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var executionService = new JobExecutionService(
+            jobStorage,
+            schedulingService,
+            configService,
+            presetManager,
+            credentialProvider,
+            jobExecutionOverride: async (_, _, token) =>
+            {
+                executionStarted.TrySetResult(true);
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            });
+
+        using var dialog = new JobListDialog(
+            jobStorage,
+            executionService,
+            historyService,
+            schedulingService,
+            presetManager,
+            exportService,
+            credentialProvider,
+            runNowInvoker: null,
+            getMainGridRows: null,
+            getMainGridColumns: null,
+            darkMode: false);
+
+        dialog.Show();
+        Application.DoEvents();
+
+        var jobsGrid = GetField<DataGridView>(dialog, "_gridJobs");
+        var toolStrip = GetField<ToolStrip>(dialog, "_toolStrip");
+        var cancelButton = toolStrip.Items.OfType<ToolStripButton>()
+            .Single(item => string.Equals(item.Name, "Cancel", StringComparison.Ordinal));
+        var runNowButton = toolStrip.Items.OfType<ToolStripButton>()
+            .Single(item => string.Equals(item.Name, "RunNow", StringComparison.Ordinal));
+
+        SelectJobRow(jobsGrid, job.Id);
+        InvokeMethod(dialog, "OnJobSelectionChanged", jobsGrid, EventArgs.Empty);
+        Application.DoEvents();
+
+        cancelButton.Enabled.Should().BeFalse();
+        runNowButton.Enabled.Should().BeTrue();
+
+        var runTask = executionService.RunNowAsync(job.Id);
+        await executionStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        InvokeMethod(dialog, "RefreshJobList");
+        Application.DoEvents();
+
+        cancelButton.Enabled.Should().BeTrue();
+        runNowButton.Enabled.Should().BeFalse();
+
+        cancelButton.PerformClick();
+        Application.DoEvents();
+        await runTask;
+
+        InvokeMethod(dialog, "RefreshJobList");
+        Application.DoEvents();
+
+        cancelButton.Enabled.Should().BeFalse();
+        runNowButton.Enabled.Should().BeTrue();
+    }
+
+    [WinFormsFact]
     public void HistoryGrid_PopulatesOnInitialLoad_WithoutManualSelection()
     {
         var configService = new ConfigurationService(_configPath);

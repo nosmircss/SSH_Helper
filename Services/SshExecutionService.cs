@@ -81,6 +81,7 @@ namespace SSH_Helper.Services
 
         private volatile bool _isRunning;
         private CancellationTokenSource? _cts;
+        private volatile bool _stopOnFirstErrorCancellationRequested;
         private bool _disposed;
         private readonly object _executionLock = new();
 
@@ -93,6 +94,7 @@ namespace SSH_Helper.Services
                 _cts?.Cancel();
                 _cts?.Dispose();
                 _cts = new CancellationTokenSource();
+                _stopOnFirstErrorCancellationRequested = false;
                 _isRunning = true;
                 return _cts.Token;
             }
@@ -103,6 +105,7 @@ namespace SSH_Helper.Services
             lock (_executionLock)
             {
                 _isRunning = false;
+                _stopOnFirstErrorCancellationRequested = false;
                 var cts = _cts;
                 _cts = null;
                 cts?.Dispose();
@@ -437,6 +440,7 @@ namespace SSH_Helper.Services
             int totalPresets = presetNames.Count;
             int completedHosts = 0;
             var errorTracker = new StopOnFirstErrorTracker();
+            var stopOnFirstErrorTriggered = 0;
 
             try
             {
@@ -486,6 +490,7 @@ namespace SSH_Helper.Services
 
                         var outputBuilder = new StringBuilder();
                         int completedPresets = 0;
+                        var hostCancellationObserved = 0;
                         bool isFirstPreset = true;
 
                         // Execute presets on this host
@@ -529,12 +534,21 @@ namespace SSH_Helper.Services
 
                                 lock (outputBuilder) { outputBuilder.Append(presetResult.Output); }
 
+                                if (presetResult.WasCancelled)
+                                {
+                                    Interlocked.Exchange(ref hostCancellationObserved, 1);
+                                }
+
                                 if (!presetResult.Success)
                                 {
                                         hostResult.Success = false;
                                         hostResult.ErrorMessage = presetResult.ErrorMessage;
                                         if (options.StopOnFirstError && errorTracker.TrySignalError())
+                                        {
+                                            Interlocked.Exchange(ref stopOnFirstErrorTriggered, 1);
+                                            _stopOnFirstErrorCancellationRequested = true;
                                             _cts?.Cancel();
+                                        }
 
                                         // Mark failed preset in output
                                         if (!options.SuppressPresetNames)
@@ -591,6 +605,11 @@ namespace SSH_Helper.Services
 
                                 outputBuilder.Append(presetResult.Output);
 
+                                if (presetResult.WasCancelled)
+                                {
+                                    hostCancellationObserved = 1;
+                                }
+
                                 if (!presetResult.Success)
                                 {
                                         hostResult.Success = false;
@@ -598,7 +617,11 @@ namespace SSH_Helper.Services
                                         if (options.StopOnFirstError)
                                         {
                                             if (errorTracker.TrySignalError())
+                                            {
+                                                Interlocked.Exchange(ref stopOnFirstErrorTriggered, 1);
+                                                _stopOnFirstErrorCancellationRequested = true;
                                                 _cts?.Cancel();
+                                            }
                                             // Mark failed preset in output
                                             if (!options.SuppressPresetNames)
                                             {
@@ -612,6 +635,16 @@ namespace SSH_Helper.Services
 
                                 completedPresets++;
                             }
+                        }
+
+                        var stoppedByUser = cancellationToken.IsCancellationRequested
+                            && Volatile.Read(ref stopOnFirstErrorTriggered) == 0;
+                        if (Volatile.Read(ref hostCancellationObserved) != 0 ||
+                            (stoppedByUser && completedPresets < totalPresets))
+                        {
+                            hostResult.Success = false;
+                            hostResult.WasCancelled = true;
+                            hostResult.ErrorMessage ??= "Operation cancelled";
                         }
 
                         hostResult.Output = outputBuilder.ToString();
@@ -866,6 +899,7 @@ namespace SSH_Helper.Services
             catch (OperationCanceledException)
             {
                 result.Success = false;
+                result.WasCancelled = !_stopOnFirstErrorCancellationRequested;
                 result.ErrorMessage = "Operation cancelled";
                 var errorOutput = FormatError("CANCELLED", host, new Exception("Operation was cancelled by user"));
                 outputBuilder.AppendLine(errorOutput);
@@ -964,6 +998,7 @@ namespace SSH_Helper.Services
             catch (OperationCanceledException)
             {
                 result.Success = false;
+                result.WasCancelled = !_stopOnFirstErrorCancellationRequested;
                 result.ErrorMessage = "Operation cancelled";
                 var errorOutput = FormatError("CANCELLED", host, new Exception("Operation was cancelled by user"));
                 outputBuilder.AppendLine(errorOutput);
@@ -1060,6 +1095,7 @@ namespace SSH_Helper.Services
                 var executor = new ScriptExecutor();
                 var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                     .GetAwaiter().GetResult();
+                EnsureScriptSucceeded(scriptResult, cancellationToken);
                 return context.GetInteractiveSessionsSnapshot();
             }
             finally
@@ -1212,6 +1248,7 @@ namespace SSH_Helper.Services
             var executor = new ScriptExecutor();
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
+            EnsureScriptSucceeded(scriptResult, cancellationToken);
 
             client.Disconnect();
             return context.GetInteractiveSessionsSnapshot();
@@ -1276,7 +1313,31 @@ namespace SSH_Helper.Services
             var executor = new ScriptExecutor();
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
+            EnsureScriptSucceeded(scriptResult, cancellationToken);
             return context.GetInteractiveSessionsSnapshot();
+        }
+
+        private static void EnsureScriptSucceeded(ScriptResult scriptResult, CancellationToken cancellationToken)
+        {
+            switch (scriptResult.Status)
+            {
+                case ScriptExitStatus.Success:
+                    return;
+
+                case ScriptExitStatus.Cancelled:
+                    throw new OperationCanceledException(
+                        string.IsNullOrWhiteSpace(scriptResult.Message) ? "Script cancelled" : scriptResult.Message,
+                        cancellationToken);
+
+                case ScriptExitStatus.Error:
+                    throw scriptResult.Exception ?? new InvalidOperationException(
+                        string.IsNullOrWhiteSpace(scriptResult.Message) ? "Script error" : scriptResult.Message);
+
+                case ScriptExitStatus.Failure:
+                default:
+                    throw new InvalidOperationException(
+                        string.IsNullOrWhiteSpace(scriptResult.Message) ? "Script failed" : scriptResult.Message);
+            }
         }
 
         private static void SeedConnectionVariables(

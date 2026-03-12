@@ -1,5 +1,75 @@
 # TODO
 
+## 56. Fix Shell Echo Duplicate-Character Artifact
+- [x] 56.1 Trace the `df -> ddf` shell echo artifact through `SshShellSession` and confirm whether the duplicate character comes from incremental transcript rendering rather than duplicate command sends.
+- [x] 56.2 Patch the live shell-output path so unfinished editable lines are buffered until they are stable, allowing backspaces/carriage returns to resolve before appending to the UI/history stream.
+- [x] 56.3 Add focused regression coverage for a shell chunk sequence like `d\bdf\r\r\n...` and run targeted verification.
+- [x] 56.4 Capture the root cause, fix, and verification notes in the review section below.
+
+### 56 Review
+- The raw shell data already showed the real behavior: the command was sent once as `df`, and the remote PTY echoed an inline edit sequence (`d\bdf\r\r\n`) rather than a literal duplicated command send.
+- The bug was in live rendering, not command dispatch. `SshShellSession.ProcessChunk(...)` normalized and emitted each processed chunk immediately, which works for complete lines but can leak partially edited shell-echo text into the append-only UI before later backspaces/carriage returns have finished rewriting that line.
+- Patched `SshShellSession` to keep an in-memory `pendingLineCarry` for the unfinished final line, emit only newline-complete stable text during streaming, and flush the remaining tail only when the command completes. That lets sequences such as `d\bdf\r\r\n` normalize to `df` before they ever reach the UI/history stream.
+- Added `TerminalOutputProcessor.BufferIncompleteFinalLineStreaming(...)` plus focused regression tests covering both split-chunk and single-chunk `d\bdf\r\r\n` command-echo cases.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~TerminalOutputProcessorTests" -p:BaseOutputPath=artifacts\\shell-echo-fix-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\shell-echo-fix-tests\\obj\\` passed (53/53).
+- Verification: `dotnet build .\\SSH_Helper.csproj -p:BaseOutputPath=artifacts\\shell-echo-fix-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\shell-echo-fix-build\\obj\\` passed with 0 warnings and 0 errors.
+
+## 55. Inspect Manual Single-Preset Cancellation
+- [x] 55.1 Trace the manual `Stop` path in `Form1.cs` for a single active preset run, including UI state transitions and history persistence.
+- [x] 55.2 Trace cancellation propagation in `Services/SshExecutionService.cs`, including token flow, cancellation checks, and final per-host results.
+- [x] 55.3 Reconcile actual cancellation behavior against the final status/history/output the user sees and capture the review below.
+
+### 55 Review
+- `Form1` runs single-preset execution through the shared `_sshService` instance (`_executionCoordinator = new ExecutionCoordinator(_sshService, _configService)`), and the Stop button just calls `StopExecution()`, which disables the button, changes it to `Stopping...`, updates the status bar to `Stopping execution...`, calls `_sshService.Stop()`, and appends `Execution Stopped by User` to the live output immediately.
+- The cancellation signal does propagate into `SshExecutionService`: `BeginExecution()` creates `_cts`, `Stop()` cancels that same `_cts`, and the token is checked by the single-preset host loops before launching additional hosts. The active host path also receives that token in `ExecuteSingleHost(...)` / `ExecuteScriptOnHost(...)`, and token-aware stages pass it into `session.InitializeAsync(...)`, `session.ExecuteBatchAsync(...)`, or `ScriptExecutor.ExecuteAsync(...)`.
+- Cancellation is cooperative, not a hard abort. In the non-pooled path, `client.Connect(...)` and `client.Login(...)` do not take the token, so Stop can lag until the current host gets past connect/login and reaches a token-aware stage.
+- When the token is finally observed, the service catches `OperationCanceledException` and converts it into a normal `ExecutionResult` with `Success = false` and `ErrorMessage = "Operation cancelled"` instead of rethrowing. `Form1.ExecutePresetOnRowsAsync(...)` then treats the run as a normal completion path: it still builds execution details, stores history, and overwrites the temporary `Stopping execution...` status with the normal completion text.
+- The user-visible result therefore mismatches the actual cancel: the live output pane shows `Execution Stopped by User`, but the final status bar says `Completed execution ...`, the history entry label is just timestamp + preset name with no cancelled state, and the host row is stored/rendered as a generic failure (`Success = false`, red X) rather than a distinct cancelled outcome. The overall history output defaults to the live output buffer, while selecting the host row shows the host-specific stored output containing the formatted `CANCELLED` block.
+- Source inspection only; no code changes or test runs were performed for this review task.
+
+## 54. Inspect Folder Execution Cancellation
+- [x] 54.1 Trace the folder-run stop flow in `Form1.cs`, including button handling, status/output updates, and post-run reporting.
+- [x] 54.2 Trace `SshExecutionService.ExecuteFolderAsync(...)` for both sequential and parallel folder modes, focusing on stop responsiveness and cancellation boundaries.
+- [x] 54.3 Summarize the final user-visible/history outcome with exact file references, then capture the review below.
+
+### 54 Review
+- `Form1.StopExecution()` only gives immediate UI feedback: it disables the button, changes it to `Stopping...`, updates the status bar to `Stopping execution...`, and appends `Execution Stopped by User` to the live output pane before calling `_sshService.Stop()`.
+- `SshExecutionService.Stop()` only cancels the current `_cts`; it does not force-abort running tasks. In `ExecuteFolderAsync(...)`, cancellation is cooperative: the outer host-batch loop stops launching later batches, sequential preset mode stops before the next preset, and parallel preset mode only prevents preset tasks that have not yet started real work. Already-running preset executions continue until their inner SSH/script path notices the token.
+- Promptness is therefore mixed. Sequential folder mode is reasonably prompt between presets/hosts, but not necessarily during a synchronous connect/login segment. Parallel folder mode is less prompt because the current host batch and any already-started preset tasks are still awaited with `Task.WhenAll(...)`.
+- Folder cancellation is not surfaced as a dedicated cancelled outcome. `ExecuteFolderWithOptionsAsync(...)` always stores a normal folder history entry and then reports either `Completed folder ...` or `X succeeded, Y failed`; there is no cancellation-specific status or history label.
+- Persisted folder history is built only from returned `ExecutionResult` objects, not from the live output pane text. That means the manual `Execution Stopped by User` banner is visible live but is not itself what gets stored in folder history. If an in-flight preset catches `OperationCanceledException`, its `ExecutionResult` is marked failed with `Operation cancelled` and the cancel text goes into that host's stored output.
+- Source inspection only; no code changes or test runs were performed for this review task.
+
+## 53. Inspect Scheduled Job Cancellation
+- [x] 53.1 Trace the user-facing scheduled-job UI in `Form1.cs` and `JobListDialog.cs` to confirm whether a running scheduled job can be cancelled by a user action.
+- [x] 53.2 Trace `Services/JobExecutionService.cs` and `Services/SshExecutionService.cs` to confirm how internal `CancelJob(...)` affects the real SSH execution path and final reported result.
+- [x] 53.3 Inspect focused tests for scheduled-job cancellation coverage, then capture the concrete answer and any gaps in the review below.
+
+### 53 Review
+- There is no user-facing scheduled-job cancel action in the inspected UI. `Form1.ShowJobListDialog()` passes only `RunTrackedJobNowAsync` into `JobListDialog`, and the dialog exposes `Run Now`, enable/disable, delete, duplicate, and import/export actions, but no stop/cancel command or shortcut.
+- `JobListDialog` does refresh running state and color running jobs green through `_executionService.IsJobRunning(job.Id)`, so users can see that a scheduled job is active, but they cannot cancel it from that dialog while the app remains open.
+- `CancelJob(jobId)` does cancel the tracked per-job `CancellationTokenSource`, and `ExecuteJobCoreAsync(...)` registers that token to call `sshService.Stop()` on the per-run `SshExecutionService`.
+- On the real SSH path, cancellation is converted into failed host results, not a propagated `OperationCanceledException`: `SshExecutionService` catches `OperationCanceledException`, sets `Success = false`, and records `ErrorMessage = "Operation cancelled"` / `CANCELLED` output per host.
+- `JobExecutionService.ExecuteJobCoreAsync(...)` then aggregates those returned host results into a `JobRunResult` with `Success = false` and raises `JobExecutionState.Failed`, so the scheduler/history UI surfaces the run as failure (`FAIL`), not as `Cancelled`.
+- Focused tests cover the internal token-plumbing path with an injected execution override that throws `OperationCanceledException`, and those tests assert `JobExecutionState.Cancelled` for both run-now and scheduled execution. They do not cover the concrete `SshExecutionService` path, no UI test exercises a user cancel action for scheduled jobs, and no test asserts how a cancelled scheduled SSH run is recorded in persisted history/UI.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~JobListDialogRunNowTests" -p:BaseOutputPath=artifacts\\scheduled-cancel-review-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduled-cancel-review-tests\\obj\\` passed (58/58).
+
+## 52. Fix Scheduler Reliability Shutdown and Evaluation Faults
+- [x] 52.1 Harden `JobExecutionService` shutdown so scheduled background tasks cannot release or reacquire the concurrency gate after disposal, and queued jobs do not start during shutdown.
+- [x] 52.2 Clean up the scheduler cancellation contract by removing the unused folder-execution token parameter while keeping the existing `sshService.Stop()` cancellation model.
+- [x] 52.3 Make the evaluation loop resilient to per-job failures, add explicit scheduler fault logging, and remove the dead async-completion shim.
+- [x] 52.4 Add focused regression coverage for shutdown races and evaluation-fault isolation, then run verification and capture the review below.
+
+### 52 Review
+- `JobExecutionService` now gates scheduler shutdown with an explicit `_shutdownRequested` flag, tracks fire-and-forget scheduled executions, routes semaphore access through shutdown-aware helpers, and waits briefly for tracked scheduled tasks before disposing scheduler-owned resources.
+- Scheduled queue draining now exits during shutdown, and late-finishing scheduled tasks no longer touch the concurrency gate after disposal begins. This closes the `Dispose()` race and prevents queued jobs from starting while the form is shutting down.
+- The private folder execution helper no longer accepts an unused `CancellationToken`, and the scheduler execution comments now state the real cancellation model: both single-preset and folder jobs cancel through `sshService.Stop()` on the per-run `SshExecutionService`.
+- The evaluation loop no longer uses the dummy `await Task.CompletedTask` shim. It now returns `Task.CompletedTask` directly, isolates per-job failures with job/stage-aware debug logging, and keeps the reentrancy guard reset in `finally`.
+- Added focused `JobExecutionServiceTests` coverage for disposing an in-flight scheduled job without semaphore-disposal faults, preventing queued jobs from starting after shutdown begins, continuing evaluation after a synthetic per-job evaluation fault, and clearing `_evaluating` after injected evaluation exceptions.
+- Verification: `dotnet build .\\SSH_Helper.csproj` failed because `bin\\Debug\\net8.0-windows\\SSH_Helper.exe` was locked by a running `SSH_Helper` process (PID 8316).
+- Verification: `dotnet build .\\SSH_Helper.csproj -p:BaseOutputPath=artifacts\\scheduler-reliability-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-reliability-build\\obj\\` passed with 0 warnings and 0 errors.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~SchedulerNotificationTests" -p:BaseOutputPath=artifacts\\scheduler-reliability-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-reliability-tests\\obj\\` passed (59/59).
+
 ## 51. Fix Scheduler Per-Job Cancellation
 - [x] 51.1 Patch `JobExecutionService` so run-now and scheduled executions pass the per-job cancellation token into the execution pipeline instead of the disposal-only token.
 - [x] 51.2 Add focused regression coverage proving `CancelJob(...)` now reaches the active job execution path.
@@ -733,3 +803,22 @@
 - Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CsvManagerTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~HostGridUtilitiesTests|FullyQualifiedName~JobEditorDialogHostGridParityTests" -p:BaseOutputPath=artifacts\\host-grid-parity-tests2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\host-grid-parity-tests2\\obj\\` passed (50/50).
 - Verification: `openspec validate update-scheduler-host-grid-parity --strict --no-interactive` passed.
 - Manual interactive UI verification was not run from this CLI environment; OpenSpec task `5.2` remains unchecked pending a live click-through.
+
+## 30. Implement update-cancellation-outcomes
+- [x] 30.1 Add the OpenSpec change artifacts for cancellation outcome normalization and scheduler cancel UI, then validate the change.
+- [x] 30.2 Add additive `WasCancelled` flags across execution, history, and scheduler models with backward-compatible persistence defaults.
+- [x] 30.3 Propagate cancellation through SSH execution, manual preset/folder completion handling, and history storage so cancelled runs retain partial output and explicit cancelled status.
+- [x] 30.4 Update scheduler aggregation, history, notifications, and the Job List UI to expose and persist cancellation distinctly from failure.
+- [x] 30.5 Add focused automated coverage for manual, folder, and scheduled cancellation behavior plus persistence/UI rendering.
+- [x] 30.6 Run verification, update the OpenSpec checklist, and capture the review outcome below.
+
+### 30 Review
+- Added a focused OpenSpec change `update-cancellation-outcomes` with validated deltas for `execution-control`, `execution-history`, and `job-scheduler`, including the explicit Job List `Cancel` action and cancelled-history retention contract.
+- Normalized cancellation into additive `WasCancelled` flags across manual execution results, execution details, host history, and scheduler run payload/index models. Older history continues to deserialize with the default `false` value.
+- Fixed the low-level propagation gap where script execution could return `ScriptExitStatus.Cancelled` or `ScriptExitStatus.Error` without surfacing that outcome through `ExecutionResult`; the SSH execution service now converts cancelled script runs into cancelled host results instead of reporting success.
+- Manual preset and folder runs now treat Stop as `cancellation requested` immediately, save the final run as `CANCELLED` only after unwind, preserve partial output from the live buffer in history, and carry cancelled host/detail status into the details dialog and history host list.
+- Scheduled runs now persist `WasCancelled`, avoid collapsing cancelled runs into failure streaks or auto-disabling one-time jobs as failures, render `CANCELLED` distinctly in the scheduler history/result columns, and expose a Job List toolbar/context-menu `Cancel` action enabled only for running jobs.
+- Verification: `dotnet build SSH_Helper.sln -p:BaseOutputPath=artifacts\\cancel-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\cancel-build\\obj\\` passed.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Cancel|FullyQualifiedName~Cancelled|FullyQualifiedName~SshExecutionServiceCancellationTests|FullyQualifiedName~ExecutionDetailsDialogTests|FullyQualifiedName~JobListDialogRunNowTests|FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~HistoryStorageServiceTests|FullyQualifiedName~ConfigurationServiceExecutionDetailsTests|FullyQualifiedName~SchedulerNotificationTests|FullyQualifiedName~ExecutionPipelineModelTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\cancel-tests-full\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\cancel-tests-full\\obj\\` passed (116/116).
+- Verification: `openspec validate update-cancellation-outcomes --strict --no-interactive` passed.
+- Manual interactive smoke testing was not run from this CLI environment.

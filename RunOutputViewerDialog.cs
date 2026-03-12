@@ -227,7 +227,9 @@ namespace SSH_Helper
 
             foreach (var hostOutput in _payload.HostOutputs)
             {
-                var statusIndicator = hostOutput.Success ? "OK" : "FAIL";
+                var statusIndicator = hostOutput.WasCancelled
+                    ? "CANCELLED"
+                    : hostOutput.Success ? "OK" : "FAIL";
                 _cboHost.Items.Add(new HostOutputItem(hostOutput, $"{hostOutput.HostAddress} ({statusIndicator})"));
             }
 

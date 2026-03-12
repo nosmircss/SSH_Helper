@@ -202,6 +202,7 @@ namespace SSH_Helper
         private readonly StringBuilder _outputBuffer = new();
         private readonly object _outputBufferLock = new();
         private readonly OutputThrottler _uiOutputThrottler;
+        private bool _manualCancellationRequested;
 
         // Credential provider
         private ICredentialProvider? _credentialProvider;
@@ -1368,6 +1369,7 @@ namespace SSH_Helper
                 PresetName = details.PresetName ?? string.Empty,
                 Commands = details.Commands ?? string.Empty,
                 PresetType = details.PresetType ?? string.Empty,
+                WasCancelled = details.WasCancelled,
                 StartTimeUtc = details.StartTimeUtc,
                 EndTimeUtc = details.EndTimeUtc,
                 EnvironmentName = details.EnvironmentName ?? EnvironmentConfig.DefaultName,
@@ -1384,6 +1386,7 @@ namespace SSH_Helper
                     {
                         HostAddress = host.HostAddress ?? string.Empty,
                         Success = host.Success,
+                        WasCancelled = host.WasCancelled,
                         TimestampUtc = host.TimestampUtc,
                         Variables = CloneDetailVariables(host.Variables)
                     })
@@ -6366,8 +6369,12 @@ namespace SSH_Helper
             {
                 // Draw status icon
                 var iconRect = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top + 2, 16, 16);
-                var iconColor = hostEntry.Success ? Color.FromArgb(40, 167, 69) : Color.FromArgb(220, 53, 69);
-                var iconText = hostEntry.Success ? "\u2713" : "\u2717";
+                var iconColor = hostEntry.WasCancelled
+                    ? Color.FromArgb(255, 193, 7)
+                    : hostEntry.Success ? Color.FromArgb(40, 167, 69) : Color.FromArgb(220, 53, 69);
+                var iconText = hostEntry.WasCancelled
+                    ? "\u25A0"
+                    : hostEntry.Success ? "\u2713" : "\u2717";
 
                 using var iconFont = new Font("Segoe UI", 10F, FontStyle.Bold);
                 using var iconBrush = new SolidBrush(iconColor);
@@ -8995,6 +9002,12 @@ namespace SSH_Helper
                         tsbPassword.Text);
                     SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
                 }
+                var wasCancelled = WasManualExecutionCancelled(results);
+                if (wasCancelled)
+                {
+                    AppendOutputText(Environment.NewLine + Environment.NewLine + "Execution cancelled." + Environment.NewLine);
+                }
+
                 var executionDetails = BuildExecutionDetails(
                     presetDisplayName,
                     preset.Commands,
@@ -9006,6 +9019,7 @@ namespace SSH_Helper
                     preparation.ConnectionTimeoutSeconds,
                     _sshService.UseConnectionPooling,
                     BuildRunModeDescription(dialogOptions, isFolderExecution: false),
+                    wasCancelled,
                     isFolderExecution: false,
                     string.Empty,
                     new[] { presetDisplayName },
@@ -9013,7 +9027,9 @@ namespace SSH_Helper
                     results);
 
                 StoreExecutionHistory(results, executionDetails);
-                UpdateStatusBar(completionStatus(results.Count));
+                UpdateStatusBar(wasCancelled
+                    ? BuildCancelledPresetStatus(hosts)
+                    : completionStatus(results.Count));
             }
             catch (Exception ex)
             {
@@ -9421,6 +9437,12 @@ namespace SSH_Helper
                     options,
                     progress);
 
+                var wasCancelled = WasManualExecutionCancelled(results);
+                if (wasCancelled)
+                {
+                    AppendOutputText(Environment.NewLine + Environment.NewLine + $"Folder '{folderName}' cancelled." + Environment.NewLine);
+                }
+
                 var executionDetails = BuildExecutionDetails(
                     folderName,
                     BuildFolderCommandSnapshot(options.SelectedPresets, presets),
@@ -9432,6 +9454,7 @@ namespace SSH_Helper
                     connectionTimeout,
                     _sshService.UseConnectionPooling,
                     BuildRunModeDescription(options, isFolderExecution: true),
+                    wasCancelled,
                     isFolderExecution: true,
                     folderName,
                     options.SelectedPresets,
@@ -9442,10 +9465,12 @@ namespace SSH_Helper
                 StoreFolderExecutionHistory(folderName, results, executionDetails);
 
                 int successCount = results.Count(r => r.Success);
-                int failCount = results.Count - successCount;
-                string status = failCount > 0
-                    ? $"Completed folder '{folderName}': {successCount} succeeded, {failCount} failed"
-                    : $"Completed folder '{folderName}' on {hosts.Count} hosts";
+                int failCount = results.Count(r => !r.Success && !r.WasCancelled);
+                string status = wasCancelled
+                    ? BuildCancelledFolderStatus(folderName)
+                    : failCount > 0
+                        ? $"Completed folder '{folderName}': {successCount} succeeded, {failCount} failed"
+                        : $"Completed folder '{folderName}' on {hosts.Count} hosts";
                 UpdateStatusBar(status);
             }
             catch (Exception ex)
@@ -9462,19 +9487,24 @@ namespace SSH_Helper
         private string StoreFolderExecutionHistory(string folderName, List<ExecutionResult> results, ExecutionDetails? details = null)
         {
             var hostResults = BuildHostHistoryEntries(results);
-            var combinedOutput = new StringBuilder();
-
-            for (int i = 0; i < hostResults.Count; i++)
+            var output = GetBufferedOutputSnapshot();
+            if (string.IsNullOrEmpty(output))
             {
-                combinedOutput.Append(hostResults[i].Output);
+                var combinedOutput = new StringBuilder();
+                foreach (var hostResult in hostResults)
+                {
+                    combinedOutput.Append(hostResult.Output);
+                }
+
+                output = combinedOutput.ToString();
             }
 
-            string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {FolderIcon} {folderName}";
+            string label = BuildExecutionHistoryLabel(folderName, isFolder: true, details?.WasCancelled == true);
             var entryId = HistoryIdGenerator.NewId();
             var payload = new HistoryRunPayload
             {
                 Id = entryId,
-                Output = combinedOutput.ToString(),
+                Output = output,
                 HostResults = hostResults.Count > 0 ? hostResults : null,
                 Details = details == null ? null : CloneExecutionDetails(details)
             };
@@ -9497,6 +9527,40 @@ namespace SSH_Helper
             return entryId;
         }
 
+        private string GetBufferedOutputSnapshot()
+        {
+            lock (_outputBufferLock)
+            {
+                return _outputBuffer.ToString();
+            }
+        }
+
+        private string BuildExecutionHistoryLabel(string? executionName, bool isFolder, bool wasCancelled)
+        {
+            var name = string.IsNullOrWhiteSpace(executionName)
+                ? "(unnamed)"
+                : executionName.Trim();
+            var suffix = isFolder ? $"{FolderIcon} {name}" : name;
+            var prefix = wasCancelled ? "CANCELLED - " : string.Empty;
+            return $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {prefix}{suffix}";
+        }
+
+        private bool WasManualExecutionCancelled(IReadOnlyList<ExecutionResult> results)
+        {
+            return _manualCancellationRequested || (results?.Any(result => result.WasCancelled) ?? false);
+        }
+
+        private static string BuildCancelledPresetStatus(IReadOnlyList<HostConnection> hosts)
+        {
+            if (hosts.Count == 1)
+                return $"Cancelled execution on {hosts[0]}";
+
+            return $"Cancelled execution on {hosts.Count} hosts";
+        }
+
+        private static string BuildCancelledFolderStatus(string folderName)
+            => $"Cancelled folder '{folderName}'";
+
         private ExecutionDetails BuildExecutionDetails(
             string presetName,
             string commands,
@@ -9508,6 +9572,7 @@ namespace SSH_Helper
             int connectionTimeoutSeconds,
             bool useConnectionPooling,
             string runMode,
+            bool wasCancelled,
             bool isFolderExecution,
             string folderName,
             IEnumerable<string> executedPresetNames,
@@ -9519,6 +9584,7 @@ namespace SSH_Helper
                 PresetName = presetName,
                 Commands = commands ?? string.Empty,
                 PresetType = presetType,
+                WasCancelled = wasCancelled,
                 StartTimeUtc = startTimeUtc,
                 EndTimeUtc = endTimeUtc,
                 EnvironmentName = string.IsNullOrWhiteSpace(_activeEnvironmentName)
@@ -9532,7 +9598,7 @@ namespace SSH_Helper
                 IsFolderExecution = isFolderExecution,
                 FolderName = folderName ?? string.Empty,
                 ExecutedPresetNames = executedPresetNames?.ToList() ?? new List<string>(),
-                Hosts = BuildHostExecutionContexts(hosts, results, endTimeUtc),
+                Hosts = BuildHostExecutionContexts(hosts, results, endTimeUtc, wasCancelled),
                 InteractiveSessions = BuildInteractiveSessionDetails(results)
             };
         }
@@ -9540,7 +9606,8 @@ namespace SSH_Helper
         private static List<SSH_Helper.Models.HostExecutionContext> BuildHostExecutionContexts(
             IReadOnlyList<HostConnection> hosts,
             IReadOnlyList<ExecutionResult> results,
-            DateTime fallbackTimestampUtc)
+            DateTime fallbackTimestampUtc,
+            bool runWasCancelled)
         {
             var hostResultLookup = (results ?? Array.Empty<ExecutionResult>())
                 .GroupBy(r => r.Host.ToString(), StringComparer.OrdinalIgnoreCase)
@@ -9554,6 +9621,12 @@ namespace SSH_Helper
             {
                 hostResultLookup.TryGetValue(host.ToString(), out var hostResults);
                 var hostSuccess = hostResults != null && hostResults.Count > 0 && hostResults.All(r => r.Success);
+                var hostWasCancelled = hostResults != null && hostResults.Any(r => r.WasCancelled);
+                if (!hostWasCancelled && runWasCancelled && (hostResults == null || hostResults.Count == 0))
+                {
+                    hostWasCancelled = true;
+                }
+
                 var hostTimestampUtc = hostResults != null && hostResults.Count > 0
                     ? hostResults.Max(r => r.Timestamp.ToUniversalTime())
                     : fallbackTimestampUtc;
@@ -9574,6 +9647,7 @@ namespace SSH_Helper
                 {
                     HostAddress = host.ToString(),
                     Success = hostSuccess,
+                    WasCancelled = hostWasCancelled,
                     TimestampUtc = hostTimestampUtc,
                     Variables = variables
                 });
@@ -9676,6 +9750,7 @@ namespace SSH_Helper
                     HostAddress = result.Host.ToString(),
                     Output = output,
                     Success = result.Success,
+                    WasCancelled = result.WasCancelled,
                     Timestamp = result.Timestamp
                 });
             }
@@ -9701,16 +9776,20 @@ namespace SSH_Helper
 
         private void StopExecution()
         {
+            if (!_sshService.IsRunning || _manualCancellationRequested)
+                return;
+
             // Immediate visual feedback - disable button and change text
             btnStopAll.Enabled = false;
-            btnStopAll.Text = "Stopping...";
-            UpdateStatusBar("Stopping execution...");
+            btnStopAll.Text = "Cancelling...";
+            UpdateStatusBar("Cancellation requested...");
+            _manualCancellationRequested = true;
 
             // Request cancellation
             _sshService.Stop();
 
             // Append stop message to output
-            AppendOutputText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
+            AppendOutputText(Environment.NewLine + Environment.NewLine + "Cancellation requested by user" + Environment.NewLine);
         }
 
         private IEnumerable<HostConnection> GetHostConnections(IEnumerable<DataGridViewRow> rows)
@@ -9804,11 +9883,15 @@ namespace SSH_Helper
             if (executing)
             {
                 // Reset stop button to initial state when starting execution
+                _manualCancellationRequested = false;
                 btnStopAll.Enabled = true;
                 btnStopAll.Text = "Stop";
             }
             else
             {
+                _manualCancellationRequested = false;
+                btnStopAll.Enabled = true;
+                btnStopAll.Text = "Stop";
                 statusProgress.Visible = false;
             }
 
@@ -10083,13 +10166,11 @@ namespace SSH_Helper
         private string StoreExecutionHistory(List<ExecutionResult> results, ExecutionDetails? details = null)
         {
             // Use output buffer as the source of truth - includes all debug output
-            string output;
-            lock (_outputBufferLock)
-            {
-                output = _outputBuffer.ToString();
-            }
-
-            string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
+            var output = GetBufferedOutputSnapshot();
+            string label = BuildExecutionHistoryLabel(
+                details?.PresetName ?? txtPreset.Text,
+                isFolder: false,
+                details?.WasCancelled == true);
             var entryId = HistoryIdGenerator.NewId();
             var hostResults = BuildHostHistoryEntries(results);
             var payload = new HistoryRunPayload

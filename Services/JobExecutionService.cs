@@ -61,14 +61,18 @@ namespace SSH_Helper.Services
         private readonly PresetManager _presetManager;
         private readonly ICredentialProvider _credentialProvider;
         private readonly Func<JobDefinition, bool, CancellationToken, Task>? _jobExecutionOverride;
+        private readonly Action<JobDefinition>? _jobEvaluationFaultInjector;
 
         private System.Threading.Timer? _timer;
         private int _evaluating; // 0 = idle, 1 = evaluating (Interlocked guard)
         private readonly SemaphoreSlim _concurrencyGate;
         private readonly ConcurrentDictionary<string, RunningJobInfo> _runningJobs = new();
+        private readonly ConcurrentDictionary<long, Task> _scheduledExecutions = new();
         private readonly ConcurrentQueue<QueuedJob> _jobQueue = new();
         private readonly ConcurrentDictionary<string, byte> _queuedJobIds = new();
         private readonly CancellationTokenSource _disposalCts = new();
+        private long _nextScheduledExecutionId;
+        private volatile bool _shutdownRequested;
         private bool _disposed;
         private DateTime _lastEvaluationUtc = DateTime.UtcNow;
 
@@ -106,7 +110,8 @@ namespace SSH_Helper.Services
             ConfigurationService configService,
             PresetManager presetManager,
             ICredentialProvider credentialProvider,
-            Func<JobDefinition, bool, CancellationToken, Task>? jobExecutionOverride)
+            Func<JobDefinition, bool, CancellationToken, Task>? jobExecutionOverride,
+            Action<JobDefinition>? jobEvaluationFaultInjector = null)
         {
             _jobStorage = jobStorage ?? throw new ArgumentNullException(nameof(jobStorage));
             _schedulingService = schedulingService ?? throw new ArgumentNullException(nameof(schedulingService));
@@ -114,6 +119,7 @@ namespace SSH_Helper.Services
             _presetManager = presetManager ?? throw new ArgumentNullException(nameof(presetManager));
             _credentialProvider = credentialProvider ?? throw new ArgumentNullException(nameof(credentialProvider));
             _jobExecutionOverride = jobExecutionOverride;
+            _jobEvaluationFaultInjector = jobEvaluationFaultInjector;
 
             var maxConcurrent = configService.GetCurrent().MaxConcurrentJobs;
             if (maxConcurrent <= 0) maxConcurrent = 3;
@@ -226,12 +232,14 @@ namespace SSH_Helper.Services
             }
             catch (OperationCanceledException)
             {
+                HandlePostExecution(job, success: false, isRunNow: true, wasCancelled: true);
                 OnJobStateChanged(jobId, job.Name, JobExecutionState.Cancelled);
+                OnJobCancelled(job);
                 return false;
             }
             catch (Exception ex)
             {
-                HandlePostExecution(job, success: false, isRunNow: true);
+                HandlePostExecution(job, success: false, isRunNow: true, wasCancelled: false);
                 OnJobFailed(job, ex.Message);
                 return false;
             }
@@ -267,10 +275,13 @@ namespace SSH_Helper.Services
         /// </summary>
         private void TimerCallback(object? state)
         {
+            if (_shutdownRequested)
+                return;
+
             if (Interlocked.CompareExchange(ref _evaluating, 1, 0) != 0)
                 return;
 
-            // Fire-and-forget the async evaluation (NOT async void)
+            // Fire-and-forget the Task-returning evaluation (NOT async void)
             _ = EvaluateAndExecuteDueJobsAsync();
         }
 
@@ -278,78 +289,33 @@ namespace SSH_Helper.Services
         /// Core evaluation loop: iterates all jobs, determines which are due, and dispatches them
         /// through the concurrency gate or into the overflow queue.
         /// </summary>
-        private async Task EvaluateAndExecuteDueJobsAsync()
+        private Task EvaluateAndExecuteDueJobsAsync()
         {
             try
             {
                 var now = DateTime.UtcNow;
+                var jobs = _jobStorage.Jobs.Values.ToList();
 
-                foreach (var job in _jobStorage.Jobs.Values.ToList())
+                foreach (var job in jobs)
                 {
-                    if (_disposalCts.IsCancellationRequested)
+                    if (_shutdownRequested)
                         break;
 
-                    if (!job.IsEnabled)
-                        continue;
-
-                    if (_runningJobs.ContainsKey(job.Id))
-                    {
-                        Debug.WriteLine($"Skipping job '{job.Name}': already running (duplicate trigger)");
-                        continue;
-                    }
-
-                    if (_queuedJobIds.ContainsKey(job.Id))
-                    {
-                        Debug.WriteLine($"Skipping job '{job.Name}': already queued");
-                        continue;
-                    }
-
-                    bool isDue = false;
-
-                    switch (job.ScheduleType)
-                    {
-                        case ScheduleType.Recurring:
-                            var missed = _schedulingService.GetMissedOccurrences(job.CronExpression, _lastEvaluationUtc);
-                            if (missed.Count > 0)
-                                isDue = true;
-                            break;
-
-                        case ScheduleType.OneTime:
-                            if (job.OneTimeScheduleUtc.HasValue && job.OneTimeScheduleUtc.Value <= now)
-                                isDue = true;
-                            break;
-
-                        case ScheduleType.None:
-                            // Manual-only jobs are never triggered by the timer
-                            break;
-                    }
-
-                    if (!isDue)
-                        continue;
-
-                    // Try to acquire a concurrency slot (non-blocking)
-                    if (_concurrencyGate.Wait(0))
-                    {
-                        _ = ExecuteScheduledJobAsync(job);
-                    }
-                    else
-                    {
-                        TryQueueJob(job);
-                    }
+                    EvaluateJobForDueExecution(job, now);
                 }
 
                 _lastEvaluationUtc = now;
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Evaluation loop error: {ex}");
+                Debug.WriteLine($"Scheduler evaluation failed: {ex}");
             }
             finally
             {
                 Interlocked.Exchange(ref _evaluating, 0);
             }
 
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
 
         #endregion
@@ -364,7 +330,7 @@ namespace SSH_Helper.Services
         {
             if (!TryStartJob(job.Id))
             {
-                _concurrencyGate.Release();
+                ReleaseConcurrencySlot();
                 return;
             }
 
@@ -374,18 +340,21 @@ namespace SSH_Helper.Services
             }
             catch (OperationCanceledException)
             {
+                HandlePostExecution(job, success: false, isRunNow: false, wasCancelled: true);
                 OnJobStateChanged(job.Id, job.Name, JobExecutionState.Cancelled);
+                OnJobCancelled(job);
             }
             catch (Exception ex)
             {
-                HandlePostExecution(job, success: false, isRunNow: false);
+                HandlePostExecution(job, success: false, isRunNow: false, wasCancelled: false);
                 OnJobFailed(job, ex.Message);
             }
             finally
             {
                 CompleteJob(job.Id);
-                _concurrencyGate.Release();
-                DrainQueue();
+                ReleaseConcurrencySlot();
+                if (!_shutdownRequested)
+                    DrainQueue();
             }
         }
 
@@ -416,12 +385,13 @@ namespace SSH_Helper.Services
             using var sshService = new SshExecutionService();
             sshService.UseConnectionPooling = false; // Avoid pool conflicts with UI instance
 
-            // Link cancellation: when our CTS fires, stop the SSH service
+            // Scheduler cancellation for both single-preset and folder jobs flows through
+            // the per-run SSH service via Stop(), which cancels its internal execution token.
             using var reg = ct.Register(() => sshService.Stop());
 
             if (job.TargetType == JobTargetType.Folder)
             {
-                results = await ExecuteFolderJobAsync(job, sshService, username, password, hosts, timeouts, ct);
+                results = await ExecuteFolderJobAsync(job, sshService, username, password, hosts, timeouts);
             }
             else
             {
@@ -430,8 +400,11 @@ namespace SSH_Helper.Services
 
             // Build result
             var succeeded = results.Count(r => r.Success);
-            var failed = results.Count(r => !r.Success);
-            var overallSuccess = failed == 0;
+            var unsuccessful = results.Count(r => !r.Success);
+            var cancelled = results.Count(r => r.WasCancelled);
+            var failed = results.Count(r => !r.Success && !r.WasCancelled);
+            var wasCancelled = ct.IsCancellationRequested || cancelled > 0;
+            var overallSuccess = unsuccessful == 0;
 
             var runResult = new JobRunResult
             {
@@ -440,10 +413,13 @@ namespace SSH_Helper.Services
                 StartedUtc = _runningJobs.TryGetValue(job.Id, out var info) ? info.StartedUtc : DateTime.UtcNow,
                 CompletedUtc = DateTime.UtcNow,
                 Success = overallSuccess,
+                WasCancelled = wasCancelled,
                 HostsSucceeded = succeeded,
-                HostsFailed = failed,
-                ErrorMessage = overallSuccess ? null : string.Join("; ",
-                    results.Where(r => !r.Success)
+                HostsFailed = unsuccessful,
+                ErrorMessage = wasCancelled
+                    ? "Cancelled by user."
+                    : overallSuccess ? null : string.Join("; ",
+                    results.Where(r => !r.Success && !r.WasCancelled)
                            .Select(r => r.ErrorMessage)
                            .Where(m => m != null)
                            .Take(3)),
@@ -452,16 +428,18 @@ namespace SSH_Helper.Services
                     HostAddress = r.Host?.IpAddress ?? "unknown",
                     Output = r.Output ?? string.Empty,
                     Success = r.Success,
+                    WasCancelled = r.WasCancelled,
                     ErrorMessage = r.ErrorMessage
                 }).ToList()
             };
 
             JobCompleted?.Invoke(this, runResult);
             OnJobStateChanged(job.Id, job.Name,
-                overallSuccess ? JobExecutionState.Completed : JobExecutionState.Failed,
-                overallSuccess ? null : $"{failed} host(s) failed");
+                wasCancelled ? JobExecutionState.Cancelled
+                    : overallSuccess ? JobExecutionState.Completed : JobExecutionState.Failed,
+                wasCancelled ? null : overallSuccess ? null : $"{failed} host(s) failed");
 
-            HandlePostExecution(job, overallSuccess, isRunNow);
+            HandlePostExecution(job, overallSuccess, isRunNow, wasCancelled);
         }
 
         private Task ExecuteTrackedJobAsync(JobDefinition job, bool isRunNow)
@@ -616,8 +594,7 @@ namespace SSH_Helper.Services
             string username,
             string password,
             List<HostConnection> hosts,
-            SshTimeoutOptions timeouts,
-            CancellationToken ct)
+            SshTimeoutOptions timeouts)
         {
             // Get direct children only (per locked decision: no recursive subfolder inclusion)
             var presetNames = _presetManager.GetPresetsInFolder(job.TargetName).ToList();
@@ -653,6 +630,9 @@ namespace SSH_Helper.Services
         /// </summary>
         private bool TryStartJob(string jobId)
         {
+            if (_shutdownRequested)
+                return false;
+
             var cts = new CancellationTokenSource();
             var info = new RunningJobInfo(jobId, DateTime.UtcNow, cts, isRunNow: false);
 
@@ -687,6 +667,9 @@ namespace SSH_Helper.Services
         /// </summary>
         private bool TryQueueJob(JobDefinition job)
         {
+            if (_shutdownRequested)
+                return false;
+
             if (!_queuedJobIds.TryAdd(job.Id, 0))
             {
                 Debug.WriteLine($"Skipping queue add for job '{job.Name}': already queued");
@@ -731,7 +714,7 @@ namespace SSH_Helper.Services
         /// </summary>
         private void DrainQueue()
         {
-            while (_jobQueue.TryPeek(out var queued) && _concurrencyGate.Wait(0))
+            while (!_shutdownRequested && _jobQueue.TryPeek(out var queued) && TryAcquireConcurrencySlot())
             {
                 if (_jobQueue.TryDequeue(out queued))
                 {
@@ -739,16 +722,16 @@ namespace SSH_Helper.Services
                     var job = _jobStorage.Get(queued.JobId);
                     if (job != null && job.IsEnabled && !_runningJobs.ContainsKey(job.Id))
                     {
-                        _ = ExecuteScheduledJobAsync(job);
+                        StartTrackedScheduledExecution(job);
                     }
                     else
                     {
-                        _concurrencyGate.Release();
+                        ReleaseConcurrencySlot();
                     }
                 }
                 else
                 {
-                    _concurrencyGate.Release();
+                    ReleaseConcurrencySlot();
                 }
             }
         }
@@ -766,7 +749,7 @@ namespace SSH_Helper.Services
         /// After MarkOneTimeCompleted sets IsEnabled=false, the evaluation loop's
         /// early "if (!job.IsEnabled) continue" check prevents re-triggering on the next cycle.
         /// </summary>
-        private void HandlePostExecution(JobDefinition job, bool success, bool isRunNow)
+        private void HandlePostExecution(JobDefinition job, bool success, bool isRunNow, bool wasCancelled)
         {
             if (success && job.ScheduleType == ScheduleType.OneTime)
             {
@@ -774,12 +757,16 @@ namespace SSH_Helper.Services
                 _jobStorage.Save(job);
                 Debug.WriteLine($"One-time job '{job.Name}' auto-disabled after successful execution");
             }
-            else if (!success && job.ScheduleType == ScheduleType.OneTime && !isRunNow)
+            else if (!success && !wasCancelled && job.ScheduleType == ScheduleType.OneTime && !isRunNow)
             {
                 job.IsEnabled = false;
                 job.DisabledReason = "One-time schedule failed";
                 _jobStorage.Save(job);
                 Debug.WriteLine($"One-time job '{job.Name}' auto-disabled after failed scheduled execution");
+            }
+            else if (wasCancelled)
+            {
+                Debug.WriteLine($"Job '{job.Name}' was cancelled");
             }
             else if (success)
             {
@@ -807,9 +794,29 @@ namespace SSH_Helper.Services
                 StartedUtc = _runningJobs.TryGetValue(job.Id, out var info) ? info.StartedUtc : DateTime.UtcNow,
                 CompletedUtc = DateTime.UtcNow,
                 Success = false,
+                WasCancelled = false,
                 HostsSucceeded = 0,
                 HostsFailed = 0,
                 ErrorMessage = errorMessage
+            };
+
+            JobCompleted?.Invoke(this, result);
+        }
+
+        private void OnJobCancelled(JobDefinition job)
+        {
+            var result = new JobRunResult
+            {
+                JobId = job.Id,
+                JobName = job.Name,
+                StartedUtc = _runningJobs.TryGetValue(job.Id, out var info) ? info.StartedUtc : DateTime.UtcNow,
+                CompletedUtc = DateTime.UtcNow,
+                Success = false,
+                WasCancelled = true,
+                HostsSucceeded = 0,
+                HostsFailed = 0,
+                ErrorMessage = "Cancelled by user.",
+                HostOutputs = new List<JobHostOutput>()
             };
 
             JobCompleted?.Invoke(this, result);
@@ -824,8 +831,10 @@ namespace SSH_Helper.Services
             if (_disposed)
                 return;
 
+            _disposed = true;
+            _shutdownRequested = true;
+            Stop();
             _disposalCts.Cancel();
-            _timer?.Dispose();
 
             // Cancel all running jobs
             foreach (var info in _runningJobs.Values)
@@ -833,9 +842,152 @@ namespace SSH_Helper.Services
                 info.Cts.Cancel();
             }
 
+            WaitForTrackedScheduledExecutions();
+            _timer?.Dispose();
             _concurrencyGate.Dispose();
             _disposalCts.Dispose();
-            _disposed = true;
+        }
+
+        #endregion
+
+        #region Internal Helpers
+
+        private void EvaluateJobForDueExecution(JobDefinition job, DateTime now)
+        {
+            var stage = "pre-check";
+
+            try
+            {
+                _jobEvaluationFaultInjector?.Invoke(job);
+
+                if (_shutdownRequested || !job.IsEnabled)
+                    return;
+
+                if (_runningJobs.ContainsKey(job.Id))
+                {
+                    Debug.WriteLine($"Skipping job '{job.Name}': already running (duplicate trigger)");
+                    return;
+                }
+
+                if (_queuedJobIds.ContainsKey(job.Id))
+                {
+                    Debug.WriteLine($"Skipping job '{job.Name}': already queued");
+                    return;
+                }
+
+                stage = "due-check";
+                if (!IsJobDue(job, now))
+                    return;
+
+                stage = "semaphore acquisition";
+                if (TryAcquireConcurrencySlot())
+                {
+                    stage = "dispatch";
+                    StartTrackedScheduledExecution(job);
+                }
+                else if (!_shutdownRequested)
+                {
+                    stage = "queueing";
+                    TryQueueJob(job);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Scheduler evaluation failed for job '{job.Name}' ({job.Id}) during {stage}: {ex}");
+            }
+        }
+
+        private bool IsJobDue(JobDefinition job, DateTime now)
+        {
+            switch (job.ScheduleType)
+            {
+                case ScheduleType.Recurring:
+                    return _schedulingService.GetMissedOccurrences(job.CronExpression, _lastEvaluationUtc).Count > 0;
+
+                case ScheduleType.OneTime:
+                    return job.OneTimeScheduleUtc.HasValue && job.OneTimeScheduleUtc.Value <= now;
+
+                case ScheduleType.None:
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryAcquireConcurrencySlot()
+        {
+            if (_shutdownRequested)
+                return false;
+
+            try
+            {
+                return _concurrencyGate.Wait(0);
+            }
+            catch (ObjectDisposedException) when (_shutdownRequested || _disposed)
+            {
+                return false;
+            }
+        }
+
+        private void ReleaseConcurrencySlot()
+        {
+            if (_shutdownRequested)
+                return;
+
+            try
+            {
+                _concurrencyGate.Release();
+            }
+            catch (ObjectDisposedException) when (_shutdownRequested || _disposed)
+            {
+                // Shutdown has already retired the gate; nothing else should be queued.
+            }
+        }
+
+        private void StartTrackedScheduledExecution(JobDefinition job)
+        {
+            if (_shutdownRequested)
+            {
+                ReleaseConcurrencySlot();
+                return;
+            }
+
+            var executionId = Interlocked.Increment(ref _nextScheduledExecutionId);
+            var scheduledTask = ExecuteScheduledJobAsync(job);
+            _scheduledExecutions[executionId] = scheduledTask;
+
+            scheduledTask.ContinueWith(
+                task => OnScheduledExecutionCompleted(executionId, task),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        private void OnScheduledExecutionCompleted(long executionId, Task task)
+        {
+            _scheduledExecutions.TryRemove(executionId, out _);
+
+            if (task.IsFaulted)
+                Debug.WriteLine($"Tracked scheduled execution faulted: {task.Exception}");
+        }
+
+        private void WaitForTrackedScheduledExecutions()
+        {
+            var scheduledTasks = _scheduledExecutions.Values.ToArray();
+            if (scheduledTasks.Length == 0)
+                return;
+
+            try
+            {
+                if (!Task.WaitAll(scheduledTasks, millisecondsTimeout: 1000))
+                {
+                    Debug.WriteLine(
+                        $"Scheduler shutdown timed out waiting for {scheduledTasks.Length} tracked scheduled execution(s).");
+                }
+            }
+            catch (AggregateException ex)
+            {
+                Debug.WriteLine($"Scheduler shutdown observed tracked task fault(s): {ex}");
+            }
         }
 
         #endregion

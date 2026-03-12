@@ -2,6 +2,7 @@ using FluentAssertions;
 using Moq;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using System.Collections.Concurrent;
 using System.Reflection;
 using Xunit;
 
@@ -84,10 +85,23 @@ public class JobExecutionServiceTests : IDisposable
         _presetManager.Save(name, new PresetInfo { Commands = commands });
     }
 
-    private JobExecutionService CreateService()
+    private static string CreateLongWaitScript(int seconds = 10)
+    {
+        return $"---\nsteps:\n  - wait: {seconds}\n";
+    }
+
+    private JobExecutionService CreateService(
+        Func<JobDefinition, bool, CancellationToken, Task>? jobExecutionOverride = null,
+        Action<JobDefinition>? jobEvaluationFaultInjector = null)
     {
         return new JobExecutionService(
-            _jobStorage, _schedulingService, _configService, _presetManager, _mockCredentialProvider.Object);
+            _jobStorage,
+            _schedulingService,
+            _configService,
+            _presetManager,
+            _mockCredentialProvider.Object,
+            jobExecutionOverride,
+            jobEvaluationFaultInjector);
     }
 
     private static Task InvokePrivateAsync(object instance, string methodName, params object?[]? args)
@@ -111,6 +125,13 @@ public class JobExecutionServiceTests : IDisposable
         var field = instance.GetType().GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
         field.Should().NotBeNull($"field '{fieldName}' should exist on {instance.GetType().Name}");
         return field!.GetValue(instance).Should().BeAssignableTo<T>().Subject;
+    }
+
+    private static T GetPrivateValue<T>(object instance, string fieldName)
+    {
+        var field = instance.GetType().GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
+        field.Should().NotBeNull($"field '{fieldName}' should exist on {instance.GetType().Name}");
+        return (T)field!.GetValue(instance)!;
     }
 
     #endregion
@@ -457,6 +478,92 @@ public class JobExecutionServiceTests : IDisposable
         service.IsJobRunning(job.Id).Should().BeFalse();
     }
 
+    [Fact]
+    public async Task CancelJob_ScheduledExecution_RealExecutionPath_PublishesCancelledResult()
+    {
+        SetupDefaultCredentials();
+        SavePreset("RealScheduledCancelPreset", CreateLongWaitScript());
+
+        var job = CreateTestJob(
+            name: "RealScheduledCancelJob",
+            schedule: ScheduleType.Recurring,
+            presetName: "RealScheduledCancelPreset");
+        _jobStorage.Save(job);
+
+        JobRunResult? receivedResult = null;
+        var states = new List<JobExecutionState>();
+
+        using var service = CreateService();
+        service.JobCompleted += (_, e) => receivedResult = e;
+        service.JobStateChanged += (_, e) => states.Add(e.State);
+
+        var concurrencyGate = GetPrivateField<SemaphoreSlim>(service, "_concurrencyGate");
+        concurrencyGate.Wait(0).Should().BeTrue();
+
+        var scheduledTask = InvokePrivateAsync(service, "ExecuteScheduledJobAsync", job);
+        SpinWait.SpinUntil(() => service.IsJobRunning(job.Id), millisecondsTimeout: 2000)
+            .Should().BeTrue();
+
+        await Task.Delay(250);
+
+        service.CancelJob(job.Id).Should().BeTrue();
+        await scheduledTask;
+
+        receivedResult.Should().NotBeNull();
+        receivedResult!.Success.Should().BeFalse();
+        receivedResult.WasCancelled.Should().BeTrue();
+        receivedResult.HostOutputs.Should().ContainSingle();
+        receivedResult.HostOutputs![0].WasCancelled.Should().BeTrue();
+        states.Should().Contain(JobExecutionState.Cancelled);
+        states.Should().NotContain(JobExecutionState.Failed);
+        service.IsJobRunning(job.Id).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Dispose_WhileScheduledJobIsInFlight_DoesNotThrowObjectDisposedException()
+    {
+        // Arrange
+        SetupDefaultCredentials();
+        SavePreset("DisposeRacePreset");
+
+        var job = CreateTestJob(name: "DisposeRaceJob", schedule: ScheduleType.Recurring, presetName: "DisposeRacePreset");
+        _jobStorage.Save(job);
+
+        var executionStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var service = CreateService(
+            jobExecutionOverride: async (_, _, token) =>
+            {
+                executionStarted.TrySetResult(true);
+
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    cancellationObserved.TrySetResult(true);
+                    throw;
+                }
+            });
+
+        var concurrencyGate = GetPrivateField<SemaphoreSlim>(service, "_concurrencyGate");
+        concurrencyGate.Wait(0).Should().BeTrue();
+
+        var scheduledTask = InvokePrivateAsync(service, "ExecuteScheduledJobAsync", job);
+        await executionStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        // Act
+        var dispose = () => service.Dispose();
+
+        // Assert
+        dispose.Should().NotThrow();
+        await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await scheduledTask;
+        service.IsJobRunning(job.Id).Should().BeFalse();
+    }
+
     #endregion
 
     #region EXEC-04: Concurrency gate
@@ -619,6 +726,128 @@ public class JobExecutionServiceTests : IDisposable
             .Should().BeTrue();
         SpinWait.SpinUntil(() => !queuedIds.ContainsKey(job.Id), millisecondsTimeout: 2000)
             .Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Dispose_DoesNotStartQueuedJobs_AfterShutdownBegins()
+    {
+        // Arrange
+        SetupDefaultCredentials();
+
+        var config = _configService.GetCurrent();
+        config.MaxConcurrentJobs = 1;
+        _configService.Save(config);
+
+        SavePreset("ShutdownRunningPreset");
+        SavePreset("ShutdownQueuedPreset");
+
+        var runningJob = CreateTestJob(name: "ShutdownRunningJob", schedule: ScheduleType.Recurring, presetName: "ShutdownRunningPreset");
+        var queuedJob = CreateTestJob(name: "ShutdownQueuedJob", schedule: ScheduleType.OneTime, presetName: "ShutdownQueuedPreset");
+        queuedJob.OneTimeScheduleUtc = DateTime.UtcNow.AddSeconds(-1);
+
+        _jobStorage.Save(runningJob);
+        _jobStorage.Save(queuedJob);
+
+        var startedJobs = new ConcurrentQueue<string>();
+        var runningJobStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var service = CreateService(
+            jobExecutionOverride: async (job, _, token) =>
+            {
+                startedJobs.Enqueue(job.Id);
+                if (job.Id == runningJob.Id)
+                    runningJobStarted.TrySetResult(true);
+
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    throw;
+                }
+            });
+
+        var concurrencyGate = GetPrivateField<SemaphoreSlim>(service, "_concurrencyGate");
+        concurrencyGate.Wait(0).Should().BeTrue();
+
+        var runningTask = InvokePrivateAsync(service, "ExecuteScheduledJobAsync", runningJob);
+        await runningJobStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        await InvokePrivateAsync(service, "EvaluateAndExecuteDueJobsAsync");
+        service.QueuedJobCount.Should().Be(1);
+
+        // Act
+        service.Dispose();
+        await runningTask;
+
+        // Assert
+        startedJobs.Should().Contain(runningJob.Id);
+        startedJobs.Should().NotContain(queuedJob.Id);
+    }
+
+    [Fact]
+    public async Task EvaluateAndExecuteDueJobsAsync_ContinuesAfterPerJobEvaluationFailure()
+    {
+        // Arrange
+        SetupDefaultCredentials();
+        SavePreset("EvalFaultBadPreset");
+        SavePreset("EvalFaultGoodPreset");
+
+        var badJob = CreateTestJob(name: "EvalFaultBadJob", schedule: ScheduleType.OneTime, presetName: "EvalFaultBadPreset");
+        badJob.OneTimeScheduleUtc = DateTime.UtcNow.AddSeconds(-1);
+        _jobStorage.Save(badJob);
+
+        var goodJob = CreateTestJob(name: "EvalFaultGoodJob", schedule: ScheduleType.OneTime, presetName: "EvalFaultGoodPreset");
+        goodJob.OneTimeScheduleUtc = DateTime.UtcNow.AddSeconds(-1);
+        _jobStorage.Save(goodJob);
+
+        var executedJobIds = new ConcurrentQueue<string>();
+
+        using var service = CreateService(
+            jobExecutionOverride: (job, _, _) =>
+            {
+                executedJobIds.Enqueue(job.Id);
+                return Task.CompletedTask;
+            },
+            jobEvaluationFaultInjector: job =>
+            {
+                if (job.Id == badJob.Id)
+                    throw new InvalidOperationException("Synthetic evaluation failure");
+            });
+
+        // Act
+        await InvokePrivateAsync(service, "EvaluateAndExecuteDueJobsAsync");
+
+        // Assert
+        SpinWait.SpinUntil(() => executedJobIds.Contains(goodJob.Id), millisecondsTimeout: 2000)
+            .Should().BeTrue();
+        executedJobIds.Should().Contain(goodJob.Id);
+        executedJobIds.Should().NotContain(badJob.Id);
+    }
+
+    [Fact]
+    public async Task EvaluateAndExecuteDueJobsAsync_ClearsEvaluatingFlag_OnFault()
+    {
+        // Arrange
+        SetupDefaultCredentials();
+        SavePreset("EvalFlagPreset");
+
+        var job = CreateTestJob(name: "EvalFlagJob", schedule: ScheduleType.OneTime, presetName: "EvalFlagPreset");
+        job.OneTimeScheduleUtc = DateTime.UtcNow.AddSeconds(-1);
+        _jobStorage.Save(job);
+
+        using var service = CreateService(
+            jobEvaluationFaultInjector: _ => throw new InvalidOperationException("Synthetic evaluation failure"));
+
+        // Act
+        await InvokePrivateAsync(service, "EvaluateAndExecuteDueJobsAsync");
+
+        // Assert
+        GetPrivateValue<int>(service, "_evaluating").Should().Be(0);
+
+        await InvokePrivateAsync(service, "EvaluateAndExecuteDueJobsAsync");
+        GetPrivateValue<int>(service, "_evaluating").Should().Be(0);
     }
 
     #endregion

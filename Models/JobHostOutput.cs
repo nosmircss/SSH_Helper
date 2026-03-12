@@ -22,6 +22,11 @@ namespace SSH_Helper.Models
         public bool Success { get; set; }
 
         /// <summary>
+        /// Whether execution on this host was cancelled by user request.
+        /// </summary>
+        public bool WasCancelled { get; set; }
+
+        /// <summary>
         /// Optional error message if execution on this host failed.
         /// </summary>
         public string? ErrorMessage { get; set; }

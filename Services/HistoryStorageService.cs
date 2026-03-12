@@ -175,6 +175,7 @@ namespace SSH_Helper.Services
 
                     var isHostAddress = reader.ValueTextEquals("HostAddress") || reader.ValueTextEquals("hostAddress");
                     var isSuccess = reader.ValueTextEquals("Success") || reader.ValueTextEquals("success");
+                    var isWasCancelled = reader.ValueTextEquals("WasCancelled") || reader.ValueTextEquals("wasCancelled");
                     var isTimestamp = reader.ValueTextEquals("Timestamp") || reader.ValueTextEquals("timestamp");
 
                     if (!reader.Read())
@@ -187,6 +188,10 @@ namespace SSH_Helper.Services
                     else if (isSuccess)
                     {
                         host.Success = ReadBooleanValue(ref reader);
+                    }
+                    else if (isWasCancelled)
+                    {
+                        host.WasCancelled = ReadBooleanValue(ref reader);
                     }
                     else if (isTimestamp)
                     {
@@ -380,6 +385,11 @@ namespace SSH_Helper.Services
                     else if (propertyName.Equals("Success", StringComparison.OrdinalIgnoreCase))
                     {
                         host.Success = reader.TokenType != JsonToken.Null &&
+                            Convert.ToBoolean(reader.Value, CultureInfo.InvariantCulture);
+                    }
+                    else if (propertyName.Equals("WasCancelled", StringComparison.OrdinalIgnoreCase))
+                    {
+                        host.WasCancelled = reader.TokenType != JsonToken.Null &&
                             Convert.ToBoolean(reader.Value, CultureInfo.InvariantCulture);
                     }
                     else if (propertyName.Equals("Timestamp", StringComparison.OrdinalIgnoreCase))

@@ -223,6 +223,43 @@ namespace SSH_Helper.Utilities
         }
 
         /// <summary>
+        /// Buffers the unfinished final line of a live terminal stream so later backspace/carriage-return
+        /// edits can resolve before the text is appended to an append-only UI surface.
+        /// </summary>
+        /// <param name="chunk">Current input chunk</param>
+        /// <param name="carry">Pending unfinished line from prior chunks</param>
+        /// <param name="flushFinal">When true, flushes the remaining buffered tail</param>
+        /// <returns>Only the stable output that is safe to emit immediately</returns>
+        internal static string BufferIncompleteFinalLineStreaming(string chunk, ref string carry, bool flushFinal = false)
+        {
+            carry ??= string.Empty;
+
+            var combined = string.Concat(carry, chunk);
+            carry = string.Empty;
+
+            if (string.IsNullOrEmpty(combined))
+                return combined;
+
+            if (flushFinal)
+                return combined;
+
+            var lastNewlineIndex = combined.LastIndexOf('\n');
+            if (lastNewlineIndex < 0)
+            {
+                carry = combined;
+                return string.Empty;
+            }
+
+            if (lastNewlineIndex + 1 < combined.Length)
+            {
+                carry = combined.Substring(lastNewlineIndex + 1);
+                return combined.Substring(0, lastNewlineIndex + 1);
+            }
+
+            return combined;
+        }
+
+        /// <summary>
         /// Strips trailing shell prompt artifacts from command output.
         /// </summary>
         /// <param name="output">Captured command output</param>

@@ -413,6 +413,7 @@ namespace SSH_Helper.Models
         public string HostAddress { get; set; } = string.Empty;
         public string Output { get; set; } = string.Empty;
         public bool Success { get; set; } = true;
+        public bool WasCancelled { get; set; }
         public DateTime Timestamp { get; set; }
     }
 

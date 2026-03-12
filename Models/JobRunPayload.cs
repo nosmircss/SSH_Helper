@@ -37,6 +37,11 @@ namespace SSH_Helper.Models
         public bool Success { get; set; }
 
         /// <summary>
+        /// Whether the overall job execution ended due to cancellation.
+        /// </summary>
+        public bool WasCancelled { get; set; }
+
+        /// <summary>
         /// Number of hosts that completed successfully.
         /// </summary>
         public int HostsSucceeded { get; set; }

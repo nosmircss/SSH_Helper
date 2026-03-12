@@ -37,6 +37,18 @@ namespace SSH_Helper
         private readonly Button _btnViewOutput;
         private readonly Button _btnClearHistory;
         private readonly Label _lblHistoryHeader;
+        private ToolStripButton? _btnEditJob;
+        private ToolStripButton? _btnRunNowJob;
+        private ToolStripButton? _btnCancelJob;
+        private ToolStripButton? _btnEnableDisableJob;
+        private ToolStripButton? _btnDeleteJob;
+        private ToolStripButton? _btnDuplicateJob;
+        private ToolStripMenuItem? _menuEditJob;
+        private ToolStripMenuItem? _menuRunNowJob;
+        private ToolStripMenuItem? _menuCancelJob;
+        private ToolStripMenuItem? _menuEnableDisableJob;
+        private ToolStripMenuItem? _menuDeleteJob;
+        private ToolStripMenuItem? _menuDuplicateJob;
 
         // Track selected job for preservation across refreshes
         private string? _selectedJobId;
@@ -181,11 +193,18 @@ namespace SSH_Helper
             var strip = new ToolStrip();
 
             strip.Items.Add(CreateToolButton("New", "New", OnNewClick));
-            strip.Items.Add(CreateToolButton("Edit", "Edit", OnEditClick));
-            strip.Items.Add(CreateToolButton("Run Now", "RunNow", OnRunNowClick));
-            strip.Items.Add(CreateToolButton("Enable/Disable", "EnableDisable", OnEnableDisableClick));
-            strip.Items.Add(CreateToolButton("Delete", "Delete", OnDeleteClick));
-            strip.Items.Add(CreateToolButton("Duplicate", "Duplicate", OnDuplicateClick));
+            _btnEditJob = CreateToolButton("Edit", "Edit", OnEditClick);
+            _btnRunNowJob = CreateToolButton("Run Now", "RunNow", OnRunNowClick);
+            _btnCancelJob = CreateToolButton("Cancel", "Cancel", OnCancelClick);
+            _btnEnableDisableJob = CreateToolButton("Enable/Disable", "EnableDisable", OnEnableDisableClick);
+            _btnDeleteJob = CreateToolButton("Delete", "Delete", OnDeleteClick);
+            _btnDuplicateJob = CreateToolButton("Duplicate", "Duplicate", OnDuplicateClick);
+            strip.Items.Add(_btnEditJob);
+            strip.Items.Add(_btnRunNowJob);
+            strip.Items.Add(_btnCancelJob);
+            strip.Items.Add(_btnEnableDisableJob);
+            strip.Items.Add(_btnDeleteJob);
+            strip.Items.Add(_btnDuplicateJob);
             strip.Items.Add(new ToolStripSeparator());
             strip.Items.Add(CreateToolButton("Export File", "ExportFile", OnExportFileClick));
             strip.Items.Add(CreateToolButton("Export Clipboard", "ExportClipboard", OnExportClipboardClick));
@@ -217,36 +236,41 @@ namespace SSH_Helper
             var menuNew = new ToolStripMenuItem("New Job");
             menuNew.Click += OnNewClick;
 
-            var menuEdit = new ToolStripMenuItem("Edit Job");
-            menuEdit.Click += OnEditClick;
+            _menuEditJob = new ToolStripMenuItem("Edit Job");
+            _menuEditJob.Click += OnEditClick;
 
-            var menuRunNow = new ToolStripMenuItem("Run Now");
-            menuRunNow.Click += OnRunNowClick;
+            _menuRunNowJob = new ToolStripMenuItem("Run Now");
+            _menuRunNowJob.Click += OnRunNowClick;
 
-            var menuEnableDisable = new ToolStripMenuItem("Enable/Disable");
-            menuEnableDisable.Click += OnEnableDisableClick;
+            _menuCancelJob = new ToolStripMenuItem("Cancel");
+            _menuCancelJob.Click += OnCancelClick;
 
-            var menuDelete = new ToolStripMenuItem("Delete");
-            menuDelete.Click += OnDeleteClick;
+            _menuEnableDisableJob = new ToolStripMenuItem("Enable/Disable");
+            _menuEnableDisableJob.Click += OnEnableDisableClick;
 
-            var menuDuplicate = new ToolStripMenuItem("Duplicate");
-            menuDuplicate.Click += OnDuplicateClick;
+            _menuDeleteJob = new ToolStripMenuItem("Delete");
+            _menuDeleteJob.Click += OnDeleteClick;
+
+            _menuDuplicateJob = new ToolStripMenuItem("Duplicate");
+            _menuDuplicateJob.Click += OnDuplicateClick;
 
             menu.Items.AddRange(new ToolStripItem[]
             {
                 menuNew,
-                menuEdit,
-                menuRunNow,
+                _menuEditJob,
+                _menuRunNowJob,
+                _menuCancelJob,
                 new ToolStripSeparator(),
-                menuEnableDisable,
-                menuDelete,
-                menuDuplicate,
+                _menuEnableDisableJob,
+                _menuDeleteJob,
+                _menuDuplicateJob,
                 new ToolStripSeparator(),
                 CreateMenuItem("Export to File", OnExportFileClick),
                 CreateMenuItem("Export to Clipboard", OnExportClipboardClick),
                 CreateMenuItem("Import from File", OnImportFileClick),
                 CreateMenuItem("Import from Clipboard", OnImportClipboardClick)
             });
+            menu.Opening += (_, _) => UpdateJobActionState();
 
             if (_darkMode)
             {
@@ -531,6 +555,7 @@ namespace SSH_Helper
             }
 
             RefreshHistory(_selectedJobId);
+            UpdateJobActionState();
         }
 
         private string? SelectActiveJob(string? preferredJobId, string? secondaryJobId)
@@ -629,6 +654,10 @@ namespace SSH_Helper
                     if (run.WasSkipped)
                     {
                         resultCell.Style.ForeColor = Color.Orange;
+                    }
+                    else if (run.WasCancelled)
+                    {
+                        resultCell.Style.ForeColor = Color.Goldenrod;
                     }
                     else if (run.Success)
                     {
@@ -818,6 +847,34 @@ namespace SSH_Helper
             _btnViewOutput.Enabled = run != null && !IsSkippedSummary(run);
         }
 
+        private void UpdateJobActionState()
+        {
+            var jobId = GetActiveJobId();
+            var hasJob = !string.IsNullOrEmpty(jobId);
+            var isRunning = hasJob && _executionService.IsJobRunning(jobId!);
+
+            SetEnabled(_btnEditJob, hasJob);
+            SetEnabled(_btnRunNowJob, hasJob && !isRunning);
+            SetEnabled(_btnCancelJob, hasJob && isRunning);
+            SetEnabled(_btnEnableDisableJob, hasJob);
+            SetEnabled(_btnDeleteJob, hasJob);
+            SetEnabled(_btnDuplicateJob, hasJob);
+            SetEnabled(_menuEditJob, hasJob);
+            SetEnabled(_menuRunNowJob, hasJob && !isRunning);
+            SetEnabled(_menuCancelJob, hasJob && isRunning);
+            SetEnabled(_menuEnableDisableJob, hasJob);
+            SetEnabled(_menuDeleteJob, hasJob);
+            SetEnabled(_menuDuplicateJob, hasJob);
+        }
+
+        private static void SetEnabled(ToolStripItem? item, bool enabled)
+        {
+            if (item != null)
+            {
+                item.Enabled = enabled;
+            }
+        }
+
         private static bool IsSkippedSummary(JobRunRecord run)
             => run.WasSkipped && run.SkippedRunCount > 0;
 
@@ -838,6 +895,13 @@ namespace SSH_Helper
             }
 
             var total = run.HostsSucceeded + run.HostsFailed;
+            if (run.WasCancelled)
+            {
+                return total > 0
+                    ? $"CANCELLED ({run.HostsSucceeded}/{total})"
+                    : "CANCELLED";
+            }
+
             return run.Success
                 ? $"OK ({run.HostsSucceeded}/{total})"
                 : GetConsecutiveFailureCount(run) > 1
@@ -856,6 +920,7 @@ namespace SSH_Helper
 
             _selectedJobId = GetCurrentGridJobId();
             RefreshHistory(_selectedJobId);
+            UpdateJobActionState();
         }
 
         private void OnHistorySelectionChanged(object? sender, EventArgs e)
@@ -949,6 +1014,24 @@ namespace SSH_Helper
                     $"Cannot run job '{job.Name}'. It may already be running.",
                     "Run Now", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+        }
+
+        private void OnCancelClick(object? sender, EventArgs e)
+        {
+            var jobId = GetActiveJobId();
+            if (jobId == null) return;
+
+            var job = _jobStorage.Get(jobId);
+            if (job == null) return;
+
+            if (!_executionService.CancelJob(jobId))
+            {
+                DialogTheme.Show(this,
+                    $"Job '{job.Name}' is not currently running.",
+                    "Cancel Job", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+
+            RefreshJobList();
         }
 
         private void OnEnableDisableClick(object? sender, EventArgs e)
