@@ -114,6 +114,142 @@ public class JobListDialogRunNowTests : IDisposable
     }
 
     [WinFormsFact]
+    public void RightClickingDifferentJobRow_UpdatesActiveJobForRunNow()
+    {
+        var configService = new ConfigurationService(_configPath);
+        var presetManager = new PresetManager(configService);
+        presetManager.Load();
+        presetManager.Save("Nightly", new PresetInfo { Commands = "echo nightly" });
+
+        var credentialProvider = new FakeCredentialProvider();
+        var schedulingService = new SchedulingService();
+        var historyService = new JobHistoryService(Path.Combine(_testDirectory, "history"));
+        var exportService = new JobExportService();
+        var jobStorage = new JobStorageService(credentialProvider, _jobsPath);
+        jobStorage.Load();
+
+        var alphaJob = CreateTestJob("Alpha Job");
+        var betaJob = CreateTestJob("Beta Job");
+        jobStorage.Save(alphaJob);
+        jobStorage.Save(betaJob);
+
+        using var executionService = new JobExecutionService(
+            jobStorage,
+            schedulingService,
+            configService,
+            presetManager,
+            credentialProvider);
+
+        string? invokedJobId = null;
+
+        using var dialog = new JobListDialog(
+            jobStorage,
+            executionService,
+            historyService,
+            schedulingService,
+            presetManager,
+            exportService,
+            credentialProvider,
+            jobId =>
+            {
+                invokedJobId = jobId;
+                return Task.FromResult(true);
+            },
+            getMainGridRows: null,
+            getMainGridColumns: null,
+            darkMode: false);
+
+        dialog.Show();
+        Application.DoEvents();
+
+        var jobsGrid = GetField<DataGridView>(dialog, "_gridJobs");
+        jobsGrid.Rows.Count.Should().Be(2);
+        jobsGrid.Rows[0].Tag.Should().Be(alphaJob.Id);
+        jobsGrid.Rows[1].Tag.Should().Be(betaJob.Id);
+
+        SelectJobRow(jobsGrid, alphaJob.Id);
+        Application.DoEvents();
+
+        var nameColumnIndex = jobsGrid.Columns["Name"].Index;
+        var rightClickEvent = new DataGridViewCellMouseEventArgs(
+            nameColumnIndex,
+            1,
+            localX: 8,
+            localY: 8,
+            new MouseEventArgs(MouseButtons.Right, clicks: 1, x: 8, y: 8, delta: 0));
+
+        InvokeMethod(dialog, "OnJobGridCellMouseDown", jobsGrid, rightClickEvent);
+        Application.DoEvents();
+
+        jobsGrid.SelectedRows.Count.Should().Be(1);
+        jobsGrid.SelectedRows[0].Tag.Should().Be(betaJob.Id);
+        jobsGrid.CurrentRow.Should().NotBeNull();
+        jobsGrid.CurrentRow!.Tag.Should().Be(betaJob.Id);
+
+        InvokeMethod(dialog, "OnRunNowClick", null, EventArgs.Empty);
+        Application.DoEvents();
+
+        SpinWait.SpinUntil(() => invokedJobId != null, millisecondsTimeout: 1000).Should().BeTrue();
+        invokedJobId.Should().Be(betaJob.Id);
+    }
+
+    [WinFormsFact]
+    public void EnabledCheckboxClick_TogglesJobAndRefreshesGrid()
+    {
+        var configService = new ConfigurationService(_configPath);
+        var presetManager = new PresetManager(configService);
+        presetManager.Load();
+        presetManager.Save("Nightly", new PresetInfo { Commands = "echo nightly" });
+
+        var credentialProvider = new FakeCredentialProvider();
+        var schedulingService = new SchedulingService();
+        var historyService = new JobHistoryService(Path.Combine(_testDirectory, "history"));
+        var exportService = new JobExportService();
+        var jobStorage = new JobStorageService(credentialProvider, _jobsPath);
+        jobStorage.Load();
+
+        var job = CreateTestJob("Checkbox Toggle Job");
+        job.IsEnabled = true;
+        jobStorage.Save(job);
+
+        using var executionService = new JobExecutionService(
+            jobStorage,
+            schedulingService,
+            configService,
+            presetManager,
+            credentialProvider);
+
+        using var dialog = new JobListDialog(
+            jobStorage,
+            executionService,
+            historyService,
+            schedulingService,
+            presetManager,
+            exportService,
+            credentialProvider,
+            runNowInvoker: null,
+            getMainGridRows: null,
+            getMainGridColumns: null,
+            darkMode: false);
+
+        dialog.Show();
+        Application.DoEvents();
+
+        var jobsGrid = GetField<DataGridView>(dialog, "_gridJobs");
+        SelectJobRow(jobsGrid, job.Id);
+        Application.DoEvents();
+
+        var enabledColumnIndex = jobsGrid.Columns["Enabled"].Index;
+        InvokeMethod(dialog, "OnJobGridCellContentClick", jobsGrid, new DataGridViewCellEventArgs(enabledColumnIndex, 0));
+        Application.DoEvents();
+
+        jobStorage.Get(job.Id)!.IsEnabled.Should().BeFalse();
+        jobsGrid.Rows[0].Cells["Enabled"].Value.Should().Be(false);
+        jobsGrid.CurrentRow.Should().NotBeNull();
+        jobsGrid.CurrentRow!.Tag.Should().Be(job.Id);
+    }
+
+    [WinFormsFact]
     public void HistoryGrid_UsesPersistedStartedUtcAndDerivedDuration()
     {
         var configService = new ConfigurationService(_configPath);

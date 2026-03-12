@@ -70,6 +70,7 @@ namespace SSH_Helper.UI
         private CommandEditorSettings _settings = new();
 
         private bool _isDarkMode;
+        private Color? _borderColor;
         private bool _acceptsTab = true;
         private bool _suppressTextProcessing;
         private int _nextStyleIndex = FirstCustomStyleIndex;
@@ -89,7 +90,8 @@ namespace SSH_Helper.UI
                 HScrollBar = true,
                 VScrollBar = true,
                 EndAtLastLine = false,
-                MouseDwellTime = 250
+                MouseDwellTime = 250,
+                BorderStyle = ScintillaBorderStyle.None
             };
 
             ConfigureLineNumberMargin();
@@ -471,6 +473,9 @@ namespace SSH_Helper.UI
                 _completionPopup.BackColor = Color.FromArgb(88, 88, 91);
                 _completionList.BackColor = Color.FromArgb(45, 45, 46);
                 _completionList.ForeColor = Color.FromArgb(220, 220, 220);
+                _borderColor = Color.FromArgb(65, 65, 65);
+                Padding = new Padding(1);
+                base.BackColor = _editor.BackColor;
             }
             else
             {
@@ -485,6 +490,9 @@ namespace SSH_Helper.UI
                 _completionPopup.BackColor = Color.FromArgb(214, 214, 214);
                 _completionList.BackColor = Color.White;
                 _completionList.ForeColor = Color.Black;
+                _borderColor = null;
+                Padding = Padding.Empty;
+                base.BackColor = _editor.BackColor;
             }
 
             ApplyScrollbarTheme(_editor, darkMode);
@@ -2053,6 +2061,16 @@ namespace SSH_Helper.UI
                 : updatedText.Substring(prefixLength, newLength);
 
             return new TextReplacement(prefixLength, oldLength, newText);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            base.OnPaintBackground(e);
+            if (_borderColor.HasValue)
+            {
+                using var pen = new Pen(_borderColor.Value);
+                e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+            }
         }
 
         protected override void Dispose(bool disposing)

@@ -1,6 +1,7 @@
 using Newtonsoft.Json;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using SSH_Helper.Services.Editor;
 using SSH_Helper.UI;
 using SSH_Helper.Utilities;
 
@@ -16,6 +17,12 @@ namespace SSH_Helper
     internal sealed class JobEditorDialog : Form
     {
         #region Fields
+
+        private const int GeneralTabIndex = 0;
+        private const int ContentTabIndex = 1;
+        private const int HostsTabIndex = 2;
+        private const int CredentialsTabIndex = 3;
+        private const int AdvancedTabIndex = 4;
 
         private readonly PresetManager _presetManager;
         private readonly SchedulingService _schedulingService;
@@ -37,12 +44,24 @@ namespace SSH_Helper
         private readonly TextBox _txtName;
         private readonly RadioButton _rbPreset;
         private readonly RadioButton _rbFolder;
+        private readonly RadioButton _rbCustomPreset;
+        private readonly Label _lblTargetSelect;
+        private readonly Label _lblCustomTargetInfo;
+        private readonly Label _lblSchedule;
         private readonly ComboBox _cboTarget;
         private readonly ComboBox _cboScheduleType;
         private readonly Panel _panelCron;
         private readonly CronBuilderControl _cronBuilder;
         private readonly Panel _panelOneTime;
         private readonly DateTimePicker _dtpOneTime;
+
+        // Content tab controls
+        private readonly ScintillaScriptEditorControl _txtCustomPresetCommands;
+        private readonly Label _lblContentHelp;
+        private readonly ScriptAutocompleteProvider _customPresetAutocompleteProvider;
+        private readonly YamlSshSyntaxHighlighter _customPresetSyntaxHighlighter = new();
+        private readonly ScriptEditorValidationService _customPresetValidationService = new();
+        private readonly CommandEditorSettings _customPresetEditorSettings = new();
 
         // Hosts tab controls
         private readonly ToolStrip _hostsToolStrip;
@@ -68,12 +87,21 @@ namespace SSH_Helper
         private readonly RadioButton _rbSequential;
         private readonly RadioButton _rbParallel;
         private readonly CheckBox _chkStopOnError;
+        private readonly GroupBox _grpTimeoutOverrides;
+        private readonly CheckBox _chkOverrideCommandTimeout;
+        private readonly NumericUpDown _numCommandTimeoutOverride;
+        private readonly Label _lblCommandTimeoutSource;
+        private readonly CheckBox _chkOverrideConnectionTimeout;
+        private readonly NumericUpDown _numConnectionTimeoutOverride;
+        private readonly Label _lblConnectionTimeoutSource;
         private readonly GroupBox _grpHistoryRetention;
         private readonly CheckBox _chkOverrideMaxRuns;
         private readonly NumericUpDown _numMaxRuns;
         private readonly CheckBox _chkOverrideRetention;
         private readonly NumericUpDown _numRetentionDays;
         private bool _syncingCronPanelLayout;
+        private bool _hasInitializedCommandTimeoutOverrideValue;
+        private bool _hasInitializedConnectionTimeoutOverrideValue;
 
         #endregion
 
@@ -128,12 +156,19 @@ namespace SSH_Helper
             _txtName = new TextBox();
             _rbPreset = new RadioButton();
             _rbFolder = new RadioButton();
+            _rbCustomPreset = new RadioButton();
+            _lblTargetSelect = new Label();
+            _lblCustomTargetInfo = new Label();
+            _lblSchedule = new Label();
             _cboTarget = new ComboBox();
             _cboScheduleType = new ComboBox();
             _panelCron = new Panel();
             _cronBuilder = new CronBuilderControl();
             _panelOneTime = new Panel();
             _dtpOneTime = new DateTimePicker();
+            _txtCustomPresetCommands = new ScintillaScriptEditorControl();
+            _lblContentHelp = new Label();
+            _customPresetAutocompleteProvider = new ScriptAutocompleteProvider(GetCustomPresetHostColumns);
 
             _hostsToolStrip = new ToolStrip();
             _hostsContextMenu = new ContextMenuStrip();
@@ -153,6 +188,13 @@ namespace SSH_Helper
             _rbSequential = new RadioButton();
             _rbParallel = new RadioButton();
             _chkStopOnError = new CheckBox();
+            _grpTimeoutOverrides = new GroupBox();
+            _chkOverrideCommandTimeout = new CheckBox();
+            _numCommandTimeoutOverride = new NumericUpDown();
+            _lblCommandTimeoutSource = new Label();
+            _chkOverrideConnectionTimeout = new CheckBox();
+            _numConnectionTimeoutOverride = new NumericUpDown();
+            _lblConnectionTimeoutSource = new Label();
             _grpHistoryRetention = new GroupBox();
             _chkOverrideMaxRuns = new CheckBox();
             _numMaxRuns = new NumericUpDown();
@@ -162,10 +204,12 @@ namespace SSH_Helper
             SuspendLayout();
             BuildDialogChrome();
             BuildGeneralTab();
+            BuildContentTab();
             BuildHostsTab();
             BuildCredentialsTab();
             BuildAdvancedTab();
             BuildBottomPanel();
+            InitializeCustomPresetEditor();
             WireEvents();
             PrepopulateFromJob();
             ResumeLayout(true);
@@ -173,6 +217,7 @@ namespace SSH_Helper
             // Apply theming
             var font = fontFamily != null ? new Font(fontFamily, fontSize) : new Font("Segoe UI", fontSize);
             DialogTheme.SetDialogFont(this, font);
+            _txtCustomPresetCommands.Font = font;
             DialogTheme.ApplyTo(this, darkMode);
             DialogTheme.SetDarkTitleBar(this, darkMode);
             DialogTheme.StyleTabControl(_tabControl, darkMode);
@@ -182,6 +227,7 @@ namespace SSH_Helper
             DialogTheme.StyleButton(_btnCancel, darkMode);
             _cronBuilder.ApplyTheme(darkMode);
             _cronBuilder.SetSchedulingService(schedulingService);
+            _txtCustomPresetCommands.ApplyTheme(darkMode);
             RefreshCronPanelLayout();
 
             // Style toolstrip for dark mode
@@ -201,7 +247,20 @@ namespace SSH_Helper
             {
                 DialogTheme.ApplyNativeTheme(this, darkMode);
                 RefreshCronPanelLayout();
+
             };
+
+            if (darkMode)
+            {
+                // Re-apply native theme when switching tabs. Controls on
+                // non-visible tab pages can lose their native dark rendering
+                // until they are actually shown.
+                _tabControl.Selected += (_, e) =>
+                {
+                    if (e.TabPage != null)
+                        BeginInvoke(() => DialogTheme.ApplyNativeTheme(e.TabPage, darkMode));
+                };
+            }
         }
 
         #endregion
@@ -212,7 +271,7 @@ namespace SSH_Helper
         {
             Text = _isNew ? "New Job" : $"Edit Job - {_editingJob.Name}";
             Size = new Size(750, 600);
-            MinimumSize = new Size(650, 500);
+            MinimumSize = new Size(750, 600);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox = false;
@@ -223,11 +282,13 @@ namespace SSH_Helper
             _tabControl.Dock = DockStyle.Fill;
 
             var tabGeneral = new TabPage("General");
+            var tabContent = new TabPage("Content");
             var tabHosts = new TabPage("Hosts");
             var tabCredentials = new TabPage("Credentials");
             var tabAdvanced = new TabPage("Advanced");
 
             _tabControl.TabPages.Add(tabGeneral);
+            _tabControl.TabPages.Add(tabContent);
             _tabControl.TabPages.Add(tabHosts);
             _tabControl.TabPages.Add(tabCredentials);
             _tabControl.TabPages.Add(tabAdvanced);
@@ -312,35 +373,40 @@ namespace SSH_Helper
             _rbFolder.Location = new Point(controlLeft + 140, yPos);
             _rbFolder.AutoSize = true;
 
+            _rbCustomPreset.Text = "Custom Preset";
+            _rbCustomPreset.Location = new Point(controlLeft + 280, yPos);
+            _rbCustomPreset.AutoSize = true;
+
             tab.Controls.Add(lblTarget);
             tab.Controls.Add(_rbPreset);
             tab.Controls.Add(_rbFolder);
+            tab.Controls.Add(_rbCustomPreset);
             yPos += 30;
 
             // Target Selector
-            var lblTargetSelect = new Label
-            {
-                Text = "Target:",
-                Location = new Point(16, yPos + 3),
-                Size = new Size(labelWidth, 20),
-                TextAlign = ContentAlignment.MiddleLeft
-            };
+            _lblTargetSelect.Text = "Target:";
+            _lblTargetSelect.Location = new Point(16, yPos + 3);
+            _lblTargetSelect.Size = new Size(labelWidth, 20);
+            _lblTargetSelect.TextAlign = ContentAlignment.MiddleLeft;
             _cboTarget.Location = new Point(controlLeft, yPos);
-            _cboTarget.Size = new Size(tab.Width - controlLeft - 32, 23);
-            _cboTarget.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            _cboTarget.Size = new Size(300, 23);
+            _cboTarget.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             _cboTarget.DropDownStyle = ComboBoxStyle.DropDownList;
-            tab.Controls.Add(lblTargetSelect);
+            _lblCustomTargetInfo.Text = "Custom preset content is stored with this job only. Author it on the Content tab.";
+            _lblCustomTargetInfo.Location = new Point(controlLeft, yPos + 3);
+            _lblCustomTargetInfo.Size = new Size(tab.Width - controlLeft - 32, 36);
+            _lblCustomTargetInfo.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            _lblCustomTargetInfo.Visible = false;
+            tab.Controls.Add(_lblTargetSelect);
             tab.Controls.Add(_cboTarget);
+            tab.Controls.Add(_lblCustomTargetInfo);
             yPos += 32;
 
             // Schedule Type
-            var lblSchedule = new Label
-            {
-                Text = "Schedule:",
-                Location = new Point(16, yPos + 3),
-                Size = new Size(labelWidth, 20),
-                TextAlign = ContentAlignment.MiddleLeft
-            };
+            _lblSchedule.Text = "Schedule:";
+            _lblSchedule.Location = new Point(16, yPos + 3);
+            _lblSchedule.Size = new Size(labelWidth, 20);
+            _lblSchedule.TextAlign = ContentAlignment.MiddleLeft;
             _cboScheduleType.Location = new Point(controlLeft, yPos);
             _cboScheduleType.Size = new Size(220, 23);
             _cboScheduleType.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -351,7 +417,7 @@ namespace SSH_Helper
                 "One-Time"
             });
             _cboScheduleType.SelectedIndex = 0;
-            tab.Controls.Add(lblSchedule);
+            tab.Controls.Add(_lblSchedule);
             tab.Controls.Add(_cboScheduleType);
             yPos += 32;
 
@@ -360,6 +426,29 @@ namespace SSH_Helper
 
             // One-time panel (visible only when One-Time selected)
             BuildOneTimePanel(tab, ref yPos);
+        }
+
+        private void BuildContentTab()
+        {
+            var tab = _tabControl.TabPages[ContentTabIndex];
+            tab.Padding = new Padding(16);
+
+            _lblContentHelp.Dock = DockStyle.Top;
+            _lblContentHelp.Height = 28;
+            _lblContentHelp.TextAlign = ContentAlignment.MiddleLeft;
+            _lblContentHelp.Text = "Switch Target Type to Custom Preset to author job-local content. Plain commands and YAML scripts are supported.";
+
+            var editorPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(0, 8, 0, 0)
+            };
+
+            _txtCustomPresetCommands.Dock = DockStyle.Fill;
+            editorPanel.Controls.Add(_txtCustomPresetCommands);
+
+            tab.Controls.Add(editorPanel);
+            tab.Controls.Add(_lblContentHelp);
         }
 
         private void BuildCronPanel(TabPage tab, ref int yPos)
@@ -412,6 +501,17 @@ namespace SSH_Helper
             if (_syncingCronPanelLayout || IsDisposed || _panelCron.IsDisposed || _cronBuilder.IsDisposed)
             {
                 return;
+            }
+
+            // Explicitly compute panel width from parent tab page to avoid
+            // stale anchor distances caused by early layout during SuspendLayout.
+            if (_panelCron.Parent is Control parentTab && parentTab.ClientSize.Width > 0)
+            {
+                var expectedWidth = parentTab.ClientSize.Width - _panelCron.Left - 32;
+                if (expectedWidth > 0 && _panelCron.Width != expectedWidth)
+                {
+                    _panelCron.Width = expectedWidth;
+                }
             }
 
             var panelWidth = _panelCron.ClientSize.Width;
@@ -472,13 +572,128 @@ namespace SSH_Helper
             }
         }
 
+        private void InitializeCustomPresetEditor()
+        {
+            _txtCustomPresetCommands.SetAutocompleteProvider(_customPresetAutocompleteProvider);
+            _txtCustomPresetCommands.SetSyntaxHighlighter(_customPresetSyntaxHighlighter);
+            _txtCustomPresetCommands.SetValidationService(_customPresetValidationService);
+            _txtCustomPresetCommands.SetVariableTooltipResolvers(
+                variableResolver: null,
+                columnResolver: ResolveCustomPresetColumnValue);
+            _txtCustomPresetCommands.ApplyCommandEditorSettings(_customPresetEditorSettings);
+        }
+
+        private IReadOnlyCollection<string> GetCustomPresetHostColumns()
+        {
+            return _gridHosts.Columns
+                .Cast<DataGridViewColumn>()
+                .Select(column => column.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToList();
+        }
+
+        private string? ResolveCustomPresetColumnValue(string columnName)
+        {
+            if (string.IsNullOrWhiteSpace(columnName) || !_gridHosts.Columns.Contains(columnName))
+            {
+                return null;
+            }
+
+            var previewRow = GetPreviewHostRow();
+            return previewRow?.Cells[columnName].Value?.ToString();
+        }
+
+        private DataGridViewRow? GetPreviewHostRow()
+        {
+            if (_gridHosts.CurrentRow != null && !_gridHosts.CurrentRow.IsNewRow)
+            {
+                return _gridHosts.CurrentRow;
+            }
+
+            return _gridHosts.Rows.Cast<DataGridViewRow>()
+                .FirstOrDefault(row => !row.IsNewRow);
+        }
+
+        private JobTargetType GetSelectedTargetType()
+        {
+            if (_rbFolder.Checked)
+                return JobTargetType.Folder;
+
+            if (_rbCustomPreset.Checked)
+                return JobTargetType.CustomPreset;
+
+            return JobTargetType.Preset;
+        }
+
+        private void UpdateTargetModeUi()
+        {
+            var targetType = GetSelectedTargetType();
+            var usesNamedTarget = targetType != JobTargetType.CustomPreset;
+
+            _lblTargetSelect.Visible = usesNamedTarget;
+            _cboTarget.Visible = usesNamedTarget;
+            _cboTarget.Enabled = usesNamedTarget;
+            _lblCustomTargetInfo.Visible = !usesNamedTarget;
+
+            if (usesNamedTarget)
+            {
+                PopulateTargetCombo();
+            }
+            else
+            {
+                _cboTarget.SelectedIndex = -1;
+            }
+
+            UpdateFolderExecutionState();
+            UpdateCustomPresetEditorState();
+            UpdateGeneralTabLayout();
+            UpdateTimeoutOverrideState();
+        }
+
+        private void UpdateCustomPresetEditorState()
+        {
+            var isCustomPreset = GetSelectedTargetType() == JobTargetType.CustomPreset;
+            _txtCustomPresetCommands.ReadOnly = !isCustomPreset;
+            _lblContentHelp.Text = isCustomPreset
+                ? "This content is stored with the job only. Plain commands and YAML scripts are supported."
+                : "Switch Target Type to Custom Preset to author job-local content. Saved preset and folder jobs ignore this tab.";
+        }
+
+        private void UpdateGeneralTabLayout()
+        {
+            const int rowSpacing = 9;
+            const int labelOffsetY = 3;
+
+            var customInfoWidth = Math.Max(_lblCustomTargetInfo.Width, 1);
+            var measuredCustomHeight = TextRenderer.MeasureText(
+                _lblCustomTargetInfo.Text,
+                _lblCustomTargetInfo.Font,
+                new Size(customInfoWidth, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl).Height;
+
+            _lblCustomTargetInfo.Height = Math.Max(36, measuredCustomHeight);
+
+            var scheduleTop = GetSelectedTargetType() == JobTargetType.CustomPreset
+                ? _lblCustomTargetInfo.Bottom + rowSpacing
+                : _cboTarget.Bottom + rowSpacing;
+
+            _lblSchedule.Location = new Point(_lblSchedule.Left, scheduleTop + labelOffsetY);
+            _cboScheduleType.Location = new Point(_cboScheduleType.Left, scheduleTop);
+
+            var panelTop = _cboScheduleType.Bottom + rowSpacing;
+            _panelCron.Location = new Point(_panelCron.Left, panelTop);
+            _panelOneTime.Location = new Point(_panelOneTime.Left, panelTop);
+
+            RefreshCronPanelLayout();
+        }
+
         #endregion
 
         #region Hosts Tab
 
         private void BuildHostsTab()
         {
-            var tab = _tabControl.TabPages[1];
+            var tab = _tabControl.TabPages[HostsTabIndex];
 
             // ToolStrip
             _hostsToolStrip.Dock = DockStyle.Top;
@@ -832,7 +1047,7 @@ namespace SSH_Helper
 
         private void BuildCredentialsTab()
         {
-            var tab = _tabControl.TabPages[2];
+            var tab = _tabControl.TabPages[CredentialsTabIndex];
             tab.AutoScroll = true;
             tab.Padding = new Padding(16);
 
@@ -928,7 +1143,7 @@ namespace SSH_Helper
 
         private void BuildAdvancedTab()
         {
-            var tab = _tabControl.TabPages[3];
+            var tab = _tabControl.TabPages[AdvancedTabIndex];
             tab.AutoScroll = true;
             tab.Padding = new Padding(16);
 
@@ -958,6 +1173,53 @@ namespace SSH_Helper
             _grpFolderExecution.Controls.Add(_chkStopOnError);
             tab.Controls.Add(_grpFolderExecution);
             yPos += _grpFolderExecution.Height + 16;
+
+            // Timeout Overrides group
+            _grpTimeoutOverrides.Text = "Timeouts (Per-Job Overrides)";
+            _grpTimeoutOverrides.Location = new Point(16, yPos);
+            _grpTimeoutOverrides.Size = new Size(tab.Width - 48, 128);
+            _grpTimeoutOverrides.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+
+            _chkOverrideCommandTimeout.Text = "Override command timeout";
+            _chkOverrideCommandTimeout.Location = new Point(16, 24);
+            _chkOverrideCommandTimeout.AutoSize = true;
+
+            _numCommandTimeoutOverride.Location = new Point(250, 22);
+            _numCommandTimeoutOverride.Size = new Size(80, 23);
+            _numCommandTimeoutOverride.Minimum = JobEditorValidator.MinCommandTimeoutOverrideSeconds;
+            _numCommandTimeoutOverride.Maximum = JobEditorValidator.MaxCommandTimeoutOverrideSeconds;
+            _numCommandTimeoutOverride.Value = JobEditorValidator.MinCommandTimeoutOverrideSeconds;
+            _numCommandTimeoutOverride.Enabled = false;
+
+            _lblCommandTimeoutSource.Location = new Point(32, 50);
+            _lblCommandTimeoutSource.Size = new Size(_grpTimeoutOverrides.Width - 48, 18);
+            _lblCommandTimeoutSource.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            _lblCommandTimeoutSource.ForeColor = Color.FromArgb(108, 117, 125);
+
+            _chkOverrideConnectionTimeout.Text = "Override connection timeout";
+            _chkOverrideConnectionTimeout.Location = new Point(16, 76);
+            _chkOverrideConnectionTimeout.AutoSize = true;
+
+            _numConnectionTimeoutOverride.Location = new Point(250, 74);
+            _numConnectionTimeoutOverride.Size = new Size(80, 23);
+            _numConnectionTimeoutOverride.Minimum = JobEditorValidator.MinConnectionTimeoutOverrideSeconds;
+            _numConnectionTimeoutOverride.Maximum = JobEditorValidator.MaxConnectionTimeoutOverrideSeconds;
+            _numConnectionTimeoutOverride.Value = JobEditorValidator.MinConnectionTimeoutOverrideSeconds;
+            _numConnectionTimeoutOverride.Enabled = false;
+
+            _lblConnectionTimeoutSource.Location = new Point(32, 102);
+            _lblConnectionTimeoutSource.Size = new Size(_grpTimeoutOverrides.Width - 48, 18);
+            _lblConnectionTimeoutSource.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            _lblConnectionTimeoutSource.ForeColor = Color.FromArgb(108, 117, 125);
+
+            _grpTimeoutOverrides.Controls.Add(_chkOverrideCommandTimeout);
+            _grpTimeoutOverrides.Controls.Add(_numCommandTimeoutOverride);
+            _grpTimeoutOverrides.Controls.Add(_lblCommandTimeoutSource);
+            _grpTimeoutOverrides.Controls.Add(_chkOverrideConnectionTimeout);
+            _grpTimeoutOverrides.Controls.Add(_numConnectionTimeoutOverride);
+            _grpTimeoutOverrides.Controls.Add(_lblConnectionTimeoutSource);
+            tab.Controls.Add(_grpTimeoutOverrides);
+            yPos += _grpTimeoutOverrides.Height + 16;
 
             // History Retention group
             _grpHistoryRetention.Text = "History Retention (Per-Job Overrides)";
@@ -1020,16 +1282,21 @@ namespace SSH_Helper
             {
                 if (_rbPreset.Checked)
                 {
-                    PopulateTargetCombo();
-                    UpdateFolderExecutionState();
+                    UpdateTargetModeUi();
                 }
             };
             _rbFolder.CheckedChanged += (_, _) =>
             {
                 if (_rbFolder.Checked)
                 {
-                    PopulateTargetCombo();
-                    UpdateFolderExecutionState();
+                    UpdateTargetModeUi();
+                }
+            };
+            _rbCustomPreset.CheckedChanged += (_, _) =>
+            {
+                if (_rbCustomPreset.Checked)
+                {
+                    UpdateTargetModeUi();
                 }
             };
 
@@ -1039,17 +1306,22 @@ namespace SSH_Helper
                 var index = _cboScheduleType.SelectedIndex;
                 _panelCron.Visible = index == 1;    // Recurring (Cron)
                 _panelOneTime.Visible = index == 2; // One-Time
-                RefreshCronPanelLayout();
+                UpdateGeneralTabLayout();
             };
 
             _panelCron.SizeChanged += (_, _) => RefreshCronPanelLayout();
             _cronBuilder.SizeChanged += (_, _) => RefreshCronPanelLayout();
-            _tabControl.TabPages[0].Resize += (_, _) => RefreshCronPanelLayout();
+            _tabControl.TabPages[GeneralTabIndex].Resize += (_, _) => UpdateGeneralTabLayout();
 
             // Credential mode radio buttons
             _rbInheritFromApp.CheckedChanged += (_, _) => UpdateCredentialPanels();
             _rbStored.CheckedChanged += (_, _) => UpdateCredentialPanels();
             _rbPerHostColumn.CheckedChanged += (_, _) => UpdateCredentialPanels();
+            _cboTarget.SelectedIndexChanged += (_, _) => UpdateTimeoutOverrideGuidance();
+
+            // Timeout override toggles
+            _chkOverrideCommandTimeout.CheckedChanged += (_, _) => UpdateTimeoutOverrideState();
+            _chkOverrideConnectionTimeout.CheckedChanged += (_, _) => UpdateTimeoutOverrideState();
 
             // History retention overrides
             _chkOverrideMaxRuns.CheckedChanged += (_, _) =>
@@ -1111,6 +1383,78 @@ namespace SSH_Helper
             _lblStoredCredNote.Text = SchedulerJobIntegrityUtilities.FormatStoredCredentialNote(_hasStoredPassword);
         }
 
+        private void UpdateTimeoutOverrideState()
+        {
+            _numCommandTimeoutOverride.Enabled = _chkOverrideCommandTimeout.Checked;
+            _numConnectionTimeoutOverride.Enabled = _chkOverrideConnectionTimeout.Checked;
+
+            if (_chkOverrideCommandTimeout.Checked && !_hasInitializedCommandTimeoutOverrideValue)
+            {
+                _numCommandTimeoutOverride.Value = ClampNumericValue(
+                    _numCommandTimeoutOverride,
+                    GetInheritedCommandTimeoutInfo().TimeoutSeconds);
+                _hasInitializedCommandTimeoutOverrideValue = true;
+            }
+
+            if (_chkOverrideConnectionTimeout.Checked && !_hasInitializedConnectionTimeoutOverrideValue)
+            {
+                _numConnectionTimeoutOverride.Value = ClampNumericValue(
+                    _numConnectionTimeoutOverride,
+                    _presetManager.GetCurrentConfiguration().ConnectionTimeout);
+                _hasInitializedConnectionTimeoutOverrideValue = true;
+            }
+
+            UpdateTimeoutOverrideGuidance();
+        }
+
+        private void UpdateTimeoutOverrideGuidance()
+        {
+            var (commandSource, commandTimeoutSeconds) = GetInheritedCommandTimeoutInfo();
+            _lblCommandTimeoutSource.Text = _chkOverrideCommandTimeout.Checked
+                ? "Using per-job command timeout override."
+                : $"Inherited: {commandSource} ({commandTimeoutSeconds} sec)";
+
+            var connectionTimeoutSeconds = _presetManager.GetCurrentConfiguration().ConnectionTimeout;
+            _lblConnectionTimeoutSource.Text = _chkOverrideConnectionTimeout.Checked
+                ? "Using per-job connection timeout override."
+                : $"Inherited: app connection timeout ({connectionTimeoutSeconds} sec)";
+        }
+
+        private (string SourceLabel, int TimeoutSeconds) GetInheritedCommandTimeoutInfo()
+        {
+            var config = _presetManager.GetCurrentConfiguration();
+            if (GetSelectedTargetType() == JobTargetType.CustomPreset)
+            {
+                return ("app default command timeout", config.Timeout);
+            }
+
+            var targetName = _cboTarget.SelectedItem?.ToString();
+            if (GetSelectedTargetType() == JobTargetType.Preset &&
+                !string.IsNullOrWhiteSpace(targetName) &&
+                _presetManager.Get(targetName)?.Timeout is int presetTimeout)
+            {
+                return ($"preset '{targetName}' timeout", presetTimeout);
+            }
+
+            return ("app default command timeout", config.Timeout);
+        }
+
+        private static decimal ClampNumericValue(NumericUpDown control, int value)
+        {
+            var decimalValue = Convert.ToDecimal(value);
+            if (decimalValue < control.Minimum)
+            {
+                return control.Minimum;
+            }
+
+            if (decimalValue > control.Maximum)
+            {
+                return control.Maximum;
+            }
+
+            return decimalValue;
+        }
+
         #endregion
 
         #region Prepopulate
@@ -1123,10 +1467,13 @@ namespace SSH_Helper
             // Target type
             _rbPreset.Checked = _editingJob.TargetType == JobTargetType.Preset;
             _rbFolder.Checked = _editingJob.TargetType == JobTargetType.Folder;
-            PopulateTargetCombo();
+            _rbCustomPreset.Checked = _editingJob.TargetType == JobTargetType.CustomPreset;
+            _txtCustomPresetCommands.Text = _editingJob.CustomPresetCommands;
+            UpdateTargetModeUi();
 
             // Select target in combo
-            if (!string.IsNullOrEmpty(_editingJob.TargetName))
+            if (_editingJob.TargetType != JobTargetType.CustomPreset &&
+                !string.IsNullOrEmpty(_editingJob.TargetName))
             {
                 var idx = _cboTarget.Items.IndexOf(_editingJob.TargetName);
                 if (idx >= 0)
@@ -1175,6 +1522,35 @@ namespace SSH_Helper
             _chkStopOnError.Checked = _editingJob.StopOnError;
             UpdateFolderExecutionState();
 
+            // Advanced - Timeout overrides
+            if (_editingJob.CommandTimeoutOverrideSeconds.HasValue)
+            {
+                _hasInitializedCommandTimeoutOverrideValue = true;
+                _numCommandTimeoutOverride.Value = ClampNumericValue(
+                    _numCommandTimeoutOverride,
+                    _editingJob.CommandTimeoutOverrideSeconds.Value);
+                _chkOverrideCommandTimeout.Checked = true;
+            }
+            else
+            {
+                _hasInitializedCommandTimeoutOverrideValue = false;
+                _chkOverrideCommandTimeout.Checked = false;
+            }
+
+            if (_editingJob.ConnectionTimeoutOverrideSeconds.HasValue)
+            {
+                _hasInitializedConnectionTimeoutOverrideValue = true;
+                _numConnectionTimeoutOverride.Value = ClampNumericValue(
+                    _numConnectionTimeoutOverride,
+                    _editingJob.ConnectionTimeoutOverrideSeconds.Value);
+                _chkOverrideConnectionTimeout.Checked = true;
+            }
+            else
+            {
+                _hasInitializedConnectionTimeoutOverrideValue = false;
+                _chkOverrideConnectionTimeout.Checked = false;
+            }
+
             // Advanced - History overrides
             if (_editingJob.MaxHistoryRuns.HasValue)
             {
@@ -1189,6 +1565,7 @@ namespace SSH_Helper
                 _numRetentionDays.Enabled = true;
             }
 
+            UpdateTimeoutOverrideState();
             RefreshCronPanelLayout();
         }
 
@@ -1511,7 +1888,11 @@ namespace SSH_Helper
         {
             // Extract current form values
             var name = _txtName.Text;
-            var targetName = _cboTarget.SelectedItem?.ToString();
+            var targetType = GetSelectedTargetType();
+            var targetName = targetType == JobTargetType.CustomPreset
+                ? null
+                : _cboTarget.SelectedItem?.ToString();
+            var customPresetCommands = _txtCustomPresetCommands.Text;
             var scheduleType = GetSelectedScheduleType();
             var cronExpression = scheduleType == ScheduleType.Recurring
                 ? _cronBuilder.CronExpression : null;
@@ -1524,11 +1905,18 @@ namespace SSH_Helper
                 ? _txtUsername.Text : null;
             var storedPassword = credentialMode == CredentialMode.Stored
                 ? _txtPassword.Text : string.Empty;
+            var commandTimeoutOverrideSeconds = _chkOverrideCommandTimeout.Checked
+                ? (int)_numCommandTimeoutOverride.Value
+                : (int?)null;
+            var connectionTimeoutOverrideSeconds = _chkOverrideConnectionTimeout.Checked
+                ? (int)_numConnectionTimeoutOverride.Value
+                : (int?)null;
 
             // Delegate ALL validation to JobEditorValidator
             var error = JobEditorValidator.ValidateAll(
                 name, targetName, scheduleType, cronExpression,
-                oneTimeUtc, hosts, hostColumns, credentialMode, storedUsername);
+                oneTimeUtc, hosts, hostColumns, credentialMode, storedUsername, targetType, customPresetCommands,
+                commandTimeoutOverrideSeconds, connectionTimeoutOverrideSeconds);
 
             if (error != null)
             {
@@ -1544,14 +1932,20 @@ namespace SSH_Helper
 
             // Populate Result from all controls
             _editingJob.Name = name!.Trim();
-            _editingJob.TargetType = _rbFolder.Checked ? JobTargetType.Folder : JobTargetType.Preset;
-            _editingJob.TargetName = targetName!;
+            _editingJob.TargetType = targetType;
+            _editingJob.TargetName = targetType == JobTargetType.CustomPreset
+                ? string.Empty
+                : targetName!;
+            _editingJob.CustomPresetCommands = targetType == JobTargetType.CustomPreset
+                ? customPresetCommands
+                : string.Empty;
 
             // Compute TargetContentHash from preset content
             if (_editingJob.TargetType == JobTargetType.Preset &&
                 _presetManager.Presets.TryGetValue(targetName!, out var presetInfo))
             {
                 _editingJob.TargetContentHash = ContentHasher.ComputeHash(presetInfo.Commands);
+                _editingJob.FolderPresetHashes = null;
             }
             else if (_editingJob.TargetType == JobTargetType.Folder)
             {
@@ -1564,6 +1958,11 @@ namespace SSH_Helper
                     }
                 }
                 _editingJob.TargetContentHash = string.Empty;
+            }
+            else
+            {
+                _editingJob.TargetContentHash = string.Empty;
+                _editingJob.FolderPresetHashes = null;
             }
 
             // Schedule
@@ -1583,6 +1982,8 @@ namespace SSH_Helper
                 ? FolderExecutionMode.Parallel
                 : FolderExecutionMode.Sequential;
             _editingJob.StopOnError = _chkStopOnError.Checked;
+            _editingJob.CommandTimeoutOverrideSeconds = commandTimeoutOverrideSeconds;
+            _editingJob.ConnectionTimeoutOverrideSeconds = connectionTimeoutOverrideSeconds;
             _editingJob.MaxHistoryRuns = _chkOverrideMaxRuns.Checked
                 ? (int)_numMaxRuns.Value : null;
             _editingJob.HistoryRetentionDays = _chkOverrideRetention.Checked
@@ -1606,6 +2007,8 @@ namespace SSH_Helper
             if (disposing)
             {
                 _cronBuilder.Dispose();
+                _customPresetValidationService.Dispose();
+                _txtCustomPresetCommands.Dispose();
                 _gridHosts.Dispose();
             }
             base.Dispose(disposing);

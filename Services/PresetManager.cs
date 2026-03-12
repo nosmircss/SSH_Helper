@@ -29,6 +29,14 @@ namespace SSH_Helper.Services
         public IReadOnlyDictionary<string, FolderInfo> Folders => _folders;
 
         /// <summary>
+        /// Returns the current application configuration snapshot backing preset operations.
+        /// </summary>
+        internal AppConfiguration GetCurrentConfiguration()
+        {
+            return _configService.GetCurrent();
+        }
+
+        /// <summary>
         /// Sets or clears the optional JobStorageService used for job reference integrity.
         /// Called after both services are constructed (not via constructor to avoid circular dependencies).
         /// </summary>

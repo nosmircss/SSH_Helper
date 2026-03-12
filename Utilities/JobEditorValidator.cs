@@ -9,6 +9,10 @@ namespace SSH_Helper.Utilities
     internal static class JobEditorValidator
     {
         private const int MaxNameLength = 100;
+        internal const int MinCommandTimeoutOverrideSeconds = 1;
+        internal const int MaxCommandTimeoutOverrideSeconds = 300;
+        internal const int MinConnectionTimeoutOverrideSeconds = 5;
+        internal const int MaxConnectionTimeoutOverrideSeconds = 120;
 
         /// <summary>
         /// Validates the job name field.
@@ -31,6 +35,31 @@ namespace SSH_Helper.Utilities
         {
             if (string.IsNullOrWhiteSpace(targetName))
                 return "Please select a target preset/folder";
+
+            return null;
+        }
+
+        /// <summary>
+        /// Validates the target selection for the selected target type.
+        /// </summary>
+        public static string? ValidateTarget(JobTargetType targetType, string? targetName)
+        {
+            if (targetType == JobTargetType.CustomPreset)
+                return null;
+
+            return ValidateTarget(targetName);
+        }
+
+        /// <summary>
+        /// Validates that a custom preset has non-empty content.
+        /// </summary>
+        public static string? ValidateCustomPresetCommands(JobTargetType targetType, string? customPresetCommands)
+        {
+            if (targetType != JobTargetType.CustomPreset)
+                return null;
+
+            if (string.IsNullOrWhiteSpace(customPresetCommands))
+                return "Custom preset content is required";
 
             return null;
         }
@@ -143,6 +172,30 @@ namespace SSH_Helper.Utilities
         }
 
         /// <summary>
+        /// Validates optional per-job timeout overrides.
+        /// </summary>
+        public static string? ValidateTimeoutOverrides(
+            int? commandTimeoutOverrideSeconds,
+            int? connectionTimeoutOverrideSeconds)
+        {
+            if (commandTimeoutOverrideSeconds.HasValue &&
+                (commandTimeoutOverrideSeconds.Value < MinCommandTimeoutOverrideSeconds ||
+                 commandTimeoutOverrideSeconds.Value > MaxCommandTimeoutOverrideSeconds))
+            {
+                return $"Command timeout override must be between {MinCommandTimeoutOverrideSeconds} and {MaxCommandTimeoutOverrideSeconds} seconds.";
+            }
+
+            if (connectionTimeoutOverrideSeconds.HasValue &&
+                (connectionTimeoutOverrideSeconds.Value < MinConnectionTimeoutOverrideSeconds ||
+                 connectionTimeoutOverrideSeconds.Value > MaxConnectionTimeoutOverrideSeconds))
+            {
+                return $"Connection timeout override must be between {MinConnectionTimeoutOverrideSeconds} and {MaxConnectionTimeoutOverrideSeconds} seconds.";
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// Runs all validators in sequence, returning the first error or null if all valid.
         /// </summary>
         public static string? ValidateAll(
@@ -154,10 +207,16 @@ namespace SSH_Helper.Utilities
             IReadOnlyList<Dictionary<string, string>>? hosts,
             IReadOnlyList<string>? hostColumns,
             CredentialMode credentialMode,
-            string? storedUsername)
+            string? storedUsername,
+            JobTargetType targetType = JobTargetType.Preset,
+            string? customPresetCommands = null,
+            int? commandTimeoutOverrideSeconds = null,
+            int? connectionTimeoutOverrideSeconds = null)
         {
             return ValidateName(name)
-                ?? ValidateTarget(targetName)
+                ?? ValidateTarget(targetType, targetName)
+                ?? ValidateCustomPresetCommands(targetType, customPresetCommands)
+                ?? ValidateTimeoutOverrides(commandTimeoutOverrideSeconds, connectionTimeoutOverrideSeconds)
                 ?? ValidateCron(scheduleType, cronExpression)
                 ?? ValidateOneTimeDate(scheduleType, oneTimeUtc)
                 ?? ValidateHosts(hosts)

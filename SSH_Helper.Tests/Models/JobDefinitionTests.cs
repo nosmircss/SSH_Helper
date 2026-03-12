@@ -79,6 +79,9 @@ public class JobDefinitionTests
         job.OneTimeScheduleUtc.Should().BeNull();
         job.DisabledReason.Should().BeNull();
         job.FolderPresetHashes.Should().BeNull();
+        job.CustomPresetCommands.Should().BeEmpty();
+        job.CommandTimeoutOverrideSeconds.Should().BeNull();
+        job.ConnectionTimeoutOverrideSeconds.Should().BeNull();
     }
 
     [Fact]
@@ -96,24 +99,30 @@ public class JobDefinitionTests
 
         // Verify all properties exist and are settable
         job.Name = "Test Job";
-        job.TargetType = JobTargetType.Folder;
-        job.TargetName = "MyFolder";
+        job.TargetType = JobTargetType.CustomPreset;
+        job.TargetName = string.Empty;
+        job.CustomPresetCommands = "echo custom";
         job.TargetContentHash = "abc123";
         job.FolderPresetHashes = new Dictionary<string, string> { { "preset1", "hash1" } };
         job.CronExpression = "0 * * * *";
         job.OneTimeScheduleUtc = DateTime.UtcNow;
         job.HasDriftWarning = true;
         job.DisabledReason = "maintenance";
+        job.CommandTimeoutOverrideSeconds = 45;
+        job.ConnectionTimeoutOverrideSeconds = 30;
 
         job.Name.Should().Be("Test Job");
-        job.TargetType.Should().Be(JobTargetType.Folder);
-        job.TargetName.Should().Be("MyFolder");
+        job.TargetType.Should().Be(JobTargetType.CustomPreset);
+        job.TargetName.Should().BeEmpty();
+        job.CustomPresetCommands.Should().Be("echo custom");
         job.TargetContentHash.Should().Be("abc123");
         job.FolderPresetHashes.Should().ContainKey("preset1");
         job.CronExpression.Should().Be("0 * * * *");
         job.OneTimeScheduleUtc.Should().NotBeNull();
         job.HasDriftWarning.Should().BeTrue();
         job.DisabledReason.Should().Be("maintenance");
+        job.CommandTimeoutOverrideSeconds.Should().Be(45);
+        job.ConnectionTimeoutOverrideSeconds.Should().Be(30);
     }
 
     [Fact]
@@ -129,5 +138,6 @@ public class JobDefinitionTests
     {
         ((int)JobTargetType.Preset).Should().Be(0);
         ((int)JobTargetType.Folder).Should().Be(1);
+        ((int)JobTargetType.CustomPreset).Should().Be(2);
     }
 }

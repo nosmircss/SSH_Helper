@@ -69,6 +69,30 @@ namespace SSH_Helper.Tests.UI
             JobEditorValidator.ValidateTarget("MyPreset").Should().BeNull();
         }
 
+        [Fact]
+        public void ValidateTarget_CustomPreset_DoesNotRequireNamedTarget()
+        {
+            JobEditorValidator.ValidateTarget(JobTargetType.CustomPreset, null).Should().BeNull();
+        }
+
+        #endregion
+
+        #region ValidateCustomPresetCommands
+
+        [Fact]
+        public void ValidateCustomPresetCommands_CustomPresetBlank_ReturnsError()
+        {
+            JobEditorValidator.ValidateCustomPresetCommands(JobTargetType.CustomPreset, "   ")
+                .Should().Be("Custom preset content is required");
+        }
+
+        [Fact]
+        public void ValidateCustomPresetCommands_CustomPresetValid_ReturnsNull()
+        {
+            JobEditorValidator.ValidateCustomPresetCommands(JobTargetType.CustomPreset, "echo custom")
+                .Should().BeNull();
+        }
+
         #endregion
 
         #region ValidateCron
@@ -257,6 +281,30 @@ namespace SSH_Helper.Tests.UI
 
         #endregion
 
+        #region ValidateTimeoutOverrides
+
+        [Fact]
+        public void ValidateTimeoutOverrides_CommandOutOfRange_ReturnsError()
+        {
+            JobEditorValidator.ValidateTimeoutOverrides(301, null)
+                .Should().Be("Command timeout override must be between 1 and 300 seconds.");
+        }
+
+        [Fact]
+        public void ValidateTimeoutOverrides_ConnectionOutOfRange_ReturnsError()
+        {
+            JobEditorValidator.ValidateTimeoutOverrides(null, 121)
+                .Should().Be("Connection timeout override must be between 5 and 120 seconds.");
+        }
+
+        [Fact]
+        public void ValidateTimeoutOverrides_ValidOverrides_ReturnsNull()
+        {
+            JobEditorValidator.ValidateTimeoutOverrides(45, 12).Should().BeNull();
+        }
+
+        #endregion
+
         #region ValidateAll
 
         [Fact]
@@ -321,6 +369,40 @@ namespace SSH_Helper.Tests.UI
                 hosts, new List<string> { "Host_IP", "username" }, CredentialMode.PerHostColumn, null);
 
             result.Should().Be("Per-host credentials require 'username' and 'password' columns in the Hosts tab.");
+        }
+
+        [Fact]
+        public void ValidateAll_CustomPresetBlankContent_ReturnsContentError()
+        {
+            var hosts = new List<Dictionary<string, string>>
+            {
+                new() { { "Host_IP", "10.0.0.1" } }
+            };
+
+            var result = JobEditorValidator.ValidateAll(
+                "MyJob", null,
+                ScheduleType.None, null, null,
+                hosts, new List<string> { "Host_IP" }, CredentialMode.InheritFromApp, null,
+                JobTargetType.CustomPreset, "  ");
+
+            result.Should().Be("Custom preset content is required");
+        }
+
+        [Fact]
+        public void ValidateAll_InvalidTimeoutOverride_ReturnsTimeoutError()
+        {
+            var hosts = new List<Dictionary<string, string>>
+            {
+                new() { { "Host_IP", "10.0.0.1" } }
+            };
+
+            var result = JobEditorValidator.ValidateAll(
+                "MyJob", "MyPreset",
+                ScheduleType.None, null, null,
+                hosts, new List<string> { "Host_IP" }, CredentialMode.InheritFromApp, null,
+                commandTimeoutOverrideSeconds: 301);
+
+            result.Should().Be("Command timeout override must be between 1 and 300 seconds.");
         }
 
         #endregion

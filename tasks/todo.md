@@ -1,5 +1,88 @@
 # TODO
 
+## 62. Fix Scheduler Job Right-Click Selection
+- [x] 62.1 Inspect the `JobListDialog` job-grid right-click and context-menu flow, and confirm the smallest safe hook for row selection before menu open.
+- [x] 62.2 Update the scheduler jobs grid so right-clicking a non-selected job row selects that row before the context menu opens, without changing empty-space behavior.
+- [x] 62.3 Add focused WinForms regression coverage for the right-click selection path and run targeted verification.
+- [x] 62.4 Capture the root cause, fix, and verification notes in the review section below.
+
+### 62 Review
+- Root cause confirmed in `JobListDialog`: the jobs grid kept using the previously selected row for scheduler actions because WinForms `DataGridView` does not automatically change row selection on right-click before opening the attached context menu.
+- Patched `JobListDialog` to handle `_gridJobs.CellMouseDown` on right-click and route clicked-row activation through a shared `SelectJobRowAt(...)` helper, which also keeps the checkbox-toggle path aligned with the same active-row selection logic.
+- Added a focused WinForms regression in `JobListDialogRunNowTests` that starts with one job selected, simulates a right-click on a different row, and asserts the subsequent `Run Now` action uses the clicked job ID instead of the stale selection.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobListDialogRunNowTests"` initially failed because `bin\\Debug\\net8.0-windows\\SSH_Helper.exe` was locked by a running `SSH_Helper` process (PID 163356).
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobListDialogRunNowTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\joblist-rightclick-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\joblist-rightclick-tests\\obj\\` passed (18/18).
+- Verification: `dotnet build .\\SSH_Helper.sln` passed with 0 warnings and 0 errors.
+
+## 61. Inspect Checkbox Toggle Reference Patterns
+- [x] 61.1 Locate the concrete WinForms `DataGridView` checkbox-toggle handlers and event wiring relevant to click-to-toggle behavior.
+- [x] 61.2 Check git history and current worktree for the edit patterns that introduced or changed those handlers.
+- [x] 61.3 Capture concise review notes below and return only the relevant references.
+
+### 61 Review
+- Relevant committed patterns: `Form1` commit `38ca71f` adds a checkbox column plus `CellClick` manual toggle and `CurrentCellDirtyStateChanged`/`CommitEdit` immediate-commit handling; `ImportPreviewDialog` commit `4a0e585` uses `EditOnEnter` with `CurrentCellDirtyStateChanged`/`CommitEdit` so checkbox clicks take effect immediately.
+- Relevant current worktree pattern: `JobListDialog` keeps the `Enabled` checkbox column read-only and adds `CellContentClick` to route the click into a shared `ToggleJobEnabled(...)` helper that saves and refreshes the grid; the local matching test invokes `OnJobGridCellContentClick(...)` directly.
+- Source inspection only; no production code behavior was changed for this task.
+
+## 60. Inspect DataGridView Checkbox Test Simulation
+- [x] 60.1 Search the test project for `DataGridView` checkbox interactions, click simulation, and commit/edit handling.
+- [x] 60.2 Classify each relevant test path as true click simulation, edit/commit flow simulation, or direct checkbox cell value assignment.
+- [x] 60.3 Capture concise file/method references and findings in the review section below.
+
+### 60 Review
+- No test in `SSH_Helper.Tests` performs a true `DataGridView` checkbox click simulation, and no test drives the checkbox edit/commit pipeline (`CommitEdit`, `CurrentCellDirtyStateChanged`, `BeginEdit`, `EndEdit`, `NotifyCurrentCellDirty`, and editing-control hooks were not found in the test project).
+- `SSH_Helper.Tests/UI/JobListDialogRunNowTests.cs` `EnabledCheckboxClick_TogglesJobAndRefreshesGrid()` exercises the checkbox-toggle path by directly invoking `OnJobGridCellContentClick(...)` with a `DataGridViewCellEventArgs`; this is handler-path simulation, not a real UI click and not an edit/commit-flow simulation.
+- `SSH_Helper.Tests/UI/HostGridUtilitiesTests.cs` `BuildSchedulerCopySnapshot_WhenCheckedRowsExist_UsesOnlyCheckedEligibleRows()` uses a `DataGridViewCheckBoxColumn` but sets checkbox state via direct cell assignment (`Cells[0].Value = true/false`), not by clicking or committing an edit.
+- `SSH_Helper.Tests/UI/HostGridUtilitiesTests.cs` `BuildSnapshot_FromDataGridView_UsesDisplayOrderAndExcludesSelectionColumn()` includes a checkbox column only to verify snapshot/export behavior; it does not simulate checkbox interaction and only assigns text-cell values.
+- Verification: source inspection only; no test execution was required for this task.
+
+## 59. Enable Scheduler Toggle By Checkbox
+- [x] 59.1 Confirm why the Scheduled Jobs `On` checkbox is not clickable and identify the smallest safe edit path in `JobListDialog`.
+- [x] 59.2 Make the `On` checkbox toggle the selected job enabled state through the existing save/refresh flow.
+- [x] 59.3 Add focused WinForms regression coverage for checkbox-driven enable/disable behavior and run verification.
+- [x] 59.4 Capture the fix and verification notes in the review section below.
+
+### 59 Review
+- Root cause confirmed in `JobListDialog`: the `On` column was rendered as a checkbox but nothing listened for checkbox clicks, so the only enable/disable path was the toolbar/context-menu command.
+- Patched `JobListDialog` to handle `CellContentClick` on the `Enabled` column, pin the clicked row as the active selection, and route both checkbox clicks and the toolbar command through a shared `ToggleJobEnabled(...)` helper.
+- Added a focused WinForms regression in `JobListDialogRunNowTests` that invokes the checkbox click handler, then asserts the persisted job state flips to disabled and the refreshed grid still shows the same row selected with the checkbox cleared.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobListDialogRunNowTests"` failed because `bin\\Debug\\net8.0-windows\\SSH_Helper.exe` was locked by a running `SSH_Helper` process (PID 161468).
+- Verification: `dotnet build .\\SSH_Helper.sln` failed for the same locked `bin\\Debug\\net8.0-windows\\SSH_Helper.exe`.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobListDialogRunNowTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\joblist-checkbox-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\joblist-checkbox-tests\\obj\\` passed (17/17).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\joblist-checkbox-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\joblist-checkbox-build\\obj\\` passed with 0 warnings and 0 errors.
+
+## 58. Fix Custom Preset General-Tab Overlap
+- [x] 58.1 Inspect the `JobEditorDialog` general-tab layout path for the custom preset target and confirm why the help text overlaps the schedule controls.
+- [x] 58.2 Patch the general-tab layout so target-mode changes and tab resize reflow the schedule row and schedule panels below the custom preset help text.
+- [x] 58.3 Add focused WinForms regression coverage for the custom preset help-text spacing and run verification.
+- [x] 58.4 Capture the fix and verification notes in the review section below.
+
+### 58 Review
+- The overlap came from the general tab still reserving the original single-row target height (`yPos += 32`) after swapping in the multi-line custom preset help label, so the schedule row stayed fixed at the old location and rendered underneath the label.
+- Patched `JobEditorDialog` to keep the schedule label as a field and recalculate the general-tab vertical layout whenever the target type changes, the schedule mode changes, or the general tab resizes. The custom preset help label now measures its wrapped height and the schedule row/panels are repositioned beneath it.
+- Added a focused WinForms regression in `JobEditorDialogLayoutTests` that opens the dialog, switches to `Custom Preset`, and asserts the help label ends above both the schedule label and schedule combo.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobEditorDialogLayoutTests|FullyQualifiedName~JobEditorDialogCustomPresetTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\custom-preset-layout-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\custom-preset-layout-tests\\obj\\` passed (5/5).
+- Verification: `dotnet build .\\SSH_Helper.sln` failed because `bin\\Debug\\net8.0-windows\\SSH_Helper.exe` was locked by a running `SSH_Helper` process (PID 138632).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\custom-preset-layout-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\custom-preset-layout-build\\obj\\` passed with 0 warnings and 0 errors.
+
+## 57. Add Scheduler-Local Custom Presets
+- [x] 57.1 Add the OpenSpec change artifacts for scheduler-local custom presets and validate the new requirement delta.
+- [x] 57.2 Extend scheduler job models, persistence, target display, and execution to support a custom preset job target with job-owned content.
+- [x] 57.3 Add `Custom Preset` authoring and validation to `JobEditorDialog` using the existing script editor stack.
+- [x] 57.4 Add focused automated coverage for custom preset model, storage/export, editor, and execution behavior.
+- [x] 57.5 Run verification and capture the review below.
+
+### 57 Review
+- Added OpenSpec change `add-scheduler-custom-presets` with proposal, checklist, and `job-scheduler` delta covering save, execution, and import/export behavior for scheduler-local custom presets.
+- Extended `JobDefinition` with `JobTargetType.CustomPreset` and normalized `CustomPresetCommands` storage so scheduler jobs can persist their own command or YAML content without referencing the shared preset tree.
+- Updated scheduler execution to materialize custom job content as a transient `PresetInfo`, preserving the existing command-vs-script detection, runtime validation, cancellation, and interactive-script preflight while using the application default timeout for custom jobs.
+- Added a dedicated Content tab to `JobEditorDialog` with the existing Scintilla editor stack, `Custom Preset` target selection, blank-content validation, and scheduler-local authoring hints while leaving preset/folder flows intact.
+- Updated scheduler list/import flows so custom preset jobs display `[Custom] Scheduler-local content` and are never treated as missing preset or folder targets.
+- Added focused regression coverage for model defaults, storage/export round-trip, import-state utilities, custom preset validation, custom preset dialog save/reload behavior, timeout fallback, transient preset resolution, and custom-script cancellation on the real scheduler execution path.
+- Verification: `openspec validate add-scheduler-custom-presets --strict --no-interactive` passed.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobDefinitionTests|FullyQualifiedName~SchedulerJobIntegrityUtilitiesTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~JobEditorDialogCustomPresetTests|FullyQualifiedName~JobStorageServiceTests|FullyQualifiedName~JobExportServiceTests|FullyQualifiedName~JobExecutionServiceTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\custom-preset-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\custom-preset-tests\\obj\\` passed (159/159).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\custom-preset-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\custom-preset-build\\obj\\` passed with 0 warnings and 0 errors.
+
 ## 56. Fix Shell Echo Duplicate-Character Artifact
 - [x] 56.1 Trace the `df -> ddf` shell echo artifact through `SshShellSession` and confirm whether the duplicate character comes from incremental transcript rendering rather than duplicate command sends.
 - [x] 56.2 Patch the live shell-output path so unfinished editable lines are buffered until they are stable, allowing backspaces/carriage returns to resolve before appending to the UI/history stream.
@@ -822,3 +905,22 @@
 - Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Cancel|FullyQualifiedName~Cancelled|FullyQualifiedName~SshExecutionServiceCancellationTests|FullyQualifiedName~ExecutionDetailsDialogTests|FullyQualifiedName~JobListDialogRunNowTests|FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~HistoryStorageServiceTests|FullyQualifiedName~ConfigurationServiceExecutionDetailsTests|FullyQualifiedName~SchedulerNotificationTests|FullyQualifiedName~ExecutionPipelineModelTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\cancel-tests-full\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\cancel-tests-full\\obj\\` passed (116/116).
 - Verification: `openspec validate update-cancellation-outcomes --strict --no-interactive` passed.
 - Manual interactive smoke testing was not run from this CLI environment.
+
+## 31. Implement update-scheduler-job-timeouts
+- [x] 31.1 Add the OpenSpec change artifacts for scheduler per-job timeout overrides and mirror the checklist into this task tracker.
+- [x] 31.2 Extend scheduler job models, persistence, and import/export round-trip support for nullable command and connection timeout overrides.
+- [x] 31.3 Add scheduler job-editor timeout override controls, inherited timeout guidance, prepopulation, and save/reset behavior.
+- [x] 31.4 Extend validation and scheduler timeout resolution precedence for preset, folder, and custom-preset jobs.
+- [x] 31.5 Add focused automated coverage for model defaults, storage/export round-trip, dialog behavior, validation, and timeout precedence.
+- [x] 31.6 Run focused verification, update the OpenSpec checklist, and capture the outcome below.
+
+### 31 Review
+- Added OpenSpec change `update-scheduler-job-timeouts` with proposal, checklist, and `job-scheduler` delta covering optional per-job command and connection timeout overrides for scheduled jobs.
+- Extended `JobDefinition` with nullable `CommandTimeoutOverrideSeconds` and `ConnectionTimeoutOverrideSeconds`, and confirmed both `jobs.json` persistence plus `.sshjobs` import/export round-trip preserve the new fields without breaking older payloads.
+- Updated `JobExecutionService.BuildTimeouts(...)` so job overrides win when present, while unset values keep the existing inherited behavior: preset timeout or app default for command timeout, and app default for connection timeout.
+- Added a new `Timeouts (Per-Job Overrides)` section to `JobEditorDialog` with inherited-value guidance, first-enable seeding from the current effective timeout, prepopulation for existing jobs, and clear-on-save behavior when overrides are unchecked.
+- Extended `JobEditorValidator` with explicit timeout override bounds validation and covered the new paths with focused model, service, export/storage, validation, and WinForms dialog tests.
+- Verification: `dotnet build .\\SSH_Helper.sln -p:BaseOutputPath=artifacts\\scheduler-timeouts-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-timeouts-build\\obj\\` passed with 0 warnings and 0 errors.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~JobStorageServiceTests|FullyQualifiedName~JobExportServiceTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~JobDefinitionTests|FullyQualifiedName~JobEditorDialogTimeoutOverrideTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\scheduler-timeouts-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-timeouts-tests\\obj\\` passed (163/163).
+- Verification: `openspec validate update-scheduler-job-timeouts --strict --no-interactive` passed.
+- Manual interactive verification was not run from this CLI environment; the OpenSpec manual verification item remains unchecked.

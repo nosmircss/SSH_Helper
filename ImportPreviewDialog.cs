@@ -212,11 +212,12 @@ namespace SSH_Helper
                 }
 
                 // Target column
-                var target = job.TargetName;
-                if (job.TargetType == JobTargetType.Folder)
+                var target = job.TargetType switch
                 {
-                    target = $"[Folder] {job.TargetName}";
-                }
+                    JobTargetType.Folder => $"[Folder] {job.TargetName}",
+                    JobTargetType.CustomPreset => "[Custom] Scheduler-local content",
+                    _ => job.TargetName
+                };
 
                 // Status column
                 string statusText;

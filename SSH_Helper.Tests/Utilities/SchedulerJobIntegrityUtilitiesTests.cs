@@ -40,6 +40,22 @@ public class SchedulerJobIntegrityUtilitiesTests
     }
 
     [Fact]
+    public void ApplyMissingTargetImportState_CustomPresetJob_UsesCustomReason()
+    {
+        var job = new JobDefinition
+        {
+            TargetType = JobTargetType.CustomPreset,
+            IsEnabled = true,
+            CustomPresetCommands = "echo custom"
+        };
+
+        SchedulerJobIntegrityUtilities.ApplyMissingTargetImportState(job);
+
+        job.IsEnabled.Should().BeFalse();
+        job.DisabledReason.Should().Be("Missing custom preset content");
+    }
+
+    [Fact]
     public void FormatStoredCredentialNote_WithStoredPassword_ReturnsKeepSecretMessage()
     {
         SchedulerJobIntegrityUtilities.FormatStoredCredentialNote(true)

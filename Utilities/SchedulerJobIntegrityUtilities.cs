@@ -9,9 +9,12 @@ namespace SSH_Helper.Utilities
             ArgumentNullException.ThrowIfNull(job);
 
             job.IsEnabled = false;
-            job.DisabledReason = job.TargetType == JobTargetType.Folder
-                ? $"Missing folder target '{job.TargetName}'"
-                : $"Missing preset target '{job.TargetName}'";
+            job.DisabledReason = job.TargetType switch
+            {
+                JobTargetType.Folder => $"Missing folder target '{job.TargetName}'",
+                JobTargetType.CustomPreset => "Missing custom preset content",
+                _ => $"Missing preset target '{job.TargetName}'"
+            };
         }
 
         public static string FormatStoredCredentialNote(bool hasStoredPassword)

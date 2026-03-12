@@ -179,7 +179,7 @@ namespace SSH_Helper.UI
             yPos += _lblPresets.Height + 4;
 
             _presetPanel.Location = new Point(8, yPos);
-            _presetPanel.Size = new Size(Width - 24, 32);
+            _presetPanel.Size = new Size(Width - Padding.Horizontal, 32);
             _presetPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _presetPanel.WrapContents = true;
             _presetPanel.AutoSize = false;
@@ -218,7 +218,7 @@ namespace SSH_Helper.UI
             yPos += _lblFields.Height + 4;
 
             _dropdownPanel.Location = new Point(8, yPos);
-            _dropdownPanel.Size = new Size(Width - 24, 52);
+            _dropdownPanel.Size = new Size(Width - Padding.Horizontal, 52);
             _dropdownPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _dropdownPanel.ColumnCount = 5;
             _dropdownPanel.RowCount = 2;
@@ -284,7 +284,7 @@ namespace SSH_Helper.UI
             yPos += _lblExpression.Height + 4;
 
             _txtRawExpression.Location = new Point(8, yPos);
-            _txtRawExpression.Size = new Size(Width - 24, 23);
+            _txtRawExpression.Size = new Size(Width - Padding.Horizontal, 23);
             _txtRawExpression.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _txtRawExpression.Font = new Font("Consolas", 10f);
             _txtRawExpression.PlaceholderText = "e.g. */5 * * * *";
@@ -295,7 +295,7 @@ namespace SSH_Helper.UI
         private void BuildDescriptionLabel(ref int yPos)
         {
             _lblDescription.Location = new Point(8, yPos);
-            _lblDescription.Size = new Size(Width - 24, 20);
+            _lblDescription.Size = new Size(Width - Padding.Horizontal, 20);
             _lblDescription.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _lblDescription.AutoEllipsis = true;
             _lblDescription.ForeColor = Color.FromArgb(108, 117, 125);
@@ -307,7 +307,7 @@ namespace SSH_Helper.UI
         private void BuildNextRunLabel(ref int yPos)
         {
             _lblNextRun.Location = new Point(8, yPos);
-            _lblNextRun.Size = new Size(Width - 24, 20);
+            _lblNextRun.Size = new Size(Width - Padding.Horizontal, 20);
             _lblNextRun.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _lblNextRun.AutoEllipsis = true;
             _lblNextRun.ForeColor = Color.FromArgb(108, 117, 125);
@@ -319,7 +319,7 @@ namespace SSH_Helper.UI
         private void BuildValidationLabel(ref int yPos)
         {
             _lblValidation.Location = new Point(8, yPos);
-            _lblValidation.Size = new Size(Width - 24, 20);
+            _lblValidation.Size = new Size(Width - Padding.Horizontal, 20);
             _lblValidation.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _lblValidation.AutoEllipsis = true;
             _lblValidation.ForeColor = Color.Red;

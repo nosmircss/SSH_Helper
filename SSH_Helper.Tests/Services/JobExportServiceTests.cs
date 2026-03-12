@@ -109,6 +109,23 @@ namespace SSH_Helper.Tests.Services
             imported[0].CronExpression.Should().Be("0 * * * *");
         }
 
+        [Fact]
+        public void ExportToString_ImportFromString_RoundTripsCustomPresetJob()
+        {
+            var job = CreateTestJob("CustomJob");
+            job.TargetType = JobTargetType.CustomPreset;
+            job.TargetName = string.Empty;
+            job.CustomPresetCommands = "echo custom";
+
+            var encoded = _service.ExportToString(new List<JobDefinition> { job });
+            var imported = _service.ImportFromString(encoded);
+
+            imported.Should().ContainSingle();
+            imported[0].TargetType.Should().Be(JobTargetType.CustomPreset);
+            imported[0].TargetName.Should().BeEmpty();
+            imported[0].CustomPresetCommands.Should().Be("echo custom");
+        }
+
         #endregion
 
         #region Credential Stripping
@@ -186,6 +203,8 @@ namespace SSH_Helper.Tests.Services
             job.FolderExecutionMode = FolderExecutionMode.Parallel;
             job.MaxHistoryRuns = 50;
             job.HistoryRetentionDays = 90;
+            job.CommandTimeoutOverrideSeconds = 45;
+            job.ConnectionTimeoutOverrideSeconds = 12;
             job.IsEnabled = false;
             job.DisabledReason = "test reason";
             var jobs = new List<JobDefinition> { job };
@@ -200,6 +219,8 @@ namespace SSH_Helper.Tests.Services
             result.FolderExecutionMode.Should().Be(FolderExecutionMode.Parallel);
             result.MaxHistoryRuns.Should().Be(50);
             result.HistoryRetentionDays.Should().Be(90);
+            result.CommandTimeoutOverrideSeconds.Should().Be(45);
+            result.ConnectionTimeoutOverrideSeconds.Should().Be(12);
             result.IsEnabled.Should().BeFalse();
             result.DisabledReason.Should().Be("test reason");
             result.TargetName.Should().Be("MyPreset");

@@ -268,6 +268,48 @@ namespace SSH_Helper.Tests.Services
             eventFired.Should().BeTrue();
         }
 
+        [Fact]
+        public void SaveAndLoad_CustomPresetJob_RoundTripsCustomPresetContent()
+        {
+            var service = CreateService();
+            service.Load();
+
+            var job = CreateTestJob("Custom Job");
+            job.TargetType = JobTargetType.CustomPreset;
+            job.TargetName = string.Empty;
+            job.CustomPresetCommands = "---\nsteps:\n  - wait: 1\n";
+
+            service.Save(job);
+
+            var reloaded = CreateService();
+            reloaded.Load();
+
+            reloaded.Jobs.Should().ContainKey(job.Id);
+            reloaded.Jobs[job.Id].TargetType.Should().Be(JobTargetType.CustomPreset);
+            reloaded.Jobs[job.Id].TargetName.Should().BeEmpty();
+            reloaded.Jobs[job.Id].CustomPresetCommands.Should().Be("---\r\nsteps:\r\n  - wait: 1\r\n");
+        }
+
+        [Fact]
+        public void SaveAndLoad_TimeoutOverrides_RoundTrip()
+        {
+            var service = CreateService();
+            service.Load();
+
+            var job = CreateTestJob("Timeout Override Job");
+            job.CommandTimeoutOverrideSeconds = 45;
+            job.ConnectionTimeoutOverrideSeconds = 12;
+
+            service.Save(job);
+
+            var reloaded = CreateService();
+            reloaded.Load();
+
+            reloaded.Jobs.Should().ContainKey(job.Id);
+            reloaded.Jobs[job.Id].CommandTimeoutOverrideSeconds.Should().Be(45);
+            reloaded.Jobs[job.Id].ConnectionTimeoutOverrideSeconds.Should().Be(12);
+        }
+
         #endregion
 
         #region Delete

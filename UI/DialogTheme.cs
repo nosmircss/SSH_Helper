@@ -23,6 +23,7 @@ namespace SSH_Helper.UI
         public static readonly Color DarkText = Color.FromArgb(204, 204, 204);
         public static readonly Color DarkSecondaryText = Color.FromArgb(128, 128, 128);
         public static readonly Color DarkBorder = Color.FromArgb(48, 48, 48);
+        public static readonly Color DarkGroupBorder = Color.FromArgb(65, 65, 65);
         public static readonly Color DarkInput = Color.FromArgb(60, 60, 60);
         public static readonly Color DarkAccent = Color.FromArgb(0, 120, 212);
         public static readonly Color GridLightSelection = Color.FromArgb(13, 110, 253);
@@ -83,6 +84,40 @@ namespace SSH_Helper.UI
                     rtb.BackColor = input;
                     rtb.ForeColor = text;
                     rtb.BorderStyle = BorderStyle.FixedSingle;
+                    break;
+
+                case GroupBox grp:
+                    grp.BackColor = bg;
+                    grp.ForeColor = text;
+                    if (darkMode)
+                    {
+                        // Visual styles ignore ForeColor — owner-draw the text and border
+                        grp.Paint += (s, e) =>
+                        {
+                            var g = e.Graphics;
+                            var textSize = TextRenderer.MeasureText(grp.Text, grp.Font);
+                            var textLeft = 8;
+                            var borderTop = textSize.Height / 2;
+
+                            // Clear the default rendering
+                            g.Clear(grp.BackColor);
+
+                            // Draw the border (rounded-ish rect with gap for text)
+                            using var pen = new Pen(DarkGroupBorder);
+                            var rect = new Rectangle(0, borderTop, grp.Width - 1, grp.Height - borderTop - 1);
+
+                            // Top line (with gap for text)
+                            g.DrawLine(pen, rect.Left, rect.Top, textLeft - 2, rect.Top);
+                            g.DrawLine(pen, textLeft + textSize.Width + 2, rect.Top, rect.Right, rect.Top);
+                            // Other three sides
+                            g.DrawLine(pen, rect.Right, rect.Top, rect.Right, rect.Bottom);
+                            g.DrawLine(pen, rect.Right, rect.Bottom, rect.Left, rect.Bottom);
+                            g.DrawLine(pen, rect.Left, rect.Bottom, rect.Left, rect.Top);
+
+                            // Draw the text
+                            TextRenderer.DrawText(g, grp.Text, grp.Font, new Point(textLeft, 0), text);
+                        };
+                    }
                     break;
 
                 case CheckBox chk:

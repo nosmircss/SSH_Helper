@@ -80,9 +80,9 @@ public class JobExecutionServiceTests : IDisposable
             });
     }
 
-    private void SavePreset(string name, string commands = "show version")
+    private void SavePreset(string name, string commands = "show version", int? timeout = null)
     {
-        _presetManager.Save(name, new PresetInfo { Commands = commands });
+        _presetManager.Save(name, new PresetInfo { Commands = commands, Timeout = timeout });
     }
 
     private static string CreateLongWaitScript(int seconds = 10)
@@ -118,6 +118,13 @@ public class JobExecutionServiceTests : IDisposable
         var method = instance.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
         method.Should().NotBeNull($"method '{methodName}' should exist on {instance.GetType().Name}");
         method!.Invoke(instance, args ?? Array.Empty<object?>());
+    }
+
+    private static T InvokePrivate<T>(object instance, string methodName, params object?[]? args)
+    {
+        var method = instance.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
+        method.Should().NotBeNull($"method '{methodName}' should exist on {instance.GetType().Name}");
+        return (T)method!.Invoke(instance, args ?? Array.Empty<object?>())!;
     }
 
     private static T GetPrivateField<T>(object instance, string fieldName) where T : class
@@ -249,6 +256,109 @@ public class JobExecutionServiceTests : IDisposable
 
         // Assert
         states.Should().Contain(JobExecutionState.Started);
+    }
+
+    [Fact]
+    public void ResolvePresetForExecution_CustomPreset_ReturnsTransientPresetInfo()
+    {
+        var job = CreateTestJob(name: "CustomResolveJob", schedule: ScheduleType.None);
+        job.TargetType = JobTargetType.CustomPreset;
+        job.TargetName = string.Empty;
+        job.CustomPresetCommands = "echo custom";
+
+        using var service = CreateService();
+
+        var preset = InvokePrivate<PresetInfo>(service, "ResolvePresetForExecution", job);
+
+        preset.Commands.Should().Be("echo custom");
+        preset.IsScript.Should().BeFalse();
+    }
+
+    [Fact]
+    public void BuildTimeouts_CustomPreset_UsesApplicationDefaultTimeout()
+    {
+        _configService.Update(c =>
+        {
+            c.Timeout = 123;
+            c.ConnectionTimeout = 44;
+        });
+
+        var job = CreateTestJob(name: "CustomTimeoutJob", schedule: ScheduleType.None);
+        job.TargetType = JobTargetType.CustomPreset;
+        job.TargetName = string.Empty;
+        job.CustomPresetCommands = "echo custom";
+
+        using var service = CreateService();
+
+        var timeouts = InvokePrivate<SshTimeoutOptions>(service, "BuildTimeouts", job);
+
+        timeouts.CommandTimeout.Should().Be(TimeSpan.FromSeconds(123));
+        timeouts.ConnectionTimeout.Should().Be(TimeSpan.FromSeconds(44));
+    }
+
+    [Fact]
+    public void BuildTimeouts_PresetJob_UsesPerJobOverridesWhenPresent()
+    {
+        _configService.Update(c =>
+        {
+            c.Timeout = 10;
+            c.ConnectionTimeout = 30;
+        });
+        SavePreset("TimeoutPreset", timeout: 90);
+
+        var job = CreateTestJob(name: "PresetOverrideJob", schedule: ScheduleType.None, presetName: "TimeoutPreset");
+        job.CommandTimeoutOverrideSeconds = 25;
+        job.ConnectionTimeoutOverrideSeconds = 12;
+
+        using var service = CreateService();
+
+        var timeouts = InvokePrivate<SshTimeoutOptions>(service, "BuildTimeouts", job);
+
+        timeouts.CommandTimeout.Should().Be(TimeSpan.FromSeconds(25));
+        timeouts.ConnectionTimeout.Should().Be(TimeSpan.FromSeconds(12));
+    }
+
+    [Fact]
+    public void BuildTimeouts_PresetJob_UsesPresetTimeoutAndGlobalConnectionWhenOverridesMissing()
+    {
+        _configService.Update(c =>
+        {
+            c.Timeout = 10;
+            c.ConnectionTimeout = 33;
+        });
+        SavePreset("InheritedPreset", timeout: 45);
+
+        var job = CreateTestJob(name: "InheritedPresetJob", schedule: ScheduleType.None, presetName: "InheritedPreset");
+
+        using var service = CreateService();
+
+        var timeouts = InvokePrivate<SshTimeoutOptions>(service, "BuildTimeouts", job);
+
+        timeouts.CommandTimeout.Should().Be(TimeSpan.FromSeconds(45));
+        timeouts.ConnectionTimeout.Should().Be(TimeSpan.FromSeconds(33));
+    }
+
+    [Fact]
+    public void BuildTimeouts_FolderJob_UsesPerJobOverridesWhenPresent()
+    {
+        _configService.Update(c =>
+        {
+            c.Timeout = 77;
+            c.ConnectionTimeout = 40;
+        });
+
+        var job = CreateTestJob(name: "FolderOverrideJob", schedule: ScheduleType.None);
+        job.TargetType = JobTargetType.Folder;
+        job.TargetName = "Network";
+        job.CommandTimeoutOverrideSeconds = 19;
+        job.ConnectionTimeoutOverrideSeconds = 11;
+
+        using var service = CreateService();
+
+        var timeouts = InvokePrivate<SshTimeoutOptions>(service, "BuildTimeouts", job);
+
+        timeouts.CommandTimeout.Should().Be(TimeSpan.FromSeconds(19));
+        timeouts.ConnectionTimeout.Should().Be(TimeSpan.FromSeconds(11));
     }
 
     [Fact]
@@ -488,6 +598,46 @@ public class JobExecutionServiceTests : IDisposable
             name: "RealScheduledCancelJob",
             schedule: ScheduleType.Recurring,
             presetName: "RealScheduledCancelPreset");
+        _jobStorage.Save(job);
+
+        JobRunResult? receivedResult = null;
+        var states = new List<JobExecutionState>();
+
+        using var service = CreateService();
+        service.JobCompleted += (_, e) => receivedResult = e;
+        service.JobStateChanged += (_, e) => states.Add(e.State);
+
+        var concurrencyGate = GetPrivateField<SemaphoreSlim>(service, "_concurrencyGate");
+        concurrencyGate.Wait(0).Should().BeTrue();
+
+        var scheduledTask = InvokePrivateAsync(service, "ExecuteScheduledJobAsync", job);
+        SpinWait.SpinUntil(() => service.IsJobRunning(job.Id), millisecondsTimeout: 2000)
+            .Should().BeTrue();
+
+        await Task.Delay(250);
+
+        service.CancelJob(job.Id).Should().BeTrue();
+        await scheduledTask;
+
+        receivedResult.Should().NotBeNull();
+        receivedResult!.Success.Should().BeFalse();
+        receivedResult.WasCancelled.Should().BeTrue();
+        receivedResult.HostOutputs.Should().ContainSingle();
+        receivedResult.HostOutputs![0].WasCancelled.Should().BeTrue();
+        states.Should().Contain(JobExecutionState.Cancelled);
+        states.Should().NotContain(JobExecutionState.Failed);
+        service.IsJobRunning(job.Id).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CancelJob_ScheduledExecution_CustomPresetScript_PublishesCancelledResult()
+    {
+        SetupDefaultCredentials();
+
+        var job = CreateTestJob(name: "CustomScheduledCancelJob", schedule: ScheduleType.Recurring);
+        job.TargetType = JobTargetType.CustomPreset;
+        job.TargetName = string.Empty;
+        job.CustomPresetCommands = CreateLongWaitScript();
         _jobStorage.Save(job);
 
         JobRunResult? receivedResult = null;

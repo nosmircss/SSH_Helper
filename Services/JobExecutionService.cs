@@ -559,15 +559,17 @@ namespace SSH_Helper.Services
             var config = _configService.GetCurrent();
             var preset = _presetManager.Get(job.TargetName);
 
-            // Use preset's Timeout override if set, otherwise config default
-            var timeout = preset?.Timeout ?? config.Timeout;
-            var connectionTimeout = config.ConnectionTimeout;
+            var commandTimeout = job.CommandTimeoutOverrideSeconds
+                ?? (job.TargetType == JobTargetType.CustomPreset
+                    ? config.Timeout
+                    : preset?.Timeout ?? config.Timeout);
+            var connectionTimeout = job.ConnectionTimeoutOverrideSeconds ?? config.ConnectionTimeout;
 
-            return SshTimeoutOptions.Create(timeout, connectionTimeout);
+            return SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
         }
 
         /// <summary>
-        /// Executes a single preset against the job's hosts.
+        /// Executes a single preset or custom preset against the job's hosts.
         /// </summary>
         private async Task<List<ExecutionResult>> ExecuteSinglePresetAsync(
             JobDefinition job,
@@ -577,10 +579,28 @@ namespace SSH_Helper.Services
             List<HostConnection> hosts,
             SshTimeoutOptions timeouts)
         {
-            var preset = _presetManager.Get(job.TargetName)
-                ?? throw new InvalidOperationException($"Preset '{job.TargetName}' not found");
+            var preset = ResolvePresetForExecution(job);
 
             return await sshService.ExecutePresetAsync(hosts, preset, username, password, timeouts);
+        }
+
+        private PresetInfo ResolvePresetForExecution(JobDefinition job)
+        {
+            if (job.TargetType == JobTargetType.CustomPreset)
+            {
+                if (string.IsNullOrWhiteSpace(job.CustomPresetCommands))
+                {
+                    throw new InvalidOperationException($"Job '{job.Name}' has no custom preset content");
+                }
+
+                return new PresetInfo
+                {
+                    Commands = job.CustomPresetCommands
+                };
+            }
+
+            return _presetManager.Get(job.TargetName)
+                ?? throw new InvalidOperationException($"Preset '{job.TargetName}' not found");
         }
 
         /// <summary>

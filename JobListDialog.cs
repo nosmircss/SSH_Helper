@@ -416,6 +416,8 @@ namespace SSH_Helper
         {
             // Grid events
             _gridJobs.SelectionChanged += OnJobSelectionChanged;
+            _gridJobs.CellMouseDown += OnJobGridCellMouseDown;
+            _gridJobs.CellContentClick += OnJobGridCellContentClick;
             _gridJobs.CellDoubleClick += OnJobGridDoubleClick;
             _gridHistory.SelectionChanged += OnHistorySelectionChanged;
             _gridHistory.CellDoubleClick += OnHistoryGridDoubleClick;
@@ -513,9 +515,12 @@ namespace SSH_Helper
                     var lastResultText = GetLastResultText(job);
 
                     // Target display
-                    var targetText = job.TargetType == JobTargetType.Folder
-                        ? $"[F] {job.TargetName}"
-                        : job.TargetName;
+                    var targetText = job.TargetType switch
+                    {
+                        JobTargetType.Folder => $"[F] {job.TargetName}",
+                        JobTargetType.CustomPreset => "[Custom] Scheduler-local content",
+                        _ => job.TargetName
+                    };
 
                     var rowIndex = _gridJobs.Rows.Add(
                         job.Name,
@@ -598,6 +603,37 @@ namespace SSH_Helper
             }
 
             return false;
+        }
+
+        private string? SelectJobRowAt(int rowIndex, int columnIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= _gridJobs.Rows.Count)
+            {
+                return null;
+            }
+
+            var row = _gridJobs.Rows[rowIndex];
+            if (row.Tag is not string jobId)
+            {
+                return null;
+            }
+
+            var targetColumnIndex = columnIndex >= 0 && columnIndex < row.Cells.Count
+                ? columnIndex
+                : 0;
+            var targetCell = row.Cells[targetColumnIndex];
+
+            if (_gridJobs.CurrentCell == targetCell && row.Selected)
+            {
+                _selectedJobId = jobId;
+                return jobId;
+            }
+
+            _gridJobs.ClearSelection();
+            _gridJobs.CurrentCell = targetCell;
+            row.Selected = true;
+            _selectedJobId = jobId;
+            return jobId;
         }
 
         private void RefreshHistory()
@@ -938,6 +974,29 @@ namespace SSH_Helper
                 EditSelectedJob();
         }
 
+        private void OnJobGridCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Right)
+                return;
+
+            SelectJobRowAt(e.RowIndex, e.ColumnIndex);
+        }
+
+        private void OnJobGridCellContentClick(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+                return;
+
+            if (!string.Equals(_gridJobs.Columns[e.ColumnIndex].Name, "Enabled", StringComparison.Ordinal))
+                return;
+
+            var jobId = SelectJobRowAt(e.RowIndex, e.ColumnIndex);
+            if (jobId == null)
+                return;
+
+            ToggleJobEnabled(jobId);
+        }
+
         private void OnHistoryGridDoubleClick(object? sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex >= 0)
@@ -1039,23 +1098,7 @@ namespace SSH_Helper
             var jobId = GetActiveJobId();
             if (jobId == null) return;
 
-            var job = _jobStorage.Get(jobId);
-            if (job == null) return;
-
-            job.IsEnabled = !job.IsEnabled;
-            if (job.IsEnabled)
-                job.DisabledReason = null;
-
-            try
-            {
-                _jobStorage.Save(job);
-                RefreshJobList();
-            }
-            catch (Exception ex)
-            {
-                DialogTheme.Show(this, $"Failed to update job: {ex.Message}",
-                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            ToggleJobEnabled(jobId);
         }
 
         private void OnDeleteClick(object? sender, EventArgs e)
@@ -1227,6 +1270,28 @@ namespace SSH_Helper
 
         #region Action Helpers
 
+        private void ToggleJobEnabled(string jobId)
+        {
+            var job = _jobStorage.Get(jobId);
+            if (job == null)
+                return;
+
+            job.IsEnabled = !job.IsEnabled;
+            if (job.IsEnabled)
+                job.DisabledReason = null;
+
+            try
+            {
+                _jobStorage.Save(job);
+                RefreshJobList();
+            }
+            catch (Exception ex)
+            {
+                DialogTheme.Show(this, $"Failed to update job: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void SaveDuplicatedJob(JobDefinition sourceJob, JobDefinition duplicateJob)
         {
             _jobStorage.Save(duplicateJob);
@@ -1377,6 +1442,10 @@ namespace SSH_Helper
                 else if (entry.Job.TargetType == JobTargetType.Folder)
                 {
                     entry.MissingTarget = !_presetManager.Folders.ContainsKey(entry.Job.TargetName);
+                }
+                else
+                {
+                    entry.MissingTarget = false;
                 }
             }
 

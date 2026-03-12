@@ -86,7 +86,12 @@ namespace SSH_Helper.Models
         /// <summary>
         /// All presets in a named folder (executed sequentially).
         /// </summary>
-        Folder = 1
+        Folder = 1,
+
+        /// <summary>
+        /// Scheduler-local command or YAML content stored directly on the job.
+        /// </summary>
+        CustomPreset = 2
     }
 
     /// <summary>
@@ -94,6 +99,8 @@ namespace SSH_Helper.Models
     /// </summary>
     public class JobDefinition
     {
+        private string _customPresetCommands = string.Empty;
+
         /// <summary>
         /// Stable GUID-based identifier (32-char lowercase hex, no dashes).
         /// </summary>
@@ -118,6 +125,16 @@ namespace SSH_Helper.Models
         /// The preset name or folder path this job targets.
         /// </summary>
         public string TargetName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Scheduler-local command or YAML content used when <see cref="TargetType"/> is <see cref="JobTargetType.CustomPreset"/>.
+        /// Empty for preset and folder jobs.
+        /// </summary>
+        public string CustomPresetCommands
+        {
+            get => _customPresetCommands;
+            set => _customPresetCommands = NormalizeToWindowsLineEndings(value);
+        }
 
         /// <summary>
         /// Legacy compatibility field storing the target preset content hash captured when the job was saved.
@@ -201,6 +218,18 @@ namespace SSH_Helper.Models
         public bool StopOnError { get; set; }
 
         /// <summary>
+        /// Optional per-job override for command timeout in seconds.
+        /// Null keeps the existing inherited scheduler behavior.
+        /// </summary>
+        public int? CommandTimeoutOverrideSeconds { get; set; }
+
+        /// <summary>
+        /// Optional per-job override for connection timeout in seconds.
+        /// Null uses the global default from AppConfiguration.
+        /// </summary>
+        public int? ConnectionTimeoutOverrideSeconds { get; set; }
+
+        /// <summary>
         /// Optional per-job override for maximum history entries retained.
         /// Null uses the global default from AppConfiguration.
         /// </summary>
@@ -211,5 +240,18 @@ namespace SSH_Helper.Models
         /// Null uses the global default from AppConfiguration.
         /// </summary>
         public int? HistoryRetentionDays { get; set; }
+
+        private static string NormalizeToWindowsLineEndings(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            return value
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n')
+                .Replace("\n", "\r\n", StringComparison.Ordinal);
+        }
     }
 }

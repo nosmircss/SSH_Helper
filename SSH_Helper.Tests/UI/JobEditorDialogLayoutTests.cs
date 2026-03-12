@@ -56,6 +56,27 @@ public class JobEditorDialogLayoutTests : IDisposable
         builder.ClientSize.Height.Should().BeGreaterOrEqualTo(requiredContentHeight);
     }
 
+    [WinFormsFact]
+    public void CustomPresetInfo_DoesNotOverlapScheduleRow()
+    {
+        using var dialog = CreateDialog();
+
+        dialog.Show();
+        Application.DoEvents();
+
+        var customRadio = GetField<RadioButton>(dialog, "_rbCustomPreset");
+        customRadio.Checked = true;
+        Application.DoEvents();
+
+        var infoLabel = GetField<Label>(dialog, "_lblCustomTargetInfo");
+        var scheduleLabel = GetField<Label>(dialog, "_lblSchedule");
+        var scheduleCombo = GetField<ComboBox>(dialog, "_cboScheduleType");
+
+        infoLabel.Visible.Should().BeTrue();
+        infoLabel.Bottom.Should().BeLessThan(scheduleLabel.Top);
+        infoLabel.Bottom.Should().BeLessThan(scheduleCombo.Top);
+    }
+
     private JobEditorDialog CreateDialog()
     {
         var configService = new ConfigurationService(_configPath);

@@ -2,6 +2,7 @@
 
 ## 2026-03-09
 - When a user narrows a follow-up implementation to a specific subset of review findings, I must implement only that approved scope and drop adjacent enhancements I suggested on my own.
+- When I swap a single-row WinForms input for a multi-line help label, I must reflow the rows beneath it and add a layout regression test instead of assuming the old fixed `y` offsets still hold.
 
 ## 2026-03-08
 - When scheduler lifecycle notifications share the same pane as live host output, I should remove or relocate them instead of mixing them into the merged output stream.
