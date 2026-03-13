@@ -14,5 +14,5 @@
 
 ## 5. Verification
 - [x] 5.1 Add focused tests for scheduler host-grid parity helpers and CSV/copy semantics.
-- [ ] 5.2 Run manual verification covering column operations, clipboard workflows, host-count refresh, and visual parity.
+- [x] 5.2 Run manual verification covering column operations, clipboard workflows, host-count refresh, and visual parity.
 - [x] 5.3 Validate change with `openspec validate update-scheduler-host-grid-parity --strict --no-interactive`.

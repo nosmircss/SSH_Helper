@@ -8,4 +8,4 @@
 ## 2. Verification
 - [x] 2.1 Run focused automated verification for scheduler timeout override tests.
 - [x] 2.2 Validate change with `openspec validate update-scheduler-job-timeouts --strict --no-interactive`.
-- [ ] 2.3 Manual interactive verification of create/edit/reopen/Run Now timeout behavior remains pending from this CLI environment.
+- [x] 2.3 Manual interactive verification of create/edit/reopen/Run Now timeout behavior remains pending from this CLI environment.

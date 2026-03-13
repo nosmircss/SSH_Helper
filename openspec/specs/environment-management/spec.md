@@ -87,3 +87,82 @@ The system SHALL persist environment-variable updates requested by script execut
 - **THEN** the system first captures legacy state into `Default`
 - **AND** saves the updated variable under `Default`
 
+### Requirement: Environment CSV freshness awareness
+The system SHALL persist enough metadata with each environment's remembered CSV reference to determine whether that environment's stored host snapshot still matches the file on disk when the environment becomes active.
+
+#### Scenario: Switching to an environment whose CSV changed on disk
+- **WHEN** environment `Lab A` remembers `fortigate.csv`
+- **AND** `fortigate.csv` has changed on disk since `Lab A` last captured its host snapshot
+- **AND** an operator switches to `Lab A`
+- **THEN** the system detects that the remembered host snapshot is stale before loading it into the grid
+- **AND** the operator is offered a reload-from-disk choice
+
+#### Scenario: Switching to an environment whose CSV is missing on disk
+- **WHEN** an environment remembers `fortigate.csv`
+- **AND** that file no longer exists on disk
+- **AND** an operator switches to the environment
+- **THEN** the environment's stored host snapshot remains available
+- **AND** the hosts header indicates that the remembered file is missing on disk
+
+#### Scenario: Switching to an environment whose CSV still matches disk
+- **WHEN** an environment remembers `fortigate.csv`
+- **AND** the file on disk still matches the environment's remembered host snapshot
+- **AND** an operator switches to the environment
+- **THEN** the host grid loads without any stale-file warning
+- **AND** the hosts header shows the file reference without a disk-drift warning
+
+### Requirement: Folder-level base environment inheritance
+The system SHALL allow preset folders to declare an optional base environment override. When resolving the environment context for a preset or folder, the system SHALL use the operator-selected global base environment unless the selected preset's folder or one of its ancestor folders declares a nearer base environment override.
+
+#### Scenario: Folder base overrides the global base
+- **WHEN** the global base environment is `Default`
+- **AND** folder `Network/Prod` declares folder base environment `prod`
+- **AND** an operator loads a preset in `Network/Prod` that does not declare its own environment
+- **THEN** the active environment switches to `prod`
+
+#### Scenario: Child folder inherits nearest ancestor base
+- **WHEN** folder `Network` declares folder base environment `lab`
+- **AND** folder `Network/Switches` does not declare its own base environment
+- **AND** an operator loads a preset in `Network/Switches`
+- **THEN** the active environment resolves to `lab`
+
+#### Scenario: Preset-declared environment still wins
+- **WHEN** folder `Network/Prod` declares folder base environment `prod`
+- **AND** a preset in that folder declares top-level script environment `staging`
+- **THEN** the active environment switches to `staging`
+- **AND** the folder base remains available as the lower-precedence fallback for presets in that folder
+
+### Requirement: Script-declared environment affinity on preset load
+The system SHALL allow a YAML script preset to declare a preferred environment at the script root, SHALL preserve a persisted base environment chosen through manual environment changes, and SHALL restore the active environment to that base when a later preset is loaded without a top-level `environment`.
+
+#### Scenario: Manual environment change rebases the base environment
+- **WHEN** an operator manually switches the environment through the UI
+- **THEN** the selected environment becomes both the active environment and the persisted base environment
+
+#### Scenario: Loading a preset switches to its declared environment
+- **WHEN** an operator loads a YAML script preset with a top-level `environment` value that matches an existing environment
+- **THEN** the active environment switches to that environment
+- **AND** the host grid updates using the existing environment-switch behavior
+- **AND** the base environment remains unchanged
+
+#### Scenario: Loading a later preset without environment restores the base environment
+- **WHEN** an operator has an active environment that differs from the base environment and loads a preset without a top-level `environment`
+- **THEN** the active environment switches back to the base environment
+- **AND** the host grid updates using the existing environment-switch behavior
+
+#### Scenario: Loading a preset with a missing declared environment
+- **WHEN** an operator loads a YAML script preset whose top-level `environment` value does not match any existing environment
+- **THEN** the active environment remains unchanged
+- **AND** the system reports the missing environment with a non-blocking status message
+
+### Requirement: Base environment mismatch indicator
+The system SHALL show the base environment in the main toolbar only while the active environment differs from the persisted base environment.
+
+#### Scenario: Active environment matches base environment
+- **WHEN** the active environment and base environment are the same
+- **THEN** the toolbar does not show the base-environment indicator
+
+#### Scenario: Active environment differs from base environment
+- **WHEN** the active environment differs from the base environment
+- **THEN** the toolbar shows `Base: <name>` next to the environment controls
+

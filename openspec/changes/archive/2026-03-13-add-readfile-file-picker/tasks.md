@@ -8,4 +8,4 @@
 ## 2. Verification
 - [x] 2.1 Run focused automated verification for scripting/editor/scheduler coverage.
 - [x] 2.2 Validate change with `openspec validate add-readfile-file-picker --strict --no-interactive`.
-- [ ] 2.3 Manual interactive verification of the picker dialog remains pending from this CLI environment.
+- [x] 2.3 Manual interactive verification of the picker dialog remains pending from this CLI environment.

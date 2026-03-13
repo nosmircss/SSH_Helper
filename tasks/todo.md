@@ -1,5 +1,32 @@
 # TODO
 
+## 73. Archive Newly Completed OpenSpec Proposals
+- [x] 73.1 Confirm the currently completed active change IDs and use that set as the archive target for this pass.
+- [x] 73.2 Archive each newly completed change with `openspec archive <id> --yes`.
+- [x] 73.3 Run strict OpenSpec validation on the updated result and capture the outcome below.
+
+### 73 Review
+- Started this pass with the two active completed changes shown by `openspec list`: `update-scheduler-host-grid-parity` and `update-scheduler-job-timeouts`.
+- Archived both with `openspec archive <id> --yes`, which updated `openspec\\specs\\job-scheduler\\spec.md` and moved the changes into `openspec\\changes\\archive\\2026-03-13-*`.
+- After that archive pass, `openspec list` showed `add-readfile-file-picker` as newly complete as well, so it was included in the same run to satisfy the request to archive all completed proposals. Archiving it updated `openspec\\specs\\scripting-runtime\\spec.md` and `openspec\\specs\\scripting-validation\\spec.md`, and moved it to `openspec\\changes\\archive\\2026-03-13-add-readfile-file-picker`.
+- A verification attempt that ran `openspec list` in parallel with `openspec archive add-readfile-file-picker --yes` hit a transient `ENOENT` while the change directory was moving. Re-running the checks sequentially resolved that race cleanly.
+- Verification: `openspec list` now shows only incomplete active changes: `add-script-assertions` and `add-job-scheduler`.
+- Verification: archive entries confirmed for `2026-03-13-update-scheduler-host-grid-parity`, `2026-03-13-update-scheduler-job-timeouts`, and `2026-03-13-add-readfile-file-picker`.
+- Verification: `openspec validate --all --strict --no-interactive` passed (`22 passed, 0 failed`).
+
+## 72. Archive Completed OpenSpec Proposals
+- [x] 72.1 Confirm the active OpenSpec changes currently marked complete and treat that set as the archive target.
+- [x] 72.2 Archive each completed change with `openspec archive <id> --yes`.
+- [x] 72.3 Run strict OpenSpec validation on the archived result and capture the outcome below.
+
+### 72 Review
+- Archived the nine active changes that `openspec list` reported as `✓ Complete`: `update-environment-csv-sync`, `update-folder-base-environments`, `update-script-load-environment`, `replace-scheduler-drift-with-save-warning`, `update-scheduler-job-integrity`, `update-scheduler-runtime-history`, `update-cancellation-outcomes`, `add-scheduler-custom-presets`, and `update-scripting-collection-ergonomics`.
+- Ran `openspec archive <id> --yes` for each change oldest-to-newest so spec updates applied in a predictable sequence. All nine archived successfully into `openspec\\changes\\archive\\2026-03-13-*`.
+- The archive command for `replace-scheduler-drift-with-save-warning` emitted non-blocking proposal authoring warnings and a warning that one removed requirement was ignored because `job-scheduler` was being created from archive deltas at that point. The archive still completed successfully and later strict validation passed for the resulting spec tree.
+- Verification: `openspec list` now shows only incomplete active changes: `add-readfile-file-picker`, `update-scheduler-job-timeouts`, `update-scheduler-host-grid-parity`, `add-script-assertions`, and `add-job-scheduler`.
+- Verification: `openspec list --specs` shows the updated live spec set, including `environment-management`, `execution-control`, `execution-history`, `job-scheduler`, `preset-organization`, `scripting-expressions`, `scripting-runtime`, and `scripting-validation`.
+- Verification: bare `openspec validate --strict --no-interactive` is not accepted by this CLI build without an explicit target, so the final strict pass used `openspec validate --all --strict --no-interactive`, which passed (`25 passed, 0 failed`).
+
 ## 71. Restore Main Window Focus After Script Prompt Close
 - [x] 71.1 Patch the shared modeless script prompt cleanup path so the main form is explicitly reactivated after the prompt closes.
 - [x] 71.2 Add focused automated coverage for the shared prompt-runner reactivation path.

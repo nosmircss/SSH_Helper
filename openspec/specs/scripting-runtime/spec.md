@@ -257,3 +257,70 @@ Closing the interactive terminal window by the user SHALL be treated as successf
 - **THEN** the interactive window and backing terminal session are force-closed
 - **AND** script execution ends with cancellation status
 
+### Requirement: Collection-aware conditional membership
+The scripting runtime SHALL support collection membership checks in conditions.
+
+#### Scenario: Case-insensitive list membership
+- **WHEN** a script evaluates `svc_key in exclude_service_matches_norm`
+- **THEN** the runtime treats the right-hand side as a collection
+- **AND** membership comparison is case-insensitive by default
+
+#### Scenario: Negated collection membership
+- **WHEN** a script evaluates `svc_key not in exclude_service_matches_norm`
+- **THEN** the runtime returns true when the value is absent from the collection
+
+### Requirement: Expression-backed foreach collections
+The scripting runtime SHALL let `foreach` iterate any resolved collection expression, not only a named variable lookup.
+
+#### Scenario: Foreach over split expression
+- **WHEN** a script uses `foreach` with `iterator: item in split(csv_ports, ",")`
+- **THEN** the loop iterates the resolved collection items in order
+
+#### Scenario: Foreach over json.items expression
+- **WHEN** a script uses `foreach` with `iterator: entry in json.items(response, "data.tags")`
+- **THEN** the loop iterates the resolved JSON-derived items without requiring a temporary variable
+
+### Requirement: Structural collection semantics
+The scripting runtime SHALL treat lists and JSON containers as structural collections for length, emptiness, and truthiness checks.
+
+#### Scenario: JSON array length uses element count
+- **WHEN** a script evaluates `length(json.items(response, "check"))` or `${check_items.length}`
+- **THEN** the result reflects the number of elements rather than the raw JSON string length
+
+#### Scenario: Empty JSON collection is empty
+- **WHEN** a script evaluates `items is empty` where `items` is an empty JSON array or object
+- **THEN** the runtime treats the collection as empty
+
+### Requirement: Readfile manual file picker
+The scripting runtime SHALL support an explicit `readfile.select_file` mode that lets an operator choose the file to read during manual execution.
+
+When `readfile.select_file` is `true`:
+- the runtime SHALL show a file-selection prompt before reading;
+- `readfile.message`, when provided, SHALL replace the default prompt text shown in that file-selection prompt;
+- `readfile.path`, when provided, SHALL be used only as the initial seed for the prompt;
+- `readfile.fileext`, when provided, SHALL restrict the browse dialog to those extensions and SHALL reject any final resolved path that does not match one of the allowed extensions;
+- the selected file SHALL still pass the existing read-path validation and line-processing rules.
+
+#### Scenario: Manual run selects a file to read
+- **WHEN** a manual script execution runs a `readfile` step with `select_file: true`
+- **AND** the operator chooses a file
+- **THEN** the runtime reads the selected file
+- **AND** stores the processed lines into the configured `into` variable
+
+#### Scenario: File selection is cancelled
+- **WHEN** a `readfile` step with `select_file: true` is prompted during a manual run
+- **AND** the operator cancels the prompt
+- **THEN** the runtime sets the `into` variable to an empty list
+- **AND** the script stops immediately with a cancelled status
+
+#### Scenario: Scheduler-triggered execution reaches picker mode
+- **WHEN** a scheduler-triggered execution runs a `readfile` step with `select_file: true`
+- **THEN** the runtime does not open a file-selection prompt
+- **AND** the step fails with a manual-run-only error unless `on_error: continue` is configured
+
+#### Scenario: Manual run customizes the picker prompt and file types
+- **WHEN** a manual script execution runs a `readfile` step with `select_file: true`
+- **AND** the step provides `message` and `fileext`
+- **THEN** the prompt shows the custom message text
+- **AND** the picker accepts only files matching the configured extensions
+
