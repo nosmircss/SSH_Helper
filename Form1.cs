@@ -826,6 +826,7 @@ namespace SSH_Helper
         {
             lstOutput.DataSource = _outputHistory;
             lstOutput.DisplayMember = nameof(HistoryListItem.Label);
+            ConfigureHistoryListLayout();
         }
 
         private void InitializeHistoryPersistence()
@@ -1200,6 +1201,7 @@ namespace SSH_Helper
             // History and host list right-click selection and custom drawing
             lstOutput.MouseDown += LstOutput_MouseDown;
             lstOutput.KeyDown += LstOutput_KeyDown;
+            lstOutput.MeasureItem += LstOutput_MeasureItem;
             lstOutput.DrawItem += LstOutput_DrawItem;
             lstHosts.MouseDown += LstHosts_MouseDown;
 
@@ -1316,6 +1318,7 @@ namespace SSH_Helper
                 }
 
                 RestoreInitialEnvironmentState(config);
+                ConfigureHistoryListLayout();
             };
         }
 
@@ -2194,9 +2197,7 @@ namespace SSH_Helper
                 ApplyLightTheme();
             }
 
-            // Set up owner-draw for history listbox
-            lstOutput.DrawMode = DrawMode.OwnerDrawFixed;
-            lstOutput.ItemHeight = 22;
+            ConfigureHistoryListLayout();
 
             // Set up owner-draw for TreeViews only in dark mode
             if (darkMode)
@@ -2350,6 +2351,7 @@ namespace SSH_Helper
             _managedFonts.Add(listFont);
             lstOutput.Font = listFont;
             lstHosts.Font = listFont;
+            ConfigureHistoryListLayout();
 
             // Menu strip
             var menuFont = new Font(uiFont, Scaled(fontSettings.MenuFontSize));
@@ -6388,6 +6390,22 @@ namespace SSH_Helper
             }
         }
 
+        private void LstOutput_MeasureItem(object? sender, MeasureItemEventArgs e)
+        {
+            if (e.Index < 0 || e.Index >= lstOutput.Items.Count)
+            {
+                e.ItemHeight = HistoryListLayout.GetMinimumItemHeight(lstOutput.Font);
+                return;
+            }
+
+            var item = lstOutput.Items[e.Index];
+            var text = item is HistoryListItem historyItem
+                ? historyItem.Label
+                : item?.ToString() ?? string.Empty;
+
+            e.ItemHeight = HistoryListLayout.CalculateItemHeight(text, lstOutput.Font, lstOutput.ClientSize.Width);
+        }
+
         private void LstOutput_DrawItem(object? sender, DrawItemEventArgs e)
         {
             if (e.Index < 0) return;
@@ -6412,55 +6430,23 @@ namespace SSH_Helper
             var item = lstOutput.Items[e.Index];
             string text = item is HistoryListItem historyItem ? historyItem.Label : item?.ToString() ?? "";
 
-            // Check if this is a folder entry (contains folder emoji)
-            bool isFolderEntry = text.Contains(FolderIcon); // folder icon
-
             // Draw text with theme-aware color
             var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
-            using var textBrush = new SolidBrush(textColor);
-            using var sf = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+            var textBounds = HistoryListLayout.GetTextBounds(e.Bounds);
+            TextRenderer.DrawText(
+                e.Graphics,
+                text,
+                lstOutput.Font,
+                textBounds,
+                textColor,
+                HistoryListLayout.TextDrawFlags);
+        }
 
-            if (isFolderEntry)
-            {
-                // Remove the folder emoji from text
-                text = text.Replace("\U0001F4C1 ", "").Replace("\U0001F4C1", "");
-
-                // Parse the text to extract date/time and folder name
-                // Format is "2026-01-18 17:39:04 - FolderName"
-                int separatorIndex = text.IndexOf(" - ");
-                string dateTimePart = separatorIndex > 0 ? text.Substring(0, separatorIndex) : "";
-                string folderName = separatorIndex > 0 ? text.Substring(separatorIndex + 3) : text;
-
-                int currentX = e.Bounds.Left + 4;
-
-                // Draw date/time first
-                if (!string.IsNullOrEmpty(dateTimePart))
-                {
-                    var dateTimeSize = e.Graphics.MeasureString(dateTimePart + " - ", e.Font ?? lstOutput.Font);
-                    var dateTimeRect = new RectangleF(currentX, e.Bounds.Top, dateTimeSize.Width, e.Bounds.Height);
-                    SafeDrawString(e.Graphics, dateTimePart + " - ", e.Font ?? lstOutput.Font, textBrush, dateTimeRect, sf);
-                    currentX += (int)dateTimeSize.Width;
-                }
-
-                // Draw folder icon after date/time
-                var iconColor = _isDarkMode ? Color.FromArgb(220, 180, 80) : Color.FromArgb(180, 140, 60);
-                using var iconFont = new Font("Segoe UI Symbol", 9F);
-                using var iconBrush = new SolidBrush(iconColor);
-                var iconRect = new RectangleF(currentX, e.Bounds.Top, 18, e.Bounds.Height);
-                using var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
-                e.Graphics.DrawString("\U0001F4C1", iconFont, iconBrush, iconRect, iconSf);
-                currentX += 18;
-
-                // Draw folder name
-                var nameRect = new Rectangle(currentX, e.Bounds.Top, e.Bounds.Width - currentX - 4, e.Bounds.Height);
-                SafeDrawString(e.Graphics, folderName, e.Font ?? lstOutput.Font, textBrush, nameRect, sf);
-            }
-            else
-            {
-                // Regular entry - just draw the text
-                var textRect = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top, e.Bounds.Width - 8, e.Bounds.Height);
-                SafeDrawString(e.Graphics, text, e.Font ?? lstOutput.Font, textBrush, textRect, sf);
-            }
+        private void ConfigureHistoryListLayout()
+        {
+            lstOutput.DrawMode = DrawMode.OwnerDrawVariable;
+            lstOutput.ItemHeight = HistoryListLayout.GetMinimumItemHeight(lstOutput.Font);
+            lstOutput.RefreshVariableItemHeights();
         }
 
         private void TreeView_DrawNode(object? sender, DrawTreeNodeEventArgs e)

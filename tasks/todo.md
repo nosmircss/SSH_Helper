@@ -1,5 +1,19 @@
 # TODO
 
+## 82. Add variable-height history rows
+- [x] 82.1 Replace the history list fixed-height configuration with measured variable-height rows that wrap full labels and cap at 3 lines.
+- [x] 82.2 Add reusable row-height measurement logic plus targeted automated coverage for short, wrapped, and capped labels.
+- [x] 82.3 Verify the history list still behaves correctly after font/layout changes and capture the result below.
+
+### 82 Review
+- Replaced the history sidebar `ListBox` with a small `HistoryListBox` subclass and switched the history rows to `OwnerDrawVariable`, so row height now remeasures from the current list width and font instead of staying pinned to the old 22px fixed height.
+- Added `UI\\HistoryListLayout.cs` as the shared measurement/drawing helper. It wraps the full existing history label, derives the baseline row height from the active font, and clamps very long entries to 3 visible lines.
+- Simplified `LstOutput_DrawItem(...)` so it draws the full label inside padded multi-line bounds with the existing light/dark selection styling preserved; the stored history label format and persistence model were left unchanged.
+- Extended the WinForms font harness so the history list can be configured in variable-height mode during tests, and added focused coverage in `SSH_Helper.Tests\\UI\\HistoryListLayoutTests.cs` plus an extra `ApplyFontSettingsTests` case for wrapped history rows after font changes.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~HistoryListLayoutTests|FullyQualifiedName~ApplyFontSettingsTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\history-rows-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\history-rows-tests\\obj\\` passed (38/38).
+- Verification: normal `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false` failed because the running `SSH_Helper` process held `bin\\Debug\\net8.0-windows\\SSH_Helper.dll` open.
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\history-rows-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\history-rows-build\\obj\\` passed with 0 warnings and 0 errors.
+
 ## 81. Fix webhook suppressed-error capture state
 - [x] 81.1 Confirm why `QA Webhook GET POST [Internet]` fails on the final bad-URL assertion.
 - [x] 81.2 Patch the webhook runtime so suppressed failures leave capture variables in a deterministic empty state.
