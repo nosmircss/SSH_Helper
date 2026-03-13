@@ -312,6 +312,58 @@ public class SetCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_AssigningDefinedNullVariable_PreservesNullValue()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "device = json('name', 'router1')" },
+            context,
+            CancellationToken.None)).Success.Should().BeTrue();
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "null_val = json.get(device, 'nonexistent')" },
+            context,
+            CancellationToken.None)).Success.Should().BeTrue();
+
+        var result = await _command.ExecuteAsync(
+            new ScriptStep { Set = "copied = null_val" },
+            context,
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.HasVariable("copied").Should().BeTrue();
+        context.GetVariable("copied").Should().BeNull();
+        context.GetVariableString("copied").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AssigningBareListIndexExpression_PreservesIndexedValue()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "ports = list('any', '22', '443')" },
+            context,
+            CancellationToken.None)).Success.Should().BeTrue();
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "tail_removed = pop(ports)" },
+            context,
+            CancellationToken.None)).Success.Should().BeTrue();
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "head_removed = shift(ports)" },
+            context,
+            CancellationToken.None)).Success.Should().BeTrue();
+
+        var result = await _command.ExecuteAsync(
+            new ScriptStep { Set = "remaining = ports[0]" },
+            context,
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("remaining").Should().Be("22");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_JsonGet_FromJsonElementVariable_ResolvesPath()
     {
         var context = new ScriptContext();

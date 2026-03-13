@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace SSH_Helper.Services.Scripting
 {
@@ -13,6 +14,10 @@ namespace SSH_Helper.Services.Scripting
     /// </summary>
     public static class ValueResolver
     {
+        private static readonly Regex TopLevelIndexExpressionPattern = new(
+            @"^(?<name>[A-Za-z_]\w*)\[(?<index>[^\]]+)\]$",
+            RegexOptions.Compiled);
+
         /// <summary>
         /// Resolves the .length property on a variable value.
         /// </summary>
@@ -192,8 +197,11 @@ namespace SSH_Helper.Services.Scripting
                 return context.SubstituteVariables(expr);
 
             var directValue = context.GetVariable(expr);
-            if (directValue != null)
+            if (directValue != null || context.HasVariable(expr))
                 return directValue;
+
+            if (TryResolveIndexedExpressionValue(expr, context, out var indexedValue))
+                return indexedValue;
 
             if (int.TryParse(expr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intValue))
                 return intValue;
@@ -202,6 +210,46 @@ namespace SSH_Helper.Services.Scripting
                 return doubleValue;
 
             return expr;
+        }
+
+        private static bool TryResolveIndexedExpressionValue(string expr, ScriptContext context, out object? value)
+        {
+            value = null;
+
+            var match = TopLevelIndexExpressionPattern.Match(expr);
+            if (!match.Success)
+                return false;
+
+            var variableName = match.Groups["name"].Value;
+            var indexExpression = match.Groups["index"].Value.Trim();
+            if (string.IsNullOrEmpty(variableName) || string.IsNullOrEmpty(indexExpression))
+                return false;
+
+            if (!TryResolveCollectionIndex(indexExpression, context, out var index))
+                return false;
+
+            var items = context.GetVariableList(variableName);
+            if (index < 0 || index >= items.Count)
+            {
+                value = null;
+                return true;
+            }
+
+            value = items[index];
+            return true;
+        }
+
+        private static bool TryResolveCollectionIndex(string expr, ScriptContext context, out int index)
+        {
+            index = 0;
+            if (int.TryParse(expr, NumberStyles.Integer, CultureInfo.InvariantCulture, out index))
+                return true;
+
+            var rawValue = context.GetVariable(expr);
+            if (rawValue == null && !context.HasVariable(expr))
+                return false;
+
+            return int.TryParse(rawValue?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out index);
         }
 
         public static bool IsEmptyValue(object? value)

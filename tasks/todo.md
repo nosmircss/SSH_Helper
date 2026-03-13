@@ -1,5 +1,31 @@
 # TODO
 
+## 78. Fix bare list index expression resolution
+- [x] 78.1 Confirm the runtime path causing bare list index expressions like `ports[0]` to be treated as literal text in conditions.
+- [x] 78.2 Patch the shared expression resolver so bare top-level index expressions resolve consistently outside `${...}` interpolation.
+- [x] 78.3 Add focused regression coverage for indexed list reads in conditions and plain `set` assignment.
+- [x] 78.4 Run targeted verification and capture the review outcome below.
+
+### 78 Review
+- Root cause was separate from task 77: the shared `ValueResolver.ResolveExpressionValue(...)` path did not understand bare top-level index expressions such as `ports[0]`, so condition evaluation treated them as literal text unless they were wrapped in `${...}` interpolation.
+- Patched the shared resolver to recognize top-level `name[index]` expressions, resolve literal or variable-backed indexes, and read from the same collection view used by script context interpolation.
+- Added focused regressions proving bare indexed list expressions now work in `if` conditions (`ports[0] == '22'`, `parts[idx] == 'beta'`) and in normal `set` assignment after `pop`/`shift` mutation.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExpressionEvaluatorTests|FullyQualifiedName~SetCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\index-expression-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\index-expression-tests\\obj\\` passed (46/46).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\index-expression-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\index-expression-build\\obj\\` passed with 0 warnings and 0 errors.
+
+## 77. Fix null-valued variable expression resolution
+- [x] 77.1 Confirm the expression/runtime path causing defined `null` variables to be treated as unresolved identifiers in conditions.
+- [x] 77.2 Patch the shared expression resolver so defined variables preserve `null` values across condition and set evaluation.
+- [x] 77.3 Add focused regression coverage for `is empty`, truthiness, and equality checks against defined `null` variables.
+- [x] 77.4 Run targeted verification and capture the review outcome below.
+
+### 77 Review
+- Root cause was in `ValueResolver.ResolveExpressionValue(...)`: it only returned a direct variable lookup when `context.GetVariable(expr)` was non-null, so a defined variable whose value was actually `null` fell through and got reinterpreted as the literal identifier text.
+- Patched the shared resolver to treat `context.HasVariable(expr)` as authoritative for direct variable references, preserving `null` values across condition evaluation and plain `set` assignment.
+- Added focused regressions proving defined-null variables are still `defined`, evaluate as `empty` and falsy in conditions, compare equal to another defined-null variable, and remain `null` when assigned into another variable through `set`.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExpressionEvaluatorTests|FullyQualifiedName~SetCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\null-resolution-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\null-resolution-tests\\obj\\` passed (43/43).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\null-resolution-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\null-resolution-build\\obj\\` passed with 0 warnings and 0 errors.
+
 ## 76. Add opt-in send shell-exit failure handling
 - [x] 76.1 Extend `send` model/parser/validation/editor metadata with `fail_on_nonzero`.
 - [x] 76.2 Add the `SendCommand` runtime path that detects non-zero shell exit status when opted in, preserving captured output and existing default behavior.

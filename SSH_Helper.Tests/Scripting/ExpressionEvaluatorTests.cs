@@ -156,4 +156,50 @@ public class ExpressionEvaluatorTests
         evaluator.Evaluate("items is not empty").Should().BeTrue();
         evaluator.Evaluate("items").Should().BeTrue();
     }
+
+    [Fact]
+    public void Evaluate_DefinedNullVariable_IsEmptyFalsyAndDefined()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("guard_pop_result", null);
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("guard_pop_result is defined").Should().BeTrue();
+        evaluator.Evaluate("guard_pop_result is empty").Should().BeTrue();
+        evaluator.Evaluate("guard_pop_result").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Evaluate_DefinedNullVariables_CompareEqual()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("left", null);
+        context.SetVariable("right", null);
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("left == right").Should().BeTrue();
+        evaluator.Evaluate("left != right").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Evaluate_BareListIndexExpression_ResolvesIndexedItem()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("ports", new List<string> { "22" });
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("ports[0] == '22'").Should().BeTrue();
+        evaluator.Evaluate("ports[1] is empty").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Evaluate_BareListIndexExpression_WithVariableIndex_ResolvesIndexedItem()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("parts", new List<string> { "gamma", "beta", "alpha" });
+        context.SetVariable("idx", 1);
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("parts[idx] == 'beta'").Should().BeTrue();
+    }
 }
