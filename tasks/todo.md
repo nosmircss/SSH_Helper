@@ -1,5 +1,42 @@
 # TODO
 
+## 76. Add opt-in send shell-exit failure handling
+- [ ] 76.1 Extend `send` model/parser/validation/editor metadata with `fail_on_nonzero`.
+- [ ] 76.2 Add the `SendCommand` runtime path that detects non-zero shell exit status when opted in, preserving captured output and existing default behavior.
+- [ ] 76.3 Add focused parser/runtime/control-flow/editor coverage for `fail_on_nonzero` success, failure, and invalid combinations.
+- [ ] 76.4 Update scripting docs and QA/control-flow examples, run focused verification, and capture the review outcome below.
+
+## 75. Fix call-arg literal missing-column warnings
+- [x] 75.1 Update `ScriptDependencyAnalyzer` so plain literal `call.args` text is not tokenized as missing-column expressions.
+- [x] 75.2 Add focused regression coverage for literal `call.args` text and expression-backed `call.args`.
+- [x] 75.3 Run targeted verification and capture the review outcome below.
+
+### 75 Review
+- Tightened `ScriptDependencyAnalyzer` so `AnalyzeExpressionReferences(...)` now only treats `call.args` text as a dependency-bearing expression when it matches forms the runtime actually resolves structurally: bare variable names, function-style expressions, member/indexer paths, or `.length` access.
+- This removes the false-positive path where decorative literal strings like `=== IPv4 Unique Internet Service Matches ===` were being tokenized into fake grid columns just because they contained identifier-like words.
+- Added regressions proving literal `call.args.title` text produces no missing-column warnings, while structured expression args such as `compact(split(source_services, ','))` still report the real external dependency.
+- Verification: an initial parallel `dotnet test` plus `dotnet build` run hit a transient shared-`obj` file lock, so the final verification was re-run sequentially with isolated output paths.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj -p:UseAppHost=false -p:BaseOutputPath=artifacts\\call-arg-missing-column-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\call-arg-missing-column-tests\\obj\\ --filter "FullyQualifiedName~ScriptSubroutineDependencyAnalyzerTests|FullyQualifiedName~ScriptDependencyAnalyzerTests"` passed (35/35).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\call-arg-missing-column-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\call-arg-missing-column-build\\obj\\` passed with 0 warnings and 0 errors.
+
+## 74. Add Script Subroutines And File Libraries
+- [x] 74.1 Add OpenSpec change artifacts for script subroutines, calls, returns, and file-based libraries.
+- [x] 74.2 Extend scripting models, parser, validation, and import/subroutine registry for `subroutines`, `imports`, `library`, `call`, and `return`.
+- [x] 74.3 Implement runtime call stack, child variable scopes, explicit output binding, and `return` control flow.
+- [x] 74.4 Update dependency analysis and editor metadata so validation, autocomplete, highlighting, and missing-column preflight understand the new syntax.
+- [x] 74.5 Add focused tests for parser/runtime/analyzer/editor behavior, update docs and samples, and capture verification results below.
+
+### 74 Review
+- Added the OpenSpec change set under `openspec\\changes\\add-script-subroutines-and-libraries` and kept it valid throughout the implementation pass.
+- Extended the scripting model/parser with top-level `library`, `imports`, and `subroutines`, plus step-level `call` and `return`, including validation for library-only files, absolute-path imports, required args, output bindings, `return` placement, and local recursive call cycles.
+- Added a reusable `ScriptSubroutineRegistryBuilder`, runtime `CallCommand`/`ReturnCommand`, shared child-scope execution in `ScriptContext`, explicit output copy-back, and a defensive max subroutine call depth of 32.
+- Updated dependency analysis and SSH preflight analysis so reachable local subroutines and resolved `call` edges are understood without leaking subroutine params/locals as fake grid-column dependencies.
+- Updated editor surfaces so parser-driven autocomplete/highlighting recognize the new syntax, interpolation symbol extraction includes subroutine params/outputs and `call.out` bindings, and inline editor validation accepts library-definition files.
+- Updated `SCRIPTING.md`, refactored `ScriptSamples\\fortigate\\internet_service_lookup_from_file.yaml` to the new subroutine-based style, and added bundled library/import demo samples under `ScriptSamples\\libraries\\string_sections.yaml` and `ScriptSamples\\generic\\library_import_demo.yaml`.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj -p:UseAppHost=false --filter "FullyQualifiedName~ScriptParserTests|FullyQualifiedName~ScriptSubroutine|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~YamlSshSyntaxHighlighterTests|FullyQualifiedName~ScriptExecutorControlFlowTests"` passed (223/223).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false` passed with 0 warnings and 0 errors.
+- Verification: `openspec validate add-script-subroutines-and-libraries --strict --no-interactive` passed.
+
 ## 73. Archive Newly Completed OpenSpec Proposals
 - [x] 73.1 Confirm the currently completed active change IDs and use that set as the archive target for this pass.
 - [x] 73.2 Archive each newly completed change with `openspec archive <id> --yes`.

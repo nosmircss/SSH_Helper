@@ -46,6 +46,12 @@ namespace SSH_Helper.Services.Scripting
         private static readonly Regex VarRefPattern = new(@"\$\{([^}]+)\}|\{\{([^}]+)\}\}", RegexOptions.Compiled);
         private static readonly Regex BareVariableNamePattern = new(@"^[A-Za-z_]\w*$", RegexOptions.Compiled);
         private static readonly Regex BareIdentifierPattern = new(@"\b[A-Za-z_]\w*\b", RegexOptions.Compiled);
+        private static readonly Regex FunctionCallExpressionPattern = new(
+            @"^[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*\s*\(",
+            RegexOptions.Compiled);
+        private static readonly Regex MemberOrIndexerExpressionPattern = new(
+            @"^[A-Za-z_]\w*(?:\s*(?:\.\s*[A-Za-z_]\w*|\[[^\]]+\]))+$",
+            RegexOptions.Compiled);
 
         private static readonly HashSet<string> BuiltInVariables = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -98,17 +104,39 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public ColumnDependencyResult AnalyzeScript(Script script)
         {
-            var definedVars = new HashSet<string>(BuiltInVariables, StringComparer.OrdinalIgnoreCase);
+            var globalDefinedVars = new HashSet<string>(BuiltInVariables, StringComparer.OrdinalIgnoreCase);
             var referencedVars = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var rootReferencedVars = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // Script vars section defines variables
             foreach (var key in script.Vars.Keys)
-                definedVars.Add(key);
+                globalDefinedVars.Add(key);
 
-            AnalyzeSteps(script.Steps, definedVars, referencedVars);
+            AnalyzeSteps(script.Steps, globalDefinedVars, rootReferencedVars);
+
+            rootReferencedVars.ExceptWith(globalDefinedVars);
+            referencedVars.UnionWith(rootReferencedVars);
+
+            var reachableLocalSubroutines = CollectReachableLocalSubroutines(script);
+            foreach (var subroutineName in reachableLocalSubroutines)
+            {
+                if (!script.Subroutines.TryGetValue(subroutineName, out var subroutine))
+                    continue;
+
+                var localDefinedVars = new HashSet<string>(globalDefinedVars, StringComparer.OrdinalIgnoreCase);
+                var localReferencedVars = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var param in subroutine.Params)
+                    localDefinedVars.Add(param);
+                foreach (var output in subroutine.Outputs)
+                    localDefinedVars.Add(output);
+
+                AnalyzeSteps(subroutine.Steps, localDefinedVars, localReferencedVars);
+                localReferencedVars.ExceptWith(localDefinedVars);
+                referencedVars.UnionWith(localReferencedVars);
+            }
 
             // External reads = referenced vars that aren't script-defined
-            referencedVars.ExceptWith(definedVars);
             referencedVars.RemoveWhere(IsRuntimeUnderscoreVariable);
 
             return new ColumnDependencyResult { ReferencedColumns = referencedVars };
@@ -192,11 +220,21 @@ namespace SSH_Helper.Services.Scripting
         public SshRequirementResult AnalyzeSshRequirements(Script script)
         {
             var result = new SshRequirementResult();
-            AnalyzeSshRequirementsInSteps(script.Steps, result);
+            AnalyzeSshRequirementsInSteps(
+                script.Steps,
+                result,
+                script.SubroutineRegistry,
+                currentSubroutine: null,
+                visitedSubroutines: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
             return result;
         }
 
-        private void AnalyzeSshRequirementsInSteps(List<ScriptStep>? steps, SshRequirementResult result)
+        private void AnalyzeSshRequirementsInSteps(
+            List<ScriptStep>? steps,
+            SshRequirementResult result,
+            ScriptSubroutineRegistry? registry,
+            ScriptSubroutineDefinition? currentSubroutine,
+            HashSet<string> visitedSubroutines)
         {
             if (steps == null) return;
 
@@ -220,31 +258,45 @@ namespace SSH_Helper.Services.Scripting
                     if (step.Sftp == null || string.IsNullOrWhiteSpace(step.Sftp.Username) || string.IsNullOrWhiteSpace(step.Sftp.Password))
                         result.SftpUsesDefaultCredentials = true;
                 }
+                else if (stepType == StepType.Call &&
+                         step.Call != null &&
+                         registry != null &&
+                         registry.TryResolve(step.Call.Subroutine, currentSubroutine, out var definition) &&
+                         definition != null &&
+                         visitedSubroutines.Add(definition.QualifiedName))
+                {
+                    AnalyzeSshRequirementsInSteps(
+                        definition.Subroutine.Steps,
+                        result,
+                        registry,
+                        definition,
+                        visitedSubroutines);
+                }
 
                 if (HasCompleteSshRequirementSignal(result))
                     return;
 
-                AnalyzeSshRequirementsInSteps(step.Then, result);
+                AnalyzeSshRequirementsInSteps(step.Then, result, registry, currentSubroutine, visitedSubroutines);
                 if (HasCompleteSshRequirementSignal(result))
                     return;
 
-                AnalyzeSshRequirementsInSteps(step.Else, result);
+                AnalyzeSshRequirementsInSteps(step.Else, result, registry, currentSubroutine, visitedSubroutines);
                 if (HasCompleteSshRequirementSignal(result))
                     return;
 
-                AnalyzeSshRequirementsInSteps(step.Do, result);
+                AnalyzeSshRequirementsInSteps(step.Do, result, registry, currentSubroutine, visitedSubroutines);
                 if (HasCompleteSshRequirementSignal(result))
                     return;
 
-                AnalyzeSshRequirementsInSteps(step.Try, result);
+                AnalyzeSshRequirementsInSteps(step.Try, result, registry, currentSubroutine, visitedSubroutines);
                 if (HasCompleteSshRequirementSignal(result))
                     return;
 
-                AnalyzeSshRequirementsInSteps(step.Catch, result);
+                AnalyzeSshRequirementsInSteps(step.Catch, result, registry, currentSubroutine, visitedSubroutines);
                 if (HasCompleteSshRequirementSignal(result))
                     return;
 
-                AnalyzeSshRequirementsInSteps(step.Finally, result);
+                AnalyzeSshRequirementsInSteps(step.Finally, result, registry, currentSubroutine, visitedSubroutines);
                 if (HasCompleteSshRequirementSignal(result))
                     return;
 
@@ -252,7 +304,7 @@ namespace SSH_Helper.Services.Scripting
                 {
                     foreach (var branch in step.Elif)
                     {
-                        AnalyzeSshRequirementsInSteps(branch.Then, result);
+                        AnalyzeSshRequirementsInSteps(branch.Then, result, registry, currentSubroutine, visitedSubroutines);
                         if (HasCompleteSshRequirementSignal(result))
                             return;
                     }
@@ -263,7 +315,7 @@ namespace SSH_Helper.Services.Scripting
                 {
                     foreach (var switchCase in step.Cases)
                     {
-                        AnalyzeSshRequirementsInSteps(switchCase.Do, result);
+                        AnalyzeSshRequirementsInSteps(switchCase.Do, result, registry, currentSubroutine, visitedSubroutines);
                         if (HasCompleteSshRequirementSignal(result))
                             return;
                     }
@@ -272,7 +324,7 @@ namespace SSH_Helper.Services.Scripting
                 // Recurse into parallel steps
                 if (step.Parallel?.Steps != null)
                 {
-                    AnalyzeSshRequirementsInSteps(step.Parallel.Steps, result);
+                    AnalyzeSshRequirementsInSteps(step.Parallel.Steps, result, registry, currentSubroutine, visitedSubroutines);
                     if (HasCompleteSshRequirementSignal(result))
                         return;
                 }
@@ -375,6 +427,7 @@ namespace SSH_Helper.Services.Scripting
 
                     case StepType.Break:
                     case StepType.Continue:
+                    case StepType.Return:
                         break;
 
                     case StepType.Readfile:
@@ -623,6 +676,24 @@ namespace SSH_Helper.Services.Scripting
                             AnalyzeSteps(step.Parallel.Steps, definedVars, referencedVars);
                         break;
 
+                    case StepType.Call:
+                        if (step.Call != null)
+                        {
+                            foreach (var argExpression in step.Call.Args.Values)
+                            {
+                                AnalyzeExpressionReferences(argExpression, referencedVars);
+                            }
+
+                            foreach (var outputBinding in step.Call.Out.Values)
+                            {
+                                if (BareVariableNamePattern.IsMatch(outputBinding))
+                                {
+                                    definedVars.Add(outputBinding);
+                                }
+                            }
+                        }
+                        break;
+
                     case StepType.Table:
                         if (step.Table != null)
                         {
@@ -678,16 +749,129 @@ namespace SSH_Helper.Services.Scripting
                 definedVars.Add(iteratorVar + "_index");
 
                 // Collection may be a variable reference or contain ${var}/{{var}}
-                ExtractVarReferences(collection, referencedVars);
-                if (BareVariableNamePattern.IsMatch(collection))
+                AnalyzeExpressionReferences(collection, referencedVars);
+            }
+        }
+
+        private static void AnalyzeExpressionReferences(string? expression, HashSet<string> references)
+        {
+            if (string.IsNullOrWhiteSpace(expression))
+                return;
+
+            ExtractVarReferences(expression, references);
+
+            var trimmed = expression.Trim();
+            if (BareVariableNamePattern.IsMatch(trimmed))
+            {
+                AddBareVarReference(trimmed, references);
+                return;
+            }
+
+            if (LooksLikeStructuredExpression(trimmed) &&
+                !trimmed.Contains("${", StringComparison.Ordinal) &&
+                !trimmed.Contains("{{", StringComparison.Ordinal))
+            {
+                ExtractBareExpressionReferences(trimmed, references);
+            }
+        }
+
+        private static bool LooksLikeStructuredExpression(string expression)
+        {
+            if (string.IsNullOrWhiteSpace(expression))
+                return false;
+
+            if (BareVariableNamePattern.IsMatch(expression))
+                return true;
+
+            if (FunctionCallExpressionPattern.IsMatch(expression))
+                return true;
+
+            if (MemberOrIndexerExpressionPattern.IsMatch(expression))
+                return true;
+
+            if (expression.EndsWith(".length", StringComparison.OrdinalIgnoreCase))
+            {
+                var baseExpression = expression.Substring(0, expression.Length - ".length".Length);
+                return BareVariableNamePattern.IsMatch(baseExpression)
+                    || MemberOrIndexerExpressionPattern.IsMatch(baseExpression);
+            }
+
+            return false;
+        }
+
+        private static HashSet<string> CollectReachableLocalSubroutines(Script script)
+        {
+            var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            TraverseReachableLocalSubroutines(script, script.Steps, reachable);
+            return reachable;
+        }
+
+        private static void TraverseReachableLocalSubroutines(
+            Script script,
+            List<ScriptStep>? steps,
+            HashSet<string> reachable)
+        {
+            if (steps == null)
+                return;
+
+            foreach (var step in steps)
+            {
+                if (step.GetStepType() == StepType.Call &&
+                    step.Call != null &&
+                    IsBareLocalSubroutineReference(step.Call.Subroutine, script.Subroutines, out var localName) &&
+                    reachable.Add(localName))
                 {
-                    AddBareVarReference(collection, referencedVars);
+                    TraverseReachableLocalSubroutines(script, script.Subroutines[localName].Steps, reachable);
                 }
-                else if (!collection.Contains("${") && !collection.Contains("{{"))
+
+                TraverseReachableLocalSubroutines(script, step.Then, reachable);
+                TraverseReachableLocalSubroutines(script, step.Else, reachable);
+                TraverseReachableLocalSubroutines(script, step.Do, reachable);
+                TraverseReachableLocalSubroutines(script, step.Try, reachable);
+                TraverseReachableLocalSubroutines(script, step.Catch, reachable);
+                TraverseReachableLocalSubroutines(script, step.Finally, reachable);
+
+                if (step.Elif != null)
                 {
-                    ExtractBareExpressionReferences(collection, referencedVars);
+                    foreach (var branch in step.Elif)
+                    {
+                        TraverseReachableLocalSubroutines(script, branch.Then, reachable);
+                    }
+                }
+
+                if (step.Cases != null)
+                {
+                    foreach (var switchCase in step.Cases)
+                    {
+                        TraverseReachableLocalSubroutines(script, switchCase.Do, reachable);
+                    }
+                }
+
+                if (step.Parallel?.Steps != null)
+                {
+                    TraverseReachableLocalSubroutines(script, step.Parallel.Steps, reachable);
                 }
             }
+        }
+
+        private static bool IsBareLocalSubroutineReference(
+            string? reference,
+            IReadOnlyDictionary<string, ScriptSubroutine> subroutines,
+            out string localName)
+        {
+            localName = string.Empty;
+            if (string.IsNullOrWhiteSpace(reference))
+                return false;
+
+            var trimmed = reference.Trim();
+            if (trimmed.Contains('.', StringComparison.Ordinal))
+                return false;
+
+            if (!subroutines.ContainsKey(trimmed))
+                return false;
+
+            localName = trimmed;
+            return true;
         }
 
         /// <summary>

@@ -1,0 +1,25 @@
+---
+name: Library_Import_Demo
+description: Demonstrates importing reusable subroutines from a file-backed script library.
+
+imports:
+  # Update this absolute path before running the sample.
+  - path: "C:\\Path\\To\\SSH_Helper\\ScriptSamples\\libraries\\string_sections.yaml"
+    as: common
+
+steps:
+  - set:
+      expression: csv_ports = " 22, 443, 443, 8443 "
+
+  - call:
+      subroutine: common.normalize_csv_values
+      args:
+        raw_values: csv_ports
+      out:
+        normalized_values: normalized_ports
+
+  - call:
+      subroutine: common.print_section
+      args:
+        title: "=== Normalized Ports ==="
+        items: normalized_ports

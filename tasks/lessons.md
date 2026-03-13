@@ -2,6 +2,7 @@
 
 ## 2026-03-12
 - When I expand the scripting runtime to accept new expression forms, I must update `ScriptDependencyAnalyzer` in the same pass or the missing-column preflight will drift and flag expression text as fake grid columns.
+- When a scripting surface accepts plain scalar text as a valid literal value, I must align missing-column analysis with the runtime resolver and avoid treating arbitrary words in that scalar as expression tokens.
 - When a user cancels a script-driven file picker and asks for the script to stop, I must model that as a real script cancellation or exit path, not a suppressible step error routed through `on_error`.
 
 ## 2026-03-09

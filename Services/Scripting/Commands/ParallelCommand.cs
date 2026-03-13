@@ -81,7 +81,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             var orderedResults = results.OrderBy(r => r.index).ToList();
             foreach (var (index, result) in orderedResults)
             {
-                if (result.ShouldExit || result.ShouldBreak || result.ShouldContinue)
+                if (result.ShouldExit || result.ShouldBreak || result.ShouldContinue || result.ShouldReturn)
                     return result;
 
                 if (!result.Success && !result.SuppressedError)

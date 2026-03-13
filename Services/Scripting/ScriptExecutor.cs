@@ -51,6 +51,8 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Assert, new AssertCommand() },
                 { StepType.Switch, new SwitchCommand(this) },
                 { StepType.Parallel, new ParallelCommand(this) },
+                { StepType.Call, new CallCommand(this) },
+                { StepType.Return, new ReturnCommand() },
                 { StepType.Table, new TableCommand() },
             };
         }
@@ -69,6 +71,9 @@ namespace SSH_Helper.Services.Scripting
         {
             try
             {
+                context.ActiveScript = script;
+                context.SubroutineRegistry = script.SubroutineRegistry;
+
                 // Import script variables (defaults)
                 if (script.Vars != null && script.Vars.Count > 0)
                 {
@@ -184,7 +189,7 @@ namespace SSH_Helper.Services.Scripting
                     }
 
                     // Propagate control flow signals
-                    if (result.ShouldExit || result.ShouldBreak || result.ShouldContinue)
+                    if (result.ShouldExit || result.ShouldBreak || result.ShouldContinue || result.ShouldReturn)
                         return result;
 
                     // Stop on error (unless on_error: continue)
@@ -237,7 +242,7 @@ namespace SSH_Helper.Services.Scripting
 
                 // Don't retry on: success, exit, break, continue, suppressed
                 if (result.Success || result.ShouldExit || result.ShouldBreak ||
-                    result.ShouldContinue || result.SuppressedError)
+                    result.ShouldContinue || result.ShouldReturn || result.SuppressedError)
                 {
                     if (attempt > 0)
                         context.EmitOutput($"Step succeeded on attempt {attempt + 1}", ScriptOutputType.Debug);
@@ -331,6 +336,36 @@ namespace SSH_Helper.Services.Scripting
             context.DebugState.IsPaused = false;
             context.DebugState.ContinueRequested = false;
             context.DebugState.StepRequested = false;
+        }
+
+        /// <summary>
+        /// Executes one resolved subroutine in an isolated child variable scope.
+        /// </summary>
+        public async Task<CommandResult> ExecuteSubroutineAsync(
+            ScriptSubroutineDefinition definition,
+            ScriptContext callerContext,
+            IReadOnlyDictionary<string, object?> args,
+            IReadOnlyDictionary<string, string> outputBindings,
+            CancellationToken cancellationToken)
+        {
+            var childContext = callerContext.CreateChildScope(args, definition);
+            if (childContext.CallDepth > 32)
+            {
+                return CommandResult.Fail($"Subroutine call depth exceeded the maximum of 32 at '{definition.QualifiedName}'");
+            }
+
+            var result = await ExecuteStepsAsync(definition.Subroutine.Steps, childContext, cancellationToken, loopDepth: 0);
+
+            if ((result.Success || result.ShouldReturn) &&
+                !result.ShouldExit &&
+                !result.ShouldBreak &&
+                !result.ShouldContinue)
+            {
+                callerContext.CopyOutputsFromChild(childContext, outputBindings, definition.Subroutine.Outputs);
+                return CommandResult.Ok(result.Message);
+            }
+
+            return result;
         }
     }
 }

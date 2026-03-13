@@ -61,6 +61,9 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (execResult.ShouldExit)
                     return execResult;
 
+                if (execResult.ShouldReturn)
+                    return execResult;
+
                 if (execResult.ShouldBreak)
                 {
                     context.EmitOutput($"While: break after {iteration + 1} iteration(s)", ScriptOutputType.Debug);

@@ -51,6 +51,8 @@ namespace SSH_Helper.Services.Scripting
             "assert",
             "switch",
             "parallel",
+            "call",
+            "return",
             "table"
         };
         private static readonly string[] KnownTopLevelKeys =
@@ -62,7 +64,10 @@ namespace SSH_Helper.Services.Scripting
             "debug",
             "nobanner",
             "suppress_missing_column_warning",
+            "library",
             "vars",
+            "imports",
+            "subroutines",
             "steps"
         };
         private static readonly string[] CommonStepOptionKeys =
@@ -117,6 +122,7 @@ namespace SSH_Helper.Services.Scripting
                 ["assert"] = ["condition", "message", "severity"],
                 ["switch"] = ["value", "cases", "default"],
                 ["parallel"] = ["steps", "max_concurrent"],
+                ["call"] = ["subroutine", "args", "out", "on_error"],
                 ["table"] = ["data", "columns", "into", "align", "show_header"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
@@ -154,6 +160,8 @@ namespace SSH_Helper.Services.Scripting
                 ["assert"] = [],
                 ["switch"] = ["cases", "else"],
                 ["parallel"] = [],
+                ["call"] = [],
+                ["return"] = [],
                 ["table"] = []
             };
         private static readonly HashSet<string> CanonicalMapCommands = new(StringComparer.OrdinalIgnoreCase)
@@ -167,6 +175,7 @@ namespace SSH_Helper.Services.Scripting
             "foreach",
             "while",
             "try",
+            "call",
             "switch",
             "assert"
         };
@@ -186,6 +195,7 @@ namespace SSH_Helper.Services.Scripting
             StepType.Multiselect,
             StepType.Confirm,
             StepType.Interactive,
+            StepType.Call,
             StepType.Assert
         ];
         private static readonly HashSet<string> ExitStatusTokens = new(StringComparer.OrdinalIgnoreCase)
@@ -309,7 +319,9 @@ namespace SSH_Helper.Services.Scripting
 
                 // Distinctive top-level script sections
                 if (trimmedLine.StartsWith("steps:", StringComparison.OrdinalIgnoreCase) ||
-                    trimmedLine.StartsWith("vars:", StringComparison.OrdinalIgnoreCase))
+                    trimmedLine.StartsWith("vars:", StringComparison.OrdinalIgnoreCase) ||
+                    trimmedLine.StartsWith("imports:", StringComparison.OrdinalIgnoreCase) ||
+                    trimmedLine.StartsWith("subroutines:", StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
@@ -363,6 +375,10 @@ namespace SSH_Helper.Services.Scripting
                     {
                         var key = parser.Consume<Scalar>();
                         var keyName = key.Value.ToLowerInvariant();
+                        if (!script.DeclaredTopLevelKeys.Add(keyName))
+                        {
+                            AddScriptParseError(script, $"Line {(int)key.Start.Line}: Duplicate top-level key '{key.Value}'");
+                        }
 
                         switch (keyName)
                         {
@@ -388,8 +404,17 @@ namespace SSH_Helper.Services.Scripting
                             case "suppress_missing_column_warning":
                                 script.SuppressMissingColumnWarning = ParseBooleanOrDefault(parser, script.SuppressMissingColumnWarning);
                                 break;
+                            case "library":
+                                script.Library = ParseBooleanOrDefault(parser, script.Library);
+                                break;
                             case "vars":
                                 script.Vars = ParseVars(parser);
+                                break;
+                            case "imports":
+                                script.Imports = ParseImports(parser, script);
+                                break;
+                            case "subroutines":
+                                script.Subroutines = ParseSubroutines(parser, script);
                                 break;
                             case "steps":
                                 script.Steps = ParseSteps(parser);
@@ -440,6 +465,139 @@ namespace SSH_Helper.Services.Scripting
             }
 
             return vars;
+        }
+
+        private List<ScriptImport> ParseImports(IParser parser, Script script)
+        {
+            var imports = new List<ScriptImport>();
+
+            if (!parser.Accept<SequenceStart>(out _))
+            {
+                AddScriptParseError(script, "imports must be a sequence of mappings with required keys 'path' and 'as'");
+                SkipValue(parser);
+                return imports;
+            }
+
+            parser.Consume<SequenceStart>();
+            while (!parser.Accept<SequenceEnd>(out _))
+            {
+                if (!parser.Accept<MappingStart>(out _))
+                {
+                    AddScriptParseError(
+                        script,
+                        $"Line {(int)(parser.Current?.Start.Line ?? 0)}: import entry must be a mapping with required keys 'path' and 'as'");
+                    SkipValue(parser);
+                    continue;
+                }
+
+                var mappingStart = parser.Consume<MappingStart>();
+                var import = new ScriptImport { LineNumber = (int)mappingStart.Start.Line };
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "path":
+                            import.Path = parser.Consume<Scalar>().Value;
+                            break;
+                        case "as":
+                        case "alias":
+                            import.Alias = parser.Consume<Scalar>().Value;
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown import key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                imports.Add(import);
+            }
+
+            parser.Consume<SequenceEnd>();
+            return imports;
+        }
+
+        private Dictionary<string, ScriptSubroutine> ParseSubroutines(IParser parser, Script script)
+        {
+            var subroutines = new Dictionary<string, ScriptSubroutine>(StringComparer.OrdinalIgnoreCase);
+
+            if (!parser.Accept<MappingStart>(out _))
+            {
+                AddScriptParseError(script, "subroutines must be a mapping of names to definitions");
+                SkipValue(parser);
+                return subroutines;
+            }
+
+            parser.Consume<MappingStart>();
+            while (!parser.Accept<MappingEnd>(out _))
+            {
+                var nameScalar = parser.Consume<Scalar>();
+                var name = nameScalar.Value;
+                var subroutine = new ScriptSubroutine
+                {
+                    Name = name,
+                    LineNumber = (int)nameScalar.Start.Line
+                };
+
+                if (subroutines.ContainsKey(name))
+                {
+                    AddScriptParseError(script, $"Line {(int)nameScalar.Start.Line}: Duplicate subroutine name '{name}'");
+                }
+
+                if (!parser.Accept<MappingStart>(out _))
+                {
+                    subroutine.ParseErrors.Add($"Line {subroutine.LineNumber}: subroutine '{name}' must be a mapping");
+                    SkipValue(parser);
+                    subroutines[name] = subroutine;
+                    continue;
+                }
+
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "params":
+                            subroutine.Params = ParseStringList(parser);
+                            break;
+                        case "outputs":
+                            subroutine.Outputs = ParseStringList(parser);
+                            break;
+                        case "steps":
+                            subroutine.Steps = ParseSteps(parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown subroutine key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                subroutines[name] = subroutine;
+            }
+
+            parser.Consume<MappingEnd>();
+            return subroutines;
+        }
+
+        private List<string> ParseStringList(IParser parser)
+        {
+            var value = ParseScalarOrSequence(parser);
+            return value switch
+            {
+                List<string> list => list.Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
+                string str when !string.IsNullOrWhiteSpace(str) => new List<string> { str },
+                _ => new List<string>()
+            };
         }
 
         private List<ScriptStep> ParseSteps(IParser parser)
@@ -656,6 +814,14 @@ namespace SSH_Helper.Services.Scripting
                     case "parallel":
                         step.DeclaredStepType = StepType.Parallel;
                         step.Parallel = ParseParallelOptions(parser, step);
+                        break;
+                    case "call":
+                        step.DeclaredStepType = StepType.Call;
+                        step.Call = ParseCallOptions(parser, step);
+                        break;
+                    case "return":
+                        step.DeclaredStepType = StepType.Return;
+                        step.ReturnFromSubroutine = ParseBooleanish(parser);
                         break;
                     case "table":
                         step.DeclaredStepType = StepType.Table;
@@ -1208,6 +1374,99 @@ namespace SSH_Helper.Services.Scripting
 
             SkipValue(parser);
             AddStepParseError(step, "try must be a mapping with required key 'do'");
+        }
+
+        private CallOptions? ParseCallOptions(IParser parser, ScriptStep step)
+        {
+            if (!parser.Accept<MappingStart>(out _))
+            {
+                SkipValue(parser);
+                AddStepParseError(step, "call must be a mapping with required key 'subroutine'");
+                return null;
+            }
+
+            var options = new CallOptions();
+            var hasSubroutine = false;
+
+            parser.Consume<MappingStart>();
+            while (!parser.Accept<MappingEnd>(out _))
+            {
+                var keyScalar = parser.Consume<Scalar>();
+                var key = keyScalar.Value.ToLowerInvariant();
+
+                switch (key)
+                {
+                    case "subroutine":
+                        options.Subroutine = parser.Consume<Scalar>().Value;
+                        hasSubroutine = !string.IsNullOrWhiteSpace(options.Subroutine);
+                        break;
+                    case "args":
+                        options.Args = ParseStringDictionary(parser, "call.args", step);
+                        break;
+                    case "out":
+                        options.Out = ParseStringDictionary(parser, "call.out", step);
+                        break;
+                    case "on_error":
+                    case "onerror":
+                        step.OnError = parser.Consume<Scalar>().Value;
+                        break;
+                    default:
+                        AddUnknownKeyWarning($"Unknown call key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                        SkipValue(parser);
+                        break;
+                }
+            }
+
+            parser.Consume<MappingEnd>();
+            if (!hasSubroutine)
+            {
+                AddStepParseError(step, "call.subroutine is required");
+            }
+
+            return options;
+        }
+
+        private Dictionary<string, string> ParseStringDictionary(IParser parser, string contextName, ScriptStep step)
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!parser.Accept<MappingStart>(out _))
+            {
+                AddStepParseError(step, $"{contextName} must be a mapping");
+                SkipValue(parser);
+                return values;
+            }
+
+            parser.Consume<MappingStart>();
+            while (!parser.Accept<MappingEnd>(out _))
+            {
+                var keyScalar = parser.Consume<Scalar>();
+                var key = keyScalar.Value;
+                if (!parser.Accept<Scalar>(out _))
+                {
+                    AddStepParseError(step, $"{contextName}.{key} must be a scalar value");
+                    SkipValue(parser);
+                    continue;
+                }
+
+                values[key] = parser.Consume<Scalar>().Value;
+            }
+
+            parser.Consume<MappingEnd>();
+            return values;
+        }
+
+        private static void AddScriptParseError(Script script, string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            if (!script.ParseErrors.Contains(message, StringComparer.Ordinal))
+            {
+                script.ParseErrors.Add(message);
+            }
         }
 
         private static void AddStepParseError(ScriptStep step, string message)
@@ -2945,21 +3204,133 @@ namespace SSH_Helper.Services.Scripting
         /// <param name="script">The parsed script to validate.</param>
         /// <param name="originalYaml">Optional original YAML text for including line content in errors.</param>
         /// <param name="enforceCanonicalSyntax">Whether to enforce strict command-map requirements and command-map placement rules.</param>
-        public List<string> Validate(Script script, string? originalYaml = null, bool enforceCanonicalSyntax = false)
+        public List<string> Validate(
+            Script script,
+            string? originalYaml = null,
+            bool enforceCanonicalSyntax = false,
+            bool allowLibraryDefinitions = false)
         {
             var errors = new List<string>();
             var lines = originalYaml?.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            script.SubroutineRegistry = null;
 
-            if (script.Steps == null || script.Steps.Count == 0)
+            foreach (var parseError in script.ParseErrors)
+            {
+                errors.Add(parseError);
+            }
+
+            if (script.Library)
+            {
+                ValidateLibraryTopLevel(script, errors);
+
+                if (!allowLibraryDefinitions)
+                {
+                    errors.Add("Library scripts cannot be executed directly");
+                }
+            }
+            else if (script.Steps == null || script.Steps.Count == 0)
             {
                 errors.Add("Script has no steps defined");
             }
             else
             {
-                ValidateSteps(script.Steps, errors, "", lines, 0, enforceCanonicalSyntax);
+                ValidateSteps(script.Steps, errors, "", lines, 0, enforceCanonicalSyntax, insideSubroutine: false);
+            }
+
+            foreach (var subroutine in script.Subroutines.Values)
+            {
+                ValidateSubroutine(subroutine, errors, lines, enforceCanonicalSyntax);
+            }
+
+            if (allowLibraryDefinitions || !script.Library)
+            {
+                var builder = new ScriptSubroutineRegistryBuilder();
+                script.SubroutineRegistry = builder.Build(script, errors, enforceCanonicalSyntax);
             }
 
             return errors;
+        }
+
+        private void ValidateLibraryTopLevel(Script script, List<string> errors)
+        {
+            ValidateForbiddenLibraryKey(script, errors, "steps");
+            ValidateForbiddenLibraryKey(script, errors, "vars");
+            ValidateForbiddenLibraryKey(script, errors, "imports");
+            ValidateForbiddenLibraryKey(script, errors, "environment");
+            ValidateForbiddenLibraryKey(script, errors, "debug");
+            ValidateForbiddenLibraryKey(script, errors, "nobanner");
+            ValidateForbiddenLibraryKey(script, errors, "suppress_missing_column_warning");
+        }
+
+        private static void ValidateForbiddenLibraryKey(Script script, List<string> errors, string key)
+        {
+            if (script.DeclaredTopLevelKeys.Contains(key))
+            {
+                errors.Add($"Library files may not declare '{key}'");
+            }
+        }
+
+        private void ValidateSubroutine(
+            ScriptSubroutine subroutine,
+            List<string> errors,
+            string[]? lines,
+            bool enforceCanonicalSyntax)
+        {
+            foreach (var parseError in subroutine.ParseErrors)
+            {
+                errors.Add(parseError);
+            }
+
+            if (string.IsNullOrWhiteSpace(subroutine.Name))
+            {
+                errors.Add($"Line {subroutine.LineNumber}: subroutine name is required");
+            }
+
+            ValidateUniqueNames(
+                subroutine.Params,
+                $"Line {subroutine.LineNumber}: subroutine '{subroutine.Name}' has duplicate param '{{0}}'",
+                errors);
+
+            ValidateUniqueNames(
+                subroutine.Outputs,
+                $"Line {subroutine.LineNumber}: subroutine '{subroutine.Name}' has duplicate output '{{0}}'",
+                errors);
+
+            if (subroutine.Steps == null || subroutine.Steps.Count == 0)
+            {
+                errors.Add($"Line {subroutine.LineNumber}: subroutine '{subroutine.Name}' requires 'steps'");
+                return;
+            }
+
+            ValidateSteps(
+                subroutine.Steps,
+                errors,
+                $"Subroutine '{subroutine.Name}': ",
+                lines,
+                loopDepth: 0,
+                enforceCanonicalSyntax,
+                insideSubroutine: true);
+        }
+
+        private static void ValidateUniqueNames(
+            IEnumerable<string> names,
+            string messageTemplate,
+            List<string> errors)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in names)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    errors.Add(messageTemplate.Replace("{0}", "(blank)", StringComparison.Ordinal));
+                    continue;
+                }
+
+                if (!seen.Add(name))
+                {
+                    errors.Add(string.Format(messageTemplate, name));
+                }
+            }
         }
 
         private void ValidateSteps(
@@ -2968,7 +3339,8 @@ namespace SSH_Helper.Services.Scripting
             string prefix,
             string[]? lines,
             int loopDepth,
-            bool enforceCanonicalSyntax)
+            bool enforceCanonicalSyntax,
+            bool insideSubroutine)
         {
             foreach (var step in steps)
             {
@@ -3038,7 +3410,7 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: If requires 'then' block{lineContent}");
                         }
                         if (step.Then != null)
-                            ValidateSteps(step.Then, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
+                            ValidateSteps(step.Then, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
                         if (step.Elif != null)
                         {
                             foreach (var branch in step.Elif)
@@ -3055,12 +3427,12 @@ namespace SSH_Helper.Services.Scripting
                                 }
                                 else
                                 {
-                                    ValidateSteps(branch.Then, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
+                                    ValidateSteps(branch.Then, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
                                 }
                             }
                         }
                         if (step.Else != null)
-                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
+                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
                         break;
 
                     case StepType.Foreach:
@@ -3070,7 +3442,7 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: Foreach requires 'do' block{lineContent}");
                         }
                         if (step.Do != null)
-                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax);
+                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine);
                         break;
 
                     case StepType.While:
@@ -3085,7 +3457,7 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: max_iterations must be greater than 0{lineContent}");
                         }
                         if (step.Do != null)
-                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax);
+                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine);
                         break;
 
                     case StepType.Try:
@@ -3095,11 +3467,11 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: Try requires 'do' block{lineContent}");
                         }
                         if (step.Try != null)
-                            ValidateSteps(step.Try, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
+                            ValidateSteps(step.Try, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
                         if (step.Catch != null)
-                            ValidateSteps(step.Catch, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
+                            ValidateSteps(step.Catch, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
                         if (step.Finally != null)
-                            ValidateSteps(step.Finally, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
+                            ValidateSteps(step.Finally, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
                         break;
 
                     case StepType.Break:
@@ -3115,6 +3487,14 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: continue can only be used inside foreach/while blocks{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Return:
+                        if (!insideSubroutine)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: return can only be used inside subroutines{lineContent}");
                         }
                         break;
 
@@ -3427,11 +3807,11 @@ namespace SSH_Helper.Services.Scripting
                             foreach (var switchCase in step.Cases)
                             {
                                 if (switchCase.Do != null)
-                                    ValidateSteps(switchCase.Do, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
+                                    ValidateSteps(switchCase.Do, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
                             }
                         }
                         if (step.Else != null)
-                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
+                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
                         break;
 
                     case StepType.Parallel:
@@ -3441,7 +3821,15 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: Parallel requires at least one step{lineContent}");
                         }
                         if (step.Parallel?.Steps != null)
-                            ValidateSteps(step.Parallel.Steps, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax);
+                            ValidateSteps(step.Parallel.Steps, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
+                        break;
+
+                    case StepType.Call:
+                        if (step.Call == null)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Call requires 'subroutine'{lineContent}");
+                        }
                         break;
 
                     case StepType.Table:

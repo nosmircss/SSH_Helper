@@ -73,6 +73,9 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (result.ShouldExit)
                     return result;
 
+                if (result.ShouldReturn)
+                    return result;
+
                 if (result.ShouldBreak)
                     break;
 

@@ -78,6 +78,14 @@ namespace SSH_Helper.Services.Editor
             new(@"^\s*into:\s*(?<value>.+?)\s*$",
                 RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
+        private static readonly Regex SequenceScalarRegex =
+            new(@"^\s*-\s*(?<value>[A-Za-z_][A-Za-z0-9_]*)\s*$",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        private static readonly Regex SimpleVariableValueMappingRegex =
+            new(@"^\s*[A-Za-z_][A-Za-z0-9_-]*\s*:\s*(?<value>[A-Za-z_][A-Za-z0-9_]*)\s*$",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
         private static readonly HashSet<string> BuiltInSymbols = new(StringComparer.OrdinalIgnoreCase)
         {
             "_output",
@@ -305,6 +313,11 @@ namespace SSH_Helper.Services.Editor
 
             var inVarsSection = false;
             var varsIndent = 0;
+            var inSubroutinesSection = false;
+            var subroutinesIndent = 0;
+            var currentSubroutineIndent = -1;
+            var activeSymbolListIndent = -1;
+            var activeCallOutIndent = -1;
 
             foreach (var line in lines)
             {
@@ -320,9 +333,25 @@ namespace SSH_Helper.Services.Editor
                     continue;
                 }
 
+                if (!inSubroutinesSection && trimmed.StartsWith("subroutines:", StringComparison.OrdinalIgnoreCase))
+                {
+                    inSubroutinesSection = true;
+                    subroutinesIndent = indent;
+                    currentSubroutineIndent = -1;
+                    activeSymbolListIndent = -1;
+                    continue;
+                }
+
                 if (inVarsSection && indent <= varsIndent)
                 {
                     inVarsSection = false;
+                }
+
+                if (inSubroutinesSection && indent <= subroutinesIndent)
+                {
+                    inSubroutinesSection = false;
+                    currentSubroutineIndent = -1;
+                    activeSymbolListIndent = -1;
                 }
 
                 if (inVarsSection)
@@ -331,6 +360,69 @@ namespace SSH_Helper.Services.Editor
                     if (varsMatch.Success)
                     {
                         symbols.Add(varsMatch.Groups["name"].Value);
+                    }
+                }
+
+                if (inSubroutinesSection)
+                {
+                    if (indent == subroutinesIndent + 2 &&
+                        TryParseMappingKeyLine(line, out var subroutineName) &&
+                        !string.Equals(CanonicalizeKey(subroutineName), "params", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(CanonicalizeKey(subroutineName), "outputs", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(CanonicalizeKey(subroutineName), "steps", StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentSubroutineIndent = indent;
+                        activeSymbolListIndent = -1;
+                    }
+
+                    if (currentSubroutineIndent >= 0 && indent <= currentSubroutineIndent)
+                    {
+                        activeSymbolListIndent = -1;
+                    }
+
+                    if (currentSubroutineIndent >= 0 && indent > currentSubroutineIndent)
+                    {
+                        if (TryReadSimpleListHeader(line, "params", out var paramsInlineValue) ||
+                            TryReadSimpleListHeader(line, "outputs", out paramsInlineValue))
+                        {
+                            activeSymbolListIndent = indent;
+                            foreach (var symbol in ParseBracketedSymbols(paramsInlineValue))
+                            {
+                                symbols.Add(symbol);
+                            }
+                        }
+                        else if (activeSymbolListIndent >= 0 && indent > activeSymbolListIndent)
+                        {
+                            var seqMatch = SequenceScalarRegex.Match(line);
+                            if (seqMatch.Success)
+                            {
+                                symbols.Add(seqMatch.Groups["value"].Value);
+                            }
+                        }
+                        else if (activeSymbolListIndent >= 0 && indent <= activeSymbolListIndent)
+                        {
+                            activeSymbolListIndent = -1;
+                        }
+                    }
+                }
+
+                if (trimmed.StartsWith("out:", StringComparison.OrdinalIgnoreCase))
+                {
+                    activeCallOutIndent = indent;
+                    continue;
+                }
+
+                if (activeCallOutIndent >= 0 && indent <= activeCallOutIndent)
+                {
+                    activeCallOutIndent = -1;
+                }
+
+                if (activeCallOutIndent >= 0 && indent > activeCallOutIndent)
+                {
+                    var outMatch = SimpleVariableValueMappingRegex.Match(line);
+                    if (outMatch.Success)
+                    {
+                        symbols.Add(outMatch.Groups["value"].Value);
                     }
                 }
 
@@ -367,6 +459,42 @@ namespace SSH_Helper.Services.Editor
             }
 
             return symbols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        private static bool TryReadSimpleListHeader(string line, string key, out string inlineValue)
+        {
+            inlineValue = string.Empty;
+            if (!TryParseMappingKeyLine(line, out var parsedKey))
+                return false;
+
+            if (!string.Equals(CanonicalizeKey(parsedKey), CanonicalizeKey(key), StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var colonIndex = line.IndexOf(':');
+            if (colonIndex < 0)
+                return false;
+
+            inlineValue = line[(colonIndex + 1)..].Trim();
+            return true;
+        }
+
+        private static IEnumerable<string> ParseBracketedSymbols(string inlineValue)
+        {
+            if (string.IsNullOrWhiteSpace(inlineValue))
+                yield break;
+
+            var trimmed = inlineValue.Trim();
+            if (!(trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal)))
+                yield break;
+
+            foreach (var part in trimmed[1..^1].Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var candidate = part.Trim();
+                if (Regex.IsMatch(candidate, @"^[A-Za-z_][A-Za-z0-9_]*$"))
+                {
+                    yield return candidate;
+                }
+            }
         }
 
         private CompletionResult? BuildInterpolationCompletion(string text, int safeCaret, string linePrefix)

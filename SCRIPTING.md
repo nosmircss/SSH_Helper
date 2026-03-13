@@ -17,6 +17,8 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [foreach](#foreach---loop-over-collections)
    - [while](#while---conditional-loop)
    - [try](#try---structured-error-handling)
+   - [call](#call---invoke-a-subroutine)
+   - [return](#return---exit-current-subroutine)
    - [exit](#exit---terminate-script)
    - [readfile](#readfile---read-text-files)
    - [writefile](#writefile---write-text-files)
@@ -61,6 +63,7 @@ environment: "prod"              # Optional: switch to this environment when the
 debug: false                     # Optional: enable debug output (default: false)
 nobanner: false                  # Optional: suppress script execution banner (default: false)
 suppress_missing_column_warning: false  # Optional: suppress missing-column preflight warning
+library: false                   # Optional: definition-only file for imports (default: false)
 
 vars:                            # Optional: variable declarations
   variable_name: "default_value"
@@ -69,21 +72,38 @@ vars:                            # Optional: variable declarations
     - "Cloudflare-CDN"
     - "Amazon-AWS"
 
+imports:                         # Optional: file-based libraries (executable scripts only)
+  - path: "C:\\Scripts\\common.yaml"
+    as: common
+
+subroutines:                     # Optional: reusable named step blocks
+  lookup:
+    params: [ip]
+    outputs: [result]
+    steps:
+      - set:
+          expression: result = "hello ${ip}"
+
 steps:                           # Required: list of execution steps
-  - send:
-      command: "command"
+  - call:
+      subroutine: lookup
+      args:
+        ip: Host_IP
+      out:
+        result: greeting
   - print:
-      message: "message"
+      message: "${greeting}"
 ```
 
 `vars:` accepts both scalar values and YAML sequences. Prefer YAML lists for fixed collections instead of building them one `json.push()` call at a time.
+Executable scripts may also declare `imports:` and `subroutines:`. Library files set `library: true` and may contain `subroutines:` only; they are meant to be imported, not executed directly.
 
 ### Auto-Detection
 
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
-- Distinctive top-level sections: `vars:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
+- Distinctive top-level sections: `vars:`, `imports:`, `subroutines:`, `steps:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
 
 Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.
 
@@ -1206,6 +1226,73 @@ Runs steps in a `try` block, optionally handles failures in `catch`, and always 
       finally:
         - log: "Cleanup complete"
 ```
+
+---
+
+### call - Invoke a Subroutine
+
+Runs a local subroutine or an imported library subroutine inside an isolated child variable scope.
+
+**Syntax:**
+```yaml
+- call:
+    subroutine: lookup_service
+    args:
+      ip: Host_IP
+      excludes: exclude_service_matches_norm
+    out:
+      unique_services: unique_services_v4
+      unmatched_ips: unmatched_ips_v4
+    on_error: continue
+```
+
+**Rules:**
+- `subroutine` is required.
+- Bare names call local subroutines.
+- `alias.name` calls imported library subroutines.
+- `args` are expression strings resolved before entering the child scope.
+- `out` maps declared subroutine outputs back into bare caller variable names.
+- Child scopes do not automatically inherit caller variables; pass everything explicitly through `args`.
+- `on_error: continue` suppresses subroutine failure just like other command-map steps.
+
+**Example:**
+```yaml
+subroutines:
+  print_section:
+    params: [title, items]
+    steps:
+      - if:
+          condition: items is empty
+          then:
+            - return: true
+      - print:
+          message: "${title}"
+      - foreach:
+          iterator: item in items
+          do:
+            - print:
+                message: "${item}"
+
+steps:
+  - call:
+      subroutine: print_section
+      args:
+        title: "=== Results ==="
+        items: results
+```
+
+---
+
+### return - Exit Current Subroutine
+
+Ends the current subroutine immediately without terminating the whole script.
+
+**Syntax:**
+```yaml
+- return: true
+```
+
+`return` is only valid inside subroutines. Declared outputs that were already assigned in the child scope are copied back to the caller when the subroutine returns.
 
 ---
 

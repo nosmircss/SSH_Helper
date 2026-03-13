@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading;
 using SSH_Helper.Models;
@@ -94,54 +96,99 @@ namespace SSH_Helper.Services.Scripting
     {
         private const string TimestampFormat = "yyyy-MM-dd HH:mm:ss";
         private static readonly Regex ArrayExpressionRegex = new(@"^(\w+)\[([^\]]+)\]$", RegexOptions.Compiled);
-        private readonly Dictionary<string, object?> _variables = new(StringComparer.OrdinalIgnoreCase);
-        private readonly StringBuilder _output = new();
-        private readonly object _stateLock = new();
-        private readonly List<InteractiveTerminalSessionDetails> _interactiveSessions = new();
-        private readonly object _interactiveSessionsLock = new();
+        private readonly Dictionary<string, object?> _variables;
+        private readonly SharedScriptExecutionState _sharedState;
         private readonly AsyncLocal<int> _loopDepth = new();
-        private string _lastCommandOutput = string.Empty;
+        private readonly AsyncLocal<int> _callDepth = new();
+
+        private sealed class SharedScriptExecutionState
+        {
+            public object StateLock { get; } = new();
+            public StringBuilder Output { get; } = new();
+            public List<InteractiveTerminalSessionDetails> InteractiveSessions { get; } = new();
+            public object InteractiveSessionsLock { get; } = new();
+            public string LastCommandOutput { get; set; } = string.Empty;
+            public SshShellSession? Session { get; set; }
+            public HostConnection? CurrentHost { get; set; }
+            public string? ResolvedUsername { get; set; }
+            public string? ResolvedPassword { get; set; }
+            public SshTimeoutOptions? Timeouts { get; set; }
+            public DebugState DebugState { get; } = new();
+            public bool AllowFileSelectionDialogs { get; set; } = true;
+            public bool DebugMode { get; set; }
+            public EventHandler<ScriptOutputEventArgs>? OutputReceived { get; set; }
+            public EventHandler<ColumnUpdateEventArgs>? ColumnUpdateRequested { get; set; }
+            public EventHandler<EnvironmentUpdateEventArgs>? EnvironmentUpdateRequested { get; set; }
+        }
 
         /// <summary>
         /// The SSH shell session for executing commands.
         /// </summary>
-        public SshShellSession? Session { get; set; }
+        public SshShellSession? Session
+        {
+            get => _sharedState.Session;
+            set => _sharedState.Session = value;
+        }
 
         /// <summary>
         /// The host currently being executed for this script context.
         /// </summary>
-        public HostConnection? CurrentHost { get; set; }
+        public HostConnection? CurrentHost
+        {
+            get => _sharedState.CurrentHost;
+            set => _sharedState.CurrentHost = value;
+        }
 
         /// <summary>
         /// Resolved username used for the current host execution.
         /// </summary>
-        public string? ResolvedUsername { get; set; }
+        public string? ResolvedUsername
+        {
+            get => _sharedState.ResolvedUsername;
+            set => _sharedState.ResolvedUsername = value;
+        }
 
         /// <summary>
         /// Resolved password used for the current host execution.
         /// </summary>
-        public string? ResolvedPassword { get; set; }
+        public string? ResolvedPassword
+        {
+            get => _sharedState.ResolvedPassword;
+            set => _sharedState.ResolvedPassword = value;
+        }
 
         /// <summary>
         /// Timeout options for the current host execution.
         /// </summary>
-        public SshTimeoutOptions? Timeouts { get; set; }
+        public SshTimeoutOptions? Timeouts
+        {
+            get => _sharedState.Timeouts;
+            set => _sharedState.Timeouts = value;
+        }
 
         /// <summary>
         /// Debug state for breakpoints and stepping.
         /// </summary>
-        public DebugState DebugState { get; } = new();
+        public DebugState DebugState => _sharedState.DebugState;
 
         /// <summary>
         /// Whether commands may open file-selection dialogs during this execution.
         /// </summary>
-        public bool AllowFileSelectionDialogs { get; set; } = true;
+        public bool AllowFileSelectionDialogs
+        {
+            get => _sharedState.AllowFileSelectionDialogs;
+            set => _sharedState.AllowFileSelectionDialogs = value;
+        }
 
         /// <summary>
         /// When true, debug output (Extract results, Set values, etc.) is shown.
         /// When false, debug output is suppressed.
         /// </summary>
-        public bool DebugMode { get; set; }
+        public bool DebugMode
+        {
+            get => _sharedState.DebugMode;
+            set => _sharedState.DebugMode = value;
+        }
 
         /// <summary>
         /// Current loop nesting depth. Managed by ScriptExecutor.
@@ -153,19 +200,91 @@ namespace SSH_Helper.Services.Scripting
         }
 
         /// <summary>
+        /// Current subroutine call depth. Managed by call execution.
+        /// </summary>
+        public int CallDepth
+        {
+            get => _callDepth.Value;
+            set => _callDepth.Value = value;
+        }
+
+        /// <summary>
+        /// Active root script for this execution context.
+        /// </summary>
+        public Script? ActiveScript { get; set; }
+
+        /// <summary>
+        /// Resolved subroutine registry for the active script.
+        /// </summary>
+        public ScriptSubroutineRegistry? SubroutineRegistry { get; set; }
+
+        /// <summary>
+        /// Current subroutine definition executing inside this scope, if any.
+        /// </summary>
+        public ScriptSubroutineDefinition? CurrentSubroutine { get; set; }
+
+        /// <summary>
         /// Fired when script produces output.
         /// </summary>
-        public event EventHandler<ScriptOutputEventArgs>? OutputReceived;
+        public event EventHandler<ScriptOutputEventArgs>? OutputReceived
+        {
+            add
+            {
+                lock (_sharedState.StateLock)
+                {
+                    _sharedState.OutputReceived += value;
+                }
+            }
+            remove
+            {
+                lock (_sharedState.StateLock)
+                {
+                    _sharedState.OutputReceived -= value;
+                }
+            }
+        }
 
         /// <summary>
         /// Fired when script requests a column update for the current host.
         /// </summary>
-        public event EventHandler<ColumnUpdateEventArgs>? ColumnUpdateRequested;
+        public event EventHandler<ColumnUpdateEventArgs>? ColumnUpdateRequested
+        {
+            add
+            {
+                lock (_sharedState.StateLock)
+                {
+                    _sharedState.ColumnUpdateRequested += value;
+                }
+            }
+            remove
+            {
+                lock (_sharedState.StateLock)
+                {
+                    _sharedState.ColumnUpdateRequested -= value;
+                }
+            }
+        }
 
         /// <summary>
         /// Fired when script requests an environment variable update.
         /// </summary>
-        public event EventHandler<EnvironmentUpdateEventArgs>? EnvironmentUpdateRequested;
+        public event EventHandler<EnvironmentUpdateEventArgs>? EnvironmentUpdateRequested
+        {
+            add
+            {
+                lock (_sharedState.StateLock)
+                {
+                    _sharedState.EnvironmentUpdateRequested += value;
+                }
+            }
+            remove
+            {
+                lock (_sharedState.StateLock)
+                {
+                    _sharedState.EnvironmentUpdateRequested -= value;
+                }
+            }
+        }
 
         /// <summary>
         /// Gets the last command output.
@@ -174,9 +293,9 @@ namespace SSH_Helper.Services.Scripting
         {
             get
             {
-                lock (_stateLock)
+                lock (_sharedState.StateLock)
                 {
-                    return _lastCommandOutput;
+                    return _sharedState.LastCommandOutput;
                 }
             }
         }
@@ -188,9 +307,9 @@ namespace SSH_Helper.Services.Scripting
         {
             get
             {
-                lock (_stateLock)
+                lock (_sharedState.StateLock)
                 {
-                    return _output.ToString();
+                    return _sharedState.Output.ToString();
                 }
             }
         }
@@ -200,7 +319,17 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         /// <param name="initialVariables">Variables from CSV columns or other sources.</param>
         public ScriptContext(Dictionary<string, string>? initialVariables = null)
+            : this(new SharedScriptExecutionState(), initialVariables)
         {
+        }
+
+        private ScriptContext(
+            SharedScriptExecutionState sharedState,
+            Dictionary<string, string>? initialVariables = null)
+        {
+            _sharedState = sharedState;
+            _variables = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
             // Import initial variables (e.g., from CSV columns)
             if (initialVariables != null)
             {
@@ -216,7 +345,7 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public void SetVariable(string name, object? value)
         {
-            lock (_stateLock)
+            lock (_sharedState.StateLock)
             {
                 _variables[name] = value;
             }
@@ -229,8 +358,10 @@ namespace SSH_Helper.Services.Scripting
         {
             if (string.Equals(name, "_timestamp", StringComparison.OrdinalIgnoreCase))
                 return DateTime.Now.ToString(TimestampFormat);
+            if (string.Equals(name, "_output", StringComparison.OrdinalIgnoreCase))
+                return LastCommandOutput;
 
-            lock (_stateLock)
+            lock (_sharedState.StateLock)
             {
                 return _variables.TryGetValue(name, out var value) ? value : null;
             }
@@ -260,10 +391,11 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public bool HasVariable(string name)
         {
-            if (string.Equals(name, "_timestamp", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(name, "_timestamp", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "_output", StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            lock (_stateLock)
+            lock (_sharedState.StateLock)
             {
                 return _variables.ContainsKey(name);
             }
@@ -274,7 +406,7 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public void RemoveVariable(string name)
         {
-            lock (_stateLock)
+            lock (_sharedState.StateLock)
             {
                 _variables.Remove(name);
             }
@@ -286,12 +418,13 @@ namespace SSH_Helper.Services.Scripting
         public IReadOnlyDictionary<string, object?> GetAllVariables()
         {
             Dictionary<string, object?> snapshot;
-            lock (_stateLock)
+            lock (_sharedState.StateLock)
             {
                 snapshot = new Dictionary<string, object?>(_variables, StringComparer.OrdinalIgnoreCase);
             }
 
             snapshot["_timestamp"] = DateTime.Now.ToString(TimestampFormat);
+            snapshot["_output"] = LastCommandOutput;
             return snapshot;
         }
 
@@ -305,9 +438,9 @@ namespace SSH_Helper.Services.Scripting
                 return input;
 
             string lastOutput;
-            lock (_stateLock)
+            lock (_sharedState.StateLock)
             {
-                lastOutput = _lastCommandOutput;
+                lastOutput = _sharedState.LastCommandOutput;
             }
 
             // Handle special _output variable
@@ -439,11 +572,10 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public void RecordCommandOutput(string output, string? captureVariable = null)
         {
-            lock (_stateLock)
+            lock (_sharedState.StateLock)
             {
-                _lastCommandOutput = output;
-                _variables["_output"] = output;
-                _output.AppendLine(output);
+                _sharedState.LastCommandOutput = output;
+                _sharedState.Output.AppendLine(output);
             }
 
             if (!string.IsNullOrEmpty(captureVariable))
@@ -464,10 +596,10 @@ namespace SSH_Helper.Services.Scripting
             EventHandler<ScriptOutputEventArgs>? outputReceived;
             ScriptOutputEventArgs eventArgs;
 
-            lock (_stateLock)
+            lock (_sharedState.StateLock)
             {
-                _output.AppendLine(message);
-                outputReceived = OutputReceived;
+                _sharedState.Output.AppendLine(message);
+                outputReceived = _sharedState.OutputReceived;
                 eventArgs = new ScriptOutputEventArgs
                 {
                     Message = message,
@@ -483,9 +615,9 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public void ClearOutput()
         {
-            lock (_stateLock)
+            lock (_sharedState.StateLock)
             {
-                _output.Clear();
+                _sharedState.Output.Clear();
             }
         }
 
@@ -496,11 +628,19 @@ namespace SSH_Helper.Services.Scripting
         /// <param name="value">The value to set.</param>
         public void RequestColumnUpdate(string columnName, string value)
         {
-            ColumnUpdateRequested?.Invoke(this, new ColumnUpdateEventArgs
+            EventHandler<ColumnUpdateEventArgs>? handler;
+            ColumnUpdateEventArgs args;
+            lock (_sharedState.StateLock)
             {
-                ColumnName = columnName,
-                Value = value
-            });
+                handler = _sharedState.ColumnUpdateRequested;
+                args = new ColumnUpdateEventArgs
+                {
+                    ColumnName = columnName,
+                    Value = value
+                };
+            }
+
+            handler?.Invoke(this, args);
         }
 
         /// <summary>
@@ -510,11 +650,19 @@ namespace SSH_Helper.Services.Scripting
         /// <param name="value">The value to persist.</param>
         public void RequestEnvironmentUpdate(string variable, string value)
         {
-            EnvironmentUpdateRequested?.Invoke(this, new EnvironmentUpdateEventArgs
+            EventHandler<EnvironmentUpdateEventArgs>? handler;
+            EnvironmentUpdateEventArgs args;
+            lock (_sharedState.StateLock)
             {
-                Variable = variable,
-                Value = value
-            });
+                handler = _sharedState.EnvironmentUpdateRequested;
+                args = new EnvironmentUpdateEventArgs
+                {
+                    Variable = variable,
+                    Value = value
+                };
+            }
+
+            handler?.Invoke(this, args);
         }
 
         /// <summary>
@@ -525,15 +673,15 @@ namespace SSH_Helper.Services.Scripting
             if (session == null)
                 return;
 
-            lock (_interactiveSessionsLock)
+            lock (_sharedState.InteractiveSessionsLock)
             {
                 var cloned = CloneInteractiveSession(session);
                 if (cloned.SessionNumber <= 0)
                 {
-                    cloned.SessionNumber = _interactiveSessions.Count + 1;
+                    cloned.SessionNumber = _sharedState.InteractiveSessions.Count + 1;
                 }
 
-                _interactiveSessions.Add(cloned);
+                _sharedState.InteractiveSessions.Add(cloned);
             }
         }
 
@@ -542,12 +690,39 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public List<InteractiveTerminalSessionDetails> GetInteractiveSessionsSnapshot()
         {
-            lock (_interactiveSessionsLock)
+            lock (_sharedState.InteractiveSessionsLock)
             {
-                return _interactiveSessions
+                return _sharedState.InteractiveSessions
                     .Select(CloneInteractiveSession)
                     .ToList();
             }
+        }
+
+        /// <summary>
+        /// Creates an isolated child variable scope that shares runtime/session/output state with the parent.
+        /// </summary>
+        public ScriptContext CreateChildScope(
+            IReadOnlyDictionary<string, object?>? initialVariables = null,
+            ScriptSubroutineDefinition? currentSubroutine = null)
+        {
+            var child = new ScriptContext(_sharedState)
+            {
+                ActiveScript = ActiveScript,
+                SubroutineRegistry = SubroutineRegistry,
+                CurrentSubroutine = currentSubroutine,
+                CallDepth = CallDepth + 1,
+                LoopDepth = 0
+            };
+
+            if (initialVariables != null)
+            {
+                foreach (var kvp in initialVariables)
+                {
+                    child.SetVariable(kvp.Key, CloneVariableValue(kvp.Value));
+                }
+            }
+
+            return child;
         }
 
         /// <summary>
@@ -555,17 +730,72 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public void ImportScriptVars(Dictionary<string, object?> vars)
         {
-            lock (_stateLock)
+            lock (_sharedState.StateLock)
             {
                 foreach (var kvp in vars)
                 {
                     // Only set if not already defined (CSV variables take precedence)
                     if (!_variables.ContainsKey(kvp.Key))
                     {
-                        _variables[kvp.Key] = kvp.Value;
+                        _variables[kvp.Key] = CloneVariableValue(kvp.Value);
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Copies selected child-scope outputs back to the caller scope.
+        /// </summary>
+        public void CopyOutputsFromChild(
+            ScriptContext childContext,
+            IReadOnlyDictionary<string, string> outputBindings,
+            IEnumerable<string> declaredOutputs)
+        {
+            if (childContext == null || outputBindings == null)
+            {
+                return;
+            }
+
+            var declared = new HashSet<string>(declaredOutputs ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            foreach (var binding in outputBindings)
+            {
+                if (!declared.Contains(binding.Key))
+                {
+                    continue;
+                }
+
+                SetVariable(binding.Value, CloneVariableValue(childContext.GetVariable(binding.Key)));
+            }
+        }
+
+        private static object? CloneVariableValue(object? value)
+        {
+            return value switch
+            {
+                null => null,
+                List<string> list => new List<string>(list),
+                JsonNode node => node.DeepClone(),
+                JsonElement element => CloneJsonElement(element),
+                Dictionary<string, object?> dict => CloneDictionary(dict),
+                _ => value
+            };
+        }
+
+        private static Dictionary<string, object?> CloneDictionary(IDictionary<string, object?> source)
+        {
+            var clone = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in source)
+            {
+                clone[kvp.Key] = CloneVariableValue(kvp.Value);
+            }
+
+            return clone;
+        }
+
+        private static JsonElement CloneJsonElement(JsonElement element)
+        {
+            using var document = JsonDocument.Parse(element.GetRawText());
+            return document.RootElement.Clone();
         }
 
         private static InteractiveTerminalSessionDetails CloneInteractiveSession(InteractiveTerminalSessionDetails session)

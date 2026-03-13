@@ -35,7 +35,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (step.Then != null && step.Then.Count > 0)
                 {
                     var thenResult = await _executor.ExecuteStepsAsync(step.Then, context, cancellationToken, context.LoopDepth);
-                    if (thenResult.ShouldExit || thenResult.ShouldBreak || thenResult.ShouldContinue || !thenResult.Success)
+                    if (thenResult.ShouldExit || thenResult.ShouldBreak || thenResult.ShouldContinue || thenResult.ShouldReturn || !thenResult.Success)
                         return thenResult;
                 }
             }
@@ -56,7 +56,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                         if (elif.Then.Count > 0)
                         {
                             var branchResult = await _executor.ExecuteStepsAsync(elif.Then, context, cancellationToken, context.LoopDepth);
-                            if (branchResult.ShouldExit || branchResult.ShouldBreak || branchResult.ShouldContinue || !branchResult.Success)
+                            if (branchResult.ShouldExit || branchResult.ShouldBreak || branchResult.ShouldContinue || branchResult.ShouldReturn || !branchResult.Success)
                                 return branchResult;
                         }
 
@@ -68,7 +68,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (step.Else != null && step.Else.Count > 0)
                 {
                     var elseResult = await _executor.ExecuteStepsAsync(step.Else, context, cancellationToken, context.LoopDepth);
-                    if (elseResult.ShouldExit || elseResult.ShouldBreak || elseResult.ShouldContinue || !elseResult.Success)
+                    if (elseResult.ShouldExit || elseResult.ShouldBreak || elseResult.ShouldContinue || elseResult.ShouldReturn || !elseResult.Success)
                         return elseResult;
                 }
             }
