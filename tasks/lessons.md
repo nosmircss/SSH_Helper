@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-03-13
+- When a user narrows status-bar progress behavior, I must encode the exact simplification they asked for instead of preserving extra host/preset detail from the earlier plan.
+- When I drive a WinForms status bar from `Progress<T>`, I must guard late UI-thread callbacks with a run token and confirm the exact visibility threshold so 1x1 runs do not show a pointless progress bar.
+
 ## 2026-03-12
 - When a user asks for clearer QA preset prerequisites or execution expectations, I must encode those details directly in each preset `description` instead of assuming the preset name or folder is enough context.
 - When I expand the scripting runtime to accept new expression forms, I must update `ScriptDependencyAnalyzer` in the same pass or the missing-column preflight will drift and flag expression text as fake grid columns.

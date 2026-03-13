@@ -1,5 +1,36 @@
 # TODO
 
+## 84. Fix manual progress visibility regressions
+- [x] 84.1 Prevent stale manual-progress callbacks from re-showing the status bar after execution completes.
+- [x] 84.2 Limit manual progress visibility to runs with more than one host-task operation so 1x1 runs stay bar-free.
+- [x] 84.3 Add focused regression coverage for the visibility rule and rerun progress verification.
+- [x] 84.4 Run targeted tests plus a normal solution build, then capture the review outcome below.
+
+### 84 Review
+- Reworked the `Form1` manual-progress lifecycle so `BeginManualExecutionProgress(...)` now returns a reporter only when the run has more than one host-task operation, which keeps 1 host x 1 preset runs from showing the progress bar at all.
+- Added a per-run token on the form side and an `EndManualExecutionProgress()` invalidation step, so any queued `Progress<FolderExecutionProgress>` callbacks posted after completion are ignored instead of re-showing the status bar.
+- Updated the multi-host preset branch to use the new conditional progress start and fall back to the normal start status text when the selected execution collapses to a single operation after the dialog filters hosts.
+- Updated the folder execution path with the same conditional visibility rule so single-operation folder runs show only status text, while multi-operation runs still get percent-based determinate progress.
+- Extended `ManualExecutionStatusProgressTests` with an explicit visibility-rule test that requires `totalOperations > 1` before progress should be shown.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceProgressTests|FullyQualifiedName~ManualExecutionStatusProgressTests|FullyQualifiedName~SshExecutionServiceCancellationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\manual-progress-visibility-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\manual-progress-visibility-tests\\obj\\` passed (11/11).
+- Verification: normal `dotnet build .\\SSH_Helper.sln` failed because `bin\\Debug\\net8.0-windows\\SSH_Helper.exe` was locked by a running `SSH_Helper` process (PID 48112).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:BaseOutputPath=artifacts\\manual-progress-visibility-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\manual-progress-visibility-build\\obj\\` passed with 0 warnings and 0 errors.
+
+## 83. Simplify manual execution status progress
+- [x] 83.1 Update manual execution progress reporting to use completed operations out of total host-task operations.
+- [x] 83.2 Patch Form1 status-bar handling so multi-host preset runs and folder runs show simple monotonic percent progress.
+- [x] 83.3 Add focused regression coverage for execution progress reporting and form-side percent formatting.
+- [x] 83.4 Run targeted tests plus a normal solution build, then capture the review outcome below.
+
+### 83 Review
+- Added additive `CompletedOperations` and `TotalOperations` to `FolderExecutionProgress` and changed `SshExecutionService.ExecuteFolderAsync(...)` to report progress only when a host-task unit finishes, where one unit is one preset completed on one host.
+- Removed the earlier start/batch progress inference so manual progress now tracks actual completed work across both sequential and parallel folder execution paths, including the multi-host preset path that reuses `ExecuteFolderAsync(...)` with a single selected preset.
+- Added `Utilities\\ManualExecutionStatusProgress.cs` as the shared helper that converts operation counts into the simple `Running... {percent}%` text and clamps out-of-order parallel reports so the status bar never moves backward.
+- Updated `Form1` so multi-host preset runs and folder runs initialize determinate progress from `total hosts x total tasks`, feed the shared progress reporter into the service, and keep the existing final success/failure/cancel summary messages unchanged.
+- Added focused regressions in `SSH_Helper.Tests\\Services\\SshExecutionServiceProgressTests.cs` and `SSH_Helper.Tests\\UI\\ManualExecutionStatusProgressTests.cs`, and kept the existing cancellation coverage in scope to guard the touched execution path.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceProgressTests|FullyQualifiedName~ManualExecutionStatusProgressTests|FullyQualifiedName~SshExecutionServiceCancellationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\manual-progress-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\manual-progress-tests\\obj\\` passed (8/8).
+- Verification: `dotnet build .\\SSH_Helper.sln` passed with 0 warnings and 0 errors.
+
 ## 82. Add variable-height history rows
 - [x] 82.1 Replace the history list fixed-height configuration with measured variable-height rows that wrap full labels and cap at 3 lines.
 - [x] 82.2 Add reusable row-height measurement logic plus targeted automated coverage for short, wrapped, and capped labels.

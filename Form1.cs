@@ -192,6 +192,8 @@ namespace SSH_Helper
         private bool _historySelectionArmPending;
         private DateTime _historySelectionArmedAtUtc = DateTime.MaxValue;
         private string _selectedHistoryOutput = string.Empty;
+        private int _manualExecutionCompletedOperations;
+        private int _manualExecutionProgressRunId;
         private string? _loadedHistoryPayloadId;
         private HistoryRunPayload? _loadedHistoryPayload;
         private bool _loadedHistoryPayloadHasDetails;
@@ -2137,6 +2139,45 @@ namespace SSH_Helper
             {
                 statusProgress.Maximum = total;
                 statusProgress.Value = Math.Min(progress, total);
+            }
+        }
+
+        private IProgress<FolderExecutionProgress>? BeginManualExecutionProgress(int totalOperations)
+        {
+            _manualExecutionCompletedOperations = 0;
+
+            if (!ManualExecutionStatusProgress.ShouldShowProgress(totalOperations))
+                return null;
+
+            int runId = unchecked(++_manualExecutionProgressRunId);
+            UpdateStatusBar("Running... 0%", true, 0, totalOperations);
+            return new Progress<FolderExecutionProgress>(progress => UpdateManualExecutionProgress(runId, progress));
+        }
+
+        private void UpdateManualExecutionProgress(int runId, FolderExecutionProgress progress)
+        {
+            if (runId != _manualExecutionProgressRunId ||
+                !ManualExecutionStatusProgress.ShouldShowProgress(progress.TotalOperations))
+            {
+                return;
+            }
+
+            var state = ManualExecutionStatusProgress.Advance(_manualExecutionCompletedOperations, progress);
+            _manualExecutionCompletedOperations = state.CompletedOperations;
+
+            UpdateStatusBar(
+                state.StatusText,
+                showProgress: true,
+                progress: state.CompletedOperations,
+                total: state.TotalOperations);
+        }
+
+        private void EndManualExecutionProgress()
+        {
+            _manualExecutionCompletedOperations = 0;
+            unchecked
+            {
+                _manualExecutionProgressRunId++;
             }
         }
 
@@ -8955,14 +8996,19 @@ namespace SSH_Helper
                 SshDebugLog("EXEC", $"Preset created. IsScript: {preset.IsScript}", sw);
             }
 
-            UpdateStatusBar(startStatus(hosts.Count), true, 0, hosts.Count);
-            var executionStartUtc = DateTime.UtcNow;
-
-            try
+            if (dialogOptions != null)
             {
-                List<ExecutionResult> results;
-                if (dialogOptions != null)
+                var totalOperations = hosts.Count * Math.Max(1, dialogOptions.SelectedPresets.Count);
+                var manualProgress = BeginManualExecutionProgress(totalOperations);
+                if (manualProgress == null)
                 {
+                    UpdateStatusBar(startStatus(hosts.Count));
+                }
+                var branchExecutionStartUtc = DateTime.UtcNow;
+
+                try
+                {
+                    List<ExecutionResult> results;
                     var presets = new Dictionary<string, PresetInfo>(StringComparer.Ordinal)
                     {
                         [presetDisplayName] = preparation.Preset
@@ -8975,19 +9021,68 @@ namespace SSH_Helper
                         tsbUsername.Text,
                         tsbPassword.Text,
                         preparation.Timeouts,
-                        dialogOptions);
+                        dialogOptions,
+                        manualProgress);
                     SshDebugLog("EXEC", $"ExecuteFolderAsync completed. Results: {results.Count}", sw);
-                }
-                else
-                {
-                    SshDebugLog("EXEC", "Calling ExecutePresetAsync - SSH connection starting", sw);
-                    results = await _executionCoordinator.ExecutePresetAsync(
-                        hosts,
-                        preparation,
+
+                    var wasCancelled = WasManualExecutionCancelled(results);
+                    if (wasCancelled)
+                    {
+                        AppendOutputText(Environment.NewLine + Environment.NewLine + "Execution cancelled." + Environment.NewLine);
+                    }
+
+                    var executionDetails = BuildExecutionDetails(
+                        presetDisplayName,
+                        preset.Commands,
+                        preset.Type.ToString(),
+                        branchExecutionStartUtc,
+                        DateTime.UtcNow,
                         tsbUsername.Text,
-                        tsbPassword.Text);
-                    SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
+                        preparation.CommandTimeoutSeconds,
+                        preparation.ConnectionTimeoutSeconds,
+                        _sshService.UseConnectionPooling,
+                        BuildRunModeDescription(dialogOptions, isFolderExecution: false),
+                        wasCancelled,
+                        isFolderExecution: false,
+                        string.Empty,
+                        new[] { presetDisplayName },
+                        hosts,
+                        results);
+
+                    StoreExecutionHistory(results, executionDetails);
+                    UpdateStatusBar(wasCancelled
+                        ? BuildCancelledPresetStatus(hosts)
+                        : completionStatus(results.Count));
                 }
+                catch (Exception ex)
+                {
+                    SshDebugLog("EXEC", $"Exception: {ex.GetType().Name}: {ex.Message}", sw);
+                    DialogTheme.Show($"An error occurred: {ex.Message}");
+                    UpdateStatusBar("Execution failed");
+                }
+                finally
+                {
+                    SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
+                    SetExecutionMode(false);
+                }
+                return;
+            }
+            else
+            {
+                UpdateStatusBar(startStatus(hosts.Count));
+            }
+            var executionStartUtc = DateTime.UtcNow;
+
+            try
+            {
+                List<ExecutionResult> results;
+                SshDebugLog("EXEC", "Calling ExecutePresetAsync - SSH connection starting", sw);
+                results = await _executionCoordinator.ExecutePresetAsync(
+                    hosts,
+                    preparation,
+                    tsbUsername.Text,
+                    tsbPassword.Text);
+                SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
                 var wasCancelled = WasManualExecutionCancelled(results);
                 if (wasCancelled)
                 {
@@ -9395,22 +9490,16 @@ namespace SSH_Helper
             ClearOutput();
 
             int totalOperations = hosts.Count * presets.Count;
-            UpdateStatusBar($"Executing folder '{folderName}' on {hosts.Count} hosts...", true, 0, totalOperations);
+            var progress = BeginManualExecutionProgress(totalOperations);
+            if (progress == null)
+            {
+                UpdateStatusBar($"Executing folder '{folderName}' on {hosts.Count} hosts...");
+            }
 
             // Use default timeout from first preset or config
             int commandTimeout = presets.Values.FirstOrDefault()?.Timeout ?? config.Timeout;
             var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
             var executionStartUtc = DateTime.UtcNow;
-
-            // Progress reporter
-            var progress = new Progress<FolderExecutionProgress>(p =>
-            {
-                if (!string.IsNullOrEmpty(p.CurrentHost) && !string.IsNullOrEmpty(p.CurrentPreset))
-                {
-                    int completed = p.CompletedHosts * presets.Count + p.CompletedPresets;
-                    UpdateStatusBar($"Running {folderName}: {p.CurrentPreset} ({p.CompletedPresets + 1}/{p.TotalPresets}) on {p.CurrentHost}", true, completed, totalOperations);
-                }
-            });
 
             try
             {
@@ -9879,6 +9968,7 @@ namespace SSH_Helper
                 btnStopAll.Enabled = true;
                 btnStopAll.Text = "Stop";
                 statusProgress.Visible = false;
+                EndManualExecutionProgress();
             }
 
             SshDebugLog("UI", $"SetExecutionMode({executing}) completed", sw);

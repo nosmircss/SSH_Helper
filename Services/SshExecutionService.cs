@@ -441,6 +441,8 @@ namespace SSH_Helper.Services
             var presetNames = options.SelectedPresets;
             int totalHosts = hostList.Count;
             int totalPresets = presetNames.Count;
+            int totalOperations = totalHosts * totalPresets;
+            int completedOperations = 0;
             int completedHosts = 0;
             var errorTracker = new StopOnFirstErrorTracker();
             var stopOnFirstErrorTriggered = 0;
@@ -508,16 +510,6 @@ namespace SSH_Helper.Services
                                 if (!presets.TryGetValue(presetName, out var preset))
                                     return;
 
-                                progress?.Report(new FolderExecutionProgress
-                                {
-                                    CurrentHost = host.IpAddress,
-                                    CurrentPreset = presetName,
-                                    CompletedPresets = completedPresets,
-                                    TotalPresets = totalPresets,
-                                    CompletedHosts = completedHosts,
-                                    TotalHosts = totalHosts
-                                });
-
                                 // Add preset separator
                                 if (!options.SuppressPresetNames)
                                 {
@@ -562,7 +554,19 @@ namespace SSH_Helper.Services
                                             OnOutputReceived(host, failMarker);
                                         }
                                     }
-                                Interlocked.Increment(ref completedPresets);
+                                var hostCompletedPresets = Interlocked.Increment(ref completedPresets);
+                                var operationCount = Interlocked.Increment(ref completedOperations);
+                                progress?.Report(new FolderExecutionProgress
+                                {
+                                    CompletedOperations = operationCount,
+                                    TotalOperations = totalOperations,
+                                    CurrentHost = host.IpAddress,
+                                    CurrentPreset = presetName,
+                                    CompletedPresets = hostCompletedPresets,
+                                    TotalPresets = totalPresets,
+                                    CompletedHosts = completedHosts,
+                                    TotalHosts = totalHosts
+                                });
                             });
 
                             await Task.WhenAll(presetTasks);
@@ -577,16 +581,6 @@ namespace SSH_Helper.Services
 
                                 if (!presets.TryGetValue(presetName, out var preset))
                                     continue;
-
-                                progress?.Report(new FolderExecutionProgress
-                                {
-                                    CurrentHost = host.IpAddress,
-                                    CurrentPreset = presetName,
-                                    CompletedPresets = completedPresets,
-                                    TotalPresets = totalPresets,
-                                    CompletedHosts = completedHosts,
-                                    TotalHosts = totalHosts
-                                });
 
                                 // Add preset separator
                                 if (!options.SuppressPresetNames)
@@ -639,6 +633,18 @@ namespace SSH_Helper.Services
                                 }
 
                                 completedPresets++;
+                                var operationCount = Interlocked.Increment(ref completedOperations);
+                                progress?.Report(new FolderExecutionProgress
+                                {
+                                    CompletedOperations = operationCount,
+                                    TotalOperations = totalOperations,
+                                    CurrentHost = host.IpAddress,
+                                    CurrentPreset = presetName,
+                                    CompletedPresets = completedPresets,
+                                    TotalPresets = totalPresets,
+                                    CompletedHosts = completedHosts,
+                                    TotalHosts = totalHosts
+                                });
                             }
                         }
 
@@ -659,16 +665,6 @@ namespace SSH_Helper.Services
                     var batchResults = await Task.WhenAll(batchTasks);
                     results.AddRange(batchResults);
                     completedHosts += batch.Count;
-
-                    progress?.Report(new FolderExecutionProgress
-                    {
-                        CurrentHost = string.Empty,
-                        CurrentPreset = string.Empty,
-                        CompletedPresets = totalPresets,
-                        TotalPresets = totalPresets,
-                        CompletedHosts = completedHosts,
-                        TotalHosts = totalHosts
-                    });
                 }
             }
             finally
