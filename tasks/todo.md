@@ -1,5 +1,44 @@
 # TODO
 
+## 81. Fix webhook suppressed-error capture state
+- [x] 81.1 Confirm why `QA Webhook GET POST [Internet]` fails on the final bad-URL assertion.
+- [x] 81.2 Patch the webhook runtime so suppressed failures leave capture variables in a deterministic empty state.
+- [x] 81.3 Add focused regression coverage and run targeted verification.
+
+### 81 Review
+- Root cause was in `Services\\Scripting\\Commands\\WebhookCommand.cs`: unlike `HttpCommand`, the webhook path did not initialize `into` capture variables before validation or request execution. On a transport failure with `on_error: continue`, the step returned a suppressed error but left `bad_response` and `bad_response_status` undefined, and this scripting engine treats an undefined variable as not-empty for `x is empty` checks because unresolved identifiers fall back to literal text.
+- Patched `WebhookCommand` to clear `${into}` and `${into}_status` at the start of each execution so both stale and previously-undefined capture variables become deterministic empty values across all failure paths, including bad URLs, timeouts, and transport exceptions. The command also now supports an internal test-only handler factory so transport failures can be exercised without real network dependencies.
+- Added a focused regression in `SSH_Helper.Tests\\Scripting\\NetworkCommandTests.cs` proving a suppressed webhook transport failure clears stale `webhook_result` and `webhook_result_status` values instead of leaving old or undefined state behind.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NetworkCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\webhook-fix-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\webhook-fix-tests\\obj\\` passed (17/17).
+- Verification: normal `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false` failed because the running `SSH_Helper` process held `bin\\Debug\\net8.0-windows\\SSH_Helper.dll` open.
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\webhook-fix-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\webhook-fix-build\\obj\\` passed with 0 warnings and 0 errors.
+
+## 80. Clarify intentional non-success QA preset wording
+- [x] 80.1 Update non-success QA preset descriptions so they explicitly say the shown failure/error is the intended QA pass condition.
+- [x] 80.2 Adjust the catalog audit test to match the clarified non-success wording.
+- [x] 80.3 Re-run targeted QA catalog verification and capture the result below.
+
+### 80 Review
+- Updated the non-success QA preset descriptions so they now state that the displayed failure, error, or validation rejection is intentional and should be read as a QA pass condition rather than an accidental script failure.
+- The clarified wording now covers `QA Exit Failure`, `QA Exit Error`, `QA Assert Error Stop`, and the `[Expected Fail]` validation samples, using explicit phrases like `Expected: intentional failure exit. QA pass when the failure is shown.`
+- Updated `SSH_Helper.Tests\\Scripting\\QaPresetCatalogTests.cs` so the catalog audit enforces the new intentional non-success wording while preserving the existing result-contract checks for failure exits, error exits, error-severity assert stops, and invalid presets.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~QaPresetsSyntaxTests|FullyQualifiedName~QaPresetCatalogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\qa-catalog-wording-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\qa-catalog-wording-tests\\obj\\` passed.
+
+## 79. Refresh QA preset catalog coverage and conventions
+- [x] 79.1 Audit `qa_presets.json` against the current scripting surface and map missing coverage plus unclear preset outcomes/prerequisites.
+- [x] 79.2 Add QA fixture files plus automated catalog tests for syntax, description conventions, coverage, and final-result contracts.
+- [x] 79.3 Rewrite `qa_presets.json` so every preset description states requirements and expected result, positive presets end with an explicit success marker, expected-failure presets are labeled, and missing feature coverage is added.
+- [x] 79.4 Run isolated verification and capture the review outcome below.
+
+### 79 Review
+- Refreshed `qa_presets.json` from 53 to 59 QA presets so every YAML `description` now includes both `Requires:` and `Expected:` and requirement wording is explicit for user interaction, shell assumptions, internet access, grid inputs, Windows-local file access, and other environment constraints.
+- Split ambiguous outcome presets into separate entries (`QA Exit Success`, `QA Exit Bare Success`, `QA Exit Failure`, `QA Exit Error`, `QA Assert`, `QA Assert Error Stop`), tagged intentional validation samples with `[Expected Fail]`, and normalized positive presets to end with one visible terminal pass marker instead of finishing on plain prints or status-only logs.
+- Added file-backed QA fixtures under `ScriptSamples\\qa\\` plus catalog coverage for `environment`, `suppress_missing_column_warning`, `library`, `imports`, `subroutines`, `call`, `return`, `send.expect`, `readfile.select_file`, `readfile.message`, `readfile.file_ext`, `readfile.encoding`, `http.follow_redirects`, `interactive.show_window`, `interactive.max_lines`, `interactive.width`, `interactive.height`, and `_writefile`.
+- Added `SSH_Helper.Tests\\Scripting\\QaPresetCatalogTests.cs` to enforce description conventions, coverage requirements, validation expectations for `[Expected Fail]` presets, and a stricter result contract that rejects hidden earlier top-level exits before the final visible outcome.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~QaPresetsSyntaxTests|FullyQualifiedName~QaPresetCatalogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\qa-catalog-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\qa-catalog-tests\\obj\\` passed.
+- Verification: normal `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false` failed because the running `SSH_Helper` process held `bin\\Debug\\net8.0-windows\\SSH_Helper.dll` open.
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\qa-catalog-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\qa-catalog-build\\obj\\` passed with 0 warnings and 0 errors.
+
 ## 78. Fix bare list index expression resolution
 - [x] 78.1 Confirm the runtime path causing bare list index expressions like `ports[0]` to be treated as literal text in conditions.
 - [x] 78.2 Patch the shared expression resolver so bare top-level index expressions resolve consistently outside `${...}` interpolation.

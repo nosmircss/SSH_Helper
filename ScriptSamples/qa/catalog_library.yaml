@@ -1,0 +1,16 @@
+---
+library: true
+name: QA Catalog Library
+description: Helper library for QA catalog coverage tests.
+
+subroutines:
+  decorate:
+    params: [prefix, value]
+    outputs: [result]
+    steps:
+      - set:
+          expression: "result = \"${prefix}:${value}\""
+      - if:
+          condition: "value == 'stop'"
+          then:
+            - return: true
