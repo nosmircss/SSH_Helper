@@ -1036,6 +1036,76 @@ steps:
         _parser.Warnings[0].Should().Contain("Unknown readfile key 'typoo'");
     }
 
+    [Fact]
+    public void Parse_ReadfileSelectFile_ParsesAndValidatesWithoutPath()
+    {
+        var yaml = @"---
+steps:
+  - readfile:
+      select_file: true
+      into: chosen_lines";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+        var readfile = script.Steps[0].Readfile;
+
+        script.Steps.Should().ContainSingle();
+        readfile.Should().NotBeNull();
+        readfile!.SelectFile.Should().BeTrue();
+        readfile.Path.Should().BeEmpty();
+        errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Parse_ReadfileSelectFile_WithCustomMessageAndFileExt_ParsesAndValidates()
+    {
+        var yaml = @"---
+steps:
+  - readfile:
+      select_file: true
+      message: Pick the host list to import.
+      fileext: txt,json
+      into: chosen_lines";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+        var readfile = script.Steps[0].Readfile;
+
+        readfile.Should().NotBeNull();
+        readfile!.SelectFile.Should().BeTrue();
+        readfile.Message.Should().Be("Pick the host list to import.");
+        readfile.FileExt.Should().Be("txt,json");
+        errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Validate_ReadfileWithoutPathAndWithoutSelectFile_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - readfile:
+      into: chosen_lines";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().ContainSingle(error => error.Contains("Readfile requires 'path'"));
+    }
+
+    [Fact]
+    public void Validate_ReadfileSelectFileWithoutInto_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - readfile:
+      select_file: true";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().ContainSingle(error => error.Contains("Readfile requires 'into'"));
+    }
+
     #endregion
 
     #region Complex Script Tests

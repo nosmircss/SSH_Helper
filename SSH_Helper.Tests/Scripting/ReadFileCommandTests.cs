@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
@@ -54,5 +55,175 @@ public class ReadFileCommandTests : IDisposable
         var entries = context.GetVariable("audit_entries");
         entries.Should().BeAssignableTo<List<string>>();
         ((List<string>)entries!).Should().ContainSingle().Which.Should().Be("{\"ok\":true}");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileTrue_PromptsAndReadsSelectedFile()
+    {
+        var allowedFilePath = Path.Combine(_testDirectory, "audit.txt");
+        File.WriteAllLines(allowedFilePath, new[] { "{\"ok\":true}" });
+        var promptCallCount = 0;
+        var command = new ReadFileCommand((request, _) =>
+        {
+            promptCallCount++;
+            request.SuggestedPath.Should().Be("seed.txt");
+            request.PromptMessage.Should().Be("Pick the audit file to import.");
+            request.AllowedExtensions.Should().BeEquivalentTo([".txt", ".json"]);
+            return Task.FromResult<string?>(allowedFilePath);
+        });
+
+        var step = new ScriptStep
+        {
+            Readfile = new ReadfileOptions
+            {
+                Path = "seed.txt",
+                SelectFile = true,
+                Message = "Pick the audit file to import.",
+                FileExt = "txt,json",
+                Into = "selected_entries"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        promptCallCount.Should().Be(1);
+        context.GetVariable("selected_entries").Should().BeEquivalentTo(new List<string> { "{\"ok\":true}" });
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileWithRestrictedExtensions_RejectsDisallowedSelection()
+    {
+        var command = new ReadFileCommand((_, _) => Task.FromResult<string?>(_testFilePath));
+        var step = new ScriptStep
+        {
+            Readfile = new ReadfileOptions
+            {
+                SelectFile = true,
+                FileExt = "txt,json",
+                Into = "selected_entries"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain(".txt");
+        result.Message.Should().Contain(".json");
+        context.HasVariable("selected_entries").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileFalse_DoesNotPrompt()
+    {
+        var promptCalled = false;
+        var command = new ReadFileCommand((_, _) =>
+        {
+            promptCalled = true;
+            return Task.FromResult<string?>(null);
+        });
+
+        var step = new ScriptStep
+        {
+            Readfile = new ReadfileOptions
+            {
+                Path = _testFilePath,
+                Into = "entries"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        promptCalled.Should().BeFalse();
+        context.GetVariable("entries").Should().BeEquivalentTo(new List<string> { "{\"ok\":true}" });
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileCancelled_ReturnsCancelledExitAndSetsEmptyList()
+    {
+        var command = new ReadFileCommand((_, _) => Task.FromResult<string?>(null));
+        var step = new ScriptStep
+        {
+            Readfile = new ReadfileOptions
+            {
+                SelectFile = true,
+                Into = "entries"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ShouldExit.Should().BeTrue();
+        result.ExitStatus.Should().Be(ScriptExitStatus.Cancelled);
+        result.Message.Should().Contain("cancelled");
+        context.GetVariable("entries").Should().BeEquivalentTo(new List<string>());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileCancelled_WithOnErrorContinue_StillReturnsCancelledExit()
+    {
+        var command = new ReadFileCommand((_, _) => Task.FromResult<string?>(null));
+        var step = new ScriptStep
+        {
+            OnError = "continue",
+            Readfile = new ReadfileOptions
+            {
+                SelectFile = true,
+                Into = "entries"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ShouldExit.Should().BeTrue();
+        result.ExitStatus.Should().Be(ScriptExitStatus.Cancelled);
+        result.SuppressedError.Should().BeFalse();
+        result.Message.Should().Contain("cancelled");
+        context.GetVariable("entries").Should().BeEquivalentTo(new List<string>());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileWhenDialogsBlocked_ReturnsManualOnlyFailureAndSkipsPrompt()
+    {
+        var promptCalled = false;
+        var command = new ReadFileCommand((_, _) =>
+        {
+            promptCalled = true;
+            return Task.FromResult<string?>(_testFilePath);
+        });
+
+        var step = new ScriptStep
+        {
+            Readfile = new ReadfileOptions
+            {
+                SelectFile = true,
+                Into = "entries"
+            }
+        };
+
+        var context = new ScriptContext
+        {
+            AllowFileSelectionDialogs = false
+        };
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain("manual");
+        promptCalled.Should().BeFalse();
+        context.GetVariable("entries").Should().BeEquivalentTo(new List<string>());
     }
 }

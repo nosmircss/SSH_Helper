@@ -1,5 +1,5 @@
 ---
-# Demonstrates: input validation, split/trim, http POST, json.items, table output
+# Demonstrates: input validation, trim_all/compact/distinct, http POST, json.items, table output
 # Scenario: Prompt for TCP ports, query portchecker.io API, and print a clean status table
 
 name: PortChecker API Query
@@ -36,20 +36,7 @@ steps:
             message: "Invalid port format in 'ports' column. Use comma-separated numbers, e.g. 22,80,443"
 
   - set:
-      expression: raw_ports = split(ports_input, ",")
-  - set:
-      expression: port_list = json([])
-
-  - foreach:
-      iterator: p in raw_ports
-      do:
-        - set:
-            expression: clean_port = trim(p)
-        - if:
-            condition: clean_port is not empty
-            then:
-              - set:
-                  expression: port_list = json.push(port_list, ${clean_port})
+      expression: port_list = distinct(compact(trim_all(split(ports_input, ","))))
 
   - set:
       expression: request_body = json("host", ${Host_IP}, "ports", ${port_list})

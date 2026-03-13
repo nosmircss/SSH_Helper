@@ -12,6 +12,8 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     internal static class ScriptPromptDialogRunner
     {
+        internal static Action<Form>? RestoreMainFormActivationOverrideForTests { get; set; }
+
         public static Task<TResult> ShowAsync<TDialog, TResult>(
             Func<TDialog> dialogFactory,
             Func<TDialog, TResult> resultSelector,
@@ -71,6 +73,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                         {
                             registration.Dispose();
                             promptLock?.Dispose();
+                            RestoreMainFormActivation(mainForm);
                             dialog.Dispose();
                         }
                     };
@@ -196,6 +199,46 @@ namespace SSH_Helper.Services.Scripting.Commands
 
                 PositionDialogCenteredOnMainForm(dialog, mainForm);
             };
+        }
+
+        private static void RestoreMainFormActivation(Form mainForm)
+        {
+            if (mainForm.IsDisposed || !mainForm.Visible)
+                return;
+
+            void ReactivateMainForm()
+            {
+                if (mainForm.IsDisposed || !mainForm.Visible || mainForm.WindowState == FormWindowState.Minimized)
+                    return;
+
+                var activationOverride = RestoreMainFormActivationOverrideForTests;
+                if (activationOverride != null)
+                {
+                    activationOverride(mainForm);
+                    return;
+                }
+
+                mainForm.BringToFront();
+                mainForm.Activate();
+            }
+
+            try
+            {
+                if (mainForm.InvokeRequired)
+                {
+                    mainForm.BeginInvoke((Action)ReactivateMainForm);
+                }
+                else
+                {
+                    ReactivateMainForm();
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
         }
 
         private static void WireModelessDialogResultButtons(Form dialog)

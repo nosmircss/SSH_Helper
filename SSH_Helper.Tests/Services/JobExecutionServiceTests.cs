@@ -670,6 +670,82 @@ public class JobExecutionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RunNowAsync_CustomPresetReadfileSelectFile_FailsWithoutPrompt()
+    {
+        SetupDefaultCredentials();
+
+        var job = CreateTestJob(name: "RunNowReadfilePickerJob", schedule: ScheduleType.None);
+        job.TargetType = JobTargetType.CustomPreset;
+        job.TargetName = string.Empty;
+        job.CustomPresetCommands = """
+            ---
+            steps:
+              - readfile:
+                  select_file: true
+                  into: lines
+            """;
+        _jobStorage.Save(job);
+
+        JobRunResult? receivedResult = null;
+        var states = new List<JobExecutionState>();
+
+        using var service = CreateService();
+        service.JobCompleted += (_, e) => receivedResult = e;
+        service.JobStateChanged += (_, e) => states.Add(e.State);
+
+        var result = await service.RunNowAsync(job.Id);
+
+        result.Should().BeTrue();
+        receivedResult.Should().NotBeNull();
+        receivedResult!.Success.Should().BeFalse();
+        receivedResult.WasCancelled.Should().BeFalse();
+        receivedResult.HostOutputs.Should().ContainSingle();
+        receivedResult.HostOutputs![0].Success.Should().BeFalse();
+        receivedResult.HostOutputs[0].ErrorMessage.Should().Contain("manual");
+        states.Should().Contain(JobExecutionState.Started);
+        states.Should().Contain(JobExecutionState.Failed);
+    }
+
+    [Fact]
+    public async Task ExecuteScheduledJobAsync_CustomPresetReadfileSelectFile_FailsWithoutPrompt()
+    {
+        SetupDefaultCredentials();
+
+        var job = CreateTestJob(name: "ScheduledReadfilePickerJob", schedule: ScheduleType.Recurring);
+        job.TargetType = JobTargetType.CustomPreset;
+        job.TargetName = string.Empty;
+        job.CustomPresetCommands = """
+            ---
+            steps:
+              - readfile:
+                  select_file: true
+                  into: lines
+            """;
+        _jobStorage.Save(job);
+
+        JobRunResult? receivedResult = null;
+        var states = new List<JobExecutionState>();
+
+        using var service = CreateService();
+        service.JobCompleted += (_, e) => receivedResult = e;
+        service.JobStateChanged += (_, e) => states.Add(e.State);
+
+        var concurrencyGate = GetPrivateField<SemaphoreSlim>(service, "_concurrencyGate");
+        concurrencyGate.Wait(0).Should().BeTrue();
+
+        await InvokePrivateAsync(service, "ExecuteScheduledJobAsync", job);
+
+        receivedResult.Should().NotBeNull();
+        receivedResult!.Success.Should().BeFalse();
+        receivedResult.WasCancelled.Should().BeFalse();
+        receivedResult.HostOutputs.Should().ContainSingle();
+        receivedResult.HostOutputs![0].Success.Should().BeFalse();
+        receivedResult.HostOutputs[0].ErrorMessage.Should().Contain("manual");
+        states.Should().Contain(JobExecutionState.Started);
+        states.Should().Contain(JobExecutionState.Failed);
+    }
+
+    [Fact]
     public async Task Dispose_WhileScheduledJobIsInFlight_DoesNotThrowObjectDisposedException()
     {
         // Arrange

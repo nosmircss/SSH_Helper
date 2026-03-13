@@ -394,6 +394,21 @@ namespace SSH_Helper.Services.Scripting.Models
         public string Path { get; set; } = string.Empty;
 
         /// <summary>
+        /// Whether to prompt the operator to choose the file at runtime.
+        /// </summary>
+        public bool SelectFile { get; set; }
+
+        /// <summary>
+        /// Optional custom prompt message shown when selecting a file at runtime.
+        /// </summary>
+        public string? Message { get; set; }
+
+        /// <summary>
+        /// Optional comma-separated list of allowed file extensions for the selected/read path.
+        /// </summary>
+        public string? FileExt { get; set; }
+
+        /// <summary>
         /// Variable name to store the lines into.
         /// </summary>
         public string Into { get; set; } = string.Empty;

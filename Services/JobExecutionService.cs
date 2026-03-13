@@ -581,7 +581,7 @@ namespace SSH_Helper.Services
         {
             var preset = ResolvePresetForExecution(job);
 
-            return await sshService.ExecutePresetAsync(hosts, preset, username, password, timeouts);
+            return await sshService.ExecutePresetAsync(hosts, preset, username, password, timeouts, allowFileSelectionDialogs: false);
         }
 
         private PresetInfo ResolvePresetForExecution(JobDefinition job)
@@ -638,7 +638,7 @@ namespace SSH_Helper.Services
                 StopOnFirstError = job.StopOnError
             };
 
-            return await sshService.ExecuteFolderAsync(hosts, presets, username, password, timeouts, options);
+            return await sshService.ExecuteFolderAsync(hosts, presets, username, password, timeouts, options, allowFileSelectionDialogs: false);
         }
 
         #endregion

@@ -1,8 +1,10 @@
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
+using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
 using Xunit;
 
@@ -287,5 +289,93 @@ public class ScriptExecutorControlFlowTests
 
         result.Status.Should().Be(ScriptExitStatus.Cancelled);
         retryStep.OnError.Should().Be("continue");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReadfilePickerCancel_StopsScriptImmediately()
+    {
+        var executor = new ScriptExecutor();
+        ReplaceCommand(executor, StepType.Readfile, new ReadFileCommand((_, _) => Task.FromResult<string?>(null)));
+
+        var context = new ScriptContext();
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    OnError = "continue",
+                    Readfile = new ReadfileOptions
+                    {
+                        SelectFile = true,
+                        Into = "entries"
+                    }
+                },
+                new() { Set = "after = done" }
+            }
+        };
+
+        var result = await executor.ExecuteAsync(script, context);
+
+        result.Status.Should().Be(ScriptExitStatus.Cancelled);
+        context.GetVariable("entries").Should().BeEquivalentTo(new List<string>());
+        context.HasVariable("after").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CollectionHelpers_SimplifyMembershipAndUniquenessFlow()
+    {
+        var parser = new ScriptParser();
+        var yaml = @"---
+vars:
+  exclude_service_matches:
+    - Cloudflare-CDN
+    - Amazon-AWS
+    - Cloudflare-Web
+steps:
+  - set:
+      expression: exclude_service_matches_norm = lower_all(trim_all(distinct(exclude_service_matches)))
+  - set:
+      expression: matched_services = list(""Cloudflare-CDN"", ""Contoso-Hosting"", ""contoso-hosting"", """")
+  - set:
+      expression: unique_services = list()
+  - foreach:
+      iterator: svc in compact(matched_services)
+      do:
+        - set:
+            expression: svc_key = lower(trim(svc))
+        - if:
+            condition: svc_key not in exclude_service_matches_norm
+            then:
+              - set:
+                  expression: unique_services = push_unique(unique_services, svc)
+  - set:
+      expression: unique_count = length(unique_services)";
+
+        var script = parser.Parse(yaml);
+        parser.Validate(script, yaml, enforceCanonicalSyntax: true).Should().BeEmpty();
+
+        var executor = new ScriptExecutor();
+        var context = new ScriptContext();
+
+        var result = await executor.ExecuteAsync(script, context);
+
+        result.Status.Should().Be(ScriptExitStatus.Success);
+        context.GetVariable("exclude_service_matches_norm").Should().BeEquivalentTo(
+            new List<string> { "cloudflare-cdn", "amazon-aws", "cloudflare-web" },
+            options => options.WithStrictOrdering());
+        context.GetVariable("unique_services").Should().BeEquivalentTo(
+            new List<string> { "Contoso-Hosting" },
+            options => options.WithStrictOrdering());
+        context.GetVariable("unique_count").Should().Be(1);
+    }
+
+    private static void ReplaceCommand(ScriptExecutor executor, StepType stepType, IScriptCommand command)
+    {
+        var field = typeof(ScriptExecutor).GetField("_commands", BindingFlags.Instance | BindingFlags.NonPublic);
+        field.Should().NotBeNull();
+
+        var commands = field!.GetValue(executor).Should().BeAssignableTo<Dictionary<StepType, IScriptCommand>>().Subject;
+        commands[stepType] = command;
     }
 }

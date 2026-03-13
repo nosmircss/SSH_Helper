@@ -2,6 +2,15 @@
 
 ## Changes Since `12c1b7f` (0.51.7)
 
+### Readfile Manual File Picker
+
+`readfile` now supports `select_file: true` to let the operator choose the input file at runtime instead of hard-coding `path`.
+
+- `path` remains required for normal `readfile` usage, but becomes optional when `select_file: true`
+- If `path` is supplied with `select_file: true`, it is used only to seed the picker
+- Scheduler executions, including Job List `Run Now`, do not open the picker and fail cleanly with a manual-only message
+- Cancelling the picker sets the target `into` variable to an empty list and stops the script immediately
+
 ### Environment CSV Freshness Detection
 
 A file fingerprinting system detects when a remembered CSV file has changed on disk since it was last loaded into an environment. `CsvFileFingerprint` records `LastWriteTimeUtc` and `FileSizeBytes` for each loaded CSV. `CsvFileSyncEvaluator` compares the stored fingerprint against the current file state and returns a `CsvFileSyncStatus`:

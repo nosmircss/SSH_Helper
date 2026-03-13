@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-03-12
+- When I expand the scripting runtime to accept new expression forms, I must update `ScriptDependencyAnalyzer` in the same pass or the missing-column preflight will drift and flag expression text as fake grid columns.
+- When a user cancels a script-driven file picker and asks for the script to stop, I must model that as a real script cancellation or exit path, not a suppressible step error routed through `on_error`.
+
 ## 2026-03-09
 - When a user narrows a follow-up implementation to a specific subset of review findings, I must implement only that approved scope and drop adjacent enhancements I suggested on my own.
 - When I swap a single-row WinForms input for a multi-line help label, I must reflow the rows beneath it and add a layout regression test instead of assuming the old fixed `y` offsets still hold.

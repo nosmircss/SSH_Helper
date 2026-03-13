@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -94,68 +93,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
         private List<string> ResolveCollection(string expr, ScriptContext context)
         {
-            var items = new List<string>();
-
-            // Check if it's a variable reference
-            var value = context.GetVariable(expr);
-
-            if (value is List<string> list)
-            {
-                return list;
-            }
-            else if (value is string strValue)
-            {
-                // Check if it's a JSON array
-                var trimmed = strValue.Trim();
-                if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
-                {
-                    try
-                    {
-                        var jsonArray = JsonNode.Parse(trimmed)?.AsArray();
-                        if (jsonArray != null)
-                        {
-                            foreach (var element in jsonArray)
-                            {
-                                if (element != null)
-                                {
-                                    items.Add(JsonUtilities.JsonNodeToStringValue(element));
-                                }
-                            }
-                            return items;
-                        }
-                    }
-                    catch
-                    {
-                        // Not valid JSON, fall through to line splitting
-                    }
-                }
-
-                // Split by newlines to iterate over lines
-                var lines = strValue.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
-                foreach (var line in lines)
-                {
-                    // Include non-empty lines (or all lines if user wants them)
-                    if (!string.IsNullOrWhiteSpace(line))
-                        items.Add(line);
-                }
-            }
-            else if (value != null)
-            {
-                // Try to enumerate if it's IEnumerable
-                if (value is System.Collections.IEnumerable enumerable)
-                {
-                    foreach (var item in enumerable)
-                    {
-                        items.Add(item?.ToString() ?? "");
-                    }
-                }
-                else
-                {
-                    items.Add(value.ToString() ?? "");
-                }
-            }
-
-            return items;
+            return ValueResolver.ResolveCollectionExpression(expr, context);
         }
     }
 }

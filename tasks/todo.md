@@ -1,5 +1,144 @@
 # TODO
 
+## 71. Restore Main Window Focus After Script Prompt Close
+- [x] 71.1 Patch the shared modeless script prompt cleanup path so the main form is explicitly reactivated after the prompt closes.
+- [x] 71.2 Add focused automated coverage for the shared prompt-runner reactivation path.
+- [x] 71.3 Run targeted verification and capture the review outcome below.
+
+### 71 Review
+- Updated `Services\\Scripting\\Commands\\ScriptPromptDialogRunner.cs` so the shared `dialog.FormClosed` cleanup path now calls `RestoreMainFormActivation(mainForm)` immediately after releasing `MainFormPromptLock`. That makes the owner-form reactivation happen for the `readfile.select_file` cancel path and the other script prompt dialogs that share the same runner.
+- `RestoreMainFormActivation(...)` is defensive: it skips disposed, hidden, or minimized owners, and otherwise brings `mainForm` to the front and activates it on the UI thread. That keeps the change narrowly scoped to the exact cleanup point where the prompt closes.
+- Added `SSH_Helper.Tests\\UI\\ScriptPromptDialogRunnerTests.cs` to cover the shared runner. The regression uses a test hook on `ScriptPromptDialogRunner` to verify that closing a modeless prompt requests owner reactivation exactly once for the correct main form, without depending on desktop-focus behavior from the xUnit host.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptPromptDialogRunnerTests|FullyQualifiedName~ScriptReadFileOpenPathDialogTests|FullyQualifiedName~ReadFileCommandTests|FullyQualifiedName~ScriptExecutorControlFlowTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\prompt-focus-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\prompt-focus-tests\\obj\\` passed (20/20).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\prompt-focus-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\prompt-focus-build\\obj\\` passed with 0 warnings and 0 errors.
+- Verification: normal `dotnet build .\\SSH_Helper.sln` also passed with 0 warnings and 0 errors.
+
+## 70. Inspect Readfile Picker Cancel Focus Recovery
+- [x] 70.1 Trace the shared script prompt dialog owner/focus flow for the `readfile.select_file` cancel path and identify the most likely focus-loss cause.
+- [x] 70.2 Inspect the smallest relevant automated tests to confirm whether owner/focus recovery is covered.
+- [x] 70.3 Capture the concise root-cause summary, smallest safe edit point, and coverage notes in the review section below.
+
+### 70 Review
+- `ReadFileCommand.ResolveFilePathAsync(...)` routes `readfile.select_file` through `PromptForOpenPathAsync(...)`, which delegates to `ScriptPromptDialogRunner.ShowAsync<ScriptReadFileOpenPathDialog, string?>()` for the actual WinForms prompt ownership path.
+- In `ScriptPromptDialogRunner.ShowAsync(...)`, the modeless prompt is shown with `dialog.Show(mainForm)` and closed through the shared `FormClosed` handler. That handler only disposes the cancellation registration, re-enables the main-form control tree via `MainFormPromptLock.Dispose()`, and disposes the dialog; it never explicitly re-activates `mainForm` or restores a previously focused control.
+- `MainFormPromptLock.Dispose()` only flips disabled controls back to `Enabled = true`. Because the prompt lock disables whichever child control in `Form1` previously held focus, cancelling the picker can leave `Form1` re-enabled but without focus being restored, which matches the reported symptom more closely than any `ReadFileCommand`-specific logic.
+- The smallest safe edit point is the shared cleanup path in `Services\\Scripting\\Commands\\ScriptPromptDialogRunner.cs`, immediately after `promptLock?.Dispose()` inside the `dialog.FormClosed` handler. That is the narrowest common place to restore/activate `mainForm` for picker cancel without touching `ReadFileCommand` semantics.
+- Existing automated coverage does not exercise this focus-recovery path. `ReadFileCommandTests` and `ScriptExecutorControlFlowTests` cover cancel semantics and script exit behavior, while `ScriptReadFileOpenPathDialogTests` cover layout and extension validation only; there is no focused test for `ScriptPromptDialogRunner`, owner activation, or `Form1` focus restoration after a modeless prompt closes.
+
+## 69. Fix foreach expression missing-column warning regression
+- [x] 69.1 Update preflight dependency analysis so expression-backed `foreach` collections do not get reported as literal missing column names.
+- [x] 69.2 Add focused regression coverage for expression-backed `foreach` collection analysis.
+- [x] 69.3 Run targeted verification and capture the review outcome below.
+
+### 69 Review
+- Fixed `ScriptDependencyAnalyzer` so `foreach: item in ...` no longer treats the entire collection expression as a bare variable reference. Expression-backed collections now tokenize bare identifiers inside the expression, skip function names and quoted text, and still report real external variables such as `source_services`.
+- Added focused regressions proving `compact(matched_services)` no longer shows up as a missing column when `matched_services` is script-defined, while `compact(split(source_services, ','))` still reports `source_services` as an external dependency.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptDependencyAnalyzerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\foreach-missing-column-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\foreach-missing-column-tests\\obj\\` passed (31/31).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\foreach-missing-column-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\foreach-missing-column-build\\obj\\` passed with 0 warnings and 0 errors.
+
+## 68. Implement update-scripting-collection-ergonomics
+- [x] 68.1 Add the OpenSpec change artifacts for scripting collection ergonomics and validate the change definition.
+- [x] 68.2 Consolidate collection resolution helpers shared by `set`, conditional evaluation, interpolation length access, and `foreach`.
+- [x] 68.3 Add `in` / `not in`, structural emptiness/length semantics, and shared read-only collection helper support across expression surfaces.
+- [x] 68.4 Add `list`, `compact`, `distinct`, `push_unique`, `trim_all`, `lower_all`, and `upper_all`, preserving additive behavior for existing scripts.
+- [x] 68.5 Add focused automated coverage for new operators/helpers, expression-backed `foreach`, and an end-to-end collection-heavy script flow.
+- [x] 68.6 Update docs plus at least one bundled sample to use `vars:` YAML lists and the new collection helpers.
+- [x] 68.7 Run focused verification, validate the OpenSpec change, and capture the review outcome below.
+
+### 68 Review
+- Added OpenSpec change `update-scripting-collection-ergonomics` with proposal, checklist, and spec deltas covering collection membership operators, structural collection semantics, expression-backed `foreach`, and the new collection helpers.
+- Consolidated collection-aware value handling in `ValueResolver` so `set`, condition evaluation, interpolation length access, truthiness, emptiness, and `foreach` all resolve lists, JSON arrays/objects, JSON strings, and newline-delimited strings through the same structural rules.
+- Extended the expression surface with `list`, `compact`, `distinct`, `push_unique`, `trim_all`, `lower_all`, and `upper_all`, then wired `SetCommand` and `ExpressionEvaluator` through the shared function path so read-only helpers behave consistently across assignments and conditions.
+- Added `in` / `not in` with case-insensitive membership by default, updated `foreach` to accept collection expressions such as `split(...)` and `json.items(...)`, and fixed missing bare collection identifiers so they no longer iterate the identifier text itself.
+- Added focused automated coverage for the new operators/helpers, structural emptiness/length semantics, expression-backed `foreach`, JSON-array string interpolation/indexing, and an end-to-end collection-heavy script flow.
+- Updated `SCRIPTING.md`, refreshed `ScriptSamples\\generic\\portchecker_api_query.yaml` to use the new collection helpers, and added `ScriptSamples\\fortigate\\internet_service_lookup_from_file.yaml` as the benchmark-style sample for the simplified workflow.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExpressionEvaluatorTests|FullyQualifiedName~SetCommandTests|FullyQualifiedName~ForeachCommandTests|FullyQualifiedName~ScriptContextTests|FullyQualifiedName~ScriptExecutorControlFlowTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\collection-ergonomics-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\collection-ergonomics-tests\\obj\\` passed (63/63).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\collection-ergonomics-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\collection-ergonomics-build\\obj\\` passed with 0 warnings and 0 errors.
+- Verification: `openspec validate update-scripting-collection-ergonomics --strict --no-interactive` passed.
+
+## 67. Enhance Readfile Picker Options
+- [x] 67.1 Extend `readfile` parsing/editor metadata to accept picker message and file-extension restriction options.
+- [x] 67.2 Update `ReadFileCommand` and the picker dialog so `select_file` can show a custom message and limit selectable extensions.
+- [x] 67.3 Add focused tests for parser acceptance/validation and runtime picker option flow.
+- [x] 67.4 Update scripting docs and capture verification results in the review section below.
+
+### 67 Review
+- Extended `ReadfileOptions`, `ScriptParser`, and parser-driven editor metadata so `readfile` now accepts `message` plus `fileext`, with `fileext` allowing comma/semicolon/pipe-separated extension lists such as `txt,json`.
+- Refactored `ReadFileCommand` to pass a structured picker request into the dialog, substitute variables into the custom message, normalize/validate allowed extensions, and reject resolved paths that do not match the configured file types.
+- Updated `ScriptReadFileOpenPathDialog` so the prompt label reflows for longer custom text, the browse dialog applies an extension filter/default extension, and manual path entry is blocked when the extension does not match the allowlist.
+- Added focused coverage for parser acceptance, autocomplete suggestions, runtime extension enforcement, and WinForms dialog layout/validation.
+- Updated `SCRIPTING.md` plus the active OpenSpec change `add-readfile-file-picker` so the documented/spec’d contract includes custom picker text and file-extension restrictions.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "(FullyQualifiedName~ReadFileCommandTests|FullyQualifiedName~ScriptParserTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScriptReadFileOpenPathDialogTests)" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\readfile-picker-custom-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\readfile-picker-custom-tests\\obj\\` passed (167/167).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\readfile-picker-custom-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\readfile-picker-custom-build\\obj\\` passed with 0 warnings and 0 errors.
+- Verification: `openspec validate add-readfile-file-picker --strict --no-interactive` passed.
+- Manual interactive smoke testing of the real picker from the app UI was not run from this CLI environment.
+
+## 66. Stop Script On Readfile Picker Cancel
+- [x] 66.1 Change `readfile.select_file` cancel behavior to stop the script immediately instead of returning a normal step failure.
+- [x] 66.2 Update focused tests and docs/spec text so cancel semantics match the runtime behavior.
+- [x] 66.3 Run focused verification and capture the review below.
+
+### 66 Review
+- Changed `ReadFileCommand` so user-canceling the `select_file` picker now returns `CommandResult.Exit(ScriptExitStatus.Cancelled, ...)` after setting `into` to an empty list, which makes the script stop immediately and ignores `on_error: continue` for that path.
+- Left the scheduler/manual-only blocked path unchanged: it still returns a normal step failure or suppressed failure with the manual-only error message.
+- Updated `ReadFileCommandTests` to assert cancelled exit semantics for picker cancellation, including the `on_error: continue` case, and added `ScriptExecutorControlFlowTests.ExecuteAsync_ReadfilePickerCancel_StopsScriptImmediately` to prove later steps do not run.
+- Updated `SCRIPTING.md`, `CHANGELOG.md`, and the active OpenSpec runtime delta so the documented cancel behavior now matches the runtime.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "(FullyQualifiedName~ReadFileCommandTests|FullyQualifiedName~ScriptExecutorControlFlowTests)" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\readfile-cancel-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\readfile-cancel-tests\\obj\\` passed (15/15).
+- Verification: `openspec validate add-readfile-file-picker --strict --no-interactive` passed.
+- Verification: `dotnet build .\\SSH_Helper.sln` was blocked because `bin\\Debug\\net8.0-windows\\SSH_Helper.exe` was locked by a running `SSH_Helper` process (PID 193740).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\readfile-cancel-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\readfile-cancel-build\\obj\\` passed with 0 warnings and 0 errors.
+
+## 65. Add Readfile File Picker
+- [x] 65.1 Add OpenSpec change `add-readfile-file-picker` with proposal, checklist, and spec deltas for runtime and validation behavior.
+- [x] 65.2 Extend scripting models, parser metadata, validation, and editor autocomplete support for `readfile.select_file`.
+- [x] 65.3 Implement manual-only `readfile` file-picker prompting with seeded path support and scheduler blocking.
+- [x] 65.4 Thread the manual-only file-selection policy through script execution contexts and scheduler execution entry points.
+- [x] 65.5 Add focused automated coverage for parser, command behavior, autocomplete, and scheduler blocking.
+- [x] 65.6 Run focused verification, validate the OpenSpec change, and capture the review below.
+
+### 65 Review
+- Added OpenSpec change `add-readfile-file-picker` with proposal, checklist, and spec deltas covering `readfile.select_file` runtime behavior plus the conditional `path` validation rule.
+- Extended `ReadfileOptions`, `ScriptParser`, and parser-driven editor metadata so `readfile` now accepts `select_file`, only requires `path` when picker mode is off, and suggests `true`/`false` in autocomplete.
+- Refactored `ReadFileCommand` to support an injectable file-picker callback, a themed `ScriptReadFileOpenPathDialog`, seeded picker paths, manual-only scheduler blocking, and empty-list handling for cancel/blocked flows while preserving the existing direct-path read behavior.
+- Threaded `AllowFileSelectionDialogs` through `ScriptContext` and `SshExecutionService`, then forced it off from `JobExecutionService` for both scheduler timer runs and Job List `Run Now`.
+- Added focused tests for parser validation, readfile picker behavior, autocomplete suggestions, and scheduler failure paths for custom preset jobs using `readfile.select_file`.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "(FullyQualifiedName~ReadFileCommandTests|FullyQualifiedName~ScriptParserTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~SshExecutionServiceCancellationTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests)" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\readfile-picker-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\readfile-picker-tests\\obj\\` passed (222/222).
+- Verification: `openspec validate add-readfile-file-picker --strict --no-interactive` passed.
+- Verification: `dotnet build .\\SSH_Helper.sln` passed with 0 warnings and 0 errors.
+- Remaining gap: the real WinForms picker interaction itself was not manually exercised from this CLI-only environment.
+
+## 64. Inspect Script Prompt Execution Contexts
+- [x] 64.1 Trace the concrete execution paths for manual preset runs, folder runs, scheduler jobs, and local-only scripts that can reach script prompt dialogs.
+- [x] 64.2 Inspect the prompt-dialog runtime (`ScriptPromptDialogRunner` plus prompt commands) for UI-thread marshaling, owner selection, disabled-owner behavior, and cancellation handling.
+- [x] 64.3 Review only the focused tests/docs that cover these paths, then capture the concrete file/method summary in the review section below.
+
+### 64 Review
+- Manual preset runs enter `Form1.ExecutePresetOnRowsAsync(...)`. Single-host runs go through `ExecutionCoordinator.ExecutePresetAsync(...)` -> `SshExecutionService.ExecutePresetAsync(...)`; multi-host runs (`ExecutionDialogPolicy.ShouldPromptForPresetExecutionOptions(hostCount > 1)`) are rerouted through `SshExecutionService.ExecuteFolderAsync(...)` with a single-preset dictionary. YAML prompt steps (`input`/`choose`/`multiselect`/`confirm`) are dispatched inside `ScriptExecutor.ExecuteAsync(...)` via the normal command table, so direct preset runs and prompt steps share the same runtime as other script commands.
+- Folder runs enter `Form1.ExecuteFolderWithOptionsAsync(...)` -> `SshExecutionService.ExecuteFolderAsync(...)` -> `ExecutePresetOnHostAsync(...)` -> `ExecuteScriptTextOnHost(...)` / `ExecuteScriptOnHost(...)`. Prompt steps are allowed on folder runs; only `interactive` steps are blocked (`Form1.ValidateFolderInteractiveRestrictions(...)` plus `SshExecutionService.FindInteractiveFolderPresets(...)`). Because folder execution batches hosts by `ParallelHostCount` and can also run presets in parallel, prompt dialogs can be reached concurrently from multiple background script tasks.
+- Scheduler jobs enter from `JobListDialog.OnRunNowClick(...)` -> injected `Form1.RunTrackedJobNowAsync(...)` -> `JobExecutionService.RunNowAsync(...)`, while scheduled timer jobs enter `JobExecutionService.TimerCallback(...)` -> `ExecuteScheduledJobAsync(...)`. Both converge on `ExecuteJobCoreAsync(...)`, which creates a dedicated per-job `SshExecutionService` and dispatches either `ExecuteSinglePresetAsync(...)` (`sshService.ExecutePresetAsync(...)`) or `ExecuteFolderJobAsync(...)` (`sshService.ExecuteFolderAsync(...)`). Scheduler folder jobs inherit folder prompt behavior, but `JobExecutionService` leaves `FolderExecutionOptions.ParallelHostCount` at the model default `1`, so scheduler folder jobs do not fan out hosts in parallel unless that code changes.
+- Local-only scripts are identified by `ScriptDependencyAnalyzer.AnalyzeSshRequirements(...)`: only `send` and `interactive` force `RequiresSshSession = true`; prompt commands do not. `SshExecutionService.ExecuteScriptOnHost(...)` routes `!RequiresSshSession` scripts into `ExecuteScriptLocal(...)`, which sets `context.Session = null` but still runs the same `ScriptExecutor` and therefore the same prompt commands. The local path changes transport only: no SSH connect/login, `LOCAL SCRIPT` banner, same output/column/environment hooks, same cancellation token.
+- `ScriptPromptDialogRunner.ShowAsync<TDialog, TResult>(...)` is the sole dialog launcher for `input`, `choose`, `multiselect`, `confirm` (and the relative-path `writefile` save-path prompt). It grabs `Application.OpenForms[0]` as the owner (normally `Form1` from `Program.Main()`), marshals to that form's UI thread with `BeginInvoke(...)` when needed, shows the prompt modeless with `dialog.Show(mainForm)`, centers it on the main form, and wires dialog-result buttons manually because modeless forms do not auto-close like `ShowDialog(...)`.
+- While a prompt is open, `MainFormPromptLock.TryAcquire(mainForm)` disables only the main form's control tree and explicitly preserves the `btnStopAll` ancestor chain. That means manual runs keep the Stop button usable, but modeless secondary windows such as `JobListDialog` are not part of the disabled control tree because the lock only walks `mainForm.Controls`.
+- Cancellation behavior splits cleanly by source. User-cancel inside `input`/`choose`/`multiselect` returns `null`, logs a warning, and fails the step unless `on_error: continue`; `confirm` instead stores `"false"` on No/Cancel/Escape and does not fail. Execution cancellation (`Form1.StopExecution()` -> `_sshService.Stop()` or `JobExecutionService.CancelJob(...)` -> tracked CTS -> `sshService.Stop()`) closes any active prompt through `ScriptPromptDialogRunner.RegisterCancellation(...)`, causes `ShowAsync(...)` to complete as cancelled, and ultimately marks the host/job result cancelled through `ScriptExecutor`, `EnsureScriptSucceeded(...)`, and `ExecutionResult.WasCancelled`.
+- Focused docs/tests reviewed: `CHANGELOG.md` documents modeless prompt dialogs and local-only routing; `SCRIPTING.md` documents per-command cancel semantics; `ScriptDependencyAnalyzerTests` covers prompt commands as non-SSH/local-compatible and `interactive` as SSH-only; `SshExecutionServiceInteractivePreflightTests` covers folder/multi-host `interactive` blocking; `SshExecutionServiceCancellationTests` covers local-script and folder cancellation; `JobExecutionServiceTests` covers custom-preset resolution and scheduled custom-script cancellation. There is no direct automated coverage for `ScriptPromptDialogRunner` owner selection, main-form locking, or multi-dialog concurrency.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "(FullyQualifiedName~SshExecutionServiceCancellationTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~JobExecutionServiceTests.CancelJob_ScheduledExecution_CustomPresetScript_PublishesCancelledResult|FullyQualifiedName~JobExecutionServiceTests.ResolvePresetForExecution_CustomPreset_ReturnsTransientPresetInfo|FullyQualifiedName~JobExecutionServiceTests.RunNowAsync_FolderJob_RespectsSequentialMode|FullyQualifiedName~JobExecutionServiceTests.RunNowAsync_FolderJob_RespectsParallelMode)" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\prompt-exec-review-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\prompt-exec-review-tests\\obj\\` passed (39/39).
+
+## 63. Inspect Popup File-Picker Constraints For Script Commands
+- [x] 63.1 Trace the `ScriptPromptDialogRunner`, `ReadFileCommand`, and `WriteFileCommand` flow to identify existing interactive-command guards and prompt contracts.
+- [x] 63.2 Inspect scripting validation, dependency analysis, and local/scheduler execution paths for policies that would constrain a popup file-open picker.
+- [x] 63.3 Review focused tests, specs, and docs covering interactive commands and file commands, then capture concrete findings and risks in the review section below.
+
+### 63 Review
+- `Services/Scripting/Commands/ScriptPromptDialogRunner.cs` centralizes script UI prompts through `ShowAsync<TDialog, TResult>()`, marshals dialog creation onto `Application.OpenForms[0]`, and only applies the main-form lock when it can find `btnStopAll`. That means prompt-capable commands can run from background execution paths, but the safety contract is UI-thread marshalling plus best-effort disabling of the main form, not a scheduler/manual execution policy gate.
+- `Services/Scripting/Commands/ReadFileCommand.cs` stays non-interactive today: `ExecuteAsync()` requires `readfile.path` and `readfile.into`, expands script/env variables, then immediately calls `ScriptFileAccessValidator.ValidateReadPath(...)`. It never prompts and it never checks `Path.IsPathFullyQualified`, so relative read paths currently resolve via `Path.GetFullPath(...)` inside the validator/runtime instead of forcing a picker.
+- `Services/Scripting/Commands/WriteFileCommand.cs` is the existing precedent for prompt-driven file selection. `ResolveFilePathAsync()` prompts only when the path is not fully qualified, `PromptForSavePathAsync()` routes through `ScriptPromptDialogRunner`, and `ScriptWriteFileSavePathDialog.BrowseForPath()` uses a real `SaveFileDialog`. Validation still happens after prompt resolution via `ValidateWritePath(...)`, and successful writes set `_writefile`.
+- `Services/Scripting/ScriptParser.cs` is the main shape-policy surface. `CommandOptionKeys`, `ParseReadfileOptions()`, `ParseWritefileOptions()`, and `Validate()` only know the current fixed keys for `readfile`/`writefile`. Adding a picker flag or picker-specific options would require parser, validation, docs, and editor-surface updates; otherwise the editor/runtime will warn or error on unknown keys. `Services/Editor/ScriptEditorValidationService.cs`, `Services/Editor/ScriptAutocompleteProvider.cs`, and `Services/Editor/YamlSshSyntaxHighlighter.cs` all derive their command metadata from `ScriptParser`.
+- `Services/Scripting/ScriptDependencyAnalyzer.cs` tracks `readfile`/`writefile` variable references in `AnalyzeSteps(...)`, but `AnalyzeSshRequirementsInSteps(...)` marks only `StepType.Interactive` as `UsesInteractive`. Existing multi-host/folder/scheduler preflight therefore ignores prompt-capable `writefile`, and a future popup-enabled `readfile` would also bypass those guards unless the analyzer and consumers are widened intentionally.
+- Manual and scheduler execution both consume that narrow `UsesInteractive` signal. `Services/SshExecutionService.cs` blocks only `interactive` scripts in `ExecuteScriptAsync(...)`, `ExecuteFolderAsync(...)`, and `ExecuteScriptTextOnHost(...)`; `Form1.cs` mirrors that in `ValidateFolderInteractiveRestrictions()` / `GetInteractiveFolderPresetNames()`. `Services/JobExecutionService.cs` runs scheduled jobs on a 30-second `System.Threading.Timer` ThreadPool callback and uses a dedicated `SshExecutionService` per job, so a popup picker inside `readfile`/`writefile` would marshal back to the main form from a background scheduled run and could stall a running job or consume a concurrency slot until the dialog is answered.
+- The biggest behavior risk is multiplicity: script execution is per-host. A popup-enabled `readfile` would likely fire once per host/preset execution unless the selected path is cached above `ScriptContext`, and current scheduler/manual multi-host preflight would not stop that because it only understands `interactive`.
+- Focused coverage/docs are asymmetric. `SSH_Helper.Tests/Scripting/WriteFileCommandTests.cs` covers relative-path prompt injection, cancel behavior, and `_writefile`; `SSH_Helper.Tests/Scripting/ReadFileCommandTests.cs` has only a single env-var read test; `SSH_Helper.Tests/Services/SshExecutionServiceInteractivePreflightTests.cs` covers only `interactive`-step blocking; `SSH_Helper.Tests/Scripting/ScriptParserTests.cs` covers unknown `readfile` keys and strict `interactive` validation. There are no focused tests for `ScriptPromptDialogRunner` itself, no actual WinForms file-dialog tests, and `SCRIPTING.md` documents runtime prompting only for `writefile`, not for `readfile` or scheduler/background prompt implications.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~WriteFileCommandTests|FullyQualifiedName~ReadFileCommandTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests|FullyQualifiedName~ScriptParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\popup-picker-inspection-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\popup-picker-inspection-tests\\obj\\` passed (165/165).
+
 ## 62. Fix Scheduler Job Right-Click Selection
 - [x] 62.1 Inspect the `JobListDialog` job-grid right-click and context-menu flow, and confirm the smallest safe hook for row selection before menu open.
 - [x] 62.2 Update the scheduler jobs grid so right-clicking a non-selected job row selects that row before the context menu opens, without changing empty-space behavior.

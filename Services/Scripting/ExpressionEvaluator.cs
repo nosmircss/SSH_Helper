@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Text.RegularExpressions;
 
 namespace SSH_Helper.Services.Scripting
@@ -62,14 +61,14 @@ namespace SSH_Helper.Services.Scripting
             {
                 var varName = expression.Substring(0, expression.Length - 9).Trim();
                 var emptyValue = ResolveValue(varName);
-                return string.IsNullOrEmpty(emptyValue?.ToString());
+                return ValueResolver.IsEmptyValue(emptyValue);
             }
 
             if (expression.EndsWith(" is not empty", StringComparison.OrdinalIgnoreCase))
             {
                 var varName = expression.Substring(0, expression.Length - 13).Trim();
                 var notEmptyValue = ResolveValue(varName);
-                return !string.IsNullOrEmpty(notEmptyValue?.ToString());
+                return !ValueResolver.IsEmptyValue(notEmptyValue);
             }
 
             // Check for "is defined" / "is not defined"
@@ -102,6 +101,24 @@ namespace SSH_Helper.Services.Scripting
                 {
                     return false;
                 }
+            }
+
+            // not in
+            var notInIndex = FindOperator(expression, " not in ");
+            if (notInIndex > 0)
+            {
+                var left = ResolveValue(expression.Substring(0, notInIndex))?.ToString() ?? "";
+                var collection = ValueResolver.ResolveCollectionExpression(expression.Substring(notInIndex + 8), _context);
+                return !ValueResolver.CollectionContains(collection, left);
+            }
+
+            // in
+            var inIndex = FindOperator(expression, " in ");
+            if (inIndex > 0)
+            {
+                var left = ResolveValue(expression.Substring(0, inIndex))?.ToString() ?? "";
+                var collection = ValueResolver.ResolveCollectionExpression(expression.Substring(inIndex + 4), _context);
+                return ValueResolver.CollectionContains(collection, left);
             }
 
             // contains
@@ -307,109 +324,7 @@ namespace SSH_Helper.Services.Scripting
 
         private object? ResolveValue(string expr)
         {
-            expr = expr.Trim();
-
-            // Handle list length property: numbers.length
-            var (lengthHandled, lengthValue) = ValueResolver.TryResolveLengthExpression(expr, _context.GetVariable);
-            if (lengthHandled)
-            {
-                return lengthValue;
-            }
-
-            if (JsonUtilities.TryEvaluateJsonExpression(expr, _context, out var jsonResult, normalizeStructured: false))
-            {
-                return jsonResult;
-            }
-
-            if (LooksLikeFunctionCall(expr))
-            {
-                return JsonUtilities.ResolveJsonValue(expr, _context);
-            }
-
-            // Handle quoted strings
-            if ((expr.StartsWith("\"") && expr.EndsWith("\"")) ||
-                (expr.StartsWith("'") && expr.EndsWith("'")))
-            {
-                return expr.Substring(1, expr.Length - 2);
-            }
-
-            // Handle variable substitution
-            if (expr.Contains("${") || expr.Contains("{{"))
-            {
-                return _context.SubstituteVariables(expr);
-            }
-
-            // Try variable lookup
-            if (_context.HasVariable(expr))
-            {
-                return _context.GetVariable(expr);
-            }
-
-            // Try numeric
-            if (double.TryParse(expr, out var num))
-            {
-                return num;
-            }
-
-            // Return as literal
-            return expr;
-        }
-
-        private static bool LooksLikeFunctionCall(string expr)
-        {
-            if (string.IsNullOrWhiteSpace(expr))
-                return false;
-
-            var openIndex = expr.IndexOf('(');
-            if (openIndex <= 0 || !expr.EndsWith(")", StringComparison.Ordinal))
-                return false;
-
-            var name = expr.Substring(0, openIndex).Trim();
-            if (string.IsNullOrEmpty(name))
-                return false;
-
-            foreach (var c in name)
-            {
-                if (!(char.IsLetterOrDigit(c) || c == '_' || c == '.'))
-                    return false;
-            }
-
-            var depth = 0;
-            var inString = false;
-            var stringChar = '\0';
-            for (int i = openIndex; i < expr.Length; i++)
-            {
-                var c = expr[i];
-                if ((c == '"' || c == '\'') && (i == 0 || expr[i - 1] != '\\'))
-                {
-                    if (!inString)
-                    {
-                        inString = true;
-                        stringChar = c;
-                    }
-                    else if (stringChar == c)
-                    {
-                        inString = false;
-                    }
-                    continue;
-                }
-
-                if (inString)
-                    continue;
-
-                if (c == '(')
-                    depth++;
-                else if (c == ')')
-                    depth--;
-
-                if (depth == 0 && i < expr.Length - 1)
-                    return false;
-
-                if (depth < 0)
-                    return false;
-            }
-
-            return depth == 0;
+            return ValueResolver.ResolveExpressionValue(expr, _context);
         }
 
         private string ResolveStringValue(string expr)
@@ -470,13 +385,7 @@ namespace SSH_Helper.Services.Scripting
 
         private bool IsTruthy(object? value)
         {
-            if (value == null) return false;
-            if (value is bool b) return b;
-            if (value is int i) return i != 0;
-            if (value is double d) return d != 0;
-            if (value is string s) return !string.IsNullOrEmpty(s) && !s.Equals("false", StringComparison.OrdinalIgnoreCase);
-            if (value is List<string> list) return list.Count > 0;
-            return true;
+            return ValueResolver.IsTruthyValue(value);
         }
     }
 }

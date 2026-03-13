@@ -97,7 +97,7 @@ namespace SSH_Helper.Services.Scripting
                 ["foreach"] = ["iterator", "when", "do"],
                 ["while"] = ["condition", "max_iterations", "do"],
                 ["try"] = ["do", "catch", "finally"],
-                ["readfile"] = ["path", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"],
+                ["readfile"] = ["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"],
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers"],
                 ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error"],
                 ["updatecolumn"] = ["column", "value"],
@@ -213,6 +213,7 @@ namespace SSH_Helper.Services.Scripting
                 ["format"] = ["text", "json", "jsonl", "csv"],
                 ["level"] = ["info", "debug", "warning", "error", "success"],
                 ["encoding"] = ["utf-8", "ascii", "utf-16", "utf-32"],
+                ["select_file"] = ["true", "false"],
                 ["follow_redirects"] = ["true", "false"],
                 ["allow_failure"] = ["true", "false"],
                 ["verify_tls"] = ["true", "false"],
@@ -1419,6 +1420,20 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         case "into":
                             options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "select_file":
+                        case "selectfile":
+                            var selectFileValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                            options.SelectFile = selectFileValue == "true" || selectFileValue == "yes" || selectFileValue == "1";
+                            break;
+                        case "message":
+                            options.Message = parser.Consume<Scalar>().Value;
+                            break;
+                        case "fileext":
+                        case "file_ext":
+                        case "file_extensions":
+                        case "fileextensions":
+                            options.FileExt = parser.Consume<Scalar>().Value;
                             break;
                         case "skip_empty_lines":
                         case "skipemptylines":
@@ -3144,7 +3159,7 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case StepType.Readfile:
-                        if (step.Readfile == null || string.IsNullOrEmpty(step.Readfile.Path))
+                        if (step.Readfile == null || (!step.Readfile.SelectFile && string.IsNullOrEmpty(step.Readfile.Path)))
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Readfile requires 'path'{lineContent}");

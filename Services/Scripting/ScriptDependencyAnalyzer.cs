@@ -45,10 +45,17 @@ namespace SSH_Helper.Services.Scripting
     {
         private static readonly Regex VarRefPattern = new(@"\$\{([^}]+)\}|\{\{([^}]+)\}\}", RegexOptions.Compiled);
         private static readonly Regex BareVariableNamePattern = new(@"^[A-Za-z_]\w*$", RegexOptions.Compiled);
+        private static readonly Regex BareIdentifierPattern = new(@"\b[A-Za-z_]\w*\b", RegexOptions.Compiled);
 
         private static readonly HashSet<string> BuiltInVariables = new(StringComparer.OrdinalIgnoreCase)
         {
             "_output", "_timestamp", "_iteration", "_last_error", "_writefile"
+        };
+
+        private static readonly HashSet<string> ExpressionKeywords = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "and", "or", "not", "is", "empty", "defined", "matches", "contains",
+            "startswith", "endswith", "in", "true", "false", "null", "pretty"
         };
 
         /// <summary>
@@ -672,9 +679,14 @@ namespace SSH_Helper.Services.Scripting
 
                 // Collection may be a variable reference or contain ${var}/{{var}}
                 ExtractVarReferences(collection, referencedVars);
-                // Also treat bare collection name as a reference if it's not a variable expression
-                if (!collection.Contains("${") && !collection.Contains("{{"))
+                if (BareVariableNamePattern.IsMatch(collection))
+                {
                     AddBareVarReference(collection, referencedVars);
+                }
+                else if (!collection.Contains("${") && !collection.Contains("{{"))
+                {
+                    ExtractBareExpressionReferences(collection, referencedVars);
+                }
             }
         }
 
@@ -747,6 +759,124 @@ namespace SSH_Helper.Services.Scripting
             if (string.IsNullOrWhiteSpace(varName)) return;
             references.Add(varName.Trim());
         }
+
+        private static void ExtractBareExpressionReferences(string? expression, HashSet<string> references)
+        {
+            if (string.IsNullOrWhiteSpace(expression))
+                return;
+
+            var sanitized = MaskQuotedContent(expression);
+            foreach (Match match in BareIdentifierPattern.Matches(sanitized))
+            {
+                var token = match.Value;
+                if (ExpressionKeywords.Contains(token))
+                    continue;
+
+                var previousIndex = GetPreviousNonWhitespaceIndex(sanitized, match.Index - 1);
+                if (previousIndex >= 0 && sanitized[previousIndex] == '.')
+                    continue;
+
+                if (LooksLikeQualifiedFunctionCall(sanitized, match.Index, match.Length))
+                    continue;
+
+                AddBareVarReference(token, references);
+            }
+        }
+
+        private static string MaskQuotedContent(string text)
+        {
+            var chars = text.ToCharArray();
+            var inString = false;
+            var stringChar = '\0';
+
+            for (int i = 0; i < chars.Length; i++)
+            {
+                var current = chars[i];
+                if (!inString)
+                {
+                    if (current == '"' || current == '\'')
+                    {
+                        inString = true;
+                        stringChar = current;
+                        chars[i] = ' ';
+                    }
+
+                    continue;
+                }
+
+                if (current == '\\' && i + 1 < chars.Length)
+                {
+                    chars[i] = ' ';
+                    chars[++i] = ' ';
+                    continue;
+                }
+
+                chars[i] = ' ';
+                if (current == stringChar)
+                {
+                    inString = false;
+                    stringChar = '\0';
+                }
+            }
+
+            return new string(chars);
+        }
+
+        private static bool LooksLikeQualifiedFunctionCall(string text, int tokenStart, int tokenLength)
+        {
+            var cursor = GetNextNonWhitespaceIndex(text, tokenStart + tokenLength);
+            if (cursor < 0)
+                return false;
+
+            if (text[cursor] == '(')
+                return true;
+
+            if (text[cursor] != '.')
+                return false;
+
+            while (cursor >= 0 && cursor < text.Length && text[cursor] == '.')
+            {
+                cursor = GetNextNonWhitespaceIndex(text, cursor + 1);
+                if (cursor < 0 || !IsIdentifierStart(text[cursor]))
+                    return false;
+
+                cursor++;
+                while (cursor < text.Length && IsIdentifierPart(text[cursor]))
+                    cursor++;
+
+                cursor = GetNextNonWhitespaceIndex(text, cursor);
+                if (cursor < 0)
+                    return false;
+            }
+
+            return cursor >= 0 && cursor < text.Length && text[cursor] == '(';
+        }
+
+        private static int GetPreviousNonWhitespaceIndex(string text, int start)
+        {
+            for (int i = start; i >= 0; i--)
+            {
+                if (!char.IsWhiteSpace(text[i]))
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private static int GetNextNonWhitespaceIndex(string text, int start)
+        {
+            for (int i = start; i < text.Length; i++)
+            {
+                if (!char.IsWhiteSpace(text[i]))
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private static bool IsIdentifierStart(char value) => char.IsLetter(value) || value == '_';
+
+        private static bool IsIdentifierPart(char value) => char.IsLetterOrDigit(value) || value == '_';
 
         private static void AnalyzeChoiceOptionsSourceReference(string? source, HashSet<string> references)
         {

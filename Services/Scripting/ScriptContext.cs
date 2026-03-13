@@ -133,6 +133,11 @@ namespace SSH_Helper.Services.Scripting
         public DebugState DebugState { get; } = new();
 
         /// <summary>
+        /// Whether commands may open file-selection dialogs during this execution.
+        /// </summary>
+        public bool AllowFileSelectionDialogs { get; set; } = true;
+
+        /// <summary>
         /// When true, debug output (Extract results, Set values, etc.) is shown.
         /// When false, debug output is suppressed.
         /// </summary>
@@ -247,12 +252,7 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         public List<string> GetVariableList(string name)
         {
-            var value = GetVariable(name);
-            if (value is List<string> list)
-                return list;
-            if (value is string s)
-                return new List<string> { s };
-            return new List<string>();
+            return ValueResolver.ResolveCollectionItems(GetVariable(name));
         }
 
         /// <summary>

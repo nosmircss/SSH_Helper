@@ -1,0 +1,196 @@
+---
+name: InternetServiceLookup_From_File
+description: Read IPs from a file, match FortiGate internet services, and print unique non-excluded results.
+nobanner: true
+
+vars:
+  exclude_service_matches:
+    - Cloudflare-CDN
+    - Amazon-AWS
+    - Cloudflare-Web
+
+steps:
+  - set:
+      expression: exclude_service_matches_norm = lower_all(trim_all(distinct(exclude_service_matches)))
+
+  - readfile:
+      select_file: true
+      into: badactors
+      message: "Choose the block file."
+      fileext: "txt,json"
+      skip_empty_lines: true
+      trim_lines: true
+
+  - set:
+      expression: unique_services_v4 = list()
+  - set:
+      expression: unique_services_v6 = list()
+  - set:
+      expression: unmatched_ips_v4 = list()
+  - set:
+      expression: unmatched_ips_v6 = list()
+
+  - foreach:
+      iterator: badguy in badactors
+      do:
+        - set:
+            expression: cmd_response = ""
+        - set:
+            expression: matched_services = list()
+        - set:
+            expression: found_non_excluded_match = 0
+
+        - if:
+            condition: badguy contains ":"
+            then:
+              - send:
+                  command: "diagnose internet-service6 match root ${badguy} 128"
+                  capture: cmd_response
+                  suppress: true
+
+              - if:
+                  condition: cmd_response is empty
+                  then:
+                    - set:
+                        expression: unmatched_ips_v6 = push_unique(unmatched_ips_v6, badguy)
+                    - continue: true
+
+              - extract:
+                  from: cmd_response
+                  pattern: 'Internet Service(?:6)?:\s*\d+\(([^)]+)\)'
+                  into: matched_services
+                  match: all
+
+              - if:
+                  condition: matched_services is empty
+                  then:
+                    - set:
+                        expression: unmatched_ips_v6 = push_unique(unmatched_ips_v6, badguy)
+                    - continue: true
+
+              - foreach:
+                  iterator: svc in compact(matched_services)
+                  do:
+                    - set:
+                        expression: svc_key = lower(trim(svc))
+                    - if:
+                        condition: svc_key in exclude_service_matches_norm
+                        then:
+                          - continue: true
+
+                    - set:
+                        expression: found_non_excluded_match = 1
+                    - set:
+                        expression: unique_services_v6 = push_unique(unique_services_v6, svc)
+
+              - if:
+                  condition: found_non_excluded_match == 0
+                  then:
+                    - set:
+                        expression: unmatched_ips_v6 = push_unique(unmatched_ips_v6, badguy)
+
+            else:
+              - send:
+                  command: "diagnose internet-service match root ${badguy} 255.255.255.255"
+                  capture: cmd_response
+                  suppress: true
+
+              - if:
+                  condition: cmd_response is empty
+                  then:
+                    - set:
+                        expression: unmatched_ips_v4 = push_unique(unmatched_ips_v4, badguy)
+                    - continue: true
+
+              - extract:
+                  from: cmd_response
+                  pattern: 'Internet Service(?:6)?:\s*\d+\(([^)]+)\)'
+                  into: matched_services
+                  match: all
+
+              - if:
+                  condition: matched_services is empty
+                  then:
+                    - set:
+                        expression: unmatched_ips_v4 = push_unique(unmatched_ips_v4, badguy)
+                    - continue: true
+
+              - foreach:
+                  iterator: svc in compact(matched_services)
+                  do:
+                    - set:
+                        expression: svc_key = lower(trim(svc))
+                    - if:
+                        condition: svc_key in exclude_service_matches_norm
+                        then:
+                          - continue: true
+
+                    - set:
+                        expression: found_non_excluded_match = 1
+                    - set:
+                        expression: unique_services_v4 = push_unique(unique_services_v4, svc)
+
+              - if:
+                  condition: found_non_excluded_match == 0
+                  then:
+                    - set:
+                        expression: unmatched_ips_v4 = push_unique(unmatched_ips_v4, badguy)
+
+  - set:
+      expression: v4_match_count = length(unique_services_v4)
+  - set:
+      expression: v6_match_count = length(unique_services_v6)
+  - set:
+      expression: v4_unmatched_count = length(unmatched_ips_v4)
+  - set:
+      expression: v6_unmatched_count = length(unmatched_ips_v6)
+
+  - if:
+      condition: v4_match_count > 0
+      then:
+        - print:
+            message: "=== IPv4 Unique Internet Service Matches ==="
+        - foreach:
+            iterator: svc in unique_services_v4
+            do:
+              - print:
+                  message: "${svc}"
+
+  - if:
+      condition: v6_match_count > 0
+      then:
+        - print:
+            message: "=== IPv6 Unique Internet Service Matches ==="
+        - foreach:
+            iterator: svc in unique_services_v6
+            do:
+              - print:
+                  message: "${svc}"
+
+  - if:
+      condition: v4_unmatched_count > 0
+      then:
+        - print:
+            message: "=== IPv4 IPs With No Match ==="
+        - foreach:
+            iterator: ip in unmatched_ips_v4
+            do:
+              - print:
+                  message: "${ip}"
+
+  - if:
+      condition: v6_unmatched_count > 0
+      then:
+        - print:
+            message: "=== IPv6 IPs With No Match ==="
+        - foreach:
+            iterator: ip in unmatched_ips_v6
+            do:
+              - print:
+                  message: "${ip}"
+
+  - if:
+      condition: v4_match_count == 0 and v6_match_count == 0 and v4_unmatched_count == 0 and v6_unmatched_count == 0
+      then:
+        - print:
+            message: "No results."
