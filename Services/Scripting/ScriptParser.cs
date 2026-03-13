@@ -92,7 +92,7 @@ namespace SSH_Helper.Services.Scripting
         private static readonly IReadOnlyDictionary<string, string[]> CommandOptionKeys =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
-                ["send"] = ["command", "capture", "suppress", "expect", "timeout", "on_error", "retry", "retry_delay", "respond"],
+                ["send"] = ["command", "capture", "suppress", "expect", "timeout", "on_error", "retry", "retry_delay", "fail_on_nonzero", "respond"],
                 ["print"] = ["message"],
                 ["wait"] = ["seconds"],
                 ["set"] = ["expression"],
@@ -224,6 +224,7 @@ namespace SSH_Helper.Services.Scripting
                 ["level"] = ["info", "debug", "warning", "error", "success"],
                 ["encoding"] = ["utf-8", "ascii", "utf-16", "utf-32"],
                 ["select_file"] = ["true", "false"],
+                ["fail_on_nonzero"] = ["true", "false"],
                 ["follow_redirects"] = ["true", "false"],
                 ["allow_failure"] = ["true", "false"],
                 ["verify_tls"] = ["true", "false"],
@@ -917,6 +918,10 @@ namespace SSH_Helper.Services.Scripting
                         case "retrydelay":
                             if (int.TryParse(parser.Consume<Scalar>().Value, out var retryDelay))
                                 step.RetryDelay = retryDelay;
+                            break;
+                        case "fail_on_nonzero":
+                        case "failonnonzero":
+                            step.FailOnNonZero = ParseBooleanOrDefault(parser, step.FailOnNonZero);
                             break;
                         case "respond":
                             step.Respond = ParseRespondPairs(parser, step);
@@ -3385,6 +3390,19 @@ namespace SSH_Helper.Services.Scripting
                 // Validate specific step types
                 switch (stepType)
                 {
+                    case StepType.Send:
+                        if (step.FailOnNonZero && !string.IsNullOrWhiteSpace(step.Expect))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: send.fail_on_nonzero is not supported with send.expect{lineContent}");
+                        }
+                        if (step.FailOnNonZero && step.Respond is { Count: > 0 })
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: send.fail_on_nonzero is not supported with send.respond{lineContent}");
+                        }
+                        break;
+
                     case StepType.Extract:
                         if (step.Extract == null || string.IsNullOrEmpty(step.Extract.From))
                         {

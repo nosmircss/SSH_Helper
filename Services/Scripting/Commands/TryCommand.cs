@@ -26,7 +26,12 @@ namespace SSH_Helper.Services.Scripting.Commands
             var shouldHandleFailure = !result.Success && !result.ShouldExit && !result.ShouldBreak && !result.ShouldContinue && !result.ShouldReturn;
             if (shouldHandleFailure && step.Catch != null && step.Catch.Count > 0)
             {
-                result = await _executor.ExecuteStepsAsync(step.Catch, context, cancellationToken, context.LoopDepth);
+                result = await _executor.ExecuteStepsAsync(
+                    step.Catch,
+                    context,
+                    cancellationToken,
+                    context.LoopDepth,
+                    preserveLastErrorOnSuccess: true);
             }
 
             if (step.Finally != null && step.Finally.Count > 0)

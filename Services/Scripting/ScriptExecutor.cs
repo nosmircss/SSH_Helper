@@ -160,7 +160,8 @@ namespace SSH_Helper.Services.Scripting
             List<ScriptStep> steps,
             ScriptContext context,
             CancellationToken cancellationToken,
-            int loopDepth)
+            int loopDepth,
+            bool preserveLastErrorOnSuccess = false)
         {
             var previousDepth = context.LoopDepth;
             context.LoopDepth = loopDepth;
@@ -183,7 +184,7 @@ namespace SSH_Helper.Services.Scripting
                     {
                         context.SetVariable("_last_error", result.Message ?? string.Empty);
                     }
-                    else if (result.Success)
+                    else if (result.Success && !preserveLastErrorOnSuccess)
                     {
                         context.RemoveVariable("_last_error");
                     }

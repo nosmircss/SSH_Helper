@@ -1,10 +1,20 @@
 # TODO
 
 ## 76. Add opt-in send shell-exit failure handling
-- [ ] 76.1 Extend `send` model/parser/validation/editor metadata with `fail_on_nonzero`.
-- [ ] 76.2 Add the `SendCommand` runtime path that detects non-zero shell exit status when opted in, preserving captured output and existing default behavior.
-- [ ] 76.3 Add focused parser/runtime/control-flow/editor coverage for `fail_on_nonzero` success, failure, and invalid combinations.
-- [ ] 76.4 Update scripting docs and QA/control-flow examples, run focused verification, and capture the review outcome below.
+- [x] 76.1 Extend `send` model/parser/validation/editor metadata with `fail_on_nonzero`.
+- [x] 76.2 Add the `SendCommand` runtime path that detects non-zero shell exit status when opted in, preserving captured output and existing default behavior.
+- [x] 76.3 Add focused parser/runtime/control-flow/editor coverage for `fail_on_nonzero` success, failure, and invalid combinations.
+- [x] 76.4 Update scripting docs and QA/control-flow examples, run focused verification, and capture the review outcome below.
+
+### 76 Review
+- Added `ScriptStep.FailOnNonZero`, parser support for `send.fail_on_nonzero`, send-specific validation rejecting `fail_on_nonzero` with `expect`/`respond`, and boolean autocomplete suggestions for the new option.
+- Refactored `SendCommand` to use a small injectable send-session adapter for tests, wrap opted-in commands with an injected exit-status sentinel, strip the sentinel from captured/user-visible output, and convert non-zero shell status into normal step failure while preserving `_output`/`capture`.
+- Kept default `send` behavior unchanged when `fail_on_nonzero` is omitted, so plain shell error text still behaves as output unless the script explicitly opts into exit-status checking.
+- Fixed a separate control-flow correctness gap uncovered during implementation: `_last_error` now remains available for the full duration of a `catch` block, matching the scripting control-flow spec and allowing multi-step catch handlers like the QA preset to read `_last_error` more than once.
+- Updated `SCRIPTING.md` and the bundled `QA Control Flow Primitives` preset in `qa_presets.json` so the documented and shipped examples use `fail_on_nonzero: true` when they expect shell command failure to enter `catch`.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SendCommandTests|FullyQualifiedName~ScriptExecutorControlFlowTests|FullyQualifiedName~ScriptParserTests|FullyQualifiedName~ScriptAutocompleteProviderTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\send-fail-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\send-fail-tests\\obj\\` passed (177/177).
+- Verification: `dotnet build .\\SSH_Helper.sln -p:UseAppHost=false -p:BaseOutputPath=artifacts\\send-fail-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\send-fail-build\\obj\\` passed with 0 warnings and 0 errors.
+- Verification: normal `dotnet build .\\SSH_Helper.sln` also passed with 0 warnings and 0 errors.
 
 ## 75. Fix call-arg literal missing-column warnings
 - [x] 75.1 Update `ScriptDependencyAnalyzer` so plain literal `call.args` text is not tokenized as missing-column expressions.

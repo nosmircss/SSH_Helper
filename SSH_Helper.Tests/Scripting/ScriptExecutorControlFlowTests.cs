@@ -133,6 +133,53 @@ public class ScriptExecutorControlFlowTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_TryCatchFinally_SendFailOnNonZero_PreservesLastErrorAcrossCatch()
+    {
+        var executor = new ScriptExecutor();
+        ReplaceCommand(
+            executor,
+            StepType.Send,
+            new SendCommand(_ => new FakeSendSession(command =>
+                $"{command}\r\nzsh: command not found: definitely_not_a_command_qa_try_12345\r\n{SendCommand.ExitStatusSentinel}:127\r\ntester$")));
+
+        var context = new ScriptContext();
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new()
+                {
+                    Try = new List<ScriptStep>
+                    {
+                        new()
+                        {
+                            Send = "definitely_not_a_command_qa_try_12345",
+                            FailOnNonZero = true
+                        }
+                    },
+                    Catch = new List<ScriptStep>
+                    {
+                        new() { Set = "caught = true" },
+                        new() { Set = "caught_message = _last_error" }
+                    },
+                    Finally = new List<ScriptStep>
+                    {
+                        new() { Set = "finalized = yes" }
+                    }
+                }
+            }
+        };
+
+        var result = await executor.ExecuteAsync(script, context);
+
+        result.Status.Should().Be(ScriptExitStatus.Success);
+        context.GetVariableString("caught").Should().BeOneOf("true", "True");
+        context.GetVariableString("caught_message").Should().Be("Command exited with status 127");
+        context.GetVariableString("finalized").Should().Be("yes");
+        context.HasVariable("_last_error").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhileHonorsPerStepMaxIterations()
     {
         var executor = new ScriptExecutor();
@@ -377,5 +424,35 @@ steps:
 
         var commands = field!.GetValue(executor).Should().BeAssignableTo<Dictionary<StepType, IScriptCommand>>().Subject;
         commands[stepType] = command;
+    }
+
+    private sealed class FakeSendSession : SendCommand.ISendCommandSession
+    {
+        private readonly System.Func<string, string> _execute;
+
+        public FakeSendSession(System.Func<string, string> execute)
+        {
+            _execute = execute;
+        }
+
+        public string? CurrentPrompt => "tester$";
+
+        public Task<string> ExecuteAsync(
+            string command,
+            string? expectPattern,
+            int? timeoutSeconds,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(_execute(command));
+        }
+
+        public Task<string> ExecuteWithRespondsAsync(
+            string command,
+            IReadOnlyList<(string expectPattern, string reply)> responds,
+            int? timeoutSeconds,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(_execute(command));
+        }
     }
 }

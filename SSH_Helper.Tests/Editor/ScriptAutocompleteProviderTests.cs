@@ -163,7 +163,19 @@ public class ScriptAutocompleteProviderTests
         var completion = provider.GetCompletion(text, text.Length);
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
-        completion.Items.Select(item => item.Label).Should().Contain(["retry", "retry_delay", "respond"]);
+        completion.Items.Select(item => item.Label).Should().Contain(["retry", "retry_delay", "fail_on_nonzero", "respond"]);
+    }
+
+    [Fact]
+    public void GetCompletion_SendFailOnNonZeroValue_SuggestsBooleanValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - send:\n      fail_on_nonzero: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["true", "false"]);
     }
 
     [Fact]

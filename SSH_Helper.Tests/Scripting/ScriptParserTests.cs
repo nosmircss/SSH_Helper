@@ -1667,6 +1667,24 @@ steps:
     }
 
     [Fact]
+    public void Parse_SendMapWithFailOnNonZero_ParsesCorrectly()
+    {
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: definitely_not_a_command
+                  fail_on_nonzero: true
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].Send.Should().Be("definitely_not_a_command");
+        script.Steps[0].FailOnNonZero.Should().BeTrue();
+    }
+
+    [Fact]
     public void Parse_SendMapWithRespondPairs_ParsesCorrectly()
     {
         var yaml = """
@@ -1707,6 +1725,44 @@ steps:
         var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
 
         errors.Should().Contain(error => error.Contains("send.respond entry", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_SendFailOnNonZeroWithExpect_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: hostname
+                  expect: "ready"
+                  fail_on_nonzero: true
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("send.fail_on_nonzero is not supported with send.expect"));
+    }
+
+    [Fact]
+    public void Validate_SendFailOnNonZeroWithRespond_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: adduser qa
+                  fail_on_nonzero: true
+                  respond:
+                    - expect: "Password:"
+                      reply: "secret"
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("send.fail_on_nonzero is not supported with send.respond"));
     }
 
     #endregion

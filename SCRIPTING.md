@@ -139,12 +139,13 @@ Executes a command on the SSH session.
     on_error: continue          # continue or stop (default)
     retry: 3                    # Retry up to N times on failure
     retry_delay: 2              # Seconds between retries (default: 1)
+    fail_on_nonzero: true       # Optional POSIX shell exit-status check
     respond:                    # Interactive prompt/response pairs
       - expect: "pattern"
         reply: "response"
 ```
 
-Use the map form when you need options (`capture`, `suppress`, `expect`, `timeout`, `on_error`, `retry`, `respond`).
+Use the map form when you need options (`capture`, `suppress`, `expect`, `timeout`, `on_error`, `retry`, `fail_on_nonzero`, `respond`).
 
 **Options:**
 
@@ -157,11 +158,14 @@ Use the map form when you need options (`capture`, `suppress`, `expect`, `timeou
 | `on_error` | string | `continue` to proceed on error, `stop` to halt (default) |
 | `retry` | integer | Number of times to retry the step on failure (default: 0) |
 | `retry_delay` | integer | Seconds to wait between retries (default: 1) |
+| `fail_on_nonzero` | boolean | When true, a detectable non-zero POSIX shell exit status fails the step |
 | `respond` | list | Sequence of expect/reply pairs for interactive prompts |
 
 **Notes:**
 - `expect` supports `/pattern/`, `"pattern"`, or `'pattern'` delimiters (they are stripped automatically).
 - When `expect` is set, the command stops as soon as the pattern matches; it does not automatically wait for the prompt. Omit `expect` to wait for the prompt, or include the prompt in your regex if needed.
+- `fail_on_nonzero` is opt-in and POSIX-shell-oriented. It is intended for Linux/macOS shell sessions and is not guaranteed on device CLIs like FortiGate/Cisco.
+- `fail_on_nonzero` is only supported on normal prompt-waiting `send` steps. It cannot be combined with `expect` or `respond`.
 - `respond` is for multi-step interactive commands where you need to send replies to successive prompts. Each pair has an `expect` pattern and a `reply` to send when matched.
 - Every `respond` entry must include both `expect` and `reply`; incomplete entries fail script validation.
 
@@ -175,6 +179,11 @@ Use the map form when you need options (`capture`, `suppress`, `expect`, `timeou
 - send:
     command: show ip interface brief
     capture: interfaces
+
+# Fail on non-zero shell exit status
+- send:
+    command: definitely_not_a_command
+    fail_on_nonzero: true
 
 # Hide sensitive command
 - send:
@@ -1220,11 +1229,12 @@ Runs steps in a `try` block, optionally handles failures in `catch`, and always 
     do:
       - send:
           command: risky command
-      catch:
-        - print:
-            message: "Caught error: ${_last_error}"
-      finally:
-        - log: "Cleanup complete"
+          fail_on_nonzero: true
+    catch:
+      - print:
+          message: "Caught error: ${_last_error}"
+    finally:
+      - log: "Cleanup complete"
 ```
 
 ---

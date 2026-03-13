@@ -253,6 +253,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public int? RetryDelay { get; set; }
 
         /// <summary>
+        /// When true, send treats detectable non-zero POSIX shell exit status as step failure.
+        /// </summary>
+        public bool FailOnNonZero { get; set; }
+
+        /// <summary>
         /// Expect/reply pairs for interactive send commands.
         /// After sending the command, each pair waits for the expect pattern then sends the reply.
         /// </summary>
