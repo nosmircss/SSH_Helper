@@ -1,5 +1,199 @@
 # Changelog
 
+## Changes Since `729f4e6` (0.51.8)
+
+### Job Scheduler
+
+A complete job scheduling system enables unattended execution of presets and folders on cron schedules, one-time schedules, or on-demand via Run Now. The scheduler is built across five service layers with a full UI integration.
+
+**Job Definitions** — `JobDefinition` is the core model, storing a GUID-based ID, name, enabled flag, target (preset, folder, or custom inline commands via `JobTargetType`), host grid data, cron expression or one-time UTC datetime, credential mode (`InheritFromApp`, `Stored`, `PerHostColumn`), timeout overrides, and history retention overrides. `ContentHasher` computes SHA256 hashes of preset content stored on the job definition to detect drift between saved jobs and current presets.
+
+**Job Storage** — `JobStorageService` provides CRUD operations for `JobDefinition` objects backed by `jobs.json` in `%LocalAppData%\SSH_Helper`. Enforces unique case-insensitive names (max 100 characters), writes with `.bak` backup on every save, handles corrupt-file backup on load, fires `JobsChanged` events, and provides reverse-lookup methods (`GetJobsReferencingPreset`, `GetJobsReferencingFolder`).
+
+**Scheduling Engine** — `SchedulingService` is a pure logic service (no timer, no execution) built on the Cronos library. Parses and validates cron expressions, generates human-readable descriptions via `CronExpressionDescriptor`, computes next-run times, and detects missed runs at startup. `MarkOneTimeCompleted` auto-disables one-time jobs after successful execution.
+
+**Execution Pipeline** — `JobExecutionService` is a timer-driven scheduler (30-second evaluation tick) with configurable concurrency via `SemaphoreSlim` (default 3 parallel jobs, controlled by `AppConfiguration.MaxConcurrentJobs`) and FIFO overflow queue. Each running job has its own `CancellationTokenSource` so `CancelJob(jobId)` cancels only that job. Crash recovery via `Initialize()` clears orphaned `RunningJobState` markers from previous sessions. `RunNowAsync` triggers immediate out-of-schedule execution, bypassing the semaphore. Folder jobs support sequential or parallel execution modes. Raises `JobStateChanged` and `JobCompleted` events.
+
+**Execution History** — `JobHistoryService` persists, queries, prunes, and searches job run history. Each job gets a subdirectory (`job-history/{jobId}/`) with `index.json` and individual `{runId}.json` payload files containing per-host output. Features include consecutive-failure deduplication (collapses repeated identical failures into one record), per-host output truncation (default 1 MB), age-based and count-based retention pruning (defaults: 50 max runs, 30 retention days via `JobHistoryRetentionOptions`), skipped-run recording for missed schedules, and full-text search across host outputs. `SchedulerHistoryPolicyResolver` resolves effective retention options using a three-tier priority: job-level override > global app config > built-in defaults.
+
+**Job Export/Import** — `JobExportService` serializes job definitions to `.sshjobs` JSON files and GZip+Base64 clipboard strings. On export, credentials are stripped and `RunningState` is cleared. On import, new GUIDs are generated and conflicting names receive deterministic `(imported)` / `(imported N)` suffixes.
+
+**Preset Reference Integrity** — `PresetManager` now accepts an optional `JobStorageService` dependency. On preset **rename**, all jobs referencing the old name have their `TargetName` updated automatically. On preset or folder **delete**, all referencing jobs are auto-disabled with a `DisabledReason` message. `PresetSaveImpactResolver` computes which jobs are affected when a preset is saved, enabling the UI to warn the user before saving a preset with dependent scheduled jobs.
+
+### Job Scheduler UI
+
+Four new dialogs and a custom control provide the scheduler's user interface.
+
+**Job Editor** — `JobEditorDialog` is a five-tab modal dialog for creating and editing jobs:
+- **General** — Name, target type (Preset/Folder/Custom), target dropdown, schedule type (None/Recurring/OneTime) with inline `CronBuilderControl` or `DateTimePicker`
+- **Content** — Scintilla-based YAML/command editor for custom preset content with syntax highlighting and autocomplete
+- **Hosts** — DataGridView with toolbar for add/remove/import CSV, copy from main grid, paste from clipboard
+- **Credentials** — Three-way radio: inherit from app, stored credentials via Windows Credential Manager (`JobPasswordTarget`), or per-host column mapping
+- **Advanced** — Folder execution mode (sequential/parallel), stop-on-error, command/connection timeout overrides, history retention overrides
+
+Validation is handled by `JobEditorValidator`, a pure static class that validates job name, target selection, cron expression, one-time date (must be future), host list (at least one non-empty `Host_IP`), stored credentials, per-host credentials (columns present and populated), and timeout overrides.
+
+**Job List** — `JobListDialog` is the primary job management dashboard (1000x700, resizable). Split-panel layout: top panel shows all jobs in a `DataGridView` (name, target, schedule, last run, next run, status, enabled), bottom panel shows run history for the selected job. Toolbar and context menu provide New, Edit, Run Now, Cancel, Enable/Disable, Delete, Duplicate, Export/Import. History panel has View Output and Clear History buttons. Refreshes on a 5-second timer, preserving selection across refreshes.
+
+**Import Preview** — `ImportPreviewDialog` shows all jobs about to be imported in a grid with Import checkbox, Name, Schedule, Target, and Status columns. Status cells are color-coded: green for OK, amber for renamed conflicts, red for missing targets. A summary label shows "N of M jobs selected."
+
+**Run Output Viewer** — `RunOutputViewerDialog` displays historical per-host SSH output from a single job run. Host selector dropdown (with OK/FAIL/CANCELLED indicators), monospace `RichTextBox` output area, Find button with collapsible search bar (`Ctrl+F`), Copy All button, and bidirectional text search with wrap-around.
+
+**Cron Builder Control** — `CronBuilderControl` is a self-contained `UserControl` for building cron expressions. Features 10 preset template buttons (Every 5 min through Quarterly), 5-field dropdown selectors (Minute, Hour, Day-of-Month, Month, Day-of-Week) each with full value ranges, a raw monospace `TextBox` with bidirectional sync to/from dropdowns, a human-readable description label, a next-run preview label (local time), and inline validation error display. Supports dark/light theming.
+
+**Main Form Integration** — `Form1.InitializeSchedulerServices` instantiates the full scheduler stack and wires it together. A clickable `ToolStripStatusLabel` in the status strip and a **Scheduler** menu item open the `JobListDialog` as a modeless single-instance dialog via `ModelessDialogManager<T>`. A 5-second timer drives `UpdateSchedulerStatusBar`, showing active job count and countdown to next scheduled run. `CleanupSchedulerServices` handles disposal on app close, writing `LastAppShutdownUtc` to config for missed-run detection on next startup.
+
+### Script Subroutines and Libraries
+
+Scripts now support reusable subroutines defined locally or imported from external library files.
+
+**Defining subroutines** — A `subroutines:` top-level section declares named subroutines with typed `params`, declared `outputs`, and a `steps` list:
+
+```yaml
+subroutines:
+  normalize_csv:
+    params: [raw_values]
+    outputs: [normalized]
+    steps:
+      - set:
+          normalized: "${distinct(compact(trim_all(split(raw_values, ','))))}"
+```
+
+**Importing libraries** — An `imports:` section loads external `.yaml` files marked with `library: true`. Each import specifies an absolute `path` and an `as` alias for qualified name resolution:
+
+```yaml
+imports:
+  - path: "C:\\Path\\To\\SSH_Helper\\ScriptSamples\\libraries\\string_sections.yaml"
+    as: common
+
+steps:
+  - call:
+      subroutine: common.normalize_csv
+      args:
+        raw_values: "a, b, , a, c"
+      out:
+        normalized: clean_values
+```
+
+**Call semantics** — `CallCommand` invokes subroutines in an isolated child variable scope. Arguments are expression-resolved before scope entry. Declared outputs are copied back to the caller on return. `on_error: continue` suppresses subroutine failures. A call depth limit of 32 prevents unbounded recursion. `ScriptSubroutineRegistryBuilder` validates all call sites at parse time: target existence, required params provided, no unknown args, no unknown out bindings, and DFS cycle detection over local call graphs.
+
+**Return** — `ReturnCommand` unwinds the subroutine call stack without terminating the entire script. Already-assigned declared outputs are copied back to the caller on return.
+
+**Runtime model** — `ScriptSubroutineRegistry` holds local definitions plus imported libraries, resolving bare names vs. `alias.name` qualified names. `ScriptContext.CreateChildScope` populates `CallDepth`, `SubroutineRegistry`, and `CurrentSubroutine` on each child scope.
+
+### Send Command Failure Detection
+
+`send` now supports opt-in exit-status detection via `fail_on_nonzero: true`. When enabled, the command is wrapped with a sentinel-based exit-code extraction pattern:
+
+```yaml
+- send:
+    command: "systemctl restart nginx"
+    fail_on_nonzero: true
+```
+
+The wrapper appends `eval '...'; __ssh_helper_send_status=$?; printf '\n<SENTINEL>:%s\n' "$__ssh_helper_send_status"` and `TryExtractExitStatus` strips the sentinel from output, returning `Ok()` for exit code 0 or failing the step with `"Command exited with status N"`. The feature is restricted to prompt-waiting steps without `expect` or `respond`, and is POSIX-shell-oriented only.
+
+### Enhanced Manual Execution Progress
+
+Manual execution of folders and multi-host runs now reports progress in the status bar. `ManualExecutionStatusProgress.ShouldShowProgress` returns true when total operations exceed 1, and `Advance` computes a percentage string like `"Running... 42%"` using monotonic progress tracking. A `_manualExecutionProgressRunId` guard prevents stale updates from racing runs.
+
+### Variable-Height History List
+
+`HistoryListBox` is a new `ListBox` subclass supporting variable-height owner-drawn items. `HistoryListLayout` provides pure static layout math: item height computed from wrapped text (capped at `MaxVisibleLines = 3`), draw rectangle with `HorizontalPadding = 4` and `VerticalPadding = 4`, and line height via `TextRenderer` with fallback. `HistoryListCollectionUpdater` handles newest-first insertion with duplicate removal and tail trimming. `HistoryStartupSelectionHydration` decides whether an already-selected history entry should be hydrated during startup.
+
+### Improved Drag-and-Drop in Presets TreeView
+
+The preset tree drag-and-drop system is overhauled with precise drop position targeting. A `DropPosition` enum (`None`, `Above`, `Inside`, `Below`) replaces the previous single background-highlight approach. `GetDropPosition` computes position from the cursor's relative Y offset within node bounds (top 25% = Above, bottom 25% = Below, middle = Inside for folders). Drop indicators are rendered via `trvPresets.Invalidate()` rather than mutating `BackColor`. Drop handling is split into `HandleDropOnEmptySpace`, `HandleDropInside`, and `HandleDropAdjacentTo`, supporting precise above/below insertion in addition to folder nesting.
+
+### Host Grid Snapshot and Unsaved Indicator
+
+`HostGridUtilities` builds immutable `HostGridSnapshot` objects (column + row data) for comparing grid state. `IsHostsGridUnsaved()` now compares the live grid against a stored snapshot rather than relying solely on the `_csvDirty` flag, correctly detecting when minor round-trip changes produce no real difference.
+
+### Autosave on Environment Switch
+
+`TrySwitchEnvironment` now unconditionally calls `SaveCurrentGridToEnvironment` when switching environments, eliminating the save/discard/cancel prompt that previously appeared when the grid had unsaved changes.
+
+### CSV Save Improvements
+
+A `CsvSaveAttemptResult` enum (`Saved`, `Cancelled`, `Failed`) replaces raw boolean returns from save operations. The form-closing path uses `TryResolvePendingCsvChangesForExit` which handles all three outcomes, including a fallback "exit without saving?" prompt. `CsvManager.ParseCsvLine` adds a proper RFC-4180-style single-line CSV parser for use by `JobStorageService` and other consumers.
+
+### Cancellation Handling Improvements
+
+**Per-job cancellation** — `JobExecutionService` stores per-job `CancellationTokenSource` instances so `CancelJob(jobId)` cancels only that specific job without affecting other running jobs.
+
+**Manual cancellation tracking** — `_manualCancellationRequested` tracks whether the user explicitly clicked Cancel during manual execution. `WasCancelled` propagates through `ExecutionResult`, history details, and history list icons.
+
+**Scheduler file picker suppression** — `SshExecutionService.ExecutePresetAsync` accepts an `allowFileSelectionDialogs` parameter (default `true`) so the scheduler can suppress interactive file picker dialogs during automated runs.
+
+### Job Duplication with Credential Copying
+
+Jobs can be duplicated from the Job List dialog. The duplicate receives a new GUID and a `(copy)` name suffix. If the source job uses stored credentials, the credential is read from Windows Credential Manager and written to a new target keyed to the duplicate's job ID.
+
+### Expression Evaluation Improvements
+
+**Indexed variable access** — `ValueResolver.TryResolveIndexedExpressionValue` enables `varname[i]` expressions in conditions and `set:` right-hand sides without requiring `${varname[i]}` substitution syntax. An out-of-bounds index returns `null` without throwing. The index itself can be a variable.
+
+**JSON expression normalization** — `JsonUtilities.TryEvaluateJsonExpression` accepts a `normalizeStructured` parameter. When `false`, JSON expression results are not coerced back to `JsonElement`, preventing a double-parse round-trip that was corrupting structured values in condition evaluation contexts.
+
+**Empty source handling in extract** — `ExtractCommand` now initializes all `into` targets to empty string (or list of empty strings for multi-variable captures) when the source variable resolves to empty or null, rather than leaving targets in their prior state.
+
+### Unsaved Preset Diff Dialog Enhancements
+
+`UnsavedPresetDiffDialog` now accepts an optional `PresetSaveImpact` and `PresetSavePromptMode` to show an "affected scheduler jobs" impact panel with count label, summary, and expandable list box. New `PresetSaveImpactAction` enum (`Cancel`, `SaveExisting`, `RenameExisting`, `CreateNew`, `Discard`) and four prompt modes replace raw `DialogResult` returns.
+
+### Dialog Ownership Fixes
+
+All `DialogTheme.Show(...)` calls in `SettingsDialog` and `EnvironmentDialog` now pass `this` as the owner form parameter, fixing modality/z-order issues where dialogs could appear behind the parent window.
+
+### Streaming Terminal Output Buffer
+
+`TerminalOutputProcessor.BufferIncompleteFinalLineStreaming` is a stateful streaming buffer that holds back the last incomplete line of live terminal output so backspace/CR edits can resolve before text is committed to an append-only UI surface. `StripPagerArtifacts` uses `ReferenceEquals` comparison after `Regex.Replace` to detect whether a replacement actually occurred, avoiding a redundant `IsMatch` call.
+
+### Utility Extractions
+
+Several shared utilities are extracted from duplicated inline code into reusable classes:
+
+| Utility | Extracted From | Purpose |
+|---------|---------------|---------|
+| `AppDataPaths` | Multiple services | Centralized `%LocalAppData%\SSH_Helper` path resolution |
+| `GZipBase64Utility` | `PresetManager`, `ConfigurationService` | Shared GZip + Base64 compress/decompress |
+| `JsonFileWriter` | `HistoryStorageService`, `ConfigurationService` | Atomic JSON file writes with temp-file swap and `.bak` backup |
+| `HostGridUtilities` | `Form1` | DataGridView snapshot, comparison, clipboard, paste, and column utilities |
+| `ModelessDialogManager<T>` | Inline code | Generic single-instance modeless dialog lifecycle management |
+
+### Dependency Changes
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `Cronos` | 0.11.1 | Cron expression parsing and next-occurrence calculation |
+| `CronExpressionDescriptor` | 2.45.0 | Human-readable cron expression descriptions |
+
+### Documentation
+
+`SCRIPTING.md` updated with:
+- `call` and `return` commands with full parameter tables, scope isolation semantics, and examples
+- `library: true` top-level flag and `imports:` section for external library loading
+- `subroutines:` section for defining reusable named subroutines with params and outputs
+- `fail_on_nonzero` option for the `send` command with POSIX-shell restriction notes
+- `call` and `return` added to the step-keyword auto-detection list and command table
+
+New script samples added:
+- `ScriptSamples/libraries/string_sections.yaml` — Reference library demonstrating `print_section` and `normalize_csv_values` subroutines
+- `ScriptSamples/generic/library_import_demo.yaml` — End-to-end import and call workflow
+- `ScriptSamples/qa/catalog_library.yaml` and `catalog_runner.yaml` — QA fixture library and runner for automated testing
+
+### Test Coverage
+
+New test suites added:
+
+- **Models** — `JobDefinitionTests` (model construction, enums, credential modes), `ExecutionPipelineModelTests` (queue, running state, skipped run models), `MaxConcurrentJobsTests` (configuration validation)
+- **Services** — `JobStorageServiceTests` (CRUD, persistence, reverse lookup), `SchedulingServiceTests` (cron validation, next-run, descriptions), `SchedulingServiceMissedRunIntegrationTests` (missed-run detection, one-time completion), `JobExecutionServiceTests` (timer-driven execution, concurrency, crash recovery, cancellation), `JobHistoryServiceTests` (save, query, prune, search, consecutive-failure dedup), `JobExportServiceTests` (export/import, conflict naming, credential stripping), `PresetManagerJobReferenceTests` (rename propagation, delete disable), `SchedulerHistoryPolicyResolverTests` (three-tier resolution), `SshExecutionServiceCancellationTests` (cancellation token propagation), `SshExecutionServiceProgressTests` (folder progress reporting)
+- **Scripting** — `ScriptSubroutineParserValidationTests` (subroutine/import parsing), `ScriptSubroutineExecutionTests` (call/return execution, scope isolation), `ScriptSubroutineDependencyAnalyzerTests` (cycle detection, call-site validation), `ScriptSubroutineEditorTests` (editor integration), `SendCommandTests` (fail_on_nonzero sentinel extraction), `QaPresetCatalogTests` (QA fixture coverage), `ExtractCommandTests` (empty source initialization)
+- **UI** — `CronBuilderControlTests` (bidirectional sync, preset templates), `CronBuilderControlLayoutTests` (layout and theming), `JobEditorDialogLayoutTests` (tab structure, controls), `JobEditorDialogCustomPresetTests` (custom preset editing), `JobEditorDialogHostGridParityTests` (host grid copy/paste), `JobEditorDialogStoredCredentialTests` (credential mode switching), `JobEditorDialogTimeoutOverrideTests` (timeout override fields), `JobEditorValidationTests` (full validation chain), `JobListDialogRunNowTests` (Run Now flow), `HistoryListCollectionUpdaterTests` (insert, dedup, trim), `HistoryListLayoutTests` (height calculation, text bounds), `HistoryStartupSelectionHydrationTests` (startup restore), `HostGridUtilitiesTests` (snapshot, comparison, clipboard), `ManualExecutionStatusProgressTests` (progress percentage), `ModelessDialogManagerTests` (single-instance lifecycle), `SchedulerNotificationTests` (status bar and completion formatting), `UnsavedPresetDiffDialogTests` (impact panel, action enum), `ScriptPromptDialogRunnerTests` (prompt dialog flows), `ScriptReadFileOpenPathDialogTests` (file picker suppression)
+- **Utilities** — `ContentHasherTests` (SHA256 hashing), `InputValidatorCronTests` (cron validation), `PresetSaveImpactResolverTests` (affected job resolution), `SchedulerJobIntegrityUtilitiesTests` (import disable, credential hints)
+
+---
+
 ## Changes Since `12c1b7f` (0.51.7)
 
 ### Readfile Manual File Picker

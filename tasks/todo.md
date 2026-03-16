@@ -1,5 +1,17 @@
 # TODO
 
+## 96. Audit changelog section since 729f4e6
+- [x] 96.1 Read the `## Changes Since \`729f4e6\` (0.51.8)` section in `CHANGELOG.md` and capture its claims.
+- [x] 96.2 Compare those claims to the actual commit and file history from `729f4e6..HEAD`.
+- [x] 96.3 Record the review result below with any inaccuracies, omissions, or confirmation that the section is accurate.
+
+### 96 Review
+- Compared the current working-copy changelog section against the repo state since `729f4e6`, including the commit/file history and the concrete implementations in `Services`, `UI`, `Form1`, and the new test suites.
+- Found two clear wording inaccuracies in the changelog: the library-import example implies a relative import path is valid even though `ScriptSubroutineRegistryBuilder` currently rejects non-absolute import paths, and the job-duplication section says duplicates get a `(Copy)` suffix even though the implementation uses lowercase `(copy)`.
+- Found one lower-severity wording issue: `HistoryStartupSelectionHydration` does not restore list selection by itself; it only decides whether an already-selected history row should be hydrated into the output/hosts panes during startup.
+- Patched `CHANGELOG.md` to correct those three points.
+- Aside from those points, the section is broadly aligned with the implemented changes since `729f4e6`.
+
 ## 95. Center scheduler jobs window over main form
 - [x] 95.1 Confirm why the scheduler dialog's `CenterParent` intent is not honored on first modeless show.
 - [x] 95.2 Patch the shared modeless dialog launcher to explicitly center `CenterParent` dialogs over the owner on first show.
