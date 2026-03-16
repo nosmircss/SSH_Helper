@@ -17,6 +17,8 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [foreach](#foreach---loop-over-collections)
    - [while](#while---conditional-loop)
    - [try](#try---structured-error-handling)
+   - [call](#call---invoke-a-subroutine)
+   - [return](#return---exit-current-subroutine)
    - [exit](#exit---terminate-script)
    - [readfile](#readfile---read-text-files)
    - [writefile](#writefile---write-text-files)
@@ -61,24 +63,47 @@ environment: "prod"              # Optional: switch to this environment when the
 debug: false                     # Optional: enable debug output (default: false)
 nobanner: false                  # Optional: suppress script execution banner (default: false)
 suppress_missing_column_warning: false  # Optional: suppress missing-column preflight warning
+library: false                   # Optional: definition-only file for imports (default: false)
 
 vars:                            # Optional: variable declarations
   variable_name: "default_value"
   timeout: 30
+  exclude_services:
+    - "Cloudflare-CDN"
+    - "Amazon-AWS"
+
+imports:                         # Optional: file-based libraries (executable scripts only)
+  - path: "C:\\Scripts\\common.yaml"
+    as: common
+
+subroutines:                     # Optional: reusable named step blocks
+  lookup:
+    params: [ip]
+    outputs: [result]
+    steps:
+      - set:
+          expression: result = "hello ${ip}"
 
 steps:                           # Required: list of execution steps
-  - send:
-      command: "command"
+  - call:
+      subroutine: lookup
+      args:
+        ip: Host_IP
+      out:
+        result: greeting
   - print:
-      message: "message"
+      message: "${greeting}"
 ```
+
+`vars:` accepts both scalar values and YAML sequences. Prefer YAML lists for fixed collections instead of building them one `json.push()` call at a time.
+Executable scripts may also declare `imports:` and `subroutines:`. Library files set `library: true` and may contain `subroutines:` only; they are meant to be imported, not executed directly.
 
 ### Auto-Detection
 
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
-- Distinctive top-level sections: `vars:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
+- Distinctive top-level sections: `vars:`, `imports:`, `subroutines:`, `steps:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
 
 Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.
 
@@ -114,12 +139,13 @@ Executes a command on the SSH session.
     on_error: continue          # continue or stop (default)
     retry: 3                    # Retry up to N times on failure
     retry_delay: 2              # Seconds between retries (default: 1)
+    fail_on_nonzero: true       # Optional POSIX shell exit-status check
     respond:                    # Interactive prompt/response pairs
       - expect: "pattern"
         reply: "response"
 ```
 
-Use the map form when you need options (`capture`, `suppress`, `expect`, `timeout`, `on_error`, `retry`, `respond`).
+Use the map form when you need options (`capture`, `suppress`, `expect`, `timeout`, `on_error`, `retry`, `fail_on_nonzero`, `respond`).
 
 **Options:**
 
@@ -132,11 +158,14 @@ Use the map form when you need options (`capture`, `suppress`, `expect`, `timeou
 | `on_error` | string | `continue` to proceed on error, `stop` to halt (default) |
 | `retry` | integer | Number of times to retry the step on failure (default: 0) |
 | `retry_delay` | integer | Seconds to wait between retries (default: 1) |
+| `fail_on_nonzero` | boolean | When true, a detectable non-zero POSIX shell exit status fails the step |
 | `respond` | list | Sequence of expect/reply pairs for interactive prompts |
 
 **Notes:**
 - `expect` supports `/pattern/`, `"pattern"`, or `'pattern'` delimiters (they are stripped automatically).
 - When `expect` is set, the command stops as soon as the pattern matches; it does not automatically wait for the prompt. Omit `expect` to wait for the prompt, or include the prompt in your regex if needed.
+- `fail_on_nonzero` is opt-in and POSIX-shell-oriented. It is intended for Linux/macOS shell sessions and is not guaranteed on device CLIs like FortiGate/Cisco.
+- `fail_on_nonzero` is only supported on normal prompt-waiting `send` steps. It cannot be combined with `expect` or `respond`.
 - `respond` is for multi-step interactive commands where you need to send replies to successive prompts. Each pair has an `expect` pattern and a `reply` to send when matched.
 - Every `respond` entry must include both `expect` and `reply`; incomplete entries fail script validation.
 
@@ -150,6 +179,11 @@ Use the map form when you need options (`capture`, `suppress`, `expect`, `timeou
 - send:
     command: show ip interface brief
     capture: interfaces
+
+# Fail on non-zero shell exit status
+- send:
+    command: definitely_not_a_command
+    fail_on_nonzero: true
 
 # Hide sensitive command
 - send:
@@ -287,12 +321,19 @@ Sets or modifies variable values with expression support.
 | Multiplication | `total = count * 10` | Numeric multiplication |
 | Division | `avg = total / count` | Numeric division |
 | Modulo | `remainder = value % 10` | Numeric modulo |
-| length() | `len = length(text)` | String or list length |
+| length() | `len = length(text)` | String length or collection size |
 | trim() | `clean = trim(input)` | Remove whitespace |
 | upper() | `caps = upper(text)` | Convert to uppercase |
 | lower() | `small = lower(text)` | Convert to lowercase |
 | replace() | `out = replace(text, "old", "new")` | Replace string content |
 | split() | `arr = split(text, ",")` | Split string into list |
+| list() | `arr = list("a", "b")` | Create a native string list |
+| compact() | `arr = compact(values)` | Remove empty items from a collection |
+| distinct() | `arr = distinct(values, "ordinal")` | Remove duplicates (default: ignore_case) |
+| push_unique() | `arr = push_unique(arr, item)` | Append only when value is not already present |
+| trim_all() | `arr = trim_all(values)` | Trim every collection item |
+| lower_all() | `arr = lower_all(values)` | Lowercase every collection item |
+| upper_all() | `arr = upper_all(values)` | Uppercase every collection item |
 | join() | `text = join(arr, ",")` | Join list into string |
 | substring() | `part = substring(text, 0, 5)` | Extract string segment |
 | sort() | `sorted = sort(arr, "desc")` | Sort list values |
@@ -366,9 +407,17 @@ Sets or modifies variable values with expression support.
 ```yaml
 # Create and build an array
 - set:
+    expression: results = list("up", "down")
+- set:
     expression: results = push(results, ${Host_IP})
 - set:
     expression: results = push(results, ${status})
+
+# Normalize and de-duplicate values
+- set:
+    expression: normalized = lower_all(trim_all(distinct(raw_values)))
+- set:
+    expression: results = push_unique(results, "up")
 
 # Prepend and remove values
 - set:
@@ -989,9 +1038,12 @@ Iterates over items in a collection.
 ```
 
 **Collection Types:**
-- **Lists**: Created by `extract` with `match: all`
+- **Lists**: Created by `vars:` YAML sequences, `extract` with `match: all`, `list()`, `split()`, and other collection helpers
+- **JSON collections**: Arrays from `json.items()`, keys from `json.keys()`, values from `json.values()`
 - **Strings**: Automatically split into lines
 - **Single values**: Treated as single-item collection
+
+`iterator:` can use collection expressions, not just variable names. Common examples include `item in split(csv, ",")`, `item in compact(list_values)`, and `entry in json.items(data, "path")`.
 
 **Special Variables in Loop:**
 - `${item}`: Current item value (or your chosen variable name)
@@ -1040,6 +1092,13 @@ Iterates over items in a collection.
     do:
       - print:
           message: "Active: ${line}"
+
+# Loop over an expression-backed collection
+- foreach:
+    iterator: svc in compact(split(service_csv, ","))
+    do:
+      - print:
+          message: "Service: ${svc}"
 ```
 
 ---
@@ -1170,12 +1229,80 @@ Runs steps in a `try` block, optionally handles failures in `catch`, and always 
     do:
       - send:
           command: risky command
-      catch:
-        - print:
-            message: "Caught error: ${_last_error}"
-      finally:
-        - log: "Cleanup complete"
+          fail_on_nonzero: true
+    catch:
+      - print:
+          message: "Caught error: ${_last_error}"
+    finally:
+      - log: "Cleanup complete"
 ```
+
+---
+
+### call - Invoke a Subroutine
+
+Runs a local subroutine or an imported library subroutine inside an isolated child variable scope.
+
+**Syntax:**
+```yaml
+- call:
+    subroutine: lookup_service
+    args:
+      ip: Host_IP
+      excludes: exclude_service_matches_norm
+    out:
+      unique_services: unique_services_v4
+      unmatched_ips: unmatched_ips_v4
+    on_error: continue
+```
+
+**Rules:**
+- `subroutine` is required.
+- Bare names call local subroutines.
+- `alias.name` calls imported library subroutines.
+- `args` are expression strings resolved before entering the child scope.
+- `out` maps declared subroutine outputs back into bare caller variable names.
+- Child scopes do not automatically inherit caller variables; pass everything explicitly through `args`.
+- `on_error: continue` suppresses subroutine failure just like other command-map steps.
+
+**Example:**
+```yaml
+subroutines:
+  print_section:
+    params: [title, items]
+    steps:
+      - if:
+          condition: items is empty
+          then:
+            - return: true
+      - print:
+          message: "${title}"
+      - foreach:
+          iterator: item in items
+          do:
+            - print:
+                message: "${item}"
+
+steps:
+  - call:
+      subroutine: print_section
+      args:
+        title: "=== Results ==="
+        items: results
+```
+
+---
+
+### return - Exit Current Subroutine
+
+Ends the current subroutine immediately without terminating the whole script.
+
+**Syntax:**
+```yaml
+- return: true
+```
+
+`return` is only valid inside subroutines. Declared outputs that were already assigned in the child scope are copied back to the caller when the subroutine returns.
 
 ---
 
@@ -1245,6 +1372,9 @@ Reads a text file line by line into a list variable. Useful for processing IP li
 ```yaml
 - readfile:
     path: "C:\\path\\to\\file.txt"
+    select_file: false         # Optional (default: false). If true, prompt to choose the file at runtime
+    message: "Choose the file to import for this run."  # Optional picker prompt text
+    fileext: "txt,json"        # Optional allowed extensions (comma-separated)
     into: variable_name
     skip_empty_lines: true     # Optional (default: true)
     trim_lines: true           # Optional (default: true)
@@ -1256,12 +1386,20 @@ Reads a text file line by line into a list variable. Useful for processing IP li
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `path` | Yes | - | Path to the file (supports variable substitution) |
+| `path` | Yes, unless `select_file: true` | - | Path to the file (supports variable substitution). When `select_file: true`, this becomes an optional seed for the picker |
+| `select_file` | No | `false` | Prompt the operator to choose the file at runtime. Only supported for manual runs from the main window |
+| `message` | No | default picker prompt | Custom prompt text shown in the picker dialog when `select_file: true` |
+| `fileext` | No | all files | Comma-separated allowed extensions such as `txt,json` or `.txt,.json`. In picker mode this filters the browse dialog, and the final resolved path must match one of the allowed extensions |
 | `into` | Yes | - | Variable name to store the lines as a list |
 | `skip_empty_lines` | No | `true` | Skip blank lines |
 | `trim_lines` | No | `true` | Remove leading/trailing whitespace from each line |
 | `max_lines` | No | `10000` | Maximum lines to read (0 = unlimited) |
 | `encoding` | No | `utf-8` | File encoding: `utf-8`, `ascii`, `utf-16`, `utf-16be`, `utf-32`, `latin1` (aliases: `unicode` for utf-16, `iso-8859-1` for latin1) |
+
+**Manual-only picker note:**
+- `select_file: true` is available only during manual main-window runs. Scheduled jobs and Job List `Run Now` executions fail cleanly instead of opening a file picker.
+- When the picker is cancelled, `into` is set to an empty list and the script stops immediately. `on_error: continue` does not suppress picker cancellation.
+- `fileext` accepts comma-separated extensions with or without leading dots or wildcards, for example `txt,json`, `.txt,.json`, or `*.txt;*.json`.
 
 **Security:**
 - **Blocked paths**: Cannot read from `C:\Windows`, `C:\Program Files`, `C:\ProgramData`, or other users' directories
@@ -1296,6 +1434,14 @@ Reads a text file line by line into a list variable. Useful for processing IP li
     skip_empty_lines: false
     trim_lines: false
     encoding: ascii
+
+# Prompt the operator to choose the file at runtime
+- readfile:
+    select_file: true
+    path: "${config_dir}\\default-hosts.txt"
+    message: "Choose the host import file for this site."
+    fileext: "txt,json"
+    into: selected_hosts
 ```
 
 ---
@@ -3193,7 +3339,7 @@ Variables can hold different types of data:
 | Type | Source | Example |
 |------|--------|---------|
 | `string` | CSV columns, `set`, `input`, `extract` | `"hello"`, `"192.168.1.1"` |
-| `List<string>` | `readfile`, `extract` (with `match: all`), `push()` | `["item1", "item2"]` |
+| `List<string>` | `vars:` YAML sequences, `readfile`, `extract` (with `match: all`), `list()`, `split()`, `push()` | `["item1", "item2"]` |
 | `int` / `double` | Arithmetic operations | `42`, `3.14` |
 | `JsonObject` | `json()`, nested dot assignment | `{"key": "value"}` |
 
@@ -3216,6 +3362,8 @@ Variables can hold different types of data:
 | `>=` | Greater than or equal | `value >= 0` |
 | `<` | Less than | `index < 5` |
 | `<=` | Less than or equal | `retry <= 3` |
+| `in` | Collection membership against lists, JSON arrays, or newline-delimited strings | `svc_key in exclude_service_matches_norm` |
+| `not in` | Collection non-membership against lists, JSON arrays, or newline-delimited strings | `svc_key not in exclude_service_matches_norm` |
 
 ### String Operators
 
@@ -3265,11 +3413,13 @@ When a condition has no comparison operator, it's evaluated as truthy or falsy:
 - The string `"false"` (case-insensitive)
 - The number `0`
 - Empty lists
+- Empty JSON arrays and objects
 
 **Truthy Values:**
 - Non-empty strings (except `"false"`)
 - Non-zero numbers
 - Non-empty lists
+- Non-empty JSON arrays and objects
 - The string `"true"` (case-insensitive)
 
 **Example:**

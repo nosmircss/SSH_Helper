@@ -77,10 +77,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 var errorMsg = $"Error getting user input: {ex.Message}";
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
-                if (step.OnError?.ToLowerInvariant() == "continue")
-                    return CommandResult.Suppressed(errorMsg);
-
-                return CommandResult.Fail(errorMsg);
+                return CommandResult.ApplyOnError(step, errorMsg);
             }
         }
     }

@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using FluentAssertions;
 using SSH_Helper.Models;
+using SSH_Helper.UI;
 using Xunit;
 
 namespace SSH_Helper.Tests.UI;
@@ -160,6 +161,36 @@ public class ApplyFontSettingsTests
         harness.ApplyFontSettings(settings);
 
         harness.dgv_variables.RowTemplate.Height.Should().Be(rowHeight);
+    }
+
+    [WinFormsFact]
+    public void ApplyFontSettings_HistoryListVariableRows_FontChangesKeepUsableHeights()
+    {
+        using var harness = new FontApplicationTestHarness();
+        harness.lstOutput.Size = new Size(150, 240);
+        harness.lstOutput.Items.Add("2026-03-13 09:55:59 - QA WriteFile JSON [Windows] with a very long history label that should wrap across multiple lines");
+
+        harness.ApplyFontSettings(FontSettings.CreateDefault());
+        harness.ConfigureVariableHeightHistoryList();
+        var initialMinimumHeight = HistoryListLayout.GetMinimumItemHeight(harness.lstOutput.Font);
+        var initialHeight = HistoryListLayout.CalculateItemHeight(
+            harness.lstOutput.Items[0]?.ToString(),
+            harness.lstOutput.Font,
+            harness.lstOutput.ClientSize.Width);
+
+        var largerFontSettings = FontSettings.CreateDefault();
+        largerFontSettings.HostListFontSize = 12f;
+        harness.ApplyFontSettings(largerFontSettings);
+        harness.lstOutput.RefreshVariableItemHeights();
+
+        var resizedHeight = HistoryListLayout.CalculateItemHeight(
+            harness.lstOutput.Items[0]?.ToString(),
+            harness.lstOutput.Font,
+            harness.lstOutput.ClientSize.Width);
+
+        harness.lstOutput.DrawMode.Should().Be(DrawMode.OwnerDrawVariable);
+        initialHeight.Should().BeGreaterThan(initialMinimumHeight);
+        resizedHeight.Should().BeGreaterThan(initialHeight);
     }
 
     #endregion

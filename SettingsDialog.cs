@@ -1066,7 +1066,7 @@ namespace SSH_Helper
                 FullOpen = true
             };
 
-            if (colorDialog.ShowDialog() == DialogResult.OK)
+            if (colorDialog.ShowDialog(this) == DialogResult.OK)
             {
                 _customAccentColor = colorDialog.Color;
                 _pnlAccentColor.BackColor = _customAccentColor;
@@ -1077,6 +1077,7 @@ namespace SSH_Helper
         private void BtnResetDefaults_Click(object? sender, EventArgs e)
         {
             var result = DialogTheme.Show(
+                this,
                 "Reset all appearance settings to their default values?",
                 "Reset to Defaults",
                 MessageBoxButtons.YesNo,
@@ -1096,6 +1097,7 @@ namespace SSH_Helper
                 return;
 
             var result = DialogTheme.Show(
+                this,
                 "Clear custom timeout values from all presets?\n\n" +
                 "Presets will inherit the global default timeout instead.",
                 "Reset Preset Timeouts",
@@ -1107,6 +1109,7 @@ namespace SSH_Helper
                 int count = _presetManager.ClearAllTimeouts();
                 PresetTimeoutsWereCleared |= count > 0;
                 DialogTheme.Show(
+                    this,
                     $"Cleared timeout overrides from {count} preset(s).",
                     "Reset Preset Timeouts",
                     MessageBoxButtons.OK,

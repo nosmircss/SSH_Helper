@@ -1,6 +1,6 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-03-06
+**Analysis Date:** 2026-03-07
 
 ## Test Framework
 
@@ -37,91 +37,92 @@ dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --collect:"XPlat Code Cover
 
 **Naming:**
 - Test files: `{ClassName}Tests.cs` (e.g., `InputValidatorTests.cs`, `PresetManagerTests.cs`)
-- Some service tests split by feature: `ConfigurationServiceFontSettingsTests.cs`, `ConfigurationServiceWindowStateTests.cs`
+- Some service tests split by feature: `ConfigurationServiceFontSettingsTests.cs`, `ConfigurationServiceWindowStateTests.cs`, `ConfigurationServiceCommandEditorSettingsTests.cs`, `ConfigurationServiceExecutionDetailsTests.cs`
+- Feature-specific tests: `PresetManagerFolderBaseEnvironmentTests.cs`, `SshExecutionServiceInteractivePreflightTests.cs`, `SshExecutionServiceOutputFormattingTests.cs`
 - Test harness files named descriptively: `FontApplicationTestHarness.cs`
 
 **Structure:**
 ```
 SSH_Helper.Tests/
-├── Editor/
-│   ├── EditorTextUtilitiesTests.cs
-│   ├── ScriptAutocompleteProviderTests.cs
-│   ├── ScriptEditorValidationServiceTests.cs
-│   └── YamlSshSyntaxHighlighterTests.cs
-├── Models/
-│   ├── FontSettingsTests.cs
-│   └── PresetInfoTests.cs
-├── Scripting/
-│   ├── CanonicalCommandMapSyntaxTests.cs
-│   ├── ChoiceOptionResolverTests.cs
-│   ├── ChooseCommandTests.cs
-│   ├── ConfirmCommandTests.cs
-│   ├── ExitCommandTests.cs
-│   ├── ExpressionEvaluatorTests.cs
-│   ├── ExtractCommandTests.cs
-│   ├── ForeachCommandTests.cs
-│   ├── InteractiveCommandTests.cs
-│   ├── LogCommandTests.cs
-│   ├── LogParsingTests.cs
-│   ├── MultiselectCommandTests.cs
-│   ├── NetworkCommandTests.cs
-│   ├── NetworkStepParserTests.cs
-│   ├── Parsers/
-│   │   └── FortiGateParserTests.cs
-│   ├── QaPresetsSyntaxTests.cs
-│   ├── ReadFileCommandTests.cs
-│   ├── ScriptContextTests.cs
-│   ├── ScriptDependencyAnalyzerTests.cs
-│   ├── ScriptExecutorControlFlowTests.cs
-│   ├── ScriptParserTests.cs
-│   ├── ScriptValidationFormatterTests.cs
-│   ├── SetCommandTests.cs
-│   ├── TableCommandTests.cs
-│   ├── UpdateColumnCommandTests.cs
-│   ├── UpdateEnvironmentCommandTests.cs
-│   └── WriteFileCommandTests.cs
-├── Services/
-│   ├── ConfigurationServiceCommandEditorSettingsTests.cs
-│   ├── ConfigurationServiceExecutionDetailsTests.cs
-│   ├── ConfigurationServiceFontSettingsTests.cs
-│   ├── ConfigurationServiceWindowStateTests.cs
-│   ├── CredentialManagerProviderTests.cs
-│   ├── CredentialTargetsTests.cs
-│   ├── CsvManagerTests.cs
-│   ├── EnvironmentServiceTests.cs
-│   ├── ExecutionCoordinatorTests.cs
-│   ├── HistoryIdGeneratorTests.cs
-│   ├── HistoryResultStoreTests.cs
-│   ├── HistoryStorageServiceTests.cs
-│   ├── InteractiveTerminalServiceTranscriptFilterTests.cs
-│   ├── PresetManagerFolderBaseEnvironmentTests.cs
-│   ├── PresetManagerTests.cs
-│   ├── SshExecutionServiceInteractivePreflightTests.cs
-│   ├── SshExecutionServiceOutputFormattingTests.cs
-│   ├── SshTerminalOptionsFactoryTests.cs
-│   └── StopOnFirstErrorTrackerTests.cs
-├── UI/
-│   ├── ApplyFontSettingsTests.cs
-│   ├── ExecutionDetailsDialogTests.cs
-│   ├── FontApplicationTestHarness.cs
-│   ├── ScintillaScriptEditorControlTests.cs
-│   ├── ScintillaScriptEditorPerformanceTests.cs
-│   └── SettingsDialogAppearanceTests.cs
-└── Utilities/
-    ├── BaseEnvironmentIndicatorFormatterTests.cs
-    ├── CsvFileSyncEvaluatorTests.cs
-    ├── ExecutionDialogPolicyTests.cs
-    ├── FolderBaseEnvironmentSummaryFormatterTests.cs
-    ├── HostsFileIndicatorFormatterTests.cs
-    ├── InlineDiffBuilderTests.cs
-    ├── InputValidatorTests.cs
-    ├── OutputThrottlerTests.cs
-    ├── PresetBaseEnvironmentResolverTests.cs
-    ├── PresetEnvironmentLoadPlannerTests.cs
-    ├── PresetEnvironmentStatusFormatterTests.cs
-    ├── PresetHeaderIndicatorFormatterTests.cs
-    ├── PromptDetectorTests.cs
-    └── TerminalOutputProcessorTests.cs
++-- Editor/
+|   +-- EditorTextUtilitiesTests.cs
+|   +-- ScriptAutocompleteProviderTests.cs
+|   +-- ScriptEditorValidationServiceTests.cs
+|   +-- YamlSshSyntaxHighlighterTests.cs
++-- Models/
+|   +-- FontSettingsTests.cs
+|   +-- PresetInfoTests.cs
++-- Scripting/
+|   +-- CanonicalCommandMapSyntaxTests.cs
+|   +-- ChoiceOptionResolverTests.cs
+|   +-- ChooseCommandTests.cs
+|   +-- ConfirmCommandTests.cs
+|   +-- ExitCommandTests.cs
+|   +-- ExpressionEvaluatorTests.cs
+|   +-- ExtractCommandTests.cs
+|   +-- ForeachCommandTests.cs
+|   +-- InteractiveCommandTests.cs
+|   +-- LogCommandTests.cs
+|   +-- LogParsingTests.cs
+|   +-- MultiselectCommandTests.cs
+|   +-- NetworkCommandTests.cs
+|   +-- NetworkStepParserTests.cs
+|   +-- Parsers/
+|   |   +-- FortiGateParserTests.cs
+|   +-- QaPresetsSyntaxTests.cs
+|   +-- ReadFileCommandTests.cs
+|   +-- ScriptContextTests.cs
+|   +-- ScriptDependencyAnalyzerTests.cs
+|   +-- ScriptExecutorControlFlowTests.cs
+|   +-- ScriptParserTests.cs
+|   +-- ScriptValidationFormatterTests.cs
+|   +-- SetCommandTests.cs
+|   +-- TableCommandTests.cs
+|   +-- UpdateColumnCommandTests.cs
+|   +-- UpdateEnvironmentCommandTests.cs
+|   +-- WriteFileCommandTests.cs
++-- Services/
+|   +-- ConfigurationServiceCommandEditorSettingsTests.cs
+|   +-- ConfigurationServiceExecutionDetailsTests.cs
+|   +-- ConfigurationServiceFontSettingsTests.cs
+|   +-- ConfigurationServiceWindowStateTests.cs
+|   +-- CredentialManagerProviderTests.cs
+|   +-- CredentialTargetsTests.cs
+|   +-- CsvManagerTests.cs
+|   +-- EnvironmentServiceTests.cs
+|   +-- ExecutionCoordinatorTests.cs
+|   +-- HistoryIdGeneratorTests.cs
+|   +-- HistoryResultStoreTests.cs
+|   +-- HistoryStorageServiceTests.cs
+|   +-- InteractiveTerminalServiceTranscriptFilterTests.cs
+|   +-- PresetManagerFolderBaseEnvironmentTests.cs
+|   +-- PresetManagerTests.cs
+|   +-- SshExecutionServiceInteractivePreflightTests.cs
+|   +-- SshExecutionServiceOutputFormattingTests.cs
+|   +-- SshTerminalOptionsFactoryTests.cs
+|   +-- StopOnFirstErrorTrackerTests.cs
++-- UI/
+|   +-- ApplyFontSettingsTests.cs
+|   +-- ExecutionDetailsDialogTests.cs
+|   +-- FontApplicationTestHarness.cs
+|   +-- ScintillaScriptEditorControlTests.cs
+|   +-- ScintillaScriptEditorPerformanceTests.cs
+|   +-- SettingsDialogAppearanceTests.cs
++-- Utilities/
+    +-- BaseEnvironmentIndicatorFormatterTests.cs
+    +-- CsvFileSyncEvaluatorTests.cs
+    +-- ExecutionDialogPolicyTests.cs
+    +-- FolderBaseEnvironmentSummaryFormatterTests.cs
+    +-- HostsFileIndicatorFormatterTests.cs
+    +-- InlineDiffBuilderTests.cs
+    +-- InputValidatorTests.cs
+    +-- OutputThrottlerTests.cs
+    +-- PresetBaseEnvironmentResolverTests.cs
+    +-- PresetEnvironmentLoadPlannerTests.cs
+    +-- PresetEnvironmentStatusFormatterTests.cs
+    +-- PresetHeaderIndicatorFormatterTests.cs
+    +-- PromptDetectorTests.cs
+    +-- TerminalOutputProcessorTests.cs
 ```
 
 ## Test Structure
@@ -201,6 +202,27 @@ public class InputValidatorTests
   }
   ```
 
+- `sealed` modifier on test classes with disposal for best practice:
+  ```csharp
+  public sealed class HistoryStorageServiceTests : IDisposable
+  ```
+
+- Best-effort cleanup pattern (swallow errors in Dispose):
+  ```csharp
+  public void Dispose()
+  {
+      try
+      {
+          if (Directory.Exists(_testDirectory))
+              Directory.Delete(_testDirectory, recursive: true);
+      }
+      catch
+      {
+          // Best-effort cleanup.
+      }
+  }
+  ```
+
 **Assertion Style:**
 - FluentAssertions exclusively. Never use `Assert.Equal()` or similar xUnit assertions.
   ```csharp
@@ -214,6 +236,12 @@ public class InputValidatorTests
   names.Should().Equal(EnvironmentConfig.DefaultName);
   action.Should().Throw<ArgumentException>();
   result.Should().ContainSingle().Which.Should().Be("sshd");
+  result.Should().BeApproximately(15f, 0.5f);
+  result.Should().BeSameAs(otherReference);
+  result.Should().NotBeSameAs(otherReference);
+  result.Should().HaveCount(1);
+  result.Should().Contain(d => d.Message.Contains("then"));
+  stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(7));
   ```
 
 ## Mocking
@@ -236,7 +264,9 @@ public class InputValidatorTests
 - `ConfigurationService` -- use real instance with temp directory.
 - `PresetManager` -- use real instance with temp config.
 - `CsvManager` -- use real instance with temp files.
+- `EnvironmentService` -- chain through real `ConfigurationService`.
 - Pure utility classes (`InputValidator`, `TerminalOutputProcessor`, `PromptDetector`).
+- Scripting commands (`SetCommand`, `ExitCommand`, etc.) -- test directly.
 
 ## Fixtures and Factories
 
@@ -245,8 +275,9 @@ public class InputValidatorTests
 // Unique names to avoid test collisions
 var uniqueName = "TestPreset_" + Guid.NewGuid().ToString("N").Substring(0, 8);
 
-// Temp directories for file-based tests
+// Temp directories for file-based tests (with Guid for uniqueness)
 _testDirectory = Path.Combine(Path.GetTempPath(), $"CsvManagerTests_{Guid.NewGuid()}");
+_testDirectory = Path.Combine(Path.GetTempPath(), $"HistoryStorageTests_{Guid.NewGuid():N}");
 
 // Inline CSV content
 File.WriteAllText(filePath, "Host_IP,port,username\n192.168.1.1,22,admin\n192.168.1.2,2222,root");
@@ -255,6 +286,30 @@ File.WriteAllText(filePath, "Host_IP,port,username\n192.168.1.1,22,admin\n192.16
 var step = new ScriptStep { Set = "result_str = \"${hn} | Kernel ${ver}\"" };
 var context = new ScriptContext();
 context.SetVariable("hn", "chris-NUC7i7DNHE");
+
+// Large payloads for storage tests
+var largeOutput = string.Concat(Enumerable.Repeat("sniffer-line-abcdefghijklmnopqrstuvwxyz0123456789\n", 12000));
+
+// Config state setup via Update()
+_configService.Update(config =>
+{
+    config.SavedState = new ApplicationState
+    {
+        HostColumns = new List<string> { CsvManager.HostColumnName, "username" },
+        Hosts = new List<Dictionary<string, string>>
+        {
+            new() { [CsvManager.HostColumnName] = "10.0.0.1", ["username"] = "admin" }
+        }
+    };
+});
+```
+
+**Helper Methods in Test Classes:**
+```csharp
+// Private helpers for creating test data (seen in CsvFileSyncEvaluatorTests, HistoryStorageServiceTests)
+private string WriteCsv(string fileName, Dictionary<string, string>[] rows) { ... }
+private EnvironmentConfig CreateEnvironment(string filePath, CsvFileFingerprint? fingerprint) { ... }
+private ExecutionDetails CreateExecutionDetails(string presetName) { ... }
 ```
 
 **Test Harness:**
@@ -263,6 +318,7 @@ context.SetVariable("hn", "chris-NUC7i7DNHE");
   using var harness = new FontApplicationTestHarness();
   harness.ApplyFontSettings(FontSettings.CreateDefault());
   harness.lblHostsTitle.Font.Should().NotBeNull();
+  harness.ManagedFonts.Should().NotBeEmpty();
   ```
 
 **Location:**
@@ -285,6 +341,8 @@ dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --collect:"XPlat Code Cover
 - Test individual classes/methods in isolation.
 - Pure utility classes tested thoroughly with `[Theory]`/`[InlineData]` for boundary conditions.
 - Scripting command tests use `ScriptContext` and `ScriptStep` directly, no SSH connection needed.
+- Expression evaluator tests cover edge cases including ReDoS protection.
+- Model tests verify normalization behavior (e.g., `PresetInfoTests` for line ending normalization).
 
 **Integration Tests:**
 - `ConfigurationService` tests with real file I/O (temp directory isolation).
@@ -292,12 +350,15 @@ dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --collect:"XPlat Code Cover
 - `PresetManager` tests exercise full save/load/delete cycle against real config.
 - `CsvManager` tests write/read actual CSV files.
 - `ExecutionCoordinator` tests create real `SshExecutionService` instances.
+- `HistoryStorageService` tests verify full save/load/prune cycle with real files.
+- `CsvFileSyncEvaluator` tests combine real `CsvManager` with file I/O.
 
 **WinForms UI Tests:**
 - Use `[WinFormsFact]` and `[WinFormsTheory]` from Xunit.StaFact for STA thread requirement.
 - `FontApplicationTestHarness` avoids full Form1 dependencies.
 - `SettingsDialog` tested via reflection (class is `internal sealed`).
 - Access internal members via `InternalsVisibleTo("SSH_Helper.Tests")`.
+- Performance tests (e.g., `ScintillaScriptEditorPerformanceTests`) verify responsiveness.
 
 **E2E Tests:**
 - Not used. No end-to-end SSH connection tests in the suite.
@@ -318,6 +379,31 @@ public async Task ExecuteAsync_QuotedInterpolatedString_DoesNotKeepOuterQuotes()
 
     result.Success.Should().BeTrue();
     context.GetVariableString("result_str").Should().Be("chris-NUC7i7DNHE | Kernel 6.8.0-90-generic");
+}
+```
+
+**Async Event Testing with TaskCompletionSource:**
+```csharp
+[Fact]
+public async Task RequestValidation_DebouncedLastEditWins_PublishesLatestDiagnostics()
+{
+    using var service = new ScriptEditorValidationService { DebounceMilliseconds = 40 };
+
+    var completion = new TaskCompletionSource<IReadOnlyList<EditorDiagnostic>>(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+
+    service.DiagnosticsUpdated += (_, diagnostics) =>
+    {
+        if (diagnostics.Any(d => d.Message.Contains("then")))
+            completion.TrySetResult(diagnostics);
+    };
+
+    service.RequestValidation("steps:\n  - send:\n      command: show version");
+    await Task.Delay(10);
+    service.RequestValidation("steps:\n  - if:\n      condition: condition");
+
+    var finalDiagnostics = await completion.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    finalDiagnostics.Should().Contain(d => d.Message.Contains("then"));
 }
 ```
 
@@ -393,6 +479,52 @@ public void ApplyFontSettings_DefaultSettings_AllControlsHaveNonNullFonts()
     harness.lblHostsTitle.Font.Should().NotBeNull();
     harness.trvPresets.Font.Should().NotBeNull();
 }
+
+[WinFormsTheory]
+[InlineData(true)]
+[InlineData(false)]
+public void ApplyFontSettings_WordWrap_AppliedToCodeEditor(bool wordWrap)
+{
+    using var harness = new FontApplicationTestHarness();
+    var settings = FontSettings.CreateDefault();
+    settings.CodeEditorWordWrap = wordWrap;
+    harness.ApplyFontSettings(settings);
+    // ... assertions
+}
+```
+
+**Performance / Timing Tests:**
+```csharp
+[Fact]
+public void Evaluate_MatchesCatastrophicPattern_CompletesWithoutThrowing()
+{
+    var context = new ScriptContext();
+    context.SetVariable("payload", new string('a', 6000) + "!");
+
+    var evaluator = new ExpressionEvaluator(context);
+    var stopwatch = Stopwatch.StartNew();
+
+    var result = evaluator.Evaluate("payload matches '(a+)+$'");
+
+    stopwatch.Stop();
+    result.Should().BeFalse();
+    stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(7));
+}
+```
+
+**Dynamic Timestamp / Time-Dependent Tests:**
+```csharp
+[Fact]
+public void TimestampVariable_ResolvesDynamically()
+{
+    var context = new ScriptContext();
+
+    var first = context.SubstituteVariables("${_timestamp}");
+    Thread.Sleep(1100);
+    var second = context.SubstituteVariables("${_timestamp}");
+
+    second.Should().NotBe(first);
+}
 ```
 
 ## GDI+ Font Testing Gotcha
@@ -413,6 +545,7 @@ When two `System.Drawing.Font` objects are created with identical parameters (fa
 2. Create temp directory in constructor, clean up in `Dispose()`
 3. Use real `ConfigurationService` with temp config path for isolation
 4. Test event raising with boolean flag pattern
+5. For large services, split into feature-focused test files: `{ServiceName}{Feature}Tests.cs`
 
 **For a new scripting command:**
 1. Create `SSH_Helper.Tests/Scripting/{CommandName}Tests.cs`
@@ -421,12 +554,22 @@ When two `System.Drawing.Font` objects are created with identical parameters (fa
 4. Use `CancellationToken.None` for non-cancellation tests
 5. Assert on `CommandResult.Success` and context variable state
 
+**For a new parser (under Scripting/Parsers):**
+1. Create `SSH_Helper.Tests/Scripting/Parsers/{ParserName}Tests.cs`
+2. Use `[Theory]`/`[InlineData]` for multiple input samples
+3. Follow existing `FortiGateParserTests.cs` as template
+
 **For WinForms UI:**
 1. Create `SSH_Helper.Tests/UI/{FeatureName}Tests.cs`
 2. Use `[WinFormsFact]`/`[WinFormsTheory]` attributes
 3. Prefer test harness over full Form1 instantiation
 4. Access `internal` members via `InternalsVisibleTo`
 
+**For async/debounced services:**
+1. Use `TaskCompletionSource` for waiting on async events
+2. Use `.WaitAsync(TimeSpan)` to prevent test hangs
+3. Use short debounce intervals in tests (e.g., `DebounceMilliseconds = 40`)
+
 ---
 
-*Testing analysis: 2026-03-06*
+*Testing analysis: 2026-03-07*

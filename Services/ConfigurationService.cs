@@ -1,8 +1,7 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SSH_Helper.Models;
-using System.IO.Compression;
-using System.Text;
+using SSH_Helper.Utilities;
 
 namespace SSH_Helper.Services
 {
@@ -19,15 +18,7 @@ namespace SSH_Helper.Services
         {
             if (string.IsNullOrWhiteSpace(configFilePath))
             {
-                string folder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                string appFolder = Path.Combine(folder, "SSH_Helper");
-
-                if (!Directory.Exists(appFolder))
-                {
-                    Directory.CreateDirectory(appFolder);
-                }
-
-                _configFilePath = Path.Combine(appFolder, "config.json");
+                _configFilePath = Path.Combine(AppDataPaths.GetAppFolder(), "config.json");
                 return;
             }
 
@@ -88,15 +79,7 @@ namespace SSH_Helper.Services
             catch (Exception ex)
             {
                 // Preserve the corrupt file so the user can recover data manually
-                try
-                {
-                    var backupPath = _configFilePath + ".corrupt";
-                    File.Copy(_configFilePath, backupPath, overwrite: true);
-                }
-                catch
-                {
-                    // If backup fails, continue with default config
-                }
+                JsonFileWriter.TryBackupCorrupt(_configFilePath);
 
                 System.Diagnostics.Debug.WriteLine($"Configuration parse error: {ex.Message}. A backup was saved to {_configFilePath}.corrupt");
                 ConfigLoadError = $"Configuration file was corrupted and could not be loaded. A backup was saved to config.json.corrupt. Default settings have been applied.";
@@ -198,7 +181,6 @@ namespace SSH_Helper.Services
                 config.Environments = CloneEnvironmentMap(environments);
                 config.ActiveEnvironment = string.IsNullOrWhiteSpace(activeEnvironment) ? null : activeEnvironment;
                 config.BaseEnvironment = string.IsNullOrWhiteSpace(baseEnvironment) ? null : baseEnvironment;
-                NormalizeEnvironmentData(config);
             });
         }
 
@@ -357,31 +339,11 @@ namespace SSH_Helper.Services
             if (string.IsNullOrEmpty(json))
                 return null;
 
-            using var input = new MemoryStream(Encoding.UTF8.GetBytes(json));
-            using var output = new MemoryStream();
-            using (var gzip = new GZipStream(output, CompressionLevel.Optimal, leaveOpen: true))
-            {
-                input.CopyTo(gzip);
-            }
-
-            return SavedStateCompressionPrefix + Convert.ToBase64String(output.ToArray());
+            return SavedStateCompressionPrefix + GZipBase64Utility.CompressAndEncode(json);
         }
 
         private static string DecompressPayload(string compressedPayload)
-        {
-            var payload = compressedPayload;
-            if (payload.StartsWith(SavedStateCompressionPrefix, StringComparison.Ordinal))
-            {
-                payload = payload.Substring(SavedStateCompressionPrefix.Length);
-            }
-
-            var compressedBytes = Convert.FromBase64String(payload);
-            using var input = new MemoryStream(compressedBytes);
-            using var gzip = new GZipStream(input, CompressionMode.Decompress);
-            using var output = new MemoryStream();
-            gzip.CopyTo(output);
-            return Encoding.UTF8.GetString(output.ToArray());
-        }
+            => GZipBase64Utility.Decompress(compressedPayload, prefixToStrip: SavedStateCompressionPrefix);
 
         private static void NormalizeEnvironmentData(AppConfiguration config)
         {

@@ -98,32 +98,6 @@ namespace SSH_Helper.Services.Scripting.Commands
         {
             expression = expression.Trim();
 
-            if (TryParseFunctionCall(expression, "length", out var innerLength))
-            {
-                var resolved = ResolveValue(innerLength, context);
-                if (resolved is List<string> list)
-                    return list.Count;
-                return resolved?.ToString()?.Length ?? 0;
-            }
-
-            if (TryParseFunctionCall(expression, "trim", out var innerTrim))
-            {
-                var resolved = ResolveValue(innerTrim, context);
-                return resolved?.ToString()?.Trim() ?? string.Empty;
-            }
-
-            if (TryParseFunctionCall(expression, "upper", out var innerUpper))
-            {
-                var resolved = ResolveValue(innerUpper, context);
-                return resolved?.ToString()?.ToUpperInvariant() ?? string.Empty;
-            }
-
-            if (TryParseFunctionCall(expression, "lower", out var innerLower))
-            {
-                var resolved = ResolveValue(innerLower, context);
-                return resolved?.ToString()?.ToLowerInvariant() ?? string.Empty;
-            }
-
             if (TryParseFunctionCall(expression, "push", out var innerPush))
             {
                 var commaIdx = JsonUtilities.FindTopLevelComma(innerPush);
@@ -201,124 +175,8 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return removedValue;
             }
 
-            if (TryParseFunctionCall(expression, "first", out var innerFirst))
-            {
-                var array = ResolveToStringList(ResolveValue(innerFirst, context));
-                return array.Count > 0 ? array[0] : null;
-            }
-
-            if (TryParseFunctionCall(expression, "last", out var innerLast))
-            {
-                var array = ResolveToStringList(ResolveValue(innerLast, context));
-                return array.Count > 0 ? array[array.Count - 1] : null;
-            }
-
-            if (TryParseFunctionCall(expression, "indexof", out var innerIndexOf))
-            {
-                var args = JsonUtilities.SplitTopLevelCommas(innerIndexOf);
-                if (args.Count >= 2)
-                {
-                    var array = ResolveToStringList(ResolveValue(args[0], context));
-                    var searchValue = ResolveValue(args[1], context)?.ToString() ?? string.Empty;
-                    return array.FindIndex(item => string.Equals(item, searchValue, StringComparison.OrdinalIgnoreCase));
-                }
-            }
-
-            if (TryParseFunctionCall(expression, "concat", out var innerConcat))
-            {
-                var args = JsonUtilities.SplitTopLevelCommas(innerConcat);
-                var combined = new List<string>();
-                foreach (var arg in args)
-                {
-                    combined.AddRange(ResolveToStringList(ResolveValue(arg, context)));
-                }
-
-                return combined;
-            }
-
-            if (TryParseFunctionCall(expression, "replace", out var innerReplace))
-            {
-                var args = JsonUtilities.SplitTopLevelCommas(innerReplace);
-                if (args.Count >= 3)
-                {
-                    var source = ResolveValue(args[0], context)?.ToString() ?? string.Empty;
-                    var oldValue = JsonUtilities.ResolveStringValue(args[1], context);
-                    var newValue = JsonUtilities.ResolveStringValue(args[2], context);
-                    return source.Replace(oldValue, newValue, StringComparison.Ordinal);
-                }
-            }
-
-            if (TryParseFunctionCall(expression, "split", out var innerSplit))
-            {
-                var args = JsonUtilities.SplitTopLevelCommas(innerSplit);
-                if (args.Count >= 1)
-                {
-                    var source = ResolveValue(args[0], context)?.ToString() ?? string.Empty;
-                    var delimiter = args.Count > 1 ? JsonUtilities.ResolveStringValue(args[1], context) : ",";
-                    if (delimiter.Length == 0)
-                    {
-                        var chars = new List<string>(source.Length);
-                        foreach (var c in source)
-                            chars.Add(c.ToString());
-                        return chars;
-                    }
-
-                    return new List<string>(source.Split(new[] { delimiter }, StringSplitOptions.None));
-                }
-            }
-
-            if (TryParseFunctionCall(expression, "join", out var innerJoin))
-            {
-                var args = JsonUtilities.SplitTopLevelCommas(innerJoin);
-                if (args.Count >= 1)
-                {
-                    var value = ResolveValue(args[0], context);
-                    var delimiter = args.Count > 1 ? JsonUtilities.ResolveStringValue(args[1], context) : ",";
-                    var list = ResolveToStringList(value);
-                    return string.Join(delimiter, list);
-                }
-            }
-
-            if (TryParseFunctionCall(expression, "substring", out var innerSubstring))
-            {
-                var args = JsonUtilities.SplitTopLevelCommas(innerSubstring);
-                if (args.Count >= 2)
-                {
-                    var source = ResolveValue(args[0], context)?.ToString() ?? string.Empty;
-                    var start = (int)ResolveNumeric(args[1], context);
-                    if (start < 0)
-                        start = 0;
-                    if (start >= source.Length)
-                        return string.Empty;
-
-                    if (args.Count >= 3)
-                    {
-                        var length = (int)ResolveNumeric(args[2], context);
-                        if (length <= 0)
-                            return string.Empty;
-                        if (start + length > source.Length)
-                            length = source.Length - start;
-                        return source.Substring(start, length);
-                    }
-
-                    return source.Substring(start);
-                }
-            }
-
-            if (TryParseFunctionCall(expression, "sort", out var innerSort))
-            {
-                var args = JsonUtilities.SplitTopLevelCommas(innerSort);
-                if (args.Count >= 1)
-                {
-                    var value = ResolveValue(args[0], context);
-                    var order = args.Count > 1 ? JsonUtilities.ResolveStringValue(args[1], context) : "asc";
-                    var list = ResolveToStringList(value);
-                    list.Sort(StringComparer.OrdinalIgnoreCase);
-                    if (order.Equals("desc", StringComparison.OrdinalIgnoreCase))
-                        list.Reverse();
-                    return list;
-                }
-            }
+            if (JsonUtilities.TryEvaluateFunctionExpression(expression, context, out var functionValue))
+                return functionValue;
 
             if (JsonUtilities.TryEvaluateJsonExpression(expression, context, out var jsonResult, normalizeStructured: false))
                 return jsonResult;
@@ -335,26 +193,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 }
             }
 
-            if ((expression.StartsWith("\"", StringComparison.Ordinal) && expression.EndsWith("\"", StringComparison.Ordinal)) ||
-                (expression.StartsWith("'", StringComparison.Ordinal) && expression.EndsWith("'", StringComparison.Ordinal)))
-            {
-                var literal = expression.Substring(1, expression.Length - 2);
-                return context.SubstituteVariables(literal);
-            }
-
-            if (expression.Contains("${", StringComparison.Ordinal))
-                return context.SubstituteVariables(expression);
-
-            if (int.TryParse(expression, out var intVal))
-                return intVal;
-            if (double.TryParse(expression, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
-                return doubleVal;
-
-            var varValue = context.GetVariable(expression);
-            if (varValue != null)
-                return varValue;
-
-            return context.SubstituteVariables(expression);
+            return ValueResolver.ResolveExpressionValue(expression, context);
         }
 
         private static bool TryParseFunctionCall(string expression, string functionName, out string inner)
@@ -411,89 +250,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
         private object? ResolveValue(string expr, ScriptContext context)
         {
-            expr = expr.Trim();
-
-            var (handled, length) = ValueResolver.TryResolveLengthExpression(expr, context.GetVariable);
-            if (handled)
-                return length;
-
-            if (JsonUtilities.TryEvaluateJsonExpression(expr, context, out var jsonResult, normalizeStructured: false))
-                return jsonResult;
-
-            if (LooksLikeFunctionCall(expr))
-                return EvaluateExpression(expr, context);
-
-            if (expr.Contains("${", StringComparison.Ordinal))
-                return context.SubstituteVariables(expr);
-
-            var directValue = context.GetVariable(expr);
-            if (directValue != null)
-                return directValue;
-
-            if ((expr.StartsWith("\"", StringComparison.Ordinal) && expr.EndsWith("\"", StringComparison.Ordinal)) ||
-                (expr.StartsWith("'", StringComparison.Ordinal) && expr.EndsWith("'", StringComparison.Ordinal)))
-            {
-                return context.SubstituteVariables(expr.Substring(1, expr.Length - 2));
-            }
-
-            return expr;
-        }
-
-        private static bool LooksLikeFunctionCall(string expr)
-        {
-            if (string.IsNullOrWhiteSpace(expr))
-                return false;
-
-            var openIndex = expr.IndexOf('(');
-            if (openIndex <= 0 || !expr.EndsWith(")", StringComparison.Ordinal))
-                return false;
-
-            var name = expr.Substring(0, openIndex).Trim();
-            if (string.IsNullOrEmpty(name))
-                return false;
-
-            foreach (var c in name)
-            {
-                if (!(char.IsLetterOrDigit(c) || c == '_' || c == '.'))
-                    return false;
-            }
-
-            var depth = 0;
-            var inString = false;
-            var stringChar = '\0';
-            for (int i = openIndex; i < expr.Length; i++)
-            {
-                var c = expr[i];
-                if ((c == '"' || c == '\'') && (i == 0 || expr[i - 1] != '\\'))
-                {
-                    if (!inString)
-                    {
-                        inString = true;
-                        stringChar = c;
-                    }
-                    else if (stringChar == c)
-                    {
-                        inString = false;
-                    }
-                    continue;
-                }
-
-                if (inString)
-                    continue;
-
-                if (c == '(')
-                    depth++;
-                else if (c == ')')
-                    depth--;
-
-                if (depth == 0 && i < expr.Length - 1)
-                    return false;
-
-                if (depth < 0)
-                    return false;
-            }
-
-            return depth == 0;
+            return ValueResolver.ResolveExpressionValue(expr, context);
         }
 
         private static bool TryResolveWritableListVariableName(string expr, out string variableName)
@@ -506,7 +263,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal))
             {
                 var candidate = trimmed.Substring(2, trimmed.Length - 3).Trim();
-                if (IsSimpleVariableName(candidate))
+                if (ValueResolver.IsSimpleIdentifier(candidate))
                 {
                     variableName = candidate;
                     return true;
@@ -515,7 +272,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return false;
             }
 
-            if (IsSimpleVariableName(trimmed))
+            if (ValueResolver.IsSimpleIdentifier(trimmed))
             {
                 variableName = trimmed;
                 return true;
@@ -524,34 +281,16 @@ namespace SSH_Helper.Services.Scripting.Commands
             return false;
         }
 
-        private static bool IsSimpleVariableName(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return false;
-
-            if (!(char.IsLetter(value[0]) || value[0] == '_'))
-                return false;
-
-            for (int i = 1; i < value.Length; i++)
-            {
-                var c = value[i];
-                if (!(char.IsLetterOrDigit(c) || c == '_'))
-                    return false;
-            }
-
-            return true;
-        }
-
         private List<string> ResolveListForExpression(string expr, ScriptContext context, out string? writableVariableName)
         {
             if (TryResolveWritableListVariableName(expr, out var variableName))
             {
                 writableVariableName = variableName;
-                return ResolveToStringList(context.GetVariable(variableName));
+                return ValueResolver.ResolveListValue(context.GetVariable(variableName));
             }
 
             writableVariableName = null;
-            return ResolveToStringList(ResolveValue(expr, context));
+            return ValueResolver.ResolveListValue(ResolveValue(expr, context));
         }
 
         private static string FormatValueForDisplay(object? value)
@@ -560,8 +299,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 null => "",
                 List<string> list => FormatListForDisplay(list),
-                JsonNode node => TruncateForDisplay(node.ToJsonString()),
-                _ => TruncateForDisplay(value.ToString() ?? string.Empty)
+                JsonNode node => ScriptingHelpers.TruncateForDisplay(node.ToJsonString()),
+                _ => ScriptingHelpers.TruncateForDisplay(value.ToString() ?? string.Empty)
             };
         }
 
@@ -575,77 +314,11 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             for (int i = 0; i < displayCount; i++)
             {
-                parts.Add(TruncateForDisplay(values[i], 30));
+                parts.Add(ScriptingHelpers.TruncateForDisplay(values[i], 30));
             }
 
             var suffix = values.Count > maxItems ? $", ... ({values.Count} items)" : "";
             return $"[{string.Join(", ", parts)}{suffix}]";
-        }
-
-        private static string TruncateForDisplay(string value, int maxLength = 100)
-        {
-            if (string.IsNullOrEmpty(value))
-                return "";
-
-            value = value.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
-
-            if (value.Length <= maxLength)
-                return value;
-
-            return value.Substring(0, maxLength) + "...";
-        }
-
-        private static List<string> ResolveToStringList(object? value)
-        {
-            if (value == null)
-                return new List<string>();
-
-            if (value is List<string> listValue)
-                return new List<string>(listValue);
-
-            if (value is JsonArray jsonArray)
-            {
-                var items = new List<string>(jsonArray.Count);
-                foreach (var item in jsonArray)
-                    items.Add(JsonUtilities.JsonNodeToStringValue(item));
-                return items;
-            }
-
-            if (value is IEnumerable enumerable && value is not string)
-            {
-                var items = new List<string>();
-                foreach (var item in enumerable)
-                    items.Add(item?.ToString() ?? string.Empty);
-                return items;
-            }
-
-            var text = value.ToString() ?? string.Empty;
-            var trimmed = text.Trim();
-            if (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal))
-            {
-                try
-                {
-                    var parsed = JsonNode.Parse(trimmed) as JsonArray;
-                    if (parsed != null)
-                    {
-                        var items = new List<string>(parsed.Count);
-                        foreach (var item in parsed)
-                            items.Add(JsonUtilities.JsonNodeToStringValue(item));
-                        return items;
-                    }
-                }
-                catch
-                {
-                    // fall back to string handling
-                }
-            }
-
-            if (text.Contains('\n') || text.Contains('\r'))
-            {
-                return new List<string>(text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None));
-            }
-
-            return new List<string> { text };
         }
 
         private double ResolveNumeric(string expr, ScriptContext context)

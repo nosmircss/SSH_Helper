@@ -81,6 +81,7 @@ namespace SSH_Helper.Services
 
         private volatile bool _isRunning;
         private CancellationTokenSource? _cts;
+        private volatile bool _stopOnFirstErrorCancellationRequested;
         private bool _disposed;
         private readonly object _executionLock = new();
 
@@ -93,6 +94,7 @@ namespace SSH_Helper.Services
                 _cts?.Cancel();
                 _cts?.Dispose();
                 _cts = new CancellationTokenSource();
+                _stopOnFirstErrorCancellationRequested = false;
                 _isRunning = true;
                 return _cts.Token;
             }
@@ -103,6 +105,7 @@ namespace SSH_Helper.Services
             lock (_executionLock)
             {
                 _isRunning = false;
+                _stopOnFirstErrorCancellationRequested = false;
                 var cts = _cts;
                 _cts = null;
                 cts?.Dispose();
@@ -294,12 +297,13 @@ namespace SSH_Helper.Services
             string defaultUsername,
             string defaultPassword,
             SshTimeoutOptions timeouts,
-            bool showHeader = true)
+            bool showHeader = true,
+            bool allowFileSelectionDialogs = true)
         {
             // Check if this is a YAML script
             if (preset.IsScript)
             {
-                return await ExecuteScriptAsync(hosts, preset.Commands, defaultUsername, defaultPassword, timeouts, showHeader);
+                return await ExecuteScriptAsync(hosts, preset.Commands, defaultUsername, defaultPassword, timeouts, showHeader, allowFileSelectionDialogs);
             }
             else
             {
@@ -319,7 +323,8 @@ namespace SSH_Helper.Services
             string defaultUsername,
             string defaultPassword,
             SshTimeoutOptions timeouts,
-            bool showHeader = true)
+            bool showHeader = true,
+            bool allowFileSelectionDialogs = true)
         {
             var results = new List<ExecutionResult>();
             var cancellationToken = BeginExecution();
@@ -395,7 +400,7 @@ namespace SSH_Helper.Services
                         continue;
 
                     var result = await Task.Run(() =>
-                        ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader, sshRequirement));
+                        ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader, sshRequirement, allowFileSelectionDialogs));
 
                     results.Add(result);
                 }
@@ -426,7 +431,8 @@ namespace SSH_Helper.Services
             string defaultPassword,
             SshTimeoutOptions timeouts,
             FolderExecutionOptions options,
-            IProgress<FolderExecutionProgress>? progress = null)
+            IProgress<FolderExecutionProgress>? progress = null,
+            bool allowFileSelectionDialogs = true)
         {
             var results = new List<ExecutionResult>();
             var cancellationToken = BeginExecution();
@@ -435,8 +441,11 @@ namespace SSH_Helper.Services
             var presetNames = options.SelectedPresets;
             int totalHosts = hostList.Count;
             int totalPresets = presetNames.Count;
+            int totalOperations = totalHosts * totalPresets;
+            int completedOperations = 0;
             int completedHosts = 0;
             var errorTracker = new StopOnFirstErrorTracker();
+            var stopOnFirstErrorTriggered = 0;
 
             try
             {
@@ -486,6 +495,7 @@ namespace SSH_Helper.Services
 
                         var outputBuilder = new StringBuilder();
                         int completedPresets = 0;
+                        var hostCancellationObserved = 0;
                         bool isFirstPreset = true;
 
                         // Execute presets on this host
@@ -499,16 +509,6 @@ namespace SSH_Helper.Services
 
                                 if (!presets.TryGetValue(presetName, out var preset))
                                     return;
-
-                                progress?.Report(new FolderExecutionProgress
-                                {
-                                    CurrentHost = host.IpAddress,
-                                    CurrentPreset = presetName,
-                                    CompletedPresets = completedPresets,
-                                    TotalPresets = totalPresets,
-                                    CompletedHosts = completedHosts,
-                                    TotalHosts = totalHosts
-                                });
 
                                 // Add preset separator
                                 if (!options.SuppressPresetNames)
@@ -525,16 +525,26 @@ namespace SSH_Helper.Services
                                     defaultPassword,
                                     timeouts,
                                     cancellationToken,
-                                    showHeader: false);
+                                    showHeader: false,
+                                    allowFileSelectionDialogs: allowFileSelectionDialogs);
 
                                 lock (outputBuilder) { outputBuilder.Append(presetResult.Output); }
+
+                                if (presetResult.WasCancelled)
+                                {
+                                    Interlocked.Exchange(ref hostCancellationObserved, 1);
+                                }
 
                                 if (!presetResult.Success)
                                 {
                                         hostResult.Success = false;
                                         hostResult.ErrorMessage = presetResult.ErrorMessage;
                                         if (options.StopOnFirstError && errorTracker.TrySignalError())
+                                        {
+                                            Interlocked.Exchange(ref stopOnFirstErrorTriggered, 1);
+                                            _stopOnFirstErrorCancellationRequested = true;
                                             _cts?.Cancel();
+                                        }
 
                                         // Mark failed preset in output
                                         if (!options.SuppressPresetNames)
@@ -544,7 +554,19 @@ namespace SSH_Helper.Services
                                             OnOutputReceived(host, failMarker);
                                         }
                                     }
-                                Interlocked.Increment(ref completedPresets);
+                                var hostCompletedPresets = Interlocked.Increment(ref completedPresets);
+                                var operationCount = Interlocked.Increment(ref completedOperations);
+                                progress?.Report(new FolderExecutionProgress
+                                {
+                                    CompletedOperations = operationCount,
+                                    TotalOperations = totalOperations,
+                                    CurrentHost = host.IpAddress,
+                                    CurrentPreset = presetName,
+                                    CompletedPresets = hostCompletedPresets,
+                                    TotalPresets = totalPresets,
+                                    CompletedHosts = completedHosts,
+                                    TotalHosts = totalHosts
+                                });
                             });
 
                             await Task.WhenAll(presetTasks);
@@ -559,16 +581,6 @@ namespace SSH_Helper.Services
 
                                 if (!presets.TryGetValue(presetName, out var preset))
                                     continue;
-
-                                progress?.Report(new FolderExecutionProgress
-                                {
-                                    CurrentHost = host.IpAddress,
-                                    CurrentPreset = presetName,
-                                    CompletedPresets = completedPresets,
-                                    TotalPresets = totalPresets,
-                                    CompletedHosts = completedHosts,
-                                    TotalHosts = totalHosts
-                                });
 
                                 // Add preset separator
                                 if (!options.SuppressPresetNames)
@@ -585,11 +597,17 @@ namespace SSH_Helper.Services
                                     defaultPassword,
                                     timeouts,
                                     cancellationToken,
-                                    showHeader: isFirstPreset);
+                                    showHeader: isFirstPreset,
+                                    allowFileSelectionDialogs: allowFileSelectionDialogs);
 
                                 isFirstPreset = false;
 
                                 outputBuilder.Append(presetResult.Output);
+
+                                if (presetResult.WasCancelled)
+                                {
+                                    hostCancellationObserved = 1;
+                                }
 
                                 if (!presetResult.Success)
                                 {
@@ -598,7 +616,11 @@ namespace SSH_Helper.Services
                                         if (options.StopOnFirstError)
                                         {
                                             if (errorTracker.TrySignalError())
+                                            {
+                                                Interlocked.Exchange(ref stopOnFirstErrorTriggered, 1);
+                                                _stopOnFirstErrorCancellationRequested = true;
                                                 _cts?.Cancel();
+                                            }
                                             // Mark failed preset in output
                                             if (!options.SuppressPresetNames)
                                             {
@@ -611,7 +633,29 @@ namespace SSH_Helper.Services
                                 }
 
                                 completedPresets++;
+                                var operationCount = Interlocked.Increment(ref completedOperations);
+                                progress?.Report(new FolderExecutionProgress
+                                {
+                                    CompletedOperations = operationCount,
+                                    TotalOperations = totalOperations,
+                                    CurrentHost = host.IpAddress,
+                                    CurrentPreset = presetName,
+                                    CompletedPresets = completedPresets,
+                                    TotalPresets = totalPresets,
+                                    CompletedHosts = completedHosts,
+                                    TotalHosts = totalHosts
+                                });
                             }
+                        }
+
+                        var stoppedByUser = cancellationToken.IsCancellationRequested
+                            && Volatile.Read(ref stopOnFirstErrorTriggered) == 0;
+                        if (Volatile.Read(ref hostCancellationObserved) != 0 ||
+                            (stoppedByUser && completedPresets < totalPresets))
+                        {
+                            hostResult.Success = false;
+                            hostResult.WasCancelled = true;
+                            hostResult.ErrorMessage ??= "Operation cancelled";
                         }
 
                         hostResult.Output = outputBuilder.ToString();
@@ -621,16 +665,6 @@ namespace SSH_Helper.Services
                     var batchResults = await Task.WhenAll(batchTasks);
                     results.AddRange(batchResults);
                     completedHosts += batch.Count;
-
-                    progress?.Report(new FolderExecutionProgress
-                    {
-                        CurrentHost = string.Empty,
-                        CurrentPreset = string.Empty,
-                        CompletedPresets = totalPresets,
-                        TotalPresets = totalPresets,
-                        CompletedHosts = completedHosts,
-                        TotalHosts = totalHosts
-                    });
                 }
             }
             finally
@@ -694,10 +728,11 @@ namespace SSH_Helper.Services
             string defaultPassword,
             SshTimeoutOptions timeouts,
             CancellationToken cancellationToken,
-            bool showHeader)
+            bool showHeader,
+            bool allowFileSelectionDialogs)
         {
             return Task.Run(() =>
-                ExecutePresetOnHost(host, preset, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader));
+                ExecutePresetOnHost(host, preset, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader, allowFileSelectionDialogs));
         }
 
         private ExecutionResult ExecutePresetOnHost(
@@ -707,11 +742,12 @@ namespace SSH_Helper.Services
             string defaultPassword,
             SshTimeoutOptions timeouts,
             CancellationToken cancellationToken,
-            bool showHeader)
+            bool showHeader,
+            bool allowFileSelectionDialogs)
         {
             if (preset.IsScript)
             {
-                return ExecuteScriptTextOnHost(host, preset.Commands, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader);
+                return ExecuteScriptTextOnHost(host, preset.Commands, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader, allowFileSelectionDialogs);
             }
 
             var commands = preset.Commands.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -725,7 +761,8 @@ namespace SSH_Helper.Services
             string defaultPassword,
             SshTimeoutOptions timeouts,
             CancellationToken cancellationToken,
-            bool showHeader)
+            bool showHeader,
+            bool allowFileSelectionDialogs)
         {
             var parser = new ScriptParser();
             Script script;
@@ -772,7 +809,7 @@ namespace SSH_Helper.Services
                 };
             }
 
-            return ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader, sshRequirement);
+            return ExecuteScriptOnHost(host, script, defaultUsername, defaultPassword, timeouts, cancellationToken, showHeader, sshRequirement, allowFileSelectionDialogs);
         }
 
         /// <summary>
@@ -866,6 +903,7 @@ namespace SSH_Helper.Services
             catch (OperationCanceledException)
             {
                 result.Success = false;
+                result.WasCancelled = !_stopOnFirstErrorCancellationRequested;
                 result.ErrorMessage = "Operation cancelled";
                 var errorOutput = FormatError("CANCELLED", host, new Exception("Operation was cancelled by user"));
                 outputBuilder.AppendLine(errorOutput);
@@ -895,7 +933,8 @@ namespace SSH_Helper.Services
             SshTimeoutOptions timeouts,
             CancellationToken cancellationToken,
             bool showHeader = true,
-            SshRequirementResult? sshRequirement = null)
+            SshRequirementResult? sshRequirement = null,
+            bool allowFileSelectionDialogs = true)
         {
             var result = new ExecutionResult
             {
@@ -912,15 +951,15 @@ namespace SSH_Helper.Services
             {
                 if (sshRequirement != null && !sshRequirement.RequiresSshSession)
                 {
-                    interactiveSessions = ExecuteScriptLocal(host, script, username, password, outputBuilder, cancellationToken, showHeader);
+                    interactiveSessions = ExecuteScriptLocal(host, script, username, password, outputBuilder, cancellationToken, showHeader, allowFileSelectionDialogs);
                 }
                 else if (UseConnectionPooling && _connectionPool != null)
                 {
-                    interactiveSessions = ExecuteScriptWithPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
+                    interactiveSessions = ExecuteScriptWithPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader, allowFileSelectionDialogs);
                 }
                 else
                 {
-                    interactiveSessions = ExecuteScriptWithoutPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader);
+                    interactiveSessions = ExecuteScriptWithoutPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader, allowFileSelectionDialogs);
                 }
 
                 result.Success = true;
@@ -964,6 +1003,7 @@ namespace SSH_Helper.Services
             catch (OperationCanceledException)
             {
                 result.Success = false;
+                result.WasCancelled = !_stopOnFirstErrorCancellationRequested;
                 result.ErrorMessage = "Operation cancelled";
                 var errorOutput = FormatError("CANCELLED", host, new Exception("Operation was cancelled by user"));
                 outputBuilder.AppendLine(errorOutput);
@@ -995,7 +1035,8 @@ namespace SSH_Helper.Services
             SshTimeoutOptions timeouts,
             StringBuilder outputBuilder,
             CancellationToken cancellationToken,
-            bool showHeader = true)
+            bool showHeader = true,
+            bool allowFileSelectionDialogs = true)
         {
             var (client, session) = _connectionPool!.CreateSessionAsync(host, username, password, timeouts, cancellationToken)
                 .GetAwaiter().GetResult();
@@ -1025,6 +1066,7 @@ namespace SSH_Helper.Services
                 var context = new ScriptContext(host.Variables);
                 context.Session = session;
                 context.DebugMode = DebugMode;
+                context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
                 SeedConnectionVariables(context, host, username, password, timeouts);
                 var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
@@ -1060,6 +1102,7 @@ namespace SSH_Helper.Services
                 var executor = new ScriptExecutor();
                 var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                     .GetAwaiter().GetResult();
+                EnsureScriptSucceeded(scriptResult, cancellationToken);
                 return context.GetInteractiveSessionsSnapshot();
             }
             finally
@@ -1081,7 +1124,8 @@ namespace SSH_Helper.Services
             SshTimeoutOptions timeouts,
             StringBuilder outputBuilder,
             CancellationToken cancellationToken,
-            bool showHeader = true)
+            bool showHeader = true,
+            bool allowFileSelectionDialogs = true)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             SshDebugLog(host, "SCRIPT", $"ExecuteScriptWithoutPool entered for {host.IpAddress}:{host.Port}");
@@ -1177,6 +1221,7 @@ namespace SSH_Helper.Services
             var context = new ScriptContext(host.Variables);
             context.Session = session;
             context.DebugMode = DebugMode;
+            context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
             SeedConnectionVariables(context, host, username, password, timeouts);
             var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
@@ -1212,6 +1257,7 @@ namespace SSH_Helper.Services
             var executor = new ScriptExecutor();
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
+            EnsureScriptSucceeded(scriptResult, cancellationToken);
 
             client.Disconnect();
             return context.GetInteractiveSessionsSnapshot();
@@ -1224,7 +1270,8 @@ namespace SSH_Helper.Services
             string password,
             StringBuilder outputBuilder,
             CancellationToken cancellationToken,
-            bool showHeader = true)
+            bool showHeader = true,
+            bool allowFileSelectionDialogs = true)
         {
             OnProgressChanged(host, $"Running locally for {host} (no SSH required)", false, false);
 
@@ -1244,6 +1291,7 @@ namespace SSH_Helper.Services
             var context = new ScriptContext(host.Variables);
             context.Session = null;
             context.DebugMode = DebugMode;
+            context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
             SeedConnectionVariables(context, host, username, password, SshTimeoutOptions.Default);
             var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
@@ -1276,7 +1324,31 @@ namespace SSH_Helper.Services
             var executor = new ScriptExecutor();
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
+            EnsureScriptSucceeded(scriptResult, cancellationToken);
             return context.GetInteractiveSessionsSnapshot();
+        }
+
+        private static void EnsureScriptSucceeded(ScriptResult scriptResult, CancellationToken cancellationToken)
+        {
+            switch (scriptResult.Status)
+            {
+                case ScriptExitStatus.Success:
+                    return;
+
+                case ScriptExitStatus.Cancelled:
+                    throw new OperationCanceledException(
+                        string.IsNullOrWhiteSpace(scriptResult.Message) ? "Script cancelled" : scriptResult.Message,
+                        cancellationToken);
+
+                case ScriptExitStatus.Error:
+                    throw scriptResult.Exception ?? new InvalidOperationException(
+                        string.IsNullOrWhiteSpace(scriptResult.Message) ? "Script error" : scriptResult.Message);
+
+                case ScriptExitStatus.Failure:
+                default:
+                    throw new InvalidOperationException(
+                        string.IsNullOrWhiteSpace(scriptResult.Message) ? "Script failed" : scriptResult.Message);
+            }
         }
 
         private static void SeedConnectionVariables(

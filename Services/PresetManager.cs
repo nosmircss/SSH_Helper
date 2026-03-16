@@ -1,5 +1,3 @@
-using System.IO.Compression;
-using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SSH_Helper.Models;
@@ -15,6 +13,7 @@ namespace SSH_Helper.Services
         private readonly Dictionary<string, PresetInfo> _presets = new();
         private readonly Dictionary<string, FolderInfo> _folders = new();
         private readonly ConfigurationService _configService;
+        private JobStorageService? _jobStorageService;
 
         public event EventHandler? PresetsChanged;
         public event EventHandler? FoldersChanged;
@@ -26,6 +25,43 @@ namespace SSH_Helper.Services
 
         public IReadOnlyDictionary<string, PresetInfo> Presets => _presets;
         public IReadOnlyDictionary<string, FolderInfo> Folders => _folders;
+
+        /// <summary>
+        /// Returns the current application configuration snapshot backing preset operations.
+        /// </summary>
+        internal AppConfiguration GetCurrentConfiguration()
+        {
+            return _configService.GetCurrent();
+        }
+
+        /// <summary>
+        /// Sets or clears the optional JobStorageService used for job reference integrity.
+        /// Called after both services are constructed (not via constructor to avoid circular dependencies).
+        /// </summary>
+        public void SetJobStorageService(JobStorageService? service)
+        {
+            _jobStorageService = service;
+        }
+
+        /// <summary>
+        /// Returns all jobs that reference the specified preset name.
+        /// Returns empty list if JobStorageService is not set.
+        /// </summary>
+        public IReadOnlyList<Models.JobDefinition> GetJobsReferencingPreset(string presetName)
+        {
+            return _jobStorageService?.GetJobsReferencingPreset(presetName)
+                ?? Array.Empty<Models.JobDefinition>();
+        }
+
+        /// <summary>
+        /// Returns all jobs that reference the specified folder path.
+        /// Returns empty list if JobStorageService is not set.
+        /// </summary>
+        public IReadOnlyList<Models.JobDefinition> GetJobsReferencingFolder(string folderPath)
+        {
+            return _jobStorageService?.GetJobsReferencingFolder(folderPath)
+                ?? Array.Empty<Models.JobDefinition>();
+        }
 
         /// <summary>
         /// Loads presets and folders from configuration.
@@ -138,6 +174,18 @@ namespace SSH_Helper.Services
             _presets.Remove(oldName);
             _presets[newName] = preset;
             PersistToConfig();
+
+            // Update job references to the renamed preset
+            if (_jobStorageService != null)
+            {
+                var referencingJobs = _jobStorageService.GetJobsReferencingPreset(oldName);
+                foreach (var job in referencingJobs)
+                {
+                    job.TargetName = newName;
+                    _jobStorageService.Save(job);
+                }
+            }
+
             OnPresetsChanged();
             return true;
         }
@@ -147,10 +195,24 @@ namespace SSH_Helper.Services
         /// </summary>
         public bool Delete(string name)
         {
-            if (!_presets.Remove(name))
+            if (!_presets.TryGetValue(name, out var preset))
                 return false;
 
+            _presets.Remove(name);
             PersistToConfig();
+
+            // Auto-disable jobs that reference the deleted preset
+            if (_jobStorageService != null)
+            {
+                var referencingJobs = _jobStorageService.GetJobsReferencingPreset(name);
+                foreach (var job in referencingJobs)
+                {
+                    job.IsEnabled = false;
+                    job.DisabledReason = $"Preset '{name}' was deleted";
+                    _jobStorageService.Save(job);
+                }
+            }
+
             OnPresetsChanged();
             return true;
         }
@@ -318,6 +380,7 @@ namespace SSH_Helper.Services
             }
 
             int count = 0;
+            var affectedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in importedPresets)
             {
                 string name = kvp.Key;
@@ -351,6 +414,7 @@ namespace SSH_Helper.Services
                 // Ensure folder and its parents exist if preset has one
                 if (!string.IsNullOrEmpty(kvp.Value.Folder))
                 {
+                    affectedFolders.Add(kvp.Value.Folder);
                     foreach (var path in FolderPathUtility.GetAllPathsInHierarchy(kvp.Value.Folder))
                     {
                         if (!_folders.ContainsKey(path))
@@ -543,6 +607,19 @@ namespace SSH_Helper.Services
             }
 
             PersistToConfig();
+
+            // Auto-disable jobs that reference the deleted folder
+            if (_jobStorageService != null)
+            {
+                var referencingJobs = _jobStorageService.GetJobsReferencingFolder(path);
+                foreach (var job in referencingJobs)
+                {
+                    job.IsEnabled = false;
+                    job.DisabledReason = $"Folder '{path}' was deleted";
+                    _jobStorageService.Save(job);
+                }
+            }
+
             OnFoldersChanged();
             OnPresetsChanged();
             return true;
@@ -815,7 +892,7 @@ namespace SSH_Helper.Services
 
         private void PersistToConfig()
         {
-            var config = _configService.Load();
+            var config = _configService.GetCurrent();
 
             // Normalize presets - ensure empty folder strings are null
             var normalizedPresets = new Dictionary<string, PresetInfo>();
@@ -843,25 +920,10 @@ namespace SSH_Helper.Services
         }
 
         private static string CompressAndEncode(string text)
-        {
-            byte[] raw = Encoding.UTF8.GetBytes(text);
-            using var ms = new MemoryStream();
-            using (var gzip = new GZipStream(ms, CompressionLevel.SmallestSize, leaveOpen: true))
-            {
-                gzip.Write(raw, 0, raw.Length);
-            }
-            return Convert.ToBase64String(ms.ToArray());
-        }
+            => GZipBase64Utility.CompressAndEncode(text);
 
         private static string DecompressEncoded(string encoded)
-        {
-            byte[] compressed = Convert.FromBase64String(encoded);
-            using var input = new MemoryStream(compressed);
-            using var gzip = new GZipStream(input, CompressionMode.Decompress);
-            using var output = new MemoryStream();
-            gzip.CopyTo(output);
-            return Encoding.UTF8.GetString(output.ToArray());
-        }
+            => GZipBase64Utility.Decompress(encoded);
 
         protected virtual void OnPresetsChanged()
         {

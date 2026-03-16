@@ -29,7 +29,7 @@ Script validation SHALL report unknown YAML keys as warnings with line context w
 Operator-facing scripting documentation SHALL match runtime YAML detection behavior.
 
 #### Scenario: metadata-only command text
-- **WHEN** command text contains metadata words like `name:` or `description:` without strong script indicators
+- **WHEN** command text contains metadata words like `name:`, `description:`, or `environment:` without strong script indicators
 - **THEN** documentation states that metadata words alone do not guarantee YAML script detection
 
 ### Requirement: Supported shorthand syntax acceptance
@@ -102,4 +102,21 @@ Validation rules:
 #### Scenario: Unknown key under interactive is rejected
 - **WHEN** script author includes an unrecognized key under `interactive`
 - **THEN** validation reports an unsupported-key error for that key
+
+### Requirement: Readfile picker-aware validation
+Script validation SHALL treat `readfile.path` as conditionally required based on `readfile.select_file`, and SHALL accept picker-specific customization keys on `readfile` steps.
+
+#### Scenario: Standard readfile still requires path
+- **WHEN** a `readfile` step omits `path`
+- **AND** `select_file` is not `true`
+- **THEN** validation reports that `readfile` requires `path`
+
+#### Scenario: Picker mode allows omitted path
+- **WHEN** a `readfile` step sets `select_file: true`
+- **AND** omits `path`
+- **THEN** validation accepts the step if `into` is present
+
+#### Scenario: Picker customization keys are accepted
+- **WHEN** a `readfile` step includes `message` and `fileext`
+- **THEN** validation accepts those keys as part of the supported `readfile` contract
 

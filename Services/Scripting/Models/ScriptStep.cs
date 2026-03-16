@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace SSH_Helper.Services.Scripting.Models
@@ -189,6 +190,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public ParallelOptions? Parallel { get; set; }
 
         /// <summary>
+        /// Call command - invokes a local or imported subroutine.
+        /// </summary>
+        public CallOptions? Call { get; set; }
+
+        /// <summary>
         /// Table command - formats data into aligned columns for display.
         /// </summary>
         public TableOptions? Table { get; set; }
@@ -202,6 +208,11 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Continue command - skips to the next loop iteration.
         /// </summary>
         public bool ContinueLoop { get; set; }
+
+        /// <summary>
+        /// Return command - exits the current subroutine early when true.
+        /// </summary>
+        public bool ReturnFromSubroutine { get; set; }
 
         // ===== Command Options =====
 
@@ -232,6 +243,12 @@ namespace SSH_Helper.Services.Scripting.Models
         public string? OnError { get; set; }
 
         /// <summary>
+        /// Whether on_error is set to "continue".
+        /// </summary>
+        public bool IsOnErrorContinue =>
+            string.Equals(OnError, "continue", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
         /// Number of retry attempts on step failure (0 = no retry).
         /// </summary>
         public int? Retry { get; set; }
@@ -240,6 +257,11 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Delay in seconds between retry attempts (default: 1).
         /// </summary>
         public int? RetryDelay { get; set; }
+
+        /// <summary>
+        /// When true, send treats detectable non-zero POSIX shell exit status as step failure.
+        /// </summary>
+        public bool FailOnNonZero { get; set; }
 
         /// <summary>
         /// Expect/reply pairs for interactive send commands.
@@ -329,7 +351,9 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Assert != null) return StepType.Assert;
             if (!string.IsNullOrEmpty(Switch)) return StepType.Switch;
             if (Parallel != null) return StepType.Parallel;
+            if (Call != null) return StepType.Call;
             if (Table != null) return StepType.Table;
+            if (ReturnFromSubroutine) return StepType.Return;
             if (DeclaredStepType != StepType.Unknown) return DeclaredStepType;
             return StepType.Unknown;
         }
@@ -392,6 +416,21 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Path to the file to read.
         /// </summary>
         public string Path { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Whether to prompt the operator to choose the file at runtime.
+        /// </summary>
+        public bool SelectFile { get; set; }
+
+        /// <summary>
+        /// Optional custom prompt message shown when selecting a file at runtime.
+        /// </summary>
+        public string? Message { get; set; }
+
+        /// <summary>
+        /// Optional comma-separated list of allowed file extensions for the selected/read path.
+        /// </summary>
+        public string? FileExt { get; set; }
 
         /// <summary>
         /// Variable name to store the lines into.
@@ -1069,7 +1108,30 @@ namespace SSH_Helper.Services.Scripting.Models
         Assert,
         Switch,
         Parallel,
+        Call,
+        Return,
         Table
+    }
+
+    /// <summary>
+    /// Options for the call command.
+    /// </summary>
+    public class CallOptions
+    {
+        /// <summary>
+        /// Fully-qualified or local subroutine reference to invoke.
+        /// </summary>
+        public string Subroutine { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Caller expressions resolved before entering the child scope.
+        /// </summary>
+        public Dictionary<string, string> Args { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Caller variable names that receive declared subroutine outputs.
+        /// </summary>
+        public Dictionary<string, string> Out { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>

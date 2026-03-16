@@ -1,0 +1,29 @@
+---
+library: true
+name: String Section Helpers
+description: Reusable text-formatting helpers for imported script samples.
+
+subroutines:
+  print_section:
+    params: [title, items]
+    steps:
+      - if:
+          condition: items is empty
+          then:
+            - return: true
+
+      - print:
+          message: "${title}"
+
+      - foreach:
+          iterator: item in items
+          do:
+            - print:
+                message: "${item}"
+
+  normalize_csv_values:
+    params: [raw_values]
+    outputs: [normalized_values]
+    steps:
+      - set:
+          expression: normalized_values = distinct(compact(trim_all(split(raw_values, ","))))

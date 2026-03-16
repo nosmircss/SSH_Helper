@@ -47,6 +47,28 @@ public class ScriptContextTests
     }
 
     [Fact]
+    public void SubstituteVariables_JsonArrayStringLength_UsesElementCount()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("services", "[\"Cloudflare-CDN\",\"Amazon-AWS\"]");
+
+        var result = context.SubstituteVariables("Count=${services.length}");
+
+        result.Should().Be("Count=2");
+    }
+
+    [Fact]
+    public void SubstituteVariables_JsonArrayStringIndex_ResolvesItem()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("services", "[\"Cloudflare-CDN\",\"Amazon-AWS\"]");
+
+        var result = context.SubstituteVariables("Service=${services[1]}");
+
+        result.Should().Be("Service=Amazon-AWS");
+    }
+
+    [Fact]
     public void TimestampVariable_IsAvailableThroughHasVariable()
     {
         var context = new ScriptContext();

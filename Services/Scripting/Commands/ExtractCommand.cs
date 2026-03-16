@@ -32,6 +32,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             var sourceText = context.GetVariableString(options.From);
             if (string.IsNullOrEmpty(sourceText))
             {
+                SetEmptyResults(options.Into, context);
                 context.EmitOutput($"Extract: source variable '{options.From}' is empty", ScriptOutputType.Warning);
                 return Task.FromResult(CommandResult.Ok());
             }
@@ -116,7 +117,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 // Single variable - capture first group (or full match if no groups)
                 var value = (match.Groups.Count > 1 ? match.Groups[1].Value : match.Value).Trim();
                 context.SetVariable(varName, value);
-                context.EmitOutput($"Extract: {varName} = '{TruncateForDisplay(value)}'", ScriptOutputType.Debug);
+                context.EmitOutput($"Extract: {varName} = '{ScriptingHelpers.TruncateForDisplay(value, 50)}'", ScriptOutputType.Debug);
             }
             else if (into is System.Collections.IList varList)
             {
@@ -127,7 +128,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     var value = groupIndex < match.Groups.Count ? match.Groups[groupIndex].Value.Trim() : "";
                     var name = varList[i]?.ToString() ?? $"group{i}";
                     context.SetVariable(name, value);
-                    context.EmitOutput($"Extract: {name} = '{TruncateForDisplay(value)}'", ScriptOutputType.Debug);
+                    context.EmitOutput($"Extract: {name} = '{ScriptingHelpers.TruncateForDisplay(value, 50)}'", ScriptOutputType.Debug);
                 }
             }
         }
@@ -197,17 +198,5 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
         }
 
-        private string TruncateForDisplay(string value, int maxLength = 50)
-        {
-            if (string.IsNullOrEmpty(value))
-                return "";
-
-            value = value.Replace("\r", "").Replace("\n", "\\n");
-
-            if (value.Length <= maxLength)
-                return value;
-
-            return value.Substring(0, maxLength) + "...";
-        }
     }
 }

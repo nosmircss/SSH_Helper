@@ -142,15 +142,9 @@ namespace SSH_Helper.Utilities
         /// <returns>Text with pager artifacts removed</returns>
         public static string StripPagerArtifacts(string chunk, out bool sawPager)
         {
-            sawPager = false;
-
-            if (PagerRegex.IsMatch(chunk))
-            {
-                sawPager = true;
-                chunk = PagerRegex.Replace(chunk, string.Empty);
-            }
-
-            return chunk;
+            var replaced = PagerRegex.Replace(chunk, string.Empty);
+            sawPager = !ReferenceEquals(replaced, chunk);
+            return replaced;
         }
 
         /// <summary>
@@ -223,6 +217,43 @@ namespace SSH_Helper.Utilities
         }
 
         /// <summary>
+        /// Buffers the unfinished final line of a live terminal stream so later backspace/carriage-return
+        /// edits can resolve before the text is appended to an append-only UI surface.
+        /// </summary>
+        /// <param name="chunk">Current input chunk</param>
+        /// <param name="carry">Pending unfinished line from prior chunks</param>
+        /// <param name="flushFinal">When true, flushes the remaining buffered tail</param>
+        /// <returns>Only the stable output that is safe to emit immediately</returns>
+        internal static string BufferIncompleteFinalLineStreaming(string chunk, ref string carry, bool flushFinal = false)
+        {
+            carry ??= string.Empty;
+
+            var combined = string.Concat(carry, chunk);
+            carry = string.Empty;
+
+            if (string.IsNullOrEmpty(combined))
+                return combined;
+
+            if (flushFinal)
+                return combined;
+
+            var lastNewlineIndex = combined.LastIndexOf('\n');
+            if (lastNewlineIndex < 0)
+            {
+                carry = combined;
+                return string.Empty;
+            }
+
+            if (lastNewlineIndex + 1 < combined.Length)
+            {
+                carry = combined.Substring(lastNewlineIndex + 1);
+                return combined.Substring(0, lastNewlineIndex + 1);
+            }
+
+            return combined;
+        }
+
+        /// <summary>
         /// Strips trailing shell prompt artifacts from command output.
         /// </summary>
         /// <param name="output">Captured command output</param>
@@ -233,11 +264,11 @@ namespace SSH_Helper.Utilities
             if (string.IsNullOrEmpty(output) || string.IsNullOrWhiteSpace(currentPrompt))
                 return output;
 
-            var lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).ToList();
-            if (lines.Count == 0)
+            var lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            if (lines.Length == 0)
                 return output;
 
-            int last = lines.Count - 1;
+            int last = lines.Length - 1;
             while (last >= 0 && string.IsNullOrWhiteSpace(lines[last]))
             {
                 last--;

@@ -80,17 +80,21 @@ namespace SSH_Helper
         public string Name { get; set; } = string.Empty;
     }
 
+    internal enum DropPosition { None, Above, Inside, Below }
+
     public partial class Form1 : Form
     {
         #region Constants
 
-        private const string ApplicationVersion = "0.51.7";
+        private const string ApplicationVersion = "0.51.8";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
         private const string FolderIcon = "\U0001F4C1";
         private const string StarIcon = "\u2605";
         private const string FolderBaseEnvironmentInheritChoiceValue = "__SSH_HELPER_FOLDER_BASE_INHERIT__";
+        private const string FavoriteKeyFolderPrefix = "folder:";
+        private const string FavoriteKeyPresetPrefix = "preset:";
         private const int LargeHistoryPayloadCharThreshold = 10_000_000;
         private const int SmallHistoryPayloadCharThreshold = 500_000;
         private const int OutputTextRecreateThresholdChars = 500_000;
@@ -113,12 +117,24 @@ namespace SSH_Helper
         private readonly SshConfigService _sshConfigService;
         private readonly HistoryStorageService _historyStorage;
 
+        // Scheduler services
+        private JobStorageService? _jobStorage;
+        private SchedulingService? _schedulingService;
+        private JobExecutionService? _jobExecutionService;
+        private JobHistoryService? _jobHistoryService;
+        private JobExportService? _jobExportService;
+        private ToolStripStatusLabel? _statusScheduler;
+        private System.Windows.Forms.Timer? _statusBarTimer;
+        private readonly ModelessDialogManager<JobListDialog> _jobListDialogManager = new();
+        private readonly HashSet<string> _runNowJobIds = new();
+
         #endregion
 
         #region State
 
         private string? _loadedFilePath;
         private CsvFileFingerprint? _loadedFileFingerprint;
+        private HostGridSnapshot? _loadedFileSnapshot;
         private CsvFileSyncStatus _loadedFileSyncStatus = CsvFileSyncStatus.NotTracked;
         private string? _activePresetName;
         private string _activeEnvironmentName = EnvironmentConfig.DefaultName;
@@ -162,7 +178,9 @@ namespace SSH_Helper
 
         // Preset TreeView drag-drop state
         private TreeNode? _draggedNode;
-        private TreeNode? _lastHighlightedNode;
+        private TreeNode? _dropTargetNode;
+        private DropPosition _dropPosition = DropPosition.None;
+        private TreeNode? _favLastHighlightedNode;
 
         // Track selected folder for Run button (TreeView selection can be unreliable on button click)
         private string? _selectedFolderName;
@@ -176,6 +194,8 @@ namespace SSH_Helper
         private bool _historySelectionArmPending;
         private DateTime _historySelectionArmedAtUtc = DateTime.MaxValue;
         private string _selectedHistoryOutput = string.Empty;
+        private int _manualExecutionCompletedOperations;
+        private int _manualExecutionProgressRunId;
         private string? _loadedHistoryPayloadId;
         private HistoryRunPayload? _loadedHistoryPayload;
         private bool _loadedHistoryPayloadHasDetails;
@@ -186,6 +206,7 @@ namespace SSH_Helper
         private readonly StringBuilder _outputBuffer = new();
         private readonly object _outputBufferLock = new();
         private readonly OutputThrottler _uiOutputThrottler;
+        private bool _manualCancellationRequested;
 
         // Credential provider
         private ICredentialProvider? _credentialProvider;
@@ -288,6 +309,8 @@ namespace SSH_Helper
             RebuildRecentFilesMenu();
             InitializePresetSearchFilter();
             InitializeConnectionTesting();
+            InitializeSchedulerServices();
+            InitializeSchedulerStatusBar();
             UpdateStatusBar("Ready");
 
             // Apply saved theme and fonts
@@ -410,10 +433,9 @@ namespace SSH_Helper
             txtTimeoutHeader.PlaceholderText = config.Timeout.ToString();
         }
 
-        private void InitializeDataGridView()
+        private static DataGridViewCheckBoxColumn CreateSelectColumn()
         {
-            // Add checkbox column for multi-host selection (first column)
-            var selectColumn = new DataGridViewCheckBoxColumn
+            return new DataGridViewCheckBoxColumn
             {
                 Name = SelectColumnName,
                 HeaderText = "",
@@ -425,7 +447,12 @@ namespace SSH_Helper
                 TrueValue = true,
                 ValueType = typeof(bool)
             };
-            dgv_variables.Columns.Add(selectColumn);
+        }
+
+        private void InitializeDataGridView()
+        {
+            // Add checkbox column for multi-host selection (first column)
+            dgv_variables.Columns.Add(CreateSelectColumn());
 
             dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
             dgv_variables.Columns[CsvManager.HostColumnName].Width = 150;
@@ -807,6 +834,7 @@ namespace SSH_Helper
         {
             lstOutput.DataSource = _outputHistory;
             lstOutput.DisplayMember = nameof(HistoryListItem.Label);
+            ConfigureHistoryListLayout();
         }
 
         private void InitializeHistoryPersistence()
@@ -834,6 +862,7 @@ namespace SSH_Helper
             var selectedIndexToApply = -1;
 
             _suppressHistorySelectionChanged = true;
+            lstOutput.BeginUpdate();
             try
             {
                 _historyIndexEntries.Clear();
@@ -844,12 +873,7 @@ namespace SSH_Helper
                         continue;
 
                     _historyIndexEntries[entry.Id] = entry;
-                    _outputHistory.Add(new HistoryListItem(
-                        entry.Id,
-                        entry.Label,
-                        output: string.Empty,
-                        hasHostResults: entry.HasHostResults,
-                        hasDetails: entry.HasDetails));
+                    _outputHistory.Add(HistoryListCollectionUpdater.CreateListItem(entry));
                 }
 
                 _loadedHistoryPayloadId = null;
@@ -877,6 +901,7 @@ namespace SSH_Helper
             }
             finally
             {
+                lstOutput.EndUpdate();
                 _suppressHistorySelectionChanged = false;
             }
 
@@ -885,6 +910,61 @@ namespace SSH_Helper
                 EnableHistorySelectionHandling();
                 lstOutput.SelectedIndex = selectedIndexToApply;
             }
+        }
+
+        private void InsertHistoryEntryIntoList(HistoryIndexEntry indexEntry, HistoryRunPayload payload)
+        {
+            ArgumentNullException.ThrowIfNull(indexEntry);
+            ArgumentNullException.ThrowIfNull(payload);
+
+            CacheLoadedHistoryPayload(
+                indexEntry.Id,
+                payload,
+                hasDetails: payload.Details != null,
+                hasHostOutputs: payload.HostResults != null && payload.HostResults.Count > 0);
+
+            lstOutput.BeginUpdate();
+            _suppressHistorySelectionChanged = true;
+            try
+            {
+                var (_, removedIds) = HistoryListCollectionUpdater.InsertNewest(
+                    _outputHistory,
+                    _historyIndexEntries,
+                    indexEntry,
+                    _configService.GetCurrent().MaxHistoryEntries);
+
+                lstOutput.ClearSelected();
+
+                foreach (var removedId in removedIds)
+                {
+                    ClearLoadedHistoryPayload(removedId);
+                }
+            }
+            finally
+            {
+                _suppressHistorySelectionChanged = false;
+                lstOutput.EndUpdate();
+            }
+
+            EnableHistorySelectionHandling();
+            if (_outputHistory.Count > 0)
+            {
+                lstOutput.SelectedIndex = 0;
+            }
+        }
+
+        private void CacheLoadedHistoryPayload(
+            string entryId,
+            HistoryRunPayload payload,
+            bool hasDetails,
+            bool hasHostOutputs)
+        {
+            var previousPayloadChars = EstimatePayloadTextChars(_loadedHistoryPayload);
+            _loadedHistoryPayloadId = entryId;
+            _loadedHistoryPayload = payload;
+            _loadedHistoryPayloadHasDetails = hasDetails;
+            _loadedHistoryPayloadHasHostOutputs = hasHostOutputs;
+            MaybeCompactAfterPayloadSwap(previousPayloadChars, payload);
         }
 
         private void EnableHistorySelectionHandling()
@@ -910,6 +990,16 @@ namespace SSH_Helper
             _historySelectionArmedAtUtc = DateTime.UtcNow;
             _historySelectionArmPending = false;
             Application.Idle -= ArmHistorySelectionOnIdle;
+
+            if (HistoryStartupSelectionHydration.ShouldHydrateSelectedEntry(
+                    _historySelectionHandlingEnabled,
+                    lstOutput.SelectedItem is HistoryListItem))
+            {
+                // A carried-over launch click can update the ListBox selection before
+                // history handling is armed. Once input settles, hydrate the visible selection.
+                EnableHistorySelectionHandling();
+                ApplySelectedHistoryEntry();
+            }
         }
 
         private bool IsHistorySelectionArmed()
@@ -954,19 +1044,19 @@ namespace SSH_Helper
                     includeDetails: requireDetails,
                     includeHostOutputs: requireHostOutputs) && loadedPayload != null)
             {
-                var previousPayloadChars = EstimatePayloadTextChars(_loadedHistoryPayload);
-                _loadedHistoryPayloadId = entryId;
-                _loadedHistoryPayload = loadedPayload;
-                _loadedHistoryPayloadHasDetails = !hasPersistedDetails || requireDetails;
-                _loadedHistoryPayloadHasHostOutputs = !hasPersistedHostResults || requireHostOutputs;
+                CacheLoadedHistoryPayload(
+                    entryId,
+                    loadedPayload,
+                    hasDetails: !hasPersistedDetails || requireDetails,
+                    hasHostOutputs: !hasPersistedHostResults || requireHostOutputs);
                 payload = loadedPayload;
-                MaybeCompactAfterPayloadSwap(previousPayloadChars, loadedPayload);
                 return true;
             }
 
             if (showError)
             {
                 DialogTheme.Show(
+                    this,
                     "History payload for this run could not be loaded.",
                     "History Load Failed",
                     MessageBoxButtons.OK,
@@ -1045,13 +1135,15 @@ namespace SSH_Helper
                 return;
 
             _lastAutomaticHistoryCompactionUtc = nowUtc;
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
+            RunGcCompaction();
         }
 
         private static void RunHistorySwitchGc()
+        {
+            RunGcCompaction();
+        }
+
+        private static void RunGcCompaction()
         {
             GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
             GC.Collect();
@@ -1085,12 +1177,14 @@ namespace SSH_Helper
             }
         }
 
+        private bool IsCredentialManagerAvailable => _credentialProvider?.IsAvailable == true;
+
         private void TryLoadDefaultPassword()
         {
-            if (_credentialProvider == null || !_credentialProvider.IsAvailable)
+            if (!IsCredentialManagerAvailable)
                 return;
 
-            if (_credentialProvider.TryGetPassword(CredentialTargets.DefaultPasswordTarget, out _, out var password))
+            if (_credentialProvider!.TryGetPassword(CredentialTargets.DefaultPasswordTarget, out _, out var password))
             {
                 tsbPassword.Text = password;
                 txtPassword.Text = password;
@@ -1099,34 +1193,34 @@ namespace SSH_Helper
 
         private void StoreDefaultPassword()
         {
-            if (_credentialProvider == null || !_credentialProvider.IsAvailable)
+            if (!IsCredentialManagerAvailable)
                 return;
 
-            _credentialProvider.SavePassword(CredentialTargets.DefaultPasswordTarget, tsbUsername.Text, tsbPassword.Text);
+            _credentialProvider!.SavePassword(CredentialTargets.DefaultPasswordTarget, tsbUsername.Text, tsbPassword.Text);
         }
 
         private bool TryResolveHostPassword(string hostKey, string username, out string password)
         {
             password = string.Empty;
-            if (_credentialProvider == null || !_credentialProvider.IsAvailable)
+            if (!IsCredentialManagerAvailable)
                 return false;
 
             var target = CredentialTargets.HostPasswordTarget(hostKey, username);
-            return _credentialProvider.TryGetPassword(target, out _, out password);
+            return _credentialProvider!.TryGetPassword(target, out _, out password);
         }
 
         private void StoreHostPassword(string hostKey, string username, string password)
         {
-            if (_credentialProvider == null || !_credentialProvider.IsAvailable)
+            if (!IsCredentialManagerAvailable)
                 return;
 
             var target = CredentialTargets.HostPasswordTarget(hostKey, username);
-            _credentialProvider.SavePassword(target, username, password);
+            _credentialProvider!.SavePassword(target, username, password);
         }
 
         private void MigratePasswordsToCredentialManager()
         {
-            if (_credentialProvider == null || !_credentialProvider.IsAvailable)
+            if (!IsCredentialManagerAvailable)
                 return;
 
             StoreDefaultPassword();
@@ -1181,6 +1275,7 @@ namespace SSH_Helper
             // History and host list right-click selection and custom drawing
             lstOutput.MouseDown += LstOutput_MouseDown;
             lstOutput.KeyDown += LstOutput_KeyDown;
+            lstOutput.MeasureItem += LstOutput_MeasureItem;
             lstOutput.DrawItem += LstOutput_DrawItem;
             lstHosts.MouseDown += LstHosts_MouseDown;
 
@@ -1297,6 +1392,7 @@ namespace SSH_Helper
                 }
 
                 RestoreInitialEnvironmentState(config);
+                ConfigureHistoryListLayout();
             };
         }
 
@@ -1350,6 +1446,7 @@ namespace SSH_Helper
                 PresetName = details.PresetName ?? string.Empty,
                 Commands = details.Commands ?? string.Empty,
                 PresetType = details.PresetType ?? string.Empty,
+                WasCancelled = details.WasCancelled,
                 StartTimeUtc = details.StartTimeUtc,
                 EndTimeUtc = details.EndTimeUtc,
                 EnvironmentName = details.EnvironmentName ?? EnvironmentConfig.DefaultName,
@@ -1366,6 +1463,7 @@ namespace SSH_Helper
                     {
                         HostAddress = host.HostAddress ?? string.Empty,
                         Success = host.Success,
+                        WasCancelled = host.WasCancelled,
                         TimestampUtc = host.TimestampUtc,
                         Variables = CloneDetailVariables(host.Variables)
                     })
@@ -1458,13 +1556,13 @@ namespace SSH_Helper
             return PresetBaseEnvironmentResolver.Resolve(_baseEnvironmentName, folderPath, _presetManager.Folders);
         }
 
-        private bool TryApplyFolderEnvironment(string folderPath, bool promptIfDirty)
+        private bool TryApplyFolderEnvironment(string folderPath)
         {
             var resolution = ResolveEffectiveBaseEnvironment(folderPath);
             if (string.Equals(_activeEnvironmentName, resolution.EnvironmentName, StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            return TrySwitchEnvironment(resolution.EnvironmentName, promptIfDirty, out _);
+            return TrySwitchEnvironment(resolution.EnvironmentName, out _);
         }
 
         private int? GetEnvironmentLabelColor(string environmentName)
@@ -1538,7 +1636,7 @@ namespace SSH_Helper
             if (string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
                 return;
 
-            if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true, out var switchStatusMessage, updateBaseEnvironment: true))
+            if (!TrySwitchEnvironment(targetEnvironment, out var switchStatusMessage, updateBaseEnvironment: true))
             {
                 RefreshEnvironmentSelector(_activeEnvironmentName);
                 return;
@@ -1559,7 +1657,7 @@ namespace SSH_Helper
             var targetEnvironment = dialog.SelectedEnvironmentName ?? _environmentService.GetActiveEnvironmentName();
             if (!string.Equals(targetEnvironment, _activeEnvironmentName, StringComparison.OrdinalIgnoreCase))
             {
-                if (!TrySwitchEnvironment(targetEnvironment, promptIfDirty: true, out var switchStatusMessage, updateBaseEnvironment: true))
+                if (!TrySwitchEnvironment(targetEnvironment, out var switchStatusMessage, updateBaseEnvironment: true))
                 {
                     RefreshEnvironmentSelector(_activeEnvironmentName);
                     return;
@@ -1581,7 +1679,6 @@ namespace SSH_Helper
 
         private bool TrySwitchEnvironment(
             string targetEnvironment,
-            bool promptIfDirty,
             out string? statusMessage,
             bool updateBaseEnvironment = false)
         {
@@ -1590,25 +1687,7 @@ namespace SSH_Helper
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
 
-            bool saveCurrent = true;
-            if (promptIfDirty && _csvDirty)
-            {
-                var result = DialogTheme.Show(
-                    "You have unsaved host-grid changes. Save to the current environment before switching?",
-                    "Switch Environment",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (result == DialogResult.Cancel)
-                    return false;
-
-                saveCurrent = result == DialogResult.Yes;
-            }
-
-            if (saveCurrent)
-            {
-                SaveCurrentGridToEnvironment(_activeEnvironmentName);
-            }
+            SaveCurrentGridToEnvironment(_activeEnvironmentName);
 
             var environment = _environmentService.GetEnvironment(targetEnvironment);
             var loadedFingerprint = environment.LastCsvFingerprint?.Clone();
@@ -1678,6 +1757,7 @@ namespace SSH_Helper
                     loadedFingerprint = environment.LastCsvFingerprint?.Clone();
 
                     var reloadResult = DialogTheme.Show(
+                        this,
                         $"The CSV file '{fileName}' changed on disk since environment '{targetEnvironment}' captured its hosts. Reload hosts from disk now?",
                         "Reload Hosts",
                         MessageBoxButtons.YesNo,
@@ -1808,7 +1888,7 @@ namespace SSH_Helper
 
             if (transition.Kind == PresetEnvironmentLoadActionKind.RestoreBaseEnvironment)
             {
-                if (TrySwitchEnvironment(transition.TargetEnvironment!, promptIfDirty: true, out _))
+                if (TrySwitchEnvironment(transition.TargetEnvironment!, out _))
                 {
                     UpdateStatusBar(PresetEnvironmentStatusFormatter.FormatRestoreMessage(presetName, effectiveBaseEnvironment));
                 }
@@ -1824,7 +1904,7 @@ namespace SSH_Helper
                 return;
             }
 
-            if (TrySwitchEnvironment(matchingEnvironment, promptIfDirty: true, out _))
+            if (TrySwitchEnvironment(matchingEnvironment, out _))
             {
                 UpdateStatusBar(PresetEnvironmentStatusFormatter.FormatSwitchMessage(presetName, matchingEnvironment));
             }
@@ -1958,6 +2038,7 @@ namespace SSH_Helper
                 : syncStatus;
             _pendingColumnAutoSize = true;
             _csvDirty = false;
+            CaptureLoadedFileSnapshotFromGrid();
             UpdateHostCount();
         }
 
@@ -1994,7 +2075,34 @@ namespace SSH_Helper
 
         private void UpdateHostsFileIndicator()
         {
-            lblHostsTitle.Text = $"Hosts: {HostsFileIndicatorFormatter.Format(_loadedFilePath, _csvDirty, ResolveLoadedFileSyncStatus())}";
+            lblHostsTitle.Text = $"Hosts: {HostsFileIndicatorFormatter.Format(_loadedFilePath, IsHostsGridUnsaved(), ResolveLoadedFileSyncStatus())}";
+        }
+
+        private bool IsHostsGridUnsaved()
+        {
+            if (string.IsNullOrWhiteSpace(_loadedFilePath))
+            {
+                return true;
+            }
+
+            if (!_csvDirty)
+            {
+                return false;
+            }
+
+            if (_loadedFileSnapshot == null)
+            {
+                return true;
+            }
+
+            return !HostGridUtilities.SnapshotsMatch(HostGridUtilities.BuildSnapshot(dgv_variables), _loadedFileSnapshot);
+        }
+
+        private void CaptureLoadedFileSnapshotFromGrid()
+        {
+            _loadedFileSnapshot = string.IsNullOrWhiteSpace(_loadedFilePath)
+                ? null
+                : HostGridUtilities.BuildSnapshot(dgv_variables);
         }
 
         private void UpdatePresetHeaderIndicator()
@@ -2080,19 +2188,7 @@ namespace SSH_Helper
             if (dgv_variables.Columns.Contains(SelectColumnName))
                 return;
 
-            var selectColumn = new DataGridViewCheckBoxColumn
-            {
-                Name = SelectColumnName,
-                HeaderText = "",
-                Width = 40,
-                Resizable = DataGridViewTriState.False,
-                SortMode = DataGridViewColumnSortMode.NotSortable,
-                ReadOnly = false,
-                FalseValue = false,
-                TrueValue = true,
-                ValueType = typeof(bool)
-            };
-            dgv_variables.Columns.Insert(0, selectColumn);
+            dgv_variables.Columns.Insert(0, CreateSelectColumn());
             _selectAllChecked = false;
         }
 
@@ -2104,6 +2200,45 @@ namespace SSH_Helper
             {
                 statusProgress.Maximum = total;
                 statusProgress.Value = Math.Min(progress, total);
+            }
+        }
+
+        private IProgress<FolderExecutionProgress>? BeginManualExecutionProgress(int totalOperations)
+        {
+            _manualExecutionCompletedOperations = 0;
+
+            if (!ManualExecutionStatusProgress.ShouldShowProgress(totalOperations))
+                return null;
+
+            int runId = unchecked(++_manualExecutionProgressRunId);
+            UpdateStatusBar("Running... 0%", true, 0, totalOperations);
+            return new Progress<FolderExecutionProgress>(progress => UpdateManualExecutionProgress(runId, progress));
+        }
+
+        private void UpdateManualExecutionProgress(int runId, FolderExecutionProgress progress)
+        {
+            if (runId != _manualExecutionProgressRunId ||
+                !ManualExecutionStatusProgress.ShouldShowProgress(progress.TotalOperations))
+            {
+                return;
+            }
+
+            var state = ManualExecutionStatusProgress.Advance(_manualExecutionCompletedOperations, progress);
+            _manualExecutionCompletedOperations = state.CompletedOperations;
+
+            UpdateStatusBar(
+                state.StatusText,
+                showProgress: true,
+                progress: state.CompletedOperations,
+                total: state.TotalOperations);
+        }
+
+        private void EndManualExecutionProgress()
+        {
+            _manualExecutionCompletedOperations = 0;
+            unchecked
+            {
+                _manualExecutionProgressRunId++;
             }
         }
 
@@ -2133,6 +2268,8 @@ namespace SSH_Helper
         private static readonly Color LightFormBackground = Color.FromArgb(233, 236, 239);
         private static readonly Color LightAccent = DialogTheme.GridLightSelection;
         private static readonly Color LightSelectionBorder = Color.FromArgb(10, 88, 202);  // Darker accent for border
+        private static readonly Color SchedulerStatusLinkLight = Color.FromArgb(36, 120, 214);
+        private static readonly Color SchedulerStatusLinkLightActive = Color.FromArgb(58, 138, 226);
 
         // Dark theme colors (VS Code inspired - professional and easy on the eyes)
         private static readonly Color DarkSurface0 = Color.FromArgb(24, 24, 24);      // Deepest background
@@ -2144,6 +2281,8 @@ namespace SSH_Helper
         private static readonly Color DarkBorder = Color.FromArgb(48, 48, 48);            // Subtle borders
         private static readonly Color DarkSelectionBg = DialogTheme.GridDarkSelection;     // Shared selection color
         private static readonly Color DarkSelectionBorder = Color.FromArgb(0, 122, 204); // Selection border accent
+        private static readonly Color SchedulerStatusLinkDark = Color.FromArgb(92, 171, 226);
+        private static readonly Color SchedulerStatusLinkDarkActive = Color.FromArgb(115, 186, 236);
         private static readonly Color DarkInputBackground = Color.FromArgb(60, 60, 60);   // Input fields
         private static readonly Color DarkInputText = Color.FromArgb(220, 220, 220);      // Input text
 
@@ -2164,32 +2303,16 @@ namespace SSH_Helper
                 ApplyLightTheme();
             }
 
-            // Set up owner-draw for history listbox
-            lstOutput.DrawMode = DrawMode.OwnerDrawFixed;
-            lstOutput.ItemHeight = 22;
+            ConfigureHistoryListLayout();
 
-            // Set up owner-draw for TreeViews only in dark mode
-            if (darkMode)
-            {
-                trvPresets.DrawMode = TreeViewDrawMode.OwnerDrawAll;
-                trvPresets.DrawNode -= TreeView_DrawNode;
-                trvPresets.DrawNode += TreeView_DrawNode;
+            // Set up owner-draw for TreeViews (both light and dark mode for consistent selection visibility)
+            trvPresets.DrawMode = TreeViewDrawMode.OwnerDrawAll;
+            trvPresets.DrawNode -= TreeView_DrawNode;
+            trvPresets.DrawNode += TreeView_DrawNode;
 
-                trvFavorites.DrawMode = TreeViewDrawMode.OwnerDrawAll;
-                trvFavorites.DrawNode -= TreeView_DrawNode;
-                trvFavorites.DrawNode += TreeView_DrawNode;
-            }
-            else
-            {
-                // Light mode: also use owner draw for consistent selection visibility
-                trvPresets.DrawMode = TreeViewDrawMode.OwnerDrawAll;
-                trvPresets.DrawNode -= TreeView_DrawNode;
-                trvPresets.DrawNode += TreeView_DrawNode;
-
-                trvFavorites.DrawMode = TreeViewDrawMode.OwnerDrawAll;
-                trvFavorites.DrawNode -= TreeView_DrawNode;
-                trvFavorites.DrawNode += TreeView_DrawNode;
-            }
+            trvFavorites.DrawMode = TreeViewDrawMode.OwnerDrawAll;
+            trvFavorites.DrawNode -= TreeView_DrawNode;
+            trvFavorites.DrawNode += TreeView_DrawNode;
 
             // Update custom DataGridView scrollbar colors
             ApplyScrollbarColors();
@@ -2320,6 +2443,7 @@ namespace SSH_Helper
             _managedFonts.Add(listFont);
             lstOutput.Font = listFont;
             lstHosts.Font = listFont;
+            ConfigureHistoryListLayout();
 
             // Menu strip
             var menuFont = new Font(uiFont, Scaled(fontSettings.MenuFontSize));
@@ -2536,6 +2660,7 @@ namespace SSH_Helper
             statusStrip.ForeColor = LightTextColor;
             statusLabel.ForeColor = LightTextColor;
             statusHostCount.ForeColor = LightSecondaryText;
+            ApplySchedulerStatusBarTheme();
 
             // Hosts panel
             hostsPanel.BackColor = LightPanelBackground;
@@ -2668,6 +2793,7 @@ namespace SSH_Helper
             statusStrip.ForeColor = DarkTextPrimary;
             statusLabel.ForeColor = DarkTextPrimary;
             statusHostCount.ForeColor = DarkTextSecondary;
+            ApplySchedulerStatusBarTheme();
 
             // Hosts panel
             hostsPanel.BackColor = DarkSurface1;
@@ -3097,6 +3223,8 @@ namespace SSH_Helper
                 }
             }
 
+            _jobExecutionService?.Stop();
+            _configService.GetCurrent().LastAppShutdownUtc = DateTime.UtcNow;
             SaveConfiguration();
         }
 
@@ -3337,7 +3465,7 @@ namespace SSH_Helper
                 dgv_variables.EndEdit();
 
             // Select only the Host_IP column of selected rows
-            if (dgv_variables.Columns.Contains("Host_IP") && dgv_variables.SelectedCells.Count > 0)
+            if (dgv_variables.Columns.Contains(CsvManager.HostColumnName) && dgv_variables.SelectedCells.Count > 0)
             {
                 var selectedRows = dgv_variables.SelectedCells
                     .Cast<DataGridViewCell>()
@@ -3350,7 +3478,7 @@ namespace SSH_Helper
 
                 foreach (var rowIndex in selectedRows)
                 {
-                    dgv_variables.Rows[rowIndex].Cells["Host_IP"].Selected = true;
+                    dgv_variables.Rows[rowIndex].Cells[CsvManager.HostColumnName].Selected = true;
                 }
             }
             else
@@ -3566,19 +3694,14 @@ namespace SSH_Helper
                 !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
                 IsPresetDirty())
             {
-                var result = ShowUnsavedPresetDiffPrompt();
-
-                if (result == DialogResult.Cancel)
+                if (!TryResolvePendingPresetChanges(() =>
+                    {
+                        _suppressPresetSelectionChange = true;
+                        SelectPresetByName(_activePresetName);
+                        _suppressPresetSelectionChange = false;
+                    }))
                 {
-                    _suppressPresetSelectionChange = true;
-                    SelectPresetByName(_activePresetName);
-                    _suppressPresetSelectionChange = false;
                     return;
-                }
-
-                if (result == DialogResult.Yes)
-                {
-                    SaveCurrentPreset();
                 }
             }
 
@@ -3591,30 +3714,28 @@ namespace SSH_Helper
 
         private void trvPresets_AfterCollapse(object? sender, TreeViewEventArgs e)
         {
-            if (_suppressExpandCollapseEvents) return;
-            if (e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
-            {
-                _presetManager.SetFolderExpanded(tag.Name, false);
-                if (debugModeToolStripMenuItem.Checked)
-                {
-                    // Verify the state was actually saved
-                    var currentState = _presetManager.Folders.TryGetValue(tag.Name, out var info) ? info.IsExpanded : (bool?)null;
-                    UpdateStatusBar($"Folder '{tag.Name}' collapsed. Verified state: {currentState}");
-                }
-            }
+            if (e.Node != null)
+                SetFolderExpandedFromEvent(e.Node, false);
         }
 
         private void trvPresets_AfterExpand(object? sender, TreeViewEventArgs e)
         {
+            if (e.Node != null)
+                SetFolderExpandedFromEvent(e.Node, true);
+        }
+
+        private void SetFolderExpandedFromEvent(TreeNode node, bool expanded)
+        {
             if (_suppressExpandCollapseEvents) return;
-            if (e.Node?.Tag is PresetNodeTag tag && tag.IsFolder)
+            if (node.Tag is PresetNodeTag tag && tag.IsFolder)
             {
-                _presetManager.SetFolderExpanded(tag.Name, true);
+                _presetManager.SetFolderExpanded(tag.Name, expanded);
                 if (debugModeToolStripMenuItem.Checked)
                 {
                     // Verify the state was actually saved
                     var currentState = _presetManager.Folders.TryGetValue(tag.Name, out var info) ? info.IsExpanded : (bool?)null;
-                    UpdateStatusBar($"Folder '{tag.Name}' expanded. Verified state: {currentState}");
+                    var action = expanded ? "expanded" : "collapsed";
+                    UpdateStatusBar($"Folder '{tag.Name}' {action}. Verified state: {currentState}");
                 }
             }
         }
@@ -3723,43 +3844,45 @@ namespace SSH_Helper
             var pt = trvPresets.PointToClient(new Point(e.X, e.Y));
             var targetNode = trvPresets.GetNodeAt(pt);
 
-            // Reset previous highlight
-            if (_lastHighlightedNode != null && _lastHighlightedNode != targetNode)
+            if (targetNode != null)
             {
-                _lastHighlightedNode.BackColor = trvPresets.BackColor;
-            }
-
-            if (targetNode != null && CanDropOn(_draggedNode, targetNode))
-            {
-                e.Effect = DragDropEffects.Move;
-                targetNode.BackColor = Color.LightBlue;
-                _lastHighlightedNode = targetNode;
-            }
-            else if (targetNode == null)
-            {
-                // Dropping on empty area = move to root
-                e.Effect = DragDropEffects.Move;
+                var position = GetDropPosition(targetNode, pt);
+                if (CanDropAt(_draggedNode, targetNode, position))
+                {
+                    e.Effect = DragDropEffects.Move;
+                    if (_dropTargetNode != targetNode || _dropPosition != position)
+                    {
+                        _dropTargetNode = targetNode;
+                        _dropPosition = position;
+                        trvPresets.Invalidate();
+                    }
+                }
+                else
+                {
+                    e.Effect = DragDropEffects.None;
+                    ClearDropIndicator();
+                }
             }
             else
             {
-                e.Effect = DragDropEffects.None;
+                // Dropping on empty area = move to root
+                e.Effect = DragDropEffects.Move;
+                ClearDropIndicator();
             }
         }
 
         private void trvPresets_DragDrop(object? sender, DragEventArgs e)
         {
-            // Reset highlight
-            if (_lastHighlightedNode != null)
-            {
-                _lastHighlightedNode.BackColor = trvPresets.BackColor;
-                _lastHighlightedNode = null;
-            }
+            // Capture and clear visual indicator state
+            var dropTarget = _dropTargetNode;
+            var dropPos = _dropPosition;
+            ClearDropIndicator();
 
             if (_draggedNode == null)
                 return;
 
             var pt = trvPresets.PointToClient(new Point(e.X, e.Y));
-            var targetNode = trvPresets.GetNodeAt(pt);
+            var targetNode = dropTarget ?? trvPresets.GetNodeAt(pt);
             var draggedTag = _draggedNode.Tag as PresetNodeTag;
 
             if (draggedTag == null)
@@ -3768,79 +3891,128 @@ namespace SSH_Helper
                 return;
             }
 
+            // If we don't have a position from the indicator, calculate it
+            if (dropPos == DropPosition.None && targetNode != null)
+                dropPos = GetDropPosition(targetNode, pt);
+
             try
             {
-                if (draggedTag.IsFolder)
+                string finalName = draggedTag.Name;
+
+                if (targetNode == null)
                 {
-                    if (targetNode?.Tag is PresetNodeTag targetTag && targetTag.IsFolder)
-                    {
-                        // Check if this is a reorder within the same parent level
-                        var draggedParent = FolderPathUtility.GetParentPath(draggedTag.Name);
-                        var targetParent = FolderPathUtility.GetParentPath(targetTag.Name);
-
-                        if (_currentSortMode == PresetSortMode.Manual && draggedParent == targetParent)
-                        {
-                            // Folder reordering within same level
-                            ReorderFolders(draggedTag.Name, targetTag.Name);
-                        }
-                        else
-                        {
-                            // Move folder into target folder (make it a subfolder)
-                            var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
-                            var newPath = FolderPathUtility.CombinePath(targetTag.Name, folderName);
-
-                            // Get unique name if conflict
-                            newPath = _presetManager.GetUniqueFolderName(newPath);
-
-                            _presetManager.RenameFolder(draggedTag.Name, newPath);
-                        }
-                    }
-                    else if (targetNode == null)
-                    {
-                        // Drop on empty area = move folder to root level
-                        var currentParent = FolderPathUtility.GetParentPath(draggedTag.Name);
-                        if (currentParent != null)
-                        {
-                            var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
-                            var newPath = _presetManager.GetUniqueFolderName(folderName);
-                            _presetManager.RenameFolder(draggedTag.Name, newPath);
-                        }
-                    }
+                    finalName = HandleDropOnEmptySpace(draggedTag);
                 }
-                else
+                else if (dropPos == DropPosition.Inside)
                 {
-                    // Preset being dragged
-                    if (targetNode == null)
-                    {
-                        // Drop on empty area = move to root
-                        _presetManager.MovePresetToFolder(draggedTag.Name, null);
-                    }
-                    else if (targetNode.Tag is PresetNodeTag targetTag)
-                    {
-                        if (targetTag.IsFolder)
-                        {
-                            // Drop on folder = move into folder
-                            _presetManager.MovePresetToFolder(draggedTag.Name, targetTag.Name);
-                        }
-                        else if (_currentSortMode == PresetSortMode.Manual)
-                        {
-                            // Drop on preset = reorder within same folder
-                            var sourcePreset = _presetManager.Get(draggedTag.Name);
-                            var targetPreset = _presetManager.Get(targetTag.Name);
-                            if (sourcePreset?.Folder == targetPreset?.Folder)
-                            {
-                                ReorderPresetsInFolder(draggedTag.Name, targetTag.Name, sourcePreset?.Folder);
-                            }
-                        }
-                    }
+                    finalName = HandleDropInside(draggedTag, targetNode);
+                }
+                else if (dropPos == DropPosition.Above || dropPos == DropPosition.Below)
+                {
+                    finalName = HandleDropAdjacentTo(draggedTag, targetNode, dropPos);
                 }
 
                 RefreshPresetList();
-                SelectPresetByName(draggedTag.IsFolder ? null : draggedTag.Name);
+                SelectTreeNodeByTagName(finalName, draggedTag.IsFolder);
             }
             finally
             {
                 _draggedNode = null;
+            }
+        }
+
+        private string HandleDropOnEmptySpace(PresetNodeTag draggedTag)
+        {
+            if (draggedTag.IsFolder)
+            {
+                var currentParent = FolderPathUtility.GetParentPath(draggedTag.Name);
+                if (currentParent != null)
+                {
+                    var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
+                    var newPath = _presetManager.GetUniqueFolderName(folderName);
+                    _presetManager.RenameFolder(draggedTag.Name, newPath);
+                    return newPath;
+                }
+                return draggedTag.Name;
+            }
+            else
+            {
+                _presetManager.MovePresetToFolder(draggedTag.Name, null);
+                return draggedTag.Name;
+            }
+        }
+
+        private string HandleDropInside(PresetNodeTag draggedTag, TreeNode targetNode)
+        {
+            var targetTag = targetNode.Tag as PresetNodeTag;
+            if (targetTag == null || !targetTag.IsFolder)
+                return draggedTag.Name;
+
+            if (draggedTag.IsFolder)
+            {
+                var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
+                var newPath = FolderPathUtility.CombinePath(targetTag.Name, folderName);
+                newPath = _presetManager.GetUniqueFolderName(newPath);
+                _presetManager.RenameFolder(draggedTag.Name, newPath);
+                return newPath;
+            }
+            else
+            {
+                _presetManager.MovePresetToFolder(draggedTag.Name, targetTag.Name);
+                return draggedTag.Name;
+            }
+        }
+
+        private string HandleDropAdjacentTo(PresetNodeTag draggedTag, TreeNode targetNode, DropPosition position)
+        {
+            var targetTag = targetNode.Tag as PresetNodeTag;
+            if (targetTag == null) return draggedTag.Name;
+
+            // Determine the target's parent level — this is where the dragged item will end up
+            string? targetParentPath;
+            if (targetTag.IsFolder)
+                targetParentPath = FolderPathUtility.GetParentPath(targetTag.Name);
+            else
+                targetParentPath = _presetManager.Get(targetTag.Name)?.Folder;
+
+            if (draggedTag.IsFolder)
+            {
+                // Move folder to the target's parent level
+                var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
+                var newPath = FolderPathUtility.CombinePath(targetParentPath, folderName);
+
+                if (newPath != draggedTag.Name)
+                {
+                    newPath = _presetManager.GetUniqueFolderName(newPath);
+                    _presetManager.RenameFolder(draggedTag.Name, newPath);
+                }
+
+                // Position in manual order relative to the target
+                if (targetTag.IsFolder)
+                    InsertIntoFolderOrder(newPath, targetTag.Name, position);
+                else
+                    InsertIntoFolderOrder(newPath, null, position);
+
+                return newPath;
+            }
+            else
+            {
+                // Move preset to the target's parent folder
+                string? targetFolder;
+                if (targetTag.IsFolder)
+                    targetFolder = targetParentPath;
+                else
+                    targetFolder = _presetManager.Get(targetTag.Name)?.Folder;
+
+                var currentPreset = _presetManager.Get(draggedTag.Name);
+                if (currentPreset?.Folder != targetFolder)
+                    _presetManager.MovePresetToFolder(draggedTag.Name, targetFolder);
+
+                // Position in manual order
+                if (!targetTag.IsFolder)
+                    InsertIntoPresetOrder(draggedTag.Name, targetFolder, targetTag.Name, position);
+
+                return draggedTag.Name;
             }
         }
 
@@ -3875,23 +4047,100 @@ namespace SSH_Helper
             }
         }
 
+        private DropPosition GetDropPosition(TreeNode targetNode, Point clientPoint)
+        {
+            var bounds = targetNode.Bounds;
+            if (bounds.Height == 0) return DropPosition.Inside;
+
+            float relativeY = clientPoint.Y - bounds.Top;
+            float ratio = relativeY / bounds.Height;
+
+            bool isFolder = targetNode.Tag is PresetNodeTag tag && tag.IsFolder;
+
+            if (isFolder)
+            {
+                if (ratio < 0.25f) return DropPosition.Above;
+                if (ratio > 0.75f) return DropPosition.Below;
+                return DropPosition.Inside;
+            }
+            else
+            {
+                return ratio < 0.5f ? DropPosition.Above : DropPosition.Below;
+            }
+        }
+
+        private bool CanDropAt(TreeNode draggedNode, TreeNode targetNode, DropPosition position)
+        {
+            if (draggedNode == targetNode)
+                return false;
+
+            var draggedTag = draggedNode.Tag as PresetNodeTag;
+            var targetTag = targetNode.Tag as PresetNodeTag;
+
+            if (draggedTag == null || targetTag == null)
+                return false;
+
+            if (draggedTag.IsFolder)
+            {
+                // Prevent dropping folder into itself or its descendants
+                if (draggedTag.Name == targetTag.Name ||
+                    FolderPathUtility.IsDescendantOf(targetTag.Name, draggedTag.Name))
+                    return false;
+
+                if (position == DropPosition.Inside)
+                {
+                    // Can only drop inside another folder
+                    return targetTag.IsFolder;
+                }
+                else
+                {
+                    // Above/Below: can drop next to any folder
+                    // Next to a preset: only if the folder would be at same level
+                    return true;
+                }
+            }
+            else
+            {
+                if (position == DropPosition.Inside)
+                {
+                    return targetTag.IsFolder;
+                }
+                else
+                {
+                    // Above/Below: always allowed (moves preset to target's level)
+                    return true;
+                }
+            }
+        }
+
+        private void ClearDropIndicator()
+        {
+            if (_dropTargetNode != null || _dropPosition != DropPosition.None)
+            {
+                _dropTargetNode = null;
+                _dropPosition = DropPosition.None;
+                trvPresets.Invalidate();
+            }
+        }
+
+        private static void ReorderInList(List<string> list, string source, string target)
+        {
+            if (!list.Contains(source))
+                list.Add(source);
+            if (!list.Contains(target))
+                list.Add(target);
+
+            int sourceIndex = list.IndexOf(source);
+            int targetIndex = list.IndexOf(target);
+
+            list.RemoveAt(sourceIndex);
+            list.Insert(targetIndex, source);
+        }
+
         private void ReorderFolders(string sourceFolderName, string targetFolderName)
         {
             var config = _configService.Load();
-            var folderOrder = config.ManualFolderOrder;
-
-            if (!folderOrder.Contains(sourceFolderName))
-                folderOrder.Add(sourceFolderName);
-            if (!folderOrder.Contains(targetFolderName))
-                folderOrder.Add(targetFolderName);
-
-            int sourceIndex = folderOrder.IndexOf(sourceFolderName);
-            int targetIndex = folderOrder.IndexOf(targetFolderName);
-
-            folderOrder.RemoveAt(sourceIndex);
-            folderOrder.Insert(targetIndex, sourceFolderName);
-
-            config.ManualFolderOrder = folderOrder;
+            ReorderInList(config.ManualFolderOrder, sourceFolderName, targetFolderName);
             _configService.Save(config);
         }
 
@@ -3906,16 +4155,78 @@ namespace SSH_Helper
                 config.ManualPresetOrderByFolder[folderKey] = presetOrder;
             }
 
-            if (!presetOrder.Contains(sourcePresetName))
-                presetOrder.Add(sourcePresetName);
-            if (!presetOrder.Contains(targetPresetName))
-                presetOrder.Add(targetPresetName);
+            ReorderInList(presetOrder, sourcePresetName, targetPresetName);
 
-            int sourceIndex = presetOrder.IndexOf(sourcePresetName);
-            int targetIndex = presetOrder.IndexOf(targetPresetName);
+            config.ManualPresetOrderByFolder[folderKey] = presetOrder;
+            _configService.Save(config);
+        }
 
-            presetOrder.RemoveAt(sourceIndex);
-            presetOrder.Insert(targetIndex, sourcePresetName);
+        private void InsertIntoFolderOrder(string folderToInsert, string? referenceItem, DropPosition position)
+        {
+            var config = _configService.Load();
+            var folderOrder = config.ManualFolderOrder;
+
+            // Ensure all existing folders are in the manual order list
+            foreach (var folder in _presetManager.GetFolders())
+            {
+                if (!folderOrder.Contains(folder))
+                    folderOrder.Add(folder);
+            }
+
+            folderOrder.Remove(folderToInsert);
+
+            if (referenceItem != null)
+            {
+                int refIndex = folderOrder.IndexOf(referenceItem);
+                if (refIndex >= 0)
+                {
+                    int insertIndex = position == DropPosition.Below ? refIndex + 1 : refIndex;
+                    folderOrder.Insert(insertIndex, folderToInsert);
+                }
+                else
+                {
+                    folderOrder.Add(folderToInsert);
+                }
+            }
+            else
+            {
+                folderOrder.Add(folderToInsert);
+            }
+
+            config.ManualFolderOrder = folderOrder;
+            _configService.Save(config);
+        }
+
+        private void InsertIntoPresetOrder(string presetToInsert, string? folder, string referenceItem, DropPosition position)
+        {
+            var config = _configService.Load();
+            string folderKey = folder ?? "";
+
+            if (!config.ManualPresetOrderByFolder.TryGetValue(folderKey, out var presetOrder))
+            {
+                presetOrder = _presetManager.GetPresetsInFolder(folder).ToList();
+                config.ManualPresetOrderByFolder[folderKey] = presetOrder;
+            }
+
+            // Ensure all presets in this folder are tracked
+            foreach (var p in _presetManager.GetPresetsInFolder(folder))
+            {
+                if (!presetOrder.Contains(p))
+                    presetOrder.Add(p);
+            }
+
+            presetOrder.Remove(presetToInsert);
+
+            int refIndex = presetOrder.IndexOf(referenceItem);
+            if (refIndex >= 0)
+            {
+                int insertIndex = position == DropPosition.Below ? refIndex + 1 : refIndex;
+                presetOrder.Insert(insertIndex, presetToInsert);
+            }
+            else
+            {
+                presetOrder.Add(presetToInsert);
+            }
 
             config.ManualPresetOrderByFolder[folderKey] = presetOrder;
             _configService.Save(config);
@@ -3975,9 +4286,9 @@ namespace SSH_Helper
             // Add items in order
             foreach (var item in orderedItems)
             {
-                if (item.StartsWith("folder:"))
+                if (TryParseFavoriteKey(item, out var parsedName, out var parsedIsFolder) && parsedIsFolder)
                 {
-                    var folderName = item.Substring(7);
+                    var folderName = parsedName;
                     var folderNode = new TreeNode($"{FolderIcon} {folderName}")
                     {
                         Tag = new PresetNodeTag { IsFolder = true, Name = folderName }
@@ -4001,9 +4312,9 @@ namespace SSH_Helper
                     // Expand folder by default
                     folderNode.Expand();
                 }
-                else if (item.StartsWith("preset:"))
+                else if (TryParseFavoriteKey(item, out var presetParsedName, out var isPresetFolder) && !isPresetFolder)
                 {
-                    var presetName = item.Substring(7);
+                    var presetName = presetParsedName;
                     var node = new TreeNode(presetName)
                     {
                         Tag = new PresetNodeTag { IsFolder = false, Name = presetName }
@@ -4011,6 +4322,28 @@ namespace SSH_Helper
                     trvFavorites.Nodes.Add(node);
                 }
             }
+        }
+
+        private static string BuildFavoriteKey(PresetNodeTag tag) =>
+            tag.IsFolder ? $"{FavoriteKeyFolderPrefix}{tag.Name}" : $"{FavoriteKeyPresetPrefix}{tag.Name}";
+
+        private static bool TryParseFavoriteKey(string key, out string name, out bool isFolder)
+        {
+            if (key.StartsWith(FavoriteKeyFolderPrefix, StringComparison.Ordinal))
+            {
+                name = key.Substring(FavoriteKeyFolderPrefix.Length);
+                isFolder = true;
+                return true;
+            }
+            if (key.StartsWith(FavoriteKeyPresetPrefix, StringComparison.Ordinal))
+            {
+                name = key.Substring(FavoriteKeyPresetPrefix.Length);
+                isFolder = false;
+                return true;
+            }
+            name = string.Empty;
+            isFolder = false;
+            return false;
         }
 
         private List<string> GetOrderedFavoriteItems(HashSet<string> favoriteFolders, HashSet<string> favoritePresets, AppConfiguration config)
@@ -4022,22 +4355,23 @@ namespace SSH_Helper
             // First, add items in the saved manual order
             foreach (var item in config.ManualFavoriteOrder)
             {
-                if (item.StartsWith("folder:"))
+                if (!TryParseFavoriteKey(item, out var name, out var isFolder))
+                    continue;
+
+                if (isFolder)
                 {
-                    var folderName = item.Substring(7);
-                    if (remainingFolders.Contains(folderName))
+                    if (remainingFolders.Contains(name))
                     {
                         result.Add(item);
-                        remainingFolders.Remove(folderName);
+                        remainingFolders.Remove(name);
                     }
                 }
-                else if (item.StartsWith("preset:"))
+                else
                 {
-                    var presetName = item.Substring(7);
-                    if (remainingPresets.Contains(presetName))
+                    if (remainingPresets.Contains(name))
                     {
                         result.Add(item);
-                        remainingPresets.Remove(presetName);
+                        remainingPresets.Remove(name);
                     }
                 }
             }
@@ -4045,13 +4379,13 @@ namespace SSH_Helper
             // Add any remaining folders (new favorites not yet in the order)
             foreach (var folder in remainingFolders.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
             {
-                result.Add($"folder:{folder}");
+                result.Add($"{FavoriteKeyFolderPrefix}{folder}");
             }
 
             // Add any remaining presets (new favorites not yet in the order)
             foreach (var preset in remainingPresets.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
             {
-                result.Add($"preset:{preset}");
+                result.Add($"{FavoriteKeyPresetPrefix}{preset}");
             }
 
             return result;
@@ -4080,16 +4414,9 @@ namespace SSH_Helper
                 !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
                 IsPresetDirty())
             {
-                var result = ShowUnsavedPresetDiffPrompt();
-
-                if (result == DialogResult.Cancel)
+                if (!TryResolvePendingPresetChanges())
                 {
                     return;
-                }
-
-                if (result == DialogResult.Yes)
-                {
-                    SaveCurrentPreset();
                 }
             }
 
@@ -4154,16 +4481,16 @@ namespace SSH_Helper
             var targetNode = trvFavorites.GetNodeAt(pt);
 
             // Reset previous highlight
-            if (_lastHighlightedNode != null && _lastHighlightedNode != targetNode)
+            if (_favLastHighlightedNode != null && _favLastHighlightedNode != targetNode)
             {
-                _lastHighlightedNode.BackColor = trvFavorites.BackColor;
+                _favLastHighlightedNode.BackColor = trvFavorites.BackColor;
             }
 
             if (targetNode != null && CanDropOnFavorites(_draggedNode, targetNode))
             {
                 e.Effect = DragDropEffects.Move;
                 targetNode.BackColor = Color.LightBlue;
-                _lastHighlightedNode = targetNode;
+                _favLastHighlightedNode = targetNode;
             }
             else
             {
@@ -4174,10 +4501,10 @@ namespace SSH_Helper
         private void trvFavorites_DragDrop(object? sender, DragEventArgs e)
         {
             // Reset highlight
-            if (_lastHighlightedNode != null)
+            if (_favLastHighlightedNode != null)
             {
-                _lastHighlightedNode.BackColor = trvFavorites.BackColor;
-                _lastHighlightedNode = null;
+                _favLastHighlightedNode.BackColor = trvFavorites.BackColor;
+                _favLastHighlightedNode = null;
             }
 
             if (_draggedNode == null)
@@ -4245,8 +4572,8 @@ namespace SSH_Helper
         {
             var config = _configService.Load();
 
-            string sourceKey = sourceTag.IsFolder ? $"folder:{sourceTag.Name}" : $"preset:{sourceTag.Name}";
-            string targetKey = targetTag.IsFolder ? $"folder:{targetTag.Name}" : $"preset:{targetTag.Name}";
+            string sourceKey = BuildFavoriteKey(sourceTag);
+            string targetKey = BuildFavoriteKey(targetTag);
 
             // Get current favorite items
             var favoriteFolders = _presetManager.Folders
@@ -5251,7 +5578,7 @@ namespace SSH_Helper
             }
 
             var treeView = folderNode.TreeView;
-            var topNodeBefore = treeView?.TopNode;
+            var topNodeBefore = PresetTreeViewportRestorer.Capture(treeView?.TopNode);
 
             var folderPaths = new List<string>();
             CollectFolderPaths(folderNode, folderPaths);
@@ -5275,9 +5602,13 @@ namespace SSH_Helper
 
                 // Keep viewport anchoring while redraw is still suspended
                 // so users never see the temporary scroll jump.
-                if (treeView != null && topNodeBefore != null)
+                if (treeView != null)
                 {
-                    TryRestoreTopNode(treeView, topNodeBefore, folderNode);
+                    PresetTreeViewportRestorer.TryRestoreTopNode(
+                        treeView,
+                        treeView.Nodes,
+                        topNodeBefore,
+                        PresetTreeViewportRestorer.Capture(folderNode));
                 }
             }
             finally
@@ -5300,49 +5631,6 @@ namespace SSH_Helper
             UpdateStatusBar(expand
                 ? $"Expanded all folders under '{folderTag.Name}'"
                 : $"Collapsed all folders under '{folderTag.Name}'");
-        }
-
-        private static void TryRestoreTopNode(TreeView treeView, TreeNode preferredTopNode, TreeNode fallbackNode)
-        {
-            if (TrySetTopNode(treeView, preferredTopNode))
-            {
-                return;
-            }
-
-            var ancestor = preferredTopNode.Parent;
-            while (ancestor != null)
-            {
-                if (TrySetTopNode(treeView, ancestor))
-                {
-                    return;
-                }
-
-                ancestor = ancestor.Parent;
-            }
-
-            TrySetTopNode(treeView, fallbackNode);
-        }
-
-        private static bool TrySetTopNode(TreeView treeView, TreeNode node)
-        {
-            if (node.TreeView != treeView)
-            {
-                return false;
-            }
-
-            try
-            {
-                treeView.TopNode = node;
-                return true;
-            }
-            catch (ArgumentException)
-            {
-                return false;
-            }
-            catch (InvalidOperationException)
-            {
-                return false;
-            }
         }
 
         private TreeNode? ResolveContextMenuFolderNode()
@@ -5574,7 +5862,7 @@ namespace SSH_Helper
             if (!_presetManager.SetFolderBaseEnvironment(folderPath, explicitEnvironmentName))
                 return;
 
-            TryApplyFolderEnvironment(folderPath, promptIfDirty: true);
+            TryApplyFolderEnvironment(folderPath);
             DisplayFolderSummary(folderPath);
 
             if (string.IsNullOrWhiteSpace(explicitEnvironmentName))
@@ -5715,7 +6003,7 @@ namespace SSH_Helper
             }
             else
             {
-                DialogTheme.Show("A folder with that name already exists.", "Rename Folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show(this, "A folder with that name already exists.", "Rename Folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -5752,7 +6040,7 @@ namespace SSH_Helper
                                $"No = Delete folder but move presets to {targetLocation}\n" +
                                $"Cancel = Abort";
 
-                var result = DialogTheme.Show(message, "Delete Folder", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                var result = DialogTheme.Show(this, message, "Delete Folder", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
 
                 if (result == DialogResult.Cancel)
                     return;
@@ -5779,7 +6067,7 @@ namespace SSH_Helper
                 // No presets, just confirm deletion
                 string message = $"Delete folder '{folderName}'{contentsDescription}?";
 
-                if (DialogTheme.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                if (DialogTheme.Show(this, message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                 {
                     _presetManager.DeleteFolder(folderPath, deletePresets: false);
                     RefreshPresetList();
@@ -5798,7 +6086,7 @@ namespace SSH_Helper
         {
             if (trvPresets.SelectedNode?.Tag is not PresetNodeTag tag || !tag.IsFolder)
             {
-                DialogTheme.Show("Please select a folder to delete.", "Delete Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show(this, "Please select a folder to delete.", "Delete Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -5822,7 +6110,7 @@ namespace SSH_Helper
 
             string message = $"Are you sure you want to delete the folder '{folderName}'{contentsDescription}?\n\nThis action cannot be undone.";
 
-            if (DialogTheme.Show(message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            if (DialogTheme.Show(this, message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
             {
                 // Clear editor before deleting to avoid "save changes?" prompt for deleted presets
                 _activePresetName = null;
@@ -5841,6 +6129,11 @@ namespace SSH_Helper
             if (_suppressHistorySelectionChanged || !_historySelectionHandlingEnabled)
                 return;
 
+            ApplySelectedHistoryEntry();
+        }
+
+        private void ApplySelectedHistoryEntry()
+        {
             var selectedEntryId = (lstOutput.SelectedItem as HistoryListItem)?.Id;
             var shouldRunHistorySwitchGc = !string.Equals(
                 _lastHistorySelectionGcEntryId,
@@ -6151,8 +6444,12 @@ namespace SSH_Helper
             {
                 // Draw status icon
                 var iconRect = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top + 2, 16, 16);
-                var iconColor = hostEntry.Success ? Color.FromArgb(40, 167, 69) : Color.FromArgb(220, 53, 69);
-                var iconText = hostEntry.Success ? "\u2713" : "\u2717";
+                var iconColor = hostEntry.WasCancelled
+                    ? Color.FromArgb(255, 193, 7)
+                    : hostEntry.Success ? Color.FromArgb(40, 167, 69) : Color.FromArgb(220, 53, 69);
+                var iconText = hostEntry.WasCancelled
+                    ? "\u25A0"
+                    : hostEntry.Success ? "\u2713" : "\u2717";
 
                 using var iconFont = new Font("Segoe UI", 10F, FontStyle.Bold);
                 using var iconBrush = new SolidBrush(iconColor);
@@ -6164,6 +6461,22 @@ namespace SSH_Helper
                 using var textBrush = new SolidBrush(textColor);
                 SafeDrawString(e.Graphics, hostEntry.HostAddress, e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
             }
+        }
+
+        private void LstOutput_MeasureItem(object? sender, MeasureItemEventArgs e)
+        {
+            if (e.Index < 0 || e.Index >= lstOutput.Items.Count)
+            {
+                e.ItemHeight = HistoryListLayout.GetMinimumItemHeight(lstOutput.Font);
+                return;
+            }
+
+            var item = lstOutput.Items[e.Index];
+            var text = item is HistoryListItem historyItem
+                ? historyItem.Label
+                : item?.ToString() ?? string.Empty;
+
+            e.ItemHeight = HistoryListLayout.CalculateItemHeight(text, lstOutput.Font, lstOutput.ClientSize.Width);
         }
 
         private void LstOutput_DrawItem(object? sender, DrawItemEventArgs e)
@@ -6190,55 +6503,23 @@ namespace SSH_Helper
             var item = lstOutput.Items[e.Index];
             string text = item is HistoryListItem historyItem ? historyItem.Label : item?.ToString() ?? "";
 
-            // Check if this is a folder entry (contains folder emoji)
-            bool isFolderEntry = text.Contains(FolderIcon); // folder icon
-
             // Draw text with theme-aware color
             var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
-            using var textBrush = new SolidBrush(textColor);
-            using var sf = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+            var textBounds = HistoryListLayout.GetTextBounds(e.Bounds);
+            TextRenderer.DrawText(
+                e.Graphics,
+                text,
+                lstOutput.Font,
+                textBounds,
+                textColor,
+                HistoryListLayout.TextDrawFlags);
+        }
 
-            if (isFolderEntry)
-            {
-                // Remove the folder emoji from text
-                text = text.Replace("\U0001F4C1 ", "").Replace("\U0001F4C1", "");
-
-                // Parse the text to extract date/time and folder name
-                // Format is "2026-01-18 17:39:04 - FolderName"
-                int separatorIndex = text.IndexOf(" - ");
-                string dateTimePart = separatorIndex > 0 ? text.Substring(0, separatorIndex) : "";
-                string folderName = separatorIndex > 0 ? text.Substring(separatorIndex + 3) : text;
-
-                int currentX = e.Bounds.Left + 4;
-
-                // Draw date/time first
-                if (!string.IsNullOrEmpty(dateTimePart))
-                {
-                    var dateTimeSize = e.Graphics.MeasureString(dateTimePart + " - ", e.Font ?? lstOutput.Font);
-                    var dateTimeRect = new RectangleF(currentX, e.Bounds.Top, dateTimeSize.Width, e.Bounds.Height);
-                    SafeDrawString(e.Graphics, dateTimePart + " - ", e.Font ?? lstOutput.Font, textBrush, dateTimeRect, sf);
-                    currentX += (int)dateTimeSize.Width;
-                }
-
-                // Draw folder icon after date/time
-                var iconColor = _isDarkMode ? Color.FromArgb(220, 180, 80) : Color.FromArgb(180, 140, 60);
-                using var iconFont = new Font("Segoe UI Symbol", 9F);
-                using var iconBrush = new SolidBrush(iconColor);
-                var iconRect = new RectangleF(currentX, e.Bounds.Top, 18, e.Bounds.Height);
-                using var iconSf = new StringFormat { LineAlignment = StringAlignment.Center };
-                e.Graphics.DrawString("\U0001F4C1", iconFont, iconBrush, iconRect, iconSf);
-                currentX += 18;
-
-                // Draw folder name
-                var nameRect = new Rectangle(currentX, e.Bounds.Top, e.Bounds.Width - currentX - 4, e.Bounds.Height);
-                SafeDrawString(e.Graphics, folderName, e.Font ?? lstOutput.Font, textBrush, nameRect, sf);
-            }
-            else
-            {
-                // Regular entry - just draw the text
-                var textRect = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top, e.Bounds.Width - 8, e.Bounds.Height);
-                SafeDrawString(e.Graphics, text, e.Font ?? lstOutput.Font, textBrush, textRect, sf);
-            }
+        private void ConfigureHistoryListLayout()
+        {
+            lstOutput.DrawMode = DrawMode.OwnerDrawVariable;
+            lstOutput.ItemHeight = HistoryListLayout.GetMinimumItemHeight(lstOutput.Font);
+            lstOutput.RefreshVariableItemHeights();
         }
 
         private void TreeView_DrawNode(object? sender, DrawTreeNodeEventArgs e)
@@ -6370,13 +6651,52 @@ namespace SSH_Helper
             using var textBrush = new SolidBrush(textColor);
             using var sf = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
             SafeDrawString(e.Graphics, nodeText, treeView.Font, textBrush, textBounds, sf);
+
+            // Draw drop position indicator
+            if (treeView == trvPresets && _dropTargetNode == e.Node && _dropPosition != DropPosition.None)
+            {
+                var indicatorColor = _isDarkMode
+                    ? Color.FromArgb(0, 122, 204)
+                    : Color.FromArgb(10, 88, 202);
+
+                int lineLeft = e.Node.Level * treeView.Indent + 4;
+                int lineRight = treeView.ClientSize.Width - 4;
+
+                if (_dropPosition == DropPosition.Above)
+                {
+                    int y = rowBounds.Top + 1;
+                    using var pen = new Pen(indicatorColor, 2f);
+                    using var brush = new SolidBrush(indicatorColor);
+                    e.Graphics.FillEllipse(brush, lineLeft - 3, y - 3, 6, 6);
+                    e.Graphics.DrawLine(pen, lineLeft + 3, y, lineRight, y);
+                }
+                else if (_dropPosition == DropPosition.Below)
+                {
+                    int y = rowBounds.Bottom - 2;
+                    using var pen = new Pen(indicatorColor, 2f);
+                    using var brush = new SolidBrush(indicatorColor);
+                    e.Graphics.FillEllipse(brush, lineLeft - 3, y - 3, 6, 6);
+                    e.Graphics.DrawLine(pen, lineLeft + 3, y, lineRight, y);
+                }
+                else if (_dropPosition == DropPosition.Inside)
+                {
+                    var highlightColor = _isDarkMode
+                        ? Color.FromArgb(50, 0, 122, 204)
+                        : Color.FromArgb(50, 10, 88, 202);
+                    using var highlightBrush = new SolidBrush(highlightColor);
+                    e.Graphics.FillRectangle(highlightBrush, rowBounds);
+
+                    using var borderPen = new Pen(indicatorColor, 1f);
+                    e.Graphics.DrawRectangle(borderPen, rowBounds.X, rowBounds.Y, rowBounds.Width - 1, rowBounds.Height - 1);
+                }
+            }
         }
 
         private void exportHostOutputToolStripMenuItem_Click(object? sender, EventArgs e)
         {
             if (lstHosts.SelectedItem is not HostHistoryEntry hostEntry)
             {
-                DialogTheme.Show("Please select a host to export.", "No Host Selected", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show(this, "Please select a host to export.", "No Host Selected", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -6386,7 +6706,7 @@ namespace SSH_Helper
                 FileName = $"{hostEntry.HostAddress.Replace(":", "_")}_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
             };
 
-            if (sfd.ShowDialog() == DialogResult.OK)
+            if (sfd.ShowDialog(this) == DialogResult.OK)
             {
                 try
                 {
@@ -6395,7 +6715,7 @@ namespace SSH_Helper
                 }
                 catch (Exception ex)
                 {
-                    DialogTheme.Show($"Failed to export: {ex.Message}", "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show(this, $"Failed to export: {ex.Message}", "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -6725,6 +7045,13 @@ namespace SSH_Helper
 
         #region CSV Operations
 
+        private enum CsvSaveAttemptResult
+        {
+            Saved,
+            Cancelled,
+            Failed
+        }
+
         private void OpenCsvFile(string? filePath = null)
         {
             if (filePath == null)
@@ -6735,7 +7062,7 @@ namespace SSH_Helper
                     Multiselect = false
                 };
 
-                if (ofd.ShowDialog() != DialogResult.OK)
+                if (ofd.ShowDialog(this) != DialogResult.OK)
                     return;
 
                 filePath = ofd.FileName;
@@ -6761,6 +7088,7 @@ namespace SSH_Helper
                 _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
                     ? CsvFileSyncStatus.NotTracked
                     : CsvFileSyncStatus.Current;
+                CaptureLoadedFileSnapshotFromGrid();
                 AutoSizeColumnsToContent();
                 UpdateHostCount();
                 UpdateStatusBar($"Loaded: {Path.GetFileName(filePath)}");
@@ -6769,11 +7097,16 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Failed to load CSV: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, $"Failed to load CSV: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
         private void SaveCsvAs()
+        {
+            _ = SaveCsvAsInternal();
+        }
+
+        private CsvSaveAttemptResult SaveCsvAsInternal()
         {
             using var sfd = new SaveFileDialog
             {
@@ -6784,44 +7117,52 @@ namespace SSH_Helper
             if (!string.IsNullOrEmpty(_loadedFilePath))
                 sfd.FileName = Path.GetFileName(_loadedFilePath);
 
-            if (sfd.ShowDialog() == DialogResult.OK)
-            {
-                SaveCsvToFile(sfd.FileName);
-                _loadedFilePath = sfd.FileName;
-                _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
-                _loadedFileSyncStatus = CsvFileSyncStatus.Current;
-                UpdateHostsFileIndicator();
-                UpdateStatusBar($"Saved: {Path.GetFileName(sfd.FileName)}");
-            }
+            if (sfd.ShowDialog(this) != DialogResult.OK)
+                return CsvSaveAttemptResult.Cancelled;
+
+            return TrySaveCsvToPath(sfd.FileName);
         }
 
         private bool SaveCurrentCsv(bool promptIfNoPath)
+        {
+            return SaveCurrentCsvInternal(promptIfNoPath) == CsvSaveAttemptResult.Saved;
+        }
+
+        private CsvSaveAttemptResult SaveCurrentCsvInternal(bool promptIfNoPath)
         {
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
 
             if (string.IsNullOrWhiteSpace(_loadedFilePath))
             {
-                if (!promptIfNoPath) return false;
-                SaveCsvAs();
-                return !string.IsNullOrWhiteSpace(_loadedFilePath);
+                if (!promptIfNoPath)
+                    return CsvSaveAttemptResult.Cancelled;
+
+                return SaveCsvAsInternal();
             }
 
+            return TrySaveCsvToPath(_loadedFilePath);
+        }
+
+        private CsvSaveAttemptResult TrySaveCsvToPath(string filename)
+        {
             try
             {
-                SaveCsvToFile(_loadedFilePath);
+                SaveCsvToFile(filename);
+                _loadedFilePath = filename;
                 _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
                 _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
                     ? CsvFileSyncStatus.NotTracked
                     : CsvFileSyncStatus.Current;
+                CaptureLoadedFileSnapshotFromGrid();
                 UpdateHostsFileIndicator();
-                UpdateStatusBar($"Saved: {Path.GetFileName(_loadedFilePath)}");
-                return true;
+                UpdateStatusBar($"Saved: {Path.GetFileName(filename)}");
+                return CsvSaveAttemptResult.Saved;
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Failed to save file:\r\n{ex.Message}", "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return false;
+                DialogTheme.Show(this, $"Failed to save file:\r\n{ex.Message}", "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return CsvSaveAttemptResult.Failed;
             }
         }
 
@@ -6860,6 +7201,7 @@ namespace SSH_Helper
             _csvDirty = true;
             _loadedFilePath = null;
             _loadedFileFingerprint = null;
+            _loadedFileSnapshot = null;
             _loadedFileSyncStatus = CsvFileSyncStatus.NotTracked;
             UpdateHostCount();
             UpdateStatusBar("Grid cleared");
@@ -6873,6 +7215,7 @@ namespace SSH_Helper
             if (!_csvDirty) return true;
 
             var result = DialogTheme.Show(
+                this,
                 "You have unsaved CSV changes. Save before opening another file?",
                 "Unsaved CSV",
                 MessageBoxButtons.YesNoCancel,
@@ -6910,7 +7253,7 @@ namespace SSH_Helper
 
             if (dgv_variables.Columns.Contains(columnName))
             {
-                DialogTheme.Show("Column name already exists!");
+                DialogTheme.Show(this, "Column name already exists!", Application.ProductName ?? "Message", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 
@@ -6939,7 +7282,7 @@ namespace SSH_Helper
             if (dgv_variables.Columns.Cast<DataGridViewColumn>()
                 .Any(c => c.HeaderText.Equals(newName, StringComparison.OrdinalIgnoreCase)))
             {
-                DialogTheme.Show("This column name already exists.", "Rename Column Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, "This column name already exists.", "Rename Column Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -6955,7 +7298,7 @@ namespace SSH_Helper
 
             if (IsProtectedColumn(columnIndex))
             {
-                DialogTheme.Show("The Host_IP column cannot be deleted.", "Delete Column", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show(this, "The Host_IP column cannot be deleted.", "Delete Column", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -6968,14 +7311,14 @@ namespace SSH_Helper
         {
             if (rowIndex < 0 || rowIndex >= dgv_variables.Rows.Count)
             {
-                DialogTheme.Show("No valid row selected.");
+                DialogTheme.Show(this, "No valid row selected.", Application.ProductName ?? "Message", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 
             var row = dgv_variables.Rows[rowIndex];
             if (row.IsNewRow)
             {
-                DialogTheme.Show("Cannot delete the new row placeholder.");
+                DialogTheme.Show(this, "Cannot delete the new row placeholder.", Application.ProductName ?? "Message", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 
@@ -7121,27 +7464,28 @@ namespace SSH_Helper
 
         #region Preset Operations
 
-        private void SaveCurrentPreset()
+        private bool SaveCurrentPreset(PresetSaveImpactAction? selectedAction = null)
         {
             // Don't save when a folder is selected (folder summary is displayed)
             if (!string.IsNullOrEmpty(_selectedFolderName))
             {
-                return;
+                return false;
             }
 
             string presetName = txtPreset.Text.Trim();
             string commands = txtCommand.Text;
+            int? timeout = int.TryParse(txtTimeoutHeader.Text, out var parsedTimeout) ? parsedTimeout : null;
 
             if (string.IsNullOrEmpty(presetName))
             {
-                DialogTheme.Show("Preset name is required.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
+                DialogTheme.Show(this, "Preset name is required.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
             }
 
             // Prevent saving preset with folder icon prefix (safety check)
             if (presetName.StartsWith(FolderIcon, StringComparison.Ordinal))
             {
-                return;
+                return false;
             }
 
             var preActionExpandState = CapturePresetTreeExpandState();
@@ -7153,34 +7497,32 @@ namespace SSH_Helper
             bool nameChanged = hasActivePreset &&
                 !string.Equals(presetName, originalPresetName, StringComparison.Ordinal);
 
+            var action = selectedAction ?? ShowPresetSavePrompt(
+                presetName,
+                commands,
+                txtTimeoutHeader.Text ?? string.Empty,
+                timeout,
+                allowDiscard: false);
+
+            if (action is PresetSaveImpactAction.Cancel or PresetSaveImpactAction.Discard)
+            {
+                return false;
+            }
+
             if (nameChanged)
             {
-                var choice = DialogTheme.Show(
-                    $"Preset name changed from '{originalPresetName}' to '{presetName}'.\n\n" +
-                    "Yes = Rename the existing preset\n" +
-                    "No = Create a new preset\n" +
-                    "Cancel = Keep editing",
-                    "Save Preset",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (choice == DialogResult.Cancel)
-                {
-                    return;
-                }
-
-                if (choice == DialogResult.Yes)
+                if (action == PresetSaveImpactAction.RenameExisting)
                 {
                     if (_presetManager.Presets.ContainsKey(presetName))
                     {
-                        DialogTheme.Show("This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
+                        DialogTheme.Show(this, "This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return false;
                     }
 
                     if (!_presetManager.Rename(originalPresetName!, presetName))
                     {
-                        DialogTheme.Show("Unable to rename preset.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
+                        DialogTheme.Show(this, "Unable to rename preset.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return false;
                     }
 
                     int orderIndex = _manualPresetOrder.IndexOf(originalPresetName!);
@@ -7191,17 +7533,22 @@ namespace SSH_Helper
 
                     refreshPresetList = true;
                 }
-                else
+                else if (action == PresetSaveImpactAction.CreateNew)
                 {
                     if (_presetManager.Presets.ContainsKey(presetName))
                     {
                         DialogTheme.Show(
+                            this,
                             "A preset with this name already exists. Choose a different name to create a new preset.",
                             "Save Preset",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Warning);
-                        return;
+                        return false;
                     }
+                }
+                else
+                {
+                    return false;
                 }
             }
 
@@ -7216,7 +7563,7 @@ namespace SSH_Helper
             var preset = new PresetInfo
             {
                 Commands = commands,
-                Timeout = int.TryParse(txtTimeoutHeader.Text, out var t) ? t : null,
+                Timeout = timeout,
                 IsFavorite = existingPreset?.IsFavorite ?? false,
                 Folder = existingPreset?.Folder
             };
@@ -7255,6 +7602,7 @@ namespace SSH_Helper
             _activePresetName = presetName;
             UpdatePresetHeaderIndicator();
             UpdateStatusBar($"Preset '{presetName}' saved");
+            return true;
         }
 
         private void AddPreset()
@@ -7262,14 +7610,9 @@ namespace SSH_Helper
             // Check for unsaved changes first
             if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
             {
-                var saveResult = ShowUnsavedPresetDiffPrompt();
-
-                if (saveResult == DialogResult.Cancel)
-                    return;
-
-                if (saveResult == DialogResult.Yes)
+                if (!TryResolvePendingPresetChanges())
                 {
-                    SaveCurrentPreset();
+                    return;
                 }
             }
 
@@ -7282,7 +7625,7 @@ namespace SSH_Helper
 
             if (_presetManager.Presets.ContainsKey(presetName))
             {
-                DialogTheme.Show("Preset name already exists!");
+                DialogTheme.Show(this, "Preset name already exists!", Application.ProductName ?? "Message", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 
@@ -7397,22 +7740,11 @@ namespace SSH_Helper
             return null;
         }
 
-        private PresetNodeTag? GetSelectionTargetAboveDeletedPreset(string presetName, bool preferContextSource)
+        private string? GetSelectionTargetAfterDeletedPreset(string presetName, bool preferContextSource)
         {
             var sourceTree = ResolvePresetTreeViewForActions(preferContextSource);
-            var nodeToDelete = FindPresetNodeByName(sourceTree.Nodes, presetName);
-            var targetNode = nodeToDelete?.PrevVisibleNode ?? nodeToDelete?.NextVisibleNode;
-
-            if (targetNode?.Tag is not PresetNodeTag targetTag)
-            {
-                return null;
-            }
-
-            return new PresetNodeTag
-            {
-                IsFolder = targetTag.IsFolder,
-                Name = targetTag.Name
-            };
+            var displayedNodes = PresetTreeDisplayOrderBuilder.Build(sourceTree.Nodes);
+            return PresetDeletionSelectionResolver.GetAdjacentPresetName(displayedNodes, presetName);
         }
 
         private void DuplicatePreset(bool preferContextSource = false)
@@ -7437,7 +7769,7 @@ namespace SSH_Helper
 
             if (_presetManager.Presets.ContainsKey(newName))
             {
-                DialogTheme.Show("A preset with that name already exists.", "Copy Preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show(this, "A preset with that name already exists.", "Copy Preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -7479,7 +7811,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                DialogTheme.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -7498,7 +7830,7 @@ namespace SSH_Helper
 
             if (!_presetManager.Rename(selectedPreset, newName))
             {
-                DialogTheme.Show("This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, "This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -7524,8 +7856,16 @@ namespace SSH_Helper
             if (string.IsNullOrWhiteSpace(selectedPreset))
                 return;
 
+            var deleteNode = FindPresetNodeByName(trvPresets.Nodes, selectedPreset);
             var preActionExpandState = CapturePresetTreeExpandState();
-            var selectionTarget = GetSelectionTargetAboveDeletedPreset(selectedPreset, preferContextSource);
+            var selectionTargetPresetName = GetSelectionTargetAfterDeletedPreset(selectedPreset, preferContextSource);
+            var selectionTargetNode = string.IsNullOrEmpty(selectionTargetPresetName)
+                ? null
+                : FindPresetNodeByName(trvPresets.Nodes, selectionTargetPresetName);
+            var canDeleteInPlace =
+                string.IsNullOrWhiteSpace(_activePresetFilter) &&
+                deleteNode != null &&
+                deleteNode.TreeView == trvPresets;
 
             // Check if this is the currently active preset being deleted
             bool isDeletingActivePreset = string.Equals(selectedPreset, _activePresetName, StringComparison.Ordinal);
@@ -7543,22 +7883,22 @@ namespace SSH_Helper
                     txtTimeoutHeader.Clear();
                 }
 
-                RefreshPresetList(expandStatesOverride: preActionExpandState);
-
-                if (selectionTarget != null)
+                if (canDeleteInPlace)
                 {
-                    if (selectionTarget.IsFolder)
-                    {
-                        SelectFolderByName(selectionTarget.Name, ensureVisible: false);
-                    }
-                    else
-                    {
-                        SelectPresetByName(selectionTarget.Name, ensureVisible: false);
-                    }
+                    PresetTreeDeleteMutation.RemoveNodeAndSelectReplacement(trvPresets, deleteNode!, selectionTargetNode);
+                }
+                else
+                {
+                    RefreshPresetList(expandStatesOverride: preActionExpandState);
+                }
 
+                RefreshFavoritesList();
+
+                if (!string.IsNullOrEmpty(selectionTargetPresetName))
+                {
                     if (trvPresets.SelectedNode?.Tag is PresetNodeTag selectedTag &&
-                        selectedTag.IsFolder == selectionTarget.IsFolder &&
-                        string.Equals(selectedTag.Name, selectionTarget.Name, StringComparison.Ordinal))
+                        !selectedTag.IsFolder &&
+                        string.Equals(selectedTag.Name, selectionTargetPresetName, StringComparison.Ordinal))
                     {
                         return;
                     }
@@ -7567,7 +7907,10 @@ namespace SSH_Helper
                 // Select another preset if any exist
                 if (_presetManager.Presets.Count > 0)
                 {
-                    var firstPreset = _presetManager.Presets.Keys.FirstOrDefault();
+                    var firstPreset = PresetTreeDisplayOrderBuilder.Build(trvPresets.Nodes)
+                        .FirstOrDefault(tag => !tag.IsFolder)
+                        ?.Name;
+
                     if (!string.IsNullOrEmpty(firstPreset) &&
                         !string.Equals(_activePresetName, firstPreset, StringComparison.Ordinal))
                     {
@@ -7590,7 +7933,7 @@ namespace SSH_Helper
             string? presetName = ResolvePresetNameForActions(preferContextSource);
             if (string.IsNullOrWhiteSpace(presetName))
             {
-                DialogTheme.Show("No preset selected to export.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show(this, "No preset selected to export.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -7598,11 +7941,11 @@ namespace SSH_Helper
             {
                 string exportString = _presetManager.Export(presetName);
                 Clipboard.SetText(exportString);
-                DialogTheme.Show("Preset exported to clipboard.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show(this, "Preset exported to clipboard.", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Failed to export preset: {ex.Message}", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, $"Failed to export preset: {ex.Message}", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -7633,15 +7976,15 @@ namespace SSH_Helper
                     }
                 }
 
-                DialogTheme.Show($"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show(this, $"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (FormatException)
             {
-                DialogTheme.Show("Invalid format or Base64 encoding.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, "Invalid format or Base64 encoding.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Failed to import preset: {ex.Message}", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, $"Failed to import preset: {ex.Message}", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -7649,7 +7992,7 @@ namespace SSH_Helper
         {
             if (_presetManager.Presets.Count == 0)
             {
-                DialogTheme.Show("No presets to export.", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show(this, "No presets to export.", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -7661,18 +8004,18 @@ namespace SSH_Helper
                 FileName = "presets_export.json"
             };
 
-            if (dialog.ShowDialog() != DialogResult.OK)
+            if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
             try
             {
                 _presetManager.ExportAllToFile(dialog.FileName);
-                DialogTheme.Show($"Exported {_presetManager.Presets.Count} presets to:\n{dialog.FileName}",
+                DialogTheme.Show(this, $"Exported {_presetManager.Presets.Count} presets to:\n{dialog.FileName}",
                     "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Failed to export presets: {ex.Message}", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, $"Failed to export presets: {ex.Message}", "Export All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -7685,7 +8028,7 @@ namespace SSH_Helper
                 DefaultExt = "json"
             };
 
-            if (dialog.ShowDialog() != DialogResult.OK)
+            if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
             // Ask user where to import the presets
@@ -7704,16 +8047,16 @@ namespace SSH_Helper
                         ? "Presets were imported to root level."
                         : $"Presets were imported to folder \"{targetFolder}\".";
 
-                DialogTheme.Show($"Imported {count} presets.\n\n{locationMsg}\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
+                DialogTheme.Show(this, $"Imported {count} presets.\n\n{locationMsg}\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
                     "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (FormatException ex)
             {
-                DialogTheme.Show($"Invalid preset file format: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, $"Invalid preset file format: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Failed to import presets: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, $"Failed to import presets: {ex.Message}", "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -7730,6 +8073,7 @@ namespace SSH_Helper
         {
             // Ask if user wants to import to a specific folder
             var result = DialogTheme.Show(
+                this,
                 "Would you like to import these presets into a specific folder?\n\n" +
                 "• Yes - Choose a destination folder\n" +
                 "• No - Keep the original folder structure from the export",
@@ -7974,18 +8318,19 @@ namespace SSH_Helper
             return sortedFolders;
         }
 
-        private IEnumerable<string> GetManualOrderedFolders(List<string> folders, AppConfiguration config)
+        private static IEnumerable<string> GetManualOrdered(IEnumerable<string> all, IReadOnlyList<string> manualOrder)
         {
+            var allList = all as IList<string> ?? all.ToList();
             var result = new List<string>();
-            foreach (var name in config.ManualFolderOrder)
+            foreach (var name in manualOrder)
             {
-                if (folders.Contains(name))
+                if (allList.Contains(name))
                 {
                     result.Add(name);
                 }
             }
-            // Add any folders not in manual order
-            foreach (var name in folders)
+            // Add any items not in manual order
+            foreach (var name in allList)
             {
                 if (!result.Contains(name))
                 {
@@ -7993,6 +8338,11 @@ namespace SSH_Helper
                 }
             }
             return result;
+        }
+
+        private IEnumerable<string> GetManualOrderedFolders(List<string> folders, AppConfiguration config)
+        {
+            return GetManualOrdered(folders, config.ManualFolderOrder);
         }
 
         private IEnumerable<string> GetSortedPresetsInFolder(string? folder, AppConfiguration config)
@@ -8023,27 +8373,10 @@ namespace SSH_Helper
         private IEnumerable<string> GetManualOrderedPresets(List<string> presets, string? folder, AppConfiguration config)
         {
             string folderKey = folder ?? "";
-            var result = new List<string>();
-
-            if (config.ManualPresetOrderByFolder.TryGetValue(folderKey, out var manualOrder))
-            {
-                foreach (var name in manualOrder)
-                {
-                    if (presets.Contains(name))
-                    {
-                        result.Add(name);
-                    }
-                }
-            }
-            // Add any presets not in manual order
-            foreach (var name in presets)
-            {
-                if (!result.Contains(name))
-                {
-                    result.Add(name);
-                }
-            }
-            return result;
+            IReadOnlyList<string> manualOrder = config.ManualPresetOrderByFolder.TryGetValue(folderKey, out var order)
+                ? order
+                : Array.Empty<string>();
+            return GetManualOrdered(presets, manualOrder);
         }
 
         private void DisplayFolderSummary(string folderPath)
@@ -8109,7 +8442,7 @@ namespace SSH_Helper
         {
             _activePresetName = null;
             _selectedFolderName = folderPath;
-            TryApplyFolderEnvironment(folderPath, promptIfDirty: true);
+            TryApplyFolderEnvironment(folderPath);
             txtTimeoutHeader.Clear();
             RefreshSelectedFolderSummary();
         }
@@ -8139,17 +8472,9 @@ namespace SSH_Helper
 
             if (!string.IsNullOrEmpty(_activePresetName) && IsPresetDirty())
             {
-                var result = ShowUnsavedPresetDiffPrompt();
-
-                if (result == DialogResult.Cancel)
+                if (!TryResolvePendingPresetChanges(onCancel))
                 {
-                    onCancel?.Invoke();
                     return;
-                }
-
-                if (result == DialogResult.Yes)
-                {
-                    SaveCurrentPreset();
                 }
             }
 
@@ -8211,31 +8536,31 @@ namespace SSH_Helper
             }
         }
 
+        private static TreeNode? FindNodeByTag(TreeNodeCollection nodes, string name, bool isFolder)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if (node.Tag is PresetNodeTag tag && tag.IsFolder == isFolder && tag.Name == name)
+                    return node;
+
+                var found = FindNodeByTag(node.Nodes, name, isFolder);
+                if (found != null)
+                    return found;
+            }
+            return null;
+        }
+
         private void SelectPresetByName(string? presetName, bool ensureVisible = true)
         {
             if (string.IsNullOrEmpty(presetName))
                 return;
 
-            TreeNode? FindNode(TreeNodeCollection nodes)
-            {
-                foreach (TreeNode node in nodes)
-                {
-                    if (node.Tag is PresetNodeTag tag && !tag.IsFolder && tag.Name == presetName)
-                        return node;
-
-                    var found = FindNode(node.Nodes);
-                    if (found != null)
-                        return found;
-                }
-                return null;
-            }
-
-            var targetNode = FindNode(trvPresets.Nodes);
+            var targetNode = FindNodeByTag(trvPresets.Nodes, presetName, isFolder: false);
             if (targetNode != null)
             {
                 // In state-preserving flows, avoid selecting hidden nodes because
-                // SelectedNode itself can auto-expand ancestor folders.
-                if (!ensureVisible && !targetNode.IsVisible)
+                // SelectedNode itself can auto-expand collapsed ancestor folders.
+                if (!ensureVisible && !PresetTreeSelectionGuard.CanSelectWithoutEnsuringVisible(targetNode))
                 {
                     return;
                 }
@@ -8252,34 +8577,23 @@ namespace SSH_Helper
             }
         }
 
+        private void SelectTreeNodeByTagName(string? name, bool isFolder, bool ensureVisible = true)
+        {
+            if (isFolder)
+                SelectFolderByName(name, ensureVisible);
+            else
+                SelectPresetByName(name, ensureVisible);
+        }
+
         private void SelectFolderByName(string? folderName, bool ensureVisible = true)
         {
             if (string.IsNullOrEmpty(folderName))
                 return;
 
-            TreeNode? FindNode(TreeNodeCollection nodes)
-            {
-                foreach (TreeNode node in nodes)
-                {
-                    if (node.Tag is PresetNodeTag tag && tag.IsFolder && tag.Name == folderName)
-                    {
-                        return node;
-                    }
-
-                    var found = FindNode(node.Nodes);
-                    if (found != null)
-                    {
-                        return found;
-                    }
-                }
-
-                return null;
-            }
-
-            var targetNode = FindNode(trvPresets.Nodes);
+            var targetNode = FindNodeByTag(trvPresets.Nodes, folderName, isFolder: true);
             if (targetNode != null)
             {
-                if (!ensureVisible && !targetNode.IsVisible)
+                if (!ensureVisible && !PresetTreeSelectionGuard.CanSelectWithoutEnsuringVisible(targetNode))
                 {
                     return;
                 }
@@ -8374,26 +8688,154 @@ namespace SSH_Helper
                 .Replace('\r', '\n');
         }
 
-        private DialogResult ShowUnsavedPresetDiffPrompt()
+        private PresetInfo? GetExistingPresetForPendingSave(string presetName, out string? existingPresetName)
         {
-            var activePresetName = _activePresetName;
-            if (string.IsNullOrEmpty(activePresetName))
+            if (!string.IsNullOrWhiteSpace(_activePresetName))
             {
-                return DialogResult.No;
+                var activePreset = _presetManager.Get(_activePresetName);
+                if (activePreset != null)
+                {
+                    existingPresetName = _activePresetName;
+                    return activePreset;
+                }
             }
 
-            var savedPreset = _presetManager.Get(activePresetName);
+            var matchingPreset = _presetManager.Get(presetName);
+            if (matchingPreset != null)
+            {
+                existingPresetName = presetName;
+                return matchingPreset;
+            }
+
+            existingPresetName = null;
+            return null;
+        }
+
+        private static bool HasPendingPresetChanges(
+            string presetName,
+            string commands,
+            int? timeout,
+            PresetInfo? existingPreset,
+            string? existingPresetName)
+        {
+            if (existingPreset == null || string.IsNullOrWhiteSpace(existingPresetName))
+            {
+                return true;
+            }
+
+            bool nameChanged = !string.Equals(presetName, existingPresetName, StringComparison.Ordinal);
+            bool commandsChanged = !string.Equals(
+                NormalizeCommandTextForComparison(commands),
+                NormalizeCommandTextForComparison(existingPreset.Commands),
+                StringComparison.Ordinal);
+            bool timeoutChanged = existingPreset.Timeout != timeout;
+
+            return nameChanged || commandsChanged || timeoutChanged;
+        }
+
+        private PresetSaveImpactAction ShowPresetSavePrompt(
+            string presetName,
+            string commands,
+            string currentTimeoutText,
+            int? timeout,
+            bool allowDiscard)
+        {
+            var existingPreset = GetExistingPresetForPendingSave(presetName, out var existingPresetName);
+            if (existingPreset == null || string.IsNullOrWhiteSpace(existingPresetName))
+            {
+                return allowDiscard
+                    ? PresetSaveImpactAction.Discard
+                    : PresetSaveImpactAction.SaveExisting;
+            }
+
+            var nameChanged = !string.Equals(presetName, existingPresetName, StringComparison.Ordinal);
+            var hasPendingChanges = HasPendingPresetChanges(
+                presetName,
+                commands,
+                timeout,
+                existingPreset,
+                existingPresetName);
+
+            if (!hasPendingChanges)
+            {
+                return PresetSaveImpactAction.SaveExisting;
+            }
+
+            var impact = PresetSaveImpactResolver.Resolve(
+                _presetManager,
+                existingPresetName!,
+                existingPreset.Folder);
+
+            if (!impact.HasAffectedJobs && !nameChanged && !allowDiscard)
+            {
+                return PresetSaveImpactAction.SaveExisting;
+            }
 
             using var dialog = new UnsavedPresetDiffDialog(
-                activePresetName,
-                txtPreset.Text ?? string.Empty,
-                savedPreset?.Timeout,
-                txtTimeoutHeader.Text ?? string.Empty,
-                savedPreset?.Commands ?? string.Empty,
-                txtCommand.Text ?? string.Empty,
-                _isDarkMode);
+                existingPresetName!,
+                presetName,
+                existingPreset.Timeout,
+                currentTimeoutText,
+                existingPreset.Commands,
+                commands,
+                _isDarkMode,
+                impact,
+                GetPresetSavePromptMode(nameChanged, allowDiscard));
             DialogTheme.SetDialogFont(dialog, _dialogFont);
-            return dialog.ShowDialog(this);
+            dialog.ShowDialog(this);
+            return dialog.SelectedAction;
+        }
+
+        private bool TryResolvePendingPresetChanges(Action? onCancel = null)
+        {
+            if (!IsPresetDirty())
+            {
+                return true;
+            }
+
+            string presetName = txtPreset.Text.Trim();
+            string commands = txtCommand.Text;
+            int? timeout = int.TryParse(txtTimeoutHeader.Text, out var parsedTimeout) ? parsedTimeout : null;
+
+            var action = ShowPresetSavePrompt(
+                presetName,
+                commands,
+                txtTimeoutHeader.Text ?? string.Empty,
+                timeout,
+                allowDiscard: true);
+
+            if (action == PresetSaveImpactAction.Cancel)
+            {
+                onCancel?.Invoke();
+                return false;
+            }
+
+            if (action == PresetSaveImpactAction.Discard)
+            {
+                return true;
+            }
+
+            if (!SaveCurrentPreset(action))
+            {
+                onCancel?.Invoke();
+                return false;
+            }
+
+            return true;
+        }
+
+        private static PresetSavePromptMode GetPresetSavePromptMode(bool nameChanged, bool allowDiscard)
+        {
+            if (nameChanged)
+            {
+                return allowDiscard
+                    ? PresetSavePromptMode.RenameExistingCreateNewDiscardCancel
+                    : PresetSavePromptMode.RenameExistingCreateNewCancel;
+            }
+
+            return allowDiscard
+                ? PresetSavePromptMode.SaveDiscardCancel
+                : PresetSavePromptMode.SaveCancel;
         }
 
         private bool IsPresetDirty()
@@ -8559,14 +9001,19 @@ namespace SSH_Helper
                 SshDebugLog("EXEC", $"Preset created. IsScript: {preset.IsScript}", sw);
             }
 
-            UpdateStatusBar(startStatus(hosts.Count), true, 0, hosts.Count);
-            var executionStartUtc = DateTime.UtcNow;
-
-            try
+            if (dialogOptions != null)
             {
-                List<ExecutionResult> results;
-                if (dialogOptions != null)
+                var totalOperations = hosts.Count * Math.Max(1, dialogOptions.SelectedPresets.Count);
+                var manualProgress = BeginManualExecutionProgress(totalOperations);
+                if (manualProgress == null)
                 {
+                    UpdateStatusBar(startStatus(hosts.Count));
+                }
+                var branchExecutionStartUtc = DateTime.UtcNow;
+
+                try
+                {
+                    List<ExecutionResult> results;
                     var presets = new Dictionary<string, PresetInfo>(StringComparer.Ordinal)
                     {
                         [presetDisplayName] = preparation.Preset
@@ -8579,19 +9026,74 @@ namespace SSH_Helper
                         tsbUsername.Text,
                         tsbPassword.Text,
                         preparation.Timeouts,
-                        dialogOptions);
+                        dialogOptions,
+                        manualProgress);
                     SshDebugLog("EXEC", $"ExecuteFolderAsync completed. Results: {results.Count}", sw);
-                }
-                else
-                {
-                    SshDebugLog("EXEC", "Calling ExecutePresetAsync - SSH connection starting", sw);
-                    results = await _executionCoordinator.ExecutePresetAsync(
-                        hosts,
-                        preparation,
+
+                    var wasCancelled = WasManualExecutionCancelled(results);
+                    if (wasCancelled)
+                    {
+                        AppendOutputText(Environment.NewLine + Environment.NewLine + "Execution cancelled." + Environment.NewLine);
+                    }
+
+                    var executionDetails = BuildExecutionDetails(
+                        presetDisplayName,
+                        preset.Commands,
+                        preset.Type.ToString(),
+                        branchExecutionStartUtc,
+                        DateTime.UtcNow,
                         tsbUsername.Text,
-                        tsbPassword.Text);
-                    SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
+                        preparation.CommandTimeoutSeconds,
+                        preparation.ConnectionTimeoutSeconds,
+                        _sshService.UseConnectionPooling,
+                        BuildRunModeDescription(dialogOptions, isFolderExecution: false),
+                        wasCancelled,
+                        isFolderExecution: false,
+                        string.Empty,
+                        new[] { presetDisplayName },
+                        hosts,
+                        results);
+
+                    StoreExecutionHistory(results, executionDetails);
+                    UpdateStatusBar(wasCancelled
+                        ? BuildCancelledPresetStatus(hosts)
+                        : completionStatus(results.Count));
                 }
+                catch (Exception ex)
+                {
+                    SshDebugLog("EXEC", $"Exception: {ex.GetType().Name}: {ex.Message}", sw);
+                    DialogTheme.Show(this, $"An error occurred: {ex.Message}", Application.ProductName ?? "Message", MessageBoxButtons.OK, MessageBoxIcon.None);
+                    UpdateStatusBar("Execution failed");
+                }
+                finally
+                {
+                    SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
+                    SetExecutionMode(false);
+                }
+                return;
+            }
+            else
+            {
+                UpdateStatusBar(startStatus(hosts.Count));
+            }
+            var executionStartUtc = DateTime.UtcNow;
+
+            try
+            {
+                List<ExecutionResult> results;
+                SshDebugLog("EXEC", "Calling ExecutePresetAsync - SSH connection starting", sw);
+                results = await _executionCoordinator.ExecutePresetAsync(
+                    hosts,
+                    preparation,
+                    tsbUsername.Text,
+                    tsbPassword.Text);
+                SshDebugLog("EXEC", $"ExecutePresetAsync completed. Results: {results.Count}", sw);
+                var wasCancelled = WasManualExecutionCancelled(results);
+                if (wasCancelled)
+                {
+                    AppendOutputText(Environment.NewLine + Environment.NewLine + "Execution cancelled." + Environment.NewLine);
+                }
+
                 var executionDetails = BuildExecutionDetails(
                     presetDisplayName,
                     preset.Commands,
@@ -8603,6 +9105,7 @@ namespace SSH_Helper
                     preparation.ConnectionTimeoutSeconds,
                     _sshService.UseConnectionPooling,
                     BuildRunModeDescription(dialogOptions, isFolderExecution: false),
+                    wasCancelled,
                     isFolderExecution: false,
                     string.Empty,
                     new[] { presetDisplayName },
@@ -8610,12 +9113,14 @@ namespace SSH_Helper
                     results);
 
                 StoreExecutionHistory(results, executionDetails);
-                UpdateStatusBar(completionStatus(results.Count));
+                UpdateStatusBar(wasCancelled
+                    ? BuildCancelledPresetStatus(hosts)
+                    : completionStatus(results.Count));
             }
             catch (Exception ex)
             {
                 SshDebugLog("EXEC", $"Exception: {ex.GetType().Name}: {ex.Message}", sw);
-                DialogTheme.Show($"An error occurred: {ex.Message}");
+                DialogTheme.Show(this, $"An error occurred: {ex.Message}", Application.ProductName ?? "Message", MessageBoxButtons.OK, MessageBoxIcon.None);
                 UpdateStatusBar("Execution failed");
             }
             finally
@@ -8811,7 +9316,7 @@ namespace SSH_Helper
 
             if (checkedRows.Count == 0)
             {
-                DialogTheme.Show("No hosts selected. Check the boxes next to hosts you want to execute on.",
+                DialogTheme.Show(this, "No hosts selected. Check the boxes next to hosts you want to execute on.",
                     "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -8825,41 +9330,17 @@ namespace SSH_Helper
 
         private async void ExecuteFolderPresetsOnAllHosts(string folderName)
         {
-            var config = _configService.Load();
-            var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
-            if (presetNames.Count == 0)
-            {
-                DialogTheme.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
             var hostRows = dgv_variables.Rows.Cast<DataGridViewRow>()
                 .Where(r => !r.IsNewRow && !string.IsNullOrWhiteSpace(GetCellValue(r, CsvManager.HostColumnName)))
                 .ToList();
 
             if (hostRows.Count == 0)
             {
-                DialogTheme.Show("No hosts available.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show(this, "No hosts available.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            // Show folder execution dialog
-            var hostAddresses = hostRows
-                .Select(r => GetCellValue(r, CsvManager.HostColumnName))
-                .Where(h => !string.IsNullOrWhiteSpace(h))
-                .ToList();
-            using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses, _isDarkMode);
-            DialogTheme.SetDialogFont(dialog, _dialogFont);
-            if (dialog.ShowDialog(this) != DialogResult.OK)
-                return;
-
-            var options = dialog.Options;
-            if (options.SelectedPresets.Count == 0)
-                return;
-
-            if (_sshService.IsRunning) return;
-
-            await ExecuteFolderWithOptionsAsync(folderName, options, hostRows);
+            await ExecuteFolderPresetsAsync(folderName, hostRows);
         }
 
         private async void ExecuteFolderPresetsOnSelectedHost(string folderName)
@@ -8881,39 +9362,11 @@ namespace SSH_Helper
                 return;
             }
 
-            var config = _configService.Load();
-            var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
-            if (presetNames.Count == 0)
-            {
-                DialogTheme.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            // Show folder execution dialog (single host selected)
-            using var dialog = new FolderExecutionDialog(folderName, presetNames, new List<string> { host }, _isDarkMode);
-            DialogTheme.SetDialogFont(dialog, _dialogFont);
-            if (dialog.ShowDialog(this) != DialogResult.OK)
-                return;
-
-            var options = dialog.Options;
-            if (options.SelectedPresets.Count == 0)
-                return;
-
-            if (_sshService.IsRunning) return;
-
-            await ExecuteFolderWithOptionsAsync(folderName, options, new List<DataGridViewRow> { row });
+            await ExecuteFolderPresetsAsync(folderName, new List<DataGridViewRow> { row });
         }
 
         private async void ExecuteFolderPresetsOnCheckedHosts(string folderName)
         {
-            var config = _configService.Load();
-            var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
-            if (presetNames.Count == 0)
-            {
-                DialogTheme.Show($"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
             // Get checked host rows with valid hosts
             var checkedRows = dgv_variables.Rows.Cast<DataGridViewRow>()
                 .Where(r => !r.IsNewRow &&
@@ -8928,10 +9381,25 @@ namespace SSH_Helper
                 return;
             }
 
-            // Show folder execution dialog with all checked hosts
-            var hostAddresses = checkedRows
+            await ExecuteFolderPresetsAsync(folderName, checkedRows);
+        }
+
+        private async Task ExecuteFolderPresetsAsync(string folderName, IEnumerable<DataGridViewRow> rows)
+        {
+            var config = _configService.Load();
+            var presetNames = GetSortedPresetsInFolder(folderName, config).ToList();
+            if (presetNames.Count == 0)
+            {
+                DialogTheme.Show(this, $"Folder '{folderName}' contains no presets.", "Run Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var hostRows = rows.ToList();
+            var hostAddresses = hostRows
                 .Select(r => GetCellValue(r, CsvManager.HostColumnName))
+                .Where(h => !string.IsNullOrWhiteSpace(h))
                 .ToList();
+
             using var dialog = new FolderExecutionDialog(folderName, presetNames, hostAddresses, _isDarkMode);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
             if (dialog.ShowDialog(this) != DialogResult.OK)
@@ -8943,7 +9411,7 @@ namespace SSH_Helper
 
             if (_sshService.IsRunning) return;
 
-            await ExecuteFolderWithOptionsAsync(folderName, options, checkedRows);
+            await ExecuteFolderWithOptionsAsync(folderName, options, hostRows);
         }
 
         private async Task ExecuteFolderWithOptionsAsync(string folderName, FolderExecutionOptions options, List<DataGridViewRow> hostRows)
@@ -8960,7 +9428,7 @@ namespace SSH_Helper
                     .ToList();
             }
 
-            if (!TryApplyFolderEnvironment(folderName, promptIfDirty: true))
+            if (!TryApplyFolderEnvironment(folderName))
                 return;
 
             // Build preset dictionary
@@ -8990,22 +9458,16 @@ namespace SSH_Helper
             ClearOutput();
 
             int totalOperations = hosts.Count * presets.Count;
-            UpdateStatusBar($"Executing folder '{folderName}' on {hosts.Count} hosts...", true, 0, totalOperations);
+            var progress = BeginManualExecutionProgress(totalOperations);
+            if (progress == null)
+            {
+                UpdateStatusBar($"Executing folder '{folderName}' on {hosts.Count} hosts...");
+            }
 
             // Use default timeout from first preset or config
             int commandTimeout = presets.Values.FirstOrDefault()?.Timeout ?? config.Timeout;
             var timeouts = SshTimeoutOptions.Create(commandTimeout, connectionTimeout);
             var executionStartUtc = DateTime.UtcNow;
-
-            // Progress reporter
-            var progress = new Progress<FolderExecutionProgress>(p =>
-            {
-                if (!string.IsNullOrEmpty(p.CurrentHost) && !string.IsNullOrEmpty(p.CurrentPreset))
-                {
-                    int completed = p.CompletedHosts * presets.Count + p.CompletedPresets;
-                    UpdateStatusBar($"Running {folderName}: {p.CurrentPreset} ({p.CompletedPresets + 1}/{p.TotalPresets}) on {p.CurrentHost}", true, completed, totalOperations);
-                }
-            });
 
             try
             {
@@ -9018,6 +9480,12 @@ namespace SSH_Helper
                     options,
                     progress);
 
+                var wasCancelled = WasManualExecutionCancelled(results);
+                if (wasCancelled)
+                {
+                    AppendOutputText(Environment.NewLine + Environment.NewLine + $"Folder '{folderName}' cancelled." + Environment.NewLine);
+                }
+
                 var executionDetails = BuildExecutionDetails(
                     folderName,
                     BuildFolderCommandSnapshot(options.SelectedPresets, presets),
@@ -9029,6 +9497,7 @@ namespace SSH_Helper
                     connectionTimeout,
                     _sshService.UseConnectionPooling,
                     BuildRunModeDescription(options, isFolderExecution: true),
+                    wasCancelled,
                     isFolderExecution: true,
                     folderName,
                     options.SelectedPresets,
@@ -9039,15 +9508,17 @@ namespace SSH_Helper
                 StoreFolderExecutionHistory(folderName, results, executionDetails);
 
                 int successCount = results.Count(r => r.Success);
-                int failCount = results.Count - successCount;
-                string status = failCount > 0
-                    ? $"Completed folder '{folderName}': {successCount} succeeded, {failCount} failed"
-                    : $"Completed folder '{folderName}' on {hosts.Count} hosts";
+                int failCount = results.Count(r => !r.Success && !r.WasCancelled);
+                string status = wasCancelled
+                    ? BuildCancelledFolderStatus(folderName)
+                    : failCount > 0
+                        ? $"Completed folder '{folderName}': {successCount} succeeded, {failCount} failed"
+                        : $"Completed folder '{folderName}' on {hosts.Count} hosts";
                 UpdateStatusBar(status);
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, $"An error occurred: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 UpdateStatusBar("Execution failed");
             }
             finally
@@ -9059,19 +9530,24 @@ namespace SSH_Helper
         private string StoreFolderExecutionHistory(string folderName, List<ExecutionResult> results, ExecutionDetails? details = null)
         {
             var hostResults = BuildHostHistoryEntries(results);
-            var combinedOutput = new StringBuilder();
-
-            for (int i = 0; i < hostResults.Count; i++)
+            var output = GetBufferedOutputSnapshot();
+            if (string.IsNullOrEmpty(output))
             {
-                combinedOutput.Append(hostResults[i].Output);
+                var combinedOutput = new StringBuilder();
+                foreach (var hostResult in hostResults)
+                {
+                    combinedOutput.Append(hostResult.Output);
+                }
+
+                output = combinedOutput.ToString();
             }
 
-            string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {FolderIcon} {folderName}";
+            string label = BuildExecutionHistoryLabel(folderName, isFolder: true, details?.WasCancelled == true);
             var entryId = HistoryIdGenerator.NewId();
             var payload = new HistoryRunPayload
             {
                 Id = entryId,
-                Output = combinedOutput.ToString(),
+                Output = output,
                 HostResults = hostResults.Count > 0 ? hostResults : null,
                 Details = details == null ? null : CloneExecutionDetails(details)
             };
@@ -9082,17 +9558,51 @@ namespace SSH_Helper
                 try
                 {
                     _historyStorage.SaveRun(indexEntry, payload, _configService.GetCurrent().MaxHistoryEntries);
-                    LoadHistoryIndexIntoList(selectEntryId: entryId);
+                    InsertHistoryEntryIntoList(indexEntry, payload);
                     SaveConfiguration();
                 }
                 catch (Exception ex)
                 {
-                    DialogTheme.Show($"Failed to persist history run: {ex.Message}", "History Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show(this, $"Failed to persist history run: {ex.Message}", "History Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             });
 
             return entryId;
         }
+
+        private string GetBufferedOutputSnapshot()
+        {
+            lock (_outputBufferLock)
+            {
+                return _outputBuffer.ToString();
+            }
+        }
+
+        private string BuildExecutionHistoryLabel(string? executionName, bool isFolder, bool wasCancelled)
+        {
+            var name = string.IsNullOrWhiteSpace(executionName)
+                ? "(unnamed)"
+                : executionName.Trim();
+            var suffix = isFolder ? $"{FolderIcon} {name}" : name;
+            var prefix = wasCancelled ? "CANCELLED - " : string.Empty;
+            return $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {prefix}{suffix}";
+        }
+
+        private bool WasManualExecutionCancelled(IReadOnlyList<ExecutionResult> results)
+        {
+            return _manualCancellationRequested || (results?.Any(result => result.WasCancelled) ?? false);
+        }
+
+        private static string BuildCancelledPresetStatus(IReadOnlyList<HostConnection> hosts)
+        {
+            if (hosts.Count == 1)
+                return $"Cancelled execution on {hosts[0]}";
+
+            return $"Cancelled execution on {hosts.Count} hosts";
+        }
+
+        private static string BuildCancelledFolderStatus(string folderName)
+            => $"Cancelled folder '{folderName}'";
 
         private ExecutionDetails BuildExecutionDetails(
             string presetName,
@@ -9105,6 +9615,7 @@ namespace SSH_Helper
             int connectionTimeoutSeconds,
             bool useConnectionPooling,
             string runMode,
+            bool wasCancelled,
             bool isFolderExecution,
             string folderName,
             IEnumerable<string> executedPresetNames,
@@ -9116,6 +9627,7 @@ namespace SSH_Helper
                 PresetName = presetName,
                 Commands = commands ?? string.Empty,
                 PresetType = presetType,
+                WasCancelled = wasCancelled,
                 StartTimeUtc = startTimeUtc,
                 EndTimeUtc = endTimeUtc,
                 EnvironmentName = string.IsNullOrWhiteSpace(_activeEnvironmentName)
@@ -9129,7 +9641,7 @@ namespace SSH_Helper
                 IsFolderExecution = isFolderExecution,
                 FolderName = folderName ?? string.Empty,
                 ExecutedPresetNames = executedPresetNames?.ToList() ?? new List<string>(),
-                Hosts = BuildHostExecutionContexts(hosts, results, endTimeUtc),
+                Hosts = BuildHostExecutionContexts(hosts, results, endTimeUtc, wasCancelled),
                 InteractiveSessions = BuildInteractiveSessionDetails(results)
             };
         }
@@ -9137,7 +9649,8 @@ namespace SSH_Helper
         private static List<SSH_Helper.Models.HostExecutionContext> BuildHostExecutionContexts(
             IReadOnlyList<HostConnection> hosts,
             IReadOnlyList<ExecutionResult> results,
-            DateTime fallbackTimestampUtc)
+            DateTime fallbackTimestampUtc,
+            bool runWasCancelled)
         {
             var hostResultLookup = (results ?? Array.Empty<ExecutionResult>())
                 .GroupBy(r => r.Host.ToString(), StringComparer.OrdinalIgnoreCase)
@@ -9151,6 +9664,12 @@ namespace SSH_Helper
             {
                 hostResultLookup.TryGetValue(host.ToString(), out var hostResults);
                 var hostSuccess = hostResults != null && hostResults.Count > 0 && hostResults.All(r => r.Success);
+                var hostWasCancelled = hostResults != null && hostResults.Any(r => r.WasCancelled);
+                if (!hostWasCancelled && runWasCancelled && (hostResults == null || hostResults.Count == 0))
+                {
+                    hostWasCancelled = true;
+                }
+
                 var hostTimestampUtc = hostResults != null && hostResults.Count > 0
                     ? hostResults.Max(r => r.Timestamp.ToUniversalTime())
                     : fallbackTimestampUtc;
@@ -9171,6 +9690,7 @@ namespace SSH_Helper
                 {
                     HostAddress = host.ToString(),
                     Success = hostSuccess,
+                    WasCancelled = hostWasCancelled,
                     TimestampUtc = hostTimestampUtc,
                     Variables = variables
                 });
@@ -9273,6 +9793,7 @@ namespace SSH_Helper
                     HostAddress = result.Host.ToString(),
                     Output = output,
                     Success = result.Success,
+                    WasCancelled = result.WasCancelled,
                     Timestamp = result.Timestamp
                 });
             }
@@ -9298,16 +9819,20 @@ namespace SSH_Helper
 
         private void StopExecution()
         {
+            if (!_sshService.IsRunning || _manualCancellationRequested)
+                return;
+
             // Immediate visual feedback - disable button and change text
             btnStopAll.Enabled = false;
-            btnStopAll.Text = "Stopping...";
-            UpdateStatusBar("Stopping execution...");
+            btnStopAll.Text = "Cancelling...";
+            UpdateStatusBar("Cancellation requested...");
+            _manualCancellationRequested = true;
 
             // Request cancellation
             _sshService.Stop();
 
             // Append stop message to output
-            AppendOutputText(Environment.NewLine + Environment.NewLine + "Execution Stopped by User" + Environment.NewLine);
+            AppendOutputText(Environment.NewLine + Environment.NewLine + "Cancellation requested by user" + Environment.NewLine);
         }
 
         private IEnumerable<HostConnection> GetHostConnections(IEnumerable<DataGridViewRow> rows)
@@ -9401,12 +9926,17 @@ namespace SSH_Helper
             if (executing)
             {
                 // Reset stop button to initial state when starting execution
+                _manualCancellationRequested = false;
                 btnStopAll.Enabled = true;
                 btnStopAll.Text = "Stop";
             }
             else
             {
+                _manualCancellationRequested = false;
+                btnStopAll.Enabled = true;
+                btnStopAll.Text = "Stop";
                 statusProgress.Visible = false;
+                EndManualExecutionProgress();
             }
 
             SshDebugLog("UI", $"SetExecutionMode({executing}) completed", sw);
@@ -9680,13 +10210,11 @@ namespace SSH_Helper
         private string StoreExecutionHistory(List<ExecutionResult> results, ExecutionDetails? details = null)
         {
             // Use output buffer as the source of truth - includes all debug output
-            string output;
-            lock (_outputBufferLock)
-            {
-                output = _outputBuffer.ToString();
-            }
-
-            string label = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {txtPreset.Text}";
+            var output = GetBufferedOutputSnapshot();
+            string label = BuildExecutionHistoryLabel(
+                details?.PresetName ?? txtPreset.Text,
+                isFolder: false,
+                details?.WasCancelled == true);
             var entryId = HistoryIdGenerator.NewId();
             var hostResults = BuildHostHistoryEntries(results);
             var payload = new HistoryRunPayload
@@ -9703,12 +10231,12 @@ namespace SSH_Helper
                 try
                 {
                     _historyStorage.SaveRun(indexEntry, payload, _configService.GetCurrent().MaxHistoryEntries);
-                    LoadHistoryIndexIntoList(selectEntryId: entryId);
+                    InsertHistoryEntryIntoList(indexEntry, payload);
                     SaveConfiguration();
                 }
                 catch (Exception ex)
                 {
-                    DialogTheme.Show($"Failed to persist history run: {ex.Message}", "History Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show(this, $"Failed to persist history run: {ex.Message}", "History Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             });
 
@@ -9723,7 +10251,7 @@ namespace SSH_Helper
         {
             if (lstOutput.SelectedItem is not HistoryListItem entry)
             {
-                DialogTheme.Show("Please select an item from the list to save.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show(this, "Please select an item from the list to save.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -9734,7 +10262,7 @@ namespace SSH_Helper
                 FileName = entry.Label.Replace(":", "_")
             };
 
-            if (sfd.ShowDialog() == DialogResult.OK)
+            if (sfd.ShowDialog(this) == DialogResult.OK)
             {
                 try
                 {
@@ -9745,7 +10273,7 @@ namespace SSH_Helper
                 }
                 catch (Exception ex)
                 {
-                    DialogTheme.Show($"Failed to save the file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show(this, $"Failed to save the file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -9754,7 +10282,7 @@ namespace SSH_Helper
         {
             if (_outputHistory.Count == 0)
             {
-                DialogTheme.Show("There is no history to save.", "No History", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DialogTheme.Show(this, "There is no history to save.", "No History", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -9765,7 +10293,7 @@ namespace SSH_Helper
                 FileName = $"SSH_Helper_History_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.txt"
             };
 
-            if (sfd.ShowDialog() == DialogResult.OK)
+            if (sfd.ShowDialog(this) == DialogResult.OK)
             {
                 try
                 {
@@ -9792,6 +10320,7 @@ namespace SSH_Helper
                     if (missingPayloads > 0)
                     {
                         DialogTheme.Show(
+                            this,
                             $"{missingPayloads} history item(s) could not be loaded and were exported as placeholders.",
                             "History Export Warning",
                             MessageBoxButtons.OK,
@@ -9800,7 +10329,7 @@ namespace SSH_Helper
                 }
                 catch (Exception ex)
                 {
-                    DialogTheme.Show($"Failed to save the file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    DialogTheme.Show(this, $"Failed to save the file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -9809,11 +10338,11 @@ namespace SSH_Helper
         {
             if (lstOutput.SelectedItem is not HistoryListItem entry)
             {
-                DialogTheme.Show("Please select an item from the list to delete.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                DialogTheme.Show(this, "Please select an item from the list to delete.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            if (DialogTheme.Show($"Are you sure you want to delete {entry.Label}?", "Delete Entry", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+            if (DialogTheme.Show(this, $"Are you sure you want to delete {entry.Label}?", "Delete Entry", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                 return;
 
             _historyStorage.DeleteRun(entry.Id);
@@ -9839,7 +10368,7 @@ namespace SSH_Helper
 
         private void DeleteAllHistory()
         {
-            if (DialogTheme.Show("Are you sure you want to delete all history?", "Delete History", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+            if (DialogTheme.Show(this, "Are you sure you want to delete all history?", "Delete History", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                 return;
 
             _historyStorage.DeleteAll();
@@ -9864,7 +10393,7 @@ namespace SSH_Helper
             var details = payload.Details;
             if (details == null)
             {
-                DialogTheme.Show("Execution details are not available for this history entry.",
+                DialogTheme.Show(this, "Execution details are not available for this history entry.",
                     "Details Not Available",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -9885,7 +10414,7 @@ namespace SSH_Helper
         {
             if (lstHosts.SelectedItem is not HostHistoryEntry hostEntry)
             {
-                DialogTheme.Show("Please select a host first.",
+                DialogTheme.Show(this, "Please select a host first.",
                     "No Host Selected",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -9895,6 +10424,7 @@ namespace SSH_Helper
             if (!EnsureHostOutputsLoadedForSelection())
             {
                 DialogTheme.Show(
+                    this,
                     "Host output for this selection could not be loaded.",
                     "History Load Failed",
                     MessageBoxButtons.OK,
@@ -10152,7 +10682,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Failed to save configuration: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogTheme.Show(this, $"Failed to save configuration: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -10333,6 +10863,7 @@ namespace SSH_Helper
 
             // Reset dirty flag since we're restoring saved state, not making new changes
             _csvDirty = false;
+            CaptureLoadedFileSnapshotFromGrid();
             UpdateHostCount();
 
             // Flag for auto-sizing after the form is fully visible (handled in Form1_Shown)
@@ -10343,7 +10874,7 @@ namespace SSH_Helper
         {
             if (_sshService.IsRunning)
             {
-                if (DialogTheme.Show("Execution is currently running. Stop and exit?", "Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+                if (DialogTheme.Show(this, "Execution is currently running. Stop and exit?", "Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                     return false;
                 StopExecution();
             }
@@ -10351,21 +10882,58 @@ namespace SSH_Helper
             if (dgv_variables.IsCurrentCellInEditMode)
                 dgv_variables.EndEdit();
 
-            if (_csvDirty)
+            if (!TryResolvePendingCsvChangesForExit())
             {
-                var result = DialogTheme.Show("You have unsaved CSV changes. Save before exiting?", "Save Changes", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-                if (result == DialogResult.Cancel) return false;
-                if (result == DialogResult.Yes && !SaveCurrentCsv(promptIfNoPath: true)) return false;
+                return false;
             }
 
             if (IsPresetDirty())
             {
-                var result = ShowUnsavedPresetDiffPrompt();
-                if (result == DialogResult.Cancel) return false;
-                if (result == DialogResult.Yes) SaveCurrentPreset();
+                if (!TryResolvePendingPresetChanges())
+                {
+                    return false;
+                }
             }
 
             return true;
+        }
+
+        private bool TryResolvePendingCsvChangesForExit()
+        {
+            if (!_csvDirty)
+                return true;
+
+            var result = DialogTheme.Show(
+                this,
+                "You have unsaved CSV changes. Save before exiting?",
+                "Save Changes",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Cancel)
+                return false;
+
+            if (result != DialogResult.Yes)
+                return true;
+
+            var saveResult = SaveCurrentCsvInternal(promptIfNoPath: true);
+            return saveResult switch
+            {
+                CsvSaveAttemptResult.Saved => true,
+                CsvSaveAttemptResult.Cancelled => ConfirmExitWithoutSavingCsv("CSV save was canceled. Exit without saving your CSV changes?"),
+                CsvSaveAttemptResult.Failed => ConfirmExitWithoutSavingCsv("CSV save failed. Exit without saving your CSV changes?"),
+                _ => false
+            };
+        }
+
+        private bool ConfirmExitWithoutSavingCsv(string message)
+        {
+            return DialogTheme.Show(
+                this,
+                message,
+                "Exit Without Saving",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) == DialogResult.Yes;
         }
 
         #endregion
@@ -10455,6 +11023,282 @@ namespace SSH_Helper
         private async void checkForUpdatesToolStripMenuItem_Click(object sender, EventArgs e)
         {
             await CheckForUpdatesAsync(silent: false);
+        }
+
+        #endregion
+
+        #region Scheduler
+
+        /// <summary>
+        /// Creates and wires all scheduler services with the correct dependency chain.
+        /// </summary>
+        private void InitializeSchedulerServices()
+        {
+            if (_credentialProvider == null)
+                return;
+
+            _schedulingService = new SchedulingService();
+            _jobStorage = new JobStorageService(_credentialProvider);
+            _jobStorage.Load();
+            _jobExportService = new JobExportService();
+            _jobExecutionService = new JobExecutionService(
+                _jobStorage, _schedulingService, _configService, _presetManager, _credentialProvider);
+            _jobHistoryService = new JobHistoryService();
+            _jobHistoryService.SubscribeTo(_jobExecutionService, ResolveSchedulerHistoryRetention);
+
+            // Subscribe to execution events for output panel notifications
+            _jobExecutionService.JobCompleted += OnSchedulerJobCompleted;
+            _jobExecutionService.JobStateChanged += OnSchedulerJobStateChanged;
+
+            // Refresh status bar when jobs change
+            _jobStorage.JobsChanged += (s, e) =>
+            {
+                if (InvokeRequired) { BeginInvoke(() => UpdateSchedulerStatusBar()); return; }
+                UpdateSchedulerStatusBar();
+            };
+
+            // Set up reference integrity with preset manager
+            _presetManager.SetJobStorageService(_jobStorage);
+
+            // Register cleanup on form close
+            FormClosed += (_, __) => CleanupSchedulerServices();
+
+            // Crash recovery and start timer
+            _jobExecutionService.Initialize();
+            RecordMissedSchedulerRunsOnStartup();
+            _jobExecutionService.Start();
+        }
+
+        /// <summary>
+        /// Sets up the scheduler status bar label and refresh timer.
+        /// </summary>
+        private void InitializeSchedulerStatusBar()
+        {
+            // Add scheduler status label to status strip
+            var statusScheduler = new ToolStripStatusLabel
+            {
+                Name = "_statusScheduler",
+                Spring = false,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Text = "Scheduler: 0 active",
+                Visible = false,
+                IsLink = true,
+                LinkBehavior = LinkBehavior.HoverUnderline
+            };
+            statusScheduler.Click += (s, e) => ShowJobListDialog();
+            statusStrip.Items.Add(statusScheduler);
+            _statusScheduler = statusScheduler;
+            ApplySchedulerStatusBarTheme();
+
+            // Add Scheduler menu item to menu bar (before Help)
+            var menuScheduler = new ToolStripMenuItem
+            {
+                Name = "_menuScheduler",
+                Text = "&Scheduler",
+                Size = new Size(69, 20)
+            };
+            menuScheduler.Click += (s, e) => ShowJobListDialog();
+            var helpIndex = menuStrip1.Items.IndexOf(helpToolStripMenuItem);
+            if (helpIndex >= 0)
+                menuStrip1.Items.Insert(helpIndex, menuScheduler);
+            else
+                menuStrip1.Items.Add(menuScheduler);
+
+            // Start status bar refresh timer
+            _statusBarTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+            _statusBarTimer.Tick += (s, e) => UpdateSchedulerStatusBar();
+            _statusBarTimer.Start();
+            UpdateSchedulerStatusBar(); // initial update
+        }
+
+        private void ApplySchedulerStatusBarTheme()
+        {
+            if (_statusScheduler == null)
+            {
+                return;
+            }
+
+            _statusScheduler.LinkColor = _isDarkMode ? SchedulerStatusLinkDark : SchedulerStatusLinkLight;
+            _statusScheduler.ActiveLinkColor = _isDarkMode ? SchedulerStatusLinkDarkActive : SchedulerStatusLinkLightActive;
+            _statusScheduler.VisitedLinkColor = _statusScheduler.LinkColor;
+        }
+
+        /// <summary>
+        /// Shows the job list dialog (modeless, single-instance pattern).
+        /// </summary>
+        private void ShowJobListDialog()
+        {
+            if (_jobStorage == null || _jobExecutionService == null ||
+                _schedulingService == null || _jobHistoryService == null || _jobExportService == null)
+                return;
+
+            var config = _configService.GetCurrent();
+            _jobListDialogManager.ShowOrActivate(
+                () => new JobListDialog(
+                    _jobStorage,
+                    _jobExecutionService,
+                    _jobHistoryService,
+                    _schedulingService,
+                    _presetManager,
+                    _jobExportService,
+                    _credentialProvider,
+                    RunTrackedJobNowAsync,
+                    getMainGridRows: () =>
+                    {
+                        return HostGridUtilities.BuildSchedulerCopySnapshot(dgv_variables).Rows
+                            .ToList();
+                    },
+                    getMainGridColumns: () =>
+                    {
+                        return HostGridUtilities.BuildSchedulerCopySnapshot(dgv_variables).Columns
+                            .ToList();
+                    },
+                    darkMode: _isDarkMode,
+                    fontFamily: config.FontSettings.UIFontFamily,
+                    fontSize: config.FontSettings.MenuFontSize),
+                this);
+        }
+
+        /// <summary>
+        /// Updates the scheduler status bar label with active job count and next-run countdown.
+        /// </summary>
+        private void UpdateSchedulerStatusBar()
+        {
+            if (_statusScheduler == null || _jobStorage == null || _schedulingService == null)
+                return;
+
+            var activeCount = _jobStorage.Jobs.Values.Count(j => j.IsEnabled);
+            var showStatusBar = SchedulerNotificationFormatter.ShouldShowStatusBar(activeCount);
+            _statusScheduler.Visible = showStatusBar;
+
+            if (!showStatusBar)
+            {
+                return;
+            }
+
+            // Find next scheduled run across all enabled recurring jobs
+            string? nextJobName = null;
+            TimeSpan? timeUntilNext = null;
+
+            foreach (var job in _jobStorage.Jobs.Values)
+            {
+                if (!job.IsEnabled || job.ScheduleType != ScheduleType.Recurring ||
+                    string.IsNullOrEmpty(job.CronExpression))
+                    continue;
+
+                var nextRun = _schedulingService.GetNextRunLocal(job.CronExpression);
+                if (nextRun == null) continue;
+
+                var remaining = nextRun.Value - DateTime.Now;
+                if (remaining <= TimeSpan.Zero) continue;
+
+                if (timeUntilNext == null || remaining < timeUntilNext.Value)
+                {
+                    timeUntilNext = remaining;
+                    nextJobName = job.Name;
+                }
+            }
+
+            _statusScheduler.Text = SchedulerNotificationFormatter.FormatStatusBar(
+                activeCount, nextJobName, timeUntilNext);
+        }
+
+        /// <summary>
+        /// Handles job completion events and refreshes scheduler UI state.
+        /// </summary>
+        private void OnSchedulerJobCompleted(object? sender, JobRunResult result)
+        {
+            if (InvokeRequired) { BeginInvoke(() => OnSchedulerJobCompleted(sender, result)); return; }
+
+            _runNowJobIds.Remove(result.JobId);
+            UpdateSchedulerStatusBar();
+        }
+
+        private void RecordMissedSchedulerRunsOnStartup()
+        {
+            if (_jobStorage == null || _schedulingService == null || _jobHistoryService == null)
+            {
+                return;
+            }
+
+            var lastShutdownUtc = _configService.GetCurrent().LastAppShutdownUtc;
+            if (!lastShutdownUtc.HasValue)
+            {
+                return;
+            }
+
+            var skippedSummaries = _schedulingService
+                .DetectMissedRunSummaries(_jobStorage.Jobs, lastShutdownUtc.Value)
+                .OrderBy(entry => entry.LastScheduledTimeUtc)
+                .ToList();
+
+            foreach (var skippedSummary in skippedSummaries)
+            {
+                var job = _jobStorage.Get(skippedSummary.JobId);
+                _jobHistoryService.SaveSkippedRunSummary(
+                    skippedSummary,
+                    ResolveSchedulerHistoryRetention(job));
+            }
+        }
+
+        private JobHistoryRetentionOptions ResolveSchedulerHistoryRetention(JobRunResult result)
+        {
+            var job = _jobStorage?.Get(result.JobId);
+            return ResolveSchedulerHistoryRetention(job);
+        }
+
+        private JobHistoryRetentionOptions ResolveSchedulerHistoryRetention(JobDefinition? job)
+        {
+            return SchedulerHistoryPolicyResolver.Resolve(_configService.GetCurrent(), job);
+        }
+
+        /// <summary>
+        /// Handles job state change events and refreshes scheduler UI state.
+        /// </summary>
+        private void OnSchedulerJobStateChanged(object? sender, JobExecutionService.JobStateChangedEventArgs e)
+        {
+            if (InvokeRequired) { BeginInvoke(() => OnSchedulerJobStateChanged(sender, e)); return; }
+
+            UpdateSchedulerStatusBar();
+        }
+
+        /// <summary>
+        /// Registers a job ID as a "Run Now" trigger so notifications use the correct prefix.
+        /// </summary>
+        internal void TrackRunNow(string jobId) => _runNowJobIds.Add(jobId);
+
+        internal async Task<bool> RunTrackedJobNowAsync(string jobId)
+        {
+            if (_jobExecutionService == null)
+            {
+                return false;
+            }
+
+            TrackRunNow(jobId);
+            var result = await _jobExecutionService.RunNowAsync(jobId);
+            if (!result)
+            {
+                _runNowJobIds.Remove(jobId);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Stops and disposes scheduler services, unsubscribes event handlers.
+        /// Called from Dispose override in Form1.Designer.cs.
+        /// </summary>
+        private void CleanupSchedulerServices()
+        {
+            _statusBarTimer?.Stop();
+            _statusBarTimer?.Dispose();
+            if (_jobExecutionService != null)
+            {
+                _jobExecutionService.JobCompleted -= OnSchedulerJobCompleted;
+                _jobExecutionService.JobStateChanged -= OnSchedulerJobStateChanged;
+                _jobExecutionService.Stop();
+                _jobExecutionService.Dispose();
+            }
         }
 
         #endregion

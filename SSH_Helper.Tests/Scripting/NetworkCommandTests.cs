@@ -490,6 +490,35 @@ public class NetworkCommandTests
     }
 
     [Fact]
+    public async Task WebhookCommand_TransportFailure_ClearsStaleIntoValues()
+    {
+        var command = new WebhookCommand(() => new StubHttpMessageHandler((_, _) =>
+            throw new HttpRequestException("Simulated transport failure")));
+        var step = new ScriptStep
+        {
+            Webhook = new WebhookOptions
+            {
+                Url = "https://example.test/fail",
+                Method = "GET",
+                Timeout = 5,
+                Into = "webhook_result"
+            },
+            OnError = "continue"
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("webhook_result", "stale-body");
+        context.SetVariable("webhook_result_status", 200);
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.SuppressedError.Should().BeTrue();
+        context.GetVariableString("webhook_result").Should().BeEmpty();
+        context.GetVariableString("webhook_result_status").Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ScriptExecutor_MixedWorkflow_SshAndNonSshSteps_ExecutesSuccessfully()
     {
         using var httpServer = new OneShotHttpServer(200, "integration-ok");

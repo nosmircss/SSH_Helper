@@ -15,5 +15,11 @@ namespace SSH_Helper.Services
             var safeUser = (username ?? string.Empty).Trim();
             return $"{Prefix}:host:{safeHost}|user:{safeUser}";
         }
+
+        public static string JobPasswordTarget(string jobId)
+        {
+            var safeId = (jobId ?? string.Empty).Trim();
+            return $"{Prefix}:job:{safeId}";
+        }
     }
 }

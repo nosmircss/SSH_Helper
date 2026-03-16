@@ -1,3 +1,5 @@
+using Cronos;
+
 namespace SSH_Helper.Utilities
 {
     /// <summary>
@@ -139,6 +141,33 @@ namespace SSH_Helper.Utilities
         public static int Clamp(int value, int min, int max)
         {
             return Math.Max(min, Math.Min(max, value));
+        }
+
+        /// <summary>
+        /// Validates a 5-field cron expression using Cronos.
+        /// Returns null if valid, error message if invalid.
+        /// </summary>
+        /// <param name="expression">The cron expression to validate (5-field only, no seconds).</param>
+        /// <returns>Null if valid; error message string if invalid.</returns>
+        public static string? ValidateCronExpression(string? expression)
+        {
+            if (string.IsNullOrWhiteSpace(expression))
+                return "Cron expression cannot be empty.";
+
+            if (!CronExpression.TryParse(expression.Trim(), out _))
+                return "Invalid cron expression format. Expected 5 fields: minute hour day-of-month month day-of-week.";
+
+            return null;
+        }
+
+        /// <summary>
+        /// Validates that a DateTime is in the future (compared to UTC now).
+        /// </summary>
+        /// <param name="dateTimeUtc">The UTC DateTime to check.</param>
+        /// <returns>True if the date is in the future.</returns>
+        public static bool IsFutureDate(DateTime dateTimeUtc)
+        {
+            return dateTimeUtc > DateTime.UtcNow;
         }
     }
 }

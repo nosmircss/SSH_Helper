@@ -189,6 +189,60 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Parses a single CSV line into fields, handling quoted fields containing commas.
+        /// </summary>
+        public static List<string> ParseCsvLine(string line)
+        {
+            var fields = new List<string>();
+            var current = new StringBuilder();
+            bool inQuotes = false;
+
+            for (int i = 0; i < line.Length; i++)
+            {
+                char c = line[i];
+
+                if (inQuotes)
+                {
+                    if (c == '"')
+                    {
+                        if (i + 1 < line.Length && line[i + 1] == '"')
+                        {
+                            current.Append('"');
+                            i++;
+                        }
+                        else
+                        {
+                            inQuotes = false;
+                        }
+                    }
+                    else
+                    {
+                        current.Append(c);
+                    }
+                }
+                else
+                {
+                    if (c == '"')
+                    {
+                        inQuotes = true;
+                    }
+                    else if (c == ',')
+                    {
+                        fields.Add(current.ToString());
+                        current.Clear();
+                    }
+                    else
+                    {
+                        current.Append(c);
+                    }
+                }
+            }
+
+            fields.Add(current.ToString());
+            return fields;
+        }
+
+        /// <summary>
         /// Escapes a value for CSV output.
         /// </summary>
         private static string EscapeCsvValue(string value)

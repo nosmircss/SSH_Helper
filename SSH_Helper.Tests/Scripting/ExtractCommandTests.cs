@@ -82,4 +82,29 @@ public class ExtractCommandTests
         stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(7));
         result.Should().NotBeNull();
     }
+
+    [Fact]
+    public async Task ExecuteAsync_EmptySource_InitializesIntoVariableSoIsEmptyChecksWork()
+    {
+        var step = new ScriptStep
+        {
+            Extract = new ExtractOptions
+            {
+                From = "command_output",
+                Pattern = "Version: (.+)",
+                Into = "version"
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("command_output", string.Empty);
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+        var evaluator = new ExpressionEvaluator(context);
+
+        result.Success.Should().BeTrue();
+        context.HasVariable("version").Should().BeTrue();
+        context.GetVariableString("version").Should().BeEmpty();
+        evaluator.Evaluate("version is empty").Should().BeTrue();
+    }
 }

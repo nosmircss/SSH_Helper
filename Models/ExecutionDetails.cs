@@ -8,6 +8,7 @@ namespace SSH_Helper.Models
         public string PresetName { get; set; } = string.Empty;
         public string Commands { get; set; } = string.Empty;
         public string PresetType { get; set; } = string.Empty;
+        public bool WasCancelled { get; set; }
         public DateTime StartTimeUtc { get; set; }
         public DateTime EndTimeUtc { get; set; }
         public string EnvironmentName { get; set; } = EnvironmentConfig.DefaultName;
@@ -30,6 +31,7 @@ namespace SSH_Helper.Models
     {
         public string HostAddress { get; set; } = string.Empty;
         public bool Success { get; set; }
+        public bool WasCancelled { get; set; }
         public DateTime TimestampUtc { get; set; }
         public Dictionary<string, string> Variables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }

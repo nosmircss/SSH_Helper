@@ -23,16 +23,21 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             var result = await _executor.ExecuteStepsAsync(step.Try, context, cancellationToken, context.LoopDepth);
 
-            var shouldHandleFailure = !result.Success && !result.ShouldExit && !result.ShouldBreak && !result.ShouldContinue;
+            var shouldHandleFailure = !result.Success && !result.ShouldExit && !result.ShouldBreak && !result.ShouldContinue && !result.ShouldReturn;
             if (shouldHandleFailure && step.Catch != null && step.Catch.Count > 0)
             {
-                result = await _executor.ExecuteStepsAsync(step.Catch, context, cancellationToken, context.LoopDepth);
+                result = await _executor.ExecuteStepsAsync(
+                    step.Catch,
+                    context,
+                    cancellationToken,
+                    context.LoopDepth,
+                    preserveLastErrorOnSuccess: true);
             }
 
             if (step.Finally != null && step.Finally.Count > 0)
             {
                 var finallyResult = await _executor.ExecuteStepsAsync(step.Finally, context, cancellationToken, context.LoopDepth);
-                if (finallyResult.ShouldExit || finallyResult.ShouldBreak || finallyResult.ShouldContinue || !finallyResult.Success)
+                if (finallyResult.IsControlFlow || !finallyResult.Success)
                     return finallyResult;
             }
 

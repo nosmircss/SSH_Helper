@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Windows.Forms;
 using SSH_Helper.Models;
+using SSH_Helper.UI;
 
 namespace SSH_Helper.Tests.UI;
 
@@ -28,7 +29,7 @@ internal sealed class FontApplicationTestHarness : IDisposable
     public TextBox txtOutput { get; } = new();
     public TabControl presetsTabControl { get; } = new();
     public DataGridView dgv_variables { get; } = new();
-    public ListBox lstOutput { get; } = new();
+    public HistoryListBox lstOutput { get; } = new();
     public ListBox lstHosts { get; } = new();
     public MenuStrip menuStrip1 { get; } = new();
     public ToolStrip mainToolStrip { get; } = new();
@@ -171,6 +172,13 @@ internal sealed class FontApplicationTestHarness : IDisposable
 
         // Accent color
         LastAppliedAccentColor = fontSettings.CustomAccentColor;
+    }
+
+    public void ConfigureVariableHeightHistoryList()
+    {
+        lstOutput.DrawMode = DrawMode.OwnerDrawVariable;
+        lstOutput.ItemHeight = HistoryListLayout.GetMinimumItemHeight(lstOutput.Font);
+        lstOutput.RefreshVariableItemHeights();
     }
 
     private static string ResolveSemiboldFontFamily(string? uiFontFamily)

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using System.Diagnostics;
+using System.Collections.Generic;
 using SSH_Helper.Services.Scripting;
 using Xunit;
 
@@ -101,5 +102,104 @@ public class ExpressionEvaluatorTests
         var result = evaluator.Evaluate("trim(json.get(admins, \"system.admin.${admin_name}.trusthost${i}\", \"\")) == '10.0.0.0 255.255.255.0'");
 
         result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Evaluate_InOperator_WithList_IsCaseInsensitive()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("svc_key", "amazon-aws");
+        context.SetVariable("exclude_service_matches_norm", new List<string> { "cloudflare-cdn", "amazon-aws" });
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("svc_key in exclude_service_matches_norm").Should().BeTrue();
+        evaluator.Evaluate("svc_key not in exclude_service_matches_norm").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Evaluate_InOperator_WithJsonArrayString_UsesCollectionMembership()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("svc_key", "cloudflare-web");
+        context.SetVariable("exclude_service_matches_norm", "[\"cloudflare-cdn\",\"cloudflare-web\"]");
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("svc_key in exclude_service_matches_norm").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Evaluate_InOperator_WithNewlineDelimitedString_UsesLines()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("needle", "beta");
+        context.SetVariable("haystack", "alpha\r\nbeta\r\ngamma");
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("needle in haystack").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Evaluate_IsEmpty_OnJsonCollections_UsesStructuralSemantics()
+    {
+        var context = new ScriptContext();
+        var evaluator = new ExpressionEvaluator(context);
+
+        context.SetVariable("items", "[]");
+        evaluator.Evaluate("items is empty").Should().BeTrue();
+        evaluator.Evaluate("items").Should().BeFalse();
+
+        context.SetVariable("items", "{}");
+        evaluator.Evaluate("items is empty").Should().BeTrue();
+        evaluator.Evaluate("items").Should().BeFalse();
+
+        context.SetVariable("items", "{\"value\":1}");
+        evaluator.Evaluate("items is not empty").Should().BeTrue();
+        evaluator.Evaluate("items").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Evaluate_DefinedNullVariable_IsEmptyFalsyAndDefined()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("guard_pop_result", null);
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("guard_pop_result is defined").Should().BeTrue();
+        evaluator.Evaluate("guard_pop_result is empty").Should().BeTrue();
+        evaluator.Evaluate("guard_pop_result").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Evaluate_DefinedNullVariables_CompareEqual()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("left", null);
+        context.SetVariable("right", null);
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("left == right").Should().BeTrue();
+        evaluator.Evaluate("left != right").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Evaluate_BareListIndexExpression_ResolvesIndexedItem()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("ports", new List<string> { "22" });
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("ports[0] == '22'").Should().BeTrue();
+        evaluator.Evaluate("ports[1] is empty").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Evaluate_BareListIndexExpression_WithVariableIndex_ResolvesIndexedItem()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("parts", new List<string> { "gamma", "beta", "alpha" });
+        context.SetVariable("idx", 1);
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("parts[idx] == 'beta'").Should().BeTrue();
     }
 }

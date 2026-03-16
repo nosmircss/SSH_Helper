@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using SSH_Helper.Models;
+using SSH_Helper.Utilities;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -174,6 +175,7 @@ namespace SSH_Helper.Services
 
                     var isHostAddress = reader.ValueTextEquals("HostAddress") || reader.ValueTextEquals("hostAddress");
                     var isSuccess = reader.ValueTextEquals("Success") || reader.ValueTextEquals("success");
+                    var isWasCancelled = reader.ValueTextEquals("WasCancelled") || reader.ValueTextEquals("wasCancelled");
                     var isTimestamp = reader.ValueTextEquals("Timestamp") || reader.ValueTextEquals("timestamp");
 
                     if (!reader.Read())
@@ -186,6 +188,10 @@ namespace SSH_Helper.Services
                     else if (isSuccess)
                     {
                         host.Success = ReadBooleanValue(ref reader);
+                    }
+                    else if (isWasCancelled)
+                    {
+                        host.WasCancelled = ReadBooleanValue(ref reader);
                     }
                     else if (isTimestamp)
                     {
@@ -379,6 +385,11 @@ namespace SSH_Helper.Services
                     else if (propertyName.Equals("Success", StringComparison.OrdinalIgnoreCase))
                     {
                         host.Success = reader.TokenType != JsonToken.Null &&
+                            Convert.ToBoolean(reader.Value, CultureInfo.InvariantCulture);
+                    }
+                    else if (propertyName.Equals("WasCancelled", StringComparison.OrdinalIgnoreCase))
+                    {
+                        host.WasCancelled = reader.TokenType != JsonToken.Null &&
                             Convert.ToBoolean(reader.Value, CultureInfo.InvariantCulture);
                     }
                     else if (propertyName.Equals("Timestamp", StringComparison.OrdinalIgnoreCase))
@@ -591,9 +602,7 @@ namespace SSH_Helper.Services
         }
 
         private static string Serialize<T>(T value)
-        {
-            return JsonConvert.SerializeObject(value, Formatting.Indented);
-        }
+            => JsonFileWriter.Serialize(value);
 
         private static DateTime ParseCreatedAtUtc(string label)
         {
@@ -714,88 +723,9 @@ namespace SSH_Helper.Services
         }
 
         private void TryBackupCorruptIndex()
-        {
-            try
-            {
-                if (!File.Exists(_indexPath))
-                    return;
-
-                var corruptPath = $"{_indexPath}.corrupt.{DateTime.UtcNow:yyyyMMddHHmmss}";
-                File.Copy(_indexPath, corruptPath, overwrite: false);
-            }
-            catch
-            {
-                // Best effort.
-            }
-        }
+            => JsonFileWriter.TryBackupCorrupt(_indexPath, useTimestamp: true);
 
         private static void WriteJsonAtomic(string path, string json, bool createBackup)
-        {
-            var directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var tempPath = path + ".tmp";
-            try
-            {
-                File.WriteAllText(tempPath, json, Utf8NoBom);
-
-                if (File.Exists(path))
-                {
-                    if (createBackup)
-                    {
-                        try
-                        {
-                            File.Replace(tempPath, path, path + ".bak", ignoreMetadataErrors: true);
-                            return;
-                        }
-                        catch
-                        {
-                            // Fall back to copy + move path replacement.
-                            try
-                            {
-                                File.Copy(path, path + ".bak", overwrite: true);
-                            }
-                            catch
-                            {
-                                // Best effort backup.
-                            }
-                        }
-                    }
-                    else
-                    {
-                        try
-                        {
-                            File.Replace(tempPath, path, destinationBackupFileName: null, ignoreMetadataErrors: true);
-                            return;
-                        }
-                        catch
-                        {
-                            // Fall back to delete + move below.
-                        }
-                    }
-
-                    File.Delete(path);
-                }
-
-                File.Move(tempPath, path);
-            }
-            finally
-            {
-                if (File.Exists(tempPath))
-                {
-                    try
-                    {
-                        File.Delete(tempPath);
-                    }
-                    catch
-                    {
-                        // Best effort cleanup.
-                    }
-                }
-            }
-        }
+            => JsonFileWriter.WriteJsonAtomic(path, json, createBackup);
     }
 }

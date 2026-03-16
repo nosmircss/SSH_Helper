@@ -14,6 +14,16 @@ namespace SSH_Helper.Services.Scripting.Commands
     {
         // Reuse HttpClient for performance (recommended by Microsoft)
         private static readonly HttpClient _httpClient = new HttpClient();
+        private readonly Func<HttpMessageHandler>? _handlerFactory;
+
+        public WebhookCommand()
+        {
+        }
+
+        internal WebhookCommand(Func<HttpMessageHandler> handlerFactory)
+        {
+            _handlerFactory = handlerFactory ?? throw new ArgumentNullException(nameof(handlerFactory));
+        }
 
         public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
         {
@@ -21,6 +31,10 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return CommandResult.Fail("Webhook command has no options");
 
             var options = step.Webhook;
+            var into = options.Into;
+
+            // Clear capture variables up front so failure paths do not leave them undefined or stale.
+            ClearCapture(into, context);
 
             if (string.IsNullOrEmpty(options.Url))
                 return CommandResult.Fail("Webhook requires 'url'");
@@ -86,7 +100,9 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.EmitOutput($"Webhook: {method} {url}", ScriptOutputType.Debug);
 
                 // Send the request
-                var response = await _httpClient.SendAsync(request, cts.Token);
+                using var ownedClient = CreateOwnedClient();
+                var client = ownedClient ?? _httpClient;
+                var response = await client.SendAsync(request, cts.Token);
                 var responseBody = await response.Content.ReadAsStringAsync(cts.Token);
 
                 // Capture response if requested
@@ -103,9 +119,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     var errorMsg = $"Webhook failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
                     context.EmitOutput(errorMsg, ScriptOutputType.Warning);
 
-                    if (step.OnError?.ToLowerInvariant() == "continue")
-                        return CommandResult.Suppressed(errorMsg);
-                    return CommandResult.Fail(errorMsg);
+                    return CommandResult.ApplyOnError(step, errorMsg);
                 }
 
                 context.EmitOutput($"Webhook: Success ({(int)response.StatusCode})", ScriptOutputType.Debug);
@@ -116,29 +130,36 @@ namespace SSH_Helper.Services.Scripting.Commands
                 // Timeout occurred
                 var errorMsg = $"Webhook timed out after {options.Timeout} seconds";
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
-
-                if (step.OnError?.ToLowerInvariant() == "continue")
-                    return CommandResult.Suppressed(errorMsg);
-                return CommandResult.Fail(errorMsg);
+                return CommandResult.ApplyOnError(step, errorMsg);
             }
             catch (HttpRequestException ex)
             {
                 var errorMsg = $"Webhook error: {ex.Message}";
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
-
-                if (step.OnError?.ToLowerInvariant() == "continue")
-                    return CommandResult.Suppressed(errorMsg);
-                return CommandResult.Fail(errorMsg);
+                return CommandResult.ApplyOnError(step, errorMsg);
             }
             catch (Exception ex)
             {
                 var errorMsg = $"Webhook error: {ex.Message}";
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
-
-                if (step.OnError?.ToLowerInvariant() == "continue")
-                    return CommandResult.Suppressed(errorMsg);
-                return CommandResult.Fail(errorMsg);
+                return CommandResult.ApplyOnError(step, errorMsg);
             }
+        }
+
+        private HttpClient? CreateOwnedClient()
+        {
+            return _handlerFactory == null
+                ? null
+                : new HttpClient(_handlerFactory(), disposeHandler: true);
+        }
+
+        private static void ClearCapture(string? into, ScriptContext context)
+        {
+            if (string.IsNullOrWhiteSpace(into))
+                return;
+
+            context.SetVariable(into, string.Empty);
+            context.SetVariable(into + "_status", string.Empty);
         }
     }
 }

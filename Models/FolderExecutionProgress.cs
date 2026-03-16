@@ -6,6 +6,17 @@ namespace SSH_Helper.Models
     public class FolderExecutionProgress
     {
         /// <summary>
+        /// Number of completed host-task operations for the current run.
+        /// One operation is one preset finished on one host.
+        /// </summary>
+        public int CompletedOperations { get; set; }
+
+        /// <summary>
+        /// Total number of host-task operations for the current run.
+        /// </summary>
+        public int TotalOperations { get; set; }
+
+        /// <summary>
         /// The current host being processed.
         /// </summary>
         public string CurrentHost { get; set; } = string.Empty;

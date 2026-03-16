@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using SSH_Helper.Services.Scripting.Models;
@@ -55,6 +56,11 @@ namespace SSH_Helper.Services.Scripting.Commands
         public bool ShouldContinue { get; set; }
 
         /// <summary>
+        /// If true, return from the current subroutine.
+        /// </summary>
+        public bool ShouldReturn { get; set; }
+
+        /// <summary>
         /// If true, the command encountered an error that was explicitly suppressed
         /// (for example, via on_error: continue).
         /// </summary>
@@ -92,6 +98,11 @@ namespace SSH_Helper.Services.Scripting.Commands
         public static CommandResult Continue() => new() { Success = true, ShouldContinue = true };
 
         /// <summary>
+        /// Creates a return result (exit current subroutine).
+        /// </summary>
+        public static CommandResult Return() => new() { Success = true, ShouldReturn = true };
+
+        /// <summary>
         /// Creates a success result that carries a suppressed error message.
         /// </summary>
         public static CommandResult Suppressed(string message) => new()
@@ -100,5 +111,42 @@ namespace SSH_Helper.Services.Scripting.Commands
             Message = message,
             SuppressedError = true
         };
+
+        /// <summary>
+        /// Whether this result carries a control flow signal (exit, break, continue, or return).
+        /// </summary>
+        public bool IsControlFlow => ShouldExit || ShouldBreak || ShouldContinue || ShouldReturn;
+
+        /// <summary>
+        /// Returns Suppressed or Fail based on the step's on_error setting.
+        /// </summary>
+        public static CommandResult ApplyOnError(ScriptStep step, string message)
+        {
+            if (step.IsOnErrorContinue)
+                return Suppressed(message);
+            return Fail(message);
+        }
+    }
+
+    /// <summary>
+    /// Shared utility methods for script command implementations.
+    /// </summary>
+    public static class ScriptingHelpers
+    {
+        /// <summary>
+        /// Truncates a string for debug/display output, replacing newlines with literal \n.
+        /// </summary>
+        public static string TruncateForDisplay(string value, int maxLength = 100)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "";
+
+            value = value.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
+
+            if (value.Length <= maxLength)
+                return value;
+
+            return value.Substring(0, maxLength) + "...";
+        }
     }
 }

@@ -50,6 +50,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="CronExpressionDescriptor" Version="2.45.0" />
+    <PackageReference Include="Cronos" Version="0.11.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Rebex.SshShell" Version="7.0.9448" />
     <PackageReference Include="Scintilla5.NET" Version="6.1.1" GeneratePathProperty="true" />

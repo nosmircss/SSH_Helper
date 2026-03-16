@@ -115,6 +115,48 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_ForeachCollectionExpression_DoesNotReportFunctionCallAsMissingColumn()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                vars:
+                  matched_services: []
+                steps:
+                  - foreach: "svc in compact(matched_services)"
+                    do:
+                      - print: "${svc}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AnalyzePresets_ForeachCollectionExpression_TracksBareVariablesInsideExpression()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - foreach: "svc in compact(split(source_services, ','))"
+                    do:
+                      - print: "${svc}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().BeEquivalentTo("source_services");
+    }
+
+    [Fact]
     public void AnalyzePresets_SendRespond_TracksExpectAndReplyVariableDependencies()
     {
         var analyzer = new ScriptDependencyAnalyzer();

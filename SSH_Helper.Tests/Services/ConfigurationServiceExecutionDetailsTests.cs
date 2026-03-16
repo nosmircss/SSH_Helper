@@ -56,7 +56,8 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
                             {
                                 HostAddress = "10.0.0.1",
                                 Output = "ok",
-                                Success = true,
+                                Success = false,
+                                WasCancelled = true,
                                 Timestamp = endTimeUtc
                             }
                         },
@@ -65,6 +66,7 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
                             PresetName = "Custom",
                             Commands = "show system status",
                             PresetType = "Simple",
+                            WasCancelled = true,
                             StartTimeUtc = startTimeUtc,
                             EndTimeUtc = endTimeUtc,
                             EnvironmentName = "Prod",
@@ -81,7 +83,8 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
                                 new()
                                 {
                                     HostAddress = "10.0.0.1",
-                                    Success = true,
+                                    Success = false,
+                                    WasCancelled = true,
                                     TimestampUtc = endTimeUtc,
                                     Variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                                     {
@@ -118,6 +121,7 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
         var entry = reloaded.SavedState.History[0];
         entry.Details.Should().NotBeNull();
         entry.Details!.PresetName.Should().Be("Custom");
+        entry.Details.WasCancelled.Should().BeTrue();
         entry.Details.Commands.Should().Be("show system status");
         entry.Details.StartTimeUtc.Should().Be(startTimeUtc);
         entry.Details.EndTimeUtc.Should().Be(endTimeUtc);
@@ -131,7 +135,10 @@ public class ConfigurationServiceExecutionDetailsTests : IDisposable
         entry.Details.ExecutedPresetNames.Should().ContainSingle().Which.Should().Be("Custom");
         entry.Details.Hosts.Should().ContainSingle();
         entry.Details.Hosts[0].HostAddress.Should().Be("10.0.0.1");
+        entry.Details.Hosts[0].WasCancelled.Should().BeTrue();
         entry.Details.Hosts[0].Variables.Should().ContainKey("role").WhoseValue.Should().Be("edge");
+        entry.HostResults.Should().ContainSingle();
+        entry.HostResults![0].WasCancelled.Should().BeTrue();
         entry.Details.InteractiveSessions.Should().ContainSingle();
         entry.Details.InteractiveSessions[0].HostAddress.Should().Be("10.0.0.1");
         entry.Details.InteractiveSessions[0].CloseReason.Should().Be("user_closed");

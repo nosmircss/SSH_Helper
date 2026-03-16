@@ -129,7 +129,7 @@ namespace SSH_Helper
             outputRightPanel = new Panel();
             historyPanel = new Panel();
             historySplitContainer = new SplitContainer();
-            lstOutput = new ListBox();
+            lstOutput = new UI.HistoryListBox();
             contextHistoryLst = new ContextMenuStrip(components);
             saveAsToolStripMenuItem = new ToolStripMenuItem();
             saveAllToolStripMenuItem = new ToolStripMenuItem();
@@ -528,6 +528,7 @@ namespace SSH_Helper
             trvPresets.ItemDrag += trvPresets_ItemDrag;
             trvPresets.DragOver += trvPresets_DragOver;
             trvPresets.DragDrop += trvPresets_DragDrop;
+            trvPresets.DragLeave += (s, e) => ClearDropIndicator();
             trvPresets.AllowDrop = true;
             //
             // trvFavorites
@@ -1829,7 +1830,7 @@ namespace SSH_Helper
         private SplitContainer historySplitContainer;
         private Panel historyHeaderPanel;
         private Label lblHistoryTitle;
-        private ListBox lstOutput;
+        private UI.HistoryListBox lstOutput;
 
         // Host list panel (for folder history)
         private Panel hostListPanel;

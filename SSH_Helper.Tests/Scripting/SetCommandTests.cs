@@ -171,6 +171,67 @@ public class SetCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ListFunction_CreatesListFromArguments()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("dynamic_service", "Amazon-AWS");
+
+        var result = await _command.ExecuteAsync(
+            new ScriptStep { Set = "services = list('Cloudflare-CDN', dynamic_service, 'Cloudflare-Web')" },
+            context,
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariable("services").Should().BeEquivalentTo(new List<string>
+        {
+            "Cloudflare-CDN",
+            "Amazon-AWS",
+            "Cloudflare-Web"
+        });
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CollectionNormalizationHelpers_WorkTogether()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "raw = list('  Cloudflare-CDN  ', '', 'amazon-aws', 'Amazon-AWS')" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "trimmed = trim_all(raw)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "compacted = compact(trimmed)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "normalized = lower_all(compacted)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "unique = distinct(normalized)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "still_unique = push_unique(unique, 'CLOUDFLARE-CDN')" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "ordinal_unique = push_unique(unique, 'CLOUDFLARE-CDN', ordinal)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "uppered = upper_all(unique)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        context.GetVariable("unique").Should().BeEquivalentTo(new List<string> { "cloudflare-cdn", "amazon-aws" }, options => options.WithStrictOrdering());
+        context.GetVariable("still_unique").Should().BeEquivalentTo(new List<string> { "cloudflare-cdn", "amazon-aws" }, options => options.WithStrictOrdering());
+        context.GetVariable("ordinal_unique").Should().BeEquivalentTo(new List<string> { "cloudflare-cdn", "amazon-aws", "CLOUDFLARE-CDN" }, options => options.WithStrictOrdering());
+        context.GetVariable("uppered").Should().BeEquivalentTo(new List<string> { "CLOUDFLARE-CDN", "AMAZON-AWS" }, options => options.WithStrictOrdering());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LengthOnJsonArrayString_UsesElementCount()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "arr = json([], 'one', 'two', 'three')" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "count = length(arr)" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        context.GetVariable("count").Should().Be(3);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_JsonConstructor_WithNestedJsonExpression_StoresNestedObject()
     {
         var step = new ScriptStep
@@ -248,6 +309,58 @@ public class SetCommandTests
         context.HasVariable("null_val").Should().BeTrue();
         context.GetVariable("null_val").Should().BeNull();
         context.GetVariableString("null_val").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AssigningDefinedNullVariable_PreservesNullValue()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "device = json('name', 'router1')" },
+            context,
+            CancellationToken.None)).Success.Should().BeTrue();
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "null_val = json.get(device, 'nonexistent')" },
+            context,
+            CancellationToken.None)).Success.Should().BeTrue();
+
+        var result = await _command.ExecuteAsync(
+            new ScriptStep { Set = "copied = null_val" },
+            context,
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.HasVariable("copied").Should().BeTrue();
+        context.GetVariable("copied").Should().BeNull();
+        context.GetVariableString("copied").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AssigningBareListIndexExpression_PreservesIndexedValue()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "ports = list('any', '22', '443')" },
+            context,
+            CancellationToken.None)).Success.Should().BeTrue();
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "tail_removed = pop(ports)" },
+            context,
+            CancellationToken.None)).Success.Should().BeTrue();
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "head_removed = shift(ports)" },
+            context,
+            CancellationToken.None)).Success.Should().BeTrue();
+
+        var result = await _command.ExecuteAsync(
+            new ScriptStep { Set = "remaining = ports[0]" },
+            context,
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("remaining").Should().Be("22");
     }
 
     [Fact]

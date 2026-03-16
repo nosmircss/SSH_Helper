@@ -162,7 +162,8 @@ public sealed class HistoryStorageServiceTests : IDisposable
                 {
                     HostAddress = "10.0.0.10",
                     Output = largeHostOutput,
-                    Success = true,
+                    Success = false,
+                    WasCancelled = true,
                     Timestamp = DateTime.UtcNow
                 }
             }
@@ -189,7 +190,8 @@ public sealed class HistoryStorageServiceTests : IDisposable
         lightweightPayload!.Output.Should().Be("Done.");
         lightweightPayload.HostResults.Should().ContainSingle();
         lightweightPayload.HostResults![0].HostAddress.Should().Be("10.0.0.10");
-        lightweightPayload.HostResults[0].Success.Should().BeTrue();
+        lightweightPayload.HostResults[0].Success.Should().BeFalse();
+        lightweightPayload.HostResults[0].WasCancelled.Should().BeTrue();
         lightweightPayload.HostResults[0].Output.Should().BeEmpty();
 
         _service.TryLoadRunPayload(
@@ -200,6 +202,70 @@ public sealed class HistoryStorageServiceTests : IDisposable
         fullPayload.Should().NotBeNull();
         fullPayload!.HostResults.Should().ContainSingle();
         fullPayload.HostResults![0].Output.Should().Contain("host-output-line-0123456789");
+        fullPayload.HostResults[0].WasCancelled.Should().BeTrue();
+    }
+
+    [Fact]
+    public void SaveRun_AndLoadRunPayload_PreservesCancelledDetailsAndHostMetadata()
+    {
+        const string entryId = "entry-cancelled";
+        var payload = new HistoryRunPayload
+        {
+            Id = entryId,
+            Output = "Cancellation requested by user\nExecution cancelled.\n",
+            HostResults = new List<HostHistoryEntry>
+            {
+                new()
+                {
+                    HostAddress = "10.0.0.20",
+                    Output = "partial output",
+                    Success = false,
+                    WasCancelled = true,
+                    Timestamp = DateTime.UtcNow
+                }
+            },
+            Details = new ExecutionDetails
+            {
+                PresetName = "Cancelled",
+                Commands = "steps:\n  - wait: 10",
+                PresetType = "YamlScript",
+                WasCancelled = true,
+                StartTimeUtc = DateTime.UtcNow.AddSeconds(-5),
+                EndTimeUtc = DateTime.UtcNow,
+                Hosts = new List<SSH_Helper.Models.HostExecutionContext>
+                {
+                    new()
+                    {
+                        HostAddress = "10.0.0.20",
+                        Success = false,
+                        WasCancelled = true,
+                        TimestampUtc = DateTime.UtcNow
+                    }
+                }
+            }
+        };
+
+        _service.SaveRun(
+            new HistoryIndexEntry
+            {
+                Id = entryId,
+                Label = "2026-03-12 10:00:00 - CANCELLED - Cancelled",
+                CreatedAtUtc = DateTime.UtcNow,
+                HasHostResults = true,
+                HasDetails = true,
+                RunFileName = $"{entryId}.json"
+            },
+            payload,
+            maxEntries: 10);
+
+        _service.TryLoadRunPayload(entryId, out var loaded).Should().BeTrue();
+        loaded.Should().NotBeNull();
+        loaded!.Details.Should().NotBeNull();
+        loaded.Details!.WasCancelled.Should().BeTrue();
+        loaded.Details.Hosts.Should().ContainSingle();
+        loaded.Details.Hosts[0].WasCancelled.Should().BeTrue();
+        loaded.HostResults.Should().ContainSingle();
+        loaded.HostResults![0].WasCancelled.Should().BeTrue();
     }
 
     [Fact]

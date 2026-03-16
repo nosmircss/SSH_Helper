@@ -117,6 +117,36 @@ namespace SSH_Helper.Models
         /// </summary>
         public int MaxRecentFiles { get; set; } = 10;
 
+        /// <summary>
+        /// UTC timestamp of the last application shutdown. Used by SchedulingService.DetectMissedRuns
+        /// to anchor the missed-run detection window. Null on first install (means clean slate, no missed runs).
+        /// </summary>
+        public DateTime? LastAppShutdownUtc { get; set; }
+
+        /// <summary>
+        /// Maximum number of scheduled jobs that can execute concurrently.
+        /// Default: 3. User-configurable via settings.
+        /// </summary>
+        public int MaxConcurrentJobs { get; set; } = 3;
+
+        /// <summary>
+        /// Default maximum number of history entries retained per job.
+        /// Individual jobs can override via JobDefinition.MaxHistoryRuns.
+        /// </summary>
+        public int DefaultMaxHistoryRuns { get; set; } = 50;
+
+        /// <summary>
+        /// Default maximum age in days for history entries.
+        /// Individual jobs can override via JobDefinition.HistoryRetentionDays.
+        /// </summary>
+        public int DefaultHistoryRetentionDays { get; set; } = 30;
+
+        /// <summary>
+        /// Maximum number of characters to retain per host in job history output.
+        /// Output exceeding this limit is truncated with a marker.
+        /// </summary>
+        public int MaxJobOutputCharsPerHost { get; set; } = 1_048_576;
+
     }
 
     /// <summary>
@@ -383,6 +413,7 @@ namespace SSH_Helper.Models
         public string HostAddress { get; set; } = string.Empty;
         public string Output { get; set; } = string.Empty;
         public bool Success { get; set; } = true;
+        public bool WasCancelled { get; set; }
         public DateTime Timestamp { get; set; }
     }
 

@@ -163,7 +163,19 @@ public class ScriptAutocompleteProviderTests
         var completion = provider.GetCompletion(text, text.Length);
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
-        completion.Items.Select(item => item.Label).Should().Contain(["retry", "retry_delay", "respond"]);
+        completion.Items.Select(item => item.Label).Should().Contain(["retry", "retry_delay", "fail_on_nonzero", "respond"]);
+    }
+
+    [Fact]
+    public void GetCompletion_SendFailOnNonZeroValue_SuggestsBooleanValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - send:\n      fail_on_nonzero: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["true", "false"]);
     }
 
     [Fact]
@@ -268,6 +280,30 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
         completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "default"]);
+    }
+
+    [Fact]
+    public void GetCompletion_ReadfileStepOptionKey_IncludesPickerCustomizationOptions()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - readfile:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"]);
+    }
+
+    [Fact]
+    public void GetCompletion_ReadfileSelectFileValue_SuggestsBooleanValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - readfile:\n      select_file: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["true", "false"]);
     }
 
     [Fact]

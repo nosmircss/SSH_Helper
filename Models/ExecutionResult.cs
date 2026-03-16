@@ -8,6 +8,7 @@ namespace SSH_Helper.Models
         public HostConnection Host { get; set; } = new();
         public string Output { get; set; } = string.Empty;
         public bool Success { get; set; }
+        public bool WasCancelled { get; set; }
         public string? ErrorMessage { get; set; }
         public Exception? Exception { get; set; }
         public DateTime Timestamp { get; set; } = DateTime.Now;

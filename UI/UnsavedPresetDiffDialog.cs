@@ -1,12 +1,36 @@
 using System.Globalization;
+using SSH_Helper.Models;
 using SSH_Helper.Utilities;
 
 namespace SSH_Helper.UI
 {
+    internal enum PresetSaveImpactAction
+    {
+        Cancel = 0,
+        SaveExisting,
+        RenameExisting,
+        CreateNew,
+        Discard
+    }
+
+    internal enum PresetSavePromptMode
+    {
+        SaveCancel = 0,
+        SaveDiscardCancel,
+        RenameExistingCreateNewCancel,
+        RenameExistingCreateNewDiscardCancel
+    }
+
     internal sealed class UnsavedPresetDiffDialog : Form
     {
         private readonly RichTextBox _txtDiff;
         private readonly bool _darkMode;
+        private readonly Label _lblImpactCount;
+        private readonly Label _lblImpactSummary;
+        private readonly Button _btnToggleAffectedJobs;
+        private readonly Panel _panelAffectedJobs;
+        private readonly ListBox _lstAffectedJobs;
+        private bool _affectedJobsExpanded;
 
         public UnsavedPresetDiffDialog(
             string savedPresetName,
@@ -15,11 +39,14 @@ namespace SSH_Helper.UI
             string currentTimeoutText,
             string savedCommands,
             string currentCommands,
-            bool darkMode)
+            bool darkMode,
+            PresetSaveImpact? impact = null,
+            PresetSavePromptMode promptMode = PresetSavePromptMode.SaveDiscardCancel,
+            string? impactSummaryOverride = null)
         {
             _darkMode = darkMode;
 
-            Text = "Unsaved Preset";
+            Text = "Save Preset";
             Size = new Size(920, 620);
             MinimumSize = new Size(760, 480);
             FormBorderStyle = FormBorderStyle.Sizable;
@@ -27,6 +54,7 @@ namespace SSH_Helper.UI
             MaximizeBox = true;
             MinimizeBox = false;
             ShowInTaskbar = false;
+            SelectedAction = PresetSaveImpactAction.Cancel;
 
             var trimmedCurrentPresetName = (currentPresetName ?? string.Empty).Trim();
             var timeoutParsed = int.TryParse(currentTimeoutText, out var parsedTimeout);
@@ -37,6 +65,7 @@ namespace SSH_Helper.UI
                 NormalizeCommandText(currentCommands),
                 StringComparison.Ordinal);
             var summaryText = BuildSummaryLine(nameChanged, timeoutChanged);
+            var hasImpact = impact?.HasAffectedJobs == true;
 
             var promptLabel = new Label
             {
@@ -68,6 +97,64 @@ namespace SSH_Helper.UI
                 headerLayout.Controls.Add(summaryLabel, 0, 1);
             }
 
+            _lblImpactCount = new Label
+            {
+                AutoSize = true,
+                Visible = hasImpact
+            };
+
+            _lblImpactSummary = new Label
+            {
+                AutoSize = true,
+                MaximumSize = new Size(860, 0),
+                Margin = new Padding(0, 2, 0, 0),
+                Visible = hasImpact
+            };
+
+            _btnToggleAffectedJobs = new Button
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0, 8, 0, 0),
+                Padding = new Padding(8, 2, 8, 2),
+                Visible = hasImpact
+            };
+            _btnToggleAffectedJobs.Click += (_, _) => ToggleAffectedJobsVisibility();
+
+            _lstAffectedJobs = new ListBox
+            {
+                Dock = DockStyle.Fill,
+                HorizontalScrollbar = true,
+                IntegralHeight = false
+            };
+
+            _panelAffectedJobs = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 120,
+                Margin = new Padding(0, 6, 0, 0),
+                Padding = new Padding(0),
+                Visible = false
+            };
+            _panelAffectedJobs.Controls.Add(_lstAffectedJobs);
+
+            var impactLayout = new TableLayoutPanel
+            {
+                ColumnCount = 1,
+                RowCount = 4,
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                Visible = hasImpact
+            };
+            impactLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            impactLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            impactLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            impactLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            impactLayout.Controls.Add(_lblImpactCount, 0, 0);
+            impactLayout.Controls.Add(_lblImpactSummary, 0, 1);
+            impactLayout.Controls.Add(_btnToggleAffectedJobs, 0, 2);
+            impactLayout.Controls.Add(_panelAffectedJobs, 0, 3);
+
             _txtDiff = new RichTextBox
             {
                 Dock = DockStyle.Fill,
@@ -81,30 +168,6 @@ namespace SSH_Helper.UI
                 Margin = new Padding(0, 8, 0, 8)
             };
 
-            var btnSave = new Button
-            {
-                Text = "Save",
-                DialogResult = DialogResult.Yes,
-                Size = new Size(96, 30),
-                Margin = new Padding(8, 0, 0, 0)
-            };
-
-            var btnDiscard = new Button
-            {
-                Text = "Discard",
-                DialogResult = DialogResult.No,
-                Size = new Size(96, 30),
-                Margin = new Padding(8, 0, 0, 0)
-            };
-
-            var btnCancel = new Button
-            {
-                Text = "Cancel",
-                DialogResult = DialogResult.Cancel,
-                Size = new Size(96, 30),
-                Margin = new Padding(8, 0, 0, 0)
-            };
-
             var buttonPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Right,
@@ -114,43 +177,69 @@ namespace SSH_Helper.UI
                 Margin = new Padding(0),
                 Padding = new Padding(0, 4, 0, 0)
             };
-            buttonPanel.Controls.Add(btnSave);
-            buttonPanel.Controls.Add(btnDiscard);
-            buttonPanel.Controls.Add(btnCancel);
+
+            ConfigureActionButtons(buttonPanel, promptMode);
 
             var root = new TableLayoutPanel
             {
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 4,
                 Dock = DockStyle.Fill,
                 Padding = new Padding(12)
             };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.Controls.Add(headerLayout, 0, 0);
-            root.Controls.Add(_txtDiff, 0, 1);
-            root.Controls.Add(buttonPanel, 0, 2);
+            root.Controls.Add(impactLayout, 0, 1);
+            root.Controls.Add(_txtDiff, 0, 2);
+            root.Controls.Add(buttonPanel, 0, 3);
 
             Controls.Add(root);
-            AcceptButton = btnSave;
-            CancelButton = btnCancel;
 
             DialogTheme.ApplyTo(this, darkMode);
-            DialogTheme.StyleButton(btnSave, darkMode, isPrimary: true);
-            DialogTheme.StyleButton(btnDiscard, darkMode);
-            DialogTheme.StyleButton(btnCancel, darkMode);
             DialogTheme.SetDarkTitleBar(this, darkMode);
 
             if (darkMode)
             {
                 _txtDiff.BackColor = DialogTheme.DarkInput;
                 _txtDiff.ForeColor = DialogTheme.DarkText;
+                _lstAffectedJobs.BackColor = DialogTheme.DarkInput;
+                _lstAffectedJobs.ForeColor = DialogTheme.DarkText;
             }
             else
             {
                 _txtDiff.BackColor = DialogTheme.LightInput;
                 _txtDiff.ForeColor = DialogTheme.LightText;
+                _lstAffectedJobs.BackColor = DialogTheme.LightInput;
+                _lstAffectedJobs.ForeColor = DialogTheme.LightText;
+            }
+
+            if (!string.IsNullOrEmpty(summaryText))
+            {
+                headerLayout.Controls[1].ForeColor = darkMode
+                    ? DialogTheme.DarkSecondaryText
+                    : DialogTheme.LightSecondaryText;
+            }
+
+            if (hasImpact)
+            {
+                _lblImpactCount.Text = BuildImpactCountText(savedPresetName, impact!.AffectedJobs.Count);
+                _lblImpactSummary.Text = impactSummaryOverride ?? BuildImpactSummaryText(
+                    savedPresetName,
+                    trimmedCurrentPresetName,
+                    nameChanged);
+                _lblImpactSummary.ForeColor = darkMode
+                    ? DialogTheme.DarkSecondaryText
+                    : DialogTheme.LightSecondaryText;
+
+                foreach (var job in impact.AffectedJobs)
+                {
+                    _lstAffectedJobs.Items.Add(FormatAffectedJobText(job));
+                }
+
+                UpdateAffectedJobsToggleText();
             }
 
             PopulateDiff(
@@ -168,6 +257,8 @@ namespace SSH_Helper.UI
 
             Load += (_, _) => DialogTheme.ApplyNativeTheme(this, darkMode);
         }
+
+        public PresetSaveImpactAction SelectedAction { get; private set; }
 
         private void PopulateDiff(
             string savedPresetName,
@@ -244,6 +335,115 @@ namespace SSH_Helper.UI
             _txtDiff.ResumeLayout();
         }
 
+        private void ConfigureActionButtons(
+            FlowLayoutPanel buttonPanel,
+            PresetSavePromptMode promptMode)
+        {
+            switch (promptMode)
+            {
+                case PresetSavePromptMode.RenameExistingCreateNewDiscardCancel:
+                    var btnRenameDiscard = CreateActionButton(
+                        "Rename Existing",
+                        PresetSaveImpactAction.RenameExisting,
+                        isPrimary: true);
+                    buttonPanel.Controls.Add(btnRenameDiscard);
+                    AcceptButton = btnRenameDiscard;
+                    buttonPanel.Controls.Add(CreateActionButton(
+                        "Create New",
+                        PresetSaveImpactAction.CreateNew,
+                        isPrimary: false));
+                    buttonPanel.Controls.Add(CreateActionButton(
+                        "Discard",
+                        PresetSaveImpactAction.Discard,
+                        isPrimary: false));
+                    break;
+
+                case PresetSavePromptMode.RenameExistingCreateNewCancel:
+                    var btnRename = CreateActionButton(
+                        "Rename Existing",
+                        PresetSaveImpactAction.RenameExisting,
+                        isPrimary: true);
+                    buttonPanel.Controls.Add(btnRename);
+                    AcceptButton = btnRename;
+                    buttonPanel.Controls.Add(CreateActionButton(
+                        "Create New",
+                        PresetSaveImpactAction.CreateNew,
+                        isPrimary: false));
+                    break;
+
+                case PresetSavePromptMode.SaveDiscardCancel:
+                    var btnSaveDiscard = CreateActionButton(
+                        "Save",
+                        PresetSaveImpactAction.SaveExisting,
+                        isPrimary: true);
+                    buttonPanel.Controls.Add(btnSaveDiscard);
+                    AcceptButton = btnSaveDiscard;
+                    buttonPanel.Controls.Add(CreateActionButton(
+                        "Discard",
+                        PresetSaveImpactAction.Discard,
+                        isPrimary: false));
+                    break;
+
+                default:
+                    var btnSave = CreateActionButton(
+                        "Save",
+                        PresetSaveImpactAction.SaveExisting,
+                        isPrimary: true);
+                    buttonPanel.Controls.Add(btnSave);
+                    AcceptButton = btnSave;
+                    break;
+            }
+
+            var btnCancel = CreateActionButton(
+                "Cancel",
+                PresetSaveImpactAction.Cancel,
+                isPrimary: false);
+            btnCancel.DialogResult = DialogResult.Cancel;
+            buttonPanel.Controls.Add(btnCancel);
+            CancelButton = btnCancel;
+        }
+
+        private Button CreateActionButton(
+            string text,
+            PresetSaveImpactAction action,
+            bool isPrimary)
+        {
+            var button = new Button
+            {
+                Text = text,
+                Size = new Size(120, 30),
+                Margin = new Padding(8, 0, 0, 0)
+            };
+
+            DialogTheme.StyleButton(button, _darkMode, isPrimary: isPrimary);
+            button.Click += (_, _) =>
+            {
+                SelectedAction = action;
+                DialogResult = action == PresetSaveImpactAction.Cancel
+                    ? DialogResult.Cancel
+                    : DialogResult.OK;
+                Close();
+            };
+
+            return button;
+        }
+
+        private void ToggleAffectedJobsVisibility()
+        {
+            _affectedJobsExpanded = !_affectedJobsExpanded;
+            _panelAffectedJobs.Visible = _affectedJobsExpanded;
+            UpdateAffectedJobsToggleText();
+        }
+
+        private void UpdateAffectedJobsToggleText()
+        {
+            var jobCount = _lstAffectedJobs.Items.Count;
+            var label = jobCount == 1 ? "job" : "jobs";
+            _btnToggleAffectedJobs.Text = _affectedJobsExpanded
+                ? $"Hide affected scheduled {label} ({jobCount})"
+                : $"Show affected scheduled {label} ({jobCount})";
+        }
+
         private Color ResolveLineColor(InlineDiffLineKind kind)
         {
             return kind switch
@@ -261,6 +461,34 @@ namespace SSH_Helper.UI
             if (nameChanged) parts.Add("name");
             if (timeoutChanged) parts.Add("timeout");
             return parts.Count == 0 ? string.Empty : $"Changed fields: {string.Join(", ", parts)}";
+        }
+
+        private static string BuildImpactCountText(string savedPresetName, int affectedJobCount)
+        {
+            var jobLabel = affectedJobCount == 1 ? "scheduled job" : "scheduled jobs";
+            return $"Preset '{savedPresetName}' is used by {affectedJobCount} {jobLabel}.";
+        }
+
+        private static string BuildImpactSummaryText(
+            string savedPresetName,
+            string currentPresetName,
+            bool nameChanged)
+        {
+            if (nameChanged)
+            {
+                return $"Rename Existing will update '{savedPresetName}' to '{currentPresetName}', and future scheduled or Run Now executions will use the renamed preset. " +
+                       $"Create New saves '{currentPresetName}' as a separate preset instead.";
+            }
+
+            return $"Future scheduled and Run Now executions will use the updated preset '{currentPresetName}'.";
+        }
+
+        private static string FormatAffectedJobText(JobDefinition job)
+        {
+            var targetSuffix = job.TargetType == JobTargetType.Folder
+                ? $" [Folder: {job.TargetName}]"
+                : string.Empty;
+            return $"{job.Name}{targetSuffix}";
         }
 
         private static string DisplayText(string value)

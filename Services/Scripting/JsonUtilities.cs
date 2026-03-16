@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using SSH_Helper.Services.Scripting.Commands;
@@ -23,7 +24,8 @@ namespace SSH_Helper.Services.Scripting
             if (value is string str)
             {
                 // Try to parse as JSON first
-                if ((str.TrimStart().StartsWith("{") || str.TrimStart().StartsWith("[")) &&
+                var trimmedStart = str.TrimStart();
+                if ((trimmedStart.StartsWith("{") || trimmedStart.StartsWith("[")) &&
                     (str.TrimEnd().EndsWith("}") || str.TrimEnd().EndsWith("]")))
                 {
                     try
@@ -307,7 +309,7 @@ namespace SSH_Helper.Services.Scripting
                 return nestedJsonValue;
             }
 
-            if (TryEvaluateScalarFunctionExpression(expr, context, out var functionValue))
+            if (TryEvaluateFunctionExpression(expr, context, out var functionValue))
             {
                 return functionValue;
             }
@@ -331,7 +333,7 @@ namespace SSH_Helper.Services.Scripting
             return ParseJsonValue(substituted);
         }
 
-        private static bool TryEvaluateScalarFunctionExpression(string expr, ScriptContext context, out object? value)
+        public static bool TryEvaluateFunctionExpression(string expr, ScriptContext context, out object? value)
         {
             value = null;
 
@@ -343,18 +345,19 @@ namespace SSH_Helper.Services.Scripting
                 case "length":
                 {
                     var resolved = ResolveJsonValue(inner, context);
-                    if (resolved is List<string> list)
+                    value = ValueResolver.ResolveLength(resolved);
+                    return true;
+                }
+                case "list":
+                {
+                    var args = SplitTopLevelCommas(inner);
+                    var items = new List<string>(args.Count);
+                    foreach (var arg in args)
                     {
-                        value = list.Count;
+                        items.Add(ResolveJsonValue(arg, context)?.ToString() ?? string.Empty);
                     }
-                    else if (resolved is JsonArray arr)
-                    {
-                        value = arr.Count;
-                    }
-                    else
-                    {
-                        value = resolved?.ToString()?.Length ?? 0;
-                    }
+
+                    value = items;
                     return true;
                 }
                 case "trim":
@@ -415,7 +418,7 @@ namespace SSH_Helper.Services.Scripting
 
                     var source = ResolveJsonValue(args[0], context);
                     var delimiter = args.Count > 1 ? ResolveJsonValue(args[1], context)?.ToString() ?? "," : ",";
-                    value = string.Join(delimiter, ResolveToStringList(source));
+                    value = string.Join(delimiter, ValueResolver.ResolveListValue(source));
                     return true;
                 }
                 case "substring":
@@ -463,12 +466,93 @@ namespace SSH_Helper.Services.Scripting
                     if (args.Count == 0)
                         return false;
 
-                    var list = ResolveToStringList(ResolveJsonValue(args[0], context));
+                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(args[0], context));
                     list.Sort(StringComparer.OrdinalIgnoreCase);
                     var order = args.Count > 1 ? ResolveJsonValue(args[1], context)?.ToString() ?? "asc" : "asc";
                     if (order.Equals("desc", StringComparison.OrdinalIgnoreCase))
                         list.Reverse();
                     value = list;
+                    return true;
+                }
+                case "compact":
+                {
+                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(inner, context));
+                    value = list.Where(item => !string.IsNullOrWhiteSpace(item)).ToList();
+                    return true;
+                }
+                case "trim_all":
+                {
+                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(inner, context));
+                    value = list.Select(item => item?.Trim() ?? string.Empty).ToList();
+                    return true;
+                }
+                case "lower_all":
+                {
+                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(inner, context));
+                    value = list.Select(item => item?.ToLowerInvariant() ?? string.Empty).ToList();
+                    return true;
+                }
+                case "upper_all":
+                {
+                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(inner, context));
+                    value = list.Select(item => item?.ToUpperInvariant() ?? string.Empty).ToList();
+                    return true;
+                }
+                case "distinct":
+                {
+                    var args = SplitTopLevelCommas(inner);
+                    if (args.Count == 0)
+                        return false;
+
+                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(args[0], context));
+                    var comparer = ValueResolver.ResolveComparisonComparer(args.Count > 1 ? ResolveJsonValue(args[1], context)?.ToString() : null);
+                    value = DistinctPreservingOrder(list, comparer);
+                    return true;
+                }
+                case "push_unique":
+                {
+                    var args = SplitTopLevelCommas(inner);
+                    if (args.Count < 2)
+                        return false;
+
+                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(args[0], context));
+                    var candidate = ResolveJsonValue(args[1], context)?.ToString() ?? string.Empty;
+                    var comparer = ValueResolver.ResolveComparisonComparer(args.Count > 2 ? ResolveJsonValue(args[2], context)?.ToString() : null);
+                    if (!list.Contains(candidate, comparer))
+                        list.Add(candidate);
+                    value = list;
+                    return true;
+                }
+                case "first":
+                {
+                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(inner, context));
+                    value = list.Count > 0 ? list[0] : null;
+                    return true;
+                }
+                case "last":
+                {
+                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(inner, context));
+                    value = list.Count > 0 ? list[^1] : null;
+                    return true;
+                }
+                case "indexof":
+                {
+                    var args = SplitTopLevelCommas(inner);
+                    if (args.Count < 2)
+                        return false;
+
+                    var list = ValueResolver.ResolveListValue(ResolveJsonValue(args[0], context));
+                    var searchValue = ResolveJsonValue(args[1], context)?.ToString() ?? string.Empty;
+                    value = list.FindIndex(item => string.Equals(item, searchValue, StringComparison.OrdinalIgnoreCase));
+                    return true;
+                }
+                case "concat":
+                {
+                    var args = SplitTopLevelCommas(inner);
+                    var combined = new List<string>();
+                    foreach (var arg in args)
+                        combined.AddRange(ValueResolver.ResolveListValue(ResolveJsonValue(arg, context)));
+                    value = combined;
                     return true;
                 }
                 default:
@@ -562,32 +646,19 @@ namespace SSH_Helper.Services.Scripting
             return int.TryParse(text, out number);
         }
 
-        private static List<string> ResolveToStringList(object? value)
+        private static List<string> DistinctPreservingOrder(IEnumerable<string> values, IEqualityComparer<string> comparer)
         {
-            if (value == null)
-                return new List<string>();
+            var result = new List<string>();
+            var seen = new HashSet<string>(comparer);
 
-            if (value is List<string> list)
-                return new List<string>(list);
-
-            if (value is JsonArray array)
+            foreach (var value in values)
             {
-                var items = new List<string>(array.Count);
-                foreach (var item in array)
-                    items.Add(JsonNodeToStringValue(item));
-                return items;
+                var safeValue = value ?? string.Empty;
+                if (seen.Add(safeValue))
+                    result.Add(safeValue);
             }
 
-            if (value is System.Collections.IEnumerable enumerable && value is not string)
-            {
-                var items = new List<string>();
-                foreach (var item in enumerable)
-                    items.Add(item?.ToString() ?? string.Empty);
-                return items;
-            }
-
-            var text = value.ToString() ?? string.Empty;
-            return new List<string> { text };
+            return result;
         }
 
         /// <summary>

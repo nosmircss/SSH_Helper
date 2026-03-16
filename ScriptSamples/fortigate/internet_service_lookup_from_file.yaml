@@ -1,0 +1,167 @@
+---
+name: InternetServiceLookup_From_File
+description: Read IPs from a file, match FortiGate internet services, and print unique non-excluded results.
+nobanner: true
+
+vars:
+  exclude_service_matches:
+    - Cloudflare-CDN
+    - Amazon-AWS
+    - Cloudflare-Web
+
+subroutines:
+  lookup_services:
+    params: [badguy, match_command, excludes, unique_services, unmatched_ips]
+    outputs: [unique_services, unmatched_ips]
+    steps:
+      - set:
+          expression: cmd_response = ""
+      - set:
+          expression: matched_services = list()
+      - set:
+          expression: found_non_excluded_match = 0
+
+      - send:
+          command: "${match_command}"
+          capture: cmd_response
+          suppress: true
+
+      - if:
+          condition: cmd_response is empty
+          then:
+            - set:
+                expression: unmatched_ips = push_unique(unmatched_ips, badguy)
+            - return: true
+
+      - extract:
+          from: cmd_response
+          pattern: 'Internet Service(?:6)?:\s*\d+\(([^)]+)\)'
+          into: matched_services
+          match: all
+
+      - if:
+          condition: matched_services is empty
+          then:
+            - set:
+                expression: unmatched_ips = push_unique(unmatched_ips, badguy)
+            - return: true
+
+      - foreach:
+          iterator: svc in compact(matched_services)
+          do:
+            - set:
+                expression: svc_key = lower(trim(svc))
+
+            - if:
+                condition: svc_key in excludes
+                then:
+                  - continue: true
+
+            - set:
+                expression: found_non_excluded_match = 1
+            - set:
+                expression: unique_services = push_unique(unique_services, svc)
+
+      - if:
+          condition: found_non_excluded_match == 0
+          then:
+            - set:
+                expression: unmatched_ips = push_unique(unmatched_ips, badguy)
+
+  print_list_section:
+    params: [title, items]
+    steps:
+      - if:
+          condition: items is empty
+          then:
+            - return: true
+
+      - print:
+          message: "${title}"
+
+      - foreach:
+          iterator: item in items
+          do:
+            - print:
+                message: "${item}"
+
+steps:
+  - set:
+      expression: exclude_service_matches_norm = lower_all(trim_all(distinct(exclude_service_matches)))
+
+  - readfile:
+      select_file: true
+      into: badactors
+      message: "Choose the block file."
+      fileext: "txt,json"
+      skip_empty_lines: true
+      trim_lines: true
+
+  - set:
+      expression: unique_services_v4 = list()
+  - set:
+      expression: unique_services_v6 = list()
+  - set:
+      expression: unmatched_ips_v4 = list()
+  - set:
+      expression: unmatched_ips_v6 = list()
+
+  - foreach:
+      iterator: badguy in badactors
+      do:
+        - if:
+            condition: badguy contains ":"
+            then:
+              - call:
+                  subroutine: lookup_services
+                  args:
+                    badguy: badguy
+                    match_command: "diagnose internet-service6 match root ${badguy} 128"
+                    excludes: exclude_service_matches_norm
+                    unique_services: unique_services_v6
+                    unmatched_ips: unmatched_ips_v6
+                  out:
+                    unique_services: unique_services_v6
+                    unmatched_ips: unmatched_ips_v6
+            else:
+              - call:
+                  subroutine: lookup_services
+                  args:
+                    badguy: badguy
+                    match_command: "diagnose internet-service match root ${badguy} 255.255.255.255"
+                    excludes: exclude_service_matches_norm
+                    unique_services: unique_services_v4
+                    unmatched_ips: unmatched_ips_v4
+                  out:
+                    unique_services: unique_services_v4
+                    unmatched_ips: unmatched_ips_v4
+
+  - call:
+      subroutine: print_list_section
+      args:
+        title: "=== IPv4 Unique Internet Service Matches ==="
+        items: unique_services_v4
+
+  - call:
+      subroutine: print_list_section
+      args:
+        title: "=== IPv6 Unique Internet Service Matches ==="
+        items: unique_services_v6
+
+  - call:
+      subroutine: print_list_section
+      args:
+        title: "=== IPv4 IPs With No Match ==="
+        items: unmatched_ips_v4
+
+  - call:
+      subroutine: print_list_section
+      args:
+        title: "=== IPv6 IPs With No Match ==="
+        items: unmatched_ips_v6
+
+  - if:
+      condition: unique_services_v4 is empty and unique_services_v6 is empty and unmatched_ips_v4 is empty and unmatched_ips_v6 is empty
+      then:
+        - print:
+            message: "No results."

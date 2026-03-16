@@ -367,7 +367,8 @@ namespace SSH_Helper
         {
             int hostCount = _visibleHosts.Count;
             int successCount = _visibleHosts.Count(h => h.Success);
-            int failedCount = hostCount - successCount;
+            int cancelledCount = _visibleHosts.Count(h => h.WasCancelled);
+            int failedCount = hostCount - successCount - cancelledCount;
             var duration = _details.EndTimeUtc > _details.StartTimeUtc
                 ? _details.EndTimeUtc - _details.StartTimeUtc
                 : TimeSpan.Zero;
@@ -375,6 +376,7 @@ namespace SSH_Helper
             var sb = new StringBuilder();
             sb.AppendLine($"Preset Name: {_details.PresetName}");
             sb.AppendLine($"Preset Type: {_details.PresetType}");
+            sb.AppendLine($"Outcome: {(_details.WasCancelled ? "Cancelled" : "Completed")}");
             sb.AppendLine($"Folder Execution: {_details.IsFolderExecution}");
             if (_details.IsFolderExecution)
             {
@@ -390,7 +392,9 @@ namespace SSH_Helper
                 sb.AppendLine($"Host Scope: {_hostAddressFilter}");
             }
 
-            sb.AppendLine($"Hosts: {hostCount} total ({successCount} succeeded, {failedCount} failed)");
+            sb.AppendLine(cancelledCount > 0
+                ? $"Hosts: {hostCount} total ({successCount} succeeded, {cancelledCount} cancelled, {failedCount} failed)"
+                : $"Hosts: {hostCount} total ({successCount} succeeded, {failedCount} failed)");
             sb.AppendLine($"Interactive Sessions: {_visibleInteractiveSessions.Count} launched");
             sb.AppendLine();
             sb.AppendLine("Executed Presets:");
@@ -422,7 +426,7 @@ namespace SSH_Helper
             {
                 _gridHosts.Rows.Add(
                     host.HostAddress,
-                    host.Success ? "Success" : "Failed",
+                    GetHostStatusText(host),
                     FormatTimestamp(host.TimestampUtc));
             }
         }
@@ -548,14 +552,14 @@ namespace SSH_Helper
             try
             {
                 Clipboard.SetText(FormatDetailsAsText(includeOutputWindow: false));
-                DialogTheme.Show("Execution details copied to clipboard.",
+                DialogTheme.Show(this, "Execution details copied to clipboard.",
                     "Copied",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Failed to copy details: {ex.Message}",
+                DialogTheme.Show(this, $"Failed to copy details: {ex.Message}",
                     "Copy Failed",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -580,7 +584,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Failed to save details: {ex.Message}",
+                DialogTheme.Show(this, $"Failed to save details: {ex.Message}",
                     "Save Failed",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -636,7 +640,7 @@ namespace SSH_Helper
             sb.AppendLine(new string('-', 80));
             foreach (var host in _visibleHosts.OrderBy(h => h.HostAddress, StringComparer.OrdinalIgnoreCase))
             {
-                sb.AppendLine($"{host.HostAddress} | {(host.Success ? "Success" : "Failed")} | {FormatTimestamp(host.TimestampUtc)}");
+                sb.AppendLine($"{host.HostAddress} | {GetHostStatusText(host)} | {FormatTimestamp(host.TimestampUtc)}");
             }
 
             sb.AppendLine();
@@ -745,6 +749,14 @@ namespace SSH_Helper
                 return "(unknown)";
 
             return sessionMode.Trim();
+        }
+
+        private static string GetHostStatusText(SSH_Helper.Models.HostExecutionContext host)
+        {
+            if (host.WasCancelled)
+                return "Cancelled";
+
+            return host.Success ? "Success" : "Failed";
         }
 
         private static string? NormalizeHostAddress(string? hostAddress)
