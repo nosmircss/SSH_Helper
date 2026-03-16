@@ -24,10 +24,7 @@ namespace SSH_Helper.Services
         public JobHistoryService(string? basePath = null)
         {
             _baseDirectory = basePath
-                ?? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SSH_Helper",
-                    "job-history");
+                ?? Path.Combine(AppDataPaths.GetAppFolder(), "job-history");
         }
 
         #region Event Subscription
@@ -435,7 +432,7 @@ namespace SSH_Helper.Services
             }
             catch
             {
-                // Best-effort: swallow exceptions during corrupt file backup
+                // Best-effort
             }
         }
 
@@ -632,7 +629,7 @@ namespace SSH_Helper.Services
             => Path.Combine(GetJobDirectory(jobId), runFileName);
 
         private static string Serialize(object obj)
-            => JsonConvert.SerializeObject(obj, Formatting.Indented);
+            => JsonFileWriter.Serialize(obj);
 
         #endregion
     }

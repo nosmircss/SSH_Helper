@@ -28,22 +28,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             // Request the column update
             context.RequestColumnUpdate(options.Column, resolvedValue);
 
-            context.EmitOutput($"UpdateColumn: {options.Column} = '{TruncateForDisplay(resolvedValue)}'", ScriptOutputType.Debug);
+            context.EmitOutput($"UpdateColumn: {options.Column} = '{ScriptingHelpers.TruncateForDisplay(resolvedValue, 50)}'", ScriptOutputType.Debug);
 
             return Task.FromResult(CommandResult.Ok());
-        }
-
-        private string TruncateForDisplay(string value, int maxLength = 50)
-        {
-            if (string.IsNullOrEmpty(value))
-                return "";
-
-            value = value.Replace("\r", "").Replace("\n", "\\n");
-
-            if (value.Length <= maxLength)
-                return value;
-
-            return value.Substring(0, maxLength) + "...";
         }
     }
 }

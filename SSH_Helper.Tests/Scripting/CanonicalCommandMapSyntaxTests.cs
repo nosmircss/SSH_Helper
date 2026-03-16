@@ -9,6 +9,8 @@ namespace SSH_Helper.Tests.Scripting;
 public class CanonicalCommandMapSyntaxTests
 {
     private readonly ScriptParser _parser = new();
+    private const string RepoSamplesPlaceholderRoot = @"C:\\Path\\To\\SSH_Helper\\ScriptSamples";
+    private const string QaCatalogLibraryPlaceholder = "__QA_CATALOG_LIBRARY_PATH__";
 
     [Fact]
     public void Parse_CanonicalMapSyntax_ParsesConvertedCommands()
@@ -215,20 +217,14 @@ public class CanonicalCommandMapSyntaxTests
     [Fact]
     public void Validate_ScriptSamples_AreCanonicalAndPassEnforcedValidation()
     {
-        DirectoryInfo? search = new(AppContext.BaseDirectory);
-        while (search != null && !Directory.Exists(Path.Combine(search.FullName, "ScriptSamples")))
-        {
-            search = search.Parent;
-        }
-
-        search.Should().NotBeNull("test should run from within the repository tree");
-        var samplesRoot = Path.Combine(search!.FullName, "ScriptSamples");
+        var repoRoot = FindRepositoryRoot();
+        var samplesRoot = Path.Combine(repoRoot, "ScriptSamples");
         var sampleFiles = Directory.GetFiles(samplesRoot, "*.yaml", SearchOption.AllDirectories);
         sampleFiles.Should().NotBeEmpty();
 
         foreach (var sampleFile in sampleFiles)
         {
-            var text = File.ReadAllText(sampleFile);
+            var text = NormalizeSampleTextForValidation(sampleFile, File.ReadAllText(sampleFile), samplesRoot);
             Script script;
             try
             {
@@ -239,8 +235,37 @@ public class CanonicalCommandMapSyntaxTests
                 throw new InvalidOperationException($"Failed to parse sample script '{sampleFile}': {ex.Message}", ex);
             }
 
-            var errors = _parser.Validate(script, text, enforceCanonicalSyntax: true);
+            var errors = _parser.Validate(
+                script,
+                text,
+                enforceCanonicalSyntax: true,
+                allowLibraryDefinitions: script.Library);
             errors.Should().BeEmpty($"script sample should be canonical: {sampleFile}");
         }
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? search = new(AppContext.BaseDirectory);
+        while (search != null && !Directory.Exists(Path.Combine(search.FullName, "ScriptSamples")))
+        {
+            search = search.Parent;
+        }
+
+        search.Should().NotBeNull("test should run from within the repository tree");
+        return search!.FullName;
+    }
+
+    private static string NormalizeSampleTextForValidation(string sampleFile, string text, string samplesRoot)
+    {
+        var normalized = text.Replace(RepoSamplesPlaceholderRoot, samplesRoot.Replace("\\", "\\\\"));
+
+        if (sampleFile.EndsWith(Path.Combine("ScriptSamples", "qa", "catalog_runner.yaml"), System.StringComparison.OrdinalIgnoreCase))
+        {
+            var qaLibraryPath = Path.Combine(samplesRoot, "qa", "catalog_library.yaml").Replace("\\", "\\\\");
+            normalized = normalized.Replace(QaCatalogLibraryPlaceholder, qaLibraryPath);
+        }
+
+        return normalized;
     }
 }

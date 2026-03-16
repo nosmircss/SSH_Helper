@@ -190,7 +190,7 @@ namespace SSH_Helper.Services.Scripting
                     }
 
                     // Propagate control flow signals
-                    if (result.ShouldExit || result.ShouldBreak || result.ShouldContinue || result.ShouldReturn)
+                    if (result.IsControlFlow)
                         return result;
 
                     // Stop on error (unless on_error: continue)
@@ -298,10 +298,7 @@ namespace SSH_Helper.Services.Scripting
                 var errorMsg = $"Error at line {step.LineNumber}: {ex.Message}";
                 context.EmitOutput(errorMsg, ScriptOutputType.Error);
 
-                if (step.OnError?.ToLowerInvariant() == "continue")
-                    return CommandResult.Suppressed(errorMsg);
-
-                return CommandResult.Fail(errorMsg);
+                return CommandResult.ApplyOnError(step, errorMsg);
             }
         }
 

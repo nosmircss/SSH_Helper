@@ -243,6 +243,12 @@ namespace SSH_Helper.Services.Scripting.Models
         public string? OnError { get; set; }
 
         /// <summary>
+        /// Whether on_error is set to "continue".
+        /// </summary>
+        public bool IsOnErrorContinue =>
+            string.Equals(OnError, "continue", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
         /// Number of retry attempts on step failure (0 = no retry).
         /// </summary>
         public int? Retry { get; set; }

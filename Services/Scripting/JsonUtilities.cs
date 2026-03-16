@@ -24,7 +24,8 @@ namespace SSH_Helper.Services.Scripting
             if (value is string str)
             {
                 // Try to parse as JSON first
-                if ((str.TrimStart().StartsWith("{") || str.TrimStart().StartsWith("[")) &&
+                var trimmedStart = str.TrimStart();
+                if ((trimmedStart.StartsWith("{") || trimmedStart.StartsWith("[")) &&
                     (str.TrimEnd().EndsWith("}") || str.TrimEnd().EndsWith("]")))
                 {
                     try

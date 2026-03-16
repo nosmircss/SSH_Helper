@@ -454,7 +454,7 @@ namespace SSH_Helper.Services.Scripting
             }
         }
 
-        private static bool IsSimpleIdentifier(string value)
+        internal static bool IsSimpleIdentifier(string value)
         {
             if (string.IsNullOrWhiteSpace(value))
                 return false;

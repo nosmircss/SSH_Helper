@@ -28,21 +28,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             // Keep the current script context in sync with the persisted environment value.
             context.SetVariable(variable, resolvedValue);
             context.RequestEnvironmentUpdate(variable, resolvedValue);
-            context.EmitOutput($"UpdateEnvironment: {variable} = '{TruncateForDisplay(resolvedValue)}'", ScriptOutputType.Debug);
+            context.EmitOutput($"UpdateEnvironment: {variable} = '{ScriptingHelpers.TruncateForDisplay(resolvedValue, 50)}'", ScriptOutputType.Debug);
 
             return Task.FromResult(CommandResult.Ok());
-        }
-
-        private string TruncateForDisplay(string value, int maxLength = 50)
-        {
-            if (string.IsNullOrEmpty(value))
-                return "";
-
-            value = value.Replace("\r", "").Replace("\n", "\\n");
-            if (value.Length <= maxLength)
-                return value;
-
-            return value.Substring(0, maxLength) + "...";
         }
     }
 }

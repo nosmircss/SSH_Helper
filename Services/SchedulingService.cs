@@ -1,6 +1,7 @@
 using Cronos;
 using CronExpressionDescriptor;
 using SSH_Helper.Models;
+using SSH_Helper.Utilities;
 
 namespace SSH_Helper.Services
 {
@@ -19,14 +20,7 @@ namespace SSH_Helper.Services
         /// <returns>Null if valid; error message string if invalid.</returns>
         public string? ValidateCronExpression(string? expression)
         {
-            if (string.IsNullOrWhiteSpace(expression))
-                return "Cron expression cannot be empty.";
-
-            // 5-field only -- do NOT pass CronFormat.IncludeSeconds
-            if (!CronExpression.TryParse(expression.Trim(), out _))
-                return "Invalid cron expression format. Expected 5 fields: minute hour day-of-month month day-of-week.";
-
-            return null;
+            return InputValidator.ValidateCronExpression(expression);
         }
 
         /// <summary>
@@ -168,9 +162,7 @@ namespace SSH_Helper.Services
                 if (string.IsNullOrEmpty(job.CronExpression))
                     continue;
 
-                var missed = GetMissedOccurrences(job.CronExpression, lastAppShutdownUtc)
-                    .OrderBy(time => time)
-                    .ToList();
+                var missed = GetMissedOccurrences(job.CronExpression, lastAppShutdownUtc);
 
                 if (missed.Count == 0)
                     continue;

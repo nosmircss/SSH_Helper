@@ -1,7 +1,6 @@
-using System.IO.Compression;
-using System.Text;
 using Newtonsoft.Json;
 using SSH_Helper.Models;
+using SSH_Helper.Utilities;
 
 namespace SSH_Helper.Services
 {
@@ -179,24 +178,9 @@ namespace SSH_Helper.Services
         }
 
         private static string CompressAndEncode(string text)
-        {
-            byte[] raw = Encoding.UTF8.GetBytes(text);
-            using var ms = new MemoryStream();
-            using (var gzip = new GZipStream(ms, CompressionLevel.SmallestSize, leaveOpen: true))
-            {
-                gzip.Write(raw, 0, raw.Length);
-            }
-            return Convert.ToBase64String(ms.ToArray());
-        }
+            => GZipBase64Utility.CompressAndEncode(text);
 
         private static string DecompressEncoded(string encoded)
-        {
-            byte[] compressed = Convert.FromBase64String(encoded);
-            using var input = new MemoryStream(compressed);
-            using var gzip = new GZipStream(input, CompressionMode.Decompress);
-            using var output = new MemoryStream();
-            gzip.CopyTo(output);
-            return Encoding.UTF8.GetString(output.ToArray());
-        }
+            => GZipBase64Utility.Decompress(encoded);
     }
 }

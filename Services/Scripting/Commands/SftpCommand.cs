@@ -174,11 +174,6 @@ namespace SSH_Helper.Services.Scripting.Commands
         }
 
         private static CommandResult ApplyOnError(ScriptStep step, string message)
-        {
-            if (string.Equals(step.OnError, "continue", StringComparison.OrdinalIgnoreCase))
-                return CommandResult.Suppressed(message);
-
-            return CommandResult.Fail(message);
-        }
+            => CommandResult.ApplyOnError(step, message);
     }
 }

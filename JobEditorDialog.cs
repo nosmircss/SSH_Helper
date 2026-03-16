@@ -962,7 +962,7 @@ namespace SSH_Helper
             if (_gridHosts.Columns.Cast<DataGridViewColumn>()
                 .Any(column => string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)))
             {
-                DialogTheme.Show("Column name already exists!", "Add Column");
+                DialogTheme.Show(this, "Column name already exists!", "Add Column", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 
@@ -979,7 +979,7 @@ namespace SSH_Helper
             var column = _gridHosts.Columns[columnIndex];
             if (HostGridUtilities.IsProtectedHostColumn(column))
             {
-                DialogTheme.Show("The Host_IP column cannot be renamed.", "Rename Column");
+                DialogTheme.Show(this, "The Host_IP column cannot be renamed.", "Rename Column", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 
@@ -999,7 +999,7 @@ namespace SSH_Helper
                 .Any(existing => !ReferenceEquals(existing, column) &&
                                  string.Equals(existing.Name, newName, StringComparison.OrdinalIgnoreCase)))
             {
-                DialogTheme.Show("This column name already exists.", "Rename Column Error");
+                DialogTheme.Show(this, "This column name already exists.", "Rename Column Error", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 
@@ -1016,7 +1016,7 @@ namespace SSH_Helper
 
             if (HostGridUtilities.IsProtectedHostColumn(_gridHosts.Columns[columnIndex]))
             {
-                DialogTheme.Show("The Host_IP column cannot be deleted.", "Delete Column");
+                DialogTheme.Show(this, "The Host_IP column cannot be deleted.", "Delete Column", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 
@@ -1760,7 +1760,7 @@ namespace SSH_Helper
                 var snapshot = HostGridUtilities.BuildSnapshot(dataTable);
                 if (!snapshot.Columns.Contains(CsvManager.HostColumnName, StringComparer.OrdinalIgnoreCase))
                 {
-                    DialogTheme.Show("CSV must contain a 'Host_IP' column.", "Import Error");
+                    DialogTheme.Show(this, "CSV must contain a 'Host_IP' column.", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.None);
                     return;
                 }
 
@@ -1768,7 +1768,7 @@ namespace SSH_Helper
             }
             catch (Exception ex)
             {
-                DialogTheme.Show($"Error importing CSV: {ex.Message}", "Import Error");
+                DialogTheme.Show(this, $"Error importing CSV: {ex.Message}", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.None);
             }
         }
 
@@ -1776,7 +1776,7 @@ namespace SSH_Helper
         {
             if (_getMainGridRows == null || _getMainGridColumns == null)
             {
-                DialogTheme.Show("Main grid data is not available.", "Copy Error");
+                DialogTheme.Show(this, "Main grid data is not available.", "Copy Error", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 
@@ -1785,7 +1785,7 @@ namespace SSH_Helper
 
             if (rows.Count == 0)
             {
-                DialogTheme.Show("No hosts found in the main grid.", "Copy");
+                DialogTheme.Show(this, "No hosts found in the main grid.", "Copy", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 
@@ -1850,8 +1850,11 @@ namespace SSH_Helper
             if (_credentialProvider?.IsAvailable != true)
             {
                 DialogTheme.Show(
+                    this,
                     "Windows Credential Manager is not available, so stored job credentials cannot be saved.",
-                    "Stored Credentials");
+                    "Stored Credentials",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.None);
                 return false;
             }
 
@@ -1864,8 +1867,11 @@ namespace SSH_Helper
                     !_credentialProvider.TryGetPassword(target, out _, out passwordToStore))
                 {
                     DialogTheme.Show(
+                        this,
                         "Password is required the first time you save stored credentials for this job.",
-                        "Stored Credentials");
+                        "Stored Credentials",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.None);
                     return false;
                 }
             }
@@ -1873,8 +1879,11 @@ namespace SSH_Helper
             if (!_credentialProvider.SavePassword(target, username, passwordToStore, "Scheduler job credential"))
             {
                 DialogTheme.Show(
+                    this,
                     "Failed to save the job password to Windows Credential Manager.",
-                    "Stored Credentials");
+                    "Stored Credentials",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.None);
                 return false;
             }
 
@@ -1920,7 +1929,7 @@ namespace SSH_Helper
 
             if (error != null)
             {
-                DialogTheme.Show(error, "Validation Error");
+                DialogTheme.Show(this, error, "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.None);
                 return;
             }
 

@@ -1,4 +1,5 @@
 using System.Text;
+using Newtonsoft.Json;
 
 namespace SSH_Helper.Utilities
 {
@@ -83,6 +84,42 @@ namespace SSH_Helper.Utilities
                         // Best effort cleanup.
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Serializes an object to indented JSON.
+        /// </summary>
+        public static string Serialize<T>(T value)
+        {
+            return JsonConvert.SerializeObject(value, Formatting.Indented);
+        }
+
+        /// <summary>
+        /// Best-effort backup of a corrupt file.
+        /// Uses <paramref name="suffix"/> as the backup extension (default: ".corrupt" with overwrite).
+        /// Pass <c>useTimestamp: true</c> to append a UTC timestamp for unique backups.
+        /// </summary>
+        public static bool TryBackupCorrupt(string path, bool useMove = false, bool useTimestamp = false)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                    return false;
+
+                var backupPath = useTimestamp
+                    ? $"{path}.corrupt.{DateTime.UtcNow:yyyyMMddHHmmss}"
+                    : $"{path}.corrupt";
+
+                if (useMove)
+                    File.Move(path, backupPath);
+                else
+                    File.Copy(path, backupPath, overwrite: !useTimestamp);
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
     }

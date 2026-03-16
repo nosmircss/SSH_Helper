@@ -237,7 +237,7 @@ namespace SSH_Helper.Services.Scripting
 
             foreach (var binding in step.Call.Out)
             {
-                if (!IsSimpleVariableName(binding.Value))
+                if (!ValueResolver.IsSimpleIdentifier(binding.Value))
                 {
                     errors.Add($"Line {step.LineNumber}: call.out target '{binding.Value}' must be a bare variable name");
                 }
@@ -358,22 +358,5 @@ namespace SSH_Helper.Services.Scripting
             }
         }
 
-        private static bool IsSimpleVariableName(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return false;
-
-            if (!(char.IsLetter(value[0]) || value[0] == '_'))
-                return false;
-
-            for (int i = 1; i < value.Length; i++)
-            {
-                var c = value[i];
-                if (!(char.IsLetterOrDigit(c) || c == '_'))
-                    return false;
-            }
-
-            return true;
-        }
     }
 }

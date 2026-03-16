@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using SSH_Helper.Models;
+using SSH_Helper.Utilities;
 
 namespace SSH_Helper.Services
 {
@@ -26,12 +27,7 @@ namespace SSH_Helper.Services
 
             if (string.IsNullOrWhiteSpace(jobsFilePath))
             {
-                var folder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                var appFolder = Path.Combine(folder, "SSH_Helper");
-                if (!Directory.Exists(appFolder))
-                    Directory.CreateDirectory(appFolder);
-
-                _jobsFilePath = Path.Combine(appFolder, "jobs.json");
+                _jobsFilePath = Path.Combine(AppDataPaths.GetAppFolder(), "jobs.json");
             }
             else
             {
@@ -93,14 +89,7 @@ namespace SSH_Helper.Services
             catch (Exception ex)
             {
                 // Preserve corrupt file for manual recovery
-                try
-                {
-                    File.Copy(_jobsFilePath, _jobsFilePath + ".corrupt", overwrite: true);
-                }
-                catch
-                {
-                    // best-effort backup
-                }
+                JsonFileWriter.TryBackupCorrupt(_jobsFilePath);
 
                 System.Diagnostics.Debug.WriteLine($"Jobs file parse error: {ex.Message}. Backup saved to {_jobsFilePath}.corrupt");
                 LoadError = "Jobs file was corrupted and could not be loaded. A backup was saved to jobs.json.corrupt. Starting with empty job list.";
@@ -229,7 +218,7 @@ namespace SSH_Helper.Services
                 Jobs = _jobs.Values.ToList()
             };
 
-            var json = JsonConvert.SerializeObject(wrapper, Formatting.Indented);
+            var json = JsonFileWriter.Serialize(wrapper);
             File.WriteAllText(_jobsFilePath, json);
         }
 
@@ -293,60 +282,8 @@ namespace SSH_Helper.Services
             return (hosts, columns);
         }
 
-        /// <summary>
-        /// Parses a single CSV line, handling quoted fields containing commas.
-        /// </summary>
         private static List<string> ParseCsvLine(string line)
-        {
-            var fields = new List<string>();
-            var current = new System.Text.StringBuilder();
-            bool inQuotes = false;
-
-            for (int i = 0; i < line.Length; i++)
-            {
-                char c = line[i];
-
-                if (inQuotes)
-                {
-                    if (c == '"')
-                    {
-                        // Check for escaped quote ("")
-                        if (i + 1 < line.Length && line[i + 1] == '"')
-                        {
-                            current.Append('"');
-                            i++; // skip next quote
-                        }
-                        else
-                        {
-                            inQuotes = false;
-                        }
-                    }
-                    else
-                    {
-                        current.Append(c);
-                    }
-                }
-                else
-                {
-                    if (c == '"')
-                    {
-                        inQuotes = true;
-                    }
-                    else if (c == ',')
-                    {
-                        fields.Add(current.ToString());
-                        current.Clear();
-                    }
-                    else
-                    {
-                        current.Append(c);
-                    }
-                }
-            }
-
-            fields.Add(current.ToString());
-            return fields;
-        }
+            => CsvManager.ParseCsvLine(line);
 
         /// <summary>
         /// Wrapper for the jobs.json file format.

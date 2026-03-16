@@ -1,5 +1,137 @@
 # TODO
 
+## 95. Center scheduler jobs window over main form
+- [x] 95.1 Confirm why the scheduler dialog's `CenterParent` intent is not honored on first modeless show.
+- [x] 95.2 Patch the shared modeless dialog launcher to explicitly center `CenterParent` dialogs over the owner on first show.
+- [x] 95.3 Add a focused regression test for the initial centered position.
+- [x] 95.4 Run focused verification and a build, then capture the review outcome below.
+
+### 95 Review
+- Root cause was the gap between `JobListDialog` and the shared launcher: `JobListDialog` already declared `StartPosition = CenterParent`, but `ModelessDialogManager.ShowOrActivate(...)` showed the form modeless with `Show(owner)` and never translated that intent into an explicit screen location. Windows therefore chose the initial position, which on this machine landed to the left of `Form1`.
+- Patched `Utilities\\ModelessDialogManager.cs` so first-show modeless dialogs with `StartPosition == CenterParent` are converted to `Manual`, positioned over the owner before show, and re-centered once on `Load` to account for final layout/auto-scale size.
+- Added a focused regression in `SSH_Helper.Tests\\UI\\ModelessDialogManagerTests.cs` that opens a `CenterParent` modeless dialog over a manually placed owner form and asserts the dialog lands at the centered owner-relative coordinates.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~ModelessDialogManagerTests"` passed (3/3).
+- Verification: `dotnet build SSH_Helper.sln -nologo` passed with 0 warnings and 0 errors.
+
+## 94. Normalize modal popup ownership
+- [x] 94.1 Audit `Form1` and modal child dialogs for ownerless modal message/file/color popups and separate intentional startup/global exceptions.
+- [x] 94.2 Patch visible-form modal popup call sites to use the immediate launching form as owner.
+- [x] 94.3 Add a short ownership rule note near the shared dialog helper.
+- [x] 94.4 Run verification searches and a solution build, then capture the review outcome below.
+
+### 94 Review
+- Patched modal popup ownership across the visible-form call sites in `Form1`, `SettingsDialog`, `JobEditorDialog`, `EnvironmentDialog`, `ExecutionDetailsDialog`, and `UpdateDialog` so nested message/file/color dialogs now use the immediate launching form via `DialogTheme.Show(this, ...)` or `ShowDialog(this)`.
+- Preserved the narrow ownerless exception in `Form1` startup initialization for the configuration-load warning, because that path runs before the main window is reliably shown; no modeless ownership flows were changed.
+- Added a short note in `UI\\DialogTheme.cs` clarifying that ownerless dialogs are exceptional and that visible forms should pass themselves as owners.
+- Verification: a targeted search over the touched forms found no remaining ownerless `ShowDialog()` usages and no remaining ownerless `DialogTheme.Show(...)` call sites besides the intentional `Form1` startup warning.
+- Verification: `dotnet build SSH_Helper.sln -nologo` passed with 0 errors. The running `SSH_Helper` process (PID 31784) held `bin\\Debug\\net8.0-windows\\SSH_Helper.exe` open, so MSBuild emitted four retry warnings before finishing successfully.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests|FullyQualifiedName~JobEditorDialogLayoutTests|FullyQualifiedName~JobEditorDialogCustomPresetTests|FullyQualifiedName~JobEditorDialogTimeoutOverrideTests"` passed (24/24).
+
+## 93. Investigate popup ownership behavior
+- [x] 93.1 Inspect dialog and popup launch paths to separate owned windows from ownerless windows.
+- [x] 93.2 Verify how the shared dialog helpers behave when no owner is supplied.
+- [x] 93.3 Document the root cause and the concrete call sites that let popups appear behind `Form1`.
+
+### 93 Review
+- Root cause is inconsistent dialog ownership. The shared helper in `UI\\DialogTheme.cs` explicitly treats ownerless dialogs as standalone windows: `Show(string...)` overloads pass `owner = null`, `ShowCore(...)` switches ownerless dialogs to `FormStartPosition.CenterScreen`, and it finally calls `dlg.ShowDialog(owner)`. Without an owner, Windows does not keep the popup parented above `Form1`.
+- The app already has counterexamples proving the intended behavior: owned modal dialogs use `ShowDialog(this)` in `Form1` and other forms, modeless singletons use `ModelessDialogManager.ShowOrActivate(..., this)` in `Utilities\\ModelessDialogManager.cs`, script prompts use `dialog.Show(mainForm)` in `Services\\Scripting\\Commands\\ScriptPromptDialogRunner.cs`, the terminal window uses `form.Show(Application.OpenForms[0])` in `Services\\Terminal\\InteractiveTerminalService.cs`, and `FindDialog` sets `Owner = owner`.
+- The issue is broad rather than isolated. App code still has many ownerless `DialogTheme.Show(...)` call sites plus several ownerless `ShowDialog()` file/color dialogs. Representative examples in `Form1.cs` include ownerless save/open dialogs at lines 6746, 7102, 8042, 8066, 10299, and 10330, and ownerless message dialogs such as the history-load warning at line 1058 and the CSV reload prompt at line 1758.
+- Secondary dialogs repeat the same pattern, so popups can appear behind the dialog that triggered them: `SettingsDialog.cs` uses ownerless `colorDialog.ShowDialog()` at line 1069 and ownerless `DialogTheme.Show(...)` confirmations; `UpdateDialog.cs`, `EnvironmentDialog.cs`, `JobEditorDialog.cs`, and `ExecutionDetailsDialog.cs` also call ownerless `DialogTheme.Show(...)`.
+- Smallest clean fix: standardize on passing the current form as owner for all modal UI (`DialogTheme.Show(this, ...)`, `openDialog.ShowDialog(this)`, `saveDialog.ShowDialog(this)`, `colorDialog.ShowDialog(this)`) and reserve ownerless dialogs only for cases that are intentionally app-global.
+
+## 91. Remove scheduler close focus flicker
+- [x] 91.1 Inspect the modeless dialog owner-reactivation timing and confirm why close briefly activates another app before `Form1`.
+- [x] 91.2 Patch the reactivation path to avoid deferred owner activation flicker while preserving the focus restore fix.
+- [x] 91.3 Run focused verification and capture the review outcome below.
+
+## 92. Fix startup history restore hydration
+- [x] 92.1 Trace the startup history-selection guard and confirm why a visually selected history row can still leave output/hosts blank after launch.
+- [x] 92.2 Patch the startup arming path so any already-selected history entry is hydrated into the output and hosts panes once startup input settles.
+- [x] 92.3 Add focused regression coverage for the startup selection/rehydration rule and capture verification results below.
+
+### 92 Review
+- Root cause was the startup history arming guard in `Form1`: a carried-over launch click could still change `lstOutput` selection before `_historySelectionHandlingEnabled` was turned on, so the first history row looked selected while `lstOutput_SelectedIndexChanged(...)` skipped the output/hosts hydrate work.
+- Patched `Form1` so `ArmHistorySelectionOnIdle(...)` now checks for an already-selected history entry once startup input settles, enables history selection handling, and immediately applies the visible selection to the output pane and host list.
+- Extracted the shared history-pane hydrate body into `ApplySelectedHistoryEntry()` so the normal selection-changed path and the startup-rehydrate path use the same logic.
+- Added `UI\\HistoryStartupSelectionHydration.cs` plus focused tests in `SSH_Helper.Tests\\UI\\HistoryStartupSelectionHydrationTests.cs` to lock the startup rule: hydrate only when a history row is already selected and handling has not yet been enabled.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~HistoryStartupSelectionHydrationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-history-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-history-tests\\obj\\` passed (3/3).
+- Verification: `dotnet build SSH_Helper.sln -p:BaseOutputPath=artifacts\\startup-history-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-history-build\\obj\\` passed with 0 warnings and 0 errors.
+
+### 91 Review
+- Confirmed the flicker cause in `Utilities\\ModelessDialogManager.cs`: the earlier focus-restore patch always used `BeginInvoke` for owner reactivation, even when already on the UI thread during the dialog `FormClosed` event. That deferred `BringToFront()` / `Activate()` by one message loop turn, which gave Windows time to activate another app first and then pull `Form1` back to the foreground.
+- Patched the shared modeless-dialog manager so owner reactivation now runs immediately when already on the UI thread, while still using `BeginInvoke` only for real cross-thread cases.
+- Tightened the regression in `SSH_Helper.Tests\\UI\\ModelessDialogManagerTests.cs` so it asserts owner-reactivation happens synchronously on `dialog.Close()` instead of only after a later `Application.DoEvents()`.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ModelessDialogManagerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\modeless-focus-timing-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\modeless-focus-timing-tests\\obj\\` passed (2/2).
+
+## 90. Restore main window focus after scheduler closes
+- [x] 90.1 Inspect the scheduler dialog show/close ownership path and identify why closing it does not reactivate `Form1`.
+- [x] 90.2 Patch the modeless scheduler close path so the main app regains focus when the scheduler window closes.
+- [x] 90.3 Run focused verification and capture the review outcome below.
+
+### 90 Review
+- Root cause was in `Utilities\\ModelessDialogManager.cs`: `ShowOrActivate(...)` showed the scheduler dialog with `Form1` as owner, but the `FormClosed` handler only cleared `_current` and never reactivated the owner window, so Windows focus could fall through to another app behind SSH Helper.
+- Patched the shared modeless-dialog manager to capture the owner form, restore it on close with `BringToFront()` + `Activate()` via a UI-thread-safe helper, and bring newly created dialogs to the front on first show for consistency with the reuse path.
+- Added a focused regression in `SSH_Helper.Tests\\UI\\ModelessDialogManagerTests.cs` proving the manager requests owner reactivation when the modeless dialog closes.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ModelessDialogManagerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\modeless-focus-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\modeless-focus-tests\\obj\\` passed (2/2).
+
+## 89. Lighten scheduler status link color
+- [x] 89.1 Inspect the scheduler status label styling and find where its current blue link color is assigned or inherited.
+- [x] 89.2 Patch the scheduler status label to use a slightly lighter blue without changing its visibility or click behavior.
+- [x] 89.3 Run focused verification and capture the review outcome below.
+
+### 89 Review
+- Traced the blue text to the scheduler `ToolStripStatusLabel` link styling in `Form1`, which previously inherited the default WinForms link color because the label had `IsLink = true` but no explicit themed link colors.
+- Added explicit light/dark scheduler link colors in `Form1` and a small `ApplySchedulerStatusBarTheme()` helper so the status label keeps the lighter blue both at startup and when the app theme is reapplied later from settings.
+- The new shades are intentionally only a small lift from the old default: light mode uses `Color.FromArgb(36, 120, 214)` with a slightly lighter active state, and dark mode uses `Color.FromArgb(92, 171, 226)` with a slightly lighter active state.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SchedulerNotificationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\scheduler-link-color-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-link-color-tests\\obj\\` passed (18/18).
+
+## 88. Hide zero-task scheduler status
+- [x] 88.1 Inspect the status-bar code that renders the scheduler active-task segment and trace the enabled-task count source.
+- [x] 88.2 Patch the UI so the scheduler status segment appears only when the enabled-task count is greater than zero.
+- [x] 88.3 Run focused verification and capture the review outcome below.
+
+### 88 Review
+- Traced the screenshot text to `Form1.UpdateSchedulerStatusBar()`, where the existing `activeCount` is already the enabled-job count (`_jobStorage.Jobs.Values.Count(j => j.IsEnabled)`), not currently-running jobs.
+- Patched `Form1.InitializeSchedulerStatusBar()` to create the scheduler status label hidden by default and updated `UpdateSchedulerStatusBar()` to show it only when `activeCount > 0`, leaving the menu entry and formatter text unchanged for positive counts.
+- Added `SchedulerNotificationFormatter.ShouldShowStatusBar(int activeJobCount)` as the small pure visibility rule and covered both zero and positive counts in the existing scheduler notification test class.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SchedulerNotificationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\scheduler-status-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-status-tests\\obj\\` passed (18/18).
+
+## 86. Diagnose canonical sample validation failure
+- [x] 86.1 Inspect the failing canonical-sample test, validator, and implicated script sample to identify the exact mismatch.
+- [x] 86.2 Run focused verification to capture the concrete validation error(s) for the sample.
+- [x] 86.3 Decide whether the defect is in test coverage/data or in production validation/parsing logic, then record the review outcome below.
+
+### 86 Review
+- Focused verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CanonicalCommandMapSyntaxTests.Validate_ScriptSamples_AreCanonicalAndPassEnforcedValidation" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\canonical-samples-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\canonical-samples-tests\\obj\\` failed only because `ScriptSamples\\generic\\library_import_demo.yaml` imports the placeholder path `C:\\Path\\To\\SSH_Helper\\ScriptSamples\\libraries\\string_sections.yaml`, which does not exist in the repo checkout.
+- Production validation is behaving as designed: `ScriptSubroutineRegistryBuilder.LoadImports(...)` explicitly requires absolute import paths and rejects missing files before resolving imported subroutines, so the downstream `Unknown subroutine` errors are expected once the import fails.
+- The broad sample-sweep test is the mismatch. It assumes every checked-in `ScriptSamples\\**\\*.yaml` file is immediately self-validating, but at least one sample is intentionally not portable as committed (`library_import_demo.yaml` says to update the absolute path before running), and the QA fixture pattern in `QaPresetCatalogTests` already shows the repo sometimes rewrites placeholder import paths before validation.
+- Conclusion: not a parser/validator bug. The failure belongs to test/sample expectations. Smallest clean fix is either to exclude placeholder/fixture samples from the canonical sweep or to preprocess known placeholder import tokens into repo-local absolute paths before validating them.
+
+## 87. Fix canonical sample validation placeholders
+- [x] 87.1 Audit `ScriptSamples` for placeholder import-path tokens that cannot validate as committed.
+- [x] 87.2 Patch `CanonicalCommandMapSyntaxTests` to normalize known repo-local placeholder import paths before parse/validate.
+- [x] 87.3 Re-run focused canonical-sample validation and capture the review outcome below.
+
+### 87 Review
+- Audited `ScriptSamples` and confirmed three test-only portability cases the old broad sweep did not account for: `generic\\library_import_demo.yaml` uses the documented `C:\\Path\\To\\SSH_Helper\\ScriptSamples...` placeholder prefix, `qa\\catalog_runner.yaml` uses the `__QA_CATALOG_LIBRARY_PATH__` token, and `libraries\\string_sections.yaml` / `qa\\catalog_library.yaml` are `library: true` files that should validate as libraries rather than executable scripts.
+- Patched `SSH_Helper.Tests\\Scripting\\CanonicalCommandMapSyntaxTests.cs` so the sample-sweep test now resolves repo-known placeholder import paths to actual repo-local library files before parsing and validating, while leaving production import validation unchanged.
+- The same test now passes `allowLibraryDefinitions: script.Library` so reusable library samples under `ScriptSamples` validate against the correct contract instead of being treated as directly executable scripts.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CanonicalCommandMapSyntaxTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\canonical-command-map-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\canonical-command-map-tests\\obj\\` passed (8/8).
+
+## 85. Optimize history-pane updates after manual runs
+- [x] 85.1 Replace the post-run full history reload with an incremental in-memory insert/select path for new history entries.
+- [x] 85.2 Reuse the freshly built history payload for the selected entry so selecting the new run does not immediately reread it from disk.
+- [x] 85.3 Run focused verification for the touched history/UI path and capture the review outcome below.
+
+### 85 Review
+- Added `UI\\HistoryListCollectionUpdater.cs` as the small pure helper that builds a `HistoryListItem`, inserts a new run at the top of the in-memory history list, replaces duplicate ids safely, and mirrors retention trimming by removing overflow ids from both the list and the index map.
+- Updated `Form1.LoadHistoryIndexIntoList(...)` to use the shared item builder and wrap bulk history-list refreshes in `lstOutput.BeginUpdate()/EndUpdate()` so cold reloads avoid unnecessary paint churn.
+- Replaced the post-run `LoadHistoryIndexIntoList(...)` call in both manual preset and folder history save paths with a new `InsertHistoryEntryIntoList(...)` flow that updates `_outputHistory` and `_historyIndexEntries` in place, clears the old selection, and selects the new entry without clearing and rebuilding the entire history pane.
+- Added `CacheLoadedHistoryPayload(...)` so the freshly built `HistoryRunPayload` is reused immediately when the new history row is selected, avoiding the redundant disk read that previously happened right after save.
+- Verification: normal `dotnet build SSH_Helper.csproj -nologo` failed because the running `SSH_Helper` process held the default debug outputs open.
+- Verification: `dotnet build SSH_Helper.csproj -nologo -p:BaseOutputPath=artifacts\\history-incremental-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\history-incremental-build\\obj\\` passed with 0 warnings and 0 errors.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~HistoryListCollectionUpdaterTests|FullyQualifiedName~HistoryStorageServiceTests|FullyQualifiedName~HistoryListLayoutTests" -p:BaseOutputPath=artifacts\\history-incremental-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\history-incremental-tests\\obj\\` passed (15/15).
+
 ## 84. Fix manual progress visibility regressions
 - [x] 84.1 Prevent stale manual-progress callbacks from re-showing the status bar after execution completes.
 - [x] 84.2 Limit manual progress visibility to runs with more than one host-task operation so 1x1 runs stay bar-free.

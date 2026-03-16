@@ -588,6 +588,8 @@ namespace SSH_Helper.UI
             ShowCore(owner, message, title, MessageBoxButtons.OK, icon, darkMode, font);
         }
 
+        // Prefer Show(this, ...) from a visible form. Ownerless dialogs are reserved for startup
+        // or intentionally app-global prompts where no reliable visible parent exists.
         public static DialogResult Show(string message)
         {
             return ShowCore(

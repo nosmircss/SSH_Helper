@@ -399,10 +399,14 @@ namespace SSH_Helper.Services
             }
 
             // Build result
-            var succeeded = results.Count(r => r.Success);
-            var unsuccessful = results.Count(r => !r.Success);
-            var cancelled = results.Count(r => r.WasCancelled);
-            var failed = results.Count(r => !r.Success && !r.WasCancelled);
+            int succeeded = 0, cancelled = 0, failed = 0;
+            foreach (var r in results)
+            {
+                if (r.Success) succeeded++;
+                else if (r.WasCancelled) cancelled++;
+                else failed++;
+            }
+            var unsuccessful = cancelled + failed;
             var wasCancelled = ct.IsCancellationRequested || cancelled > 0;
             var overallSuccess = unsuccessful == 0;
 

@@ -142,15 +142,9 @@ namespace SSH_Helper.Utilities
         /// <returns>Text with pager artifacts removed</returns>
         public static string StripPagerArtifacts(string chunk, out bool sawPager)
         {
-            sawPager = false;
-
-            if (PagerRegex.IsMatch(chunk))
-            {
-                sawPager = true;
-                chunk = PagerRegex.Replace(chunk, string.Empty);
-            }
-
-            return chunk;
+            var replaced = PagerRegex.Replace(chunk, string.Empty);
+            sawPager = !ReferenceEquals(replaced, chunk);
+            return replaced;
         }
 
         /// <summary>
@@ -270,11 +264,11 @@ namespace SSH_Helper.Utilities
             if (string.IsNullOrEmpty(output) || string.IsNullOrWhiteSpace(currentPrompt))
                 return output;
 
-            var lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).ToList();
-            if (lines.Count == 0)
+            var lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            if (lines.Length == 0)
                 return output;
 
-            int last = lines.Count - 1;
+            int last = lines.Length - 1;
             while (last >= 0 && string.IsNullOrWhiteSpace(lines[last]))
             {
                 last--;

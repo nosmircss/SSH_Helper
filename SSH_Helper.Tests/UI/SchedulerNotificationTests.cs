@@ -116,6 +116,18 @@ namespace SSH_Helper.Tests.UI
         #region FormatStatusBar
 
         [Fact]
+        public void ShouldShowStatusBar_ZeroActive_ReturnsFalse()
+        {
+            SchedulerNotificationFormatter.ShouldShowStatusBar(0).Should().BeFalse();
+        }
+
+        [Fact]
+        public void ShouldShowStatusBar_PositiveActive_ReturnsTrue()
+        {
+            SchedulerNotificationFormatter.ShouldShowStatusBar(1).Should().BeTrue();
+        }
+
+        [Fact]
         public void FormatStatusBar_ZeroActive_ReturnsSimple()
         {
             var result = SchedulerNotificationFormatter.FormatStatusBar(0, null, null);

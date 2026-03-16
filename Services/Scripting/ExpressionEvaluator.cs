@@ -88,7 +88,7 @@ namespace SSH_Helper.Services.Scripting
             // Order matters: check longer operators first (>=, <=, !=, ==) before shorter ones (>, <)
 
             // matches (regex)
-            var matchesIndex = FindOperator(expression, " matches ");
+            var matchesIndex = FindLogicalOperator(expression, " matches ");
             if (matchesIndex > 0)
             {
                 var left = ResolveValue(expression.Substring(0, matchesIndex))?.ToString() ?? "";
@@ -104,7 +104,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // not in
-            var notInIndex = FindOperator(expression, " not in ");
+            var notInIndex = FindLogicalOperator(expression, " not in ");
             if (notInIndex > 0)
             {
                 var left = ResolveValue(expression.Substring(0, notInIndex))?.ToString() ?? "";
@@ -113,7 +113,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // in
-            var inIndex = FindOperator(expression, " in ");
+            var inIndex = FindLogicalOperator(expression, " in ");
             if (inIndex > 0)
             {
                 var left = ResolveValue(expression.Substring(0, inIndex))?.ToString() ?? "";
@@ -122,7 +122,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // contains
-            var containsIndex = FindOperator(expression, " contains ");
+            var containsIndex = FindLogicalOperator(expression, " contains ");
             if (containsIndex > 0)
             {
                 var left = ResolveValue(expression.Substring(0, containsIndex))?.ToString() ?? "";
@@ -131,7 +131,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // startswith
-            var startsWithIndex = FindOperator(expression, " startswith ");
+            var startsWithIndex = FindLogicalOperator(expression, " startswith ");
             if (startsWithIndex > 0)
             {
                 var left = ResolveValue(expression.Substring(0, startsWithIndex))?.ToString() ?? "";
@@ -140,7 +140,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // endswith
-            var endsWithIndex = FindOperator(expression, " endswith ");
+            var endsWithIndex = FindLogicalOperator(expression, " endswith ");
             if (endsWithIndex > 0)
             {
                 var left = ResolveValue(expression.Substring(0, endsWithIndex))?.ToString() ?? "";
@@ -149,7 +149,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // != (not equals)
-            var neIndex = FindOperator(expression, " != ");
+            var neIndex = FindLogicalOperator(expression, " != ");
             if (neIndex > 0)
             {
                 var left = ResolveValue(expression.Substring(0, neIndex));
@@ -158,7 +158,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // == (equals)
-            var eqIndex = FindOperator(expression, " == ");
+            var eqIndex = FindLogicalOperator(expression, " == ");
             if (eqIndex > 0)
             {
                 var left = ResolveValue(expression.Substring(0, eqIndex));
@@ -167,7 +167,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // >=
-            var gteIndex = FindOperator(expression, " >= ");
+            var gteIndex = FindLogicalOperator(expression, " >= ");
             if (gteIndex > 0)
             {
                 var left = ResolveNumeric(expression.Substring(0, gteIndex));
@@ -176,7 +176,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // <=
-            var lteIndex = FindOperator(expression, " <= ");
+            var lteIndex = FindLogicalOperator(expression, " <= ");
             if (lteIndex > 0)
             {
                 var left = ResolveNumeric(expression.Substring(0, lteIndex));
@@ -185,7 +185,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // >
-            var gtIndex = FindOperator(expression, " > ");
+            var gtIndex = FindLogicalOperator(expression, " > ");
             if (gtIndex > 0)
             {
                 var left = ResolveNumeric(expression.Substring(0, gtIndex));
@@ -194,7 +194,7 @@ namespace SSH_Helper.Services.Scripting
             }
 
             // <
-            var ltIndex = FindOperator(expression, " < ");
+            var ltIndex = FindLogicalOperator(expression, " < ");
             if (ltIndex > 0)
             {
                 var left = ResolveNumeric(expression.Substring(0, ltIndex));
@@ -204,7 +204,7 @@ namespace SSH_Helper.Services.Scripting
 
             // If no operator found, treat as truthy check
             var value = ResolveValue(expression);
-            return IsTruthy(value);
+            return ValueResolver.IsTruthyValue(value);
         }
 
         private int FindLogicalOperator(string expression, string op)
@@ -255,11 +255,6 @@ namespace SSH_Helper.Services.Scripting
             }
 
             return -1;
-        }
-
-        private int FindOperator(string expression, string op)
-        {
-            return FindLogicalOperator(expression, op);
         }
 
         private static string TrimEnclosingParentheses(string expression)
@@ -383,9 +378,5 @@ namespace SSH_Helper.Services.Scripting
             return string.Equals(leftStr, rightStr, StringComparison.OrdinalIgnoreCase);
         }
 
-        private bool IsTruthy(object? value)
-        {
-            return ValueResolver.IsTruthyValue(value);
-        }
     }
 }

@@ -64,6 +64,11 @@ namespace SSH_Helper.Utilities
         }
 
         /// <summary>
+        /// Returns whether the scheduler status bar segment should be shown.
+        /// </summary>
+        internal static bool ShouldShowStatusBar(int activeJobCount) => activeJobCount > 0;
+
+        /// <summary>
         /// Formats the status bar text showing active job count and next-run countdown.
         /// </summary>
         internal static string FormatStatusBar(int activeJobCount, string? nextJobName, TimeSpan? timeUntilNext)

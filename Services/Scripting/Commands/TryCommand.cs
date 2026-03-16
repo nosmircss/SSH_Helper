@@ -37,7 +37,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (step.Finally != null && step.Finally.Count > 0)
             {
                 var finallyResult = await _executor.ExecuteStepsAsync(step.Finally, context, cancellationToken, context.LoopDepth);
-                if (finallyResult.ShouldExit || finallyResult.ShouldBreak || finallyResult.ShouldContinue || finallyResult.ShouldReturn || !finallyResult.Success)
+                if (finallyResult.IsControlFlow || !finallyResult.Success)
                     return finallyResult;
             }
 

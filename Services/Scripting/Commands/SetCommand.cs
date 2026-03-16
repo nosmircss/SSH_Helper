@@ -263,7 +263,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal))
             {
                 var candidate = trimmed.Substring(2, trimmed.Length - 3).Trim();
-                if (IsSimpleVariableName(candidate))
+                if (ValueResolver.IsSimpleIdentifier(candidate))
                 {
                     variableName = candidate;
                     return true;
@@ -272,31 +272,13 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return false;
             }
 
-            if (IsSimpleVariableName(trimmed))
+            if (ValueResolver.IsSimpleIdentifier(trimmed))
             {
                 variableName = trimmed;
                 return true;
             }
 
             return false;
-        }
-
-        private static bool IsSimpleVariableName(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return false;
-
-            if (!(char.IsLetter(value[0]) || value[0] == '_'))
-                return false;
-
-            for (int i = 1; i < value.Length; i++)
-            {
-                var c = value[i];
-                if (!(char.IsLetterOrDigit(c) || c == '_'))
-                    return false;
-            }
-
-            return true;
         }
 
         private List<string> ResolveListForExpression(string expr, ScriptContext context, out string? writableVariableName)
@@ -317,8 +299,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 null => "",
                 List<string> list => FormatListForDisplay(list),
-                JsonNode node => TruncateForDisplay(node.ToJsonString()),
-                _ => TruncateForDisplay(value.ToString() ?? string.Empty)
+                JsonNode node => ScriptingHelpers.TruncateForDisplay(node.ToJsonString()),
+                _ => ScriptingHelpers.TruncateForDisplay(value.ToString() ?? string.Empty)
             };
         }
 
@@ -332,24 +314,11 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             for (int i = 0; i < displayCount; i++)
             {
-                parts.Add(TruncateForDisplay(values[i], 30));
+                parts.Add(ScriptingHelpers.TruncateForDisplay(values[i], 30));
             }
 
             var suffix = values.Count > maxItems ? $", ... ({values.Count} items)" : "";
             return $"[{string.Join(", ", parts)}{suffix}]";
-        }
-
-        private static string TruncateForDisplay(string value, int maxLength = 100)
-        {
-            if (string.IsNullOrEmpty(value))
-                return "";
-
-            value = value.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
-
-            if (value.Length <= maxLength)
-                return value;
-
-            return value.Substring(0, maxLength) + "...";
         }
 
         private double ResolveNumeric(string expr, ScriptContext context)

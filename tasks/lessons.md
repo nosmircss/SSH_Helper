@@ -1,5 +1,10 @@
 # Lessons
 
+## 2026-03-15
+- When a user narrows a popup-ownership cleanup to allow some ownerless dialogs, I must preserve explicit exceptions for startup/global flows instead of force-owning every modal call site.
+- When I add or adjust a modeless dialog launched from `Form1`, I must verify the close path explicitly restores activation to the main window instead of assuming WinForms ownership will do it automatically.
+- When I restore owner activation from a modeless dialog close path, I must verify the timing on the UI thread; an unnecessary deferred `BeginInvoke` can cause visible focus flicker by letting another app activate briefly first.
+
 ## 2026-03-13
 - When a user narrows status-bar progress behavior, I must encode the exact simplification they asked for instead of preserving extra host/preset detail from the earlier plan.
 - When I drive a WinForms status bar from `Progress<T>`, I must guard late UI-thread callbacks with a run token and confirm the exact visibility threshold so 1x1 runs do not show a pointless progress bar.

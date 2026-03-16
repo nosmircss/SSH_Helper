@@ -602,9 +602,7 @@ namespace SSH_Helper.Services
         }
 
         private static string Serialize<T>(T value)
-        {
-            return JsonConvert.SerializeObject(value, Formatting.Indented);
-        }
+            => JsonFileWriter.Serialize(value);
 
         private static DateTime ParseCreatedAtUtc(string label)
         {
@@ -725,20 +723,7 @@ namespace SSH_Helper.Services
         }
 
         private void TryBackupCorruptIndex()
-        {
-            try
-            {
-                if (!File.Exists(_indexPath))
-                    return;
-
-                var corruptPath = $"{_indexPath}.corrupt.{DateTime.UtcNow:yyyyMMddHHmmss}";
-                File.Copy(_indexPath, corruptPath, overwrite: false);
-            }
-            catch
-            {
-                // Best effort.
-            }
-        }
+            => JsonFileWriter.TryBackupCorrupt(_indexPath, useTimestamp: true);
 
         private static void WriteJsonAtomic(string path, string json, bool createBackup)
             => JsonFileWriter.WriteJsonAtomic(path, json, createBackup);
