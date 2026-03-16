@@ -4,6 +4,10 @@
 - When a user narrows a popup-ownership cleanup to allow some ownerless dialogs, I must preserve explicit exceptions for startup/global flows instead of force-owning every modal call site.
 - When I add or adjust a modeless dialog launched from `Form1`, I must verify the close path explicitly restores activation to the main window instead of assuming WinForms ownership will do it automatically.
 - When I restore owner activation from a modeless dialog close path, I must verify the timing on the UI thread; an unnecessary deferred `BeginInvoke` can cause visible focus flicker by letting another app activate briefly first.
+- When I reason about WinForms `TreeView` display order, I must not use `TreeNode.IsVisible` as a proxy for logical tree visibility; it is viewport-dependent and can break adjacent-node selection rules.
+- When I preserve tree expansion state during WinForms reselection, I must gate on collapsed ancestors, not on `TreeNode.IsVisible`; off-screen root nodes are still valid selection targets.
+- When I rebuild a WinForms `TreeView` to preserve selection, I must also preserve `TopNode` while redraw is suspended or users will see a jump-to-top/jump-back flicker.
+- When deleting a single item from a WinForms `TreeView`, I should prefer in-place node removal over clearing and rebuilding the whole tree; full rebuilds are prone to scroll-state regressions and visible flicker.
 
 ## 2026-03-13
 - When a user narrows status-bar progress behavior, I must encode the exact simplification they asked for instead of preserving extra host/preset detail from the earlier plan.

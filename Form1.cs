@@ -5578,7 +5578,7 @@ namespace SSH_Helper
             }
 
             var treeView = folderNode.TreeView;
-            var topNodeBefore = treeView?.TopNode;
+            var topNodeBefore = PresetTreeViewportRestorer.Capture(treeView?.TopNode);
 
             var folderPaths = new List<string>();
             CollectFolderPaths(folderNode, folderPaths);
@@ -5602,9 +5602,13 @@ namespace SSH_Helper
 
                 // Keep viewport anchoring while redraw is still suspended
                 // so users never see the temporary scroll jump.
-                if (treeView != null && topNodeBefore != null)
+                if (treeView != null)
                 {
-                    TryRestoreTopNode(treeView, topNodeBefore, folderNode);
+                    PresetTreeViewportRestorer.TryRestoreTopNode(
+                        treeView,
+                        treeView.Nodes,
+                        topNodeBefore,
+                        PresetTreeViewportRestorer.Capture(folderNode));
                 }
             }
             finally
@@ -5627,49 +5631,6 @@ namespace SSH_Helper
             UpdateStatusBar(expand
                 ? $"Expanded all folders under '{folderTag.Name}'"
                 : $"Collapsed all folders under '{folderTag.Name}'");
-        }
-
-        private static void TryRestoreTopNode(TreeView treeView, TreeNode preferredTopNode, TreeNode fallbackNode)
-        {
-            if (TrySetTopNode(treeView, preferredTopNode))
-            {
-                return;
-            }
-
-            var ancestor = preferredTopNode.Parent;
-            while (ancestor != null)
-            {
-                if (TrySetTopNode(treeView, ancestor))
-                {
-                    return;
-                }
-
-                ancestor = ancestor.Parent;
-            }
-
-            TrySetTopNode(treeView, fallbackNode);
-        }
-
-        private static bool TrySetTopNode(TreeView treeView, TreeNode node)
-        {
-            if (node.TreeView != treeView)
-            {
-                return false;
-            }
-
-            try
-            {
-                treeView.TopNode = node;
-                return true;
-            }
-            catch (ArgumentException)
-            {
-                return false;
-            }
-            catch (InvalidOperationException)
-            {
-                return false;
-            }
         }
 
         private TreeNode? ResolveContextMenuFolderNode()
@@ -7779,22 +7740,11 @@ namespace SSH_Helper
             return null;
         }
 
-        private PresetNodeTag? GetSelectionTargetAboveDeletedPreset(string presetName, bool preferContextSource)
+        private string? GetSelectionTargetAfterDeletedPreset(string presetName, bool preferContextSource)
         {
             var sourceTree = ResolvePresetTreeViewForActions(preferContextSource);
-            var nodeToDelete = FindPresetNodeByName(sourceTree.Nodes, presetName);
-            var targetNode = nodeToDelete?.PrevVisibleNode ?? nodeToDelete?.NextVisibleNode;
-
-            if (targetNode?.Tag is not PresetNodeTag targetTag)
-            {
-                return null;
-            }
-
-            return new PresetNodeTag
-            {
-                IsFolder = targetTag.IsFolder,
-                Name = targetTag.Name
-            };
+            var displayedNodes = PresetTreeDisplayOrderBuilder.Build(sourceTree.Nodes);
+            return PresetDeletionSelectionResolver.GetAdjacentPresetName(displayedNodes, presetName);
         }
 
         private void DuplicatePreset(bool preferContextSource = false)
@@ -7906,8 +7856,16 @@ namespace SSH_Helper
             if (string.IsNullOrWhiteSpace(selectedPreset))
                 return;
 
+            var deleteNode = FindPresetNodeByName(trvPresets.Nodes, selectedPreset);
             var preActionExpandState = CapturePresetTreeExpandState();
-            var selectionTarget = GetSelectionTargetAboveDeletedPreset(selectedPreset, preferContextSource);
+            var selectionTargetPresetName = GetSelectionTargetAfterDeletedPreset(selectedPreset, preferContextSource);
+            var selectionTargetNode = string.IsNullOrEmpty(selectionTargetPresetName)
+                ? null
+                : FindPresetNodeByName(trvPresets.Nodes, selectionTargetPresetName);
+            var canDeleteInPlace =
+                string.IsNullOrWhiteSpace(_activePresetFilter) &&
+                deleteNode != null &&
+                deleteNode.TreeView == trvPresets;
 
             // Check if this is the currently active preset being deleted
             bool isDeletingActivePreset = string.Equals(selectedPreset, _activePresetName, StringComparison.Ordinal);
@@ -7925,22 +7883,22 @@ namespace SSH_Helper
                     txtTimeoutHeader.Clear();
                 }
 
-                RefreshPresetList(expandStatesOverride: preActionExpandState);
-
-                if (selectionTarget != null)
+                if (canDeleteInPlace)
                 {
-                    if (selectionTarget.IsFolder)
-                    {
-                        SelectFolderByName(selectionTarget.Name, ensureVisible: false);
-                    }
-                    else
-                    {
-                        SelectPresetByName(selectionTarget.Name, ensureVisible: false);
-                    }
+                    PresetTreeDeleteMutation.RemoveNodeAndSelectReplacement(trvPresets, deleteNode!, selectionTargetNode);
+                }
+                else
+                {
+                    RefreshPresetList(expandStatesOverride: preActionExpandState);
+                }
 
+                RefreshFavoritesList();
+
+                if (!string.IsNullOrEmpty(selectionTargetPresetName))
+                {
                     if (trvPresets.SelectedNode?.Tag is PresetNodeTag selectedTag &&
-                        selectedTag.IsFolder == selectionTarget.IsFolder &&
-                        string.Equals(selectedTag.Name, selectionTarget.Name, StringComparison.Ordinal))
+                        !selectedTag.IsFolder &&
+                        string.Equals(selectedTag.Name, selectionTargetPresetName, StringComparison.Ordinal))
                     {
                         return;
                     }
@@ -7949,7 +7907,10 @@ namespace SSH_Helper
                 // Select another preset if any exist
                 if (_presetManager.Presets.Count > 0)
                 {
-                    var firstPreset = _presetManager.Presets.Keys.FirstOrDefault();
+                    var firstPreset = PresetTreeDisplayOrderBuilder.Build(trvPresets.Nodes)
+                        .FirstOrDefault(tag => !tag.IsFolder)
+                        ?.Name;
+
                     if (!string.IsNullOrEmpty(firstPreset) &&
                         !string.Equals(_activePresetName, firstPreset, StringComparison.Ordinal))
                     {
@@ -8598,8 +8559,8 @@ namespace SSH_Helper
             if (targetNode != null)
             {
                 // In state-preserving flows, avoid selecting hidden nodes because
-                // SelectedNode itself can auto-expand ancestor folders.
-                if (!ensureVisible && !targetNode.IsVisible)
+                // SelectedNode itself can auto-expand collapsed ancestor folders.
+                if (!ensureVisible && !PresetTreeSelectionGuard.CanSelectWithoutEnsuringVisible(targetNode))
                 {
                     return;
                 }
@@ -8616,12 +8577,12 @@ namespace SSH_Helper
             }
         }
 
-        private void SelectTreeNodeByTagName(string? name, bool isFolder)
+        private void SelectTreeNodeByTagName(string? name, bool isFolder, bool ensureVisible = true)
         {
             if (isFolder)
-                SelectFolderByName(name);
+                SelectFolderByName(name, ensureVisible);
             else
-                SelectPresetByName(name);
+                SelectPresetByName(name, ensureVisible);
         }
 
         private void SelectFolderByName(string? folderName, bool ensureVisible = true)
@@ -8632,7 +8593,7 @@ namespace SSH_Helper
             var targetNode = FindNodeByTag(trvPresets.Nodes, folderName, isFolder: true);
             if (targetNode != null)
             {
-                if (!ensureVisible && !targetNode.IsVisible)
+                if (!ensureVisible && !PresetTreeSelectionGuard.CanSelectWithoutEnsuringVisible(targetNode))
                 {
                     return;
                 }

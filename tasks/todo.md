@@ -1,5 +1,72 @@
 # TODO
 
+## 101. Eliminate delete flicker with in-place tree mutation
+- [x] 101.1 Re-check why the refresh-based viewport preservation still leaves the presets tree in a bad scroll state after delete.
+- [x] 101.2 Replace the normal preset delete path with an in-place tree node removal so deleting one preset does not rebuild the whole presets tree.
+- [x] 101.3 Add focused WinForms coverage, rerun verification, and capture the review outcome below.
+
+### 101 Review
+- The remaining problem was architectural rather than cosmetic: even with `TopNode` restoration, deleting one preset still went through `RefreshPresetList()`, which clears and rebuilds the entire presets tree. That full rebuild let WinForms re-normalize scroll/selection state in ways that still produced bad live behavior.
+- Replaced the normal unfiltered delete path in `Form1.DeletePreset(...)` with an in-place tree mutation. After the preset is removed from storage, `UI\\PresetTreeDeleteMutation.cs` removes just that `TreeNode`, selects the already-computed replacement node, and restores the viewport against the existing tree instead of rebuilding every node.
+- The old full refresh path is still used as a fallback for filtered cases where a delete can change which folders should remain visible, but the standard delete flow now avoids the expensive/repaint-heavy tree rebuild that was causing the flicker.
+- Added `SSH_Helper.Tests\\UI\\PresetTreeDeleteMutationTests.cs` to verify the in-place delete path removes the selected node, keeps the viewport away from the first row, and leaves the replacement selection visible.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetDeletionSelectionResolverTests|FullyQualifiedName~PresetTreeDisplayOrderBuilderTests|FullyQualifiedName~PresetTreeSelectionGuardTests|FullyQualifiedName~PresetTreeViewportRestorerTests|FullyQualifiedName~PresetTreeDeleteMutationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\preset-delete-selection-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\preset-delete-selection-tests\\obj\\` passed (12/12).
+- Verification: `dotnet build SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\\preset-delete-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\preset-delete-build\\obj\\` passed with 0 warnings and 0 errors.
+- Verification note: a normal `dotnet build SSH_Helper.sln -nologo` attempt was blocked by a running `SSH_Helper.exe` process holding `bin\\Debug\\net8.0-windows\\SSH_Helper.exe` open.
+
+## 100. Preserve preset tree viewport on delete
+- [x] 100.1 Trace the delete flicker and confirm whether `RefreshPresetList()` is resetting the presets tree viewport before the replacement selection is applied.
+- [x] 100.2 Preserve the presets tree top-node anchor during delete refresh so the tree does not visibly jump to the top and then back down.
+- [x] 100.3 Add focused coverage for top-node restoration, rerun verification, and capture the review outcome below.
+
+### 100 Review
+- Root cause was the refresh sequence in `Form1.DeletePreset(...)`: `RefreshPresetList()` cleared and rebuilt `trvPresets`, which reset the viewport to the top, and only after that did the replacement preset get reselected. That produced the visible jump-to-top/jump-back flicker.
+- Extended `RefreshPresetList(...)` so callers can provide a replacement selection and a `TopNode` anchor. The method now reapplies selection and restores the tree viewport while `BeginUpdate()` is still active, before `EndUpdate()` allows redraw.
+- Added `UI\\PresetTreeViewportRestorer.cs` to snapshot/resolve preset tree node tags across a rebuild and to restore the top node with fallback logic. `ExpandCollapseFolderSubtree(...)` now uses the same shared helper, so the tree keeps one viewport-restoration path.
+- `DeletePreset(...)` now captures the current `TopNode`, passes the adjacent replacement preset as the refresh-time selection override, and lets `RefreshPresetList(...)` rebuild the tree without exposing the intermediate scroll reset.
+- Added `SSH_Helper.Tests\\UI\\PresetTreeViewportRestorerTests.cs` covering both the direct top-node restore path and the preferred-missing fallback resolution used after a delete.
+- Verification: `dotnet build SSH_Helper.sln -nologo` passed with 0 warnings and 0 errors.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetDeletionSelectionResolverTests|FullyQualifiedName~PresetTreeDisplayOrderBuilderTests|FullyQualifiedName~PresetTreeSelectionGuardTests|FullyQualifiedName~PresetTreeViewportRestorerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\preset-delete-selection-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\preset-delete-selection-tests\\obj\\` passed (11/11).
+
+## 99. Fix off-screen delete reselection
+- [x] 99.1 Trace why the corrected adjacent-preset target still fails after delete and confirm whether the later selection guard is blocking off-screen root nodes.
+- [x] 99.2 Replace the `IsVisible`-based no-scroll selection guard with one that preserves expansion state without rejecting logically visible nodes.
+- [x] 99.3 Add focused WinForms regression coverage, rerun verification, and capture the review outcome below.
+
+### 99 Review
+- The remaining failure was after target resolution, not during it. `DeletePreset(...)` had the right adjacent preset name, but `SelectPresetByName(..., ensureVisible: false)` still refused to select that node whenever `targetNode.IsVisible` was false.
+- In WinForms, `TreeNode.IsVisible` is a viewport check, so off-screen root presets fail that test even though selecting them would not expand any folders. That caused the reselection to silently abort and fall through to unrelated fallback behavior.
+- Added `UI\\PresetTreeSelectionGuard.cs` and updated both `SelectPresetByName(...)` and `SelectFolderByName(...)` to allow no-scroll selection whenever all ancestors are already expanded. Collapsed descendants are still blocked, so state-preserving flows do not auto-expand folders.
+- Added `SSH_Helper.Tests\\UI\\PresetTreeSelectionGuardTests.cs` covering the exact missed case: a root-level node in an unshown/off-screen tree must still be selectable, while a child under a collapsed folder must remain blocked.
+- Verification: `dotnet build SSH_Helper.sln -nologo` passed with 0 warnings and 0 errors.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetDeletionSelectionResolverTests|FullyQualifiedName~PresetTreeDisplayOrderBuilderTests|FullyQualifiedName~PresetTreeSelectionGuardTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\preset-delete-selection-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\preset-delete-selection-tests\\obj\\` passed (9/9).
+
+## 98. Fix root-level preset delete selection
+- [x] 98.1 Re-check the root-level preset delete flow after the failed first patch and confirm the real WinForms tree-order bug.
+- [x] 98.2 Replace the delete-selection traversal so it uses logical display order instead of viewport visibility.
+- [x] 98.3 Add regression coverage for root-level tree ordering, rerun focused verification, and capture the review outcome below.
+
+### 98 Review
+- Root cause in the failed first patch was the use of `TreeNode.IsVisible` inside the preset-delete traversal. In WinForms that flag is viewport-dependent, not a reliable representation of the tree's logical display order, so root-level predecessors could be skipped.
+- Replaced the inline traversal in `Form1` with `UI\\PresetTreeDisplayOrderBuilder.cs`, which walks the tree in display order, always includes root nodes, and descends only into expanded folders.
+- `Form1.DeletePreset(...)` now resolves the adjacent preset from that display-order snapshot, so deleting a root-level preset chooses the preceding root-level preset when one exists.
+- Added `SSH_Helper.Tests\\UI\\PresetTreeDisplayOrderBuilderTests.cs` to lock the missing case: an unshown tree with root presets must still preserve root order for delete selection, plus a branch-order test proving collapsed folders do not leak hidden children into the order.
+- Verification: `dotnet build SSH_Helper.sln -nologo` passed with 0 warnings and 0 errors.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetDeletionSelectionResolverTests|FullyQualifiedName~PresetTreeDisplayOrderBuilderTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\preset-delete-selection-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\preset-delete-selection-tests\\obj\\` passed (6/6).
+
+## 97. Select previous preset after delete
+- [x] 97.1 Trace the preset delete selection rule in `Form1` and lock the intended behavior: choose the preset directly before the deleted preset when one exists.
+- [x] 97.2 Patch the delete-selection logic to skip folder headers and fall back to the next preset only when there is no previous preset.
+- [x] 97.3 Add focused regression coverage for the delete-selection rule, run targeted verification, and capture the review outcome below.
+
+### 97 Review
+- Root cause was in `Form1.DeletePreset(...)`: it asked `GetSelectionTargetAboveDeletedPreset(...)` for `PrevVisibleNode ?? NextVisibleNode`, which meant a folder header could win simply because it was the nearest visible tree node above the deleted preset.
+- Replaced that rule with a visible-preset-only resolver. `Form1` now snapshots the current tree's visible nodes, skips folder tags, and selects the previous preset in display order; only when there is no previous preset does it fall back to the next preset.
+- Tightened the final fallback in `DeletePreset(...)` to use the first visible preset in the rebuilt presets tree instead of the first dictionary key from `_presetManager.Presets`, which keeps fallback behavior aligned with the on-screen ordering.
+- Added `UI\\PresetDeletionSelectionResolver.cs` plus focused tests in `SSH_Helper.Tests\\UI\\PresetDeletionSelectionResolverTests.cs` covering the folder-header case, first-item fallback-to-next, only-item null case, and missing-preset null case.
+- Verification: `dotnet build SSH_Helper.sln -nologo` passed with 0 warnings and 0 errors.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetDeletionSelectionResolverTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\preset-delete-selection-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\preset-delete-selection-tests\\obj\\` passed (4/4).
+
 ## 96. Audit changelog section since 729f4e6
 - [x] 96.1 Read the `## Changes Since \`729f4e6\` (0.51.8)` section in `CHANGELOG.md` and capture its claims.
 - [x] 96.2 Compare those claims to the actual commit and file history from `729f4e6..HEAD`.
