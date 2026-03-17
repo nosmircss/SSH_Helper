@@ -242,6 +242,17 @@ namespace SSH_Helper.Forms
             base.WndProc(ref m);
         }
 
+        protected override bool ProcessDialogKey(Keys keyData)
+        {
+            if (_acceptHostInput && (keyData & Keys.KeyCode) == Keys.Tab)
+            {
+                InteractiveTerminalForm_KeyDown(this, new KeyEventArgs(keyData));
+                return true;
+            }
+
+            return base.ProcessDialogKey(keyData);
+        }
+
         private void InteractiveTerminalForm_KeyPress(object? sender, KeyPressEventArgs e)
         {
             if (!_acceptHostInput)
