@@ -68,9 +68,18 @@ namespace SSH_Helper.Services
         /// </summary>
         public void Load()
         {
+            Load(_configService.Load());
+        }
+
+        /// <summary>
+        /// Loads presets and folders from the supplied configuration snapshot.
+        /// </summary>
+        public void Load(AppConfiguration config)
+        {
+            ArgumentNullException.ThrowIfNull(config);
+
             _presets.Clear();
             _folders.Clear();
-            var config = _configService.Load();
             var validEnvironmentNames = new HashSet<string>(config.Environments.Keys, StringComparer.OrdinalIgnoreCase)
             {
                 EnvironmentConfig.DefaultName

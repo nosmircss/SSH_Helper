@@ -291,7 +291,7 @@ namespace SSH_Helper
                 config.UpdateSettings.GitHubRepo,
                 ApplicationVersion);
 
-            InitializeFromConfiguration();
+            InitializeFromConfiguration(config);
             InitializeCredentials();
             InitializeDataGridView();
             InitializeScriptEditor();
@@ -302,7 +302,7 @@ namespace SSH_Helper
             InitializeEnvironmentToolbar();
             InitializePasswordMasking();
             EnableDoubleBuffering();
-            RestoreWindowState();
+            RestoreWindowState(config);
             UpdateHostCount();
             UpdatePresetHeaderIndicator();
             UpdateSortModeIndicator();
@@ -408,13 +408,12 @@ namespace SSH_Helper
 
         #region Initialization
 
-        private void InitializeFromConfiguration()
+        private void InitializeFromConfiguration(AppConfiguration config)
         {
-            var config = _configService.Load();
             _activeEnvironmentName = string.IsNullOrWhiteSpace(config.ActiveEnvironment)
                 ? EnvironmentConfig.DefaultName
                 : config.ActiveEnvironment;
-            _presetManager.Load();
+            _presetManager.Load(config);
 
             // Populate UI from config
             tsbUsername.Text = config.Username;
@@ -427,7 +426,7 @@ namespace SSH_Helper
 
             // Populate preset list with proper sorting
             // Don't restore expand state here - Form1_Shown will do it after the form is visible
-            RefreshPresetList(restoreExpandState: false);
+            RefreshPresetList(restoreExpandState: false, configOverride: config);
 
             // Show global default timeout as placeholder when preset has no override
             txtTimeoutHeader.PlaceholderText = config.Timeout.ToString();
@@ -1338,9 +1337,8 @@ namespace SSH_Helper
                 .SetValue(control, true, null);
         }
 
-        private void RestoreWindowState()
+        private void RestoreWindowState(AppConfiguration config)
         {
-            var config = _configService.GetCurrent();
             var ws = config.WindowState;
 
             if (ws.Width.HasValue && ws.Height.HasValue && ws.Left.HasValue && ws.Top.HasValue)
@@ -8134,7 +8132,8 @@ namespace SSH_Helper
         private void RefreshPresetList(
             bool restoreExpandState = true,
             IReadOnlyDictionary<string, bool>? expandStatesOverride = null,
-            string? filterText = null)
+            string? filterText = null,
+            AppConfiguration? configOverride = null)
         {
             _activePresetFilter = string.IsNullOrWhiteSpace(filterText) ? null : filterText.Trim();
             var isFiltering = _activePresetFilter != null;
@@ -8162,7 +8161,7 @@ namespace SSH_Helper
             trvPresets.BeginUpdate();
             trvPresets.Nodes.Clear();
 
-            var config = _configService.Load();
+            var config = configOverride ?? _configService.Load();
 
             // Dictionary to track nodes by full path for nested folder building
             var folderNodes = new Dictionary<string, TreeNode>();
