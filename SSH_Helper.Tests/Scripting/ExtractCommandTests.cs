@@ -107,4 +107,31 @@ public class ExtractCommandTests
         context.GetVariableString("version").Should().BeEmpty();
         evaluator.Evaluate("version is empty").Should().BeTrue();
     }
+
+    [Fact]
+    public async Task ExecuteAsync_PatternVariableInterpolation_ResolvesBeforeRegexMatch()
+    {
+        var step = new ScriptStep
+        {
+            Extract = new ExtractOptions
+            {
+                From = "internet_service_output",
+                Pattern = "${match_pattern}",
+                Into = "matched_services",
+                Match = "all"
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("match_pattern", "Internet Service(?:6)?:\\s*\\d+\\(([^)]+)\\)");
+        context.SetVariable(
+            "internet_service_output",
+            "Internet Service: 123(Amazon-AWS.EC2)\nInternet Service6: 456(VPN-Anonymous.VPN)");
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var values = context.GetVariable("matched_services").Should().BeAssignableTo<List<string>>().Subject;
+        values.Should().Equal("Amazon-AWS.EC2", "VPN-Anonymous.VPN");
+    }
 }

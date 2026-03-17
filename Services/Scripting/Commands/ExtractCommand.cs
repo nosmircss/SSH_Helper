@@ -37,8 +37,10 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return Task.FromResult(CommandResult.Ok());
             }
 
+            // Resolve variables in the pattern first so scripts can reuse regex strings.
+            var pattern = context.SubstituteVariables(options.Pattern).Trim();
+
             // Prepare the pattern (strip delimiters if present)
-            var pattern = options.Pattern.Trim();
             if (pattern.StartsWith("/") && pattern.EndsWith("/"))
             {
                 pattern = pattern.Substring(1, pattern.Length - 2);
