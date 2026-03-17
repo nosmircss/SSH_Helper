@@ -1,5 +1,12 @@
 # TODO
 
+## 102. Improve startup load time
+- [x] 102.1 Inspect the startup path, identify the largest synchronous load-time costs, and agree whether to optimize first paint, fully-ready state, or a balanced target.
+- [ ] 102.2 Implement the chosen load-time improvements with minimal behavior change and verify they reduce synchronous startup work.
+- [ ] 102.3 Run focused verification, run a solution build, and capture the review outcome below.
+
+### 102 Review
+
 ## 101. Eliminate delete flicker with in-place tree mutation
 - [x] 101.1 Re-check why the refresh-based viewport preservation still leaves the presets tree in a bad scroll state after delete.
 - [x] 101.2 Replace the normal preset delete path with an in-place tree node removal so deleting one preset does not rebuild the whole presets tree.
