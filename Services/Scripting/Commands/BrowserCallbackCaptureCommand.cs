@@ -451,27 +451,29 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             var encodedPostPath = EscapeForJavaScriptString(postPath);
 
-            return $"<!DOCTYPE html>\n" +
-                   "<html><head><meta charset=\"utf-8\"><title>Processing callback...</title></head>\n" +
-                   "<body style=\"font-family:Segoe UI,Arial,sans-serif;margin:40px;\">\n" +
-                   "<h3>Processing browser callback...</h3>\n" +
-                   "<p id=\"status\">Collecting callback values...</p>\n" +
-                   "<script>\n" +
-                   "(function(){\n" +
-                   "  var payload = new URLSearchParams();\n" +
-                   "  var query = new URLSearchParams(window.location.search.substring(1));\n" +
-                   "  query.forEach(function(v,k){ payload.append('q:' + k, v); });\n" +
-                   "  var hash = new URLSearchParams(window.location.hash.substring(1));\n" +
-                   "  hash.forEach(function(v,k){ payload.append('h:' + k, v); });\n" +
-                   $"  fetch('{encodedPostPath}', {{ method:'POST', headers:{{'Content-Type':'application/x-www-form-urlencoded'}}, body: payload.toString() }})\n" +
-                   "    .then(function(){\n" +
-                   "      document.getElementById('status').textContent='" + completion + "';\n" +
-                   "      setTimeout(function(){ window.close(); }, 200);\n" +
-                   "    })\n" +
-                   "    .catch(function(){ document.getElementById('status').textContent='" + failure + "'; });\n" +
-                   "})();\n" +
-                   "</script>\n" +
-                   "</body></html>";
+            return $$"""
+                <!DOCTYPE html>
+                <html><head><meta charset="utf-8"><title>Processing callback...</title></head>
+                <body style="font-family:Segoe UI,Arial,sans-serif;margin:40px;">
+                <h3>Processing browser callback...</h3>
+                <p id="status">Collecting callback values...</p>
+                <script>
+                (function(){
+                  var payload = new URLSearchParams();
+                  var query = new URLSearchParams(window.location.search.substring(1));
+                  query.forEach(function(v,k){ payload.append('q:' + k, v); });
+                  var hash = new URLSearchParams(window.location.hash.substring(1));
+                  hash.forEach(function(v,k){ payload.append('h:' + k, v); });
+                  fetch('{{encodedPostPath}}', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: payload.toString() })
+                    .then(function(){
+                      document.getElementById('status').textContent='{{completion}}';
+                      setTimeout(function(){ window.close(); }, 200);
+                    })
+                    .catch(function(){ document.getElementById('status').textContent='{{failure}}'; });
+                })();
+                </script>
+                </body></html>
+                """;
         }
 
         private static void RequestApplicationFocusRestore()
@@ -594,6 +596,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             return value
                 .Replace("\\", "\\\\", StringComparison.Ordinal)
                 .Replace("'", "\\'", StringComparison.Ordinal)
+                .Replace("</", "<\\/", StringComparison.Ordinal)
                 .Replace("\r", string.Empty, StringComparison.Ordinal)
                 .Replace("\n", "\\n", StringComparison.Ordinal);
         }

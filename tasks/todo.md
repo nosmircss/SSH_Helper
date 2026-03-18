@@ -1,5 +1,22 @@
 # TODO
 
+## 103. Merge callback_test without keycloak sample
+- [x] 103.1 Review `origin/callback_test` and decide import scope based on the requirement to keep `SCRIPTING.md` and drop `keycloak_block_site.yaml`.
+- [x] 103.2 Import browser callback capture feature work and explicitly exclude the sample keycloak block site file from the merge.
+- [x] 103.3 Preserve low-risk cleanup behavior for stale capture fields in `BrowserCallbackCaptureCommand.ClearCapture(...)`.
+- [x] 103.4 Add/update targeted tests for parser, dependency, preflight, and callback stale-suffix cleanup paths.
+- [x] 103.5 Verify final branch state excludes `keycloak_block_site.yaml` and commit changes as one atomic merge.
+
+### 103 Review
+- Reviewed `origin/callback_test` and confirmed it is two commits: `6e82241` (feature + `SCRIPTING.md`) and `75cc4ef` (deletes `keycloak_block_site.yaml`).
+- Kept the feature path by cherry-picking `6e82241` without commit and manually excluding the keycloak sample file before committing the merge.
+- Added `BrowserCallbackCaptureCommand` support plus runtime/parser/dependency integrations and updated `SCRIPTING.md` in commit `4950903`.
+- `ClearCapture(...)` now removes all stale `into_*` variables before writing the new callback capture result, not just `into`, `into_count`, and `into_keys`.
+- Added regression coverage in `SSH_Helper.Tests/Scripting/BrowserCallbackCaptureCommandTests.cs` for stale-suffixed capture variable cleanup.
+- Verification: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackCaptureCommandTests"` passed (5/5).
+- Verification: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests|FullyQualifiedName~NetworkStepParserTests"` passed (48/48).
+- Verification: `Test-Path keycloak_block_site.yaml` returned `False`; `git status --short` has no `keycloak_block_site.yaml` entries.
+
 ## 102. Improve startup load time
 - [x] 102.1 Inspect the startup path, identify the largest synchronous load-time costs, and agree whether to optimize first paint, fully-ready state, or a balanced target.
 - [x] 102.2 Implement the chosen load-time improvements with minimal behavior change and verify they reduce synchronous startup work.

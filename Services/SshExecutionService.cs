@@ -66,10 +66,8 @@ namespace SSH_Helper.Services
     /// </summary>
     public class SshExecutionService : IDisposable
     {
-        private const string InteractiveUnsupportedMultiHostOrFolderMessage =
-            "Scripts using 'interactive' are not supported in folder or multi-host runs. Run the script against a single current host instead.";
-        private const string BrowserCallbackUnsupportedMultiHostOrFolderMessage =
-            "Scripts using 'browser_callback_capture' are not supported in folder or multi-host runs. Run the script against a single current host instead.";
+        private const string SingleHostOnlyMessageSuffix =
+            " not supported in folder or multi-host runs. Run the script against a single current host instead.";
 
         private readonly SshConnectionPool? _connectionPool;
         private readonly bool _ownsPool;
@@ -714,7 +712,7 @@ namespace SSH_Helper.Services
 
         private static string BuildFolderSingleHostOnlyPreflightMessage(IReadOnlyList<string> blockedPresetNames)
         {
-            const string baseMessage = "Scripts using 'interactive' or 'browser_callback_capture' are not supported in folder or multi-host runs. Run the script against a single current host instead.";
+            var baseMessage = BuildSingleHostOnlyBaseMessage(usesInteractive: true, usesBrowserCallback: true);
             if (blockedPresetNames.Count == 0)
                 return baseMessage;
 
@@ -724,26 +722,22 @@ namespace SSH_Helper.Services
 
         private static bool TryBuildSingleHostOnlyPreflightMessage(SshRequirementResult requirement, out string message)
         {
-            if (requirement.UsesInteractive && requirement.UsesBrowserCallbackCapture)
+            if (!requirement.UsesInteractive && !requirement.UsesBrowserCallbackCapture)
             {
-                message = "Scripts using 'interactive' or 'browser_callback_capture' are not supported in folder or multi-host runs. Run the script against a single current host instead.";
-                return true;
+                message = string.Empty;
+                return false;
             }
 
-            if (requirement.UsesInteractive)
-            {
-                message = InteractiveUnsupportedMultiHostOrFolderMessage;
-                return true;
-            }
+            message = BuildSingleHostOnlyBaseMessage(requirement.UsesInteractive, requirement.UsesBrowserCallbackCapture);
+            return true;
+        }
 
-            if (requirement.UsesBrowserCallbackCapture)
-            {
-                message = BrowserCallbackUnsupportedMultiHostOrFolderMessage;
-                return true;
-            }
-
-            message = string.Empty;
-            return false;
+        private static string BuildSingleHostOnlyBaseMessage(bool usesInteractive, bool usesBrowserCallback)
+        {
+            var features = new List<string>(2);
+            if (usesInteractive) features.Add("'interactive'");
+            if (usesBrowserCallback) features.Add("'browser_callback_capture'");
+            return $"Scripts using {string.Join(" or ", features)} are{SingleHostOnlyMessageSuffix}";
         }
 
         // Execute a preset without starting a new execution scope (caller owns BeginExecution/EndExecution).
