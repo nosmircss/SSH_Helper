@@ -2,10 +2,34 @@
 
 ## 102. Improve startup load time
 - [x] 102.1 Inspect the startup path, identify the largest synchronous load-time costs, and agree whether to optimize first paint, fully-ready state, or a balanced target.
-- [ ] 102.2 Implement the chosen load-time improvements with minimal behavior change and verify they reduce synchronous startup work.
-- [ ] 102.3 Run focused verification, run a solution build, and capture the review outcome below.
+- [x] 102.2 Implement the chosen load-time improvements with minimal behavior change and verify they reduce synchronous startup work.
+- [x] 102.3 Run focused verification, run a solution build, and capture the review outcome below.
+
+### 102.2 Task 2 Plan
+- [x] 102.2.1 Add focused `HostGridRestoreBatcher` tests for collapsed restore-scope flush behavior.
+- [x] 102.2.2 Run the targeted batcher test filter and confirm the expected red failure because the helper does not exist yet.
+- [x] 102.2.3 Implement `UI/HostGridRestoreBatcher.cs` with nested restore scopes and deferred single-flush requests.
+- [x] 102.2.4 Wire `Form1` startup/bulk host-grid restore paths to batch scrollbar, host-count, dirty-mark, and hosts-file-indicator work without changing non-restore behavior.
+- [x] 102.2.5 Re-run the targeted batcher test slice and the requested host-grid regression slice.
+- [x] 102.2.6 Commit the scoped Task 2 changes.
 
 ### 102 Review
+- Task 1 reused the constructor's first `AppConfiguration` snapshot across startup-sensitive paths. `PresetManager` now supports `Load(AppConfiguration config)`, `Form1.InitializeFromConfiguration(...)` and `RestoreWindowState(...)` take the startup snapshot explicitly, and startup preset-tree construction can use the supplied config instead of rereading `config.json`.
+- Task 2 added `UI\\HostGridRestoreBatcher.cs` plus focused tests in `SSH_Helper.Tests\\UI\\HostGridRestoreBatcherTests.cs` to lock the batching contract: repeated requests collapse into one flush and nested restore scopes wait for the outermost dispose.
+- `Form1` now routes host-grid scrollbar/count/dirty requests through the batcher, and both `RestoreApplicationState(...)` and `LoadEnvironmentIntoGrid(...)` populate the grid inside a restore scope so startup restore no longer recomputes scrollbars and host counts on every row/column mutation.
+- Task 3 moved heavy scheduler bootstrap out of the constructor and onto a once-only idle continuation after `Form1_Shown` completes restore/layout work. The scheduler shell still appears immediately, while the existing `InitializeSchedulerServices()` path now runs once after startup restore and still performs job load, crash recovery, missed-run recording, timer start, and status refresh.
+- After each restore scope completes, `Form1` still resets `_csvDirty` to `false`, captures the loaded snapshot, and refreshes the hosts-file indicator so restored startup state stays clean while row heights, host count text, and themed custom scrollbars settle once at the end.
+- Startup measurement method: release build, one warm-up launch, then five measured launches of the app against the same local config; each run records `WindowMs` (main window appearance) and `ReadyMs` (time until the process stays under ~1% CPU for three consecutive 200 ms samples after the window appears).
+- Baseline startup metrics before implementation: `WindowAvg=1021.1 ms`, `WindowMedian=1009.8 ms`, `ReadyAvg=2174.8 ms`, `ReadyMedian=2250.2 ms`.
+- Post-change startup metrics after implementation: `WindowAvg=515.7 ms`, `WindowMedian=533.6 ms`, `ReadyAvg=1486.8 ms`, `ReadyMedian=1535.1 ms`.
+- Measured improvement from the same method/config: `WindowAvg` improved by about `49.5%` and `ReadyAvg` improved by about `31.6%`.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetManagerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-preset-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-preset-tests\\obj\\` passed (49/49).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetManagerTests|FullyQualifiedName~PresetManagerFolderBaseEnvironmentTests|FullyQualifiedName~ConfigurationServiceWindowStateTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-config-regression\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-config-regression\\obj\\` passed (55/55).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~HostGridRestoreBatcherTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-grid-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-grid-tests\\obj\\` passed (2/2).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~HostGridUtilitiesTests|FullyQualifiedName~ApplyFontSettingsTests|FullyQualifiedName~JobEditorDialogHostGridParityTests|FullyQualifiedName~HostGridRestoreBatcherTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-grid-regression\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-grid-regression\\obj\\` passed (47/47).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~SchedulingServiceMissedRunIntegrationTests|FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~SchedulerNotificationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-scheduler-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-scheduler-tests\\obj\\` passed (87/87).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetManagerTests|FullyQualifiedName~PresetManagerFolderBaseEnvironmentTests|FullyQualifiedName~ConfigurationServiceWindowStateTests|FullyQualifiedName~HostGridUtilitiesTests|FullyQualifiedName~ApplyFontSettingsTests|FullyQualifiedName~JobEditorDialogHostGridParityTests|FullyQualifiedName~HostGridRestoreBatcherTests|FullyQualifiedName~SchedulingServiceMissedRunIntegrationTests|FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~SchedulerNotificationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-final-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-final-tests\\obj\\` passed (189/189).
+- Verification: `dotnet build SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\\startup-load-time-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-build\\obj\\` passed with 0 warnings and 0 errors.
 
 ## 101. Eliminate delete flicker with in-place tree mutation
 - [x] 101.1 Re-check why the refresh-based viewport preservation still leaves the presets tree in a bad scroll state after delete.
