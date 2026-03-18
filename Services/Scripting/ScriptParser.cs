@@ -35,6 +35,7 @@ namespace SSH_Helper.Services.Scripting
             "input",
             "log",
             "http",
+            "browser_callback_capture",
             "ping",
             "dns",
             "portcheck",
@@ -109,6 +110,7 @@ namespace SSH_Helper.Services.Scripting
                 ["updateenvironment"] = ["variable", "value"],
                 ["log"] = ["message", "level"],
                 ["http"] = ["url", "method", "body", "headers", "into", "timeout", "follow_redirects", "allow_failure", "verify_tls", "auth", "username", "password", "token", "content_type", "on_error"],
+                ["browser_callback_capture"] = ["start_url", "callback_path", "local_port", "capture_mode", "into", "required_fields", "timeout", "open_browser", "completion_message", "failure_message", "quiet", "on_error"],
                 ["ping"] = ["host", "count", "timeout", "into", "on_error"],
                 ["dns"] = ["host", "type", "timeout", "into", "on_error"],
                 ["portcheck"] = ["host", "port", "timeout", "into", "on_error"],
@@ -144,6 +146,7 @@ namespace SSH_Helper.Services.Scripting
                 ["input"] = [],
                 ["log"] = [],
                 ["http"] = [],
+                ["browser_callback_capture"] = [],
                 ["ping"] = [],
                 ["dns"] = [],
                 ["portcheck"] = [],
@@ -186,6 +189,7 @@ namespace SSH_Helper.Services.Scripting
             StepType.Writefile,
             StepType.Input,
             StepType.Http,
+            StepType.BrowserCallbackCapture,
             StepType.Ping,
             StepType.Dns,
             StepType.Portcheck,
@@ -228,6 +232,9 @@ namespace SSH_Helper.Services.Scripting
                 ["follow_redirects"] = ["true", "false"],
                 ["allow_failure"] = ["true", "false"],
                 ["verify_tls"] = ["true", "false"],
+                ["capture_mode"] = ["auto", "fragment", "query", "post_body"],
+                ["open_browser"] = ["true", "false"],
+                ["quiet"] = ["true", "false"],
                 ["session"] = ["separate", "shared"],
                 ["mirror_output"] = ["true", "false"],
                 ["show_window"] = ["true", "false"],
@@ -763,6 +770,10 @@ namespace SSH_Helper.Services.Scripting
                     case "http":
                         step.DeclaredStepType = StepType.Http;
                         step.Http = ParseHttpOptions(parser, step);
+                        break;
+                    case "browser_callback_capture":
+                        step.DeclaredStepType = StepType.BrowserCallbackCapture;
+                        step.BrowserCallbackCapture = ParseBrowserCallbackCaptureOptions(parser, step);
                         break;
                     case "ping":
                         step.DeclaredStepType = StepType.Ping;
@@ -2446,6 +2457,92 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
+        private BrowserCallbackCaptureOptions ParseBrowserCallbackCaptureOptions(IParser parser, ScriptStep step)
+        {
+            var options = new BrowserCallbackCaptureOptions();
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                // Shorthand: - browser_callback_capture: "https://example.com/start"
+                options.StartUrl = parser.Consume<Scalar>().Value;
+                return options;
+            }
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "start_url":
+                        case "starturl":
+                            options.StartUrl = parser.Consume<Scalar>().Value;
+                            break;
+                        case "callback_path":
+                        case "callbackpath":
+                            options.CallbackPath = parser.Consume<Scalar>().Value;
+                            break;
+                        case "local_port":
+                        case "localport":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var localPort))
+                                options.LocalPort = localPort;
+                            break;
+                        case "capture_mode":
+                        case "capturemode":
+                            options.CaptureMode = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "required_fields":
+                        case "requiredfields":
+                            options.RequiredFields = ParseStringList(parser);
+                            break;
+                        case "timeout":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
+                                options.Timeout = timeout;
+                            break;
+                        case "open_browser":
+                        case "openbrowser":
+                            options.OpenBrowser = ParseBooleanOrDefault(parser, options.OpenBrowser);
+                            break;
+                        case "completion_message":
+                        case "completionmessage":
+                            options.CompletionMessage = parser.Consume<Scalar>().Value;
+                            break;
+                        case "failure_message":
+                        case "failuremessage":
+                            options.FailureMessage = parser.Consume<Scalar>().Value;
+                            break;
+                        case "quiet":
+                            options.Quiet = ParseBooleanOrDefault(parser, options.Quiet);
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown browser_callback_capture key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
         private DnsOptions ParseDnsOptions(IParser parser, ScriptStep step)
         {
             var options = new DnsOptions();
@@ -3640,6 +3737,61 @@ namespace SSH_Helper.Services.Scripting
                                     errors.Add($"{prefix}Line {step.LineNumber}: Http 'auth: bearer' requires 'token'{lineContent}");
                                 }
                             }
+                        }
+                        break;
+
+                    case StepType.BrowserCallbackCapture:
+                        if (step.BrowserCallbackCapture == null)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture requires options{lineContent}");
+                            break;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(step.BrowserCallbackCapture.StartUrl))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture requires 'start_url'{lineContent}");
+                        }
+
+                        if (string.IsNullOrWhiteSpace(step.BrowserCallbackCapture.CallbackPath))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture requires 'callback_path'{lineContent}");
+                        }
+                        else if (!IsDynamicValue(step.BrowserCallbackCapture.CallbackPath) &&
+                                 !step.BrowserCallbackCapture.CallbackPath.StartsWith("/", StringComparison.Ordinal))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.callback_path must start with '/'{lineContent}");
+                        }
+
+                        if (string.IsNullOrWhiteSpace(step.BrowserCallbackCapture.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture requires 'into'{lineContent}");
+                        }
+
+                        if (step.BrowserCallbackCapture.LocalPort < 1 || step.BrowserCallbackCapture.LocalPort > 65535)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.local_port must be between 1 and 65535{lineContent}");
+                        }
+
+                        if (step.BrowserCallbackCapture.Timeout <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.timeout must be greater than 0{lineContent}");
+                        }
+
+                        if (!IsDynamicValue(step.BrowserCallbackCapture.CaptureMode) &&
+                            !string.Equals(step.BrowserCallbackCapture.CaptureMode, "auto", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.BrowserCallbackCapture.CaptureMode, "fragment", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.BrowserCallbackCapture.CaptureMode, "query", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.BrowserCallbackCapture.CaptureMode, "post_body", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.capture_mode must be one of auto, fragment, query, post_body{lineContent}");
                         }
                         break;
 

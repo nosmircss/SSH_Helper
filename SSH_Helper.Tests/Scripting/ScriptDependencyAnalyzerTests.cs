@@ -254,6 +254,23 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzeSshRequirements_BrowserCallbackCapture_FlagsSingleHostOnlyWithoutSsh()
+    {
+        var result = AnalyzeSshRequirements("""
+            ---
+            steps:
+              - browser_callback_capture:
+                  start_url: "https://idp.example.com/start"
+                  callback_path: "/oauth_callback"
+                  into: callback_data
+            """);
+
+        result.RequiresSshSession.Should().BeFalse();
+        result.UsesBrowserCallbackCapture.Should().BeTrue();
+        result.UsesInteractive.Should().BeFalse();
+    }
+
+    [Fact]
     public void AnalyzeSshRequirements_SendInIfThen_RequiresSshSession()
     {
         var result = AnalyzeSshRequirements("""

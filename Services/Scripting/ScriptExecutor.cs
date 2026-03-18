@@ -38,6 +38,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.UpdateEnvironment, new UpdateEnvironmentCommand() },
                 { StepType.Log, new LogCommand() },
                 { StepType.Http, new HttpCommand() },
+                { StepType.BrowserCallbackCapture, new BrowserCallbackCaptureCommand() },
                 { StepType.Ping, new PingCommand() },
                 { StepType.Dns, new DnsCommand() },
                 { StepType.Portcheck, new PortcheckCommand() },
