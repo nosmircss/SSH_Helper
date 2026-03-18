@@ -487,6 +487,22 @@ namespace SSH_Helper.Services.Scripting
                 return string.Empty;
             }
 
+            // Support inline function expressions: ${json.format(data)}, ${upper(json.get(x, "k"))}, etc.
+            if (expr.Contains('('))
+            {
+                var result = ValueResolver.ResolveExpressionValue(expr, this);
+                if (result != null)
+                {
+                    return result switch
+                    {
+                        string s => s,
+                        List<string> list => string.Join(", ", list),
+                        JsonNode node => node.ToJsonString(),
+                        _ => result.ToString() ?? string.Empty
+                    };
+                }
+            }
+
             // Simple variable lookup
             return GetVariableString(expr);
         }

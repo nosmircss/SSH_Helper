@@ -246,6 +246,7 @@ Outputs a message to the script output.
 
 **Features:**
 - Supports variable substitution with `${variable}` syntax
+- Supports inline function expressions with `${function(args)}` syntax (including nested calls)
 - Always succeeds (never causes script failure)
 
 **Examples:**
@@ -258,6 +259,14 @@ Outputs a message to the script output.
     message: "Found ${count} interfaces"
 - print:
     message: "Status: ${status}"
+
+# Inline function expressions
+- print:
+    message: "Pretty JSON: ${json.format(data)}"
+- print:
+    message: "Hostname: ${upper(json.get(data, "host"))}"
+- print:
+    message: "Keys: ${json.keys(data)}"
 ```
 
 ---
@@ -3291,16 +3300,37 @@ These are accessible via nested paths:
 
 ### Variable Substitution Syntax
 
-Variables are substituted using `${variable_name}`:
+Variables are substituted using `${variable_name}`. Function expressions are also supported inline using `${function(args)}`, including nested calls:
 
 ```yaml
+# Simple variable substitution
 - print:
     message: "Host ${Host_IP} has IP ${ip_address}"
 - send:
     command: show interface ${interface_name}
 - set:
     expression: message = "Status: ${status}"
+
+# Inline function expressions
+- print:
+    message: "Pretty: ${json.format(data)}"
+- print:
+    message: "Upper: ${upper(hostname)}"
+- print:
+    message: "Key count: ${json.len(data)}"
+
+# Nested function calls
+- print:
+    message: "Name: ${upper(json.get(data, "host"))}"
+- print:
+    message: "Trimmed keys: ${trim(join(json.keys(data), ", "))}"
+
+# Mixed variables and inline expressions in one string
+- print:
+    message: "Host ${Host_IP} name=${upper(json.get(data, "host"))} with ${json.len(data)} fields"
 ```
+
+Inline expressions work everywhere `${...}` is supported — `print`, `writefile` content, `send` commands, URLs, headers, and any other string field that performs variable substitution. All scripting functions (`json.*`, `upper`, `lower`, `trim`, `replace`, `split`, `join`, `length`, etc.) are available inline.
 
 ### Quoting and Escaping
 
@@ -3373,6 +3403,54 @@ Lists support index-based access and properties:
 | `.length` | Number of items in list | `${my_list.length}` |
 
 **Note:** The `.length` property works on lists created by `extract` (with `match: all`) or `readfile`.
+
+### Inline Function Expressions
+
+In addition to variable lookups, `${...}` tokens support calling any scripting function directly. This eliminates the need for a separate `set` step when you just want to display a transformed value.
+
+**Supported syntax:**
+```yaml
+# Single function call
+${function(arg1, arg2)}
+
+# Nested function calls (functions as arguments to other functions)
+${outer(inner(arg))}
+
+# Deeply nested
+${upper(trim(json.get(data, "name")))}
+```
+
+**All scripting functions are available inline**, including:
+- **JSON functions:** `json.format()`, `json.get()`, `json.keys()`, `json.values()`, `json.len()`, `json.type()`, `json.exists()`, `json.merge()`, `json.items()`, `json.slice()`, etc.
+- **String functions:** `upper()`, `lower()`, `trim()`, `replace()`, `substring()`, `length()`
+- **List functions:** `join()`, `split()`, `sort()`, `compact()`, `distinct()`, `first()`, `last()`
+
+**Examples:**
+
+```yaml
+# Pretty-print JSON from an API response
+- http:
+    url: "https://api.example.com/status"
+    into: response
+- print: "API response: ${json.format(response)}"
+
+# Extract and transform a value in one step
+- print: "Hostname: ${upper(json.get(device_info, "hostname"))}"
+
+# Use in writefile content
+- writefile:
+    path: "C:\\output\\summary.txt"
+    content: "Device ${Host_IP} has hostname ${upper(json.get(data, "name"))} with ${json.len(data)} attributes"
+
+# Use in command strings
+- send:
+    command: "ping ${lower(json.get(config, "target_host"))}"
+
+# Combine with regular variables
+- print: "Host ${Host_IP}: status=${json.get(data, "status")}, uptime=${json.get(data, "uptime")}"
+```
+
+**Note:** Simple variable lookups (`${varname}`), `.length` properties (`${list.length}`), and array indexing (`${list[0]}`) continue to work as before. Inline expressions activate only when the `${...}` content contains a function call (parentheses).
 
 ### Variable Precedence
 
@@ -4986,9 +5064,10 @@ steps:
 15. **Use `json()` for inline objects**: Quick way to create JSON without building nested structures
 16. **Automatic type detection**: Numbers and booleans in arrays are preserved (e.g., `"42"` becomes `42` in JSON)
 17. **Use `json.merge()` for configuration overrides**: Combine base settings with host-specific overrides
+18. **Use inline expressions to skip `set` steps**: Print or use function results directly with `${json.format(data)}` or `${upper(json.get(data, "key"))}` — no intermediate variable needed
 
 ### Working with Configuration Parsing
-18. **Use `parse` for structured device configs**: Parse FortiGate configs instead of regex for reliable data extraction
-19. **Filter sections for large configs**: Use the `sections` parameter to only parse what you need
-20. **Access parsed data with `json.get()`**: Use default values to handle missing keys gracefully
-21. **Iterate with `json.keys()`**: Get all interface names, policy IDs, etc. for processing in loops
+19. **Use `parse` for structured device configs**: Parse FortiGate configs instead of regex for reliable data extraction
+20. **Filter sections for large configs**: Use the `sections` parameter to only parse what you need
+21. **Access parsed data with `json.get()`**: Use default values to handle missing keys gracefully
+22. **Iterate with `json.keys()`**: Get all interface names, policy IDs, etc. for processing in loops
