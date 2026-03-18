@@ -228,6 +228,7 @@ namespace SSH_Helper
         private VScrollBar? _dgvVScrollBar;
         private HScrollBar? _dgvHScrollBar;
         private Panel? _dgvScrollCorner;
+        private readonly HostGridRestoreBatcher _hostGridRestoreBatcher;
 
         // Multi-host selection state
         private bool _selectAllChecked;
@@ -246,6 +247,10 @@ namespace SSH_Helper
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
             InitializeComponent();
+            _hostGridRestoreBatcher = new HostGridRestoreBatcher(
+                onScrollbarRefresh: UpdateDataGridViewScrollbars,
+                onHostCountRefresh: UpdateHostCount,
+                onMarkDirty: MarkHostGridDirty);
             InitializeFolderBaseEnvironmentContextMenuItem();
             InitializeFolderExpandCollapseContextMenuItems();
             Text = $"{ApplicationName} {ApplicationVersion}";
@@ -665,15 +670,15 @@ namespace SSH_Helper
             _dgvHScrollBar.Scroll += DgvHScrollBar_Scroll;
 
             // Wire up DataGridView events to update scrollbar state
-            dgv_variables.RowsAdded += (s, e) => UpdateDataGridViewScrollbars();
-            dgv_variables.RowsRemoved += (s, e) => UpdateDataGridViewScrollbars();
-            dgv_variables.ColumnAdded += (s, e) => UpdateDataGridViewScrollbars();
-            dgv_variables.ColumnRemoved += (s, e) => UpdateDataGridViewScrollbars();
-            dgv_variables.ColumnWidthChanged += (s, e) => UpdateDataGridViewScrollbars();
-            dgv_variables.Resize += (s, e) => UpdateDataGridViewScrollbars();
+            dgv_variables.RowsAdded += (s, e) => RequestHostGridScrollbarRefresh();
+            dgv_variables.RowsRemoved += (s, e) => RequestHostGridScrollbarRefresh();
+            dgv_variables.ColumnAdded += (s, e) => RequestHostGridScrollbarRefresh();
+            dgv_variables.ColumnRemoved += (s, e) => RequestHostGridScrollbarRefresh();
+            dgv_variables.ColumnWidthChanged += (s, e) => RequestHostGridScrollbarRefresh();
+            dgv_variables.Resize += (s, e) => RequestHostGridScrollbarRefresh();
             dgv_variables.Scroll += DgvVariables_Scroll;
             dgv_variables.MouseWheel += DgvVariables_MouseWheel;
-            hostsPanel.Resize += (s, e) => UpdateDataGridViewScrollbars();
+            hostsPanel.Resize += (s, e) => RequestHostGridScrollbarRefresh();
 
             // Initial update
             UpdateDataGridViewScrollbars();
@@ -827,6 +832,19 @@ namespace SSH_Helper
                 ApplyLightScrollbars(_dgvVScrollBar);
                 ApplyLightScrollbars(_dgvHScrollBar);
             }
+        }
+
+        private IDisposable BeginHostGridRestoreScope() => _hostGridRestoreBatcher.BeginRestoreScope();
+
+        private void RequestHostGridScrollbarRefresh() => _hostGridRestoreBatcher.RequestScrollbarRefresh();
+
+        private void RequestHostGridHostCountRefresh() => _hostGridRestoreBatcher.RequestHostCountRefresh();
+
+        private void RequestHostGridDirtyMark() => _hostGridRestoreBatcher.RequestMarkDirty();
+
+        private void MarkHostGridDirty()
+        {
+            _csvDirty = true;
         }
 
         private void InitializeOutputHistory()
@@ -1965,79 +1983,86 @@ namespace SSH_Helper
             dgv_variables.Rows.Clear();
             dgv_variables.Columns.Clear();
 
-            var columns = (environment.HostColumns ?? new List<string>())
-                .Where(name => !string.IsNullOrWhiteSpace(name) && name != SelectColumnName)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (!columns.Contains(CsvManager.HostColumnName, StringComparer.OrdinalIgnoreCase))
-            {
-                columns.Insert(0, CsvManager.HostColumnName);
-            }
-
-            foreach (var column in columns)
-            {
-                dgv_variables.Columns.Add(column, column);
-            }
-
-            EnsureSelectColumn();
-            dgv_variables.RowTemplate.Height = 28;
-
-            var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                       _configService.GetCurrent().Credentials.UseCredentialManager;
-
-            foreach (var rowData in environment.Hosts ?? new List<Dictionary<string, string>>())
-            {
-                var rowCopy = rowData != null
-                    ? new Dictionary<string, string>(rowData, StringComparer.OrdinalIgnoreCase)
-                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                if (useCredentialManager)
-                {
-                    rowCopy.TryGetValue(CsvManager.HostColumnName, out var hostValue);
-                    rowCopy.TryGetValue("username", out var usernameValue);
-                    rowCopy.TryGetValue("password", out var passwordValue);
-
-                    var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
-                    if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
-                    {
-                        StoreHostPassword(hostValue, resolvedUsername, passwordValue);
-                        rowCopy["password"] = string.Empty;
-                    }
-                }
-
-                var rowIndex = dgv_variables.Rows.Add();
-                dgv_variables.Rows[rowIndex].Height = 28;
-
-                foreach (var kvp in rowCopy)
-                {
-                    if (dgv_variables.Columns.Contains(kvp.Key))
-                    {
-                        dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
-                    }
-                }
-            }
-
-            if (environment.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
-            {
-                foreach (var index in environment.SelectedHostIndices)
-                {
-                    if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
-                    {
-                        dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
-                    }
-                }
-            }
-
             _loadedFilePath = environment.LastCsvPath;
             _loadedFileFingerprint = loadedFingerprint?.Clone() ?? environment.LastCsvFingerprint?.Clone();
             _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
                 ? CsvFileSyncStatus.NotTracked
                 : syncStatus;
+
+            var columns = (environment.HostColumns ?? new List<string>())
+                .Where(name => !string.IsNullOrWhiteSpace(name) && name != SelectColumnName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            using (BeginHostGridRestoreScope())
+            {
+                if (!columns.Contains(CsvManager.HostColumnName, StringComparer.OrdinalIgnoreCase))
+                {
+                    columns.Insert(0, CsvManager.HostColumnName);
+                }
+
+                foreach (var column in columns)
+                {
+                    dgv_variables.Columns.Add(column, column);
+                }
+
+                EnsureSelectColumn();
+                dgv_variables.RowTemplate.Height = 28;
+
+                var useCredentialManager = _credentialProvider?.IsAvailable == true &&
+                                           _configService.GetCurrent().Credentials.UseCredentialManager;
+
+                foreach (var rowData in environment.Hosts ?? new List<Dictionary<string, string>>())
+                {
+                    var rowCopy = rowData != null
+                        ? new Dictionary<string, string>(rowData, StringComparer.OrdinalIgnoreCase)
+                        : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                    if (useCredentialManager)
+                    {
+                        rowCopy.TryGetValue(CsvManager.HostColumnName, out var hostValue);
+                        rowCopy.TryGetValue("username", out var usernameValue);
+                        rowCopy.TryGetValue("password", out var passwordValue);
+
+                        var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
+                        if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
+                        {
+                            StoreHostPassword(hostValue, resolvedUsername, passwordValue);
+                            rowCopy["password"] = string.Empty;
+                        }
+                    }
+
+                    var rowIndex = dgv_variables.Rows.Add();
+                    dgv_variables.Rows[rowIndex].Height = 28;
+
+                    foreach (var kvp in rowCopy)
+                    {
+                        if (dgv_variables.Columns.Contains(kvp.Key))
+                        {
+                            dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
+                        }
+                    }
+                }
+
+                if (environment.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
+                {
+                    foreach (var index in environment.SelectedHostIndices)
+                    {
+                        if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
+                        {
+                            dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
+                        }
+                    }
+                }
+
+                RequestHostGridHostCountRefresh();
+                RequestHostGridScrollbarRefresh();
+            }
+
             _pendingColumnAutoSize = true;
             _csvDirty = false;
             CaptureLoadedFileSnapshotFromGrid();
-            UpdateHostCount();
+            UpdateHostsFileIndicator();
         }
 
         #endregion
@@ -3568,20 +3593,20 @@ namespace SSH_Helper
                 dgv_variables.Rows[e.RowIndex + i].Height = 28;
             }
 
-            _csvDirty = true;
-            UpdateHostCount();
+            RequestHostGridDirtyMark();
+            RequestHostGridHostCountRefresh();
         }
 
         private void Dgv_Variables_RowsRemoved(object? sender, DataGridViewRowsRemovedEventArgs e)
         {
-            _csvDirty = true;
-            UpdateHostCount();
+            RequestHostGridDirtyMark();
+            RequestHostGridHostCountRefresh();
         }
 
         private void Dgv_Variables_ColumnRemoved(object? sender, DataGridViewColumnEventArgs e)
         {
-            _csvDirty = true;
-            UpdateHostsFileIndicator();
+            RequestHostGridDirtyMark();
+            RequestHostGridHostCountRefresh();
         }
 
         private void Dgv_Variables_KeyPress(object? sender, KeyPressEventArgs e)
@@ -10777,71 +10802,76 @@ namespace SSH_Helper
             dgv_variables.Rows.Clear();
             dgv_variables.Columns.Clear();
 
-            if (state.HostColumns != null && state.HostColumns.Count > 0)
-            {
-                foreach (var colName in state.HostColumns)
-                {
-                    // Skip checkbox column name and whitespace-only names (will be added by EnsureSelectColumn)
-                    if (colName == SelectColumnName || string.IsNullOrWhiteSpace(colName))
-                        continue;
-                    dgv_variables.Columns.Add(colName, colName);
-                }
-                EnsureSelectColumn();
-
-                if (state.Hosts != null)
-                {
-                    // Ensure row template height is set before adding rows
-                    dgv_variables.RowTemplate.Height = 28;
-                    var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                               _configService.GetCurrent().Credentials.UseCredentialManager;
-
-                    foreach (var rowData in state.Hosts)
-                    {
-                        if (useCredentialManager)
-                        {
-                            rowData.TryGetValue(CsvManager.HostColumnName, out var hostValue);
-                            rowData.TryGetValue("username", out var usernameValue);
-                            rowData.TryGetValue("password", out var passwordValue);
-
-                            var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
-                            if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
-                            {
-                                StoreHostPassword(hostValue, resolvedUsername, passwordValue);
-                                rowData["password"] = string.Empty;
-                            }
-                        }
-
-                        var rowIndex = dgv_variables.Rows.Add();
-                        dgv_variables.Rows[rowIndex].Height = 28;
-                        foreach (var kvp in rowData)
-                        {
-                            if (dgv_variables.Columns.Contains(kvp.Key))
-                            {
-                                dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
-                            }
-                        }
-                    }
-                }
-
-                // Restore selected (checked) host indices
-                if (state.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
-                {
-                    foreach (var index in state.SelectedHostIndices)
-                    {
-                        if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
-                        {
-                            dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
-                        }
-                    }
-                }
-            }
-
-            // Restore CSV path
             _loadedFilePath = state.LastCsvPath;
             _loadedFileFingerprint = state.LastCsvFingerprint?.Clone();
             _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
                 ? CsvFileSyncStatus.NotTracked
                 : CsvFileSyncStatus.Current;
+
+            using (BeginHostGridRestoreScope())
+            {
+                if (state.HostColumns != null && state.HostColumns.Count > 0)
+                {
+                    foreach (var colName in state.HostColumns)
+                    {
+                        // Skip checkbox column name and whitespace-only names (will be added by EnsureSelectColumn)
+                        if (colName == SelectColumnName || string.IsNullOrWhiteSpace(colName))
+                            continue;
+                        dgv_variables.Columns.Add(colName, colName);
+                    }
+                    EnsureSelectColumn();
+
+                    if (state.Hosts != null)
+                    {
+                        // Ensure row template height is set before adding rows
+                        dgv_variables.RowTemplate.Height = 28;
+                        var useCredentialManager = _credentialProvider?.IsAvailable == true &&
+                                                   _configService.GetCurrent().Credentials.UseCredentialManager;
+
+                        foreach (var rowData in state.Hosts)
+                        {
+                            if (useCredentialManager)
+                            {
+                                rowData.TryGetValue(CsvManager.HostColumnName, out var hostValue);
+                                rowData.TryGetValue("username", out var usernameValue);
+                                rowData.TryGetValue("password", out var passwordValue);
+
+                                var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
+                                if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
+                                {
+                                    StoreHostPassword(hostValue, resolvedUsername, passwordValue);
+                                    rowData["password"] = string.Empty;
+                                }
+                            }
+
+                            var rowIndex = dgv_variables.Rows.Add();
+                            dgv_variables.Rows[rowIndex].Height = 28;
+                            foreach (var kvp in rowData)
+                            {
+                                if (dgv_variables.Columns.Contains(kvp.Key))
+                                {
+                                    dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
+                                }
+                            }
+                        }
+                    }
+
+                    // Restore selected (checked) host indices
+                    if (state.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
+                    {
+                        foreach (var index in state.SelectedHostIndices)
+                        {
+                            if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
+                            {
+                                dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
+                            }
+                        }
+                    }
+                }
+
+                RequestHostGridHostCountRefresh();
+                RequestHostGridScrollbarRefresh();
+            }
 
             // Restore username (not password)
             if (!string.IsNullOrEmpty(state.Username))
@@ -10863,7 +10893,7 @@ namespace SSH_Helper
             // Reset dirty flag since we're restoring saved state, not making new changes
             _csvDirty = false;
             CaptureLoadedFileSnapshotFromGrid();
-            UpdateHostCount();
+            UpdateHostsFileIndicator();
 
             // Flag for auto-sizing after the form is fully visible (handled in Form1_Shown)
             _pendingColumnAutoSize = true;
