@@ -1,0 +1,27 @@
+suppress_missing_column_warning: true
+name: "Keycloak SSO - Block Site"
+steps:
+  - browser_callback_capture:
+      start_url: "https://keycloak.masergy.com/auth/realms/Internal/protocol/openid-connect/auth?response_type=token&client_id=landscape_ui&redirect_uri=http%3A%2F%2Flocalhost%3A8086%2Foauth_callback"
+      callback_path: "/oauth_callback"
+      local_port: 8086
+      capture_mode: fragment
+      into: sso
+      timeout: 300
+      open_browser: true
+  - set:
+      expression: block_payload = json("blocked_site", "11.22.33.44", "customer_id", "MC000012", "duration", 86400, "notes", "Dudek Test", "status", "active")
+  - http:
+      url: "https://dynamic-block-list.masergy.com/api/v1/blocked_sites"
+      method: POST
+      auth: bearer
+      token: "${sso_access_token}"
+      content_type: json
+      headers:
+        accept: "application/json"
+      body: ${block_payload}
+      into: block_result
+  - print:
+      message: "Block API status: ${block_result_status}"
+  - print:
+      message: "Block API response: ${block_result}"

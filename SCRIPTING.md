@@ -1,4 +1,4 @@
-# SSH Helper Scripting Language Documentation
+﻿# SSH Helper Scripting Language Documentation
 
 SSH Helper supports a powerful YAML-based scripting language for automating complex SSH workflows. This document provides complete reference documentation for all scripting features.
 
@@ -31,6 +31,7 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [updateenvironment](#updateenvironment---update-active-environment-variable)
    - [log](#log---output-with-log-level)
    - [http](#http---http-requests-preferred)
+   - [browser_callback_capture](#browser_callback_capture---capture-browser-callback-values)
    - [ping](#ping---icmp-reachability-checks)
    - [dns](#dns---dns-lookups)
    - [portcheck](#portcheck---tcp-port-checks)
@@ -103,7 +104,7 @@ Executable scripts may also declare `imports:` and `subroutines:`. Library files
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `imports:`, `subroutines:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
 
 Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.
 
@@ -2273,6 +2274,8 @@ Outputs a message with a specific log level for categorized output. Unlike `prin
 
 Makes HTTP requests with explicit controls for authentication, redirect behavior, TLS verification, and response capture.
 
+For browser-based login flows that return values to a localhost callback, use browser_callback_capture instead of http.
+
 **Syntax:**
 ```yaml
 - http:
@@ -2360,6 +2363,72 @@ Makes HTTP requests with explicit controls for authentication, redirect behavior
     body: "raw text payload"
 ```
 
+---
+
+### browser_callback_capture - Capture Browser Callback Values
+
+Starts a localhost callback listener and captures values returned from browser-driven flows.
+
+**Syntax:**
+```yaml
+- browser_callback_capture:
+    start_url: "https://idp.example.com/start"
+    callback_path: "/oauth_callback"
+    local_port: 8086
+    capture_mode: auto
+    into: callback_data
+    required_fields: ["access_token"]
+    timeout: 300
+    open_browser: true
+    quiet: true
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `start_url` | Yes | - | Initial URL to open in browser |
+| `callback_path` | Yes | `/oauth_callback` | Local callback path starting with `/` |
+| `local_port` | No | `8086` | Loopback listener port |
+| `capture_mode` | No | `auto` | `auto`, `fragment`, `query`, `post_body` |
+| `into` | Yes | - | Variable prefix for captured values |
+| `required_fields` | No | - | Keys that must be present and non-empty |
+| `timeout` | No | `300` | Maximum wait in seconds |
+| `open_browser` | No | `true` | Open system browser automatically |
+| `quiet` | No | `true` | Suppress success summary output line after capture |
+| `completion_message` | No | built-in | Message shown on callback success page |
+| `failure_message` | No | built-in | Message shown on callback failure page |
+
+**Capture Variables:**
+- `${into}`: captured values as JSON object
+- `${into}_count`: number of captured keys
+- `${into}_keys`: comma-separated captured key names
+- `${into}_<key>`: value for each captured key (normalized key name)
+
+**Execution Constraints:**
+- `browser_callback_capture` is local/browser-interactive.
+- It is blocked in folder and multi-host runs; run it against a single current host.
+
+**Browser UX Behavior:**
+- After successful callback capture, SSH Helper attempts to close the callback tab automatically.
+- SSH Helper also attempts to restore focus to the main application window after capture.
+- Browser and OS focus policies may prevent forced focus changes in some environments.
+
+**Example:**
+```yaml
+- browser_callback_capture:
+    start_url: "https://idp.example.com/auth?response_type=token&redirect_uri=http://127.0.0.1:8086/oauth_callback"
+    callback_path: "/oauth_callback"
+    capture_mode: fragment
+    into: callback
+    required_fields: ["access_token"]
+
+- print:
+    message: "${callback_access_token}"
+```
+
+**Security Note:**
+- Captured callback values may contain secrets. Printing them will store them in output/history.
 ---
 
 ### ping - ICMP Reachability Checks
@@ -3165,7 +3234,8 @@ These are accessible via nested paths:
 
 2. **Active Environment Variables**: Variables from the currently selected environment profile
    ```yaml
-   - print:
+   - print:
+
        message: "Token: ${api_token}"
    ```
 

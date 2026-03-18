@@ -68,6 +68,8 @@ namespace SSH_Helper.Services
     {
         private const string InteractiveUnsupportedMultiHostOrFolderMessage =
             "Scripts using 'interactive' are not supported in folder or multi-host runs. Run the script against a single current host instead.";
+        private const string BrowserCallbackUnsupportedMultiHostOrFolderMessage =
+            "Scripts using 'browser_callback_capture' are not supported in folder or multi-host runs. Run the script against a single current host instead.";
 
         private readonly SshConnectionPool? _connectionPool;
         private readonly bool _ownsPool;
@@ -369,9 +371,8 @@ namespace SSH_Helper.Services
                 var analyzer = new ScriptDependencyAnalyzer();
                 var sshRequirement = analyzer.AnalyzeSshRequirements(script);
 
-                if (sshRequirement.UsesInteractive && hostList.Count != 1)
+                if (hostList.Count != 1 && TryBuildSingleHostOnlyPreflightMessage(sshRequirement, out var preflightMessage))
                 {
-                    const string preflightMessage = InteractiveUnsupportedMultiHostOrFolderMessage;
                     var errorOutput = $"Script preflight error: {preflightMessage}\n";
                     OnOutputReceived(hostList.FirstOrDefault() ?? new HostConnection(), errorOutput);
 
@@ -449,10 +450,10 @@ namespace SSH_Helper.Services
 
             try
             {
-                var interactivePresetNames = FindInteractiveFolderPresets(presetNames, presets);
-                if (interactivePresetNames.Count > 0)
+                var blockedPresetNames = FindSingleHostOnlyFolderPresets(presetNames, presets);
+                if (blockedPresetNames.Count > 0)
                 {
-                    var preflightMessage = BuildFolderInteractivePreflightMessage(interactivePresetNames);
+                    var preflightMessage = BuildFolderSingleHostOnlyPreflightMessage(blockedPresetNames);
                     var errorOutput = $"Script preflight error: {preflightMessage}\n";
                     OnOutputReceived(hostList.FirstOrDefault() ?? new HostConnection(), errorOutput);
 
@@ -675,13 +676,13 @@ namespace SSH_Helper.Services
             return results;
         }
 
-        private static List<string> FindInteractiveFolderPresets(
+        private static List<string> FindSingleHostOnlyFolderPresets(
             IEnumerable<string> presetNames,
             IReadOnlyDictionary<string, PresetInfo> presets)
         {
             var parser = new ScriptParser();
             var analyzer = new ScriptDependencyAnalyzer();
-            var interactivePresetNames = new List<string>();
+            var blockedPresetNames = new List<string>();
 
             foreach (var presetName in presetNames.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase))
             {
@@ -701,23 +702,48 @@ namespace SSH_Helper.Services
                     continue;
                 }
 
-                if (analyzer.AnalyzeSshRequirements(script).UsesInteractive)
+                var requirement = analyzer.AnalyzeSshRequirements(script);
+                if (requirement.UsesInteractive || requirement.UsesBrowserCallbackCapture)
                 {
-                    interactivePresetNames.Add(presetName);
+                    blockedPresetNames.Add(presetName);
                 }
             }
 
-            return interactivePresetNames;
+            return blockedPresetNames;
         }
 
-        private static string BuildFolderInteractivePreflightMessage(IReadOnlyList<string> interactivePresetNames)
+        private static string BuildFolderSingleHostOnlyPreflightMessage(IReadOnlyList<string> blockedPresetNames)
         {
-            const string baseMessage = InteractiveUnsupportedMultiHostOrFolderMessage;
-            if (interactivePresetNames.Count == 0)
+            const string baseMessage = "Scripts using 'interactive' or 'browser_callback_capture' are not supported in folder or multi-host runs. Run the script against a single current host instead.";
+            if (blockedPresetNames.Count == 0)
                 return baseMessage;
 
-            var blockedPresets = string.Join(", ", interactivePresetNames.Select(name => $"'{name}'"));
+            var blockedPresets = string.Join(", ", blockedPresetNames.Select(name => $"'{name}'"));
             return $"{baseMessage} Blocked preset(s): {blockedPresets}.";
+        }
+
+        private static bool TryBuildSingleHostOnlyPreflightMessage(SshRequirementResult requirement, out string message)
+        {
+            if (requirement.UsesInteractive && requirement.UsesBrowserCallbackCapture)
+            {
+                message = "Scripts using 'interactive' or 'browser_callback_capture' are not supported in folder or multi-host runs. Run the script against a single current host instead.";
+                return true;
+            }
+
+            if (requirement.UsesInteractive)
+            {
+                message = InteractiveUnsupportedMultiHostOrFolderMessage;
+                return true;
+            }
+
+            if (requirement.UsesBrowserCallbackCapture)
+            {
+                message = BrowserCallbackUnsupportedMultiHostOrFolderMessage;
+                return true;
+            }
+
+            message = string.Empty;
+            return false;
         }
 
         // Execute a preset without starting a new execution scope (caller owns BeginExecution/EndExecution).
@@ -793,9 +819,8 @@ namespace SSH_Helper.Services
             var analyzer = new ScriptDependencyAnalyzer();
             var sshRequirement = analyzer.AnalyzeSshRequirements(script);
 
-            if (sshRequirement.UsesInteractive)
+            if (TryBuildSingleHostOnlyPreflightMessage(sshRequirement, out var preflightMessage))
             {
-                const string preflightMessage = InteractiveUnsupportedMultiHostOrFolderMessage;
                 var errorOutput = $"Script preflight error: {preflightMessage}\n";
                 OnOutputReceived(host, errorOutput);
 
