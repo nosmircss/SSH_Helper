@@ -148,6 +148,7 @@ namespace SSH_Helper
         private int _rightClickedColumnIndex = -1;
         private int _rightClickedRowIndex = -1;
         private readonly BindingList<HistoryListItem> _outputHistory = new();
+        private bool _deferredSchedulerBootstrapStarted;
 
         // Recent files menu
         private ToolStripMenuItem? _recentFilesMenuItem;
@@ -314,7 +315,6 @@ namespace SSH_Helper
             RebuildRecentFilesMenu();
             InitializePresetSearchFilter();
             InitializeConnectionTesting();
-            InitializeSchedulerServices();
             InitializeSchedulerStatusBar();
             UpdateStatusBar("Ready");
 
@@ -349,12 +349,42 @@ namespace SSH_Helper
 
             // After startup restore/layout, ensure selected preset is actually in viewport.
             BeginInvoke((Action)EnsureSelectedPresetNodeVisible);
+            Application.Idle -= BootstrapSchedulerAfterStartupRestoreOnIdle;
+            Application.Idle += BootstrapSchedulerAfterStartupRestoreOnIdle;
 
             var config = _configService.GetCurrent();
             if (config.UpdateSettings.CheckOnStartup)
             {
                 await CheckForUpdatesAsync(silent: true);
             }
+        }
+
+        private void BootstrapSchedulerAfterStartupRestoreOnIdle(object? sender, EventArgs e)
+        {
+            Application.Idle -= BootstrapSchedulerAfterStartupRestoreOnIdle;
+            RunDeferredSchedulerBootstrap();
+        }
+
+        private bool TryBeginDeferredSchedulerBootstrap()
+        {
+            if (_deferredSchedulerBootstrapStarted)
+            {
+                return false;
+            }
+
+            _deferredSchedulerBootstrapStarted = true;
+            return true;
+        }
+
+        private void RunDeferredSchedulerBootstrap()
+        {
+            if (!TryBeginDeferredSchedulerBootstrap())
+            {
+                return;
+            }
+
+            InitializeSchedulerServices();
+            UpdateSchedulerStatusBar();
         }
 
         private void RestoreFolderExpandState()

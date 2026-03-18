@@ -1,6 +1,8 @@
 using FluentAssertions;
 using SSH_Helper.Models;
 using SSH_Helper.Utilities;
+using System.Runtime.CompilerServices;
+using System.Reflection;
 using Xunit;
 
 namespace SSH_Helper.Tests.UI
@@ -114,6 +116,19 @@ namespace SSH_Helper.Tests.UI
         #endregion
 
         #region FormatStatusBar
+
+        [Fact]
+        public void DeferredSchedulerBootstrapGuard_AllowsOnlyFirstRun()
+        {
+            var form = (global::SSH_Helper.Form1)RuntimeHelpers.GetUninitializedObject(typeof(global::SSH_Helper.Form1));
+            var method = typeof(global::SSH_Helper.Form1).GetMethod(
+                "TryBeginDeferredSchedulerBootstrap",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            method.Should().NotBeNull();
+            method!.Invoke(form, null).Should().Be(true);
+            method.Invoke(form, null).Should().Be(false);
+        }
 
         [Fact]
         public void ShouldShowStatusBar_ZeroActive_ReturnsFalse()
