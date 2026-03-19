@@ -164,16 +164,28 @@ namespace SSH_Helper.Services.Scripting.Functions
 
         /// <summary>
         /// YAML-safe ternary: iif(condition, true_value, false_value).
-        /// Condition is evaluated for truthiness (non-null, non-empty, non-false, non-zero).
+        /// Condition is evaluated using the same expression evaluator as assert/if,
+        /// supporting comparison operators (==, !=, >, <, >=, <=) and logical operators.
+        /// Falls back to truthiness check for simple values.
         /// </summary>
         private static object? Iif(string argsString, ScriptContext context)
         {
             var args = JsonUtilities.SplitTopLevelCommas(argsString);
             if (args.Count < 3) return null;
 
-            var conditionStr = args[0].Trim();
-            var resolvedCondition = JsonUtilities.ResolveJsonValue(conditionStr, context);
-            var isTruthy = ValueResolver.IsTruthyValue(resolvedCondition);
+            var conditionStr = context.SubstituteVariables(args[0].Trim());
+            var evaluator = new ExpressionEvaluator(context);
+            bool isTruthy;
+            try
+            {
+                isTruthy = evaluator.Evaluate(conditionStr);
+            }
+            catch
+            {
+                // If the expression evaluator can't parse it, fall back to truthiness
+                var resolvedCondition = JsonUtilities.ResolveJsonValue(args[0].Trim(), context);
+                isTruthy = ValueResolver.IsTruthyValue(resolvedCondition);
+            }
 
             var resultExpr = isTruthy ? args[1] : args[2];
             return JsonUtilities.ResolveJsonValue(resultExpr, context);

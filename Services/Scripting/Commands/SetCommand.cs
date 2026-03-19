@@ -236,7 +236,12 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (inQuote)
                     continue;
 
-                if (c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '(' || c == ')')
+                if (c == '*' || c == '/' || c == '%' || c == '(' || c == ')')
+                    return true;
+
+                // '+' and '-' are only arithmetic when preceded by whitespace (e.g., "a - b")
+                // to avoid treating hyphenated identifiers like "db-master.local" as subtraction.
+                if ((c == '+' || c == '-') && i > 0 && char.IsWhiteSpace(expression[i - 1]))
                     return true;
             }
 

@@ -657,6 +657,37 @@ public class SetCommandTests
         desc.Should().Equal("c", "b", "a");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_DotNotation_HyphenatedValueNotTreatedAsArithmetic()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "config.database.primary.host = db-master.local" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "config.database.primary.port = 5432" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        var root = context.GetVariable("config").Should().BeOfType<JsonObject>().Subject;
+        var dbHost = root["database"]!["primary"]!["host"]!.GetValue<string>();
+        dbHost.Should().Be("db-master.local");
+
+        var dbPort = root["database"]!["primary"]!["port"]!.GetValue<int>();
+        dbPort.Should().Be(5432);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SpacedMinusStillTreatedAsArithmetic()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("x", 10);
+        context.SetVariable("y", 3);
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "result = x - y" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        context.GetVariable("result").Should().Be(7.0);
+    }
+
     private static JsonArray GetArrayVariable(ScriptContext context, string variableName)
     {
         var value = context.GetVariable(variableName);

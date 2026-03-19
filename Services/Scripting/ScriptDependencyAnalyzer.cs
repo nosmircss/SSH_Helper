@@ -924,6 +924,14 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         private static void AddResolvedVarName(string expr, HashSet<string> references)
         {
+            // If expression contains a function call, extract variable references
+            // from its arguments rather than treating the whole expression as a name.
+            if (FunctionCallExpressionPattern.IsMatch(expr.TrimStart()))
+            {
+                ExtractBareExpressionReferences(expr, references);
+                return;
+            }
+
             // Strip .length suffix
             if (expr.EndsWith(".length", StringComparison.OrdinalIgnoreCase))
             {

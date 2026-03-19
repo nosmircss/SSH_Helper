@@ -274,6 +274,30 @@ public class ExpressionParserTests
         context.GetVariableString("result").Should().Be("no");
     }
 
+    [Fact]
+    public void Iif_ComparisonWithSpaces_ReturnsCorrectBranch()
+    {
+        var context = new ScriptContext();
+        var cmd = new SSH_Helper.Services.Scripting.Commands.SetCommand();
+
+        cmd.ExecuteAsync(new SSH_Helper.Services.Scripting.Models.ScriptStep { Set = "r1 = iif(10 > 5, \"yes\", \"no\")" }, context, System.Threading.CancellationToken.None).Wait();
+        context.GetVariableString("r1").Should().Be("yes");
+
+        cmd.ExecuteAsync(new SSH_Helper.Services.Scripting.Models.ScriptStep { Set = "r2 = iif(10 < 5, \"yes\", \"no\")" }, context, System.Threading.CancellationToken.None).Wait();
+        context.GetVariableString("r2").Should().Be("no");
+    }
+
+    [Fact]
+    public void Iif_NestedComparison_ReturnsCorrectBranch()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("val", 50);
+        var cmd = new SSH_Helper.Services.Scripting.Commands.SetCommand();
+
+        cmd.ExecuteAsync(new SSH_Helper.Services.Scripting.Models.ScriptStep { Set = "r = iif(val > 75, 'high', iif(val > 25, 'mid', 'low'))" }, context, System.Threading.CancellationToken.None).Wait();
+        context.GetVariableString("r").Should().Be("mid");
+    }
+
     // --- String concatenation in ExpressionParser ---
 
     [Fact]
