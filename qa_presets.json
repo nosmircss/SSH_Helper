@@ -344,8 +344,8 @@
             "isFavorite": false,
             "folder": "QA/Core"
         },
-        "QA Send Respond Invalid [bash] [Expected Fail]": {
-            "commands": "---\nname: QA Send Respond Invalid [bash] [Expected Fail]\ndescription: \"Validation sample for an invalid send.respond plus fail_on_nonzero combination. Requires: no special environment beyond editor validation; the sample intentionally violates send.respond schema. Expected: intentional validation failure. QA pass when validation fails.\"\nversion: 1\nsteps:\n  - send:\n      command: \"bash -c 'read -p \\\"Enter name: \\\" name; echo \\\"Hello, $name\\\"'\"\n      fail_on_nonzero: true\n      respond:\n        - expect: \"Enter name:\"\n          reply: \"QA_Tester\"",
+        "QA Send FailOnNonZero with Expect Invalid [Expected Fail]": {
+            "commands": "---\nname: QA Send FailOnNonZero with Expect Invalid [Expected Fail]\ndescription: \"Validation sample for an invalid send.fail_on_nonzero plus send.expect combination. Requires: no special environment beyond editor validation; the sample intentionally uses incompatible send options. Expected: intentional validation failure. QA pass when validation fails.\"\nversion: 1\nsteps:\n  - send:\n      command: show version\n      fail_on_nonzero: true\n      expect: \"#\"",
             "timeout": 30,
             "isFavorite": false,
             "folder": "QA/Core"

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -363,6 +364,8 @@ namespace SSH_Helper.Services.Scripting
             {
                 _warnings.Clear();
 
+                yamlText = PreprocessYaml(yamlText);
+
                 // Use a custom approach to handle the flexible step format
                 using var reader = new StringReader(yamlText);
                 var parser = new Parser(reader);
@@ -447,6 +450,142 @@ namespace SSH_Helper.Services.Scripting
             {
                 throw new ScriptParseException($"Failed to parse script: {ex.Message}", ex);
             }
+        }
+
+        // Regex matches lines like "  - set: value" or "    condition: value" where value is unquoted.
+        // Group 1 = leading whitespace + optional "- ", Group 2 = key name, Group 3 = the value.
+        private static readonly Regex PlainScalarLineRegex = new(
+            @"^(\s*(?:-\s+)?)(\w+):\s+(.+)$",
+            RegexOptions.Compiled);
+
+        // Keys whose plain scalar values commonly contain colons (ternary, time formats, etc.)
+        private static readonly HashSet<string> ScalarValueKeys = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // Step keys that accept inline expression/string scalars
+            "set", "print", "send", "exit", "if", "while", "when", "assert",
+            "call", "return", "foreach",
+            // Expanded-form sub-keys that accept expression scalars
+            "expression", "condition", "message", "command", "expect",
+            "format", "value", "source", "pattern", "url", "body", "path"
+        };
+
+        /// <summary>
+        /// Pre-processes YAML text to auto-quote plain scalar values that contain
+        /// unquoted colons (e.g. ternary operators like <c>x ? "a" : "b"</c>),
+        /// which would otherwise cause YAML mapping parse errors.
+        /// </summary>
+        internal static string PreprocessYaml(string yamlText)
+        {
+            var lines = yamlText.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            var modified = false;
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+
+                // Skip blank lines and comments
+                if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("#"))
+                    continue;
+
+                var match = PlainScalarLineRegex.Match(line);
+                if (!match.Success)
+                    continue;
+
+                var key = match.Groups[2].Value;
+                var value = match.Groups[3].Value;
+
+                // Only process known scalar-value keys
+                if (!ScalarValueKeys.Contains(key))
+                    continue;
+
+                // Value starts a block scalar (| or >) — leave it alone
+                if (value.StartsWith("|") || value.StartsWith(">"))
+                    continue;
+
+                // Check if the value would confuse the YAML parser
+                if (!NeedsYamlQuoting(value))
+                    continue;
+
+                // Wrap in single quotes, escaping any existing single quotes by doubling them
+                var escaped = value.Replace("'", "''");
+                lines[i] = $"{match.Groups[1].Value}{key}: '{escaped}'";
+                modified = true;
+            }
+
+            return modified ? string.Join("\n", lines) : yamlText;
+        }
+
+        /// <summary>
+        /// Determines whether a plain YAML scalar value needs to be wrapped in quotes
+        /// to prevent YAML parsing ambiguity. Detects:
+        /// <list type="bullet">
+        ///   <item>Colons (<c>x ? "a" : "b"</c>, <c>"Error 404: Not Found"</c>) — YAML sees a nested mapping.
+        ///         In YAML plain scalars, quotes are NOT special, so <c>": "</c> inside DSL-level
+        ///         "quoted strings" still breaks YAML.</item>
+        ///   <item>Embedded quoted substrings with trailing text (<c>"alice" in names</c>) — YAML
+        ///         parses only the first quoted scalar and chokes on the rest</item>
+        ///   <item><c>#</c> preceded by space — YAML treats it as a comment</item>
+        /// </list>
+        /// </summary>
+        private static bool NeedsYamlQuoting(string value)
+        {
+            // If the entire value is a single quoted string, YAML handles it fine
+            if (value.Length >= 2)
+            {
+                if ((value[0] == '"' && value[^1] == '"') ||
+                    (value[0] == '\'' && value[^1] == '\''))
+                {
+                    // But verify there's no premature close — e.g. "alice" in names
+                    // has a closing quote at position 6 but the value continues
+                    if (!HasTrailingContentAfterQuotedString(value))
+                        return false;
+                }
+            }
+
+            // Value starts with a quote but isn't fully quoted — YAML will misparse
+            if (value[0] == '"' || value[0] == '\'')
+                return true;
+
+            // In a YAML plain scalar, quotes are NOT special characters — they are just
+            // regular characters. So we must NOT track quote state here. Any ": " or
+            // " #" anywhere in the value is a problem regardless of DSL-level quoting.
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+
+                // Colon followed by space or at end — YAML mapping indicator
+                if (c == ':' && (i + 1 >= value.Length || value[i + 1] == ' '))
+                    return true;
+
+                // Hash preceded by space — YAML comment
+                if (c == '#' && i > 0 && value[i - 1] == ' ')
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if a value that starts and ends with matching quotes actually has
+        /// content after the first closing quote (e.g. <c>"alice" in names</c>).
+        /// </summary>
+        private static bool HasTrailingContentAfterQuotedString(string value)
+        {
+            char quote = value[0];
+            // Find the first closing quote after position 0
+            for (int i = 1; i < value.Length - 1; i++)
+            {
+                if (value[i] == quote)
+                {
+                    // For double quotes, skip escaped quotes
+                    if (quote == '"' && i > 0 && value[i - 1] == '\\')
+                        continue;
+
+                    // Found a closing quote before the end — there's trailing content
+                    return true;
+                }
+            }
+            return false;
         }
 
         private Dictionary<string, object?> ParseVars(IParser parser)
@@ -3492,11 +3631,6 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: send.fail_on_nonzero is not supported with send.expect{lineContent}");
-                        }
-                        if (step.FailOnNonZero && step.Respond is { Count: > 0 })
-                        {
-                            var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: send.fail_on_nonzero is not supported with send.respond{lineContent}");
                         }
                         break;
 

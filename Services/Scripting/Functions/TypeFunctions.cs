@@ -78,14 +78,16 @@ namespace SSH_Helper.Services.Scripting.Functions
 
         private static object? TypeOf(string argsString, ScriptContext context)
         {
-            // Get raw variable to distinguish types before ResolveJsonValue converts
             var expr = argsString.Trim();
             var rawVar = GetRawVariable(expr, context);
-            bool isVariable = rawVar != null || HasVariable(expr, context);
 
-            // For non-variables (literals, expressions), resolve through ResolveJsonValue
-            var value = isVariable ? (rawVar ?? JsonUtilities.ResolveJsonValue(expr, context))
-                                   : JsonUtilities.ResolveJsonValue(expr, context);
+            // If expr is a simple identifier that doesn't exist as a variable, it's null
+            bool isSimpleIdent = ValueResolver.IsSimpleIdentifier(expr) ||
+                                 (expr.StartsWith("${") && expr.EndsWith("}"));
+            if (rawVar == null && isSimpleIdent && !HasVariable(expr, context))
+                return "null";
+
+            var value = rawVar ?? JsonUtilities.ResolveJsonValue(expr, context);
 
             return value switch
             {
@@ -105,9 +107,7 @@ namespace SSH_Helper.Services.Scripting.Functions
                     JsonValueKind.Null or JsonValueKind.Undefined => "null",
                     _ => "string"
                 },
-                // For variables, the C# runtime type is authoritative — don't re-infer from content
-                string when isVariable => "string",
-                // For literals/expressions, infer type from string content
+                // Infer type from string content (e.g. "42" → number, "true" → bool)
                 string s => InferStringType(s),
                 _ => "string"
             };

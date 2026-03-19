@@ -38,12 +38,12 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (string.IsNullOrEmpty(step.Send))
                 return CommandResult.Fail("Send command has no command text");
 
-            if (step.FailOnNonZero && (!string.IsNullOrWhiteSpace(step.Expect) || step.Respond is { Count: > 0 }))
+            if (step.FailOnNonZero && !string.IsNullOrWhiteSpace(step.Expect))
             {
                 return EmitFailure(
                     step,
                     context,
-                    "send.fail_on_nonzero is only supported for prompt-waiting send steps without expect/respond");
+                    "send.fail_on_nonzero is not supported with send.expect");
             }
 
             var session = _sessionResolver(context);

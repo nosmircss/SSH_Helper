@@ -181,7 +181,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (JsonUtilities.TryEvaluateJsonExpression(expression, context, out var jsonResult, normalizeStructured: false))
                 return jsonResult;
 
-            if (HasArithmeticOperator(expression))
+            if (HasExpressionOperator(expression))
             {
                 try
                 {
@@ -211,7 +211,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             return false;
         }
 
-        private static bool HasArithmeticOperator(string expression)
+        private static bool HasExpressionOperator(string expression)
         {
             var inQuote = false;
             var quoteChar = '\0';
@@ -242,6 +242,18 @@ namespace SSH_Helper.Services.Scripting.Commands
                 // '+' and '-' are only arithmetic when preceded by whitespace (e.g., "a - b")
                 // to avoid treating hyphenated identifiers like "db-master.local" as subtraction.
                 if ((c == '+' || c == '-') && i > 0 && char.IsWhiteSpace(expression[i - 1]))
+                    return true;
+
+                // Ternary (?) and null-coalesce (??)
+                if (c == '?')
+                    return true;
+
+                // Comparison operators: >, <, >=, <=
+                if (c == '>' || c == '<')
+                    return true;
+
+                // Equality (==) and inequality (!=)
+                if ((c == '=' || c == '!') && i + 1 < expression.Length && expression[i + 1] == '=')
                     return true;
             }
 
