@@ -2594,6 +2594,99 @@ namespace SSH_Helper
             var presetItemHeight = Math.Max(22, presetsToolStrip.Height - presetsToolStrip.Padding.Vertical - 2);
             tsbSeparatorFolders.AutoSize = false;
             tsbSeparatorFolders.Size = new Size(tsbSeparatorFolders.Width, presetItemHeight);
+
+            ReflowMainChromeBounds();
+            ReflowTopSectionHeaders();
+        }
+
+        private void ReflowMainChromeBounds()
+        {
+            menuStrip1.Dock = DockStyle.None;
+            mainToolStrip.Dock = DockStyle.None;
+            mainSplitContainer.Dock = DockStyle.None;
+
+            menuStrip1.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            mainToolStrip.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            mainSplitContainer.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+
+            menuStrip1.Location = new Point(0, 0);
+            menuStrip1.Size = new Size(ClientSize.Width, menuStrip1.Height);
+
+            mainToolStrip.Location = new Point(0, menuStrip1.Bottom);
+            mainToolStrip.Size = new Size(ClientSize.Width, mainToolStrip.Height);
+
+            var statusHeight = statusStrip.Visible ? statusStrip.Height : 0;
+            var contentTop = mainToolStrip.Bottom;
+            mainSplitContainer.Location = new Point(0, contentTop);
+            mainSplitContainer.Size = new Size(
+                ClientSize.Width,
+                Math.Max(0, ClientSize.Height - statusHeight - contentTop));
+
+            menuStrip1.BringToFront();
+            mainToolStrip.BringToFront();
+            statusStrip.BringToFront();
+        }
+
+        private void ReflowTopSectionHeaders()
+        {
+            ReflowHostsHeader();
+            ReflowTitleOnlyHeader(presetsHeaderPanel, lblPresetsTitle, minHeight: 32);
+            ReflowScriptHeader();
+        }
+
+        private void ReflowHostsHeader()
+        {
+            lblHostCount.AutoSize = true;
+
+            var titleHeight = lblHostsTitle.PreferredHeight;
+            var countHeight = lblHostCount.PreferredHeight;
+            var contentHeight = Math.Max(titleHeight, countHeight);
+            hostsHeaderPanel.Height = Math.Max(36, hostsHeaderPanel.Padding.Vertical + contentHeight);
+
+            var contentTop = hostsHeaderPanel.Padding.Top +
+                             Math.Max(0, (hostsHeaderPanel.ClientSize.Height - hostsHeaderPanel.Padding.Vertical - contentHeight) / 2);
+            var countY = contentTop + Math.Max(0, (contentHeight - lblHostCount.Height) / 2);
+            lblHostCount.Location = new Point(
+                Math.Max(hostsHeaderPanel.Padding.Left, hostsHeaderPanel.ClientSize.Width - hostsHeaderPanel.Padding.Right - lblHostCount.Width),
+                countY);
+
+            var titleWidth = Math.Max(0, lblHostCount.Left - hostsHeaderPanel.Padding.Left - 8);
+            var titleY = contentTop + Math.Max(0, (contentHeight - titleHeight) / 2);
+            lblHostsTitle.AutoSize = false;
+            lblHostsTitle.Location = new Point(hostsHeaderPanel.Padding.Left, titleY);
+            lblHostsTitle.Size = new Size(titleWidth, titleHeight);
+        }
+
+        private void ReflowTitleOnlyHeader(Panel panel, Label titleLabel, int minHeight)
+        {
+            var titleHeight = titleLabel.PreferredHeight;
+            panel.Height = Math.Max(minHeight, panel.Padding.Vertical + titleHeight);
+
+            var titleY = panel.Padding.Top +
+                         Math.Max(0, (panel.ClientSize.Height - panel.Padding.Vertical - titleHeight) / 2);
+            titleLabel.AutoSize = false;
+            titleLabel.Location = new Point(panel.Padding.Left, titleY);
+            titleLabel.Size = new Size(
+                Math.Max(0, panel.ClientSize.Width - panel.Padding.Horizontal),
+                titleHeight);
+        }
+
+        private void ReflowScriptHeader()
+        {
+            var titleHeight = lblScriptTitle.PreferredHeight;
+            var firstRowBottom = new Control[] { lblPresetName, txtPreset, lblTimeoutHeader, txtTimeoutHeader, btnSavePreset }
+                .Where(control => control.Visible)
+                .Select(control => control.Bottom)
+                .DefaultIfEmpty(scriptHeaderPanel.Padding.Top)
+                .Max();
+
+            lblScriptTitle.AutoSize = false;
+            lblScriptTitle.Location = new Point(scriptHeaderPanel.Padding.Left, firstRowBottom + 6);
+            lblScriptTitle.Size = new Size(
+                Math.Max(0, scriptHeaderPanel.ClientSize.Width - scriptHeaderPanel.Padding.Horizontal),
+                titleHeight);
+
+            scriptHeaderPanel.Height = Math.Max(60, lblScriptTitle.Bottom + scriptHeaderPanel.Padding.Bottom);
         }
 
         private void ApplyColumnAutoResize(bool autoResize)

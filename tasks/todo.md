@@ -1,5 +1,16 @@
 # TODO
 
+## 104. Fix top-pane truncation under menu/tool strip
+- [x] 104.1 Confirm whether runtime font scaling leaves the top chrome and section headers on stale designer-era heights.
+- [x] 104.2 Reflow the menu/tool strip stack and the top section headers from current font metrics so the top panes sit below the bars and their titles no longer clip.
+- [ ] 104.3 Run the affected UI path and verify the layout in the reproduced theme/font setup.
+
+### 104 Review
+- Root cause is mixed layout strategy: `ApplyFontSettings(...)` recalculates menu and tool strip heights at runtime, but the surrounding top-level content/header layout still relies on fixed measurements from the original designer layout.
+- `Form1.cs` now reapplies the form's top chrome bounds after font changes so the menu strip, main tool strip, and `mainSplitContainer` stack from their actual current heights instead of the old `24 + 25 = 49` assumption.
+- The top section headers now recalculate their title heights from the active fonts and resize their panels so the Hosts, Presets, and Commands titles do not get clipped when the UI font scale grows.
+- Verification has not been run in this pass.
+
 ## 103. Merge callback_test without keycloak sample
 - [x] 103.1 Review `origin/callback_test` and decide import scope based on the requirement to keep `SCRIPTING.md` and drop `keycloak_block_site.yaml`.
 - [x] 103.2 Import browser callback capture feature work and explicitly exclude the sample keycloak block site file from the merge.
