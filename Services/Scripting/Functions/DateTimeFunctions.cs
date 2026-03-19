@@ -46,7 +46,7 @@ namespace SSH_Helper.Services.Scripting.Functions
 
         private static object? Epoch(string argsString, ScriptContext context)
         {
-            return (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            return DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         }
 
         private static object? EpochToDate(string argsString, ScriptContext context)

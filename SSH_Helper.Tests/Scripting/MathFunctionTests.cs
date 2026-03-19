@@ -125,4 +125,42 @@ public class MathFunctionTests
         int.TryParse(result, out var num).Should().BeTrue();
         num.Should().BeInRange(0, 100);
     }
+
+    [Fact]
+    public async Task Random_SingleValueRange_ReturnsThatValue()
+    {
+        (await Eval("random(5, 5)")).Should().Be("5");
+    }
+
+    [Fact]
+    public async Task Random_ReversedBounds_AutoSwaps()
+    {
+        var result = await Eval("random(10, 1)");
+        int.TryParse(result, out var num).Should().BeTrue();
+        num.Should().BeInRange(1, 10);
+    }
+
+    [Fact]
+    public async Task Random_NegativeRange_Supported()
+    {
+        var result = await Eval("random(-10, -1)");
+        int.TryParse(result, out var num).Should().BeTrue();
+        num.Should().BeInRange(-10, -1);
+    }
+
+    [Fact]
+    public async Task Random_InvalidMax_UsesDefault()
+    {
+        var result = await Eval("random(50, 'oops')");
+        int.TryParse(result, out var num).Should().BeTrue();
+        num.Should().BeInRange(50, 100);
+    }
+
+    [Fact]
+    public async Task Random_IntMaxBoundary_DoesNotOverflow()
+    {
+        var result = await Eval($"random({int.MaxValue - 1}, {int.MaxValue})");
+        int.TryParse(result, out var num).Should().BeTrue();
+        num.Should().BeInRange(int.MaxValue - 1, int.MaxValue);
+    }
 }

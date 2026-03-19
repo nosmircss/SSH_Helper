@@ -42,9 +42,25 @@ public class DateTimeFunctionTests
     public async Task Epoch_ReturnsCurrentUnixTime()
     {
         var result = await Eval("epoch()");
-        int.TryParse(result, out var epoch).Should().BeTrue();
-        var expected = (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        long.TryParse(result, out var epoch).Should().BeTrue();
+        var expected = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         epoch.Should().BeCloseTo(expected, 2);
+    }
+
+    [Fact]
+    public async Task Epoch_CanRoundTripWithEpochToDate()
+    {
+        var context = new ScriptContext();
+        (await _command.ExecuteAsync(new ScriptStep { Set = "unix_ts = epoch()" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        (await _command.ExecuteAsync(
+            new ScriptStep { Set = "result = epoch_to_date(unix_ts, 'yyyy-MM-dd')" },
+            context,
+            CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        context.GetVariableString("result").Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}$");
     }
 
     // --- epoch_to_date ---

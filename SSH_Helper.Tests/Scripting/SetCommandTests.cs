@@ -688,6 +688,39 @@ public class SetCommandTests
         context.GetVariable("result").Should().Be(7.0);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_CompactMinusBetweenNumbers_TreatedAsArithmetic()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "result = 5-1" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        context.GetVariable("result").Should().Be(4.0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CompactPlusBetweenNumbers_TreatedAsArithmetic()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "result = 2+3" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        context.GetVariable("result").Should().Be(5.0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DateLikeLiteralWithHyphen_RemainsLiteral()
+    {
+        var context = new ScriptContext();
+
+        (await _command.ExecuteAsync(new ScriptStep { Set = "value = 2024-01" }, context, CancellationToken.None))
+            .Success.Should().BeTrue();
+
+        context.GetVariableString("value").Should().Be("2024-01");
+    }
+
     private static JsonArray GetArrayVariable(ScriptContext context, string variableName)
     {
         var value = context.GetVariable(variableName);

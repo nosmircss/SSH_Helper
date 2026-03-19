@@ -910,6 +910,11 @@ Math functions work on numeric values. Non-numeric inputs are coerced where poss
 
 # Random integer (inclusive range, defaults: 0–100)
 - set: roll = random(1, 6)
+# Reversed bounds are auto-swapped and equal bounds return that value
+- set: same = random(5, 5)
+- set: swapped = random(10, 1)
+# Invalid min/max inputs fall back to defaults (min: 0, max: 100)
+- set: fallback = random(50, "oops")
 
 # Power and square root
 - set: squared = pow(2, 10)
@@ -1082,7 +1087,7 @@ These functions accept lambda expressions in the form `x => expression` (single 
 # Result: "2025-03-18"
 - set: iso = now("yyyy-MM-ddTHH:mm:ssZ")
 
-# Unix epoch (UTC seconds)
+# Unix epoch (UTC seconds, 64-bit)
 - set: unix_ts = epoch()
 # Result: 1742312400
 

@@ -111,19 +111,24 @@ namespace SSH_Helper.Services.Scripting.Functions
             if (args.Count >= 1 && !string.IsNullOrWhiteSpace(args[0]))
             {
                 var minStr = JsonUtilities.ResolveJsonValue(args[0], context)?.ToString() ?? "0";
-                int.TryParse(minStr, out min);
+                if (int.TryParse(minStr, out var parsedMin))
+                    min = parsedMin;
             }
-            if (args.Count >= 2)
+            if (args.Count >= 2 && !string.IsNullOrWhiteSpace(args[1]))
             {
                 var maxStr = JsonUtilities.ResolveJsonValue(args[1], context)?.ToString() ?? "100";
-                int.TryParse(maxStr, out max);
+                if (int.TryParse(maxStr, out var parsedMax))
+                    max = parsedMax;
             }
 
             if (min > max) (min, max) = (max, min);
+            if (min == max)
+                return min;
 
             lock (_random)
             {
-                return _random.Next(min, max + 1);
+                var value = _random.NextInt64(min, (long)max + 1);
+                return (int)value;
             }
         }
 

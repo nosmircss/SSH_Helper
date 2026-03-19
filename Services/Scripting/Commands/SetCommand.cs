@@ -213,6 +213,9 @@ namespace SSH_Helper.Services.Scripting.Commands
 
         private static bool HasExpressionOperator(string expression)
         {
+            if (IsSimpleCompactNumericBinaryExpression(expression))
+                return true;
+
             var inQuote = false;
             var quoteChar = '\0';
 
@@ -258,6 +261,60 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             return false;
+        }
+
+        private static bool IsSimpleCompactNumericBinaryExpression(string expression)
+        {
+            var trimmed = expression.Trim();
+            if (trimmed.Length < 3)
+                return false;
+
+            if (trimmed.IndexOf(' ') >= 0 ||
+                trimmed.Contains('"') ||
+                trimmed.Contains('\'') ||
+                trimmed.Contains("${", StringComparison.Ordinal) ||
+                trimmed.Contains("{{", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var operatorIndex = -1;
+            for (int i = 1; i < trimmed.Length - 1; i++)
+            {
+                var c = trimmed[i];
+                if (c == '+' || c == '-')
+                {
+                    if (operatorIndex >= 0)
+                        return false;
+
+                    operatorIndex = i;
+                }
+            }
+
+            if (operatorIndex <= 0 || operatorIndex >= trimmed.Length - 1)
+                return false;
+
+            var left = trimmed.Substring(0, operatorIndex);
+            var right = trimmed.Substring(operatorIndex + 1);
+
+            // Prevent date-like values such as 2024-01 from being reinterpreted as arithmetic.
+            if (HasAmbiguousLeadingZero(left) || HasAmbiguousLeadingZero(right))
+                return false;
+
+            return double.TryParse(left, NumberStyles.Float, CultureInfo.InvariantCulture, out _) &&
+                   double.TryParse(right, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+        }
+
+        private static bool HasAmbiguousLeadingZero(string operand)
+        {
+            if (string.IsNullOrEmpty(operand) || operand.Length < 2)
+                return false;
+
+            var start = operand[0] == '+' || operand[0] == '-' ? 1 : 0;
+            if (operand.Length - start < 2)
+                return false;
+
+            return operand[start] == '0' && operand[start + 1] != '.';
         }
 
         private object? ResolveValue(string expr, ScriptContext context)
