@@ -1295,6 +1295,11 @@ namespace SSH_Helper
         {
             // Form events
             FormClosing += Form1_FormClosing;
+            Resize += (_, _) => ReflowTopSectionHeaders();
+            topSplitContainer.Resize += (_, _) => ReflowTopSectionHeaders();
+            commandSplitContainer.Resize += (_, _) => ReflowTopSectionHeaders();
+            scriptPanel.Resize += (_, _) => ReflowScriptHeader();
+            scriptHeaderPanel.Resize += (_, _) => ReflowScriptHeader();
 
             // DataGridView events
             dgv_variables.MouseDown += Dgv_Variables_MouseDown;
@@ -1388,8 +1393,9 @@ namespace SSH_Helper
         private void RestoreWindowState(AppConfiguration config)
         {
             var ws = config.WindowState;
+            var restoreMaximized = ws.IsMaximized;
 
-            if (ws.Width.HasValue && ws.Height.HasValue && ws.Left.HasValue && ws.Top.HasValue)
+            if (!restoreMaximized && ws.Width.HasValue && ws.Height.HasValue && ws.Left.HasValue && ws.Top.HasValue)
             {
                 // Ensure window is on screen
                 var screen = Screen.FromPoint(new Point(ws.Left.Value, ws.Top.Value));
@@ -1403,7 +1409,7 @@ namespace SSH_Helper
                 }
             }
 
-            if (ws.IsMaximized)
+            if (restoreMaximized)
             {
                 WindowState = FormWindowState.Maximized;
             }
@@ -2171,6 +2177,7 @@ namespace SSH_Helper
                 isDirty);
             lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty);
             btnSavePreset.Text = PresetHeaderIndicatorFormatter.FormatSaveButtonLabel(isDirty);
+            ReflowScriptHeader();
         }
 
         private void UpdateHostCount()
@@ -2674,6 +2681,34 @@ namespace SSH_Helper
         private void ReflowScriptHeader()
         {
             var titleHeight = lblScriptTitle.PreferredHeight;
+            var contentLeft = scriptHeaderPanel.Padding.Left;
+            var contentRight = Math.Max(contentLeft, scriptHeaderPanel.ClientSize.Width - scriptHeaderPanel.Padding.Right);
+
+            // Single top row: Name + preset box + timeout + save.
+            var rowY = scriptHeaderPanel.Padding.Top + 3;
+
+            btnSavePreset.AutoSize = false;
+            btnSavePreset.Location = new Point(
+                Math.Max(contentLeft, contentRight - btnSavePreset.Width),
+                rowY - 1);
+
+            txtTimeoutHeader.Location = new Point(
+                Math.Max(contentLeft, btnSavePreset.Left - txtTimeoutHeader.Width - 6),
+                rowY);
+
+            lblTimeoutHeader.AutoSize = true;
+            lblTimeoutHeader.Location = new Point(
+                Math.Max(contentLeft, txtTimeoutHeader.Left - lblTimeoutHeader.Width - 6),
+                rowY + Math.Max(0, (txtTimeoutHeader.Height - lblTimeoutHeader.Height) / 2));
+
+            lblPresetName.AutoSize = true;
+            lblPresetName.Location = new Point(contentLeft, rowY + Math.Max(0, (txtPreset.Height - lblPresetName.Height) / 2));
+
+            var presetLeft = lblPresetName.Right + 6;
+            var presetRight = lblTimeoutHeader.Left - 8;
+            txtPreset.Location = new Point(presetLeft, rowY);
+            txtPreset.Width = Math.Max(20, presetRight - presetLeft);
+
             var firstRowBottom = new Control[] { lblPresetName, txtPreset, lblTimeoutHeader, txtTimeoutHeader, btnSavePreset }
                 .Where(control => control.Visible)
                 .Select(control => control.Bottom)
@@ -2687,6 +2722,7 @@ namespace SSH_Helper
                 titleHeight);
 
             scriptHeaderPanel.Height = Math.Max(60, lblScriptTitle.Bottom + scriptHeaderPanel.Padding.Bottom);
+            scriptHeaderPanel.Invalidate(true);
         }
 
         private void ApplyColumnAutoResize(bool autoResize)

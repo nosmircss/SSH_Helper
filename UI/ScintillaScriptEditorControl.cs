@@ -84,6 +84,12 @@ namespace SSH_Helper.UI
 
         public ScintillaScriptEditorControl()
         {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw,
+                true);
+
             _editor = new Scintilla
             {
                 Dock = DockStyle.Fill,
@@ -123,6 +129,7 @@ namespace SSH_Helper.UI
             _editor.DwellStart += Editor_DwellStart;
             _editor.DwellEnd += (_, _) => HideTooltip();
             _editor.Click += (_, _) => OnClick(EventArgs.Empty);
+            _editor.Resize += (_, _) => Invalidate();
 
             _toolTip = new ToolTip
             {
@@ -172,6 +179,12 @@ namespace SSH_Helper.UI
             Application.AddMessageFilter(_completionDismissFilter);
             _completionDismissFilterRegistered = true;
             ApplyTheme(darkMode: false);
+        }
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            Invalidate();
         }
 
         [AllowNull]

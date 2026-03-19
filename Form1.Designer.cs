@@ -907,7 +907,7 @@ namespace SSH_Helper
             txtPreset.Font = new Font("Segoe UI", 9F);
             txtPreset.Location = new Point(55, 7);
             txtPreset.Name = "txtPreset";
-            txtPreset.PlaceholderText = "Preset name...";
+            txtPreset.PlaceholderText = string.Empty;
             txtPreset.Size = new Size(20, 23);
             txtPreset.TabIndex = 1;
             // 
