@@ -185,7 +185,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 try
                 {
-                    return EvaluateArithmetic(expression, context);
+                    var parser = new ExpressionParser(expression, context);
+                    return parser.Parse();
                 }
                 catch (FormatException)
                 {
@@ -240,12 +241,6 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             return false;
-        }
-
-        private double EvaluateArithmetic(string expression, ScriptContext context)
-        {
-            var parser = new ArithmeticParser(expression, token => ResolveNumeric(token, context), context);
-            return parser.Parse();
         }
 
         private object? ResolveValue(string expr, ScriptContext context)
@@ -321,178 +316,6 @@ namespace SSH_Helper.Services.Scripting.Commands
             return $"[{string.Join(", ", parts)}{suffix}]";
         }
 
-        private double ResolveNumeric(string expr, ScriptContext context)
-        {
-            expr = expr.Trim();
-
-            var (handled, length) = ValueResolver.TryResolveLengthExpression(expr, context.GetVariable);
-            if (handled)
-                return length;
-
-            if (double.TryParse(expr, NumberStyles.Float, CultureInfo.InvariantCulture, out var num))
-                return num;
-            if (double.TryParse(expr, out num))
-                return num;
-
-            var directValue = context.GetVariable(expr);
-            if (directValue != null && double.TryParse(directValue.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var varNum))
-                return varNum;
-            if (directValue != null && double.TryParse(directValue.ToString(), out varNum))
-                return varNum;
-
-            var substituted = context.SubstituteVariables(expr);
-            if (double.TryParse(substituted, NumberStyles.Float, CultureInfo.InvariantCulture, out var subNum))
-                return subNum;
-            if (double.TryParse(substituted, out subNum))
-                return subNum;
-
-            throw new FormatException($"Unable to resolve numeric value from '{expr}'");
-        }
-
-        private sealed class ArithmeticParser
-        {
-            private readonly string _expression;
-            private readonly Func<string, double> _resolveNumeric;
-            private readonly ScriptContext _context;
-            private int _position;
-
-            public ArithmeticParser(string expression, Func<string, double> resolveNumeric, ScriptContext context)
-            {
-                _expression = expression;
-                _resolveNumeric = resolveNumeric;
-                _context = context;
-            }
-
-            public double Parse()
-            {
-                _position = 0;
-                var value = ParseAddSubtract();
-                SkipWhitespace();
-                if (_position < _expression.Length)
-                    throw new FormatException("Unexpected trailing tokens in arithmetic expression");
-                return value;
-            }
-
-            private double ParseAddSubtract()
-            {
-                var value = ParseMultiplyDivideModulo();
-                while (true)
-                {
-                    SkipWhitespace();
-                    if (Match('+'))
-                    {
-                        value += ParseMultiplyDivideModulo();
-                        continue;
-                    }
-                    if (Match('-'))
-                    {
-                        value -= ParseMultiplyDivideModulo();
-                        continue;
-                    }
-                    return value;
-                }
-            }
-
-            private double ParseMultiplyDivideModulo()
-            {
-                var value = ParseUnary();
-                while (true)
-                {
-                    SkipWhitespace();
-                    if (Match('*'))
-                    {
-                        value *= ParseUnary();
-                        continue;
-                    }
-                    if (Match('/'))
-                    {
-                        var rhs = ParseUnary();
-                        if (rhs == 0)
-                        {
-                            _context.EmitOutput("Warning: Division by zero, returning 0", ScriptOutputType.Warning);
-                            return 0;
-                        }
-                        value /= rhs;
-                        continue;
-                    }
-                    if (Match('%'))
-                    {
-                        var rhs = ParseUnary();
-                        if (rhs == 0)
-                        {
-                            _context.EmitOutput("Warning: Modulo by zero, returning 0", ScriptOutputType.Warning);
-                            return 0;
-                        }
-                        value %= rhs;
-                        continue;
-                    }
-
-                    return value;
-                }
-            }
-
-            private double ParseUnary()
-            {
-                SkipWhitespace();
-                if (Match('+'))
-                    return ParseUnary();
-                if (Match('-'))
-                    return -ParseUnary();
-                return ParsePrimary();
-            }
-
-            private double ParsePrimary()
-            {
-                SkipWhitespace();
-                if (Match('('))
-                {
-                    var value = ParseAddSubtract();
-                    SkipWhitespace();
-                    if (!Match(')'))
-                        throw new FormatException("Missing closing parenthesis in arithmetic expression");
-                    return value;
-                }
-
-                var token = ReadToken();
-                return _resolveNumeric(token);
-            }
-
-            private string ReadToken()
-            {
-                SkipWhitespace();
-                if (_position >= _expression.Length)
-                    throw new FormatException("Unexpected end of arithmetic expression");
-
-                var start = _position;
-                while (_position < _expression.Length)
-                {
-                    var c = _expression[_position];
-                    if (char.IsWhiteSpace(c) || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '(' || c == ')')
-                        break;
-                    _position++;
-                }
-
-                if (start == _position)
-                    throw new FormatException("Invalid token in arithmetic expression");
-
-                return _expression.Substring(start, _position - start);
-            }
-
-            private void SkipWhitespace()
-            {
-                while (_position < _expression.Length && char.IsWhiteSpace(_expression[_position]))
-                    _position++;
-            }
-
-            private bool Match(char expected)
-            {
-                if (_position < _expression.Length && _expression[_position] == expected)
-                {
-                    _position++;
-                    return true;
-                }
-                return false;
-            }
-        }
+        // ArithmeticParser removed — replaced by ExpressionParser (see Services/Scripting/ExpressionParser.cs)
     }
 }

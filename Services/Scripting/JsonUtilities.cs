@@ -340,6 +340,10 @@ namespace SSH_Helper.Services.Scripting
             if (!TryParseFunctionCall(expr, out var functionName, out var inner))
                 return false;
 
+            // Delegate to the FunctionRegistry first; fall through to the legacy switch if not registered.
+            if (FunctionRegistry.Instance.TryEvaluate(functionName, inner, context, out value))
+                return true;
+
             switch (functionName.ToLowerInvariant())
             {
                 case "length":
