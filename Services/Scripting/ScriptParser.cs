@@ -104,8 +104,8 @@ namespace SSH_Helper.Services.Scripting
                 ["foreach"] = ["iterator", "when", "do"],
                 ["while"] = ["condition", "max_iterations", "do"],
                 ["try"] = ["do", "catch", "finally"],
-                ["readfile"] = ["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"],
-                ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers"],
+                ["readfile"] = ["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding", "on_error"],
+                ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
                 ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error"],
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
@@ -884,11 +884,11 @@ namespace SSH_Helper.Services.Scripting
                         break;
                     case "readfile":
                         step.DeclaredStepType = StepType.Readfile;
-                        step.Readfile = ParseReadfileOptions(parser);
+                        step.Readfile = ParseReadfileOptions(parser, step);
                         break;
                     case "writefile":
                         step.DeclaredStepType = StepType.Writefile;
-                        step.Writefile = ParseWritefileOptions(parser);
+                        step.Writefile = ParseWritefileOptions(parser, step);
                         break;
                     case "input":
                         step.DeclaredStepType = StepType.Input;
@@ -1814,7 +1814,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private ReadfileOptions ParseReadfileOptions(IParser parser)
+        private ReadfileOptions ParseReadfileOptions(IParser parser, ScriptStep step)
         {
             var options = new ReadfileOptions();
 
@@ -1867,6 +1867,10 @@ namespace SSH_Helper.Services.Scripting
                         case "encoding":
                             options.Encoding = parser.Consume<Scalar>().Value;
                             break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
                         default:
                             AddUnknownKeyWarning($"Unknown readfile key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
@@ -1884,7 +1888,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private WritefileOptions ParseWritefileOptions(IParser parser)
+        private WritefileOptions ParseWritefileOptions(IParser parser, ScriptStep step)
         {
             var options = new WritefileOptions();
 
@@ -1919,6 +1923,10 @@ namespace SSH_Helper.Services.Scripting
                             var headersList = ParseScalarOrSequence(parser);
                             if (headersList is List<string> list)
                                 options.Headers = list;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown writefile key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
