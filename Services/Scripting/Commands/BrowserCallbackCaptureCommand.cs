@@ -4,13 +4,11 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using SSH_Helper.Services.Scripting.Models;
-using System.Windows.Forms;
 
 namespace SSH_Helper.Services.Scripting.Commands
 {
@@ -57,6 +55,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             callbackPath = NormalizePath(callbackPath);
             var postPath = NormalizePath(callbackPath + "/capture");
+            var completionPath = NormalizePath(callbackPath + "/complete");
             var timeoutSeconds = options.Timeout > 0 ? options.Timeout : 300;
 
             using var listener = _listenerFactory(options.LocalPort);
@@ -95,12 +94,13 @@ namespace SSH_Helper.Services.Scripting.Commands
                     listener,
                     callbackPath,
                     postPath,
+                    completionPath,
                     captureMode,
                     options.CompletionMessage,
                     options.FailureMessage,
                     timeoutCts.Token).ConfigureAwait(false);
 
-                RequestApplicationFocusRestore();
+                BrowserCallbackFocusRestorer.RequestApplicationFocusRestore();
 
                 var requiredFields = (options.RequiredFields ?? new List<string>())
                     .Select(field => context.SubstituteVariables(field ?? string.Empty).Trim())
@@ -176,11 +176,14 @@ namespace SSH_Helper.Services.Scripting.Commands
             HttpListener listener,
             string callbackPath,
             string postPath,
+            string completionPath,
             CaptureMode captureMode,
             string? completionMessage,
             string? failureMessage,
             CancellationToken cancellationToken)
         {
+            Dictionary<string, string>? pendingPayload = null;
+
             while (true)
             {
                 var context = await WaitForContextAsync(listener, cancellationToken).ConfigureAwait(false);
@@ -193,13 +196,15 @@ namespace SSH_Helper.Services.Scripting.Commands
                         var queryValues = ReadQueryValues(context.Request);
                         if (captureMode == CaptureMode.Query && queryValues.Count > 0)
                         {
-                            await WriteTextResponseAsync(context.Response, 200, "Callback captured. You may close this tab.")
+                            pendingPayload = queryValues;
+                            var completionHtml = BuildCompletionHtml(completionPath, completionMessage, autoCloseDelayMs: 200);
+                            await WriteHtmlResponseAsync(context.Response, 200, completionHtml)
                                 .ConfigureAwait(false);
-                            return queryValues;
+                            continue;
                         }
 
-                        var html = BuildCaptureHtml(postPath, completionMessage, failureMessage);
-                        await WriteHtmlResponseAsync(context.Response, 200, html).ConfigureAwait(false);
+                        var captureHtml = BuildCaptureHtml(postPath, completionPath, completionMessage, failureMessage);
+                        await WriteHtmlResponseAsync(context.Response, 200, captureHtml).ConfigureAwait(false);
                         continue;
                     }
 
@@ -221,7 +226,19 @@ namespace SSH_Helper.Services.Scripting.Commands
                     await WriteTextResponseAsync(context.Response, 200, "OK").ConfigureAwait(false);
 
                     if (payload.Count > 0)
-                        return payload;
+                    {
+                        pendingPayload = payload;
+                    }
+
+                    continue;
+                }
+                else if (PathEquals(path, completionPath) && string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+                {
+                    await WriteTextResponseAsync(context.Response, 200, "OK").ConfigureAwait(false);
+                    if (pendingPayload != null && pendingPayload.Count > 0)
+                    {
+                        return pendingPayload;
+                    }
 
                     continue;
                 }
@@ -440,7 +457,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             response.Close();
         }
 
-        private static string BuildCaptureHtml(string postPath, string? completionMessage, string? failureMessage)
+        private static string BuildCaptureHtml(string postPath, string completionPath, string? completionMessage, string? failureMessage)
         {
             var completion = EscapeForJavaScriptString(string.IsNullOrWhiteSpace(completionMessage)
                 ? "Callback captured. You may close this tab."
@@ -450,6 +467,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 : failureMessage);
 
             var encodedPostPath = EscapeForJavaScriptString(postPath);
+            var encodedCompletionPath = EscapeForJavaScriptString(completionPath);
 
             return $$"""
                 <!DOCTYPE html>
@@ -465,7 +483,12 @@ namespace SSH_Helper.Services.Scripting.Commands
                   var hash = new URLSearchParams(window.location.hash.substring(1));
                   hash.forEach(function(v,k){ payload.append('h:' + k, v); });
                   fetch('{{encodedPostPath}}', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: payload.toString() })
-                    .then(function(){
+                    .then(function(response){
+                      if (!response.ok) { throw new Error('capture failed'); }
+                      return fetch('{{encodedCompletionPath}}', { method:'POST', keepalive:true });
+                    })
+                    .then(function(response){
+                      if (!response.ok) { throw new Error('completion failed'); }
                       document.getElementById('status').textContent='{{completion}}';
                       setTimeout(function(){ window.close(); }, 200);
                     })
@@ -476,119 +499,31 @@ namespace SSH_Helper.Services.Scripting.Commands
                 """;
         }
 
-        private static void RequestApplicationFocusRestore()
+        private static string BuildCompletionHtml(string completionPath, string? completionMessage, int autoCloseDelayMs)
         {
-            try
-            {
-                var targetForm = GetTargetForm();
-                if (targetForm != null)
-                {
-                    if (targetForm.InvokeRequired)
-                    {
-                        targetForm.BeginInvoke((Action)(() => ScheduleUiActivationAttempts(targetForm)));
-                        return;
-                    }
+            var completion = EscapeForJavaScriptString(string.IsNullOrWhiteSpace(completionMessage)
+                ? "Callback captured. You may close this tab."
+                : completionMessage);
+            var encodedCompletionPath = EscapeForJavaScriptString(completionPath);
 
-                    ScheduleUiActivationAttempts(targetForm);
-                    return;
-                }
-            }
-            catch
-            {
-                // Best-effort only. Focus behavior can be blocked by OS foreground lock rules.
-            }
-            // No open form available; do a single best-effort fallback.
-            var handle = Process.GetCurrentProcess().MainWindowHandle;
-            if (handle != IntPtr.Zero)
-            {
-                NativeMethods.ShowWindow(handle, NativeMethods.SW_RESTORE);
-                NativeMethods.SetForegroundWindow(handle);
-            }
-        }
-
-        private static Form? GetTargetForm()
-        {
-            if (Application.OpenForms.Count <= 0)
-                return null;
-
-            foreach (Form form in Application.OpenForms)
-            {
-                if (!form.IsDisposed && form.Visible)
-                    return form;
-            }
-
-            var fallback = Application.OpenForms[0] as Form;
-            if (fallback == null)
-                return null;
-
-            return fallback.IsDisposed ? null : fallback;
-        }
-
-        private static void ScheduleUiActivationAttempts(Form form)
-        {
-            if (form.IsDisposed || !form.IsHandleCreated)
-                return;
-
-            var attempts = 0;
-            var timer = new System.Windows.Forms.Timer
-            {
-                Interval = 220
-            };
-
-            timer.Tick += (_, _) =>
-            {
-                try
-                {
-                    if (form.IsDisposed)
-                    {
-                        timer.Stop();
-                        timer.Dispose();
-                        return;
-                    }
-
-                    TryActivateForm(form);
-                    attempts++;
-
-                    // First attempt is near browser-close timing, later attempts catch delayed focus release.
-                    if (attempts >= 3)
-                    {
-                        timer.Stop();
-                        timer.Dispose();
-                        return;
-                    }
-
-                    timer.Interval = 320;
-                }
-                catch
-                {
-                    timer.Stop();
-                    timer.Dispose();
-                }
-            };
-
-            timer.Start();
-        }
-
-        private static void TryActivateForm(Form form)
-        {
-            var handle = form.Handle;
-            if (handle == IntPtr.Zero)
-                return;
-
-            var isMinimized = form.WindowState == FormWindowState.Minimized || NativeMethods.IsIconic(handle);
-            if (isMinimized)
-            {
-                // Restore only when minimized so maximized/fullscreen state is preserved.
-                NativeMethods.ShowWindow(handle, NativeMethods.SW_RESTORE);
-            }
-
-            form.Show();
-            form.TopMost = true;
-            form.BringToFront();
-            form.Activate();
-            form.TopMost = false;
-
-            NativeMethods.SetForegroundWindow(handle);
+            return $$"""
+                <!DOCTYPE html>
+                <html><head><meta charset="utf-8"><title>Callback captured</title></head>
+                <body style="font-family:Segoe UI,Arial,sans-serif;margin:40px;">
+                <h3>Browser callback captured</h3>
+                <p id="status">{{completion}}</p>
+                <script>
+                (function(){
+                  fetch('{{encodedCompletionPath}}', { method:'POST', keepalive:true })
+                    .then(function(response){
+                      if (!response.ok) { throw new Error('completion failed'); }
+                      setTimeout(function(){ window.close(); }, {{autoCloseDelayMs}});
+                    })
+                    .catch(function(){ document.getElementById('status').textContent='Failed to finalize browser callback.'; });
+                })();
+                </script>
+                </body></html>
+                """;
         }
 
         private static string EscapeForJavaScriptString(string value)
@@ -625,23 +560,6 @@ namespace SSH_Helper.Services.Scripting.Commands
             Fragment,
             Query,
             PostBody
-        }
-
-        private static class NativeMethods
-        {
-            internal const int SW_RESTORE = 9;
-
-            [DllImport("user32.dll")]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            internal static extern bool IsIconic(IntPtr hWnd);
-
-            [DllImport("user32.dll")]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            internal static extern bool SetForegroundWindow(IntPtr hWnd);
-
-            [DllImport("user32.dll")]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            internal static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         }
     }
 }

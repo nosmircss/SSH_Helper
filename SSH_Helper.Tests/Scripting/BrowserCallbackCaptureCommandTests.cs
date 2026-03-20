@@ -39,6 +39,7 @@ public class BrowserCallbackCaptureCommandTests
 
         var executeTask = command.ExecuteAsync(step, context, CancellationToken.None);
         await SendWithRetryAsync($"http://127.0.0.1:{port}/oauth_callback?code=abc123&state=xyz", HttpMethod.Get);
+        await CompleteCallbackAsync(port);
 
         var result = await executeTask;
 
@@ -49,6 +50,42 @@ public class BrowserCallbackCaptureCommandTests
         outputs.Should().NotContain(entry =>
             entry.Type == ScriptOutputType.Success &&
             entry.Message.Contains("Captured", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_QueryCapture_ReturnsAutoCloseHtmlResponse()
+    {
+        var command = new BrowserCallbackCaptureCommand();
+        var context = new ScriptContext();
+        var port = GetFreePort();
+
+        var step = new ScriptStep
+        {
+            BrowserCallbackCapture = new BrowserCallbackCaptureOptions
+            {
+                StartUrl = "https://idp.example.com/start",
+                CallbackPath = "/oauth_callback",
+                LocalPort = port,
+                CaptureMode = "query",
+                Into = "callback_data",
+                OpenBrowser = false,
+                Timeout = 5
+            }
+        };
+
+        var executeTask = command.ExecuteAsync(step, context, CancellationToken.None);
+        var responseBody = await SendWithRetryForBodyAsync($"http://127.0.0.1:{port}/oauth_callback?code=abc123&state=xyz", HttpMethod.Get);
+
+        await Task.Delay(200);
+        executeTask.IsCompleted.Should().BeFalse("the command should wait for the browser completion acknowledgement before returning");
+
+        await SendWithRetryAsync($"http://127.0.0.1:{port}/oauth_callback/complete", HttpMethod.Post);
+
+        var result = await executeTask;
+
+        result.Success.Should().BeTrue();
+        responseBody.Should().Contain("window.close()", "query-mode callback completion should attempt to close the browser tab");
+        responseBody.Should().Contain("Callback captured. You may close this tab.");
     }
 
     [Fact]
@@ -88,6 +125,8 @@ public class BrowserCallbackCaptureCommandTests
             HttpMethod.Post,
             new FormUrlEncodedContent(formData));
 
+        await SendWithRetryAsync($"http://127.0.0.1:{port}/oauth_callback/complete", HttpMethod.Post);
+
         var result = await executeTask;
 
         result.Success.Should().BeTrue();
@@ -120,6 +159,7 @@ public class BrowserCallbackCaptureCommandTests
 
         var executeTask = command.ExecuteAsync(step, context, CancellationToken.None);
         await SendWithRetryAsync($"http://127.0.0.1:{port}/oauth_callback?state=only", HttpMethod.Get);
+        await CompleteCallbackAsync(port);
 
         var result = await executeTask;
 
@@ -153,6 +193,7 @@ public class BrowserCallbackCaptureCommandTests
 
         var executeTask = command.ExecuteAsync(step, context, CancellationToken.None);
         await SendWithRetryAsync($"http://127.0.0.1:{port}/oauth_callback?code=abc123&state=xyz", HttpMethod.Get);
+        await CompleteCallbackAsync(port);
 
         var result = await executeTask;
 
@@ -190,6 +231,7 @@ public class BrowserCallbackCaptureCommandTests
 
         var executeTask = command.ExecuteAsync(step, context, CancellationToken.None);
         await SendWithRetryAsync($"http://127.0.0.1:{port}/oauth_callback?code=abc123", HttpMethod.Get);
+        await CompleteCallbackAsync(port);
 
         var result = await executeTask;
 
@@ -205,6 +247,11 @@ public class BrowserCallbackCaptureCommandTests
         using var listener = new TcpListener(System.Net.IPAddress.Loopback, 0);
         listener.Start();
         return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
+    private static Task CompleteCallbackAsync(int port, string callbackPath = "/oauth_callback")
+    {
+        return SendWithRetryAsync($"http://127.0.0.1:{port}{callbackPath}/complete", HttpMethod.Post);
     }
 
     private static async Task SendWithRetryAsync(string url, HttpMethod method, HttpContent? content = null)
@@ -239,6 +286,49 @@ public class BrowserCallbackCaptureCommandTests
 
                 using var response = await client.SendAsync(request);
                 return;
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                await Task.Delay(100);
+            }
+        }
+
+        throw new InvalidOperationException($"Failed to reach callback endpoint after retries: {url}", lastException);
+    }
+
+    private static async Task<string> SendWithRetryForBodyAsync(string url, HttpMethod method, HttpContent? content = null)
+    {
+        using var client = new HttpClient();
+        byte[]? bodyBytes = null;
+        string? mediaType = null;
+        if (content != null)
+        {
+            bodyBytes = await content.ReadAsByteArrayAsync();
+            mediaType = content.Headers.ContentType?.ToString();
+        }
+
+        Exception? lastException = null;
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(method, url)
+                {
+                    Content = null
+                };
+
+                if (bodyBytes != null)
+                {
+                    request.Content = new ByteArrayContent(bodyBytes);
+                    if (!string.IsNullOrWhiteSpace(mediaType))
+                    {
+                        request.Content.Headers.TryAddWithoutValidation("Content-Type", mediaType);
+                    }
+                }
+
+                using var response = await client.SendAsync(request);
+                return await response.Content.ReadAsStringAsync();
             }
             catch (Exception ex)
             {

@@ -1,5 +1,96 @@
 # TODO
 
+## 109. Fix browser callback focus-restorer native imports
+- [x] 109.1 Trace the JIT crash and confirm that the focus-restorer P/Invokes are targeting non-existent `Native...` exports instead of the real Windows entry-point names.
+- [x] 109.2 Add a focused failing test that the focus-restorer native imports map to the real `user32.dll` and `kernel32.dll` export names.
+- [x] 109.3 Correct the `DllImport` declarations so the focus-restorer uses the intended Windows entry points without changing its activation behavior.
+- [x] 109.4 Run focused verification plus a build, then capture the review outcome below.
+
+### 109 Review
+- Root cause is concrete: `NativeMethodsAdapter` uses wrapper method names like `NativeIsIconic`, but the `DllImport` declarations did not specify `EntryPoint`, so the CLR tried to resolve exports like `NativeIsIconic` in `user32.dll` and threw `EntryPointNotFoundException` at runtime.
+- Added `NativeMethodsAdapter_ImportsUseRealWindowsEntryPoints` to `SSH_Helper.Tests\UI\BrowserCallbackFocusRestorerTests.cs` so the native import mapping is now covered by an automated test instead of being left to runtime/manual validation.
+- Updated every focus-restorer import to declare the real Windows entry point explicitly: `IsIconic`, `SetForegroundWindow`, `ShowWindow`, `GetForegroundWindow`, `GetWindowThreadProcessId`, `GetCurrentThreadId`, `AttachThreadInput`, `BringWindowToTop`, and `SetFocus`.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackFocusRestorerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-native-import-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-native-import-tests\obj\` failed first because the import contract still resolved `NativeIsIconic` instead of `IsIconic`.
+- Verification: the same focused test command passed after the implementation (3/3).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackSelfContainedPresetTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~NetworkStepParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-regression\obj\` passed (53/53).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted 5 existing xUnit analyzer warnings in `ExpressionParserTests.cs` unrelated to this change.
+
+## 108. Align focus restore with browser close completion
+- [x] 108.1 Trace the callback completion path and confirm that focus restore currently fires before the browser completion page actually closes the tab.
+- [x] 108.2 Add a focused failing test that successful browser callback capture waits for a browser completion acknowledgement before returning.
+- [x] 108.3 Implement the minimal runtime change so query and fragment callback flows acknowledge browser completion before the command returns and requests app focus.
+- [x] 108.4 Run focused verification plus a build, then capture the review outcome below.
+
+### 108 Review
+- Root cause turned out to be two separate timing gaps. Browser-driven query/fragment capture returned as soon as the payload arrived, which could request app focus before the completion page had posted its final acknowledgement and attempted to close the tab. Separately, the focus retry path relied on a local `System.Windows.Forms.Timer` and made no immediate activation attempt, so the restore sequence itself could be delayed or dropped.
+- Updated `BrowserCallbackCaptureCommand` so browser GET/fragment flows now hold captured values in a pending payload and return only after the browser completion page POSTs `/complete`. The completion/capture HTML now sends that acknowledgement before `window.close()`.
+- Updated `BrowserCallbackFocusRestorer` so it prefers the app's active form when available, performs an immediate `TryActivateForm(...)` before any delayed retries, and runs the retry loop through an async delay path instead of a local WinForms timer.
+- Updated `BrowserCallbackCaptureCommandTests` to model the new browser completion acknowledgement sequence and added focused regression coverage in `BrowserCallbackFocusRestorerTests` for the immediate activation attempt.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-complete-signal-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-complete-signal-tests\obj\` failed first because browser-driven query capture no longer completed immediately and the existing query tests were still assuming the old contract.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-handshake-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-handshake-tests\obj\` failed first because `ScheduleUiActivationAttempts(...)` did not attempt activation immediately.
+- Verification: the same browser-callback/focus handshake command passed after the implementation (8/8).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackSelfContainedPresetTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~NetworkStepParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-regression\obj\` passed (52/52).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted 5 existing xUnit analyzer warnings in `ExpressionParserTests.cs` unrelated to this change.
+- Residual risk: foreground activation is still best-effort under Windows/browser policy, but the app now waits for browser completion before restoring focus and the retry mechanism no longer depends on an unrooted local timer.
+
+## 107. Restore app focus after query-mode browser callbacks
+- [x] 107.1 Re-check the self-contained browser-callback flow and confirm whether query-mode capture leaves the browser foreground because it returns a plain text completion page instead of the auto-close HTML path.
+- [x] 107.2 Add a focused failing test that expects successful query-mode callback capture to return an HTML completion page that attempts to close the browser tab.
+- [x] 107.3 Implement the minimal runtime change so query-mode callbacks use the same auto-close completion-page behavior and align the focus restore timing with that page.
+- [x] 107.4 Run focused verification plus a build, then capture the review outcome below.
+
+### 107 Review
+- Root cause in the self-contained preset flow is concrete and code-level: `capture_mode: query` returned a plain text success page (`"Callback captured. You may close this tab."`) and never attempted `window.close()`. The demo preset hits query mode first, so the browser was expected to remain foreground unless the OS focus restore won on its own.
+- Updated `BrowserCallbackCaptureCommand` so successful query-mode callbacks now return an HTML completion page with the same auto-close attempt pattern used elsewhere, instead of a plain text page.
+- Also widened the browser-callback focus retry schedule in `BrowserCallbackFocusRestorer` so the activation attempts continue after the completion page has had time to render and attempt to close.
+- Added `ExecuteAsync_QueryCapture_ReturnsAutoCloseHtmlResponse` to `SSH_Helper.Tests\Scripting\BrowserCallbackCaptureCommandTests.cs` to lock the regression: successful query-mode capture must now return a page containing `window.close()`.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-query-html-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-query-html-tests\obj\` failed first because the query response body was still plain text.
+- Verification: the same focused test command passed after the implementation (6/6).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~NetworkStepParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-query-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-query-regression\obj\` passed (50/50).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted 5 existing xUnit analyzer warnings in `ExpressionParserTests.cs` unrelated to this change.
+- Residual risk: browser auto-close remains best-effort because modern browsers may still block `window.close()` on tabs they did not open via script. If that happens, the longer focus retry path is still in effect, but foreground return is not fully guaranteed by Windows or the browser.
+
+## 106. Improve browser callback focus restoration
+- [x] 106.1 Trace the existing browser callback focus-restore path and confirm whether the failure is in our code or Windows foreground-lock policy.
+- [x] 106.2 Add a focused failing test for the activation strategy needed when another foreground window owns the input queue.
+- [x] 106.3 Implement the minimal fix so browser callback restore can attach to the foreground thread and make SSH Helper active more reliably.
+- [x] 106.4 Run focused verification plus a build, then capture the review outcome below.
+
+### 106 Review
+- Root cause is Windows foreground-lock behavior, not the absence of a restore attempt. The old browser callback path already tried `TopMost`, `BringToFront`, `Activate`, and `SetForegroundWindow`, but when the browser still owned the active input queue Windows could deny the foreground switch and flash the taskbar instead.
+- Added `Services\Scripting\Commands\BrowserCallbackFocusRestorer.cs` to own browser-callback focus restoration and to make the native-window activation sequence testable.
+- The new activation path now detects the current foreground window, temporarily calls `AttachThreadInput(...)` when that window belongs to another thread, and then uses `BringWindowToTop(...)`, `SetForegroundWindow(...)`, and `SetFocus(...)` around the existing WinForms activation steps before detaching again.
+- `BrowserCallbackCaptureCommand` now delegates to the shared focus restorer instead of carrying its own private restore logic.
+- Added `SSH_Helper.Tests\UI\BrowserCallbackFocusRestorerTests.cs` to lock the regression: when another foreground thread is active, the restore path must attach/detach input queues around the foreground switch.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackFocusRestorerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-tests\obj\` failed first with `CS0246` because the new focus-restorer seam did not exist yet.
+- Verification: the same focused test command passed after the implementation (1/1).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~NetworkStepParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-regression\obj\` passed (49/49).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted 5 existing xUnit analyzer warnings in `ExpressionParserTests.cs` unrelated to this change.
+- Residual risk: Windows can still refuse foreground activation in some policy or shell scenarios; this change makes activation materially more reliable, but it cannot guarantee focus in every OS state.
+
+## 105. Build browser callback scripting test fixture
+- [x] 105.1 Review the existing `browser_callback_capture` runtime, docs, QA fixture patterns, and import/export surfaces.
+- [x] 105.2 Clarify the desired callback test target and success criteria with the user.
+- [x] 105.3 Propose the fixture approaches, present the recommended design, and get approval before implementation.
+- [x] 105.4 Implement the approved preset/environment artifacts with tests or fixture validation as appropriate.
+- [x] 105.5 Run verification, capture how to import/use the fixture, and write the review outcome below.
+
+### 105.4 Task Plan
+- [x] 105.4.1 Add a failing test that expects a dedicated self-contained browser-callback preset export file to exist and validate cleanly.
+- [x] 105.4.2 Run the focused test slice and confirm it fails for the missing fixture.
+- [x] 105.4.3 Create a single importable preset-export JSON that exercises local query and fragment browser callback capture with no separate environment file.
+- [x] 105.4.4 Re-run the focused fixture-validation tests and confirm they pass.
+
+### 105 Review
+- Added `ScriptSamples\browser_callback_self_contained_presets.json`, a single-file import bundle containing one preset: `Browser Callback Self-Contained Demo`.
+- The preset is fully self-contained: it uses only script-local `vars`, no separate environment file, no SSH commands, and no external identity provider. It exercises `browser_callback_capture` twice against `127.0.0.1:38086`: once in `query` mode and once in `fragment` mode.
+- The preset description now states exact prerequisites and expected outcome: one selected/current host row, single-host execution, a local browser, and an available localhost port.
+- Added `SSH_Helper.Tests\Scripting\BrowserCallbackSelfContainedPresetTests.cs` to lock the fixture contract: the bundle must exist, contain exactly one preset, parse/validate cleanly, use two browser callback capture steps, require no SSH session, require no external columns/environment variables, and end with an explicit success exit.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackSelfContainedPresetTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-self-contained-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-self-contained-tests\obj\` failed first as expected because the bundle file did not exist.
+- Verification: the same focused test command passed after adding the bundle (1/1).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackSelfContainedPresetTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~NetworkStepParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-self-contained-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-self-contained-regression\obj\` passed (49/49).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted 5 existing xUnit analyzer warnings in `ExpressionParserTests.cs` unrelated to this fixture.
+
 ## 104. Fix top-pane truncation under menu/tool strip
 - [x] 104.1 Confirm whether runtime font scaling leaves the top chrome and section headers on stale designer-era heights.
 - [x] 104.2 Reflow the menu/tool strip stack and the top section headers from current font metrics so the top panes sit below the bars and their titles no longer clip.

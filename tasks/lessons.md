@@ -1,5 +1,10 @@
 # Lessons
 
+## 2026-03-20
+- When I hand off a self-contained `browser_callback_capture` preset, I must state explicitly that the command itself starts the temporary localhost listener before opening the browser; users should not have to infer that from the `start_url` alone.
+- When I change WinForms/browser callback focus restoration, I must verify the real interactive foreground result, not just native-call ordering in a unit test; Windows activation behavior can still regress even when the API sequence looks stronger on paper.
+- When I wrap Windows P/Invoke calls in helper names like `NativeIsIconic`, I must explicitly set `EntryPoint` (or keep the extern name exact) and add a test for the import mapping; mocked focus tests will not catch missing exports and the bug will surface only at runtime.
+
 ## 2026-03-15
 - When a user narrows a popup-ownership cleanup to allow some ownerless dialogs, I must preserve explicit exceptions for startup/global flows instead of force-owning every modal call site.
 - When I add or adjust a modeless dialog launched from `Form1`, I must verify the close path explicitly restores activation to the main window instead of assuming WinForms ownership will do it automatically.
