@@ -8,8 +8,20 @@ namespace SSH_Helper.UI
 
         internal void RefreshVariableItemHeights()
         {
+            RefreshVariableItemHeights(fromFontChange: false);
+        }
+
+        private void RefreshVariableItemHeights(bool fromFontChange)
+        {
             if (IsDisposed || DrawMode != DrawMode.OwnerDrawVariable)
+            {
                 return;
+            }
+
+            if (!fromFontChange && ClientSize.Width == _lastMeasuredClientWidth)
+            {
+                return;
+            }
 
             _lastMeasuredClientWidth = ClientSize.Width;
 
@@ -22,8 +34,6 @@ namespace SSH_Helper.UI
             {
                 EndUpdate();
             }
-
-            Invalidate();
         }
 
         protected override void OnSizeChanged(EventArgs e)
@@ -42,7 +52,7 @@ namespace SSH_Helper.UI
 
             if (DrawMode == DrawMode.OwnerDrawVariable)
             {
-                RefreshVariableItemHeights();
+                RefreshVariableItemHeights(fromFontChange: true);
             }
         }
     }

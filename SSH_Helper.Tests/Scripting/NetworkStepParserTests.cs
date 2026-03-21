@@ -17,6 +17,7 @@ public class NetworkStepParserTests
         ScriptParser.IsYamlScript("- dns:\n    host: localhost").Should().BeTrue();
         ScriptParser.IsYamlScript("- portcheck:\n    host: localhost").Should().BeTrue();
         ScriptParser.IsYamlScript("- sftp:\n    action: upload").Should().BeTrue();
+        ScriptParser.IsYamlScript("- browser_callback_capture:\n    start_url: https://example.com").Should().BeTrue();
     }
 
     [Fact]
@@ -120,6 +121,139 @@ public class NetworkStepParserTests
         var sftp = script.Steps[4].Sftp!;
         sftp.Overwrite.Should().BeTrue();
         sftp.Timeout.Should().Be(120);
+    }
+
+    [Fact]
+    public void Parse_BrowserCallbackCapture_ParsesOptionsAndNormalizesEnums()
+    {
+        var yaml = """
+            ---
+            steps:
+              - browser_callback_capture:
+                  start_url: "https://idp.example.com/start"
+                  callback_path: "/oauth_callback"
+                  local_port: 9090
+                  capture_mode: FRAGMENT
+                  browser_mode: WEBVIEW2
+                  show_after_seconds: 4
+                  into: callback_data
+                  required_fields:
+                    - access_token
+                    - token_type
+                  timeout: 120
+                  open_browser: false
+                  auto_close_browser: false
+                  quiet: false
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.BrowserCallbackCapture);
+        var options = script.Steps[0].BrowserCallbackCapture!;
+        options.StartUrl.Should().Be("https://idp.example.com/start");
+        options.CallbackPath.Should().Be("/oauth_callback");
+        options.LocalPort.Should().Be(9090);
+        options.CaptureMode.Should().Be("fragment");
+        options.BrowserMode.Should().Be("webview2");
+        options.ShowAfterSeconds.Should().Be(4);
+        options.Into.Should().Be("callback_data");
+        options.RequiredFields.Should().BeEquivalentTo("access_token", "token_type");
+        options.Timeout.Should().Be(120);
+        options.OpenBrowser.Should().BeFalse();
+        options.AutoCloseBrowser.Should().BeFalse();
+        options.Quiet.Should().BeFalse();
+
+        var errors = _parser.Validate(script, yaml);
+        errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Parse_BrowserCallbackCapture_QuietDefaultsToTrue()
+    {
+        var yaml = """
+            ---
+            steps:
+              - browser_callback_capture:
+                  start_url: "https://idp.example.com/start"
+                  callback_path: "/oauth_callback"
+                  into: callback_data
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.BrowserCallbackCapture);
+        script.Steps[0].BrowserCallbackCapture!.Quiet.Should().BeTrue();
+        script.Steps[0].BrowserCallbackCapture!.AutoCloseBrowser.Should().BeTrue();
+        script.Steps[0].BrowserCallbackCapture!.ShowAfterSeconds.Should().Be(0);
+    }
+
+    [Fact]
+    public void Validate_BrowserCallbackCaptureRequiredFields_ReturnsLineErrors()
+    {
+        var yaml = """
+            ---
+            steps:
+              - browser_callback_capture:
+                  callback_path: "oauth_callback"
+                  local_port: 70000
+                  capture_mode: invalid
+                  show_after_seconds: -1
+                  timeout: 0
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(e => e.Contains("requires 'start_url'"));
+        errors.Should().Contain(e => e.Contains("requires 'into'"));
+        errors.Should().Contain(e => e.Contains("callback_path must start with '/'"));
+        errors.Should().Contain(e => e.Contains("local_port must be between 1 and 65535"));
+        errors.Should().Contain(e => e.Contains("capture_mode must be one of"));
+        errors.Should().Contain(e => e.Contains("show_after_seconds must be greater than or equal to 0"));
+        errors.Should().Contain(e => e.Contains("timeout must be greater than 0"));
+    }
+
+    [Fact]
+    public void Validate_BrowserCallbackCaptureBrowserMode_InvalidValueReturnsLineError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - browser_callback_capture:
+                  start_url: "https://idp.example.com/start"
+                  callback_path: "/oauth_callback"
+                  into: callback_data
+                  browser_mode: popup
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().ContainSingle(e => e.Contains("browser_callback_capture.browser_mode must be one of external, webview2"));
+    }
+
+    [Fact]
+    public void Validate_BrowserCallbackCaptureBrowserMode_WhenOpenBrowserFalse_AllowsWebView2Literal()
+    {
+        var yaml = """
+            ---
+            steps:
+              - browser_callback_capture:
+                  start_url: "https://idp.example.com/start"
+                  callback_path: "/oauth_callback"
+                  into: callback_data
+                  open_browser: false
+                  browser_mode: webview2
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().BeEmpty();
+        script.Steps[0].BrowserCallbackCapture!.OpenBrowser.Should().BeFalse();
+        script.Steps[0].BrowserCallbackCapture!.BrowserMode.Should().Be("webview2");
     }
 
     [Fact]

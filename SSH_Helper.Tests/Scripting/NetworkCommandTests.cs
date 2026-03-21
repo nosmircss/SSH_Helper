@@ -702,6 +702,10 @@ public class NetworkCommandTests
             {
                 // Listener was disposed before any client connected.
             }
+            catch (IOException ex) when (ex.InnerException is SocketException)
+            {
+                // Client disconnected while response bytes were being written.
+            }
             catch (SocketException)
             {
                 // Listener was stopped while waiting for a client.

@@ -66,11 +66,12 @@ namespace SSH_Helper.Services
     /// </summary>
     public class SshExecutionService : IDisposable
     {
-        private const string InteractiveUnsupportedMultiHostOrFolderMessage =
-            "Scripts using 'interactive' are not supported in folder or multi-host runs. Run the script against a single current host instead.";
+        private const string SingleHostOnlyMessageSuffix =
+            " not supported in folder or multi-host runs. Run the script against a single current host instead.";
 
         private readonly SshConnectionPool? _connectionPool;
         private readonly bool _ownsPool;
+        private readonly IBrowserCallbackUiHost? _browserCallbackUiHost;
 
         public event EventHandler<SshProgressEventArgs>? ProgressChanged;
         public event EventHandler<SshOutputEventArgs>? OutputReceived;
@@ -189,6 +190,24 @@ namespace SSH_Helper.Services
             _connectionPool = sharedPool ?? throw new ArgumentNullException(nameof(sharedPool));
             _ownsPool = false;
             UseConnectionPooling = true;
+        }
+
+        internal SshExecutionService(IBrowserCallbackUiHost browserCallbackUiHost)
+            : this()
+        {
+            _browserCallbackUiHost = browserCallbackUiHost ?? throw new ArgumentNullException(nameof(browserCallbackUiHost));
+        }
+
+        internal SshExecutionService(bool enablePooling, SshTimeoutOptions? poolTimeouts, IBrowserCallbackUiHost browserCallbackUiHost)
+            : this(enablePooling, poolTimeouts)
+        {
+            _browserCallbackUiHost = browserCallbackUiHost ?? throw new ArgumentNullException(nameof(browserCallbackUiHost));
+        }
+
+        internal SshExecutionService(SshConnectionPool sharedPool, IBrowserCallbackUiHost browserCallbackUiHost)
+            : this(sharedPool)
+        {
+            _browserCallbackUiHost = browserCallbackUiHost ?? throw new ArgumentNullException(nameof(browserCallbackUiHost));
         }
 
         /// <summary>
@@ -369,9 +388,8 @@ namespace SSH_Helper.Services
                 var analyzer = new ScriptDependencyAnalyzer();
                 var sshRequirement = analyzer.AnalyzeSshRequirements(script);
 
-                if (sshRequirement.UsesInteractive && hostList.Count != 1)
+                if (hostList.Count != 1 && TryBuildSingleHostOnlyPreflightMessage(sshRequirement, out var preflightMessage))
                 {
-                    const string preflightMessage = InteractiveUnsupportedMultiHostOrFolderMessage;
                     var errorOutput = $"Script preflight error: {preflightMessage}\n";
                     OnOutputReceived(hostList.FirstOrDefault() ?? new HostConnection(), errorOutput);
 
@@ -449,10 +467,10 @@ namespace SSH_Helper.Services
 
             try
             {
-                var interactivePresetNames = FindInteractiveFolderPresets(presetNames, presets);
-                if (interactivePresetNames.Count > 0)
+                var blockedPresetNames = FindSingleHostOnlyFolderPresets(presetNames, presets);
+                if (blockedPresetNames.Count > 0)
                 {
-                    var preflightMessage = BuildFolderInteractivePreflightMessage(interactivePresetNames);
+                    var preflightMessage = BuildFolderSingleHostOnlyPreflightMessage(blockedPresetNames);
                     var errorOutput = $"Script preflight error: {preflightMessage}\n";
                     OnOutputReceived(hostList.FirstOrDefault() ?? new HostConnection(), errorOutput);
 
@@ -675,13 +693,13 @@ namespace SSH_Helper.Services
             return results;
         }
 
-        private static List<string> FindInteractiveFolderPresets(
+        private static List<string> FindSingleHostOnlyFolderPresets(
             IEnumerable<string> presetNames,
             IReadOnlyDictionary<string, PresetInfo> presets)
         {
             var parser = new ScriptParser();
             var analyzer = new ScriptDependencyAnalyzer();
-            var interactivePresetNames = new List<string>();
+            var blockedPresetNames = new List<string>();
 
             foreach (var presetName in presetNames.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase))
             {
@@ -701,23 +719,44 @@ namespace SSH_Helper.Services
                     continue;
                 }
 
-                if (analyzer.AnalyzeSshRequirements(script).UsesInteractive)
+                var requirement = analyzer.AnalyzeSshRequirements(script);
+                if (requirement.UsesInteractive || requirement.UsesBrowserCallbackCapture)
                 {
-                    interactivePresetNames.Add(presetName);
+                    blockedPresetNames.Add(presetName);
                 }
             }
 
-            return interactivePresetNames;
+            return blockedPresetNames;
         }
 
-        private static string BuildFolderInteractivePreflightMessage(IReadOnlyList<string> interactivePresetNames)
+        private static string BuildFolderSingleHostOnlyPreflightMessage(IReadOnlyList<string> blockedPresetNames)
         {
-            const string baseMessage = InteractiveUnsupportedMultiHostOrFolderMessage;
-            if (interactivePresetNames.Count == 0)
+            var baseMessage = BuildSingleHostOnlyBaseMessage(usesInteractive: true, usesBrowserCallback: true);
+            if (blockedPresetNames.Count == 0)
                 return baseMessage;
 
-            var blockedPresets = string.Join(", ", interactivePresetNames.Select(name => $"'{name}'"));
+            var blockedPresets = string.Join(", ", blockedPresetNames.Select(name => $"'{name}'"));
             return $"{baseMessage} Blocked preset(s): {blockedPresets}.";
+        }
+
+        private static bool TryBuildSingleHostOnlyPreflightMessage(SshRequirementResult requirement, out string message)
+        {
+            if (!requirement.UsesInteractive && !requirement.UsesBrowserCallbackCapture)
+            {
+                message = string.Empty;
+                return false;
+            }
+
+            message = BuildSingleHostOnlyBaseMessage(requirement.UsesInteractive, requirement.UsesBrowserCallbackCapture);
+            return true;
+        }
+
+        private static string BuildSingleHostOnlyBaseMessage(bool usesInteractive, bool usesBrowserCallback)
+        {
+            var features = new List<string>(2);
+            if (usesInteractive) features.Add("'interactive'");
+            if (usesBrowserCallback) features.Add("'browser_callback_capture'");
+            return $"Scripts using {string.Join(" or ", features)} are{SingleHostOnlyMessageSuffix}";
         }
 
         // Execute a preset without starting a new execution scope (caller owns BeginExecution/EndExecution).
@@ -793,9 +832,8 @@ namespace SSH_Helper.Services
             var analyzer = new ScriptDependencyAnalyzer();
             var sshRequirement = analyzer.AnalyzeSshRequirements(script);
 
-            if (sshRequirement.UsesInteractive)
+            if (TryBuildSingleHostOnlyPreflightMessage(sshRequirement, out var preflightMessage))
             {
-                const string preflightMessage = InteractiveUnsupportedMultiHostOrFolderMessage;
                 var errorOutput = $"Script preflight error: {preflightMessage}\n";
                 OnOutputReceived(host, errorOutput);
 
@@ -1099,7 +1137,7 @@ namespace SSH_Helper.Services
                 };
 
                 // Execute the script
-                var executor = new ScriptExecutor();
+                var executor = new ScriptExecutor(_browserCallbackUiHost);
                 var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                     .GetAwaiter().GetResult();
                 EnsureScriptSucceeded(scriptResult, cancellationToken);
@@ -1254,7 +1292,7 @@ namespace SSH_Helper.Services
             };
 
             // Execute the script
-            var executor = new ScriptExecutor();
+            var executor = new ScriptExecutor(_browserCallbackUiHost);
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
             EnsureScriptSucceeded(scriptResult, cancellationToken);
@@ -1321,7 +1359,7 @@ namespace SSH_Helper.Services
                 OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
             };
 
-            var executor = new ScriptExecutor();
+            var executor = new ScriptExecutor(_browserCallbackUiHost);
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
             EnsureScriptSucceeded(scriptResult, cancellationToken);

@@ -1,5 +1,574 @@
 # TODO
 
+## 134. Archive completed OpenSpec changes
+- [x] 134.1 Confirm which active OpenSpec changes are complete and archive-ready.
+- [x] 134.2 Archive each completed change with `openspec archive <id> --yes` and review the CLI output for spec updates/archive placement.
+- [x] 134.3 Run strict OpenSpec validation after archiving and capture the review outcome below.
+
+### 134 Review
+- `openspec list` showed one archive-ready completed change: `add-browser-callback-webview2-mode`. The other active changes (`add-preset-delete-undo`, `add-script-subroutines-and-libraries`, `add-script-assertions`) were not complete and were left untouched.
+- `openspec show add-browser-callback-webview2-mode` confirmed the change was still active before archiving.
+- `openspec archive add-browser-callback-webview2-mode --yes` succeeded. The CLI updated two live specs: `openspec/specs/scripting-network-steps/spec.md` (`+4`) and `openspec/specs/scripting-runtime/spec.md` (`+5`), then moved the change into `openspec/changes/archive/2026-03-21-add-browser-callback-webview2-mode`.
+- Post-archive verification: `openspec list` no longer shows `add-browser-callback-webview2-mode` as an active change, and the archive directory now contains `2026-03-21-add-browser-callback-webview2-mode`.
+- `openspec validate --strict --no-interactive` produced the CLI's "Nothing to validate" message after the archive because no explicit target was selected, so I reran the effective repo-wide check as `openspec validate --all --strict --no-interactive`, which passed (`23` items, `0` failed).
+
+## 133. Show connection-test status in row headers for selected hosts
+- [x] 133.1 Add focused failing WinForms coverage for row-header connection-test visuals, including selected-row visibility, clearing on reset/edit, and theme reapplication.
+- [x] 133.2 Update `Form1` connection-test state/rendering so row headers reflect testing/success/failure while preserving existing `Host_IP` cell tinting for unselected rows.
+- [x] 133.3 Run focused UI verification, broader regression verification, and build verification; then capture the review outcome below.
+
+### 133 Review
+- Root cause was the host grid’s owner-drawn selected-cell path in `Form1`: `Dgv_Variables_CellPainting(...)` repaints selected data cells with the selection color, so the existing green/red `Host_IP` tint disappeared whenever the tested row stayed selected.
+- Added focused coverage in `SSH_Helper.Tests/UI/Form1ConnectionTestStatusTests.cs` for the exact contracts the user asked for: successful selected rows, failed selected rows, clearing via `ClearConnectionTestIndicators()`, clearing on `Host_IP` edits, theme reapplication, and the existing queued-progress completion-status regression.
+- The red verification failed for the right runtime reason before the fix: every new assertion showed `row.HeaderCell.Style.BackColor` staying `Color.Empty`, proving there was no row-header status lane for selected hosts.
+- `Form1.cs` now keeps per-row connection-test visual state, applies both `Host_IP` cell styling and row-header styling from that state, marks rows as `Testing` before async connection checks complete, and clears/reapplies the state through clear, edit, and theme-change paths.
+- `Dgv_Variables_RowPostPaint(...)` now paints the row-header background from the stored connection-test state and draws the row number with a contrast-aware foreground so success/failure/testing remain readable in both themes.
+- Focused red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-status-red\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-status-red\obj\`` failed as intended (`5` failed, `1` passed) because row-header styles remained empty before the implementation.
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-status-green\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-status-green\obj\`` passed (`6` passed, `0` failed).
+- Broader host-grid/UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~HostGridUtilitiesTests|FullyQualifiedName~JobEditorDialogHostGridParityTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-status-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-status-ui\obj\`` (`27` passed, `0` failed).
+- `dotnet build .\SSH_Helper.sln -nologo` passed. The build still reported the existing `MSB3277` `WindowsBase`/WebView2 warnings, the existing `xUnit1031` warnings in `ExpressionParserTests.cs`, and transient `MSB3026` copy-retry warnings because a running `SSH_Helper.exe` process (`PID 86392`) had the apphost locked while the build produced `SSH_Helper.dll`.
+
+## 132. Restore Presets/Favorites selection sync across tab switches
+- [x] 132.1 Add failing WinForms coverage for switching between Presets and Favorites while each tab keeps its own selected preset.
+- [x] 132.2 Update `Form1` so tab changes re-sync the commands pane to the active tab selection and Favorites rebuilds preserve their selected node.
+- [x] 132.3 Run focused UI verification, broader regression verification, and capture the review outcome below.
+
+### 132 Review
+- Root cause was split across two gaps in `Form1`: switching between `Presets` and `Favorites` only synchronized the visible tab/header state, not the commands editor, and `RefreshFavoritesList()` rebuilt the Favorites tree from scratch without restoring its selected node.
+- Added `SSH_Helper.Tests/UI/Form1PresetTabSelectionTests.cs` with a focused WinForms regression that loads a temp config snapshot, selects different presets on each tab, and proves two contracts: returning to `Presets` reloads the preset already selected there, and returning to `Favorites` restores the previously selected favorite and its commands.
+- `Form1.cs` now routes both tree selection handlers and tab switches through one shared preset/folder selection application path, including the existing dirty-check behavior. The form also remembers the last selected node per tree so tab changes do not depend on `TreeView.SelectedNode` surviving a hide/show cycle.
+- `RefreshFavoritesList()` now preserves the previously selected favorite across tree rebuilds and restores it quietly before the active-tab sync reapplies the corresponding commands in the editor.
+- Focused red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTabSelectionTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tab-selection-red\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tab-selection-red\obj\`` failed as intended on the original bug (`editor.Text` stayed on `echo beta` after switching back to `Presets`).
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTabSelectionTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tab-selection-green\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tab-selection-green\obj\`` passed (`1` passed, `0` failed).
+- Broader preset/UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTabSelectionTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~PresetTreeSelectionGuardTests|FullyQualifiedName~PresetTreeViewportRestorerTests|FullyQualifiedName~PresetTreeDeleteMutationTests|FullyQualifiedName~PresetDeletionSelectionResolverTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tab-selection-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tab-selection-ui\obj\`` (`22` passed, `0` failed).
+- `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\preset-tab-selection-build\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tab-selection-build\obj\`` passed. The build still reports the existing `MSB3277` WebView2/`WindowsBase` warnings and the existing `xUnit1031` warnings from `ExpressionParserTests`.
+
+## 131. Replace visible Presets/Favorites native tab chrome with a buffered custom header
+- [x] 131.1 Add failing coverage that requires the presets area to use a dedicated buffered header strip and a clipped viewport for the underlying native tab control.
+- [x] 131.2 Keep `presetsTabControl` as the content/state host, but hide its native header from the visible surface and route the visible `Presets` / `Favorites` switching through a custom buffered header strip.
+- [x] 131.3 Run focused buffered-surface verification, broader UI verification, callback-adjacent verification, and build verification; then record the corrected root cause below.
+
+### 131 Review
+- The latest user repro showed Tasks 126-130 still were not at the real owner of the remaining flicker. Even after buffering adjacent panels and patching the hidden-border seam, the visible `Presets` / `Favorites` header still belonged to the native Win32 `TabControl`, so native repaint could still flash in that strip during `Run Selected`.
+- Added red coverage in `Form1BufferedSurfacesTests` that requires three concrete contracts: a dedicated `PresetTabHeaderStrip` control exists, the native `presetsTabControl` is hosted inside a viewport panel and shifted upward to hide its header, and tab selection remains synchronized between the visible header strip and the underlying tab control. The focused red run failed exactly there because none of those contracts existed yet.
+- Added `UI/PresetTabHeaderStrip.cs`, a buffered custom control that paints the visible `Presets` / `Favorites` tabs in dark/light themes and raises `SelectedIndexChanged` like a normal two-tab switcher.
+- `Form1.Designer.cs` now hosts the presets tab content inside `presetsTabViewportPanel` and places `presetsTabHeaderStrip` above it. The native `presetsTabControl` stays in place as the actual content/state host, but its header is clipped out of the visible surface by shifting the control upward inside the viewport.
+- `Form1.cs` now initializes the custom header strip, keeps its selection synchronized with `presetsTabControl`, updates the viewport offset from the native tab-header height, and applies the same theme/font changes to the custom header so the visible behavior stays aligned with the previous UI.
+- Focused red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1BufferedSurfacesTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\custom-presets-header-red\bin\ -p:BaseIntermediateOutputPath=artifacts\custom-presets-header-red\obj\`` failed as intended (`3` failed, `8` passed).
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1BufferedSurfacesTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\custom-presets-header-green2\bin\ -p:BaseIntermediateOutputPath=artifacts\custom-presets-header-green2\obj\`` passed (`11` passed, `0` failed).
+- Broader UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\custom-presets-header-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\custom-presets-header-ui\obj\`` (`33` passed, `0` failed).
+- Callback-adjacent verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ExecuteAsync_WebView2Mode_UsesEmbeddedUiHost_AndClosesSessionAfterCompletion|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\custom-presets-header-callback\bin\ -p:BaseIntermediateOutputPath=artifacts\custom-presets-header-callback\obj\`` (`9` passed, `0` failed).
+- `dotnet build .\SSH_Helper.sln -nologo` passed with only the existing `MSB3277` WebView2/`WindowsBase` warnings and the existing five `xUnit1031` warnings.
+- Manual validation is still required in the live app: rerun the preset flow and confirm the remaining visible flicker around `Presets` / `Favorites` is gone now that the native header is no longer on the visible surface.
+
+## 130. Remove residual Presets/Favorites header-gap flicker during Run Selected
+- [x] 130.1 Add failing coverage for the borderless tab control’s early background paint contract around the header gap beside `Favorites`.
+- [x] 130.2 Paint the hidden-border header background during the tab control’s erase/paint lifecycle so the trailing header gap stays dark before native repaint finishes.
+- [x] 130.3 Run focused tab/UI verification, callback-adjacent verification, and build verification; then record the corrected root cause below.
+
+### 130 Review
+- The latest user repro showed Task 129 was still not at the real seam. The remaining flash was not the run strip anymore; it was the borderless tab header gap beside `Favorites` itself.
+- Added a red test in `BorderlessTabControlTests` that dispatches `WM_ERASEBKGND` into a bitmap-backed HDC and samples the trailing header gap after erase, before the later post-`WM_PAINT` seam overlay runs. That red test failed exactly as expected: the gap remained pure white during erase.
+- Root cause was the `BorderlessTabControl.WndProc(...)` erase path. When `HideBorder` was enabled, `WM_ERASEBKGND` returned handled (`m.Result = 1`) but painted nothing, so the header gap beside the last tab stayed unpainted until the later seam overlay. During `Run Selected` invalidations, that left a visible flash in the exact region the user pointed out.
+- `BorderlessTabControl` now paints the hidden-border background during `WM_ERASEBKGND` when an HDC is provided. The new `PaintHiddenBorderBackground(...)` helper fills the client area with the dark content color and fills the full tab-header band with the dark header color before native paint continues. The existing post-`WM_PAINT` overlay remains in place for the seam/edge cleanup.
+- Focused red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\tab-header-gap-red\bin\ -p:BaseIntermediateOutputPath=artifacts\tab-header-gap-red\obj\`` failed as intended (`1` failed, `5` passed).
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\tab-header-gap-green\bin\ -p:BaseIntermediateOutputPath=artifacts\tab-header-gap-green\obj\`` passed (`6` passed, `0` failed).
+- Broader UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\tab-header-gap-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\tab-header-gap-ui\obj\`` (`30` passed, `0` failed).
+- Callback-adjacent verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ExecuteAsync_WebView2Mode_UsesEmbeddedUiHost_AndClosesSessionAfterCompletion|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\tab-header-gap-callback\bin\ -p:BaseIntermediateOutputPath=artifacts\tab-header-gap-callback\obj\`` (`9` passed, `0` failed).
+- A normal `dotnet build .\SSH_Helper.sln -nologo` attempt was blocked because the running SSH Helper instance locked `bin\Debug\net8.0-windows\SSH_Helper.exe` (`PID 177044`).
+- Equivalent compile verification passed with `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\tab-header-gap-build\bin\ -p:BaseIntermediateOutputPath=artifacts\tab-header-gap-build\obj\`` with only the existing `MSB3277` and `xUnit1031` warnings.
+- Manual validation is still required in the live app: click `Run Selected` repeatedly and confirm the small flash beside `Favorites` is actually gone.
+
+## 129. Remove remaining Run Selected flicker around Presets/Favorites
+- [x] 129.1 Add failing coverage for the remaining run-start repaint seams around the Presets/Favorites area.
+- [x] 129.2 Convert the remaining run-strip and preset-search surfaces to buffered containers and batch the run-strip execution-state transition to avoid live layout churn.
+- [x] 129.3 Run focused UI verification, callback-adjacent verification, and a build; then record the corrected root cause below.
+
+### 129 Review
+- The latest repro moved the remaining flicker off the tab-strip paint path and onto the `Run Selected` state transition itself. Tracing that click path showed `SetExecutionMode(true)` immediately toggles `btnStopAll.Visible`, and the two surfaces nearest the Presets/Favorites seam that participate in that transition were still plain `Panel`s: the bottom execute strip and the runtime-created preset search strip.
+- Added red coverage in `Form1BufferedSurfacesTests` for both seams. The initial focused run failed exactly where expected: `executePanel` was still declared as `System.Windows.Forms.Panel`, and `_presetSearchPanel` was still instantiated as `System.Windows.Forms.Panel`. The tab-page `UseVisualStyleBackColor` contract already passed, so the fix stayed tight on the still-unbuffered surfaces.
+- `Form1.Designer.cs` now declares `executePanel` as `BufferedPanel`, and `Form1.InitializePresetSearchFilter()` now creates `_presetSearchPanel` as `BufferedPanel`. `SetExecutionMode(...)` also batches the run-strip button-state flip inside `executePanel.SuspendLayout()/ResumeLayout(false)` and avoids redundant property sets before invalidating just that strip.
+- Focused red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1BufferedSurfacesTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\run-selected-flicker-red\bin\ -p:BaseIntermediateOutputPath=artifacts\run-selected-flicker-red\obj\`` failed as intended (`2` failed, `6` passed).
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1BufferedSurfacesTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\run-selected-flicker-green\bin\ -p:BaseIntermediateOutputPath=artifacts\run-selected-flicker-green\obj\`` passed (`8` passed, `0` failed).
+- Broader UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\run-selected-flicker-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\run-selected-flicker-ui\obj\`` (`29` passed, `0` failed).
+- Callback-adjacent verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ExecuteAsync_WebView2Mode_UsesEmbeddedUiHost_AndClosesSessionAfterCompletion|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\run-selected-flicker-callback\bin\ -p:BaseIntermediateOutputPath=artifacts\run-selected-flicker-callback\obj\`` (`9` passed, `0` failed).
+- A normal `dotnet build .\SSH_Helper.sln -nologo` attempt was blocked because `bin\Debug\net8.0-windows\SSH_Helper.exe` was locked by the running SSH Helper process (`PID 53200`).
+- Equivalent compile verification passed with `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\run-selected-flicker-build\bin\ -p:BaseIntermediateOutputPath=artifacts\run-selected-flicker-build\obj\`` with only the existing `MSB3277` and `xUnit1031` warnings.
+- Manual validation is still required in the live app: click `Run Selected` repeatedly on the preset flow and confirm the remaining Presets/Favorites-area flicker is actually gone.
+
+## 128. Restore dark tab-strip coverage while keeping Presets/Favorites stable
+- [x] 128.1 Replace the incorrect managed-paint-only contract with failing tests for a buffered post-native hidden-border overlay path.
+- [x] 128.2 Reintroduce the hidden-border seam cleanup through a dedicated buffered overlay renderer instead of direct multi-draw `Graphics.FromHwnd` patches.
+- [x] 128.3 Run focused borderless-tab, broader UI, callback-adjacent verification, and a build; then record the corrected root cause below.
+
+### 128 Review
+- The latest user repro showed Task 127 was still incomplete: removing the direct `WM_PAINT` overlay eliminated one source of flicker, but it also exposed native white seams at launch and still left a small flicker around the `Presets` tab.
+- Root cause was paint order. The managed `TabControl_Paint(...)` path can render the right colors in isolation, but the live WinForms/native `TabControl` lifecycle still paints chrome after that path for hidden-border tabs. So the remaining seams required a post-native overlay, just not the old direct multi-rectangle `Graphics.FromHwnd` patching that flickered.
+- Added corrected red tests in `BorderlessTabControlTests`: one requires dark borderless tabs to avoid a managed `Paint` handler again, and one requires a dedicated hidden-border overlay renderer (`PaintHiddenBorderOverlay`) that can repaint the trailing header gap dark. The red slice failed for the expected reasons (`2` failed, `3` passed).
+- `BorderlessTabControl` now owns a dedicated hidden-border overlay renderer with configurable header/inactive-tab colors. `WndProc(...)` still suppresses `WM_ERASEBKGND`, but its `WM_PAINT` follow-up now renders the seam overlay into an offscreen bitmap and blits once, instead of issuing a sequence of direct `Graphics.FromHwnd` fills against the live window surface.
+- `Form1.ApplyDarkTabControl(...)` and `DialogTheme.StyleTabControl(...)` now configure that buffered hidden-border overlay for borderless tabs and no longer attach the managed `Paint` handler in those cases. Non-borderless tabs still use the existing managed `Paint` path.
+- Focused red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-buffered-overlay-red\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-buffered-overlay-red\obj\`` failed as intended (`2` failed, `3` passed).
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-buffered-overlay-green\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-buffered-overlay-green\obj\`` passed (`5` passed, `0` failed).
+- Broader UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-buffered-overlay-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-buffered-overlay-ui\obj\`` (`26` passed, `0` failed).
+- Callback-adjacent verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ExecuteAsync_WebView2Mode_UsesEmbeddedUiHost_AndClosesSessionAfterCompletion|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-buffered-overlay-callback\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-buffered-overlay-callback\obj\`` (`9` passed, `0` failed).
+- `dotnet build .\SSH_Helper.sln -nologo` passed with only the existing `MSB3277` WebView2/`WindowsBase` warnings and the existing five `xUnit1031` warnings.
+- Manual validation is still required in the live app: relaunch SSH Helper in dark mode and rerun the callback preset to confirm the tab strip no longer shows the white launch seam or the residual flicker around `Presets` / `Favorites`.
+
+## 127. Remove residual native-overlay flicker from Presets/Favorites tabs
+- [x] 127.1 Replace the incorrect borderless-tab paint hypothesis with a failing test that proves dark borderless tabs should use one buffered managed overlay path.
+- [x] 127.2 Move the borderless-tab hidden-border overlay off the direct post-`WM_PAINT` path and onto the normal managed paint path used during dark tab styling.
+- [x] 127.3 Run focused tab/UI verification, callback-adjacent verification, and a build; then record the corrected root cause below.
+
+### 127 Review
+- The user's follow-up video showed Task 126's hypothesis was incomplete: removing the extra managed `Paint` hookup reduced one overlay path, but the tabs still flickered during the callback activation flow.
+- Root cause was the remaining direct post-`WM_PAINT` overdraw in `BorderlessTabControl.WndProc(...)`, which used `Graphics.FromHwnd(Handle)` to patch the tab strip after native painting. That bypassed the normal buffered paint path, so a small tab-header flash could still show during activation repaints.
+- Replaced the earlier test with a more accurate red contract in `BorderlessTabControlTests`: `ApplyDarkTabControl_WhenBorderlessTabControl_AttachesManagedPaintOverlay`. The red slice failed for the correct reason because borderless dark tabs had zero managed overlay handlers.
+- `Form1.ApplyDarkTabControl(...)` now restores the managed `TabControl_Paint` overlay for `BorderlessTabControl`, while `BorderlessTabControl.WndProc(...)` keeps only `WM_ERASEBKGND` suppression and no longer performs direct post-`WM_PAINT` drawing. That leaves one buffered managed overlay path instead of a native overdraw patch.
+- While touching the same owner-draw path, `TabControl_DrawItem(...)` now uses `DarkSurface2` instead of the stray `Color.Red` top-edge pen for unselected tabs, aligning the strip with the rest of the dark header colors.
+- Red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-native-overlay-red\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-native-overlay-red\obj\`` failed as intended (`1` failed, `2` passed).
+- Green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-native-overlay-green\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-native-overlay-green\obj\`` passed (`3` passed, `0` failed).
+- Broader UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-native-overlay-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-native-overlay-ui\obj\`` (`24` passed, `0` failed).
+- Callback-adjacent verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ExecuteAsync_WebView2Mode_UsesEmbeddedUiHost_AndClosesSessionAfterCompletion|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-native-overlay-callback\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-native-overlay-callback\obj\`` (`9` passed, `0` failed).
+- `dotnet build .\SSH_Helper.sln -nologo` passed with only the existing `MSB3277` WebView2/`WindowsBase` warnings and the existing five `xUnit1031` warnings.
+- Manual validation is still required in the live app: rerun the callback preset and confirm the `Presets` / `Favorites` tabs no longer show the residual flicker during launch/close activation repaint.
+
+## 126. Remove residual Presets/Favorites tab-header flicker
+- [x] 126.1 Add failing coverage proving `ApplyDarkTabControl` does not attach a redundant managed `Paint` overlay to `BorderlessTabControl`.
+- [x] 126.2 Remove the duplicate paint hookup so the preset/favorites header overlay is owned in one place only.
+- [x] 126.3 Run targeted UI and callback verification, build, and record the outcome below.
+
+### 126 Review
+- The user's latest repro narrowed the remaining issue to a small flash around the `Presets` / `Favorites` tab header after the larger callback and whole-form flicker fixes were already in place.
+- Root cause was duplicate painting on the same surface: `BorderlessTabControl` already owns its hidden-border/header overlay in `WndProc` during `WM_PAINT`, but `Form1.ApplyDarkTabControl(...)` was also attaching `TabControl_Paint` to the same control.
+- Added a focused red test in `BorderlessTabControlTests`: `ApplyDarkTabControl_WhenBorderlessTabControl_DoesNotAttachExtraPaintHandler`. The red slice failed for the correct reason because one managed event entry remained attached after dark-tab styling.
+- `Form1.ApplyDarkTabControl(...)` now still applies `DrawItem` styling and the `BorderlessTabControl` appearance properties, but only non-borderless tabs receive the extra `TabControl_Paint` handler. That leaves `BorderlessTabControl` as the sole owner of the tab-header overlay path.
+- Red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-flicker-red\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-flicker-red\obj\`` failed as intended (`1` failed, `2` passed).
+- Green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-flicker-green\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-flicker-green\obj\`` passed (`3` passed, `0` failed).
+- Broader UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-flicker-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-flicker-ui\obj\`` (`24` passed, `0` failed).
+- Callback-adjacent verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ExecuteAsync_WebView2Mode_UsesEmbeddedUiHost_AndClosesSessionAfterCompletion|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\presets-tab-flicker-callback\bin\ -p:BaseIntermediateOutputPath=artifacts\presets-tab-flicker-callback\obj\`` (`9` passed, `0` failed).
+- `dotnet build .\SSH_Helper.sln -nologo` passed with only the existing `MSB3277` WebView2/`WindowsBase` warnings and the existing five `xUnit1031` warnings.
+- Manual validation is still required in the live app: rerun the self-contained callback preset and confirm the `Presets` / `Favorites` tab header no longer shows the residual flicker during activation repaint.
+
+## 125. Remove remaining callback-launch flicker in the main form
+- [x] 125.1 Lock the root cause with focused failing tests for keep-open WebView2 callback launch behavior and the presets tab repaint path.
+- [x] 125.2 Implement the minimal fix so keep-open callback windows stop forcing whole-form disabled-state repaints, and narrow any remaining preset-tab overpaint that still flickers during activation.
+- [x] 125.3 Run focused callback/UI verification, rerun the relevant regression slices, and record the outcome below.
+
+### 125 Review
+- Root-cause investigation from the user’s latest repro points at the keep-open WebView2 path disabling the entire SSH Helper owner form while the callback is pending. That broad `_owner.Enabled = false` repaint lines up with the “labels disappear” symptom during launch.
+- Added red tests to prove the issue at the correct seams: `BrowserCallbackUiHostTests` now requires keep-open WebView2 launch to leave the owner form enabled, and `Form1BufferedSurfacesTests` requires the preset/script/history header surfaces to use `BufferedPanel` instead of raw `Panel`.
+- The red slice failed for the expected reasons: the callback host was disabling the owner form, and the affected header panels were still plain `Panel` fields.
+- The production fix removed the keep-open owner-disable/reenable path from `BrowserCallbackUiHost`, preserving the modeless WebView2 behavior and close-path focus restore without forcing a whole-form disabled-state repaint.
+- `Form1.Designer.cs` now uses `BufferedPanel` for `hostsHeaderPanel`, `presetsHeaderPanel`, `scriptHeaderPanel`, `scriptFooterPanel`, and `historyHeaderPanel` so the label-heavy header surfaces exposed during callback activation repaint through the buffered container wrapper.
+- Focused verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~Form1BufferedSurfacesTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-task125-green\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-task125-green\obj\`` (`9` passed, `0` failed).
+- Focused UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BufferedContainerControlTests|FullyQualifiedName~BorderlessTabControlTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-task125-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-task125-ui\obj\`` (`26` passed, `0` failed).
+- Focused callback verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ExecuteAsync_WebView2Mode_UsesEmbeddedUiHost_AndClosesSessionAfterCompletion|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-task125-callback-focused\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-task125-callback-focused\obj\`` (`9` passed, `0` failed).
+- Browser-callback regression verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallback|FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~SettingsDialogBrowserCallbackTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-task125-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-task125-regression\obj\`` (`90` passed, `0` failed).
+- `dotnet build .\SSH_Helper.sln -nologo` passed with the existing `MSB3277` WebView2/`WindowsBase` warnings and the existing five `xUnit1031` warnings only.
+- Manual validation is still required for the exact user repro: rerun the two-callback self-contained preset in SSH Helper and confirm the preset tab area and header labels stay visually stable during callback launch and close.
+
+## 124. Review Task 2 buffered container tests quality
+- [x] 124.1 Inspect `BufferedContainerControlTests.cs` against existing UI-test patterns and Task 2 requirements.
+- [x] 124.2 Run a focused test command to determine whether the current red state is a runtime failure or a compile-time break.
+- [x] 124.3 Record strengths, issues, and approval status for the Task 2 review.
+
+### 124 Review
+- Initial review found a real issue: `BufferedContainerControlTests` directly referenced the not-yet-created `SSH_Helper.BufferedSplitContainer` type, so the red slice failed at compile time instead of as an executable test run.
+- The test file was then corrected to resolve `SSH_Helper.BufferedPanel` and `SSH_Helper.BufferedSplitContainer` via reflection at runtime, which preserves the intended red state without blocking compilation.
+- Follow-up quality review approved the revised file. The only remaining note was a minor brittleness concern around anchoring assembly lookup to an unrelated type; I removed that by switching the test helper to use `typeof(SSH_Helper.Form1).Assembly`.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BufferedContainerControlTests|FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase1-red\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase1-red\obj\` failed as expected at runtime (`3` failed, `2` passed) because `SSH_Helper.BufferedPanel` and `SSH_Helper.BufferedSplitContainer` do not exist yet.
+
+## 123. Reduce general-interaction whole-form flicker
+- [x] 123.1 Add failing tests for host-grid/history redraw batching and any new main-form repaint helper seam.
+- [x] 123.2 Implement the phase-2 redraw narrowing in `HostGridRestoreBatcher`, `HistoryListBox`, and `Form1` without expanding into unrelated dialog/theme cleanup.
+- [x] 123.3 Run focused UI verification, rerun phase-1 callback regressions, build, and capture the review outcome below.
+
+### 123 Review
+- Task 123.1 is complete. Extended `HostGridRestoreBatcherTests` with an exact public `BeginMutationScope()` contract check plus explicit deferral assertions, and added `HistoryListBoxTests` covering both the width-stable resize path and the font-change-plus-explicit-refresh duplicate-work path.
+- Kept the new history-list coverage handle-based only with an attached in-memory host control and no visible top-level form. `ApplyFontSettingsTests.cs` did not need modification because no new helper seam was required.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~HostGridRestoreBatcherTests|FullyQualifiedName~HistoryListBoxTests|FullyQualifiedName~ApplyFontSettingsTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase2-red\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase2-red\obj\` failed as intended at assertion time, not compile time (`2` failed, `38` passed).
+- The two intended red failures are:
+- missing public `BeginMutationScope()` on `HostGridRestoreBatcher`
+- duplicate `HistoryListBox` work when a font change is followed by an explicit `RefreshVariableItemHeights()` call
+- A quality-review concern remained about using exact public reflection instead of a typed call for the future `BeginMutationScope()` API. I kept the reflection contract because Task 5 explicitly required a compile-safe red state before the API exists; a direct typed call would fail the whole test project at compile time.
+- Task 123.2 is complete. `HostGridRestoreBatcher` now exposes `BeginMutationScope()` and batches scrollbar/host-count refreshes until both restore and mutation scopes exit, `HistoryListBox` suppresses the immediate post-font duplicate refresh, and `Form1` now uses mutation scopes for `ClearGrid()` and `PasteFromClipboard()`, narrows `DeleteSelectedCells()` repainting, removes the whole-form `Refresh()` from `ApplyTheme()`, and narrows `scriptHeaderPanel.Invalidate(true)` to `Invalidate()`.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~HostGridRestoreBatcherTests|FullyQualifiedName~HistoryListBoxTests|FullyQualifiedName~ApplyFontSettingsTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase2-green\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase2-green\obj\` passed (`40` passed, `0` failed).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with the existing `MSB3277` WindowsBase conflicts and existing `xUnit1031` warnings.
+- Task 123.2 correction pass tightened the remaining review gaps: `OpenCsvFile()` now runs under `BeginHostGridMutationScope()`, `DeleteSelectedCells()` batches its host-count churn through the existing mutation scope path, and `HistoryListBox` now suppresses width-stable explicit refresh repeats more generally instead of only after a font change.
+- Verification for the correction pass: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~HostGridRestoreBatcherTests|FullyQualifiedName~HistoryListBoxTests|FullyQualifiedName~ApplyFontSettingsTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase2-green\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase2-green\obj\` passed (`41` passed, `0` failed).
+- Task 123.2 review-fix pass addressed the remaining follow-up notes: `ClearGrid()` now refreshes the hosts-file indicator after clearing loaded-file tracking state, `HistoryListBoxTests` now proves the font change itself did observable work before checking the follow-up explicit refresh, and `HostGridRestoreBatcherTests` now uses the public `BeginMutationScope()` API directly.
+- Verification for the review-fix pass: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~HostGridRestoreBatcherTests|FullyQualifiedName~HistoryListBoxTests|FullyQualifiedName~ApplyFontSettingsTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase2-green\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase2-green\obj\` passed (`41` passed, `0` failed).
+- Task 123.3 verification is complete. The broadened phase-2 UI slice passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~HostGridRestoreBatcherTests|FullyQualifiedName~HistoryListBoxTests|FullyQualifiedName~ApplyFontSettingsTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase2-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase2-ui\obj\`` (`57` passed, `0` failed).
+- Reran the callback-related regression slice against the phase-1 buffering/focus surfaces with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BufferedContainerControlTests|FullyQualifiedName~BorderlessTabControlTests|FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase2-callback-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase2-callback-regression\obj\`` (`11` passed, `0` failed).
+- To keep that callback slice deterministic, the callback/focus WinForms tests now run inside a shared non-parallel xUnit collection so the process-global activation override and visible-form cleanup cannot race across classes.
+- A prior verification attempt produced misleading failures because I ran WinForms-heavy test processes in parallel. After rerunning those same slices serially and cleaning the stale `testhost`, the failures disappeared; the passing serial reruns above are the results that count.
+- Final verification: `dotnet build .\SSH_Helper.sln -nologo` passed with the same existing `MSB3277` WebView2/`WindowsBase` conflict warning and the same existing five `xUnit1031` warnings in `ExpressionParserTests.cs`.
+- Remaining manual validation for the whole-form flicker work is still interactive: rerun the two-callback preset in SSH Helper and confirm the main form regain-focus path looks clean end to end.
+
+## 122. Reduce callback regain-focus whole-form flicker
+- [x] 122.1 Add failing tests for new buffered panel/split-container infrastructure used by the main form.
+- [x] 122.2 Implement buffered container controls and apply them to the top-level `Form1` split/panel hierarchy that repaints during callback regain-focus.
+- [ ] 122.3 Run focused UI/browser-callback verification, build, manually validate the two-callback preset flow, and capture the review outcome below.
+
+### 122 Review
+- Task 122.1 is complete. Added `BufferedContainerControlTests` to lock the new buffered panel and split-container contracts: buffered painting styles for both controls plus `WM_ERASEBKGND` suppression coverage for the split-container path.
+- Kept the tests handle-based only and added `Application.OpenForms.Count == 0` guards so the focused slice cannot leak a visible top-level form during test execution.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BufferedContainerControlTests|FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase1-red\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase1-red\obj\` failed as intended (`3` failed, `2` passed) because the buffered container controls are not implemented yet.
+- Task 122.2 is complete. Added `BufferedPanel` and `BufferedSplitContainer` as small buffering wrappers, then swapped the top-level phase-1 `Form1` surfaces to the buffered types without expanding into header/footer panels.
+- `BufferedPanel` and `BufferedSplitContainer` both enable `OptimizedDoubleBuffer`, `AllPaintingInWmPaint`, and `ResizeRedraw`. After review feedback, both controls now gate `WM_ERASEBKGND` suppression behind opaque-surface checks instead of swallowing background erase unconditionally.
+- Updated the following `Form1` activation surfaces to buffered types: `mainSplitContainer`, `topSplitContainer`, `commandSplitContainer`, `outputSplitContainer`, `historySplitContainer`, `hostsPanel`, `commandPanel`, `presetsPanel`, `scriptPanel`, `outputPanel`, `outputRightPanel`, `historyPanel`, and `hostListPanel`.
+- Focused implementation verification passed with:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BufferedContainerControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-task3-buffered-only\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-task3-buffered-only\obj\` (`3/3`)
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BufferedContainerControlTests|FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-task3-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-task3-ui\obj\` (`5/5`)
+- Automated Task 122.3 verification also passed with:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BufferedContainerControlTests|FullyQualifiedName~BorderlessTabControlTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase1-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase1-ui\obj\` (`21/21`)
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ExecuteAsync_WebView2Mode_UsesEmbeddedUiHost_AndClosesSessionAfterCompletion|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase1-callback-focused\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase1-callback-focused\obj\` (`8/8`)
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallback|FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~SettingsDialogBrowserCallbackTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\whole-form-flicker-phase1-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\whole-form-flicker-phase1-regression\obj\` (`89/89`)
+- `dotnet build .\SSH_Helper.sln -nologo` passed.
+- The first attempt at the broader regression slice timed out and left a stale `testhost` process locking the shared output path. After stopping the orphaned `testhost` processes, the rerun passed cleanly. Existing `MSB3277` WebView2/`WindowsBase` warnings and the existing five `xUnit1031` warnings remain unchanged.
+- Manual interactive verification is still pending: rerun the two-callback preset in SSH Helper and confirm the main window regains focus without the broad client-area flash that originally exposed the whole-form flicker.
+
+## 121. Plan whole-form flicker reduction
+- [x] 121.1 Trace the main-form activation, layout, and repaint paths that still flicker after the presets-tab fix.
+- [x] 121.2 Decompose the remaining flicker into a first scoped phase instead of treating the entire form as one opaque bug.
+- [x] 121.3 Capture the agreed design/plan before implementation.
+
+### 121 Review
+- Reviewed the main-form redraw path and confirmed the remaining flicker is not one missing buffering flag. `Form1` already uses form-level double buffering, but the app still contains a deep split-container/panel hierarchy plus several broad `Refresh()` / `Invalidate()` paths that can flash during activation and interaction repaint.
+- Agreed on a two-phase design instead of a single risky whole-form pass: phase 1 targets callback regain-focus flicker after embedded callback windows close; phase 2 targets broader interaction/layout flicker once the activation path is stable.
+- Wrote the approved design to `docs\superpowers\specs\2026-03-20-whole-form-flicker-reduction-design.md`.
+- Wrote the implementation plan to `docs\superpowers\plans\2026-03-20-whole-form-flicker-reduction.md`.
+- I did not create a commit because the worktree already contains unrelated in-flight changes.
+
+## 120. Remove visible host window from borderless tab control tests
+- [x] 120.1 Update the new `BorderlessTabControl` regression test so it exercises the handle/erase path without showing a top-level `Form`.
+- [x] 120.2 Rerun the targeted test suite and confirm the test still passes without leaving a visible blank window behind.
+
+### 120 Review
+- Root cause was the new `BorderlessTabControlTests.WndProc_WhenHideBorderAndEraseBackground_SuppressesNativeErase` test creating and showing a plain top-level `Form` just to parent the tab control. That host window matched the blank desktop form the user saw during test runs.
+- Updated the test to create the tab control handle directly, keep the `WM_ERASEBKGND` regression coverage, and assert `Application.OpenForms.Count == 0` so the test can no longer leak a visible host form.
+- Verification passed with:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\borderless-tab-test-host-fix\bin\ -p:BaseIntermediateOutputPath=artifacts\borderless-tab-test-host-fix\obj\` (`2/2`)
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BorderlessTabControlTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~ExecutionDetailsDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\borderless-tab-test-host-ui-focused\bin\ -p:BaseIntermediateOutputPath=artifacts\borderless-tab-test-host-ui-focused\obj\` (`18/18`)
+- Existing `MSB3277` and `xUnit1031` warnings remain unchanged.
+
+## 119. Remove presets-tab flicker during callback focus restoration
+- [ ] 119.1 Add focused failing tests proving the custom presets tab control uses buffered painting and suppresses native background erase while border-hiding is active.
+- [ ] 119.2 Implement the minimal `BorderlessTabControl` paint-path changes needed to reduce activation flicker without changing preset behavior or callback focus logic.
+- [ ] 119.3 Run focused UI/browser-callback verification plus a build, then capture the review outcome below.
+
+### 119 Review
+- Pending implementation.
+
+## 118. Restore main app focus when closing keep-open callback windows
+- [x] 118.1 Reproduce the remaining multi-callback focus issue in the modeless WebView2 close path and identify the missing owner-restore step.
+- [x] 118.2 Add a focused failing test proving closing a keep-open callback window requests activation of the SSH Helper main form.
+- [x] 118.3 Implement the minimal close-path focus restore and rerun focused plus regression browser-callback verification.
+
+### 118 Review
+- Root cause was the modeless keep-open WebView2 close path never explicitly reactivating SSH Helper. Once the last callback window closed, Windows was free to leave focus on whatever app had most recently been active instead of the main form.
+- Added a focused host-level regression test in `BrowserCallbackUiHostTests` that opens two keep-open callback windows, closes one, and asserts the close path requests activation for the main SSH Helper form rather than falling through to another window.
+- Added a small test seam to `BrowserCallbackFocusRestorer` so WinForms tests can observe scheduled activation attempts without relying on native foreground behavior, then used that seam from the new host test.
+- `BrowserCallbackUiHost` now calls the existing focus-restorer from the modeless dialog `FormClosed` path whenever a keep-open callback window is dismissed and the main owner form is still valid.
+- Verification passed with:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ClosingKeepOpenBrowserCallbackWindow_RequestsMainFormActivation" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-restore-green1\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-restore-green1\obj\` (`1/1`)
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ExecuteAsync_WebView2Mode_UsesEmbeddedUiHost_AndClosesSessionAfterCompletion|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-restore-focused-serial2\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-restore-focused-serial2\obj\` (`8/8`)
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallback|FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~SettingsDialogBrowserCallbackTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-restore-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-restore-regression\obj\` (`89/89`)
+- `dotnet build .\SSH_Helper.sln -nologo`
+- The build still reports the existing `MSB3277` WebView2/`WindowsBase` warnings and the existing five `xUnit1031` warnings in `ExpressionParserTests.cs`.
+- I did not run a manual interactive UI smoke test from the CLI; the remaining validation is to rerun the two-callback preset in SSH Helper and confirm both window closes restore focus to the main app.
+
+## 117. Remove embedded browser close flicker in keep-open WebView2 flows
+- [x] 117.1 Identify the smallest WebView2 host/session change that avoids flashing the owner window when a completed callback window is closed.
+- [x] 117.2 Add focused failing tests for the revised keep-open window lifecycle and close behavior.
+- [x] 117.3 Implement the minimal callback UI host/dialog changes needed to satisfy the tests without regressing cancel/timeout behavior.
+- [x] 117.4 Run focused browser-callback tests, a regression slice, and a build, then capture the review outcome below.
+
+### 117 Review
+- Root cause was the keep-open WebView2 path entering a modal `ShowDialog(owner)` loop. When the operator later closed that completed callback window, WinForms necessarily reactivated the owner form, which produced the visible flash. Owner selection also preferred `Form.ActiveForm`, so a still-open callback window could become the owner for a later callback step.
+- Added focused regression coverage in `BrowserCallbackUiHostTests` for two contracts: keep-open WebView2 sessions are shown modeless instead of modal, and owner resolution ignores already-open callback windows in favor of the main application form. Extended `BrowserCallbackCaptureCommandTests` so the command must pass the new keep-open launch hint through to the UI host.
+- Extended `BrowserCallbackUiLaunchRequest` with a `KeepWindowOpenOnSuccess` hint and threaded it from `BrowserCallbackCaptureCommand` based on `auto_close_browser`. The WebView2 host now keeps the existing modal behavior for normal auto-close flows, but uses a modeless show path for keep-open flows and temporarily disables the owner form only while the callback is still pending. Once the callback completes, the owner is re-enabled and the completed browser window can be closed without dropping out of a modal dialog loop.
+- Added a lightweight callback-window marker so owner resolution skips active callback windows and attaches new callback windows to the main app form instead of chaining callback dialogs together.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackUiHostTests|FullyQualifiedName~ExecuteAsync_WebView2Mode_UsesEmbeddedUiHost_AndClosesSessionAfterCompletion|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-flicker-green3\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-flicker-green3\obj\` passed (4/4).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallback|FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~SettingsDialogBrowserCallbackTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-flicker-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-flicker-regression\obj\` passed (88/88).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with the existing `MSB3277` `WindowsBase` conflict warnings from the WebView2 package and the existing five `xUnit1031` warnings in `ExpressionParserTests.cs`.
+- Manual interactive verification was not run from this CLI session. The remaining live check is to rerun your keep-open WebView2 preset in the app and confirm the completed callback window now closes without the old owner-window flash.
+
+## 116. Investigate embedded browser close flicker between callback steps
+- [x] 116.1 Confirm the live sample preset sequence and whether it opens one or multiple callback windows.
+- [x] 116.2 Trace the WebView2 callback dialog lifecycle, including owner resolution, modal show, completion state, and close behavior.
+- [x] 116.3 Document the root cause, expected WinForms behavior, and any practical mitigation options in the review section below.
+
+### 116 Review
+- Confirmed the shipped self-contained preset bundle contains two sequential `browser_callback_capture` steps, one query and one fragment, so the sample flow can show more than one callback window during a single run.
+- In `browser_mode: webview2`, the "browser" is not an external browser process. SSH Helper creates a `BrowserCallbackWebViewDialog`, centers it on the owner, hides it from the taskbar, and shows it modally via `_dialog.ShowDialog(_owner)`.
+- The dialog owner is chosen by `ResolveOwnerForm()`, which prefers `Form.ActiveForm`. That means the active SSH Helper window, or even a previous callback dialog if one is still open, becomes the owner for the next callback window.
+- When `auto_close_browser: false`, `BrowserCallbackCaptureCommand` marks the dialog completed and intentionally keeps the WebView2 session open after the callback succeeds instead of disposing it. The script executor then continues immediately to later steps while that modal dialog is still on screen.
+- Because the callback window is an owned modal WinForms dialog, closing it necessarily returns activation to its owner before anything else happens. That is the brief flash of the underlying SSH Helper window the user is seeing; it is normal for the current `ShowDialog(owner)` implementation rather than an external-browser close path.
+- In multi-step keep-open flows, there is an extra visual handoff: after one callback dialog closes, WinForms reactivates the owner, and a later callback step may then create/show a separate modal dialog. That produces a visible transition between windows instead of a seamless swap.
+- No production code was changed for this investigation. Verification was source inspection of `BrowserCallbackUiHost`, `BrowserCallbackCaptureCommand`, `ScriptExecutor`, and the shipped sample preset bundle; no live UI smoke test was run from this CLI session.
+
+## 115. Fix embedded callback completion affordances and dark mode rendering
+- [x] 115.1 Add focused failing tests for the embedded browser callback dialog completion state and the callback HTML theme styling.
+- [x] 115.2 Update the embedded WebView2 session/dialog so a successful keep-open callback changes the footer action from `Cancel` to `Close` with matching instruction text.
+- [x] 115.3 Update browser callback completion/bridge HTML to render correctly in dark mode instead of relying on default text/background colors.
+- [x] 115.4 Run focused tests, the browser-callback regression slice, and a solution build, then capture the review outcome below.
+
+### 115 Review
+- Root cause was split across two layers. The embedded WebView2 dialog never received a success-state transition, so its footer button remained the static `Cancel` control and the header text still described closing the window as cancellation even after the callback had already completed. Separately, the generated callback HTML had no explicit theme CSS, so dark mode depended on browser defaults and could render black text against the dark WebView background.
+- Added `BrowserCallbackWebViewDialogTests` to lock the dialog completion-state contract and added `ExecuteAsync_QueryCapture_ReturnsThemeAwareHtmlResponse` so callback success HTML must ship with explicit light/dark styling.
+- Extended `IBrowserCallbackUiSession` with `MarkCompletedAsync()` and updated the WebView2 session to forward successful keep-open completion into the dialog. The dialog now changes its title, instructions, and footer button text from `Cancel` to `Close` after success instead of staying in the pre-completion state.
+- Updated the callback completion and fragment bridge pages to emit explicit CSS with `color-scheme: light dark` plus dark-mode background/foreground rules, so the success content renders legibly inside the embedded browser and in external browsers that honor `prefers-color-scheme`.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackWebViewDialogTests|FullyQualifiedName~ExecuteAsync_QueryCapture_ReturnsThemeAwareHtmlResponse" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-ui-theme-red\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-ui-theme-red\obj\` failed first because the dialog had no completion-state method and the HTML did not contain theme-aware styling.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackWebViewDialogTests|FullyQualifiedName~ExecuteAsync_QueryCapture_ReturnsThemeAwareHtmlResponse|FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-ui-theme-green\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-ui-theme-green\obj\` passed (3/3).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallback|FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~SettingsDialogBrowserCallbackTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-ui-theme-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-ui-theme-regression\obj\` passed (86/86).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with the existing `MSB3277` `WindowsBase` conflict warnings from the WebView2 package and the existing five `xUnit1031` warnings in `ExpressionParserTests.cs`.
+- Manual WinForms/WebView2 smoke testing was not run from this CLI session, so the remaining live check is to rerun your preset once and confirm the footer now says `Close` after success and the page text renders correctly in dark mode.
+
+## 114. Keep embedded browser open when auto-close is disabled
+- [x] 114.1 Update the active `add-browser-callback-webview2-mode` OpenSpec change so `auto_close_browser: false` keeps the successful embedded WebView2 callback surface open instead of only changing page HTML.
+- [x] 114.2 Add a focused failing WebView2 runtime test proving the embedded callback session is not closed after success when `auto_close_browser: false`.
+- [x] 114.3 Update `BrowserCallbackCaptureCommand` session-lifecycle handling so successful `browser_mode: webview2` steps only auto-close when `auto_close_browser` is `true`, while failure/timeout/cancel cleanup stays intact.
+- [x] 114.4 Update `SCRIPTING.md`, rerun focused/regression/build/spec verification, and capture the review outcome below.
+
+### 114 Review
+- Corrected the `auto_close_browser` contract so successful visible WebView2 callback windows now stay open for inspection when `auto_close_browser: false`, instead of only omitting `window.close()` from the callback page HTML.
+- Added focused WebView2 runtime coverage for two distinct behaviors: a shown embedded callback window stays open after success when auto-close is disabled, and a delayed hidden session that never became visible still gets disposed instead of lingering invisibly.
+- Updated `BrowserCallbackCaptureCommand` to keep the embedded UI session alive only after a successful WebView2 callback when `auto_close_browser: false` and the dialog was actually shown to the operator; timeout, cancellation, validation failure, and never-shown delayed sessions still clean up through the existing dispose path.
+- Extended the browser-callback UI session contract with `WasShownToUser` so the command can distinguish a visible embedded window from a hidden delayed session.
+- Updated the active OpenSpec change and `SCRIPTING.md` so the documented behavior now matches the runtime, including the hidden delayed-session cleanup rule.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_DoesNotCloseSessionAfterCompletion" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-webview2-keep-open-red\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-webview2-keep-open-red\obj\` failed first because the embedded session was still auto-closing (`CloseCallCount` was `1`).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-webview2-keep-open-red2\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-webview2-keep-open-red2\obj\` failed during the first pass because the hidden delayed session was not being disposed (`DisposeCallCount` was `0`).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExecuteAsync_WebView2Mode_WithAutoCloseBrowserFalse_" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-webview2-keep-open-green\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-webview2-keep-open-green\obj\` passed (2/2).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-webview2-keep-open-focused\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-webview2-keep-open-focused\obj\` passed (29/29).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallback|FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~SettingsDialogBrowserCallbackTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-webview2-keep-open-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-webview2-keep-open-regression\obj\` passed (84/84).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with the existing `MSB3277` `WindowsBase` conflict warnings from the WebView2 package and the existing five `xUnit1031` warnings in `ExpressionParserTests.cs`.
+- Verification: `openspec validate add-browser-callback-webview2-mode --strict --no-interactive` passed.
+- Manual WinForms/WebView2 smoke testing was not run from this CLI session, so the remaining live check is to rerun your preset once and confirm the visible embedded callback window now stays open when `auto_close_browser: false`.
+
+## 113. Add browser callback auto-close toggle
+- [x] 113.1 Update the active `add-browser-callback-webview2-mode` OpenSpec change to cover a per-step `auto_close_browser` option and completion-page close behavior.
+- [x] 113.2 Add focused failing parser and completion-page tests for `auto_close_browser`, including query and fragment success pages that stay open.
+- [x] 113.3 Extend `browser_callback_capture` parsing/validation and runtime HTML generation to carry `auto_close_browser` with a default of `true`.
+- [x] 113.4 Update `SCRIPTING.md`, run focused/regression/build/spec verification, and capture the review outcome below.
+
+### 113 Review
+- Extended the active OpenSpec change `add-browser-callback-webview2-mode` so the browser callback contract now includes a per-step `auto_close_browser` toggle for successful callback pages.
+- Added `BrowserCallbackCaptureOptions.AutoCloseBrowser`, parser support for `auto_close_browser`, and the documented default of `true`.
+- Updated query and fragment completion-page HTML generation in `BrowserCallbackCaptureCommand` so `auto_close_browser: false` omits `window.close()` while preserving the existing `/complete` acknowledgement flow and keeping the owned WebView2 dialog close behavior unchanged.
+- Added focused parser/runtime coverage for explicit `auto_close_browser: false`, default `true`, query-mode stay-open completion pages, and fragment-mode stay-open bridge pages.
+- Updated `SCRIPTING.md` to document `auto_close_browser` and clarify that it only affects the callback page's self-close behavior, not the WebView2 dialog lifecycle.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-auto-close-red\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-auto-close-red\obj\` failed first because `BrowserCallbackCaptureOptions` did not yet define `AutoCloseBrowser`.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-auto-close-green1\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-auto-close-green1\obj\` passed (27/27).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallback|FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~SettingsDialogBrowserCallbackTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-auto-close-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-auto-close-regression\obj\` passed (82/82).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with the existing `MSB3277` `WindowsBase` conflict warnings from the WebView2 package and the existing five `xUnit1031` warnings in `ExpressionParserTests.cs`.
+- Verification: `openspec validate add-browser-callback-webview2-mode --strict --no-interactive` passed.
+- Manual interactive browser smoke testing was not run from this CLI session, so the new stay-open completion-page behavior should still be click-tested once in the app.
+
+## 112. Add delayed WebView2 reveal for browser callbacks
+- [x] 112.1 Update the active `add-browser-callback-webview2-mode` OpenSpec change to cover a per-step `show_after_seconds` option and hidden-until-slow WebView2 behavior.
+- [x] 112.2 Add focused failing parser and runtime tests for `show_after_seconds`, including "completes before reveal" and "reveals after delay" behavior.
+- [x] 112.3 Extend `browser_callback_capture` parsing/validation and runtime launch plumbing to carry `show_after_seconds` into the WebView2 UI host.
+- [x] 112.4 Implement delayed WebView2 dialog reveal so `show_after_seconds: 0` keeps the current immediate popup, values above zero stay hidden until the timeout elapses, and early callback completion never shows the popup.
+- [x] 112.5 Update `SCRIPTING.md`, run focused/regression/build/spec verification, and capture the review outcome below.
+
+### 112 Review
+- Extended the active OpenSpec change `add-browser-callback-webview2-mode` so the script contract and runtime behavior now cover per-step `show_after_seconds` delayed reveal semantics for WebView2 browser callback steps.
+- Added `BrowserCallbackCaptureOptions.ShowAfterSeconds`, parser support for `show_after_seconds`, and validation that rejects negative values with line-specific `browser_callback_capture.show_after_seconds` errors.
+- Threaded `show_after_seconds` through `BrowserCallbackCaptureCommand` and `BrowserCallbackUiLaunchRequest`, then updated the WebView2 dialog session so delayed steps initialize the embedded browser immediately but only call `ShowDialog(...)` after the configured delay if the callback is still pending.
+- Added focused parser/runtime coverage for three new contracts: parsing/defaulting `show_after_seconds`, early callback completion before reveal, and delayed reveal when the callback remains pending. Also hardened the hidden-start runtime by forcing WinForms/WebView2 handle creation before initializing the control.
+- Updated `SCRIPTING.md` to document `show_after_seconds`, its default of `0`, and that it only changes behavior in `browser_mode: webview2`.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-show-after-red\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-show-after-red\obj\` failed first because `BrowserCallbackCaptureOptions` and `BrowserCallbackUiLaunchRequest` did not yet define `ShowAfterSeconds`.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-show-after-focused\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-show-after-focused\obj\` passed (25/25).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallback|FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~SettingsDialogBrowserCallbackTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-show-after-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-show-after-regression\obj\` passed (80/80).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with the existing `MSB3277` `WindowsBase` conflict warnings from the WebView2 package and the existing five `xUnit1031` warnings in `ExpressionParserTests.cs`.
+- Verification: `openspec validate add-browser-callback-webview2-mode --strict --no-interactive` passed.
+- Manual WinForms/WebView2 click-through was not run from this CLI session, so the new hidden-then-reveal behavior should still be smoke-tested once in the app.
+
+## 111. Investigate WebView2 preset still launching external browser
+- [x] 111.1 Inspect the live saved preset text and confirm whether every `browser_callback_capture` step actually sets `browser_mode: webview2`.
+- [x] 111.2 Trace the runtime launch-selection path to confirm whether the code still routes `browser_mode: webview2` steps to the external-browser host.
+- [x] 111.3 Capture the root cause and the exact corrective action for the user below.
+
+### 111 Review
+- The runtime launch-selection code is honoring `browser_mode` correctly: `BrowserCallbackCaptureCommand` parses `BrowserMode`, resolves `webview2` to `BrowserCallbackUiMode.WebView2`, and only falls back to the external host when the option is omitted or resolves to `external`.
+- The saved live preset in `%LocalAppData%\\SSH_Helper\\config.json` is the mismatch. The preset named `Browser Callback Self-Contained Demo webview2` contains `browser_mode: webview2` on the first `browser_callback_capture` step only.
+- The second `browser_callback_capture` step in that same saved preset omits `browser_mode`, so it defaults to the external browser by design. That matches the user's observed behavior exactly.
+- No production code change was required for this report. The corrective action is to add `browser_mode: webview2` to every callback step that should stay inside SSH Helper, or create/import a dedicated all-WebView2 sample preset.
+
+## 110. Add WebView2 browser callback mode
+- [x] 110.1 Add the OpenSpec change `add-browser-callback-webview2-mode` with proposal, tasks, and spec deltas for the new script option plus embedded-browser runtime/profile reset behavior.
+- [x] 110.2 Add focused failing tests for `browser_callback_capture browser_mode`, WebView2 launch/cancel behavior, and the settings clear-data action before changing production code.
+- [x] 110.3 Add the WebView2 package/runtime plumbing, including static loader preference and single-file publish compatibility with the installed Evergreen runtime.
+- [x] 110.4 Implement the browser-callback UI host abstraction plus `browser_mode: webview2` support, keeping `open_browser=false` as manual mode and external browser as the backward-compatible default.
+- [x] 110.5 Add a shared WebView2 profile manager, persistent app-owned user-data folder, active-session tracking, and full profile reset behavior.
+- [x] 110.6 Add the Settings UI action to clear embedded browser data with explicit confirmation and active-session blocking.
+- [x] 110.7 Update `SCRIPTING.md`, add any necessary sample coverage, run focused verification plus build/publish checks, and capture the review outcome below.
+
+### 110 Review
+- Added OpenSpec change `add-browser-callback-webview2-mode` with validated proposal, tasks, design notes, and delta specs for `scripting-network-steps` plus `scripting-runtime`.
+- Extended `browser_callback_capture` with `browser_mode`, parser normalization/validation, and the documented precedence that keeps `open_browser=false` in manual mode while defaulting omitted browser mode to the external browser path.
+- Introduced a browser-callback UI host seam plus a shared WebView2 profile manager. `BrowserCallbackCaptureCommand` now selects between external browser launch and an owned modal WebView2 dialog, fails cleanly if the embedded dialog is closed early, and only uses the focus restorer for external-browser runs.
+- Added a Settings action to clear embedded browser data with explicit confirmation text and active-session blocking, backed by the shared profile manager.
+- Updated `SCRIPTING.md` to document `browser_mode`, `open_browser` precedence, WebView2 behavior, persistent embedded browser data, and the settings-based reset path.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~BrowserCallbackWebViewProfileManagerTests|FullyQualifiedName~SettingsDialogBrowserCallbackTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-webview2-red\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-webview2-red\obj\` failed first because the new WebView2 host/profile/settings seam types did not exist yet.
+- Verification: the same focused command/parser/settings slice passed after implementation (26/26).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallback|FullyQualifiedName~NetworkStepParserTests|FullyQualifiedName~SettingsDialogAppearanceTests|FullyQualifiedName~SettingsDialogBrowserCallbackTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-webview2-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-webview2-regression\obj\` passed (78/78).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted the existing 5 xUnit analyzer warnings in `ExpressionParserTests.cs` plus new `MSB3277` `WindowsBase` conflict warnings from the `Microsoft.Web.WebView2` package's unused WPF reference path.
+- Verification: `dotnet publish .\SSH_Helper.csproj -c Release -nologo -o artifacts\browser-callback-webview2-publish` passed. `artifacts\browser-callback-webview2-publish\WebView2Loader.dll`, `artifacts\browser-callback-webview2-publish\runtimes\win-x64\native\WebView2Loader.dll`, and `artifacts\browser-callback-webview2-publish\Microsoft.Web.WebView2.Wpf.dll` were all absent.
+- Verification: `openspec validate add-browser-callback-webview2-mode --strict --no-interactive` passed.
+- Manual interactive browser smoke testing was not run from this CLI session, so embedded WebView2 navigation/focus return should still be click-tested in the app.
+
+## 109. Fix browser callback focus-restorer native imports
+- [x] 109.1 Trace the JIT crash and confirm that the focus-restorer P/Invokes are targeting non-existent `Native...` exports instead of the real Windows entry-point names.
+- [x] 109.2 Add a focused failing test that the focus-restorer native imports map to the real `user32.dll` and `kernel32.dll` export names.
+- [x] 109.3 Correct the `DllImport` declarations so the focus-restorer uses the intended Windows entry points without changing its activation behavior.
+- [x] 109.4 Run focused verification plus a build, then capture the review outcome below.
+
+### 109 Review
+- Root cause is concrete: `NativeMethodsAdapter` uses wrapper method names like `NativeIsIconic`, but the `DllImport` declarations did not specify `EntryPoint`, so the CLR tried to resolve exports like `NativeIsIconic` in `user32.dll` and threw `EntryPointNotFoundException` at runtime.
+- Added `NativeMethodsAdapter_ImportsUseRealWindowsEntryPoints` to `SSH_Helper.Tests\UI\BrowserCallbackFocusRestorerTests.cs` so the native import mapping is now covered by an automated test instead of being left to runtime/manual validation.
+- Updated every focus-restorer import to declare the real Windows entry point explicitly: `IsIconic`, `SetForegroundWindow`, `ShowWindow`, `GetForegroundWindow`, `GetWindowThreadProcessId`, `GetCurrentThreadId`, `AttachThreadInput`, `BringWindowToTop`, and `SetFocus`.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackFocusRestorerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-native-import-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-native-import-tests\obj\` failed first because the import contract still resolved `NativeIsIconic` instead of `IsIconic`.
+- Verification: the same focused test command passed after the implementation (3/3).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackSelfContainedPresetTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~NetworkStepParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-regression\obj\` passed (53/53).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted 5 existing xUnit analyzer warnings in `ExpressionParserTests.cs` unrelated to this change.
+
+## 108. Align focus restore with browser close completion
+- [x] 108.1 Trace the callback completion path and confirm that focus restore currently fires before the browser completion page actually closes the tab.
+- [x] 108.2 Add a focused failing test that successful browser callback capture waits for a browser completion acknowledgement before returning.
+- [x] 108.3 Implement the minimal runtime change so query and fragment callback flows acknowledge browser completion before the command returns and requests app focus.
+- [x] 108.4 Run focused verification plus a build, then capture the review outcome below.
+
+### 108 Review
+- Root cause turned out to be two separate timing gaps. Browser-driven query/fragment capture returned as soon as the payload arrived, which could request app focus before the completion page had posted its final acknowledgement and attempted to close the tab. Separately, the focus retry path relied on a local `System.Windows.Forms.Timer` and made no immediate activation attempt, so the restore sequence itself could be delayed or dropped.
+- Updated `BrowserCallbackCaptureCommand` so browser GET/fragment flows now hold captured values in a pending payload and return only after the browser completion page POSTs `/complete`. The completion/capture HTML now sends that acknowledgement before `window.close()`.
+- Updated `BrowserCallbackFocusRestorer` so it prefers the app's active form when available, performs an immediate `TryActivateForm(...)` before any delayed retries, and runs the retry loop through an async delay path instead of a local WinForms timer.
+- Updated `BrowserCallbackCaptureCommandTests` to model the new browser completion acknowledgement sequence and added focused regression coverage in `BrowserCallbackFocusRestorerTests` for the immediate activation attempt.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-complete-signal-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-complete-signal-tests\obj\` failed first because browser-driven query capture no longer completed immediately and the existing query tests were still assuming the old contract.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-handshake-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-handshake-tests\obj\` failed first because `ScheduleUiActivationAttempts(...)` did not attempt activation immediately.
+- Verification: the same browser-callback/focus handshake command passed after the implementation (8/8).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackSelfContainedPresetTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~NetworkStepParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-regression\obj\` passed (52/52).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted 5 existing xUnit analyzer warnings in `ExpressionParserTests.cs` unrelated to this change.
+- Residual risk: foreground activation is still best-effort under Windows/browser policy, but the app now waits for browser completion before restoring focus and the retry mechanism no longer depends on an unrooted local timer.
+
+## 107. Restore app focus after query-mode browser callbacks
+- [x] 107.1 Re-check the self-contained browser-callback flow and confirm whether query-mode capture leaves the browser foreground because it returns a plain text completion page instead of the auto-close HTML path.
+- [x] 107.2 Add a focused failing test that expects successful query-mode callback capture to return an HTML completion page that attempts to close the browser tab.
+- [x] 107.3 Implement the minimal runtime change so query-mode callbacks use the same auto-close completion-page behavior and align the focus restore timing with that page.
+- [x] 107.4 Run focused verification plus a build, then capture the review outcome below.
+
+### 107 Review
+- Root cause in the self-contained preset flow is concrete and code-level: `capture_mode: query` returned a plain text success page (`"Callback captured. You may close this tab."`) and never attempted `window.close()`. The demo preset hits query mode first, so the browser was expected to remain foreground unless the OS focus restore won on its own.
+- Updated `BrowserCallbackCaptureCommand` so successful query-mode callbacks now return an HTML completion page with the same auto-close attempt pattern used elsewhere, instead of a plain text page.
+- Also widened the browser-callback focus retry schedule in `BrowserCallbackFocusRestorer` so the activation attempts continue after the completion page has had time to render and attempt to close.
+- Added `ExecuteAsync_QueryCapture_ReturnsAutoCloseHtmlResponse` to `SSH_Helper.Tests\Scripting\BrowserCallbackCaptureCommandTests.cs` to lock the regression: successful query-mode capture must now return a page containing `window.close()`.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackCaptureCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-query-html-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-query-html-tests\obj\` failed first because the query response body was still plain text.
+- Verification: the same focused test command passed after the implementation (6/6).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~NetworkStepParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-query-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-query-regression\obj\` passed (50/50).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted 5 existing xUnit analyzer warnings in `ExpressionParserTests.cs` unrelated to this change.
+- Residual risk: browser auto-close remains best-effort because modern browsers may still block `window.close()` on tabs they did not open via script. If that happens, the longer focus retry path is still in effect, but foreground return is not fully guaranteed by Windows or the browser.
+
+## 106. Improve browser callback focus restoration
+- [x] 106.1 Trace the existing browser callback focus-restore path and confirm whether the failure is in our code or Windows foreground-lock policy.
+- [x] 106.2 Add a focused failing test for the activation strategy needed when another foreground window owns the input queue.
+- [x] 106.3 Implement the minimal fix so browser callback restore can attach to the foreground thread and make SSH Helper active more reliably.
+- [x] 106.4 Run focused verification plus a build, then capture the review outcome below.
+
+### 106 Review
+- Root cause is Windows foreground-lock behavior, not the absence of a restore attempt. The old browser callback path already tried `TopMost`, `BringToFront`, `Activate`, and `SetForegroundWindow`, but when the browser still owned the active input queue Windows could deny the foreground switch and flash the taskbar instead.
+- Added `Services\Scripting\Commands\BrowserCallbackFocusRestorer.cs` to own browser-callback focus restoration and to make the native-window activation sequence testable.
+- The new activation path now detects the current foreground window, temporarily calls `AttachThreadInput(...)` when that window belongs to another thread, and then uses `BringWindowToTop(...)`, `SetForegroundWindow(...)`, and `SetFocus(...)` around the existing WinForms activation steps before detaching again.
+- `BrowserCallbackCaptureCommand` now delegates to the shared focus restorer instead of carrying its own private restore logic.
+- Added `SSH_Helper.Tests\UI\BrowserCallbackFocusRestorerTests.cs` to lock the regression: when another foreground thread is active, the restore path must attach/detach input queues around the foreground switch.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackFocusRestorerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-tests\obj\` failed first with `CS0246` because the new focus-restorer seam did not exist yet.
+- Verification: the same focused test command passed after the implementation (1/1).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~BrowserCallbackFocusRestorerTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~NetworkStepParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-focus-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-focus-regression\obj\` passed (49/49).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted 5 existing xUnit analyzer warnings in `ExpressionParserTests.cs` unrelated to this change.
+- Residual risk: Windows can still refuse foreground activation in some policy or shell scenarios; this change makes activation materially more reliable, but it cannot guarantee focus in every OS state.
+
+## 105. Build browser callback scripting test fixture
+- [x] 105.1 Review the existing `browser_callback_capture` runtime, docs, QA fixture patterns, and import/export surfaces.
+- [x] 105.2 Clarify the desired callback test target and success criteria with the user.
+- [x] 105.3 Propose the fixture approaches, present the recommended design, and get approval before implementation.
+- [x] 105.4 Implement the approved preset/environment artifacts with tests or fixture validation as appropriate.
+- [x] 105.5 Run verification, capture how to import/use the fixture, and write the review outcome below.
+
+### 105.4 Task Plan
+- [x] 105.4.1 Add a failing test that expects a dedicated self-contained browser-callback preset export file to exist and validate cleanly.
+- [x] 105.4.2 Run the focused test slice and confirm it fails for the missing fixture.
+- [x] 105.4.3 Create a single importable preset-export JSON that exercises local query and fragment browser callback capture with no separate environment file.
+- [x] 105.4.4 Re-run the focused fixture-validation tests and confirm they pass.
+
+### 105 Review
+- Added `ScriptSamples\browser_callback_self_contained_presets.json`, a single-file import bundle containing one preset: `Browser Callback Self-Contained Demo`.
+- The preset is fully self-contained: it uses only script-local `vars`, no separate environment file, no SSH commands, and no external identity provider. It exercises `browser_callback_capture` twice against `127.0.0.1:38086`: once in `query` mode and once in `fragment` mode.
+- The preset description now states exact prerequisites and expected outcome: one selected/current host row, single-host execution, a local browser, and an available localhost port.
+- Added `SSH_Helper.Tests\Scripting\BrowserCallbackSelfContainedPresetTests.cs` to lock the fixture contract: the bundle must exist, contain exactly one preset, parse/validate cleanly, use two browser callback capture steps, require no SSH session, require no external columns/environment variables, and end with an explicit success exit.
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackSelfContainedPresetTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-self-contained-tests\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-self-contained-tests\obj\` failed first as expected because the bundle file did not exist.
+- Verification: the same focused test command passed after adding the bundle (1/1).
+- Verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackSelfContainedPresetTests|FullyQualifiedName~BrowserCallbackCaptureCommandTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~NetworkStepParserTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\browser-callback-self-contained-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\browser-callback-self-contained-regression\obj\` passed (49/49).
+- Verification: `dotnet build .\SSH_Helper.sln -nologo` passed with 0 errors. The build emitted 5 existing xUnit analyzer warnings in `ExpressionParserTests.cs` unrelated to this fixture.
+
+## 104. Fix top-pane truncation under menu/tool strip
+- [x] 104.1 Confirm whether runtime font scaling leaves the top chrome and section headers on stale designer-era heights.
+- [x] 104.2 Reflow the menu/tool strip stack and the top section headers from current font metrics so the top panes sit below the bars and their titles no longer clip.
+- [ ] 104.3 Run the affected UI path and verify the layout in the reproduced theme/font setup.
+
+### 104 Review
+- Root cause is mixed layout strategy: `ApplyFontSettings(...)` recalculates menu and tool strip heights at runtime, but the surrounding top-level content/header layout still relies on fixed measurements from the original designer layout.
+- `Form1.cs` now reapplies the form's top chrome bounds after font changes so the menu strip, main tool strip, and `mainSplitContainer` stack from their actual current heights instead of the old `24 + 25 = 49` assumption.
+- The top section headers now recalculate their title heights from the active fonts and resize their panels so the Hosts, Presets, and Commands titles do not get clipped when the UI font scale grows.
+- Verification has not been run in this pass.
+
+## 103. Merge callback_test without keycloak sample
+- [x] 103.1 Review `origin/callback_test` and decide import scope based on the requirement to keep `SCRIPTING.md` and drop `keycloak_block_site.yaml`.
+- [x] 103.2 Import browser callback capture feature work and explicitly exclude the sample keycloak block site file from the merge.
+- [x] 103.3 Preserve low-risk cleanup behavior for stale capture fields in `BrowserCallbackCaptureCommand.ClearCapture(...)`.
+- [x] 103.4 Add/update targeted tests for parser, dependency, preflight, and callback stale-suffix cleanup paths.
+- [x] 103.5 Verify final branch state excludes `keycloak_block_site.yaml` and commit changes as one atomic merge.
+
+### 103 Review
+- Reviewed `origin/callback_test` and confirmed it is two commits: `6e82241` (feature + `SCRIPTING.md`) and `75cc4ef` (deletes `keycloak_block_site.yaml`).
+- Kept the feature path by cherry-picking `6e82241` without commit and manually excluding the keycloak sample file before committing the merge.
+- Added `BrowserCallbackCaptureCommand` support plus runtime/parser/dependency integrations and updated `SCRIPTING.md` in commit `4950903`.
+- `ClearCapture(...)` now removes all stale `into_*` variables before writing the new callback capture result, not just `into`, `into_count`, and `into_keys`.
+- Added regression coverage in `SSH_Helper.Tests/Scripting/BrowserCallbackCaptureCommandTests.cs` for stale-suffixed capture variable cleanup.
+- Verification: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BrowserCallbackCaptureCommandTests"` passed (5/5).
+- Verification: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests|FullyQualifiedName~NetworkStepParserTests"` passed (48/48).
+- Verification: `Test-Path keycloak_block_site.yaml` returned `False`; `git status --short` has no `keycloak_block_site.yaml` entries.
+
+## 102. Improve startup load time
+- [x] 102.1 Inspect the startup path, identify the largest synchronous load-time costs, and agree whether to optimize first paint, fully-ready state, or a balanced target.
+- [x] 102.2 Implement the chosen load-time improvements with minimal behavior change and verify they reduce synchronous startup work.
+- [x] 102.3 Run focused verification, run a solution build, and capture the review outcome below.
+
+### 102.2 Task 2 Plan
+- [x] 102.2.1 Add focused `HostGridRestoreBatcher` tests for collapsed restore-scope flush behavior.
+- [x] 102.2.2 Run the targeted batcher test filter and confirm the expected red failure because the helper does not exist yet.
+- [x] 102.2.3 Implement `UI/HostGridRestoreBatcher.cs` with nested restore scopes and deferred single-flush requests.
+- [x] 102.2.4 Wire `Form1` startup/bulk host-grid restore paths to batch scrollbar, host-count, dirty-mark, and hosts-file-indicator work without changing non-restore behavior.
+- [x] 102.2.5 Re-run the targeted batcher test slice and the requested host-grid regression slice.
+- [x] 102.2.6 Commit the scoped Task 2 changes.
+
+### 102 Review
+- Task 1 reused the constructor's first `AppConfiguration` snapshot across startup-sensitive paths. `PresetManager` now supports `Load(AppConfiguration config)`, `Form1.InitializeFromConfiguration(...)` and `RestoreWindowState(...)` take the startup snapshot explicitly, and startup preset-tree construction can use the supplied config instead of rereading `config.json`.
+- Task 2 added `UI\\HostGridRestoreBatcher.cs` plus focused tests in `SSH_Helper.Tests\\UI\\HostGridRestoreBatcherTests.cs` to lock the batching contract: repeated requests collapse into one flush and nested restore scopes wait for the outermost dispose.
+- `Form1` now routes host-grid scrollbar/count/dirty requests through the batcher, and both `RestoreApplicationState(...)` and `LoadEnvironmentIntoGrid(...)` populate the grid inside a restore scope so startup restore no longer recomputes scrollbars and host counts on every row/column mutation.
+- Task 3 moved heavy scheduler bootstrap out of the constructor and onto a once-only idle continuation after `Form1_Shown` completes restore/layout work. The scheduler shell still appears immediately, while the existing `InitializeSchedulerServices()` path now runs once after startup restore and still performs job load, crash recovery, missed-run recording, timer start, and status refresh.
+- After each restore scope completes, `Form1` still resets `_csvDirty` to `false`, captures the loaded snapshot, and refreshes the hosts-file indicator so restored startup state stays clean while row heights, host count text, and themed custom scrollbars settle once at the end.
+- Startup measurement method: release build, one warm-up launch, then five measured launches of the app against the same local config; each run records `WindowMs` (main window appearance) and `ReadyMs` (time until the process stays under ~1% CPU for three consecutive 200 ms samples after the window appears).
+- Baseline startup metrics before implementation: `WindowAvg=1021.1 ms`, `WindowMedian=1009.8 ms`, `ReadyAvg=2174.8 ms`, `ReadyMedian=2250.2 ms`.
+- Post-change startup metrics after implementation: `WindowAvg=515.7 ms`, `WindowMedian=533.6 ms`, `ReadyAvg=1486.8 ms`, `ReadyMedian=1535.1 ms`.
+- Measured improvement from the same method/config: `WindowAvg` improved by about `49.5%` and `ReadyAvg` improved by about `31.6%`.
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetManagerTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-preset-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-preset-tests\\obj\\` passed (49/49).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetManagerTests|FullyQualifiedName~PresetManagerFolderBaseEnvironmentTests|FullyQualifiedName~ConfigurationServiceWindowStateTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-config-regression\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-config-regression\\obj\\` passed (55/55).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~HostGridRestoreBatcherTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-grid-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-grid-tests\\obj\\` passed (2/2).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~HostGridUtilitiesTests|FullyQualifiedName~ApplyFontSettingsTests|FullyQualifiedName~JobEditorDialogHostGridParityTests|FullyQualifiedName~HostGridRestoreBatcherTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-grid-regression\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-grid-regression\\obj\\` passed (47/47).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~SchedulingServiceMissedRunIntegrationTests|FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~SchedulerNotificationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-scheduler-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-scheduler-tests\\obj\\` passed (87/87).
+- Verification: `dotnet test SSH_Helper.Tests\\SSH_Helper.Tests.csproj -nologo --filter "FullyQualifiedName~PresetManagerTests|FullyQualifiedName~PresetManagerFolderBaseEnvironmentTests|FullyQualifiedName~ConfigurationServiceWindowStateTests|FullyQualifiedName~HostGridUtilitiesTests|FullyQualifiedName~ApplyFontSettingsTests|FullyQualifiedName~JobEditorDialogHostGridParityTests|FullyQualifiedName~HostGridRestoreBatcherTests|FullyQualifiedName~SchedulingServiceMissedRunIntegrationTests|FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~SchedulerNotificationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\startup-load-time-final-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-final-tests\\obj\\` passed (189/189).
+- Verification: `dotnet build SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\\startup-load-time-build\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\startup-load-time-build\\obj\\` passed with 0 warnings and 0 errors.
+
 ## 101. Eliminate delete flicker with in-place tree mutation
 - [x] 101.1 Re-check why the refresh-based viewport preservation still leaves the presets tree in a bad scroll state after delete.
 - [x] 101.2 Replace the normal preset delete path with an in-place tree node removal so deleting one preset does not rebuild the whole presets tree.
@@ -1458,3 +2027,87 @@
 - Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~JobStorageServiceTests|FullyQualifiedName~JobExportServiceTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~JobDefinitionTests|FullyQualifiedName~JobEditorDialogTimeoutOverrideTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\scheduler-timeouts-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-timeouts-tests\\obj\\` passed (163/163).
 - Verification: `openspec validate update-scheduler-job-timeouts --strict --no-interactive` passed.
 - Manual interactive verification was not run from this CLI environment; the OpenSpec manual verification item remains unchecked.
+
+## 133. Implement add-preset-delete-undo
+- [x] 133.1 Add OpenSpec change `add-preset-delete-undo` plus this task checklist, then validate the change once the deltas are written.
+- [x] 133.2 Add failing service and UI coverage for session-scoped delete undo, guarded `Ctrl+Z`, delete-stack invalidation, descendant-folder preservation, and recursive folder-delete scheduler effects.
+- [x] 133.3 Implement snapshot-based preset/folder delete undo support, including preset-library snapshot capture/restore and affected-job snapshot restore.
+- [x] 133.4 Correct folder delete semantics so move-to-parent preserves descendant folder structure, and recursive folder delete disables preset-target jobs for removed presets.
+- [x] 133.5 Wire `Edit > Undo Delete`, guarded `Ctrl+Z`, undo-menu state refresh, and non-delete mutation invalidation through `Form1`.
+- [x] 133.6 Run focused verification, broader regression verification, `openspec validate`, and capture the review outcome below.
+
+### 133 Review
+- Added OpenSpec change `add-preset-delete-undo` with proposal, tasks, and spec deltas for `preset-organization` and `job-scheduler`.
+- Added focused regression coverage for preset/folder delete undo, undo stack ordering/clearing, guarded `Ctrl+Z`, folder delete subtree preservation, and scheduler job disable/restore behavior.
+- Implemented `PresetDeleteUndoService` plus preset-library snapshot restore and affected-job snapshot restore.
+- Fixed `PresetManager.DeleteFolder(..., deletePresets: false)` so descendant folders are renamed upward instead of flattened, and `deletePresets: true` now disables preset-target jobs for presets removed from the subtree.
+- Wired `Edit > Undo Delete`, session-scoped multi-level undo capture/restore, and stale-history invalidation across preset/folder/order/favorite/base-environment mutations in `Form1`.
+- Verification passed:
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PresetManagerDeleteBehaviorTests|FullyQualifiedName~PresetDeleteUndoServiceTests|FullyQualifiedName~Form1DeleteUndoTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-delete-undo-red\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-delete-undo-red\obj\`
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-delete-undo-full\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-delete-undo-full\obj\`
+  - `openspec validate add-preset-delete-undo --strict --no-interactive`
+
+## 134. Preset tree incremental mutation cleanup
+- [x] 134.1 Add failing WinForms coverage for in-place preset-tree insertion/restore flows, including add preset, single-preset undo delete, and at least one adjacent single-item mutation path.
+- [x] 134.2 Add a focused preset-tree mutation helper layer that can insert, relabel, move, and restore local nodes while preserving viewport and selection memory.
+- [x] 134.3 Route eligible single-item preset-tree operations through the incremental path and keep full rebuilds only for filtered, bulk, or structural folder-tree changes.
+- [x] 134.4 Run focused regression verification, broader preset-tree regression verification, build verification, and capture the review outcome below.
+
+### 134 Review
+- Added focused WinForms regression coverage for add-preset insertion, single-preset undo delete restore, in-place rename mutation, filtered fallback rebuild behavior, and favorite-rename Favorites-tree refresh.
+- Added an internal incremental preset-tree mutation layer in `Form1` that captures/restores `TopNode`, preserves remembered selection, and supports local preset/folder insert, relabel, move, and reinsertion without rebuilding unrelated nodes.
+- Routed local unfiltered mutations through that helper for add preset, save-as-new, duplicate, single import, rename, move-to-folder, empty-folder create, single-preset undo delete, and preset/folder favorite toggles, while keeping filtered, bulk, and structural operations on the rebuild path.
+- Kept Favorites refreshes scoped to actual visibility/order changes, and fixed the rename path so favorite presets or presets inside favorite folders still update the Favorites tree label/order.
+- Verification passed:
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-incremental-green6\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-incremental-green6\obj\`
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1DeleteUndoTests|FullyQualifiedName~PresetTreeDeleteMutationTests|FullyQualifiedName~PresetTreeViewportRestorerTests|FullyQualifiedName~PresetTreeSelectionGuardTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-incremental-regression2\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-incremental-regression2\obj\`
+  - `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\preset-tree-incremental-build2\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-incremental-build2\obj\`
+- Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.
+
+## 135. Fix add-preset visibility and base-environment restore regressions
+- [x] 135.1 Add focused WinForms regressions for add-preset viewport visibility and add-preset base-environment restore behavior.
+- [x] 135.2 Patch the add-preset incremental selection path so a newly inserted preset is fully visible without unnecessary tree rebuilds or viewport jumps.
+- [x] 135.3 Route add-preset editor loading through the normal preset load path so environment restore behavior matches other preset selections.
+- [x] 135.4 Run focused verification, update lessons, and capture the review outcome below.
+
+### 135 Review
+- Added focused WinForms regressions for the two reported follow-up bugs: add-preset now verifies a newly inserted row becomes fully visible when it lands below the fold, and creating a blank preset now verifies the active environment restores to the base environment instead of staying on the prior preset's declared environment.
+- Updated `AddPreset` to stop hand-populating the editor and instead load the new preset through `EnsurePresetLoadedInEditor(...)`, which reuses the existing environment-restore logic from normal preset selection.
+- Added a small `TreeView` visibility helper in `Form1` so the incremental add path only scrolls when the new node is not fully visible, while still avoiding full preset-tree rebuilds.
+- Tightened the older add-preset no-rebuild regression to focus on preserved node instances rather than strict `TopNode` equality; with the corrected UX, add-preset is allowed to scroll just enough to reveal the new row.
+- Updated `tasks/lessons.md` with the two missed patterns from this regression.
+- Verification passed:
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-followup-green4\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-followup-green4\obj\`
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests|FullyQualifiedName~Form1DeleteUndoTests|FullyQualifiedName~PresetTreeDeleteMutationTests|FullyQualifiedName~PresetTreeViewportRestorerTests|FullyQualifiedName~PresetTreeSelectionGuardTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-followup-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-followup-regression\obj\`
+  - `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\preset-tree-followup-build\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-followup-build\obj\`
+- Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.
+
+## 136. Fix undo-delete preset visibility regression
+- [x] 136.1 Add focused WinForms coverage around single-preset undelete visibility scenarios, including scroll-away and rebuild-fallback undo flows.
+- [x] 136.2 Patch the undo-delete path so restored presets are fully visible after both incremental restore and fallback rebuild selection.
+- [x] 136.3 Run focused verification, update lessons, and capture the review outcome below.
+
+### 136 Review
+- Added focused WinForms coverage for undo-delete visibility scenarios in the shared preset-tree mutation test class, including user-scroll-before-undo and filtered rebuild-fallback undo flows.
+- The exact invisible restored-node case from the user report did not reproduce in the current WinForms harness, but code inspection showed the undo path still lacked the same explicit visibility guarantee already added for add-preset.
+- Patched `UndoLatestPresetDelete` so the rebuild fallback reselects with `ensureVisible: true`, and the incremental restore path now calls the shared tree-visibility helper on the restored node.
+- Updated `tasks/lessons.md` with the missed pattern: when I fix visibility for add, I must audit the matching undo/restore path in the same pass.
+- Verification passed:
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-undo-visibility-green\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-undo-visibility-green\obj\`
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests|FullyQualifiedName~Form1DeleteUndoTests|FullyQualifiedName~PresetTreeDeleteMutationTests|FullyQualifiedName~PresetTreeViewportRestorerTests|FullyQualifiedName~PresetTreeSelectionGuardTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-undo-visibility-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-undo-visibility-regression\obj\`
+  - `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\preset-tree-undo-visibility-build\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-undo-visibility-build\obj\`
+- Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.
+
+## 137. Fix Test Connection status-bar completion regression
+- [x] 137.1 Add focused WinForms coverage that reproduces `Test Connection(s)` leaving the status label on `Testing connections...` after queued UI callbacks drain.
+- [x] 137.2 Patch `Form1` connection-test progress handling so only the active test run can update the status/progress UI, and completed/cancelled runs cannot be overwritten by stale callbacks.
+- [x] 137.3 Run focused verification, build verification, and capture the review outcome below.
+
+### 137 Review
+- Added `SSH_Helper.Tests/UI/Form1ConnectionTestStatusTests.cs` with a focused WinForms regression that drives the real `TestSelectedConnections()` path against a loopback `TcpListener` and proves the status label remains `Connection test complete (1 hosts)` after queued UI callbacks drain.
+- Root cause was `TestSelectedConnections()` queuing per-host progress/status updates through `BeginInvoke(...)`. `Task.WhenAll(...)` could complete before those UI callbacks executed, so the method would set the final completion text and then a late `Testing connections... N of N` callback would overwrite it.
+- `Form1.cs` now tracks connection-test progress with a run id, mirroring the existing manual-execution progress pattern. Per-host cell coloring still applies when callbacks arrive, but status/progress updates are ignored once that connection-test run has been invalidated by completion or cancellation.
+- Focused red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-test-status-red\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-red\obj\`` failed as intended with the status label stuck on `Testing connections... 1 of 1`.
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-test-status-green\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-green\obj\`` passed (`1` passed, `0` failed).
+- Build verification: `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\connection-test-status-build\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-build\obj\`` passed.
+- Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.

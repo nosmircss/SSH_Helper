@@ -32,6 +32,7 @@ namespace SSH_Helper.Services.Scripting
         public bool RequiresSshSession { get; set; }
         public bool UsesSftp { get; set; }
         public bool UsesInteractive { get; set; }
+        public bool UsesBrowserCallbackCapture { get; set; }
         public bool SftpUsesDefaultHost { get; set; }
         public bool SftpUsesDefaultCredentials { get; set; }
     }
@@ -250,6 +251,10 @@ namespace SSH_Helper.Services.Scripting
                     result.RequiresSshSession = true;
                     result.UsesInteractive = true;
                 }
+                else if (stepType == StepType.BrowserCallbackCapture)
+                {
+                    result.UsesBrowserCallbackCapture = true;
+                }
                 else if (stepType == StepType.Sftp)
                 {
                     result.UsesSftp = true;
@@ -333,7 +338,7 @@ namespace SSH_Helper.Services.Scripting
 
         private static bool HasCompleteSshRequirementSignal(SshRequirementResult result)
         {
-            if (result.UsesInteractive)
+            if (result.UsesInteractive || result.UsesBrowserCallbackCapture)
                 return true;
 
             return result.RequiresSshSession
@@ -562,6 +567,30 @@ namespace SSH_Helper.Services.Scripting
                                 definedVars.Add(step.Http.Into);
                                 definedVars.Add(step.Http.Into + "_status");
                                 definedVars.Add(step.Http.Into + "_headers");
+                            }
+                        }
+                        break;
+                    case StepType.BrowserCallbackCapture:
+                        if (step.BrowserCallbackCapture != null)
+                        {
+                            ExtractVarReferences(step.BrowserCallbackCapture.StartUrl, referencedVars);
+                            ExtractVarReferences(step.BrowserCallbackCapture.CallbackPath, referencedVars);
+                            ExtractVarReferences(step.BrowserCallbackCapture.CaptureMode, referencedVars);
+                            ExtractVarReferences(step.BrowserCallbackCapture.Into, referencedVars);
+                            if (step.BrowserCallbackCapture.RequiredFields != null)
+                            {
+                                foreach (var requiredField in step.BrowserCallbackCapture.RequiredFields)
+                                {
+                                    ExtractVarReferences(requiredField, referencedVars);
+                                }
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(step.BrowserCallbackCapture.Into))
+                            {
+                                var into = step.BrowserCallbackCapture.Into.Trim();
+                                definedVars.Add(into);
+                                definedVars.Add(into + "_count");
+                                definedVars.Add(into + "_keys");
                             }
                         }
                         break;
@@ -895,6 +924,14 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         private static void AddResolvedVarName(string expr, HashSet<string> references)
         {
+            // If expression contains a function call, extract variable references
+            // from its arguments rather than treating the whole expression as a name.
+            if (FunctionCallExpressionPattern.IsMatch(expr.TrimStart()))
+            {
+                ExtractBareExpressionReferences(expr, references);
+                return;
+            }
+
             // Strip .length suffix
             if (expr.EndsWith(".length", StringComparison.OrdinalIgnoreCase))
             {

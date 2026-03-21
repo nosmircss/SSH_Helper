@@ -1746,7 +1746,7 @@ steps:
     }
 
     [Fact]
-    public void Validate_SendFailOnNonZeroWithRespond_ReturnsError()
+    public void Validate_SendFailOnNonZeroWithRespond_IsValid()
     {
         var yaml = """
             ---
@@ -1762,7 +1762,138 @@ steps:
         var script = _parser.Parse(yaml);
         var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
 
-        errors.Should().Contain(error => error.Contains("send.fail_on_nonzero is not supported with send.respond"));
+        errors.Should().NotContain(error => error.Contains("fail_on_nonzero"));
+    }
+
+    #endregion
+
+    #region PreprocessYaml Tests
+
+    [Fact]
+    public void PreprocessYaml_QuotesTernaryInSetStep()
+    {
+        var yaml = """
+            steps:
+              - set: t1 = 10 > 5 ? "yes" : "no"
+            """;
+
+        var result = ScriptParser.PreprocessYaml(yaml);
+
+        result.Should().Contain("set: 't1 = 10 > 5 ? \"yes\" : \"no\"'");
+    }
+
+    [Fact]
+    public void PreprocessYaml_LeavesAlreadyQuotedValuesAlone()
+    {
+        var yaml = """
+            steps:
+              - set: 't1 = 10 > 5 ? "yes" : "no"'
+            """;
+
+        var result = ScriptParser.PreprocessYaml(yaml);
+
+        // Should be unchanged
+        result.Should().Be(yaml);
+    }
+
+    [Fact]
+    public void PreprocessYaml_LeavesValuesWithoutColonAlone()
+    {
+        var yaml = """
+            steps:
+              - set: score = 75
+            """;
+
+        var result = ScriptParser.PreprocessYaml(yaml);
+
+        result.Should().Be(yaml);
+    }
+
+    [Fact]
+    public void PreprocessYaml_HandlesNestedTernary()
+    {
+        var yaml = """
+            steps:
+              - set: grade = score >= 90 ? "A" : score >= 80 ? "B" : "F"
+            """;
+
+        var result = ScriptParser.PreprocessYaml(yaml);
+
+        result.Should().Contain("set: 'grade = score >= 90 ? \"A\" : score >= 80 ? \"B\" : \"F\"'");
+    }
+
+    [Fact]
+    public void PreprocessYaml_DoesNotQuoteColonInsideQuotedString()
+    {
+        // The colon is inside quotes, so there's no unquoted colon
+        var yaml = """
+            steps:
+              - print: "time is 10:30"
+            """;
+
+        var result = ScriptParser.PreprocessYaml(yaml);
+
+        result.Should().Be(yaml);
+    }
+
+    [Fact]
+    public void PreprocessYaml_QuotesEmbeddedQuotedStringWithTrailingText()
+    {
+        // YAML would parse "alice" as the value and choke on " in allowed_names"
+        var yaml = """
+            steps:
+              - if: "alice" in allowed_names
+            """;
+
+        var result = ScriptParser.PreprocessYaml(yaml);
+
+        result.Should().Contain("if: '\"alice\" in allowed_names'");
+    }
+
+    [Fact]
+    public void PreprocessYaml_LeavesFullyQuotedValueAlone()
+    {
+        // Value is a single complete quoted string — no ambiguity
+        var yaml = """
+            steps:
+              - print: "this is fine"
+            """;
+
+        var result = ScriptParser.PreprocessYaml(yaml);
+
+        result.Should().Be(yaml);
+    }
+
+    [Fact]
+    public void Parse_TernaryExpressionWithoutManualQuoting()
+    {
+        var yaml = """
+            steps:
+              - set: t1 = 10 > 5 ? "yes" : "no"
+              - set: score = 75
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(2);
+        script.Steps[0].Set.Should().Be("t1 = 10 > 5 ? \"yes\" : \"no\"");
+        script.Steps[1].Set.Should().Be("score = 75");
+    }
+
+    [Fact]
+    public void Parse_IfWithQuotedMembershipExpression()
+    {
+        var yaml = """
+            steps:
+              - if: "alice" in allowed_names
+                then:
+                  - print: "found"
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].If.Should().Be("\"alice\" in allowed_names");
     }
 
     #endregion

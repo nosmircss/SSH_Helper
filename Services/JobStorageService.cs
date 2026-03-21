@@ -200,6 +200,27 @@ namespace SSH_Helper.Services
                 .AsReadOnly();
         }
 
+        internal void RestoreSnapshots(IEnumerable<JobDefinition> snapshots)
+        {
+            ArgumentNullException.ThrowIfNull(snapshots);
+
+            bool changed = false;
+            foreach (var snapshot in snapshots)
+            {
+                if (snapshot == null || string.IsNullOrWhiteSpace(snapshot.Id))
+                    continue;
+
+                _jobs[snapshot.Id] = CloneJob(snapshot);
+                changed = true;
+            }
+
+            if (!changed)
+                return;
+
+            PersistToDisk();
+            JobsChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         /// <summary>
         /// Persists the current in-memory jobs to disk with .bak backup.
         /// </summary>
@@ -220,6 +241,11 @@ namespace SSH_Helper.Services
 
             var json = JsonFileWriter.Serialize(wrapper);
             File.WriteAllText(_jobsFilePath, json);
+        }
+
+        private static JobDefinition CloneJob(JobDefinition job)
+        {
+            return JsonConvert.DeserializeObject<JobDefinition>(JsonConvert.SerializeObject(job))!;
         }
 
         /// <summary>

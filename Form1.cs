@@ -2,9 +2,11 @@
 using System.Data;
 using System.Diagnostics;
 using System.Runtime;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using Newtonsoft.Json;
 using SSH_Helper.Models;
 using SSH_Helper.Services.Editor;
 using SSH_Helper.Services;
@@ -84,9 +86,30 @@ namespace SSH_Helper
 
     public partial class Form1 : Form
     {
+        private enum ConnectionTestVisualState
+        {
+            None,
+            Testing,
+            Success,
+            Failure
+        }
+
+        private sealed class ConnectionTestRowVisualStateInfo
+        {
+            public ConnectionTestRowVisualStateInfo(ConnectionTestVisualState state, string toolTipText)
+            {
+                State = state;
+                ToolTipText = toolTipText ?? string.Empty;
+            }
+
+            public ConnectionTestVisualState State { get; }
+
+            public string ToolTipText { get; }
+        }
+
         #region Constants
 
-        private const string ApplicationVersion = "0.51.9";
+        private const string ApplicationVersion = "0.51.10";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -99,6 +122,7 @@ namespace SSH_Helper
         private const int SmallHistoryPayloadCharThreshold = 500_000;
         private const int OutputTextRecreateThresholdChars = 500_000;
         private const int OutputTextRecreateTargetChars = 100_000;
+        private const int HiddenPresetsTabHeaderFallbackHeight = 24;
         private static readonly TimeSpan AutomaticHistoryCompactionCooldown = TimeSpan.FromSeconds(2);
         private static readonly string FolderSummarySeparator = new string('=', 60);
         private static readonly string FolderSummarySubSeparator = new string('=', 9);
@@ -116,6 +140,7 @@ namespace SSH_Helper
         private readonly UpdateService _updateService;
         private readonly SshConfigService _sshConfigService;
         private readonly HistoryStorageService _historyStorage;
+        private readonly PresetDeleteUndoService _presetDeleteUndoService = new();
 
         // Scheduler services
         private JobStorageService? _jobStorage;
@@ -148,6 +173,7 @@ namespace SSH_Helper
         private int _rightClickedColumnIndex = -1;
         private int _rightClickedRowIndex = -1;
         private readonly BindingList<HistoryListItem> _outputHistory = new();
+        private bool _deferredSchedulerBootstrapStarted;
 
         // Recent files menu
         private ToolStripMenuItem? _recentFilesMenuItem;
@@ -158,9 +184,11 @@ namespace SSH_Helper
         private ToolStripSeparator? _testConnectionSeparator;
         private CancellationTokenSource? _connectionTestCts;
         private bool _isTestingConnections;
+        private int _connectionTestProgressRunId;
+        private readonly ConditionalWeakTable<DataGridViewRow, ConnectionTestRowVisualStateInfo> _connectionTestRowStates = new();
 
         // Preset search/filter
-        private Panel? _presetSearchPanel;
+        private BufferedPanel? _presetSearchPanel;
         private TextBox? _txtPresetSearch;
         private Label? _btnPresetSearchClear;
         private System.Windows.Forms.Timer? _presetSearchDebounceTimer;
@@ -181,6 +209,11 @@ namespace SSH_Helper
         private TreeNode? _dropTargetNode;
         private DropPosition _dropPosition = DropPosition.None;
         private TreeNode? _favLastHighlightedNode;
+        private int _lastPresetsTabIndex;
+        private bool _restoringPresetsTabSelection;
+        private PresetNodeTag? _lastPresetsTreeSelection;
+        private PresetNodeTag? _lastFavoritesTreeSelection;
+        private Func<string, string, string, string>? _inputBoxPromptOverrideForTests = null;
 
         // Track selected folder for Run button (TreeView selection can be unreliable on button click)
         private string? _selectedFolderName;
@@ -228,6 +261,7 @@ namespace SSH_Helper
         private VScrollBar? _dgvVScrollBar;
         private HScrollBar? _dgvHScrollBar;
         private Panel? _dgvScrollCorner;
+        private readonly HostGridRestoreBatcher _hostGridRestoreBatcher;
 
         // Multi-host selection state
         private bool _selectAllChecked;
@@ -246,6 +280,10 @@ namespace SSH_Helper
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
             InitializeComponent();
+            _hostGridRestoreBatcher = new HostGridRestoreBatcher(
+                onScrollbarRefresh: UpdateDataGridViewScrollbars,
+                onHostCountRefresh: UpdateHostCount,
+                onMarkDirty: MarkHostGridDirty);
             InitializeFolderBaseEnvironmentContextMenuItem();
             InitializeFolderExpandCollapseContextMenuItems();
             Text = $"{ApplicationName} {ApplicationVersion}";
@@ -291,7 +329,7 @@ namespace SSH_Helper
                 config.UpdateSettings.GitHubRepo,
                 ApplicationVersion);
 
-            InitializeFromConfiguration();
+            InitializeFromConfiguration(config);
             InitializeCredentials();
             InitializeDataGridView();
             InitializeScriptEditor();
@@ -302,15 +340,16 @@ namespace SSH_Helper
             InitializeEnvironmentToolbar();
             InitializePasswordMasking();
             EnableDoubleBuffering();
-            RestoreWindowState();
+            RestoreWindowState(config);
             UpdateHostCount();
             UpdatePresetHeaderIndicator();
             UpdateSortModeIndicator();
             RebuildRecentFilesMenu();
             InitializePresetSearchFilter();
+            InitializePresetsTabChrome();
             InitializeConnectionTesting();
-            InitializeSchedulerServices();
             InitializeSchedulerStatusBar();
+            RefreshPresetDeleteUndoUi();
             UpdateStatusBar("Ready");
 
             // Apply saved theme and fonts
@@ -344,12 +383,42 @@ namespace SSH_Helper
 
             // After startup restore/layout, ensure selected preset is actually in viewport.
             BeginInvoke((Action)EnsureSelectedPresetNodeVisible);
+            Application.Idle -= BootstrapSchedulerAfterStartupRestoreOnIdle;
+            Application.Idle += BootstrapSchedulerAfterStartupRestoreOnIdle;
 
             var config = _configService.GetCurrent();
             if (config.UpdateSettings.CheckOnStartup)
             {
                 await CheckForUpdatesAsync(silent: true);
             }
+        }
+
+        private void BootstrapSchedulerAfterStartupRestoreOnIdle(object? sender, EventArgs e)
+        {
+            Application.Idle -= BootstrapSchedulerAfterStartupRestoreOnIdle;
+            RunDeferredSchedulerBootstrap();
+        }
+
+        private bool TryBeginDeferredSchedulerBootstrap()
+        {
+            if (_deferredSchedulerBootstrapStarted)
+            {
+                return false;
+            }
+
+            _deferredSchedulerBootstrapStarted = true;
+            return true;
+        }
+
+        private void RunDeferredSchedulerBootstrap()
+        {
+            if (!TryBeginDeferredSchedulerBootstrap())
+            {
+                return;
+            }
+
+            InitializeSchedulerServices();
+            UpdateSchedulerStatusBar();
         }
 
         private void RestoreFolderExpandState()
@@ -380,14 +449,40 @@ namespace SSH_Helper
             if (selectedNode == null)
                 return;
 
-            // Preserve saved collapse state: do not auto-expand collapsed branches.
-            if (HasCollapsedAncestor(selectedNode))
+            EnsureTreeNodeFullyVisible(trvPresets, selectedNode);
+        }
+
+        private void EnsureTreeNodeFullyVisible(TreeView treeView, TreeNode node)
+        {
+            if (treeView.IsDisposed || node.TreeView != treeView)
                 return;
 
-            if (!selectedNode.IsVisible)
+            // Preserve saved collapse state: do not auto-expand collapsed branches.
+            if (HasCollapsedAncestor(node))
+                return;
+
+            treeView.Update();
+            if (IsTreeNodeFullyVisible(treeView, node))
+                return;
+
+            var previousSuppressExpand = _suppressExpandCollapseEvents;
+            _suppressExpandCollapseEvents = true;
+            try
             {
-                selectedNode.EnsureVisible();
+                node.EnsureVisible();
             }
+            finally
+            {
+                _suppressExpandCollapseEvents = previousSuppressExpand;
+            }
+        }
+
+        private static bool IsTreeNodeFullyVisible(TreeView treeView, TreeNode node)
+        {
+            var bounds = node.Bounds;
+            return bounds.Height > 0 &&
+                bounds.Top >= 0 &&
+                bounds.Bottom <= treeView.ClientSize.Height;
         }
 
         private static bool HasCollapsedAncestor(TreeNode node)
@@ -408,13 +503,12 @@ namespace SSH_Helper
 
         #region Initialization
 
-        private void InitializeFromConfiguration()
+        private void InitializeFromConfiguration(AppConfiguration config)
         {
-            var config = _configService.Load();
             _activeEnvironmentName = string.IsNullOrWhiteSpace(config.ActiveEnvironment)
                 ? EnvironmentConfig.DefaultName
                 : config.ActiveEnvironment;
-            _presetManager.Load();
+            _presetManager.Load(config);
 
             // Populate UI from config
             tsbUsername.Text = config.Username;
@@ -427,7 +521,7 @@ namespace SSH_Helper
 
             // Populate preset list with proper sorting
             // Don't restore expand state here - Form1_Shown will do it after the form is visible
-            RefreshPresetList(restoreExpandState: false);
+            RefreshPresetList(restoreExpandState: false, configOverride: config);
 
             // Show global default timeout as placeholder when preset has no override
             txtTimeoutHeader.PlaceholderText = config.Timeout.ToString();
@@ -666,15 +760,15 @@ namespace SSH_Helper
             _dgvHScrollBar.Scroll += DgvHScrollBar_Scroll;
 
             // Wire up DataGridView events to update scrollbar state
-            dgv_variables.RowsAdded += (s, e) => UpdateDataGridViewScrollbars();
-            dgv_variables.RowsRemoved += (s, e) => UpdateDataGridViewScrollbars();
-            dgv_variables.ColumnAdded += (s, e) => UpdateDataGridViewScrollbars();
-            dgv_variables.ColumnRemoved += (s, e) => UpdateDataGridViewScrollbars();
-            dgv_variables.ColumnWidthChanged += (s, e) => UpdateDataGridViewScrollbars();
-            dgv_variables.Resize += (s, e) => UpdateDataGridViewScrollbars();
+            dgv_variables.RowsAdded += (s, e) => RequestHostGridScrollbarRefresh();
+            dgv_variables.RowsRemoved += (s, e) => RequestHostGridScrollbarRefresh();
+            dgv_variables.ColumnAdded += (s, e) => RequestHostGridScrollbarRefresh();
+            dgv_variables.ColumnRemoved += (s, e) => RequestHostGridScrollbarRefresh();
+            dgv_variables.ColumnWidthChanged += (s, e) => RequestHostGridScrollbarRefresh();
+            dgv_variables.Resize += (s, e) => RequestHostGridScrollbarRefresh();
             dgv_variables.Scroll += DgvVariables_Scroll;
             dgv_variables.MouseWheel += DgvVariables_MouseWheel;
-            hostsPanel.Resize += (s, e) => UpdateDataGridViewScrollbars();
+            hostsPanel.Resize += (s, e) => RequestHostGridScrollbarRefresh();
 
             // Initial update
             UpdateDataGridViewScrollbars();
@@ -828,6 +922,21 @@ namespace SSH_Helper
                 ApplyLightScrollbars(_dgvVScrollBar);
                 ApplyLightScrollbars(_dgvHScrollBar);
             }
+        }
+
+        private IDisposable BeginHostGridRestoreScope() => _hostGridRestoreBatcher.BeginRestoreScope();
+
+        private IDisposable BeginHostGridMutationScope() => _hostGridRestoreBatcher.BeginMutationScope();
+
+        private void RequestHostGridScrollbarRefresh() => _hostGridRestoreBatcher.RequestScrollbarRefresh();
+
+        private void RequestHostGridHostCountRefresh() => _hostGridRestoreBatcher.RequestHostCountRefresh();
+
+        private void RequestHostGridDirtyMark() => _hostGridRestoreBatcher.RequestMarkDirty();
+
+        private void MarkHostGridDirty()
+        {
+            _csvDirty = true;
         }
 
         private void InitializeOutputHistory()
@@ -1248,6 +1357,11 @@ namespace SSH_Helper
         {
             // Form events
             FormClosing += Form1_FormClosing;
+            Resize += (_, _) => ReflowTopSectionHeaders();
+            topSplitContainer.Resize += (_, _) => ReflowTopSectionHeaders();
+            commandSplitContainer.Resize += (_, _) => ReflowTopSectionHeaders();
+            scriptPanel.Resize += (_, _) => ReflowScriptHeader();
+            scriptHeaderPanel.Resize += (_, _) => ReflowScriptHeader();
 
             // DataGridView events
             dgv_variables.MouseDown += Dgv_Variables_MouseDown;
@@ -1338,12 +1452,12 @@ namespace SSH_Helper
                 .SetValue(control, true, null);
         }
 
-        private void RestoreWindowState()
+        private void RestoreWindowState(AppConfiguration config)
         {
-            var config = _configService.GetCurrent();
             var ws = config.WindowState;
+            var restoreMaximized = ws.IsMaximized;
 
-            if (ws.Width.HasValue && ws.Height.HasValue && ws.Left.HasValue && ws.Top.HasValue)
+            if (!restoreMaximized && ws.Width.HasValue && ws.Height.HasValue && ws.Left.HasValue && ws.Top.HasValue)
             {
                 // Ensure window is on screen
                 var screen = Screen.FromPoint(new Point(ws.Left.Value, ws.Top.Value));
@@ -1357,7 +1471,7 @@ namespace SSH_Helper
                 }
             }
 
-            if (ws.IsMaximized)
+            if (restoreMaximized)
             {
                 WindowState = FormWindowState.Maximized;
             }
@@ -1967,79 +2081,86 @@ namespace SSH_Helper
             dgv_variables.Rows.Clear();
             dgv_variables.Columns.Clear();
 
-            var columns = (environment.HostColumns ?? new List<string>())
-                .Where(name => !string.IsNullOrWhiteSpace(name) && name != SelectColumnName)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (!columns.Contains(CsvManager.HostColumnName, StringComparer.OrdinalIgnoreCase))
-            {
-                columns.Insert(0, CsvManager.HostColumnName);
-            }
-
-            foreach (var column in columns)
-            {
-                dgv_variables.Columns.Add(column, column);
-            }
-
-            EnsureSelectColumn();
-            dgv_variables.RowTemplate.Height = 28;
-
-            var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                       _configService.GetCurrent().Credentials.UseCredentialManager;
-
-            foreach (var rowData in environment.Hosts ?? new List<Dictionary<string, string>>())
-            {
-                var rowCopy = rowData != null
-                    ? new Dictionary<string, string>(rowData, StringComparer.OrdinalIgnoreCase)
-                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                if (useCredentialManager)
-                {
-                    rowCopy.TryGetValue(CsvManager.HostColumnName, out var hostValue);
-                    rowCopy.TryGetValue("username", out var usernameValue);
-                    rowCopy.TryGetValue("password", out var passwordValue);
-
-                    var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
-                    if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
-                    {
-                        StoreHostPassword(hostValue, resolvedUsername, passwordValue);
-                        rowCopy["password"] = string.Empty;
-                    }
-                }
-
-                var rowIndex = dgv_variables.Rows.Add();
-                dgv_variables.Rows[rowIndex].Height = 28;
-
-                foreach (var kvp in rowCopy)
-                {
-                    if (dgv_variables.Columns.Contains(kvp.Key))
-                    {
-                        dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
-                    }
-                }
-            }
-
-            if (environment.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
-            {
-                foreach (var index in environment.SelectedHostIndices)
-                {
-                    if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
-                    {
-                        dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
-                    }
-                }
-            }
-
             _loadedFilePath = environment.LastCsvPath;
             _loadedFileFingerprint = loadedFingerprint?.Clone() ?? environment.LastCsvFingerprint?.Clone();
             _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
                 ? CsvFileSyncStatus.NotTracked
                 : syncStatus;
+
+            var columns = (environment.HostColumns ?? new List<string>())
+                .Where(name => !string.IsNullOrWhiteSpace(name) && name != SelectColumnName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            using (BeginHostGridRestoreScope())
+            {
+                if (!columns.Contains(CsvManager.HostColumnName, StringComparer.OrdinalIgnoreCase))
+                {
+                    columns.Insert(0, CsvManager.HostColumnName);
+                }
+
+                foreach (var column in columns)
+                {
+                    dgv_variables.Columns.Add(column, column);
+                }
+
+                EnsureSelectColumn();
+                dgv_variables.RowTemplate.Height = 28;
+
+                var useCredentialManager = _credentialProvider?.IsAvailable == true &&
+                                           _configService.GetCurrent().Credentials.UseCredentialManager;
+
+                foreach (var rowData in environment.Hosts ?? new List<Dictionary<string, string>>())
+                {
+                    var rowCopy = rowData != null
+                        ? new Dictionary<string, string>(rowData, StringComparer.OrdinalIgnoreCase)
+                        : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                    if (useCredentialManager)
+                    {
+                        rowCopy.TryGetValue(CsvManager.HostColumnName, out var hostValue);
+                        rowCopy.TryGetValue("username", out var usernameValue);
+                        rowCopy.TryGetValue("password", out var passwordValue);
+
+                        var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
+                        if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
+                        {
+                            StoreHostPassword(hostValue, resolvedUsername, passwordValue);
+                            rowCopy["password"] = string.Empty;
+                        }
+                    }
+
+                    var rowIndex = dgv_variables.Rows.Add();
+                    dgv_variables.Rows[rowIndex].Height = 28;
+
+                    foreach (var kvp in rowCopy)
+                    {
+                        if (dgv_variables.Columns.Contains(kvp.Key))
+                        {
+                            dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
+                        }
+                    }
+                }
+
+                if (environment.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
+                {
+                    foreach (var index in environment.SelectedHostIndices)
+                    {
+                        if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
+                        {
+                            dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
+                        }
+                    }
+                }
+
+                RequestHostGridHostCountRefresh();
+                RequestHostGridScrollbarRefresh();
+            }
+
             _pendingColumnAutoSize = true;
             _csvDirty = false;
             CaptureLoadedFileSnapshotFromGrid();
-            UpdateHostCount();
+            UpdateHostsFileIndicator();
         }
 
         #endregion
@@ -2118,6 +2239,7 @@ namespace SSH_Helper
                 isDirty);
             lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty);
             btnSavePreset.Text = PresetHeaderIndicatorFormatter.FormatSaveButtonLabel(isDirty);
+            ReflowScriptHeader();
         }
 
         private void UpdateHostCount()
@@ -2200,6 +2322,182 @@ namespace SSH_Helper
             {
                 statusProgress.Maximum = total;
                 statusProgress.Value = Math.Min(progress, total);
+            }
+        }
+
+        private int BeginConnectionTestProgress(int totalConnections)
+        {
+            int runId = unchecked(++_connectionTestProgressRunId);
+            statusProgress.Visible = true;
+            statusProgress.Maximum = totalConnections;
+            statusProgress.Value = 0;
+            return runId;
+        }
+
+        private void UpdateConnectionTestProgress(int runId, int completedConnections, int totalConnections)
+        {
+            if (!_isTestingConnections || runId != _connectionTestProgressRunId)
+            {
+                return;
+            }
+
+            statusProgress.Value = Math.Min(completedConnections, totalConnections);
+            UpdateStatusBar($"Testing connections... {completedConnections} of {totalConnections}");
+        }
+
+        private void InvalidateConnectionTestProgress()
+        {
+            unchecked
+            {
+                _connectionTestProgressRunId++;
+            }
+        }
+
+        private static Color GetConnectionTestHeaderTextColor(Color backgroundColor)
+        {
+            int weightedBrightness = ((backgroundColor.R * 299) + (backgroundColor.G * 587) + (backgroundColor.B * 114)) / 1000;
+            return weightedBrightness >= 140 ? LightTextColor : Color.White;
+        }
+
+        private static (Color CellBackColor, Color CellForeColor, Color HeaderBackColor, Color HeaderForeColor) GetConnectionTestPalette(
+            ConnectionTestVisualState state,
+            bool darkMode)
+        {
+            Color cellBackColor;
+            Color cellForeColor;
+
+            switch (state)
+            {
+                case ConnectionTestVisualState.Testing:
+                    cellBackColor = darkMode ? Color.FromArgb(92, 67, 0) : Color.FromArgb(255, 243, 205);
+                    cellForeColor = darkMode ? Color.FromArgb(255, 231, 153) : Color.FromArgb(102, 77, 3);
+                    break;
+                case ConnectionTestVisualState.Success:
+                    cellBackColor = darkMode ? Color.FromArgb(30, 70, 40) : Color.FromArgb(212, 237, 218);
+                    cellForeColor = darkMode ? Color.FromArgb(180, 230, 180) : Color.Empty;
+                    break;
+                case ConnectionTestVisualState.Failure:
+                    cellBackColor = darkMode ? Color.FromArgb(80, 30, 30) : Color.FromArgb(248, 215, 218);
+                    cellForeColor = darkMode ? Color.FromArgb(230, 150, 150) : Color.Empty;
+                    break;
+                default:
+                    return (Color.Empty, Color.Empty, Color.Empty, Color.Empty);
+            }
+
+            var headerBackColor = cellBackColor;
+            var headerForeColor = GetConnectionTestHeaderTextColor(headerBackColor);
+            return (cellBackColor, cellForeColor, headerBackColor, headerForeColor);
+        }
+
+        private int GetHostIpColumnIndex()
+        {
+            return dgv_variables.Columns["Host_IP"]?.Index ?? -1;
+        }
+
+        private void SetConnectionTestVisualState(
+            DataGridViewRow row,
+            int hostIpColIndex,
+            ConnectionTestVisualState state,
+            string toolTipText)
+        {
+            if (hostIpColIndex < 0 || row.IsNewRow)
+            {
+                return;
+            }
+
+            _connectionTestRowStates.Remove(row);
+            if (state != ConnectionTestVisualState.None)
+            {
+                _connectionTestRowStates.Add(row, new ConnectionTestRowVisualStateInfo(state, toolTipText));
+            }
+
+            ApplyConnectionTestVisualState(row, hostIpColIndex);
+        }
+
+        private void ApplyConnectionTestVisualState(DataGridViewRow row, int hostIpColIndex)
+        {
+            if (hostIpColIndex < 0 || row.IsNewRow)
+            {
+                return;
+            }
+
+            var cell = row.Cells[hostIpColIndex];
+            if (!_connectionTestRowStates.TryGetValue(row, out var visualState) ||
+                visualState.State == ConnectionTestVisualState.None)
+            {
+                cell.Style.BackColor = Color.Empty;
+                cell.Style.ForeColor = Color.Empty;
+                cell.ToolTipText = string.Empty;
+                row.HeaderCell.Style.BackColor = Color.Empty;
+                row.HeaderCell.Style.ForeColor = Color.Empty;
+                if (row.Index >= 0)
+                {
+                    dgv_variables.InvalidateRow(row.Index);
+                }
+                return;
+            }
+
+            var palette = GetConnectionTestPalette(visualState.State, _isDarkMode);
+            cell.Style.BackColor = palette.CellBackColor;
+            cell.Style.ForeColor = palette.CellForeColor;
+            cell.ToolTipText = visualState.ToolTipText;
+            row.HeaderCell.Style.BackColor = palette.HeaderBackColor;
+            row.HeaderCell.Style.ForeColor = palette.HeaderForeColor;
+
+            if (row.Index >= 0)
+            {
+                dgv_variables.InvalidateRow(row.Index);
+            }
+        }
+
+        private void ClearConnectionTestVisualState(DataGridViewRow row, int hostIpColIndex)
+        {
+            SetConnectionTestVisualState(row, hostIpColIndex, ConnectionTestVisualState.None, string.Empty);
+        }
+
+        private void ReapplyConnectionTestVisualStates()
+        {
+            int hostIpColIndex = GetHostIpColumnIndex();
+            if (hostIpColIndex < 0)
+            {
+                return;
+            }
+
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                ApplyConnectionTestVisualState(row, hostIpColIndex);
+            }
+        }
+
+        private void ApplyConnectionTestCellResult(DataGridViewRow row, int hostIpColIndex, Models.ConnectionTestResult result)
+        {
+            if (hostIpColIndex < 0)
+            {
+                return;
+            }
+
+            if (result.Success)
+            {
+                SetConnectionTestVisualState(
+                    row,
+                    hostIpColIndex,
+                    ConnectionTestVisualState.Success,
+                    $"Reachable ({result.LatencyMs}ms)");
+            }
+            else
+            {
+                string errorCategory = string.IsNullOrWhiteSpace(result.ErrorCategory) ? "Error" : result.ErrorCategory;
+                string errorMessage = string.IsNullOrWhiteSpace(result.ErrorMessage) ? "Connection test failed" : result.ErrorMessage;
+                SetConnectionTestVisualState(
+                    row,
+                    hostIpColIndex,
+                    ConnectionTestVisualState.Failure,
+                    $"{errorCategory}: {errorMessage}");
             }
         }
 
@@ -2317,9 +2615,9 @@ namespace SSH_Helper
             // Update custom DataGridView scrollbar colors
             ApplyScrollbarColors();
             ApplyActiveEnvironmentLabelColor();
+            ReapplyConnectionTestVisualStates();
 
             ResumeLayout(true);
-            Refresh();
         }
 
         // Fonts created by ApplyFontSettings — disposed on next call or in Form1.Dispose
@@ -2428,6 +2726,9 @@ namespace SSH_Helper
             var tabFont = new Font(uiFont, Scaled(fontSettings.TabFontSize));
             _managedFonts.Add(tabFont);
             presetsTabControl.Font = tabFont;
+            presetsTabHeaderStrip.Font = tabFont;
+            presetsTabHeaderStrip.Height = Math.Max(24, tabFont.Height + 10);
+            UpdatePresetsTabViewportLayout();
 
             // Host list (DataGridView) - apply row height setting
             // Don't change font on DataGridView as it interferes with existing styling
@@ -2541,6 +2842,128 @@ namespace SSH_Helper
             var presetItemHeight = Math.Max(22, presetsToolStrip.Height - presetsToolStrip.Padding.Vertical - 2);
             tsbSeparatorFolders.AutoSize = false;
             tsbSeparatorFolders.Size = new Size(tsbSeparatorFolders.Width, presetItemHeight);
+
+            ReflowMainChromeBounds();
+            ReflowTopSectionHeaders();
+        }
+
+        private void ReflowMainChromeBounds()
+        {
+            menuStrip1.Dock = DockStyle.None;
+            mainToolStrip.Dock = DockStyle.None;
+            mainSplitContainer.Dock = DockStyle.None;
+
+            menuStrip1.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            mainToolStrip.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            mainSplitContainer.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+
+            menuStrip1.Location = new Point(0, 0);
+            menuStrip1.Size = new Size(ClientSize.Width, menuStrip1.Height);
+
+            mainToolStrip.Location = new Point(0, menuStrip1.Bottom);
+            mainToolStrip.Size = new Size(ClientSize.Width, mainToolStrip.Height);
+
+            var statusHeight = statusStrip.Visible ? statusStrip.Height : 0;
+            var contentTop = mainToolStrip.Bottom;
+            mainSplitContainer.Location = new Point(0, contentTop);
+            mainSplitContainer.Size = new Size(
+                ClientSize.Width,
+                Math.Max(0, ClientSize.Height - statusHeight - contentTop));
+
+            menuStrip1.BringToFront();
+            mainToolStrip.BringToFront();
+            statusStrip.BringToFront();
+        }
+
+        private void ReflowTopSectionHeaders()
+        {
+            ReflowHostsHeader();
+            ReflowTitleOnlyHeader(presetsHeaderPanel, lblPresetsTitle, minHeight: 32);
+            ReflowScriptHeader();
+        }
+
+        private void ReflowHostsHeader()
+        {
+            lblHostCount.AutoSize = true;
+
+            var titleHeight = lblHostsTitle.PreferredHeight;
+            var countHeight = lblHostCount.PreferredHeight;
+            var contentHeight = Math.Max(titleHeight, countHeight);
+            hostsHeaderPanel.Height = Math.Max(36, hostsHeaderPanel.Padding.Vertical + contentHeight);
+
+            var contentTop = hostsHeaderPanel.Padding.Top +
+                             Math.Max(0, (hostsHeaderPanel.ClientSize.Height - hostsHeaderPanel.Padding.Vertical - contentHeight) / 2);
+            var countY = contentTop + Math.Max(0, (contentHeight - lblHostCount.Height) / 2);
+            lblHostCount.Location = new Point(
+                Math.Max(hostsHeaderPanel.Padding.Left, hostsHeaderPanel.ClientSize.Width - hostsHeaderPanel.Padding.Right - lblHostCount.Width),
+                countY);
+
+            var titleWidth = Math.Max(0, lblHostCount.Left - hostsHeaderPanel.Padding.Left - 8);
+            var titleY = contentTop + Math.Max(0, (contentHeight - titleHeight) / 2);
+            lblHostsTitle.AutoSize = false;
+            lblHostsTitle.Location = new Point(hostsHeaderPanel.Padding.Left, titleY);
+            lblHostsTitle.Size = new Size(titleWidth, titleHeight);
+        }
+
+        private void ReflowTitleOnlyHeader(Panel panel, Label titleLabel, int minHeight)
+        {
+            var titleHeight = titleLabel.PreferredHeight;
+            panel.Height = Math.Max(minHeight, panel.Padding.Vertical + titleHeight);
+
+            var titleY = panel.Padding.Top +
+                         Math.Max(0, (panel.ClientSize.Height - panel.Padding.Vertical - titleHeight) / 2);
+            titleLabel.AutoSize = false;
+            titleLabel.Location = new Point(panel.Padding.Left, titleY);
+            titleLabel.Size = new Size(
+                Math.Max(0, panel.ClientSize.Width - panel.Padding.Horizontal),
+                titleHeight);
+        }
+
+        private void ReflowScriptHeader()
+        {
+            var titleHeight = lblScriptTitle.PreferredHeight;
+            var contentLeft = scriptHeaderPanel.Padding.Left;
+            var contentRight = Math.Max(contentLeft, scriptHeaderPanel.ClientSize.Width - scriptHeaderPanel.Padding.Right);
+
+            // Single top row: Name + preset box + timeout + save.
+            var rowY = scriptHeaderPanel.Padding.Top + 3;
+
+            btnSavePreset.AutoSize = false;
+            btnSavePreset.Location = new Point(
+                Math.Max(contentLeft, contentRight - btnSavePreset.Width),
+                rowY - 1);
+
+            txtTimeoutHeader.Location = new Point(
+                Math.Max(contentLeft, btnSavePreset.Left - txtTimeoutHeader.Width - 6),
+                rowY);
+
+            lblTimeoutHeader.AutoSize = true;
+            lblTimeoutHeader.Location = new Point(
+                Math.Max(contentLeft, txtTimeoutHeader.Left - lblTimeoutHeader.Width - 6),
+                rowY + Math.Max(0, (txtTimeoutHeader.Height - lblTimeoutHeader.Height) / 2));
+
+            lblPresetName.AutoSize = true;
+            lblPresetName.Location = new Point(contentLeft, rowY + Math.Max(0, (txtPreset.Height - lblPresetName.Height) / 2));
+
+            var presetLeft = lblPresetName.Right + 6;
+            var presetRight = lblTimeoutHeader.Left - 8;
+            txtPreset.Location = new Point(presetLeft, rowY);
+            txtPreset.Width = Math.Max(20, presetRight - presetLeft);
+
+            var firstRowBottom = new Control[] { lblPresetName, txtPreset, lblTimeoutHeader, txtTimeoutHeader, btnSavePreset }
+                .Where(control => control.Visible)
+                .Select(control => control.Bottom)
+                .DefaultIfEmpty(scriptHeaderPanel.Padding.Top)
+                .Max();
+
+            lblScriptTitle.AutoSize = false;
+            lblScriptTitle.Location = new Point(scriptHeaderPanel.Padding.Left, firstRowBottom + 6);
+            lblScriptTitle.Size = new Size(
+                Math.Max(0, scriptHeaderPanel.ClientSize.Width - scriptHeaderPanel.Padding.Horizontal),
+                titleHeight);
+
+            scriptHeaderPanel.Height = Math.Max(60, lblScriptTitle.Bottom + scriptHeaderPanel.Padding.Bottom);
+            scriptHeaderPanel.Invalidate();
         }
 
         private void ApplyColumnAutoResize(bool autoResize)
@@ -2688,10 +3111,19 @@ namespace SSH_Helper
 
             // Presets panel
             presetsPanel.BackColor = LightBackground;
+            presetsTabViewportPanel.BackColor = LightBackground;
             presetsHeaderPanel.BackColor = LightBackground;
             presetsToolStrip.BackColor = LightBackground;
             lblPresetsTitle.ForeColor = LightTextColor;
             presetsTabControl.BackColor = LightBackground;
+            presetsTabHeaderStrip.BackColor = LightBackground;
+            presetsTabHeaderStrip.HeaderBackgroundColor = LightBackground;
+            presetsTabHeaderStrip.SelectedTabBackgroundColor = LightPanelBackground;
+            presetsTabHeaderStrip.HoverTabBackgroundColor = LightControlBackground;
+            presetsTabHeaderStrip.SelectedTextColor = LightTextColor;
+            presetsTabHeaderStrip.UnselectedTextColor = LightSecondaryText;
+            presetsTabHeaderStrip.SelectedAccentColor = LightAccent;
+            presetsTabHeaderStrip.BorderColor = LightBorderColor;
             tabPresets.BackColor = LightPanelBackground;
             tabFavorites.BackColor = LightPanelBackground;
             trvPresets.BackColor = LightPanelBackground;
@@ -2773,6 +3205,8 @@ namespace SSH_Helper
 
             // Reset TabControl to default drawing
             ApplyLightTabControl(presetsTabControl);
+            presetsTabHeaderStrip.Invalidate();
+            UpdatePresetsTabViewportLayout();
         }
 
         private void ApplyDarkTheme()
@@ -2821,10 +3255,19 @@ namespace SSH_Helper
 
             // Presets panel
             presetsPanel.BackColor = DarkSurface1;
+            presetsTabViewportPanel.BackColor = DarkSurface1;
             presetsHeaderPanel.BackColor = DarkSurface2;
             presetsToolStrip.BackColor = DarkSurface2;
             lblPresetsTitle.ForeColor = DarkTextPrimary;
             presetsTabControl.BackColor = DarkSurface1;
+            presetsTabHeaderStrip.BackColor = DarkSurface2;
+            presetsTabHeaderStrip.HeaderBackgroundColor = DarkSurface2;
+            presetsTabHeaderStrip.SelectedTabBackgroundColor = DarkSurface1;
+            presetsTabHeaderStrip.HoverTabBackgroundColor = DarkSurface3;
+            presetsTabHeaderStrip.SelectedTextColor = Color.White;
+            presetsTabHeaderStrip.UnselectedTextColor = DarkTextSecondary;
+            presetsTabHeaderStrip.SelectedAccentColor = DarkSelectionBorder;
+            presetsTabHeaderStrip.BorderColor = DarkBorder;
             tabPresets.BackColor = DarkSurface1;
             tabFavorites.BackColor = DarkSurface1;
             trvPresets.BackColor = DarkSurface1;
@@ -2905,6 +3348,8 @@ namespace SSH_Helper
 
             // Style TabControl for dark mode
             ApplyDarkTabControl(presetsTabControl);
+            presetsTabHeaderStrip.Invalidate();
+            UpdatePresetsTabViewportLayout();
         }
 
         private void ApplyToolStripTheme(ToolStrip strip, bool darkMode)
@@ -3027,15 +3472,21 @@ namespace SSH_Helper
             tabControl.DrawItem -= TabControl_DrawItem;
             tabControl.DrawItem += TabControl_DrawItem;
 
-            // Handle painting to cover any remaining artifacts
             tabControl.Paint -= TabControl_Paint;
-            tabControl.Paint += TabControl_Paint;
 
             // Use the custom BorderlessTabControl properties if available
             if (tabControl is BorderlessTabControl borderlessTab)
             {
                 borderlessTab.HideBorder = true;
                 borderlessTab.BorderBackgroundColor = DarkSurface1;
+                borderlessTab.HiddenBorderHeaderColor = DarkSurface2;
+                borderlessTab.HiddenBorderInactiveTabColor = DarkSurface3;
+                borderlessTab.HiddenBorderInactiveTabTopLineColor = DarkSurface2;
+            }
+            else
+            {
+                // Non-borderless tabs still rely on the managed paint overlay to hide native artifacts.
+                tabControl.Paint += TabControl_Paint;
             }
 
             // Style the parent panel
@@ -3163,7 +3614,7 @@ namespace SSH_Helper
                 // Cover the left edge
                 e.Graphics.FillRectangle(edgeBrush, tabRect.Left - 3, tabRect.Y, 4, tabRect.Height);
                 // Cover the top edge highlight with a darker line
-                using var topPen = new Pen(Color.Red, 2);
+                using var topPen = new Pen(DarkSurface2, 2);
                 e.Graphics.DrawLine(topPen, tabRect.Left, tabRect.Top + 1, tabRect.Right - 1, tabRect.Top + 1);
 
                 // Draw bottom border line
@@ -3342,6 +3793,7 @@ namespace SSH_Helper
             var grid = sender as DataGridView;
             if (grid == null) return;
 
+            var row = grid.Rows[e.RowIndex];
             var rowIdx = (e.RowIndex + 1).ToString();
             using var centerFormat = new StringFormat
             {
@@ -3349,7 +3801,24 @@ namespace SSH_Helper
                 LineAlignment = StringAlignment.Center
             };
             var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
-            using var brush = new SolidBrush(Color.FromArgb(108, 117, 125));
+            var headerBackColor = row.HeaderCell.Style.BackColor.IsEmpty
+                ? grid.RowHeadersDefaultCellStyle.BackColor
+                : row.HeaderCell.Style.BackColor;
+            using (var backgroundBrush = new SolidBrush(headerBackColor))
+            {
+                e.Graphics.FillRectangle(backgroundBrush, headerBounds);
+            }
+
+            using (var borderPen = new Pen(grid.GridColor))
+            {
+                e.Graphics.DrawLine(borderPen, headerBounds.Right - 1, headerBounds.Top, headerBounds.Right - 1, headerBounds.Bottom - 1);
+                e.Graphics.DrawLine(borderPen, headerBounds.Left, headerBounds.Bottom - 1, headerBounds.Right - 1, headerBounds.Bottom - 1);
+            }
+
+            var headerForeColor = row.HeaderCell.Style.ForeColor.IsEmpty
+                ? grid.RowHeadersDefaultCellStyle.ForeColor
+                : row.HeaderCell.Style.ForeColor;
+            using var brush = new SolidBrush(headerForeColor);
             SafeDrawString(e.Graphics, rowIdx, grid.Font, brush, headerBounds, centerFormat);
         }
 
@@ -3531,16 +4000,13 @@ namespace SSH_Helper
             }
 
             _csvDirty = true;
-            UpdateHostCount();
+            RequestHostGridHostCountRefresh();
 
             // Clear connection test indicator when Host_IP is edited
             if (e.ColumnIndex >= 0 && e.RowIndex >= 0 &&
                 dgv_variables.Columns[e.ColumnIndex].Name == "Host_IP")
             {
-                var cell = dgv_variables.Rows[e.RowIndex].Cells[e.ColumnIndex];
-                cell.Style.BackColor = Color.Empty;
-                cell.Style.ForeColor = Color.Empty;
-                cell.ToolTipText = "";
+                ClearConnectionTestVisualState(dgv_variables.Rows[e.RowIndex], e.ColumnIndex);
             }
         }
 
@@ -3570,20 +4036,20 @@ namespace SSH_Helper
                 dgv_variables.Rows[e.RowIndex + i].Height = 28;
             }
 
-            _csvDirty = true;
-            UpdateHostCount();
+            RequestHostGridDirtyMark();
+            RequestHostGridHostCountRefresh();
         }
 
         private void Dgv_Variables_RowsRemoved(object? sender, DataGridViewRowsRemovedEventArgs e)
         {
-            _csvDirty = true;
-            UpdateHostCount();
+            RequestHostGridDirtyMark();
+            RequestHostGridHostCountRefresh();
         }
 
         private void Dgv_Variables_ColumnRemoved(object? sender, DataGridViewColumnEventArgs e)
         {
-            _csvDirty = true;
-            UpdateHostsFileIndicator();
+            RequestHostGridDirtyMark();
+            RequestHostGridHostCountRefresh();
         }
 
         private void Dgv_Variables_KeyPress(object? sender, KeyPressEventArgs e)
@@ -3670,46 +4136,15 @@ namespace SSH_Helper
             if (_suppressPresetSelectionChange || e.Node == null)
                 return;
 
-            var tag = e.Node.Tag as PresetNodeTag;
-            if (tag == null)
-                return;
-
-            // If a folder is selected, clear the editor to avoid confusion
-            if (tag.IsFolder)
-            {
-                HandleFolderSelection(
-                    tag.Name,
-                    onCancel: () =>
-                    {
-                        _suppressPresetSelectionChange = true;
-                        SelectPresetByName(_activePresetName);
-                        _suppressPresetSelectionChange = false;
-                    });
-                return;
-            }
-
-            string newPresetName = tag.Name;
-
-            if (!string.IsNullOrEmpty(_activePresetName) &&
-                !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
-                IsPresetDirty())
-            {
-                if (!TryResolvePendingPresetChanges(() =>
-                    {
-                        _suppressPresetSelectionChange = true;
-                        SelectPresetByName(_activePresetName);
-                        _suppressPresetSelectionChange = false;
-                    }))
+            TryApplySelectedPresetNode(
+                trvPresets,
+                e.Node,
+                onCancel: () =>
                 {
-                    return;
-                }
-            }
-
-            var preset = _presetManager.Get(newPresetName);
-            if (preset != null)
-            {
-                LoadPresetIntoEditor(newPresetName, preset);
-            }
+                    _suppressPresetSelectionChange = true;
+                    SelectPresetByName(_activePresetName);
+                    _suppressPresetSelectionChange = false;
+                });
         }
 
         private void trvPresets_AfterCollapse(object? sender, TreeViewEventArgs e)
@@ -3931,13 +4366,19 @@ namespace SSH_Helper
                     var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
                     var newPath = _presetManager.GetUniqueFolderName(folderName);
                     _presetManager.RenameFolder(draggedTag.Name, newPath);
+                    ClearPresetDeleteUndoHistory();
                     return newPath;
                 }
                 return draggedTag.Name;
             }
             else
             {
-                _presetManager.MovePresetToFolder(draggedTag.Name, null);
+                var currentPreset = _presetManager.Get(draggedTag.Name);
+                if (!string.IsNullOrEmpty(currentPreset?.Folder))
+                {
+                    _presetManager.MovePresetToFolder(draggedTag.Name, null);
+                    ClearPresetDeleteUndoHistory();
+                }
                 return draggedTag.Name;
             }
         }
@@ -3954,11 +4395,17 @@ namespace SSH_Helper
                 var newPath = FolderPathUtility.CombinePath(targetTag.Name, folderName);
                 newPath = _presetManager.GetUniqueFolderName(newPath);
                 _presetManager.RenameFolder(draggedTag.Name, newPath);
+                ClearPresetDeleteUndoHistory();
                 return newPath;
             }
             else
             {
-                _presetManager.MovePresetToFolder(draggedTag.Name, targetTag.Name);
+                var currentPreset = _presetManager.Get(draggedTag.Name);
+                if (!string.Equals(currentPreset?.Folder, targetTag.Name, StringComparison.Ordinal))
+                {
+                    _presetManager.MovePresetToFolder(draggedTag.Name, targetTag.Name);
+                    ClearPresetDeleteUndoHistory();
+                }
                 return draggedTag.Name;
             }
         }
@@ -3985,6 +4432,7 @@ namespace SSH_Helper
                 {
                     newPath = _presetManager.GetUniqueFolderName(newPath);
                     _presetManager.RenameFolder(draggedTag.Name, newPath);
+                    ClearPresetDeleteUndoHistory();
                 }
 
                 // Position in manual order relative to the target
@@ -4006,7 +4454,10 @@ namespace SSH_Helper
 
                 var currentPreset = _presetManager.Get(draggedTag.Name);
                 if (currentPreset?.Folder != targetFolder)
+                {
                     _presetManager.MovePresetToFolder(draggedTag.Name, targetFolder);
+                    ClearPresetDeleteUndoHistory();
+                }
 
                 // Position in manual order
                 if (!targetTag.IsFolder)
@@ -4142,6 +4593,7 @@ namespace SSH_Helper
             var config = _configService.Load();
             ReorderInList(config.ManualFolderOrder, sourceFolderName, targetFolderName);
             _configService.Save(config);
+            ClearPresetDeleteUndoHistory();
         }
 
         private void ReorderPresetsInFolder(string sourcePresetName, string targetPresetName, string? folder)
@@ -4159,6 +4611,7 @@ namespace SSH_Helper
 
             config.ManualPresetOrderByFolder[folderKey] = presetOrder;
             _configService.Save(config);
+            ClearPresetDeleteUndoHistory();
         }
 
         private void InsertIntoFolderOrder(string folderToInsert, string? referenceItem, DropPosition position)
@@ -4195,6 +4648,7 @@ namespace SSH_Helper
 
             config.ManualFolderOrder = folderOrder;
             _configService.Save(config);
+            ClearPresetDeleteUndoHistory();
         }
 
         private void InsertIntoPresetOrder(string presetToInsert, string? folder, string referenceItem, DropPosition position)
@@ -4230,23 +4684,65 @@ namespace SSH_Helper
 
             config.ManualPresetOrderByFolder[folderKey] = presetOrder;
             _configService.Save(config);
+            ClearPresetDeleteUndoHistory();
         }
 
         #endregion
 
         #region Favorites TreeView Handlers
 
+        private void presetsTabHeaderStrip_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            if (presetsTabControl.SelectedIndex != presetsTabHeaderStrip.SelectedIndex)
+            {
+                presetsTabControl.SelectedIndex = presetsTabHeaderStrip.SelectedIndex;
+            }
+        }
+
         private void presetsTabControl_SelectedIndexChanged(object? sender, EventArgs e)
         {
+            if (presetsTabHeaderStrip.SelectedIndex != presetsTabControl.SelectedIndex)
+            {
+                presetsTabHeaderStrip.SelectedIndex = presetsTabControl.SelectedIndex;
+            }
+
+            if (_restoringPresetsTabSelection)
+            {
+                return;
+            }
+
+            var previousTabIndex = _lastPresetsTabIndex;
+
             if (presetsTabControl.SelectedTab == tabFavorites)
             {
                 RefreshFavoritesList();
+
+                if (!TryApplySelectedPresetNode(
+                        trvFavorites,
+                        onCancel: () => RestorePresetTabSelection(previousTabIndex)))
+                {
+                    return;
+                }
             }
+            else if (presetsTabControl.SelectedTab == tabPresets)
+            {
+                if (!TryApplySelectedPresetNode(
+                        trvPresets,
+                        onCancel: () => RestorePresetTabSelection(previousTabIndex)))
+                {
+                    return;
+                }
+            }
+
+            _lastPresetsTabIndex = presetsTabControl.SelectedIndex;
         }
 
         private void RefreshFavoritesList(string? filterText = null)
         {
             var filter = string.IsNullOrWhiteSpace(filterText) ? null : filterText.Trim();
+            var previousSelection = CaptureSelectedPresetNodeTag(trvFavorites) ?? ClonePresetNodeTag(_lastFavoritesTreeSelection);
+            var previousSuppressSelectionChange = _suppressPresetSelectionChange;
+            _suppressPresetSelectionChange = true;
             trvFavorites.Nodes.Clear();
 
             // Get favorite folders
@@ -4272,6 +4768,8 @@ namespace SSH_Helper
             {
                 lblFavoritesEmpty.Visible = true;
                 trvFavorites.Visible = false;
+                _lastFavoritesTreeSelection = null;
+                _suppressPresetSelectionChange = previousSuppressSelectionChange;
                 return;
             }
 
@@ -4322,6 +4820,22 @@ namespace SSH_Helper
                     trvFavorites.Nodes.Add(node);
                 }
             }
+
+            if (previousSelection != null)
+            {
+                var restoredNode = FindNodeByTag(trvFavorites.Nodes, previousSelection.Name, previousSelection.IsFolder);
+                if (restoredNode != null)
+                {
+                    trvFavorites.SelectedNode = restoredNode;
+                    _lastFavoritesTreeSelection = ClonePresetNodeTag(previousSelection);
+                }
+                else
+                {
+                    _lastFavoritesTreeSelection = null;
+                }
+            }
+
+            _suppressPresetSelectionChange = previousSuppressSelectionChange;
         }
 
         private static string BuildFavoriteKey(PresetNodeTag tag) =>
@@ -4396,35 +4910,7 @@ namespace SSH_Helper
             if (_suppressPresetSelectionChange || e.Node == null)
                 return;
 
-            var tag = e.Node.Tag as PresetNodeTag;
-            if (tag == null)
-                return;
-
-            // Handle folder selection
-            if (tag.IsFolder)
-            {
-                HandleFolderSelection(tag.Name);
-                return;
-            }
-
-            string newPresetName = tag.Name;
-
-            // Check for unsaved changes
-            if (!string.IsNullOrEmpty(_activePresetName) &&
-                !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
-                IsPresetDirty())
-            {
-                if (!TryResolvePendingPresetChanges())
-                {
-                    return;
-                }
-            }
-
-            var preset = _presetManager.Get(newPresetName);
-            if (preset != null)
-            {
-                LoadPresetIntoEditor(newPresetName, preset);
-            }
+            TryApplySelectedPresetNode(trvFavorites, e.Node);
         }
 
         private void trvFavorites_MouseDown(object? sender, MouseEventArgs e)
@@ -4606,6 +5092,7 @@ namespace SSH_Helper
             // Save new order
             config.ManualFavoriteOrder = currentOrder;
             _configService.Save(config);
+            ClearPresetDeleteUndoHistory();
         }
 
         private bool CanDropOnFavorites(TreeNode draggedNode, TreeNode targetNode)
@@ -5469,8 +5956,6 @@ namespace SSH_Helper
 
         private void toggleSortingToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            // Cycle through sort modes: Ascending -> Descending -> Manual -> Ascending
-            var previousMode = _currentSortMode;
             _currentSortMode = _currentSortMode switch
             {
                 PresetSortMode.Ascending => PresetSortMode.Descending,
@@ -5493,6 +5978,7 @@ namespace SSH_Helper
             RefreshPresetList();
             UpdateSortModeIndicator();
             UpdateStatusBar($"Sort mode: {_currentSortMode}");
+            ClearPresetDeleteUndoHistory();
         }
 
         private void UpdateSortModeIndicator()
@@ -5864,6 +6350,7 @@ namespace SSH_Helper
 
             TryApplyFolderEnvironment(folderPath);
             DisplayFolderSummary(folderPath);
+            ClearPresetDeleteUndoHistory();
 
             if (string.IsNullOrWhiteSpace(explicitEnvironmentName))
             {
@@ -5889,9 +6376,36 @@ namespace SSH_Helper
             };
             rootItem.Click += (s, e) =>
             {
+                if (string.IsNullOrEmpty(currentFolder))
+                {
+                    return;
+                }
+
+                var preActionExpandState = CapturePresetTreeExpandState();
+                var movingNode = FindPresetNodeByName(trvPresets.Nodes, presetName);
                 _presetManager.MovePresetToFolder(presetName, null);
-                RefreshPresetList();
-                SelectPresetByName(presetName);
+
+                bool usedIncrementalMutation = false;
+                if (CanMutatePresetTreeIncrementally() && movingNode != null)
+                {
+                    ApplyIncrementalPresetTreeMutation(
+                        () => { usedIncrementalMutation = TryReinsertExistingPresetNodeIncrementally(movingNode, presetName); },
+                        () => movingNode);
+                }
+
+                if (!usedIncrementalMutation)
+                {
+                    RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                    SelectPresetByName(presetName, ensureVisible: false);
+                }
+
+                if (ShouldRefreshFavoritesForPreset(presetName, currentFolder))
+                {
+                    RefreshFavoritesListPreservingCurrentFilter();
+                }
+
+                EnsurePresetLoadedInEditor(presetName);
+                ClearPresetDeleteUndoHistory();
             };
             ctxMoveToFolder.DropDownItems.Add(rootItem);
 
@@ -5920,9 +6434,36 @@ namespace SSH_Helper
                 var targetPath = folderPath;
                 folderItem.Click += (s, e) =>
                 {
+                    if (string.Equals(currentFolder, targetPath, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+
+                    var preActionExpandState = CapturePresetTreeExpandState();
+                    var movingNode = FindPresetNodeByName(trvPresets.Nodes, presetName);
                     _presetManager.MovePresetToFolder(presetName, targetPath);
-                    RefreshPresetList();
-                    SelectPresetByName(presetName);
+
+                    bool usedIncrementalMutation = false;
+                    if (CanMutatePresetTreeIncrementally() && movingNode != null)
+                    {
+                        ApplyIncrementalPresetTreeMutation(
+                            () => { usedIncrementalMutation = TryReinsertExistingPresetNodeIncrementally(movingNode, presetName); },
+                            () => movingNode);
+                    }
+
+                    if (!usedIncrementalMutation)
+                    {
+                        RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                        SelectPresetByName(presetName, ensureVisible: false);
+                    }
+
+                    if (ShouldRefreshFavoritesForPreset(presetName, currentFolder))
+                    {
+                        RefreshFavoritesListPreservingCurrentFilter();
+                    }
+
+                    EnsurePresetLoadedInEditor(presetName);
+                    ClearPresetDeleteUndoHistory();
                 };
 
                 // Add to parent menu or root
@@ -5952,7 +6493,7 @@ namespace SSH_Helper
                 ? $"Enter a name for the new subfolder in '{parentPath}':"
                 : "Enter a name for the new folder (use / for nested paths, e.g., 'Network/Cisco'):";
 
-            string folderName = Microsoft.VisualBasic.Interaction.InputBox(
+            string folderName = ShowInputBox(
                 prompt,
                 "New Folder",
                 "New Folder");
@@ -5968,8 +6509,20 @@ namespace SSH_Helper
 
             if (_presetManager.CreateFolder(fullPath))
             {
-                RefreshPresetList();
+                bool usedIncrementalMutation = false;
+                if (CanMutatePresetTreeIncrementally())
+                {
+                    ApplyIncrementalPresetTreeMutation(
+                        () => { usedIncrementalMutation = TryInsertFolderNodeIncrementally(fullPath, out _); });
+                }
+
+                if (!usedIncrementalMutation)
+                {
+                    RefreshPresetList();
+                }
+
                 UpdateStatusBar($"Folder '{fullPath}' created");
+                ClearPresetDeleteUndoHistory();
             }
         }
 
@@ -6000,6 +6553,7 @@ namespace SSH_Helper
             {
                 RefreshPresetList();
                 UpdateStatusBar($"Folder renamed to '{newPath}'");
+                ClearPresetDeleteUndoHistory();
             }
             else
             {
@@ -6056,11 +6610,14 @@ namespace SSH_Helper
                     txtTimeoutHeader.Clear();
                 }
 
-                _presetManager.DeleteFolder(folderPath, deletePresets: deletePresets);
-                RefreshPresetList();
+                if (TryDeleteFolderWithUndo(folderPath, deletePresets))
+                {
+                    RefreshPresetList();
+                    RefreshFavoritesList();
 
-                string action = deletePresets ? "and its presets deleted" : "deleted (presets moved)";
-                UpdateStatusBar($"Folder '{folderPath}' {action}");
+                    string action = deletePresets ? "and its presets deleted" : "deleted (presets moved)";
+                    UpdateStatusBar($"Folder '{folderPath}' {action}");
+                }
             }
             else
             {
@@ -6069,9 +6626,12 @@ namespace SSH_Helper
 
                 if (DialogTheme.Show(this, message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                 {
-                    _presetManager.DeleteFolder(folderPath, deletePresets: false);
-                    RefreshPresetList();
-                    UpdateStatusBar($"Folder '{folderPath}' deleted");
+                    if (TryDeleteFolderWithUndo(folderPath, deletePresets: false))
+                    {
+                        RefreshPresetList();
+                        RefreshFavoritesList();
+                        UpdateStatusBar($"Folder '{folderPath}' deleted");
+                    }
                 }
             }
         }
@@ -6108,7 +6668,7 @@ namespace SSH_Helper
                 ? $" and ALL its contents ({string.Join(" and ", messageParts)})"
                 : "";
 
-            string message = $"Are you sure you want to delete the folder '{folderName}'{contentsDescription}?\n\nThis action cannot be undone.";
+            string message = $"Are you sure you want to delete the folder '{folderName}'{contentsDescription}?";
 
             if (DialogTheme.Show(this, message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
             {
@@ -6118,9 +6678,12 @@ namespace SSH_Helper
                 txtCommand.Clear();
                 txtTimeoutHeader.Clear();
 
-                _presetManager.DeleteFolder(folderPath, deletePresets: true);
-                RefreshPresetList();
-                UpdateStatusBar($"Folder '{folderName}' and its presets deleted");
+                if (TryDeleteFolderWithUndo(folderPath, deletePresets: true))
+                {
+                    RefreshPresetList();
+                    RefreshFavoritesList();
+                    UpdateStatusBar($"Folder '{folderName}' and its presets deleted");
+                }
             }
         }
 
@@ -6743,16 +7306,13 @@ namespace SSH_Helper
 
         private void ClearConnectionTestIndicators()
         {
-            var colIndex = dgv_variables.Columns["Host_IP"]?.Index ?? -1;
+            var colIndex = GetHostIpColumnIndex();
             if (colIndex < 0) return;
 
             foreach (DataGridViewRow row in dgv_variables.Rows)
             {
                 if (row.IsNewRow) continue;
-                var cell = row.Cells[colIndex];
-                cell.Style.BackColor = Color.Empty;
-                cell.Style.ForeColor = Color.Empty;
-                cell.ToolTipText = "";
+                ClearConnectionTestVisualState(row, colIndex);
             }
         }
 
@@ -6786,10 +7346,7 @@ namespace SSH_Helper
             var config = _configService.GetCurrent();
             var timeoutMs = config.ConnectionTimeout * 1000;
             var completed = 0;
-
-            statusProgress.Visible = true;
-            statusProgress.Maximum = rows.Count;
-            statusProgress.Value = 0;
+            var progressRunId = BeginConnectionTestProgress(rows.Count);
 
             try
             {
@@ -6805,40 +7362,22 @@ namespace SSH_Helper
                         var host = hosts[0];
 
                         // Show "Testing..." in Host_IP cell
-                        var hostIpColIndex = dgv_variables.Columns["Host_IP"]?.Index ?? -1;
+                        var hostIpColIndex = GetHostIpColumnIndex();
                         if (hostIpColIndex >= 0)
                         {
                             BeginInvoke(() =>
                             {
-                                row.Cells[hostIpColIndex].ToolTipText = "Testing...";
+                                SetConnectionTestVisualState(row, hostIpColIndex, ConnectionTestVisualState.Testing, "Testing...");
                             });
                         }
 
                         var result = await _sshService.TestConnectionAsync(host, timeoutMs, ct);
+                        var done = Interlocked.Increment(ref completed);
 
                         BeginInvoke(() =>
                         {
-                            if (hostIpColIndex >= 0)
-                            {
-                                var cell = row.Cells[hostIpColIndex];
-                                bool dark = _configService.GetCurrent().DarkMode;
-                                if (result.Success)
-                                {
-                                    cell.Style.BackColor = dark ? Color.FromArgb(30, 70, 40) : Color.FromArgb(212, 237, 218);
-                                    cell.Style.ForeColor = dark ? Color.FromArgb(180, 230, 180) : Color.Empty;
-                                    cell.ToolTipText = $"Reachable ({result.LatencyMs}ms)";
-                                }
-                                else
-                                {
-                                    cell.Style.BackColor = dark ? Color.FromArgb(80, 30, 30) : Color.FromArgb(248, 215, 218);
-                                    cell.Style.ForeColor = dark ? Color.FromArgb(230, 150, 150) : Color.Empty;
-                                    cell.ToolTipText = $"{result.ErrorCategory}: {result.ErrorMessage}";
-                                }
-                            }
-
-                            var done = Interlocked.Increment(ref completed);
-                            statusProgress.Value = done;
-                            UpdateStatusBar($"Testing connections... {done} of {rows.Count}");
+                            ApplyConnectionTestCellResult(row, hostIpColIndex, result);
+                            UpdateConnectionTestProgress(progressRunId, done, rows.Count);
                         });
                     }
                     finally
@@ -6848,10 +7387,12 @@ namespace SSH_Helper
                 });
 
                 await Task.WhenAll(tasks);
+                InvalidateConnectionTestProgress();
                 UpdateStatusBar($"Connection test complete ({completed} hosts)");
             }
             catch (OperationCanceledException)
             {
+                InvalidateConnectionTestProgress();
                 UpdateStatusBar("Connection test cancelled");
             }
             finally
@@ -6869,7 +7410,7 @@ namespace SSH_Helper
 
         private void InitializePresetSearchFilter()
         {
-            _presetSearchPanel = new Panel
+            _presetSearchPanel = new BufferedPanel
             {
                 Height = 28,
                 Dock = DockStyle.Top,
@@ -6937,6 +7478,45 @@ namespace SSH_Helper
             // and the Fill control occupies the remaining space without overlap.
             tabPresets.Controls.Add(_presetSearchPanel);
             trvPresets.BringToFront();
+        }
+
+        private void InitializePresetsTabChrome()
+        {
+            presetsTabHeaderStrip.SelectedIndex = presetsTabControl.SelectedIndex;
+            _lastPresetsTabIndex = presetsTabControl.SelectedIndex;
+            presetsTabViewportPanel.Resize += (_, _) => UpdatePresetsTabViewportLayout();
+            presetsTabControl.HandleCreated += (_, _) => UpdatePresetsTabViewportLayout();
+            presetsTabControl.FontChanged += (_, _) => UpdatePresetsTabViewportLayout();
+            UpdatePresetsTabViewportLayout();
+        }
+
+        private void UpdatePresetsTabViewportLayout()
+        {
+            if (presetsTabViewportPanel.ClientSize.Width <= 0 || presetsTabViewportPanel.ClientSize.Height <= 0)
+            {
+                return;
+            }
+
+            var nativeHeaderHeight = GetNativePresetsTabHeaderHeight();
+            presetsTabControl.Bounds = new Rectangle(
+                0,
+                -nativeHeaderHeight,
+                presetsTabViewportPanel.ClientSize.Width,
+                presetsTabViewportPanel.ClientSize.Height + nativeHeaderHeight);
+        }
+
+        private int GetNativePresetsTabHeaderHeight()
+        {
+            if (presetsTabControl.TabCount > 0 && presetsTabControl.IsHandleCreated)
+            {
+                var tabRect = presetsTabControl.GetTabRect(0);
+                if (tabRect.Height > 0)
+                {
+                    return Math.Max(HiddenPresetsTabHeaderFallbackHeight, tabRect.Bottom + 1);
+                }
+            }
+
+            return Math.Max(HiddenPresetsTabHeaderFallbackHeight, presetsTabHeaderStrip.Height);
         }
 
         private string? _activePresetFilter;
@@ -7072,25 +7652,30 @@ namespace SSH_Helper
             {
                 var dataTable = _csvManager.LoadFromFile(filePath);
                 _loadedFilePath = filePath;
-                dgv_variables.Columns.Clear();
-                dgv_variables.DataSource = dataTable;
-                EnsureSelectColumn();
-
-                // Apply row template height to all rows (DataSource binding doesn't use RowTemplate)
-                foreach (DataGridViewRow row in dgv_variables.Rows)
+                using (BeginHostGridMutationScope())
                 {
-                    if (!row.IsNewRow)
-                        row.Height = dgv_variables.RowTemplate.Height;
+                    dgv_variables.Columns.Clear();
+                    dgv_variables.DataSource = dataTable;
+                    EnsureSelectColumn();
+
+                    // Apply row template height to all rows (DataSource binding doesn't use RowTemplate)
+                    foreach (DataGridViewRow row in dgv_variables.Rows)
+                    {
+                        if (!row.IsNewRow)
+                            row.Height = dgv_variables.RowTemplate.Height;
+                    }
+
+                    _csvDirty = false;
+                    _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
+                    _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
+                        ? CsvFileSyncStatus.NotTracked
+                        : CsvFileSyncStatus.Current;
+                    CaptureLoadedFileSnapshotFromGrid();
+                    AutoSizeColumnsToContent();
+                    RequestHostGridHostCountRefresh();
+                    RequestHostGridScrollbarRefresh();
                 }
 
-                _csvDirty = false;
-                _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
-                _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
-                    ? CsvFileSyncStatus.NotTracked
-                    : CsvFileSyncStatus.Current;
-                CaptureLoadedFileSnapshotFromGrid();
-                AutoSizeColumnsToContent();
-                UpdateHostCount();
                 UpdateStatusBar($"Loaded: {Path.GetFileName(filePath)}");
 
                 AddToRecentFiles(filePath);
@@ -7185,25 +7770,31 @@ namespace SSH_Helper
 
         private void ClearGrid()
         {
-            if (dgv_variables.DataSource is DataTable dt)
+            using (BeginHostGridMutationScope())
             {
-                dt.Rows.Clear();
-                dt.Columns.Clear();
-                dt.Columns.Add(CsvManager.HostColumnName, typeof(string));
+                if (dgv_variables.DataSource is DataTable dt)
+                {
+                    dt.Rows.Clear();
+                    dt.Columns.Clear();
+                    dt.Columns.Add(CsvManager.HostColumnName, typeof(string));
+                }
+                else
+                {
+                    dgv_variables.Rows.Clear();
+                    dgv_variables.Columns.Clear();
+                    dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
+                }
+                EnsureSelectColumn();
+                _csvDirty = true;
+                RequestHostGridHostCountRefresh();
+                RequestHostGridScrollbarRefresh();
             }
-            else
-            {
-                dgv_variables.Rows.Clear();
-                dgv_variables.Columns.Clear();
-                dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
-            }
-            EnsureSelectColumn();
-            _csvDirty = true;
+
             _loadedFilePath = null;
             _loadedFileFingerprint = null;
             _loadedFileSnapshot = null;
             _loadedFileSyncStatus = CsvFileSyncStatus.NotTracked;
-            UpdateHostCount();
+            UpdateHostsFileIndicator();
             UpdateStatusBar("Grid cleared");
         }
 
@@ -7408,61 +7999,307 @@ namespace SSH_Helper
 
             string[] rows = Clipboard.GetText().Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
 
-            dgv_variables.AllowUserToAddRows = false;
-
-            for (int i = 0; i < rows.Length; i++)
+            using (BeginHostGridMutationScope())
             {
-                string[] columns = rows[i].Split('\t');
-                for (int j = 0; j < columns.Length; j++)
+                dgv_variables.AllowUserToAddRows = false;
+
+                for (int i = 0; i < rows.Length; i++)
                 {
-                    int rowIndex = startRow + i;
-                    while (rowIndex >= dgv_variables.Rows.Count)
+                    string[] columns = rows[i].Split('\t');
+                    for (int j = 0; j < columns.Length; j++)
                     {
-                        dgv_variables.Rows.Add(new DataGridViewRow());
-                    }
+                        int rowIndex = startRow + i;
+                        while (rowIndex >= dgv_variables.Rows.Count)
+                        {
+                            dgv_variables.Rows.Add(new DataGridViewRow());
+                        }
 
-                    int columnIndex = startCol + j;
-                    while (columnIndex >= dgv_variables.Columns.Count)
-                    {
-                        int nextNum = dgv_variables.Columns.Count + 1;
-                        dgv_variables.Columns.Add($"Column{nextNum}", $"Column{nextNum}");
-                    }
+                        int columnIndex = startCol + j;
+                        while (columnIndex >= dgv_variables.Columns.Count)
+                        {
+                            int nextNum = dgv_variables.Columns.Count + 1;
+                            dgv_variables.Columns.Add($"Column{nextNum}", $"Column{nextNum}");
+                        }
 
-                    if (!dgv_variables.Columns[columnIndex].ReadOnly)
-                    {
-                        dgv_variables.Rows[rowIndex].Cells[columnIndex].Value = columns[j];
+                        if (!dgv_variables.Columns[columnIndex].ReadOnly)
+                        {
+                            dgv_variables.Rows[rowIndex].Cells[columnIndex].Value = columns[j];
+                        }
                     }
                 }
+
+                dgv_variables.AllowUserToAddRows = true;
+
+                // Select the new empty row so user can continue pasting
+                dgv_variables.ClearSelection();
+                int newRowIndex = dgv_variables.Rows.Count - 1; // The new empty row
+                if (newRowIndex >= 0 && dgv_variables.Rows[newRowIndex].IsNewRow)
+                {
+                    dgv_variables.CurrentCell = dgv_variables.Rows[newRowIndex].Cells[startCol];
+                }
+
+                _csvDirty = true;
+                RequestHostGridHostCountRefresh();
+                RequestHostGridScrollbarRefresh();
             }
 
-            dgv_variables.AllowUserToAddRows = true;
-
-            // Select the new empty row so user can continue pasting
-            dgv_variables.ClearSelection();
-            int newRowIndex = dgv_variables.Rows.Count - 1; // The new empty row
-            if (newRowIndex >= 0 && dgv_variables.Rows[newRowIndex].IsNewRow)
-            {
-                dgv_variables.CurrentCell = dgv_variables.Rows[newRowIndex].Cells[startCol];
-            }
-
-            _csvDirty = true;
-            UpdateHostCount();
         }
 
         private void DeleteSelectedCells()
         {
-            foreach (DataGridViewCell cell in dgv_variables.SelectedCells)
+            using (BeginHostGridMutationScope())
             {
-                if (!cell.ReadOnly) cell.Value = null;
+                var cellsToInvalidate = new List<DataGridViewCell>();
+                foreach (DataGridViewCell cell in dgv_variables.SelectedCells)
+                {
+                    if (!cell.ReadOnly)
+                    {
+                        cell.Value = null;
+                        cellsToInvalidate.Add(cell);
+                    }
+                }
+
+                foreach (var cell in cellsToInvalidate)
+                {
+                    dgv_variables.InvalidateCell(cell);
+                }
+
+                _csvDirty = true;
+                UpdateHostsFileIndicator();
             }
-            dgv_variables.Refresh();
-            _csvDirty = true;
-            UpdateHostsFileIndicator();
         }
 
         #endregion
 
         #region Preset Operations
+
+        private void RefreshPresetDeleteUndoUi()
+        {
+            undoDeleteToolStripMenuItem.Enabled = _presetDeleteUndoService.CanUndo;
+            undoDeleteToolStripMenuItem.Text = _presetDeleteUndoService.PendingActionText;
+        }
+
+        private void ClearPresetDeleteUndoHistory()
+        {
+            _presetDeleteUndoService.Clear();
+            RefreshPresetDeleteUndoUi();
+        }
+
+        private AppConfiguration CapturePresetDeleteUndoConfigSnapshot()
+        {
+            var currentConfig = _configService.GetCurrent();
+            var snapshot = JsonConvert.DeserializeObject<AppConfiguration>(JsonConvert.SerializeObject(currentConfig)) ?? new AppConfiguration();
+            snapshot.ManualPresetOrder = new List<string>(_manualPresetOrder);
+            return snapshot;
+        }
+
+        private IReadOnlyCollection<JobDefinition> CaptureAffectedJobsForPresetDelete(string presetName)
+        {
+            if (_jobStorage == null)
+            {
+                return Array.Empty<JobDefinition>();
+            }
+
+            return _jobStorage.GetJobsReferencingPreset(presetName)
+                .Select(CloneJobDefinition)
+                .ToArray();
+        }
+
+        private IReadOnlyCollection<JobDefinition> CaptureAffectedJobsForFolderDelete(string folderPath, bool deletePresets)
+        {
+            if (_jobStorage == null)
+            {
+                return Array.Empty<JobDefinition>();
+            }
+
+            var affectedJobs = new Dictionary<string, JobDefinition>(StringComparer.Ordinal);
+
+            foreach (var job in _jobStorage.GetJobsReferencingFolder(folderPath))
+            {
+                affectedJobs[job.Id] = CloneJobDefinition(job);
+            }
+
+            if (deletePresets)
+            {
+                foreach (var presetName in GetPresetNamesInFolderSubtree(folderPath))
+                {
+                    foreach (var job in _jobStorage.GetJobsReferencingPreset(presetName))
+                    {
+                        affectedJobs[job.Id] = CloneJobDefinition(job);
+                    }
+                }
+            }
+
+            return affectedJobs.Values.ToArray();
+        }
+
+        private IEnumerable<string> GetPresetNamesInFolderSubtree(string folderPath)
+        {
+            return _presetManager.Presets
+                .Where(kvp =>
+                    string.Equals(kvp.Value.Folder, folderPath, StringComparison.Ordinal) ||
+                    (!string.IsNullOrEmpty(kvp.Value.Folder) && FolderPathUtility.IsDescendantOf(kvp.Value.Folder, folderPath)))
+                .Select(kvp => kvp.Key)
+                .ToList();
+        }
+
+        private void RecordPresetDeleteUndo(
+            string targetName,
+            bool isFolder,
+            AppConfiguration configSnapshot,
+            IReadOnlyCollection<JobDefinition> affectedJobs)
+        {
+            _presetDeleteUndoService.RecordDelete(targetName, isFolder, configSnapshot, affectedJobs);
+            RefreshPresetDeleteUndoUi();
+        }
+
+        private void UndoLatestPresetDelete()
+        {
+            var undoResult = _presetDeleteUndoService.UndoLatest(_presetManager, _jobStorage);
+            if (undoResult == null)
+            {
+                RefreshPresetDeleteUndoUi();
+                return;
+            }
+
+            var restoredConfig = _configService.GetCurrent();
+            _manualPresetOrder.Clear();
+            _manualPresetOrder.AddRange(restoredConfig.ManualPresetOrder);
+
+            bool usedIncrementalMutation = false;
+            TreeNode? restoredNode = null;
+            if (!undoResult.IsFolder && CanMutatePresetTreeIncrementally())
+            {
+                ApplyIncrementalPresetTreeMutation(
+                    () => { usedIncrementalMutation = TryInsertPresetNodeIncrementally(undoResult.TargetName, out restoredNode); },
+                    () => restoredNode);
+            }
+
+            if (!usedIncrementalMutation)
+            {
+                RefreshPresetListPreservingCurrentFilter();
+            }
+
+            if (undoResult.IsFolder || ShouldRefreshFavoritesForPreset(undoResult.TargetName))
+            {
+                RefreshFavoritesListPreservingCurrentFilter();
+            }
+
+            if (presetsTabControl.SelectedTab != tabPresets)
+            {
+                presetsTabControl.SelectedTab = tabPresets;
+            }
+
+            _suppressPresetSelectionChange = true;
+            try
+            {
+                if (undoResult.IsFolder)
+                {
+                    SelectFolderByName(undoResult.TargetName);
+                    LoadFolderIntoSummary(undoResult.TargetName);
+                }
+                else
+                {
+                    if (!usedIncrementalMutation)
+                    {
+                        SelectPresetByName(undoResult.TargetName, ensureVisible: true);
+                    }
+                    else if (restoredNode != null)
+                    {
+                        EnsureTreeNodeFullyVisible(trvPresets, restoredNode);
+                    }
+
+                    var restoredPreset = _presetManager.Get(undoResult.TargetName);
+                    if (restoredPreset != null)
+                    {
+                        LoadPresetIntoEditor(undoResult.TargetName, restoredPreset);
+                    }
+                }
+            }
+            finally
+            {
+                _suppressPresetSelectionChange = false;
+            }
+
+            RefreshPresetDeleteUndoUi();
+        }
+
+        private void undoDeleteToolStripMenuItem_Click(object? sender, EventArgs e)
+        {
+            UndoLatestPresetDelete();
+        }
+
+        private bool ShouldHandlePresetDeleteShortcut()
+        {
+            if (!_presetDeleteUndoService.CanUndo)
+            {
+                return false;
+            }
+
+            if (txtCommand.ContainsFocus ||
+                dgv_variables.IsCurrentCellInEditMode ||
+                tsbUsername.TextBox.Focused ||
+                tsbPassword.TextBox.Focused)
+            {
+                return false;
+            }
+
+            return !ContainsFocusedEditableTextControl(this);
+        }
+
+        private static bool ContainsFocusedEditableTextControl(Control parent)
+        {
+            foreach (Control child in parent.Controls)
+            {
+                if (!child.ContainsFocus)
+                {
+                    continue;
+                }
+
+                if (child is TextBoxBase)
+                {
+                    return true;
+                }
+
+                if (ContainsFocusedEditableTextControl(child))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static JobDefinition CloneJobDefinition(JobDefinition job)
+        {
+            return JsonConvert.DeserializeObject<JobDefinition>(JsonConvert.SerializeObject(job))!;
+        }
+
+        private bool TryDeletePresetWithUndo(string presetName)
+        {
+            var configSnapshot = CapturePresetDeleteUndoConfigSnapshot();
+            var affectedJobs = CaptureAffectedJobsForPresetDelete(presetName);
+            if (!_presetManager.Delete(presetName))
+            {
+                return false;
+            }
+
+            RecordPresetDeleteUndo(presetName, isFolder: false, configSnapshot, affectedJobs);
+            return true;
+        }
+
+        private bool TryDeleteFolderWithUndo(string folderPath, bool deletePresets)
+        {
+            var configSnapshot = CapturePresetDeleteUndoConfigSnapshot();
+            var affectedJobs = CaptureAffectedJobsForFolderDelete(folderPath, deletePresets);
+            if (!_presetManager.DeleteFolder(folderPath, deletePresets))
+            {
+                return false;
+            }
+
+            RecordPresetDeleteUndo(folderPath, isFolder: true, configSnapshot, affectedJobs);
+            return true;
+        }
 
         private bool SaveCurrentPreset(PresetSaveImpactAction? selectedAction = null)
         {
@@ -7496,6 +8333,10 @@ namespace SSH_Helper
                 _presetManager.Get(originalPresetName) != null;
             bool nameChanged = hasActivePreset &&
                 !string.Equals(presetName, originalPresetName, StringComparison.Ordinal);
+            string? originalFolder = hasActivePreset && !string.IsNullOrWhiteSpace(originalPresetName)
+                ? _presetManager.Get(originalPresetName!)?.Folder
+                : null;
+            TreeNode? renamedNode = null;
 
             var action = selectedAction ?? ShowPresetSavePrompt(
                 presetName,
@@ -7524,6 +8365,8 @@ namespace SSH_Helper
                         DialogTheme.Show(this, "Unable to rename preset.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return false;
                     }
+
+                    renamedNode = FindPresetNodeByName(trvPresets.Nodes, originalPresetName!);
 
                     int orderIndex = _manualPresetOrder.IndexOf(originalPresetName!);
                     if (orderIndex >= 0)
@@ -7586,22 +8429,51 @@ namespace SSH_Helper
                 // Align active preset before programmatic selection to avoid false
                 // unsaved prompts in AfterSelect handlers.
                 _activePresetName = presetName;
-                RefreshPresetList(expandStatesOverride: preActionExpandState);
 
-                _suppressPresetSelectionChange = true;
-                try
+                bool usedIncrementalMutation = false;
+                TreeNode? mutatedNode = null;
+                if (CanMutatePresetTreeIncrementally())
                 {
-                    SelectPresetByName(presetName, ensureVisible: false);
+                    if (isNew)
+                    {
+                        ApplyIncrementalPresetTreeMutation(
+                            () => { usedIncrementalMutation = TryInsertPresetNodeIncrementally(presetName, out mutatedNode); },
+                            () => mutatedNode);
+                    }
+                    else if (nameChanged && action == PresetSaveImpactAction.RenameExisting && renamedNode != null)
+                    {
+                        ApplyIncrementalPresetTreeMutation(
+                            () => { usedIncrementalMutation = TryReinsertExistingPresetNodeIncrementally(renamedNode, presetName); },
+                            () => renamedNode);
+                    }
                 }
-                finally
+
+                if (!usedIncrementalMutation)
                 {
-                    _suppressPresetSelectionChange = false;
+                    RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+
+                    _suppressPresetSelectionChange = true;
+                    try
+                    {
+                        SelectPresetByName(presetName, ensureVisible: false);
+                    }
+                    finally
+                    {
+                        _suppressPresetSelectionChange = false;
+                    }
+                }
+
+                if ((isNew || (nameChanged && action == PresetSaveImpactAction.RenameExisting)) &&
+                    ShouldRefreshFavoritesForPreset(presetName, originalFolder))
+                {
+                    RefreshFavoritesListPreservingCurrentFilter();
                 }
             }
 
             _activePresetName = presetName;
             UpdatePresetHeaderIndicator();
             UpdateStatusBar($"Preset '{presetName}' saved");
+            ClearPresetDeleteUndoHistory();
             return true;
         }
 
@@ -7616,7 +8488,7 @@ namespace SSH_Helper
                 }
             }
 
-            string presetName = Microsoft.VisualBasic.Interaction.InputBox(
+            string presetName = ShowInputBox(
                 "Enter the name of the new preset:",
                 "Add Preset",
                 "New Preset");
@@ -7661,17 +8533,32 @@ namespace SSH_Helper
                 _manualPresetOrder.Add(presetName);
             }
 
-            RefreshPresetList();
-            SelectPresetByName(presetName);
+            bool usedIncrementalMutation = false;
+            TreeNode? insertedNode = null;
+            if (CanMutatePresetTreeIncrementally())
+            {
+                ApplyIncrementalPresetTreeMutation(
+                    () => { usedIncrementalMutation = TryInsertPresetNodeIncrementally(presetName, out insertedNode); },
+                    () => insertedNode);
+            }
 
-            // Load the new preset into the editor
-            txtPreset.Text = presetName;
-            txtCommand.Clear();
-            txtTimeoutHeader.Text = string.Empty;
-            _activePresetName = presetName;
-            _selectedFolderName = null;
-            UpdateRunButtonText();
-            UpdatePresetHeaderIndicator();
+            if (!usedIncrementalMutation)
+            {
+                RefreshPresetListPreservingCurrentFilter();
+                SelectPresetByName(presetName, ensureVisible: true);
+            }
+            else if (insertedNode != null)
+            {
+                EnsureTreeNodeFullyVisible(trvPresets, insertedNode);
+            }
+
+            if (ShouldRefreshFavoritesForPreset(presetName))
+            {
+                RefreshFavoritesListPreservingCurrentFilter();
+            }
+
+            EnsurePresetLoadedInEditor(presetName);
+            ClearPresetDeleteUndoHistory();
         }
 
         private string? ResolvePresetNameForActions(bool preferContextSource)
@@ -7760,7 +8647,7 @@ namespace SSH_Helper
             var preActionExpandState = CapturePresetTreeExpandState();
             string suggested = _presetManager.GetUniqueName(sourceName + "_Copy");
 
-            string newName = Microsoft.VisualBasic.Interaction.InputBox(
+            string newName = ShowInputBox(
                 $"Enter name for the copied preset (from '{sourceName}'):",
                 "Copy Preset",
                 suggested);
@@ -7797,17 +8684,28 @@ namespace SSH_Helper
                     _manualPresetOrder.Add(finalName);
                 }
 
-                RefreshPresetList(expandStatesOverride: preActionExpandState);
-                SelectPresetByName(finalName, ensureVisible: false);
-
-                if (!string.Equals(_activePresetName, finalName, StringComparison.Ordinal))
+                bool usedIncrementalMutation = false;
+                TreeNode? duplicatedNode = null;
+                if (CanMutatePresetTreeIncrementally())
                 {
-                    var preset = _presetManager.Get(finalName);
-                    if (preset != null)
-                    {
-                        LoadPresetIntoEditor(finalName, preset);
-                    }
+                    ApplyIncrementalPresetTreeMutation(
+                        () => { usedIncrementalMutation = TryInsertPresetNodeIncrementally(finalName, out duplicatedNode); },
+                        () => duplicatedNode);
                 }
+
+                if (!usedIncrementalMutation)
+                {
+                    RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                    SelectPresetByName(finalName, ensureVisible: false);
+                }
+
+                if (ShouldRefreshFavoritesForPreset(finalName, sourcePreset.Folder))
+                {
+                    RefreshFavoritesListPreservingCurrentFilter();
+                }
+
+                EnsurePresetLoadedInEditor(finalName);
+                ClearPresetDeleteUndoHistory();
             }
             catch (Exception ex)
             {
@@ -7821,20 +8719,22 @@ namespace SSH_Helper
             if (string.IsNullOrWhiteSpace(selectedPreset))
                 return;
 
-            string newName = Microsoft.VisualBasic.Interaction.InputBox(
+            string newName = ShowInputBox(
                 $"Enter a new name for the preset '{selectedPreset}':",
                 "Rename Preset",
                 selectedPreset);
 
             if (string.IsNullOrEmpty(newName) || newName == selectedPreset) return;
 
+            var renamedNode = FindPresetNodeByName(trvPresets.Nodes, selectedPreset);
+            var preActionExpandState = CapturePresetTreeExpandState();
+            var originalFolder = _presetManager.Get(selectedPreset)?.Folder;
+
             if (!_presetManager.Rename(selectedPreset, newName))
             {
                 DialogTheme.Show(this, "This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
-
-            var preActionExpandState = CapturePresetTreeExpandState();
 
             // Update manual order list
             int orderIndex = _manualPresetOrder.IndexOf(selectedPreset);
@@ -7843,11 +8743,29 @@ namespace SSH_Helper
                 _manualPresetOrder[orderIndex] = newName;
             }
 
-            RefreshPresetList(expandStatesOverride: preActionExpandState);
-            SelectPresetByName(newName, ensureVisible: false);
+            bool usedIncrementalMutation = false;
+            if (CanMutatePresetTreeIncrementally() && renamedNode != null)
+            {
+                ApplyIncrementalPresetTreeMutation(
+                    () => { usedIncrementalMutation = TryReinsertExistingPresetNodeIncrementally(renamedNode, newName); },
+                    () => renamedNode);
+            }
+
+            if (!usedIncrementalMutation)
+            {
+                RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                SelectPresetByName(newName, ensureVisible: false);
+            }
+
+            if (ShouldRefreshFavoritesForPreset(newName, originalFolder))
+            {
+                RefreshFavoritesListPreservingCurrentFilter();
+            }
+
             txtPreset.Text = newName;
             _activePresetName = newName;
             UpdatePresetHeaderIndicator();
+            ClearPresetDeleteUndoHistory();
         }
 
         private void DeletePreset(bool preferContextSource = false)
@@ -7870,7 +8788,7 @@ namespace SSH_Helper
             // Check if this is the currently active preset being deleted
             bool isDeletingActivePreset = string.Equals(selectedPreset, _activePresetName, StringComparison.Ordinal);
 
-            if (_presetManager.Delete(selectedPreset))
+            if (TryDeletePresetWithUndo(selectedPreset))
             {
                 _manualPresetOrder.Remove(selectedPreset);
 
@@ -7889,10 +8807,10 @@ namespace SSH_Helper
                 }
                 else
                 {
-                    RefreshPresetList(expandStatesOverride: preActionExpandState);
+                    RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
                 }
 
-                RefreshFavoritesList();
+                RefreshFavoritesListPreservingCurrentFilter();
 
                 if (!string.IsNullOrEmpty(selectionTargetPresetName))
                 {
@@ -7951,7 +8869,7 @@ namespace SSH_Helper
 
         private void ImportPreset()
         {
-            string input = Microsoft.VisualBasic.Interaction.InputBox(
+            string input = ShowInputBox(
                 "Paste the encoded preset string:\r\nFormat: <name>_<encoded>",
                 "Import Preset",
                 "");
@@ -7964,19 +8882,29 @@ namespace SSH_Helper
 
                 string finalName = _presetManager.Import(input, defaultTimeout);
 
-                RefreshPresetList();
-                SelectPresetByName(finalName, ensureVisible: false);
-
-                if (!string.Equals(_activePresetName, finalName, StringComparison.Ordinal))
+                bool usedIncrementalMutation = false;
+                TreeNode? importedNode = null;
+                if (CanMutatePresetTreeIncrementally())
                 {
-                    var preset = _presetManager.Get(finalName);
-                    if (preset != null)
-                    {
-                        LoadPresetIntoEditor(finalName, preset);
-                    }
+                    ApplyIncrementalPresetTreeMutation(
+                        () => { usedIncrementalMutation = TryInsertPresetNodeIncrementally(finalName, out importedNode); },
+                        () => importedNode);
                 }
 
+                if (!usedIncrementalMutation)
+                {
+                    RefreshPresetListPreservingCurrentFilter();
+                    SelectPresetByName(finalName, ensureVisible: false);
+                }
+
+                if (ShouldRefreshFavoritesForPreset(finalName))
+                {
+                    RefreshFavoritesListPreservingCurrentFilter();
+                }
+
+                EnsurePresetLoadedInEditor(finalName);
                 DialogTheme.Show(this, $"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ClearPresetDeleteUndoHistory();
             }
             catch (FormatException)
             {
@@ -8049,6 +8977,11 @@ namespace SSH_Helper
 
                 DialogTheme.Show(this, $"Imported {count} presets.\n\n{locationMsg}\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
                     "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                if (count > 0)
+                {
+                    ClearPresetDeleteUndoHistory();
+                }
             }
             catch (FormatException ex)
             {
@@ -8134,7 +9067,8 @@ namespace SSH_Helper
         private void RefreshPresetList(
             bool restoreExpandState = true,
             IReadOnlyDictionary<string, bool>? expandStatesOverride = null,
-            string? filterText = null)
+            string? filterText = null,
+            AppConfiguration? configOverride = null)
         {
             _activePresetFilter = string.IsNullOrWhiteSpace(filterText) ? null : filterText.Trim();
             var isFiltering = _activePresetFilter != null;
@@ -8162,7 +9096,7 @@ namespace SSH_Helper
             trvPresets.BeginUpdate();
             trvPresets.Nodes.Clear();
 
-            var config = _configService.Load();
+            var config = configOverride ?? _configService.Load();
 
             // Dictionary to track nodes by full path for nested folder building
             var folderNodes = new Dictionary<string, TreeNode>();
@@ -8536,6 +9470,348 @@ namespace SSH_Helper
             }
         }
 
+        private string ShowInputBox(string prompt, string title, string defaultResponse)
+        {
+            var promptOverride = _inputBoxPromptOverrideForTests;
+            if (promptOverride != null)
+            {
+                return promptOverride(prompt, title, defaultResponse);
+            }
+
+            return Microsoft.VisualBasic.Interaction.InputBox(prompt, title, defaultResponse);
+        }
+
+        private bool CanMutatePresetTreeIncrementally()
+        {
+            return string.IsNullOrWhiteSpace(_activePresetFilter) && !trvPresets.IsDisposed;
+        }
+
+        private string BuildPresetTreeNodeText(string presetName)
+        {
+            var preset = _presetManager.Get(presetName);
+            return preset?.IsFavorite == true ? $"{StarIcon} {presetName}" : presetName;
+        }
+
+        private string BuildFolderTreeNodeText(string folderPath)
+        {
+            var folderName = FolderPathUtility.GetFolderName(folderPath);
+            var folderInfo = _presetManager.Folders.GetValueOrDefault(folderPath);
+            return folderInfo?.IsFavorite == true
+                ? $"{StarIcon} {FolderIcon} {folderName}"
+                : $"{FolderIcon} {folderName}";
+        }
+
+        private TreeNode CreatePresetTreeNode(string presetName)
+        {
+            return new TreeNode(BuildPresetTreeNodeText(presetName))
+            {
+                Tag = new PresetNodeTag { IsFolder = false, Name = presetName }
+            };
+        }
+
+        private TreeNode CreateFolderTreeNode(string folderPath)
+        {
+            return new TreeNode(BuildFolderTreeNodeText(folderPath))
+            {
+                Tag = new PresetNodeTag { IsFolder = true, Name = folderPath }
+            };
+        }
+
+        private void UpdatePresetTreeNodeDisplay(TreeNode node)
+        {
+            if (node.Tag is not PresetNodeTag tag)
+            {
+                return;
+            }
+
+            node.Text = tag.IsFolder
+                ? BuildFolderTreeNodeText(tag.Name)
+                : BuildPresetTreeNodeText(tag.Name);
+        }
+
+        private void ApplyIncrementalPresetTreeMutation(Action mutate, Func<TreeNode?>? preferredSelectionNodeResolver = null)
+        {
+            var topNodeBefore = PresetTreeViewportRestorer.Capture(trvPresets.TopNode);
+            var selectionBefore = CaptureSelectedPresetNodeTag(trvPresets) ?? ClonePresetNodeTag(_lastPresetsTreeSelection);
+            var previousSuppressSelection = _suppressPresetSelectionChange;
+            var previousSuppressExpand = _suppressExpandCollapseEvents;
+
+            _suppressPresetSelectionChange = true;
+            _suppressExpandCollapseEvents = true;
+            PresetNodeTag? selectionTag = null;
+            trvPresets.BeginUpdate();
+            try
+            {
+                mutate();
+
+                var preferredSelectionNode = preferredSelectionNodeResolver?.Invoke();
+                TreeNode? selectionNode = null;
+                if (preferredSelectionNode != null && preferredSelectionNode.TreeView == trvPresets)
+                {
+                    selectionNode = preferredSelectionNode;
+                }
+                else if (selectionBefore != null)
+                {
+                    selectionNode = FindNodeByTag(trvPresets.Nodes, selectionBefore.Name, selectionBefore.IsFolder);
+                }
+
+                selectionTag = selectionNode?.Tag as PresetNodeTag ?? selectionBefore;
+                if (selectionNode != null)
+                {
+                    trvPresets.SelectedNode = selectionNode;
+                }
+
+                RememberPresetTreeSelection(trvPresets, selectionTag);
+                PresetTreeViewportRestorer.TryRestoreTopNode(
+                    trvPresets,
+                    trvPresets.Nodes,
+                    topNodeBefore,
+                    selectionTag);
+            }
+            finally
+            {
+                trvPresets.EndUpdate();
+                _suppressExpandCollapseEvents = previousSuppressExpand;
+                _suppressPresetSelectionChange = previousSuppressSelection;
+            }
+
+            PresetTreeViewportRestorer.TryRestoreTopNode(
+                trvPresets,
+                trvPresets.Nodes,
+                topNodeBefore,
+                selectionTag);
+        }
+
+        private bool TryInsertPresetNodeIncrementally(string presetName, out TreeNode? insertedNode)
+        {
+            insertedNode = null;
+            var preset = _presetManager.Get(presetName);
+            if (preset == null)
+            {
+                return false;
+            }
+
+            var parentNode = string.IsNullOrEmpty(preset.Folder)
+                ? null
+                : FindNodeByTag(trvPresets.Nodes, preset.Folder, isFolder: true);
+            if (!string.IsNullOrEmpty(preset.Folder) && parentNode == null)
+            {
+                return false;
+            }
+
+            var node = CreatePresetTreeNode(presetName);
+            InsertPresetNode(node, presetName, preset.Folder, _configService.GetCurrent());
+            insertedNode = node;
+            return true;
+        }
+
+        private bool TryInsertFolderNodeIncrementally(string folderPath, out TreeNode? insertedNode)
+        {
+            insertedNode = null;
+            var parentPath = FolderPathUtility.GetParentPath(folderPath);
+            var parentNode = string.IsNullOrEmpty(parentPath)
+                ? null
+                : FindNodeByTag(trvPresets.Nodes, parentPath, isFolder: true);
+            if (!string.IsNullOrEmpty(parentPath) && parentNode == null)
+            {
+                return false;
+            }
+
+            var node = CreateFolderTreeNode(folderPath);
+            InsertFolderNode(node, folderPath, _configService.GetCurrent());
+            insertedNode = node;
+            return true;
+        }
+
+        private bool TryReinsertExistingPresetNodeIncrementally(TreeNode node, string presetName)
+        {
+            var preset = _presetManager.Get(presetName);
+            if (preset == null)
+            {
+                return false;
+            }
+
+            var parentNode = string.IsNullOrEmpty(preset.Folder)
+                ? null
+                : FindNodeByTag(trvPresets.Nodes, preset.Folder, isFolder: true);
+            if (!string.IsNullOrEmpty(preset.Folder) && parentNode == null)
+            {
+                return false;
+            }
+
+            if (node.Tag is PresetNodeTag tag)
+            {
+                tag.Name = presetName;
+                tag.IsFolder = false;
+            }
+
+            DetachTreeNode(node);
+            UpdatePresetTreeNodeDisplay(node);
+            InsertPresetNode(node, presetName, preset.Folder, _configService.GetCurrent());
+            return true;
+        }
+
+        private void InsertPresetNode(TreeNode node, string presetName, string? folder, AppConfiguration config)
+        {
+            var parentNode = string.IsNullOrEmpty(folder)
+                ? null
+                : FindNodeByTag(trvPresets.Nodes, folder, isFolder: true);
+            var targetNodes = parentNode?.Nodes ?? trvPresets.Nodes;
+            var orderedPresets = GetSortedPresetsInFolder(folder, config).ToList();
+            var desiredPresetIndex = orderedPresets.IndexOf(presetName);
+            if (desiredPresetIndex < 0)
+            {
+                desiredPresetIndex = orderedPresets.Count;
+            }
+
+            var insertIndex = ResolvePresetInsertIndex(targetNodes, desiredPresetIndex, insideFolder: parentNode != null);
+            targetNodes.Insert(insertIndex, node);
+        }
+
+        private void InsertFolderNode(TreeNode node, string folderPath, AppConfiguration config)
+        {
+            var parentPath = FolderPathUtility.GetParentPath(folderPath);
+            var parentNode = string.IsNullOrEmpty(parentPath)
+                ? null
+                : FindNodeByTag(trvPresets.Nodes, parentPath, isFolder: true);
+            var targetNodes = parentNode?.Nodes ?? trvPresets.Nodes;
+            var siblingFolders = GetSortedFolders(config)
+                .Where(path => string.Equals(FolderPathUtility.GetParentPath(path), parentPath, StringComparison.Ordinal))
+                .ToList();
+            var desiredFolderIndex = siblingFolders.IndexOf(folderPath);
+            if (desiredFolderIndex < 0)
+            {
+                desiredFolderIndex = siblingFolders.Count;
+            }
+
+            var insertIndex = ResolveFolderInsertIndex(targetNodes, desiredFolderIndex, insideFolder: parentNode != null);
+            targetNodes.Insert(insertIndex, node);
+        }
+
+        private static int ResolvePresetInsertIndex(TreeNodeCollection nodes, int desiredPresetIndex, bool insideFolder)
+        {
+            var seenPresets = 0;
+            for (var i = 0; i < nodes.Count; i++)
+            {
+                if (nodes[i].Tag is not PresetNodeTag tag)
+                {
+                    continue;
+                }
+
+                if (!tag.IsFolder)
+                {
+                    if (seenPresets == desiredPresetIndex)
+                    {
+                        return i;
+                    }
+
+                    seenPresets++;
+                    continue;
+                }
+
+                if (insideFolder)
+                {
+                    return i;
+                }
+            }
+
+            return nodes.Count;
+        }
+
+        private static int ResolveFolderInsertIndex(TreeNodeCollection nodes, int desiredFolderIndex, bool insideFolder)
+        {
+            var seenFolders = 0;
+            for (var i = 0; i < nodes.Count; i++)
+            {
+                if (nodes[i].Tag is not PresetNodeTag tag)
+                {
+                    continue;
+                }
+
+                if (tag.IsFolder)
+                {
+                    if (seenFolders == desiredFolderIndex)
+                    {
+                        return i;
+                    }
+
+                    seenFolders++;
+                    continue;
+                }
+
+                if (!insideFolder)
+                {
+                    return i;
+                }
+            }
+
+            return nodes.Count;
+        }
+
+        private static void DetachTreeNode(TreeNode node)
+        {
+            if (node.Parent != null)
+            {
+                node.Parent.Nodes.Remove(node);
+            }
+            else
+            {
+                node.TreeView?.Nodes.Remove(node);
+            }
+        }
+
+        private bool IsFavoriteFolder(string? folderPath)
+        {
+            return !string.IsNullOrEmpty(folderPath) &&
+                _presetManager.Folders.TryGetValue(folderPath, out var folderInfo) &&
+                folderInfo.IsFavorite;
+        }
+
+        private bool ShouldRefreshFavoritesForPreset(string presetName, string? previousFolder = null)
+        {
+            var preset = _presetManager.Get(presetName);
+            if (preset == null)
+            {
+                return IsFavoriteFolder(previousFolder);
+            }
+
+            return preset.IsFavorite ||
+                IsFavoriteFolder(previousFolder) ||
+                IsFavoriteFolder(preset.Folder);
+        }
+
+        private void EnsurePresetLoadedInEditor(string presetName)
+        {
+            if (string.Equals(_activePresetName, presetName, StringComparison.Ordinal) &&
+                string.IsNullOrEmpty(_selectedFolderName))
+            {
+                return;
+            }
+
+            var preset = _presetManager.Get(presetName);
+            if (preset != null)
+            {
+                LoadPresetIntoEditor(presetName, preset);
+            }
+        }
+
+        private void RefreshPresetListPreservingCurrentFilter(
+            bool restoreExpandState = true,
+            IReadOnlyDictionary<string, bool>? expandStatesOverride = null,
+            AppConfiguration? configOverride = null)
+        {
+            RefreshPresetList(
+                restoreExpandState: restoreExpandState,
+                expandStatesOverride: expandStatesOverride,
+                filterText: _activePresetFilter,
+                configOverride: configOverride);
+        }
+
+        private void RefreshFavoritesListPreservingCurrentFilter()
+        {
+            RefreshFavoritesList(_activePresetFilter);
+        }
+
         private static TreeNode? FindNodeByTag(TreeNodeCollection nodes, string name, bool isFolder)
         {
             foreach (TreeNode node in nodes)
@@ -8548,6 +9824,141 @@ namespace SSH_Helper
                     return found;
             }
             return null;
+        }
+
+        private static PresetNodeTag? CaptureSelectedPresetNodeTag(TreeView treeView)
+        {
+            if (treeView.SelectedNode?.Tag is not PresetNodeTag tag)
+            {
+                return null;
+            }
+
+            return ClonePresetNodeTag(tag);
+        }
+
+        private static PresetNodeTag? ClonePresetNodeTag(PresetNodeTag? tag)
+        {
+            if (tag == null)
+            {
+                return null;
+            }
+
+            return new PresetNodeTag
+            {
+                IsFolder = tag.IsFolder,
+                Name = tag.Name
+            };
+        }
+
+        private PresetNodeTag? GetRememberedPresetTreeSelection(TreeView treeView)
+        {
+            if (ReferenceEquals(treeView, trvFavorites))
+            {
+                return ClonePresetNodeTag(_lastFavoritesTreeSelection);
+            }
+
+            if (ReferenceEquals(treeView, trvPresets))
+            {
+                return ClonePresetNodeTag(_lastPresetsTreeSelection);
+            }
+
+            return null;
+        }
+
+        private void RememberPresetTreeSelection(TreeView treeView, PresetNodeTag? tag)
+        {
+            var clone = ClonePresetNodeTag(tag);
+            if (ReferenceEquals(treeView, trvFavorites))
+            {
+                _lastFavoritesTreeSelection = clone;
+            }
+            else if (ReferenceEquals(treeView, trvPresets))
+            {
+                _lastPresetsTreeSelection = clone;
+            }
+        }
+
+        private bool TryApplySelectedPresetNode(TreeView treeView, Action? onCancel = null)
+        {
+            return TryApplySelectedPresetNode(treeView, treeView.SelectedNode, onCancel);
+        }
+
+        private bool TryApplySelectedPresetNode(TreeView treeView, TreeNode? node, Action? onCancel = null)
+        {
+            var tag = node?.Tag as PresetNodeTag ?? GetRememberedPresetTreeSelection(treeView);
+            if (tag == null)
+            {
+                return true;
+            }
+
+            if (!TryApplySelectedPresetNodeTag(tag, onCancel))
+            {
+                return false;
+            }
+
+            RememberPresetTreeSelection(treeView, tag);
+            return true;
+        }
+
+        private bool TryApplySelectedPresetNodeTag(PresetNodeTag tag, Action? onCancel = null)
+        {
+            if (tag.IsFolder)
+            {
+                if (string.IsNullOrEmpty(_activePresetName) &&
+                    string.Equals(_selectedFolderName, tag.Name, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                HandleFolderSelection(tag.Name, onCancel);
+                return string.IsNullOrEmpty(_activePresetName) &&
+                    string.Equals(_selectedFolderName, tag.Name, StringComparison.Ordinal);
+            }
+
+            if (string.Equals(_activePresetName, tag.Name, StringComparison.Ordinal) &&
+                string.IsNullOrEmpty(_selectedFolderName))
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrEmpty(_activePresetName) &&
+                !string.Equals(tag.Name, _activePresetName, StringComparison.Ordinal) &&
+                IsPresetDirty())
+            {
+                if (!TryResolvePendingPresetChanges(onCancel))
+                {
+                    return false;
+                }
+            }
+
+            var preset = _presetManager.Get(tag.Name);
+            if (preset == null)
+            {
+                return false;
+            }
+
+            LoadPresetIntoEditor(tag.Name, preset);
+            return true;
+        }
+
+        private void RestorePresetTabSelection(int tabIndex)
+        {
+            if (tabIndex < 0 ||
+                tabIndex >= presetsTabControl.TabCount ||
+                presetsTabControl.SelectedIndex == tabIndex)
+            {
+                return;
+            }
+
+            _restoringPresetsTabSelection = true;
+            try
+            {
+                presetsTabControl.SelectedIndex = tabIndex;
+            }
+            finally
+            {
+                _restoringPresetsTabSelection = false;
+            }
         }
 
         private void SelectPresetByName(string? presetName, bool ensureVisible = true)
@@ -8574,6 +9985,7 @@ namespace SSH_Helper
                     targetNode.EnsureVisible();
                 }
                 _suppressExpandCollapseEvents = false;
+                RememberPresetTreeSelection(trvPresets, targetNode.Tag as PresetNodeTag);
             }
         }
 
@@ -8605,6 +10017,7 @@ namespace SSH_Helper
                     targetNode.EnsureVisible();
                 }
                 _suppressExpandCollapseEvents = false;
+                RememberPresetTreeSelection(trvPresets, targetNode.Tag as PresetNodeTag);
             }
         }
 
@@ -8644,30 +10057,64 @@ namespace SSH_Helper
         {
             var preset = _presetManager.Get(presetName);
             if (preset == null) return;
+            var presetNode = FindPresetNodeByName(trvPresets.Nodes, presetName);
+            var preActionExpandState = CapturePresetTreeExpandState();
 
             preset.IsFavorite = !preset.IsFavorite;
             _presetManager.Save(presetName, preset);
 
-            RefreshPresetList();
-            RefreshFavoritesList();
-            SelectPresetByName(presetName);
+            bool usedIncrementalMutation = false;
+            if (CanMutatePresetTreeIncrementally() && presetNode != null)
+            {
+                ApplyIncrementalPresetTreeMutation(
+                    () => { usedIncrementalMutation = TryReinsertExistingPresetNodeIncrementally(presetNode, presetName); },
+                    () => presetNode);
+            }
+
+            if (!usedIncrementalMutation)
+            {
+                RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                SelectPresetByName(presetName, ensureVisible: false);
+            }
+
+            RefreshFavoritesListPreservingCurrentFilter();
 
             UpdateStatusBar(preset.IsFavorite ? $"'{presetName}' added to favorites" : $"'{presetName}' removed from favorites");
+            ClearPresetDeleteUndoHistory();
         }
 
         private void ToggleFolderFavorite(string folderName)
         {
             if (!_presetManager.Folders.TryGetValue(folderName, out var folderInfo))
                 return;
+            var folderNode = FindNodeByTag(trvPresets.Nodes, folderName, isFolder: true);
+            var preActionExpandState = CapturePresetTreeExpandState();
 
             bool newFavoriteState = !folderInfo.IsFavorite;
             _presetManager.SetFolderFavorite(folderName, newFavoriteState);
 
-            RefreshPresetList();
-            RefreshFavoritesList();
-            SelectFolderByName(folderName);
+            bool usedIncrementalMutation = false;
+            if (CanMutatePresetTreeIncrementally() && folderNode != null)
+            {
+                ApplyIncrementalPresetTreeMutation(
+                    () =>
+                    {
+                        UpdatePresetTreeNodeDisplay(folderNode);
+                        usedIncrementalMutation = true;
+                    },
+                    () => folderNode);
+            }
+
+            if (!usedIncrementalMutation)
+            {
+                RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                SelectFolderByName(folderName, ensureVisible: false);
+            }
+
+            RefreshFavoritesListPreservingCurrentFilter();
 
             UpdateStatusBar(newFavoriteState ? $"Folder '{folderName}' added to favorites" : $"Folder '{folderName}' removed from favorites");
+            ClearPresetDeleteUndoHistory();
         }
 
         private string GetPresetNameFromDisplay(string displayName)
@@ -9913,10 +11360,27 @@ namespace SSH_Helper
             var sw = System.Diagnostics.Stopwatch.StartNew();
             SshDebugLog("UI", $"SetExecutionMode({executing}) entered");
 
-            Cursor = executing ? Cursors.WaitCursor : Cursors.Default;
-            btnExecuteAll.Enabled = !executing;
-            btnExecuteSelected.Enabled = !executing;
-            btnStopAll.Visible = executing;
+            executePanel.SuspendLayout();
+            try
+            {
+                var targetCursor = executing ? Cursors.WaitCursor : Cursors.Default;
+                if (Cursor != targetCursor)
+                    Cursor = targetCursor;
+
+                var runButtonsEnabled = !executing;
+                if (btnExecuteAll.Enabled != runButtonsEnabled)
+                    btnExecuteAll.Enabled = runButtonsEnabled;
+                if (btnExecuteSelected.Enabled != runButtonsEnabled)
+                    btnExecuteSelected.Enabled = runButtonsEnabled;
+                if (btnStopAll.Visible != executing)
+                    btnStopAll.Visible = executing;
+            }
+            finally
+            {
+                executePanel.ResumeLayout(performLayout: false);
+                executePanel.Invalidate();
+            }
+
             lstOutput.Enabled = !executing;
             tsbOpenCsv.Enabled = !executing;
             tsbSaveCsv.Enabled = !executing;
@@ -10455,6 +11919,13 @@ namespace SSH_Helper
                 case Keys.Control | Keys.F:
                     ShowFindDialog();
                     return true;
+                case Keys.Control | Keys.Z:
+                    if (ShouldHandlePresetDeleteShortcut())
+                    {
+                        UndoLatestPresetDelete();
+                        return true;
+                    }
+                    break;
                 case Keys.F3:
                     NavigateToMatch(forward: true);
                     return true;
@@ -10778,71 +12249,76 @@ namespace SSH_Helper
             dgv_variables.Rows.Clear();
             dgv_variables.Columns.Clear();
 
-            if (state.HostColumns != null && state.HostColumns.Count > 0)
-            {
-                foreach (var colName in state.HostColumns)
-                {
-                    // Skip checkbox column name and whitespace-only names (will be added by EnsureSelectColumn)
-                    if (colName == SelectColumnName || string.IsNullOrWhiteSpace(colName))
-                        continue;
-                    dgv_variables.Columns.Add(colName, colName);
-                }
-                EnsureSelectColumn();
-
-                if (state.Hosts != null)
-                {
-                    // Ensure row template height is set before adding rows
-                    dgv_variables.RowTemplate.Height = 28;
-                    var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                               _configService.GetCurrent().Credentials.UseCredentialManager;
-
-                    foreach (var rowData in state.Hosts)
-                    {
-                        if (useCredentialManager)
-                        {
-                            rowData.TryGetValue(CsvManager.HostColumnName, out var hostValue);
-                            rowData.TryGetValue("username", out var usernameValue);
-                            rowData.TryGetValue("password", out var passwordValue);
-
-                            var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
-                            if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
-                            {
-                                StoreHostPassword(hostValue, resolvedUsername, passwordValue);
-                                rowData["password"] = string.Empty;
-                            }
-                        }
-
-                        var rowIndex = dgv_variables.Rows.Add();
-                        dgv_variables.Rows[rowIndex].Height = 28;
-                        foreach (var kvp in rowData)
-                        {
-                            if (dgv_variables.Columns.Contains(kvp.Key))
-                            {
-                                dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
-                            }
-                        }
-                    }
-                }
-
-                // Restore selected (checked) host indices
-                if (state.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
-                {
-                    foreach (var index in state.SelectedHostIndices)
-                    {
-                        if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
-                        {
-                            dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
-                        }
-                    }
-                }
-            }
-
-            // Restore CSV path
             _loadedFilePath = state.LastCsvPath;
             _loadedFileFingerprint = state.LastCsvFingerprint?.Clone();
             _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
                 ? CsvFileSyncStatus.NotTracked
                 : CsvFileSyncStatus.Current;
+
+            using (BeginHostGridRestoreScope())
+            {
+                if (state.HostColumns != null && state.HostColumns.Count > 0)
+                {
+                    foreach (var colName in state.HostColumns)
+                    {
+                        // Skip checkbox column name and whitespace-only names (will be added by EnsureSelectColumn)
+                        if (colName == SelectColumnName || string.IsNullOrWhiteSpace(colName))
+                            continue;
+                        dgv_variables.Columns.Add(colName, colName);
+                    }
+                    EnsureSelectColumn();
+
+                    if (state.Hosts != null)
+                    {
+                        // Ensure row template height is set before adding rows
+                        dgv_variables.RowTemplate.Height = 28;
+                        var useCredentialManager = _credentialProvider?.IsAvailable == true &&
+                                                   _configService.GetCurrent().Credentials.UseCredentialManager;
+
+                        foreach (var rowData in state.Hosts)
+                        {
+                            if (useCredentialManager)
+                            {
+                                rowData.TryGetValue(CsvManager.HostColumnName, out var hostValue);
+                                rowData.TryGetValue("username", out var usernameValue);
+                                rowData.TryGetValue("password", out var passwordValue);
+
+                                var resolvedUsername = string.IsNullOrWhiteSpace(usernameValue) ? tsbUsername.Text : usernameValue;
+                                if (!string.IsNullOrWhiteSpace(passwordValue) && !string.IsNullOrWhiteSpace(hostValue))
+                                {
+                                    StoreHostPassword(hostValue, resolvedUsername, passwordValue);
+                                    rowData["password"] = string.Empty;
+                                }
+                            }
+
+                            var rowIndex = dgv_variables.Rows.Add();
+                            dgv_variables.Rows[rowIndex].Height = 28;
+                            foreach (var kvp in rowData)
+                            {
+                                if (dgv_variables.Columns.Contains(kvp.Key))
+                                {
+                                    dgv_variables.Rows[rowIndex].Cells[kvp.Key].Value = kvp.Value;
+                                }
+                            }
+                        }
+                    }
+
+                    // Restore selected (checked) host indices
+                    if (state.SelectedHostIndices != null && dgv_variables.Columns.Contains(SelectColumnName))
+                    {
+                        foreach (var index in state.SelectedHostIndices)
+                        {
+                            if (index >= 0 && index < dgv_variables.Rows.Count && !dgv_variables.Rows[index].IsNewRow)
+                            {
+                                dgv_variables.Rows[index].Cells[SelectColumnName].Value = true;
+                            }
+                        }
+                    }
+                }
+
+                RequestHostGridHostCountRefresh();
+                RequestHostGridScrollbarRefresh();
+            }
 
             // Restore username (not password)
             if (!string.IsNullOrEmpty(state.Username))
@@ -10864,7 +12340,7 @@ namespace SSH_Helper
             // Reset dirty flag since we're restoring saved state, not making new changes
             _csvDirty = false;
             CaptureLoadedFileSnapshotFromGrid();
-            UpdateHostCount();
+            UpdateHostsFileIndicator();
 
             // Flag for auto-sizing after the form is fully visible (handled in Form1_Shown)
             _pendingColumnAutoSize = true;

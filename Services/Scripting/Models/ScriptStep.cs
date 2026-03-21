@@ -119,6 +119,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public HttpOptions? Http { get; set; }
 
         /// <summary>
+        /// Browser callback capture command - opens a browser flow and captures localhost callback parameters.
+        /// </summary>
+        public BrowserCallbackCaptureOptions? BrowserCallbackCapture { get; set; }
+
+        /// <summary>
         /// Ping command - performs ICMP reachability checks.
         /// </summary>
         public PingOptions? Ping { get; set; }
@@ -338,6 +343,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (UpdateEnvironment != null) return StepType.UpdateEnvironment;
             if (Log != null) return StepType.Log;
             if (Http != null) return StepType.Http;
+            if (BrowserCallbackCapture != null) return StepType.BrowserCallbackCapture;
             if (Ping != null) return StepType.Ping;
             if (Dns != null) return StepType.Dns;
             if (Portcheck != null) return StepType.Portcheck;
@@ -873,6 +879,82 @@ namespace SSH_Helper.Services.Scripting.Models
     }
 
     /// <summary>
+    /// Options for the browser_callback_capture command.
+    /// </summary>
+    public class BrowserCallbackCaptureOptions
+    {
+        /// <summary>
+        /// The initial URL to open in the system browser.
+        /// </summary>
+        public string StartUrl { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Local callback path to handle browser redirects/posts (for example /oauth_callback).
+        /// </summary>
+        public string CallbackPath { get; set; } = "/oauth_callback";
+
+        /// <summary>
+        /// Local loopback listener port.
+        /// </summary>
+        public int LocalPort { get; set; } = 8086;
+
+        /// <summary>
+        /// Capture mode: auto, fragment, query, post_body.
+        /// </summary>
+        public string CaptureMode { get; set; } = "auto";
+
+        /// <summary>
+        /// Browser launch surface: external or webview2.
+        /// </summary>
+        public string BrowserMode { get; set; } = "external";
+
+        /// <summary>
+        /// When greater than zero in WebView2 mode, keep the embedded browser hidden until the callback is still pending after this many seconds.
+        /// </summary>
+        public int ShowAfterSeconds { get; set; }
+
+        /// <summary>
+        /// Variable name prefix used to persist captured values.
+        /// </summary>
+        public string Into { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Optional list of required callback fields.
+        /// </summary>
+        public List<string>? RequiredFields { get; set; }
+
+        /// <summary>
+        /// Wait timeout in seconds.
+        /// </summary>
+        public int Timeout { get; set; } = 300;
+
+        /// <summary>
+        /// When true, open the start_url in the default browser.
+        /// </summary>
+        public bool OpenBrowser { get; set; } = true;
+
+        /// <summary>
+        /// When true, successful callback pages attempt to close themselves after completion.
+        /// </summary>
+        public bool AutoCloseBrowser { get; set; } = true;
+
+        /// <summary>
+        /// Optional message shown on callback completion page.
+        /// </summary>
+        public string? CompletionMessage { get; set; }
+
+        /// <summary>
+        /// Optional message shown on callback failure page.
+        /// </summary>
+        public string? FailureMessage { get; set; }
+
+        /// <summary>
+        /// When true, suppresses the success summary output line after capture.
+        /// </summary>
+        public bool Quiet { get; set; } = true;
+    }
+
+    /// <summary>
     /// Options for the ping command.
     /// </summary>
     public class PingOptions
@@ -1095,6 +1177,7 @@ namespace SSH_Helper.Services.Scripting.Models
         UpdateEnvironment,
         Log,
         Http,
+        BrowserCallbackCapture,
         Ping,
         Dns,
         Portcheck,

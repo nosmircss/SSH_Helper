@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -35,6 +36,7 @@ namespace SSH_Helper.Services.Scripting
             "input",
             "log",
             "http",
+            "browser_callback_capture",
             "ping",
             "dns",
             "portcheck",
@@ -102,13 +104,14 @@ namespace SSH_Helper.Services.Scripting
                 ["foreach"] = ["iterator", "when", "do"],
                 ["while"] = ["condition", "max_iterations", "do"],
                 ["try"] = ["do", "catch", "finally"],
-                ["readfile"] = ["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"],
-                ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers"],
+                ["readfile"] = ["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding", "on_error"],
+                ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
                 ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error"],
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
                 ["log"] = ["message", "level"],
                 ["http"] = ["url", "method", "body", "headers", "into", "timeout", "follow_redirects", "allow_failure", "verify_tls", "auth", "username", "password", "token", "content_type", "on_error"],
+                ["browser_callback_capture"] = ["start_url", "callback_path", "local_port", "capture_mode", "browser_mode", "show_after_seconds", "into", "required_fields", "timeout", "open_browser", "auto_close_browser", "completion_message", "failure_message", "quiet", "on_error"],
                 ["ping"] = ["host", "count", "timeout", "into", "on_error"],
                 ["dns"] = ["host", "type", "timeout", "into", "on_error"],
                 ["portcheck"] = ["host", "port", "timeout", "into", "on_error"],
@@ -144,6 +147,7 @@ namespace SSH_Helper.Services.Scripting
                 ["input"] = [],
                 ["log"] = [],
                 ["http"] = [],
+                ["browser_callback_capture"] = [],
                 ["ping"] = [],
                 ["dns"] = [],
                 ["portcheck"] = [],
@@ -186,6 +190,7 @@ namespace SSH_Helper.Services.Scripting
             StepType.Writefile,
             StepType.Input,
             StepType.Http,
+            StepType.BrowserCallbackCapture,
             StepType.Ping,
             StepType.Dns,
             StepType.Portcheck,
@@ -228,6 +233,11 @@ namespace SSH_Helper.Services.Scripting
                 ["follow_redirects"] = ["true", "false"],
                 ["allow_failure"] = ["true", "false"],
                 ["verify_tls"] = ["true", "false"],
+                ["capture_mode"] = ["auto", "fragment", "query", "post_body"],
+                ["browser_mode"] = ["external", "webview2"],
+                ["open_browser"] = ["true", "false"],
+                ["auto_close_browser"] = ["true", "false"],
+                ["quiet"] = ["true", "false"],
                 ["session"] = ["separate", "shared"],
                 ["mirror_output"] = ["true", "false"],
                 ["show_window"] = ["true", "false"],
@@ -356,6 +366,8 @@ namespace SSH_Helper.Services.Scripting
             {
                 _warnings.Clear();
 
+                yamlText = PreprocessYaml(yamlText);
+
                 // Use a custom approach to handle the flexible step format
                 using var reader = new StringReader(yamlText);
                 var parser = new Parser(reader);
@@ -440,6 +452,142 @@ namespace SSH_Helper.Services.Scripting
             {
                 throw new ScriptParseException($"Failed to parse script: {ex.Message}", ex);
             }
+        }
+
+        // Regex matches lines like "  - set: value" or "    condition: value" where value is unquoted.
+        // Group 1 = leading whitespace + optional "- ", Group 2 = key name, Group 3 = the value.
+        private static readonly Regex PlainScalarLineRegex = new(
+            @"^(\s*(?:-\s+)?)(\w+):\s+(.+)$",
+            RegexOptions.Compiled);
+
+        // Keys whose plain scalar values commonly contain colons (ternary, time formats, etc.)
+        private static readonly HashSet<string> ScalarValueKeys = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // Step keys that accept inline expression/string scalars
+            "set", "print", "send", "exit", "if", "while", "when", "assert",
+            "call", "return", "foreach",
+            // Expanded-form sub-keys that accept expression scalars
+            "expression", "condition", "message", "command", "expect",
+            "format", "value", "source", "pattern", "url", "body", "path"
+        };
+
+        /// <summary>
+        /// Pre-processes YAML text to auto-quote plain scalar values that contain
+        /// unquoted colons (e.g. ternary operators like <c>x ? "a" : "b"</c>),
+        /// which would otherwise cause YAML mapping parse errors.
+        /// </summary>
+        internal static string PreprocessYaml(string yamlText)
+        {
+            var lines = yamlText.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            var modified = false;
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+
+                // Skip blank lines and comments
+                if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("#"))
+                    continue;
+
+                var match = PlainScalarLineRegex.Match(line);
+                if (!match.Success)
+                    continue;
+
+                var key = match.Groups[2].Value;
+                var value = match.Groups[3].Value;
+
+                // Only process known scalar-value keys
+                if (!ScalarValueKeys.Contains(key))
+                    continue;
+
+                // Value starts a block scalar (| or >) — leave it alone
+                if (value.StartsWith("|") || value.StartsWith(">"))
+                    continue;
+
+                // Check if the value would confuse the YAML parser
+                if (!NeedsYamlQuoting(value))
+                    continue;
+
+                // Wrap in single quotes, escaping any existing single quotes by doubling them
+                var escaped = value.Replace("'", "''");
+                lines[i] = $"{match.Groups[1].Value}{key}: '{escaped}'";
+                modified = true;
+            }
+
+            return modified ? string.Join("\n", lines) : yamlText;
+        }
+
+        /// <summary>
+        /// Determines whether a plain YAML scalar value needs to be wrapped in quotes
+        /// to prevent YAML parsing ambiguity. Detects:
+        /// <list type="bullet">
+        ///   <item>Colons (<c>x ? "a" : "b"</c>, <c>"Error 404: Not Found"</c>) — YAML sees a nested mapping.
+        ///         In YAML plain scalars, quotes are NOT special, so <c>": "</c> inside DSL-level
+        ///         "quoted strings" still breaks YAML.</item>
+        ///   <item>Embedded quoted substrings with trailing text (<c>"alice" in names</c>) — YAML
+        ///         parses only the first quoted scalar and chokes on the rest</item>
+        ///   <item><c>#</c> preceded by space — YAML treats it as a comment</item>
+        /// </list>
+        /// </summary>
+        private static bool NeedsYamlQuoting(string value)
+        {
+            // If the entire value is a single quoted string, YAML handles it fine
+            if (value.Length >= 2)
+            {
+                if ((value[0] == '"' && value[^1] == '"') ||
+                    (value[0] == '\'' && value[^1] == '\''))
+                {
+                    // But verify there's no premature close — e.g. "alice" in names
+                    // has a closing quote at position 6 but the value continues
+                    if (!HasTrailingContentAfterQuotedString(value))
+                        return false;
+                }
+            }
+
+            // Value starts with a quote but isn't fully quoted — YAML will misparse
+            if (value[0] == '"' || value[0] == '\'')
+                return true;
+
+            // In a YAML plain scalar, quotes are NOT special characters — they are just
+            // regular characters. So we must NOT track quote state here. Any ": " or
+            // " #" anywhere in the value is a problem regardless of DSL-level quoting.
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+
+                // Colon followed by space or at end — YAML mapping indicator
+                if (c == ':' && (i + 1 >= value.Length || value[i + 1] == ' '))
+                    return true;
+
+                // Hash preceded by space — YAML comment
+                if (c == '#' && i > 0 && value[i - 1] == ' ')
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if a value that starts and ends with matching quotes actually has
+        /// content after the first closing quote (e.g. <c>"alice" in names</c>).
+        /// </summary>
+        private static bool HasTrailingContentAfterQuotedString(string value)
+        {
+            char quote = value[0];
+            // Find the first closing quote after position 0
+            for (int i = 1; i < value.Length - 1; i++)
+            {
+                if (value[i] == quote)
+                {
+                    // For double quotes, skip escaped quotes
+                    if (quote == '"' && i > 0 && value[i - 1] == '\\')
+                        continue;
+
+                    // Found a closing quote before the end — there's trailing content
+                    return true;
+                }
+            }
+            return false;
         }
 
         private Dictionary<string, object?> ParseVars(IParser parser)
@@ -738,11 +886,11 @@ namespace SSH_Helper.Services.Scripting
                         break;
                     case "readfile":
                         step.DeclaredStepType = StepType.Readfile;
-                        step.Readfile = ParseReadfileOptions(parser);
+                        step.Readfile = ParseReadfileOptions(parser, step);
                         break;
                     case "writefile":
                         step.DeclaredStepType = StepType.Writefile;
-                        step.Writefile = ParseWritefileOptions(parser);
+                        step.Writefile = ParseWritefileOptions(parser, step);
                         break;
                     case "input":
                         step.DeclaredStepType = StepType.Input;
@@ -763,6 +911,10 @@ namespace SSH_Helper.Services.Scripting
                     case "http":
                         step.DeclaredStepType = StepType.Http;
                         step.Http = ParseHttpOptions(parser, step);
+                        break;
+                    case "browser_callback_capture":
+                        step.DeclaredStepType = StepType.BrowserCallbackCapture;
+                        step.BrowserCallbackCapture = ParseBrowserCallbackCaptureOptions(parser, step);
                         break;
                     case "ping":
                         step.DeclaredStepType = StepType.Ping;
@@ -1664,7 +1816,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private ReadfileOptions ParseReadfileOptions(IParser parser)
+        private ReadfileOptions ParseReadfileOptions(IParser parser, ScriptStep step)
         {
             var options = new ReadfileOptions();
 
@@ -1717,6 +1869,10 @@ namespace SSH_Helper.Services.Scripting
                         case "encoding":
                             options.Encoding = parser.Consume<Scalar>().Value;
                             break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
                         default:
                             AddUnknownKeyWarning($"Unknown readfile key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
@@ -1734,7 +1890,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private WritefileOptions ParseWritefileOptions(IParser parser)
+        private WritefileOptions ParseWritefileOptions(IParser parser, ScriptStep step)
         {
             var options = new WritefileOptions();
 
@@ -1769,6 +1925,10 @@ namespace SSH_Helper.Services.Scripting
                             var headersList = ParseScalarOrSequence(parser);
                             if (headersList is List<string> list)
                                 options.Headers = list;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown writefile key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
@@ -2431,6 +2591,105 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown ping key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private BrowserCallbackCaptureOptions ParseBrowserCallbackCaptureOptions(IParser parser, ScriptStep step)
+        {
+            var options = new BrowserCallbackCaptureOptions();
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                // Shorthand: - browser_callback_capture: "https://example.com/start"
+                options.StartUrl = parser.Consume<Scalar>().Value;
+                return options;
+            }
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "start_url":
+                        case "starturl":
+                            options.StartUrl = parser.Consume<Scalar>().Value;
+                            break;
+                        case "callback_path":
+                        case "callbackpath":
+                            options.CallbackPath = parser.Consume<Scalar>().Value;
+                            break;
+                        case "local_port":
+                        case "localport":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var localPort))
+                                options.LocalPort = localPort;
+                            break;
+                        case "capture_mode":
+                        case "capturemode":
+                            options.CaptureMode = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "browser_mode":
+                        case "browsermode":
+                            options.BrowserMode = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "show_after_seconds":
+                        case "showafterseconds":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var showAfterSeconds))
+                                options.ShowAfterSeconds = showAfterSeconds;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "required_fields":
+                        case "requiredfields":
+                            options.RequiredFields = ParseStringList(parser);
+                            break;
+                        case "timeout":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
+                                options.Timeout = timeout;
+                            break;
+                        case "open_browser":
+                        case "openbrowser":
+                            options.OpenBrowser = ParseBooleanOrDefault(parser, options.OpenBrowser);
+                            break;
+                        case "auto_close_browser":
+                        case "autoclosebrowser":
+                            options.AutoCloseBrowser = ParseBooleanOrDefault(parser, options.AutoCloseBrowser);
+                            break;
+                        case "completion_message":
+                        case "completionmessage":
+                            options.CompletionMessage = parser.Consume<Scalar>().Value;
+                            break;
+                        case "failure_message":
+                        case "failuremessage":
+                            options.FailureMessage = parser.Consume<Scalar>().Value;
+                            break;
+                        case "quiet":
+                            options.Quiet = ParseBooleanOrDefault(parser, options.Quiet);
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown browser_callback_capture key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -3396,11 +3655,6 @@ namespace SSH_Helper.Services.Scripting
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: send.fail_on_nonzero is not supported with send.expect{lineContent}");
                         }
-                        if (step.FailOnNonZero && step.Respond is { Count: > 0 })
-                        {
-                            var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: send.fail_on_nonzero is not supported with send.respond{lineContent}");
-                        }
                         break;
 
                     case StepType.Extract:
@@ -3640,6 +3894,75 @@ namespace SSH_Helper.Services.Scripting
                                     errors.Add($"{prefix}Line {step.LineNumber}: Http 'auth: bearer' requires 'token'{lineContent}");
                                 }
                             }
+                        }
+                        break;
+
+                    case StepType.BrowserCallbackCapture:
+                        if (step.BrowserCallbackCapture == null)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture requires options{lineContent}");
+                            break;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(step.BrowserCallbackCapture.StartUrl))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture requires 'start_url'{lineContent}");
+                        }
+
+                        if (string.IsNullOrWhiteSpace(step.BrowserCallbackCapture.CallbackPath))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture requires 'callback_path'{lineContent}");
+                        }
+                        else if (!IsDynamicValue(step.BrowserCallbackCapture.CallbackPath) &&
+                                 !step.BrowserCallbackCapture.CallbackPath.StartsWith("/", StringComparison.Ordinal))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.callback_path must start with '/'{lineContent}");
+                        }
+
+                        if (string.IsNullOrWhiteSpace(step.BrowserCallbackCapture.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture requires 'into'{lineContent}");
+                        }
+
+                        if (step.BrowserCallbackCapture.LocalPort < 1 || step.BrowserCallbackCapture.LocalPort > 65535)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.local_port must be between 1 and 65535{lineContent}");
+                        }
+
+                        if (step.BrowserCallbackCapture.Timeout <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.timeout must be greater than 0{lineContent}");
+                        }
+
+                        if (!IsDynamicValue(step.BrowserCallbackCapture.CaptureMode) &&
+                            !string.Equals(step.BrowserCallbackCapture.CaptureMode, "auto", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.BrowserCallbackCapture.CaptureMode, "fragment", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.BrowserCallbackCapture.CaptureMode, "query", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.BrowserCallbackCapture.CaptureMode, "post_body", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.capture_mode must be one of auto, fragment, query, post_body{lineContent}");
+                        }
+
+                        if (!IsDynamicValue(step.BrowserCallbackCapture.BrowserMode) &&
+                            !string.Equals(step.BrowserCallbackCapture.BrowserMode, "external", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.BrowserCallbackCapture.BrowserMode, "webview2", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.browser_mode must be one of external, webview2{lineContent}");
+                        }
+
+                        if (step.BrowserCallbackCapture.ShowAfterSeconds < 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.show_after_seconds must be greater than or equal to 0{lineContent}");
                         }
                         break;
 

@@ -181,11 +181,12 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (JsonUtilities.TryEvaluateJsonExpression(expression, context, out var jsonResult, normalizeStructured: false))
                 return jsonResult;
 
-            if (HasArithmeticOperator(expression))
+            if (HasExpressionOperator(expression))
             {
                 try
                 {
-                    return EvaluateArithmetic(expression, context);
+                    var parser = new ExpressionParser(expression, context);
+                    return parser.Parse();
                 }
                 catch (FormatException)
                 {
@@ -210,8 +211,11 @@ namespace SSH_Helper.Services.Scripting.Commands
             return false;
         }
 
-        private static bool HasArithmeticOperator(string expression)
+        private static bool HasExpressionOperator(string expression)
         {
+            if (IsSimpleCompactNumericBinaryExpression(expression))
+                return true;
+
             var inQuote = false;
             var quoteChar = '\0';
 
@@ -235,17 +239,82 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (inQuote)
                     continue;
 
-                if (c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '(' || c == ')')
+                if (c == '*' || c == '/' || c == '%' || c == '(' || c == ')')
+                    return true;
+
+                // '+' and '-' are only arithmetic when preceded by whitespace (e.g., "a - b")
+                // to avoid treating hyphenated identifiers like "db-master.local" as subtraction.
+                if ((c == '+' || c == '-') && i > 0 && char.IsWhiteSpace(expression[i - 1]))
+                    return true;
+
+                // Ternary (?) and null-coalesce (??)
+                if (c == '?')
+                    return true;
+
+                // Comparison operators: >, <, >=, <=
+                if (c == '>' || c == '<')
+                    return true;
+
+                // Equality (==) and inequality (!=)
+                if ((c == '=' || c == '!') && i + 1 < expression.Length && expression[i + 1] == '=')
                     return true;
             }
 
             return false;
         }
 
-        private double EvaluateArithmetic(string expression, ScriptContext context)
+        private static bool IsSimpleCompactNumericBinaryExpression(string expression)
         {
-            var parser = new ArithmeticParser(expression, token => ResolveNumeric(token, context), context);
-            return parser.Parse();
+            var trimmed = expression.Trim();
+            if (trimmed.Length < 3)
+                return false;
+
+            if (trimmed.IndexOf(' ') >= 0 ||
+                trimmed.Contains('"') ||
+                trimmed.Contains('\'') ||
+                trimmed.Contains("${", StringComparison.Ordinal) ||
+                trimmed.Contains("{{", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var operatorIndex = -1;
+            for (int i = 1; i < trimmed.Length - 1; i++)
+            {
+                var c = trimmed[i];
+                if (c == '+' || c == '-')
+                {
+                    if (operatorIndex >= 0)
+                        return false;
+
+                    operatorIndex = i;
+                }
+            }
+
+            if (operatorIndex <= 0 || operatorIndex >= trimmed.Length - 1)
+                return false;
+
+            var left = trimmed.Substring(0, operatorIndex);
+            var right = trimmed.Substring(operatorIndex + 1);
+
+            // Prevent date-like values such as 2024-01 from being reinterpreted as arithmetic.
+            if (HasAmbiguousLeadingZero(left) || HasAmbiguousLeadingZero(right))
+                return false;
+
+            return double.TryParse(left, NumberStyles.Float, CultureInfo.InvariantCulture, out _) &&
+                   double.TryParse(right, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+        }
+
+        private static bool HasAmbiguousLeadingZero(string operand)
+        {
+            if (string.IsNullOrEmpty(operand) || operand.Length < 2)
+                return false;
+
+            var start = operand[0] == '+' || operand[0] == '-' ? 1 : 0;
+            if (operand.Length - start < 2)
+                return false;
+
+            return operand[start] == '0' && operand[start + 1] != '.';
         }
 
         private object? ResolveValue(string expr, ScriptContext context)
@@ -321,178 +390,6 @@ namespace SSH_Helper.Services.Scripting.Commands
             return $"[{string.Join(", ", parts)}{suffix}]";
         }
 
-        private double ResolveNumeric(string expr, ScriptContext context)
-        {
-            expr = expr.Trim();
-
-            var (handled, length) = ValueResolver.TryResolveLengthExpression(expr, context.GetVariable);
-            if (handled)
-                return length;
-
-            if (double.TryParse(expr, NumberStyles.Float, CultureInfo.InvariantCulture, out var num))
-                return num;
-            if (double.TryParse(expr, out num))
-                return num;
-
-            var directValue = context.GetVariable(expr);
-            if (directValue != null && double.TryParse(directValue.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var varNum))
-                return varNum;
-            if (directValue != null && double.TryParse(directValue.ToString(), out varNum))
-                return varNum;
-
-            var substituted = context.SubstituteVariables(expr);
-            if (double.TryParse(substituted, NumberStyles.Float, CultureInfo.InvariantCulture, out var subNum))
-                return subNum;
-            if (double.TryParse(substituted, out subNum))
-                return subNum;
-
-            throw new FormatException($"Unable to resolve numeric value from '{expr}'");
-        }
-
-        private sealed class ArithmeticParser
-        {
-            private readonly string _expression;
-            private readonly Func<string, double> _resolveNumeric;
-            private readonly ScriptContext _context;
-            private int _position;
-
-            public ArithmeticParser(string expression, Func<string, double> resolveNumeric, ScriptContext context)
-            {
-                _expression = expression;
-                _resolveNumeric = resolveNumeric;
-                _context = context;
-            }
-
-            public double Parse()
-            {
-                _position = 0;
-                var value = ParseAddSubtract();
-                SkipWhitespace();
-                if (_position < _expression.Length)
-                    throw new FormatException("Unexpected trailing tokens in arithmetic expression");
-                return value;
-            }
-
-            private double ParseAddSubtract()
-            {
-                var value = ParseMultiplyDivideModulo();
-                while (true)
-                {
-                    SkipWhitespace();
-                    if (Match('+'))
-                    {
-                        value += ParseMultiplyDivideModulo();
-                        continue;
-                    }
-                    if (Match('-'))
-                    {
-                        value -= ParseMultiplyDivideModulo();
-                        continue;
-                    }
-                    return value;
-                }
-            }
-
-            private double ParseMultiplyDivideModulo()
-            {
-                var value = ParseUnary();
-                while (true)
-                {
-                    SkipWhitespace();
-                    if (Match('*'))
-                    {
-                        value *= ParseUnary();
-                        continue;
-                    }
-                    if (Match('/'))
-                    {
-                        var rhs = ParseUnary();
-                        if (rhs == 0)
-                        {
-                            _context.EmitOutput("Warning: Division by zero, returning 0", ScriptOutputType.Warning);
-                            return 0;
-                        }
-                        value /= rhs;
-                        continue;
-                    }
-                    if (Match('%'))
-                    {
-                        var rhs = ParseUnary();
-                        if (rhs == 0)
-                        {
-                            _context.EmitOutput("Warning: Modulo by zero, returning 0", ScriptOutputType.Warning);
-                            return 0;
-                        }
-                        value %= rhs;
-                        continue;
-                    }
-
-                    return value;
-                }
-            }
-
-            private double ParseUnary()
-            {
-                SkipWhitespace();
-                if (Match('+'))
-                    return ParseUnary();
-                if (Match('-'))
-                    return -ParseUnary();
-                return ParsePrimary();
-            }
-
-            private double ParsePrimary()
-            {
-                SkipWhitespace();
-                if (Match('('))
-                {
-                    var value = ParseAddSubtract();
-                    SkipWhitespace();
-                    if (!Match(')'))
-                        throw new FormatException("Missing closing parenthesis in arithmetic expression");
-                    return value;
-                }
-
-                var token = ReadToken();
-                return _resolveNumeric(token);
-            }
-
-            private string ReadToken()
-            {
-                SkipWhitespace();
-                if (_position >= _expression.Length)
-                    throw new FormatException("Unexpected end of arithmetic expression");
-
-                var start = _position;
-                while (_position < _expression.Length)
-                {
-                    var c = _expression[_position];
-                    if (char.IsWhiteSpace(c) || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '(' || c == ')')
-                        break;
-                    _position++;
-                }
-
-                if (start == _position)
-                    throw new FormatException("Invalid token in arithmetic expression");
-
-                return _expression.Substring(start, _position - start);
-            }
-
-            private void SkipWhitespace()
-            {
-                while (_position < _expression.Length && char.IsWhiteSpace(_expression[_position]))
-                    _position++;
-            }
-
-            private bool Match(char expected)
-            {
-                if (_position < _expression.Length && _expression[_position] == expected)
-                {
-                    _position++;
-                    return true;
-                }
-                return false;
-            }
-        }
+        // ArithmeticParser removed — replaced by ExpressionParser (see Services/Scripting/ExpressionParser.cs)
     }
 }

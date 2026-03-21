@@ -73,6 +73,7 @@ namespace SSH_Helper.UI
         private Color? _borderColor;
         private bool _acceptsTab = true;
         private bool _suppressTextProcessing;
+        private bool _refreshAndValidationQueued;
         private int _nextStyleIndex = FirstCustomStyleIndex;
         private int _completionReplaceStart;
         private int _completionReplaceLength;
@@ -83,6 +84,12 @@ namespace SSH_Helper.UI
 
         public ScintillaScriptEditorControl()
         {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw,
+                true);
+
             _editor = new Scintilla
             {
                 Dock = DockStyle.Fill,
@@ -122,6 +129,7 @@ namespace SSH_Helper.UI
             _editor.DwellStart += Editor_DwellStart;
             _editor.DwellEnd += (_, _) => HideTooltip();
             _editor.Click += (_, _) => OnClick(EventArgs.Empty);
+            _editor.Resize += (_, _) => Invalidate();
 
             _toolTip = new ToolTip
             {
@@ -171,6 +179,12 @@ namespace SSH_Helper.UI
             Application.AddMessageFilter(_completionDismissFilter);
             _completionDismissFilterRegistered = true;
             ApplyTheme(darkMode: false);
+        }
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            Invalidate();
         }
 
         [AllowNull]
@@ -520,8 +534,35 @@ namespace SSH_Helper.UI
                 ShowCompletionPopup();
             }
 
-            RefreshEditorVisuals();
-            RequestValidationOrClear();
+            QueueRefreshAndValidation();
+        }
+
+        private void QueueRefreshAndValidation()
+        {
+            if (_refreshAndValidationQueued)
+            {
+                return;
+            }
+
+            if (!IsHandleCreated)
+            {
+                RefreshEditorVisuals();
+                RequestValidationOrClear();
+                return;
+            }
+
+            _refreshAndValidationQueued = true;
+            BeginInvoke(new Action(() =>
+            {
+                _refreshAndValidationQueued = false;
+                if (IsDisposed || _editor.IsDisposed)
+                {
+                    return;
+                }
+
+                RefreshEditorVisuals();
+                RequestValidationOrClear();
+            }));
         }
 
         private void SetEditorTextPreservingReadOnly(string value)
@@ -1746,11 +1787,13 @@ namespace SSH_Helper.UI
                 return;
             }
 
-            if (_validationService != null && ScriptParser.IsYamlScript(_editor.Text))
+            var isYamlScript = ScriptParser.IsYamlScript(_editor.Text);
+
+            if (_validationService != null && isYamlScript)
             {
                 _validationService.RequestValidation(_editor.Text);
             }
-            else if (!ScriptParser.IsYamlScript(_editor.Text))
+            else if (!isYamlScript)
             {
                 _validationService?.CancelPendingValidation();
                 ClearDiagnostics();

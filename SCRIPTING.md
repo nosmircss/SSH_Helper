@@ -1,4 +1,4 @@
-# SSH Helper Scripting Language Documentation
+﻿# SSH Helper Scripting Language Documentation
 
 SSH Helper supports a powerful YAML-based scripting language for automating complex SSH workflows. This document provides complete reference documentation for all scripting features.
 
@@ -31,6 +31,7 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [updateenvironment](#updateenvironment---update-active-environment-variable)
    - [log](#log---output-with-log-level)
    - [http](#http---http-requests-preferred)
+   - [browser_callback_capture](#browser_callback_capture---capture-browser-callback-values)
    - [ping](#ping---icmp-reachability-checks)
    - [dns](#dns---dns-lookups)
    - [portcheck](#portcheck---tcp-port-checks)
@@ -103,7 +104,7 @@ Executable scripts may also declare `imports:` and `subroutines:`. Library files
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `imports:`, `subroutines:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
 
 Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.
 
@@ -245,6 +246,7 @@ Outputs a message to the script output.
 
 **Features:**
 - Supports variable substitution with `${variable}` syntax
+- Supports inline function expressions with `${function(args)}` syntax (including nested calls)
 - Always succeeds (never causes script failure)
 
 **Examples:**
@@ -257,6 +259,14 @@ Outputs a message to the script output.
     message: "Found ${count} interfaces"
 - print:
     message: "Status: ${status}"
+
+# Inline function expressions
+- print:
+    message: "Pretty JSON: ${json.format(data)}"
+- print:
+    message: "Hostname: ${upper(json.get(data, "host"))}"
+- print:
+    message: "Keys: ${json.keys(data)}"
 ```
 
 ---
@@ -282,13 +292,14 @@ Pauses script execution for a specified number of seconds.
 - wait:
     seconds: 5
 
-# Wait after reboot command
+# Wait for a service to restart before checking status
 - send:
-    command: reload
+    command: systemctl restart nginx
 - wait:
-    seconds: 30
+    seconds: 5
 - send:
-    command: show version
+    command: systemctl status nginx
+    capture: status
 ```
 
 ---
@@ -366,6 +377,67 @@ Sets or modifies variable values with expression support.
 | json.slice() | `sub = json.slice(arr, 0, 3)` | Extract array subset |
 | json.concat() | `all = json.concat(arr1, arr2)` | Concatenate arrays |
 | json.indexOf() | `idx = json.indexOf(arr, value)` | Find element index |
+| **Math** | | |
+| abs() | `val = abs(-5)` | Absolute value |
+| min() | `val = min(a, b, c)` | Minimum of values (variadic) |
+| max() | `val = max(a, b, c)` | Maximum of values (variadic) |
+| round() | `val = round(3.14, 1)` | Round to N decimal places (default 0) |
+| floor() | `val = floor(3.7)` | Floor to integer |
+| ceil() | `val = ceil(3.2)` | Ceiling to integer |
+| random() | `val = random(1, 100)` | Random integer in range (inclusive) |
+| pow() | `val = pow(2, 8)` | Exponentiation |
+| sqrt() | `val = sqrt(144)` | Square root |
+| clamp() | `val = clamp(x, 0, 100)` | Clamp value between min and max |
+| iif() | `val = iif(x > 0, "pos", "neg")` | Inline ternary expression |
+| **String (additional)** | | |
+| contains() | `bool = contains(text, "sub")` | Case-insensitive substring check |
+| startswith() | `bool = startswith(name, "eth")` | Case-insensitive prefix check |
+| endswith() | `bool = endswith(file, ".txt")` | Case-insensitive suffix check |
+| pad_left() | `val = pad_left(num, 5, "0")` | Left-pad string (default: space) |
+| pad_right() | `val = pad_right(name, 20)` | Right-pad string (default: space) |
+| repeat() | `val = repeat("-", 40)` | Repeat string N times (max 10,000) |
+| reverse() | `val = reverse(text)` | Reverse string or list order |
+| regex_replace() | `val = regex_replace(s, '/\d+/', "X")` | Replace regex matches |
+| format() | `val = format("{0} of {1}", a, b)` | C#-style string formatting |
+| char_at() | `val = char_at(text, 0)` | Character at zero-based index |
+| index_of() | `idx = index_of(text, "sub")` | Index of substring (-1 if not found) |
+| **Collection (with lambdas)** | | |
+| map() | `out = map(list, x => upper(x))` | Transform each element |
+| filter() | `out = filter(list, x => x > 0)` | Keep matching elements |
+| reduce() | `val = reduce(list, (acc, x) => acc + x, 0)` | Fold into single value |
+| find() | `val = find(list, x => x > 10)` | First matching element or null |
+| any() | `bool = any(list, x => x == "up")` | True if any element matches |
+| all() | `bool = all(list, x => x > 0)` | True if all elements match |
+| count() | `n = count(list, x => x > 0)` | Count matching elements |
+| range() | `nums = range(1, 10)` | Generate integer list [start, end) |
+| slice() | `sub = slice(list, 1, 3)` | Sub-list (supports negative indices) |
+| flatten() | `flat = flatten(nested)` | Flatten one level of nesting |
+| zip() | `pairs = zip(keys, values)` | Pair elements from two lists |
+| **Type Conversion** | | |
+| int() | `val = int("42")` | Convert to integer |
+| float() | `val = float("3.14")` | Convert to double |
+| str() | `val = str(42)` | Convert to string |
+| bool() | `val = bool("true")` | Convert to boolean |
+| typeof() | `t = typeof(value)` | Get type name (string, number, bool, list, json, null) |
+| is_number() | `bool = is_number(val)` | Check if value is numeric |
+| is_list() | `bool = is_list(val)` | Check if value is a list |
+| is_json() | `bool = is_json(val)` | Check if value is JSON object/array |
+| is_empty() | `bool = is_empty(val)` | Check if null, empty string, or empty collection |
+| **DateTime** | | |
+| now() | `ts = now("yyyy-MM-dd")` | Current local datetime (custom format) |
+| epoch() | `ts = epoch()` | Current UTC Unix timestamp (seconds) |
+| epoch_to_date() | `dt = epoch_to_date(ts, "yyyy-MM-dd")` | Unix timestamp to local datetime |
+| date_add() | `dt = date_add(ts, 1, "hours")` | Add time to datetime |
+| date_diff() | `val = date_diff(a, b, "minutes")` | Difference between datetimes |
+| date_format() | `val = date_format(ts, "MM/dd/yyyy")` | Reformat datetime string |
+| **Encoding/Hashing** | | |
+| base64_encode() | `val = base64_encode(text)` | Base64 encode UTF-8 string |
+| base64_decode() | `val = base64_decode(encoded)` | Decode Base64 to UTF-8 |
+| url_encode() | `val = url_encode(text)` | RFC 3986 percent-encoding |
+| url_decode() | `val = url_decode(encoded)` | Decode percent-encoded string |
+| hash() | `val = hash(text, "SHA256")` | Hash digest (MD5, SHA1, SHA256, SHA384, SHA512) |
+| hex_encode() | `val = hex_encode(text)` | Encode to lowercase hex |
+| hex_decode() | `val = hex_decode(hex)` | Decode hex to UTF-8 |
 | Nested assignment | `obj.key.subkey = value` | Assign to nested path |
 
 **Basic Examples:**
@@ -815,6 +887,259 @@ You can build nested JSON objects using dot notation. Intermediate objects are c
 
 ---
 
+**Math Functions:**
+
+Math functions work on numeric values. Non-numeric inputs are coerced where possible.
+
+```yaml
+# Absolute value
+- set: val = abs(-42)
+# Result: 42
+
+# Min and max (variadic — any number of arguments)
+- set: smallest = min(latency_a, latency_b, latency_c)
+- set: largest = max(10, count, 50)
+
+# Rounding
+- set: rounded = round(3.14159, 2)
+# Result: 3.14
+- set: whole = floor(9.8)
+# Result: 9
+- set: up = ceil(9.1)
+# Result: 10
+
+# Random integer (inclusive range, defaults: 0–100)
+- set: roll = random(1, 6)
+# Reversed bounds are auto-swapped and equal bounds return that value
+- set: same = random(5, 5)
+- set: swapped = random(10, 1)
+# Invalid min/max inputs fall back to defaults (min: 0, max: 100)
+- set: fallback = random(50, "oops")
+
+# Power and square root
+- set: squared = pow(2, 10)
+# Result: 1024
+- set: root = sqrt(144)
+# Result: 12
+
+# Clamp a value between bounds
+- set: pct = clamp(raw_score, 0, 100)
+
+# Inline ternary (condition, true-value, false-value)
+- set: label = iif(count > 0, "found", "none")
+- set: status = iif(latency < 50, "good", iif(latency < 200, "ok", "slow"))
+```
+
+---
+
+**Additional String Functions:**
+
+These supplement `trim`, `upper`, `lower`, `replace`, `split`, `join`, `substring`, and `length` already documented above.
+
+```yaml
+# Function forms of condition operators (return bool)
+- set: has_error = contains(output, "error")
+- set: is_eth = startswith(iface, "eth")
+- set: is_log = endswith(filename, ".log")
+
+# Padding (default pad character is space)
+- set: padded_id = pad_left(id, 6, "0")
+# "42" → "000042"
+- set: col = pad_right(name, 20)
+# "host1" → "host1               "
+
+# Repeat a string
+- set: separator = repeat("=", 60)
+- set: dots = repeat(".", 3)
+
+# Reverse a string or list
+- set: reversed = reverse("hello")
+# Result: "olleh"
+- set: rev_list = reverse(my_list)
+
+# Regex replace (pattern supports /…/, "…", or '…' delimiters)
+- set: clean = regex_replace(output, '/\x1b\[[0-9;]*m/', "")
+- set: masked = regex_replace(config, '/password\s+\S+/', "password ***")
+
+# C#-style string format with positional placeholders
+- set: line = format("{0}: {1} ({2}ms)", hostname, status, latency)
+
+# Character access
+- set: first_char = char_at(hostname, 0)
+
+# Substring search (case-insensitive, returns -1 if not found)
+- set: pos = index_of(output, "error")
+- if: pos >= 0
+  then:
+    - print: "Error found at position ${pos}"
+```
+
+---
+
+**Collection Functions (with Lambdas):**
+
+These functions accept lambda expressions in the form `x => expression` (single parameter) or `(acc, x) => expression` (two parameters for `reduce`). Lambda bodies support full arithmetic and function calls.
+
+```yaml
+# Transform every element
+- set: upper_names = map(names, x => upper(x))
+- set: doubled = map(numbers, x => x * 2)
+
+# Filter elements
+- set: active = filter(hosts, x => x != "")
+- set: large = filter(values, x => x > 100)
+
+# Reduce to a single value
+- set: total = reduce(scores, (acc, x) => acc + x, 0)
+- set: csv_line = reduce(fields, (acc, x) => acc + "," + x, "")
+
+# Find first matching element (or null)
+- set: first_error = find(lines, x => contains(x, "error"))
+
+# Check if any/all match
+- set: has_failures = any(results, x => x == "fail")
+- set: all_up = all(statuses, x => x == "up")
+
+# Count matching elements (without lambda: total count)
+- set: error_count = count(lines, x => contains(x, "error"))
+- set: total = count(my_list)
+
+# Generate integer ranges [start, end) with optional step
+- set: indices = range(0, 10)
+# Result: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+- set: odds = range(1, 20, 2)
+# Result: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+- set: countdown = range(10, 0, -1)
+# Result: [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+
+# Slice a sub-list (supports negative indices)
+- set: first_three = slice(items, 0, 3)
+- set: last_two = slice(items, -2)
+
+# Flatten one level of nesting
+- set: flat = flatten(list_of_lists)
+
+# Zip two lists into pairs
+- set: pairs = zip(keys, values)
+# keys=["a","b"], values=["1","2"] → [["a","1"],["b","2"]]
+```
+
+**Combining collection functions** for powerful one-liners:
+
+```yaml
+# Get unique uppercase non-empty values
+- set: clean = distinct(map(filter(raw, x => x != ""), x => upper(x)))
+
+# Sum all numeric values from a list of strings
+- set: total = reduce(filter(values, x => is_number(x)), (acc, x) => acc + float(x), 0)
+
+# Build a comma-separated string from filtered items
+- set: summary = join(filter(items, x => startswith(x, "192.")), ", ")
+```
+
+---
+
+**Type Conversion Functions:**
+
+```yaml
+# Convert between types
+- set: num = int("42")
+# Result: 42 (integer)
+- set: pi = float("3.14")
+# Result: 3.14 (double)
+- set: text = str(42)
+# Result: "42" (string)
+- set: flag = bool("true")
+# Result: true (boolean)
+
+# Type checking
+- set: t = typeof(value)
+# Returns: "string", "number", "bool", "list", "json", or "null"
+
+- if: is_number(user_input)
+  then:
+    - set: timeout = int(user_input)
+  else:
+    - print: "Invalid number: ${user_input}"
+
+- if: is_list(data)
+  then:
+    - print: "Got ${length(data)} items"
+
+- if: is_json(response)
+  then:
+    - set: name = json.get(response, "name")
+
+- if: is_empty(result)
+  then:
+    - print: "No result returned"
+```
+
+---
+
+**DateTime Functions:**
+
+```yaml
+# Current timestamp (default: "yyyy-MM-dd HH:mm:ss")
+- set: ts = now()
+# Result: "2025-03-18 14:30:00"
+- set: date_only = now("yyyy-MM-dd")
+# Result: "2025-03-18"
+- set: iso = now("yyyy-MM-ddTHH:mm:ssZ")
+
+# Unix epoch (UTC seconds, 64-bit)
+- set: unix_ts = epoch()
+# Result: 1742312400
+
+# Convert epoch to datetime string
+- set: readable = epoch_to_date(unix_ts)
+# Result: "2025-03-18 14:30:00"
+- set: date_only = epoch_to_date(unix_ts, "yyyy-MM-dd")
+
+# Add time to a datetime (units: seconds/s, minutes/m, hours/h, days/d)
+- set: expires = date_add(now(), 24, "hours")
+- set: tomorrow = date_add(now("yyyy-MM-dd"), 1, "days")
+
+# Difference between datetimes
+- set: elapsed = date_diff(end_time, start_time, "seconds")
+- set: days_old = date_diff(now(), created_date, "days")
+
+# Reformat a datetime string
+- set: us_date = date_format(timestamp, "MM/dd/yyyy")
+- set: compact = date_format(timestamp, "yyyyMMdd_HHmmss")
+```
+
+---
+
+**Encoding and Hashing Functions:**
+
+```yaml
+# Base64
+- set: encoded = base64_encode("hello world")
+# Result: "aGVsbG8gd29ybGQ="
+- set: decoded = base64_decode(encoded)
+# Result: "hello world"
+
+# URL encoding (RFC 3986)
+- set: safe_url = url_encode("hello world & more")
+# Result: "hello%20world%20%26%20more"
+- set: original = url_decode(safe_url)
+
+# Hashing (algorithms: MD5, SHA1, SHA256, SHA384, SHA512)
+- set: sha = hash("password123")
+# Result: SHA256 hex digest (default)
+- set: md5 = hash(config_text, "MD5")
+- set: sha1 = hash(data, "SHA1")
+
+# Hex encoding
+- set: hex = hex_encode("ABC")
+# Result: "414243"
+- set: text = hex_decode(hex)
+# Result: "ABC"
+```
+
+---
+
 ### extract - Regex Data Extraction
 
 Extracts data from a variable using regex patterns with capture groups.
@@ -956,6 +1281,8 @@ Executes a block conditionally based on an expression.
 | `contains` | `output contains "error"` | Substring check |
 | `startswith` | `name startswith "eth"` | Starts with |
 | `endswith` | `file endswith ".txt"` | Ends with |
+| `in` | `item in my_list` | Collection membership |
+| `not in` | `item not in my_list` | Collection non-membership |
 | `is empty` | `result is empty` | Check if empty/null |
 | `is not empty` | `value is not empty` | Check if not empty |
 | `is defined` | `var is defined` | Variable exists |
@@ -990,7 +1317,7 @@ Executes a block conditionally based on an expression.
       - print:
           message: "Threshold exceeded on active device"
 
-# Check if variable is defined
+# Check if variable is defined (classic approach)
 - if:
     condition: custom_timeout is defined
     then:
@@ -999,6 +1326,9 @@ Executes a block conditionally based on an expression.
     else:
       - set:
           expression: timeout = 30
+
+# Same thing using null-coalesce (cleaner)
+- set: timeout = custom_timeout ?? 30
 
 # Nested conditions
 - if:
@@ -2273,6 +2603,8 @@ Outputs a message with a specific log level for categorized output. Unlike `prin
 
 Makes HTTP requests with explicit controls for authentication, redirect behavior, TLS verification, and response capture.
 
+For browser-based login flows that return values to a localhost callback, use browser_callback_capture instead of http.
+
 **Syntax:**
 ```yaml
 - http:
@@ -2360,6 +2692,104 @@ Makes HTTP requests with explicit controls for authentication, redirect behavior
     body: "raw text payload"
 ```
 
+---
+
+### browser_callback_capture - Capture Browser Callback Values
+
+Starts a localhost callback listener and captures values returned from browser-driven flows.
+
+**Syntax:**
+```yaml
+- browser_callback_capture:
+    start_url: "https://idp.example.com/start"
+    callback_path: "/oauth_callback"
+    local_port: 8086
+    capture_mode: auto
+    browser_mode: external
+    show_after_seconds: 0
+    auto_close_browser: true
+    into: callback_data
+    required_fields: ["access_token"]
+    timeout: 300
+    open_browser: true
+    quiet: true
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `start_url` | Yes | - | Initial URL to open in browser |
+| `callback_path` | Yes | `/oauth_callback` | Local callback path starting with `/` |
+| `local_port` | No | `8086` | Loopback listener port |
+| `capture_mode` | No | `auto` | `auto`, `fragment`, `query`, `post_body` |
+| `browser_mode` | No | `external` | `external` or `webview2` when `open_browser: true` |
+| `show_after_seconds` | No | `0` | WebView2-only delayed reveal in seconds; `0` shows immediately |
+| `auto_close_browser` | No | `true` | Whether successful callback pages and visible embedded WebView2 windows auto-close |
+| `into` | Yes | - | Variable prefix for captured values |
+| `required_fields` | No | - | Keys that must be present and non-empty |
+| `timeout` | No | `300` | Maximum wait in seconds |
+| `open_browser` | No | `true` | Open system browser automatically |
+| `quiet` | No | `true` | Suppress success summary output line after capture |
+| `completion_message` | No | built-in | Message shown on callback success page |
+| `failure_message` | No | built-in | Message shown on callback failure page |
+
+**Capture Variables:**
+- `${into}`: captured values as JSON object
+- `${into}_count`: number of captured keys
+- `${into}_keys`: comma-separated captured key names
+- `${into}_<key>`: value for each captured key (normalized key name)
+
+**Execution Constraints:**
+- `browser_callback_capture` is local/browser-interactive.
+- It is blocked in folder and multi-host runs; run it against a single current host.
+
+**Browser UX Behavior:**
+- `open_browser: false` keeps the step in manual mode and ignores `browser_mode`.
+- If `open_browser: true` and `browser_mode` is omitted, SSH Helper uses the external system browser for backward compatibility.
+- `browser_mode: webview2` opens the flow in an owned in-app WebView2 dialog instead of launching the default browser.
+- `show_after_seconds` only affects `browser_mode: webview2`. Values above `0` start the embedded browser hidden and only show the dialog if the callback is still pending after the configured delay.
+- `auto_close_browser: false` keeps the successful callback surface open for inspection.
+- In external-browser mode that means the callback page stays open instead of calling `window.close()`.
+- In `browser_mode: webview2`, a visible embedded callback window stays open after successful completion until you close it manually.
+- If a delayed WebView2 dialog never became visible because the callback finished before reveal, SSH Helper still cleans up that hidden session automatically.
+- By default, after successful callback capture, SSH Helper attempts to close the callback tab automatically.
+- External-browser mode also attempts to restore focus to the main application window after capture.
+- Browser and OS focus policies may prevent forced focus changes in some environments.
+
+**Embedded Browser Data:**
+- WebView2 mode uses a shared SSH Helper browser profile under `%LocalAppData%\SSH_Helper`.
+- Cookies, cache, local storage, IndexedDB, and related site data persist across runs until cleared.
+- Use `Settings > General > Browser Callback > Clear Embedded Browser Data...` to reset that shared embedded-browser profile.
+- The clear action is blocked while an embedded browser callback window is open.
+
+**Example:**
+```yaml
+- browser_callback_capture:
+    start_url: "https://idp.example.com/auth?response_type=token&redirect_uri=http://127.0.0.1:8086/oauth_callback"
+    callback_path: "/oauth_callback"
+    capture_mode: fragment
+    into: callback
+    required_fields: ["access_token"]
+
+- print:
+    message: "${callback_access_token}"
+```
+
+**Embedded WebView2 Example:**
+```yaml
+- browser_callback_capture:
+    start_url: "https://idp.example.com/auth?response_type=code&redirect_uri=http://127.0.0.1:8086/oauth_callback"
+    callback_path: "/oauth_callback"
+    capture_mode: query
+    browser_mode: webview2
+    show_after_seconds: 2
+    into: callback
+    required_fields: ["code"]
+```
+
+**Security Note:**
+- Captured callback values may contain secrets. Printing them will store them in output/history.
 ---
 
 ### ping - ICMP Reachability Checks
@@ -2916,12 +3346,7 @@ Formats data into aligned columns for display. Supports lists, JSON arrays, and 
     content: "${report_text}"
 
 # Table from a simple list
-- set:
-    expression: "servers = push(servers, web-01)"
-- set:
-    expression: "servers = push(servers, web-02)"
-- set:
-    expression: "servers = push(servers, db-01)"
+- set: servers = list("web-01", "web-02", "db-01")
 - table:
     data: "${servers}"
 # Output:
@@ -3165,7 +3590,8 @@ These are accessible via nested paths:
 
 2. **Active Environment Variables**: Variables from the currently selected environment profile
    ```yaml
-   - print:
+   - print:
+
        message: "Token: ${api_token}"
    ```
 
@@ -3221,16 +3647,37 @@ These are accessible via nested paths:
 
 ### Variable Substitution Syntax
 
-Variables are substituted using `${variable_name}`:
+Variables are substituted using `${variable_name}`. Function expressions are also supported inline using `${function(args)}`, including nested calls:
 
 ```yaml
+# Simple variable substitution
 - print:
     message: "Host ${Host_IP} has IP ${ip_address}"
 - send:
     command: show interface ${interface_name}
 - set:
     expression: message = "Status: ${status}"
+
+# Inline function expressions
+- print:
+    message: "Pretty: ${json.format(data)}"
+- print:
+    message: "Upper: ${upper(hostname)}"
+- print:
+    message: "Key count: ${json.len(data)}"
+
+# Nested function calls
+- print:
+    message: "Name: ${upper(json.get(data, "host"))}"
+- print:
+    message: "Trimmed keys: ${trim(join(json.keys(data), ", "))}"
+
+# Mixed variables and inline expressions in one string
+- print:
+    message: "Host ${Host_IP} name=${upper(json.get(data, "host"))} with ${json.len(data)} fields"
 ```
+
+Inline expressions work everywhere `${...}` is supported — `print`, `writefile` content, `send` commands, URLs, headers, and any other string field that performs variable substitution. All scripting functions (`json.*`, `upper`, `lower`, `trim`, `replace`, `split`, `join`, `length`, etc.) are available inline.
 
 ### Quoting and Escaping
 
@@ -3304,6 +3751,58 @@ Lists support index-based access and properties:
 
 **Note:** The `.length` property works on lists created by `extract` (with `match: all`) or `readfile`.
 
+### Inline Function Expressions
+
+In addition to variable lookups, `${...}` tokens support calling any scripting function directly. This eliminates the need for a separate `set` step when you just want to display a transformed value.
+
+**Supported syntax:**
+```yaml
+# Single function call
+${function(arg1, arg2)}
+
+# Nested function calls (functions as arguments to other functions)
+${outer(inner(arg))}
+
+# Deeply nested
+${upper(trim(json.get(data, "name")))}
+```
+
+**All scripting functions are available inline**, including:
+- **JSON functions:** `json.format()`, `json.get()`, `json.keys()`, `json.values()`, `json.len()`, `json.type()`, `json.exists()`, `json.merge()`, `json.items()`, `json.slice()`, etc.
+- **String functions:** `upper()`, `lower()`, `trim()`, `replace()`, `substring()`, `length()`, `pad_left()`, `pad_right()`, `repeat()`, `reverse()`, `format()`, `char_at()`, `index_of()`, `regex_replace()`
+- **List functions:** `join()`, `split()`, `sort()`, `compact()`, `distinct()`, `first()`, `last()`, `map()`, `filter()`, `find()`, `count()`, `any()`, `all()`
+- **Math functions:** `abs()`, `min()`, `max()`, `round()`, `floor()`, `ceil()`, `clamp()`, `iif()`
+- **Type functions:** `typeof()`, `int()`, `float()`, `str()`, `bool()`, `is_number()`, `is_list()`, `is_json()`, `is_empty()`
+- **DateTime functions:** `now()`, `epoch()`, `epoch_to_date()`, `date_add()`, `date_diff()`, `date_format()`
+- **Encoding functions:** `base64_encode()`, `base64_decode()`, `url_encode()`, `url_decode()`, `hash()`, `hex_encode()`, `hex_decode()`
+
+**Examples:**
+
+```yaml
+# Pretty-print JSON from an API response
+- http:
+    url: "https://api.example.com/status"
+    into: response
+- print: "API response: ${json.format(response)}"
+
+# Extract and transform a value in one step
+- print: "Hostname: ${upper(json.get(device_info, "hostname"))}"
+
+# Use in writefile content
+- writefile:
+    path: "C:\\output\\summary.txt"
+    content: "Device ${Host_IP} has hostname ${upper(json.get(data, "name"))} with ${json.len(data)} attributes"
+
+# Use in command strings
+- send:
+    command: "ping ${lower(json.get(config, "target_host"))}"
+
+# Combine with regular variables
+- print: "Host ${Host_IP}: status=${json.get(data, "status")}, uptime=${json.get(data, "uptime")}"
+```
+
+**Note:** Simple variable lookups (`${varname}`), `.length` properties (`${list.length}`), and array indexing (`${list[0]}`) continue to work as before. Inline expressions activate only when the `${...}` content contains a function call (parentheses).
+
 ### Variable Precedence
 
 When multiple sources define the same variable name, the following precedence applies (highest to lowest):
@@ -3345,8 +3844,40 @@ Variables can hold different types of data:
 
 **Type Coercion:**
 - String variables containing numbers are automatically converted for arithmetic operations
+- `"true"`/`"false"` strings are coerced to booleans in boolean contexts
 - List variables can be iterated with `foreach`
 - JSON objects can be written to files using `format: json`
+- Use `int()`, `float()`, `str()`, `bool()` for explicit conversion when needed
+
+### Lambda Expressions
+
+Collection functions like `map`, `filter`, `reduce`, `find`, `any`, `all`, and `count` accept lambda expressions (arrow functions):
+
+```yaml
+# Single parameter
+x => expression
+
+# Two parameters (for reduce)
+(acc, x) => expression
+```
+
+The lambda body is a full expression that supports arithmetic, function calls, variable references, and nested function invocations:
+
+```yaml
+# Transform elements
+- set: names = map(hosts, x => upper(x))
+
+# Filter with a complex condition
+- set: active = filter(items, x => x != "" and not startswith(x, "#"))
+
+# Accumulate with reduce
+- set: total = reduce(scores, (acc, x) => acc + int(x), 0)
+
+# Chain collection operations
+- set: summary = join(map(filter(entries, x => x != ""), x => trim(x)), ", ")
+```
+
+Lambda parameter names (e.g., `x`) are scoped to the lambda — they don't leak into the outer variable scope.
 
 ---
 
@@ -3403,6 +3934,27 @@ Use parentheses for complex expressions:
           message: "System is operational"
 ```
 
+### Arithmetic Expression Operators
+
+These operators are available inside `set:` expressions (not in `if:` conditions):
+
+| Operator | Example | Description |
+|----------|---------|-------------|
+| `? :` | `status == "up" ? "OK" : "DOWN"` | Ternary — returns one of two values based on a condition |
+| `??` | `hostname ?? "unknown"` | Null-coalesce — returns right side if left is null or empty |
+
+```yaml
+# Ternary operator
+- set: label = count > 0 ? "found ${count}" : "none"
+- set: color = latency < 50 ? "green" : latency < 200 ? "yellow" : "red"
+
+# Null-coalesce operator
+- set: name = hostname ?? "unknown"
+- set: timeout = custom_timeout ?? default_timeout ?? 30
+```
+
+> **Note:** For inline ternary in function arguments or complex expressions, you can also use `iif(condition, true_value, false_value)`.
+
 ### Truthy/Falsy Evaluation
 
 When a condition has no comparison operator, it's evaluated as truthy or falsy:
@@ -3411,12 +3963,13 @@ When a condition has no comparison operator, it's evaluated as truthy or falsy:
 - `null` or undefined variables
 - Empty string `""`
 - The string `"false"` (case-insensitive)
+- The string `"0"`
 - The number `0`
 - Empty lists
 - Empty JSON arrays and objects
 
 **Truthy Values:**
-- Non-empty strings (except `"false"`)
+- Non-empty strings (except `"false"` and `"0"`)
 - Non-zero numbers
 - Non-empty lists
 - Non-empty JSON arrays and objects
@@ -3757,21 +4310,32 @@ There are two ways to build JSON objects:
 
 ### Building JSON Arrays
 
-Use `push()` to build a list, then convert with `json()`:
+Create a list with `list()`, then convert with `json()`:
 
 ```yaml
-- set:
-    expression: items = push(items, "first")
-- set:
-    expression: items = push(items, "second")
-- set:
-    expression: arr = json(items)
+- set: items = list("first", "second", "third")
+- set: arr = json(items)
 ```
 
-Or create inline arrays:
+Or create inline JSON arrays directly:
 ```yaml
-- set:
-    expression: arr = json([], "item1", "item2", "item3")
+- set: arr = json([], "item1", "item2", "item3")
+```
+
+Or use YAML sequences in `vars:` (preferred for static lists):
+```yaml
+vars:
+  items:
+    - first
+    - second
+    - third
+```
+
+Use `push()` when building lists dynamically (e.g., in loops):
+```yaml
+- foreach: host in hosts
+  do:
+    - set: results = push(results, ${status})
 ```
 
 ### Automatic Type Detection
@@ -3913,36 +4477,23 @@ steps:
 ---
 name: Process API Response
 steps:
-  - webhook:
+  - http:
       url: "https://api.example.com/users"
       method: GET
       into: response
 
   # Check for errors first
-  - if:
-      condition: json.exists(response, "error")
-      then:
-        - set:
-            expression: err = json.get(response, "error.message", "Unknown error")
-        - exit:
-            message: failure "API Error: ${err}"
+  - if: json.exists(response, "error")
+    then:
+      - exit: failure "API Error: ${json.get(response, 'error.message', 'Unknown error')}"
 
-  # Get array length
-  - set:
-      expression: count = json.len(response, "data.users")
-  - print:
-      message: "Found ${count} users"
+  - print: "Found ${json.len(response, 'data.users')} users"
 
-  # Iterate over users
-  - foreach:
-      iterator: user in json.items(response, "data.users")
-      do:
-        - set:
-            expression: name = json.get(user, "name")
-        - set:
-            expression: email = json.get(user, "email", "no email")
-        - print:
-            message: "${name}: ${email}"
+  # Iterate over users using inline expressions
+  - foreach: user in json.items(response, "data.users")
+    do:
+      - print: "${json.get(user, 'name')}: ${json.get(user, 'email', 'no email')}"
+```
 
 **Modifying JSON Data:**
 ```yaml
@@ -4150,47 +4701,41 @@ vars:
   vendor: "cisco"
 
 steps:
-  - if:
-      condition: vendor == "cisco"
-      then:
-        - send:
-            command: show version
-            capture: output
-        - extract:
-            from: output
-            pattern: 'Version (\S+)'
-            into: version
+  - switch: "${vendor}"
+    cases:
+      - value: cisco
+        do:
+          - send:
+              command: show version
+              capture: output
+          - extract:
+              from: output
+              pattern: 'Version (\S+)'
+              into: version
+      - value: juniper
+        do:
+          - send:
+              command: show version
+              capture: output
+          - extract:
+              from: output
+              pattern: 'Junos: (\S+)'
+              into: version
+      - value: fortigate
+        do:
+          - send:
+              command: get system status
+              capture: output
+          - extract:
+              from: output
+              pattern: 'Version: (.+?)$'
+              into: version
+    else:
+      - log:
+          message: "Unknown vendor: ${vendor}"
+          level: warning
 
-  - if:
-      condition: vendor == "juniper"
-      then:
-        - send:
-            command: show version
-            capture: output
-        - extract:
-            from: output
-            pattern: 'Junos: (\S+)'
-            into: version
-
-  - if:
-      condition: vendor == "fortigate"
-      then:
-        - send:
-            command: get system status
-            capture: output
-        - extract:
-            from: output
-            pattern: 'Version: (.+?)$'
-            into: version
-
-  - if:
-      condition: version is defined
-      then:
-        - print:
-            message: "Version: ${version}"
-      else:
-        - print:
-            message: "Could not determine version"
+  - print: "Version: ${version ?? 'unknown'}"
 ```
 
 ### Example 6: Block IPs from File
@@ -4277,35 +4822,25 @@ steps:
       validate: "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"
       validation_error: "Please enter a valid subnet mask"
 
-  # Confirm before applying
-  - input:
-      prompt: "Configure ${interface} with ${ip_address}/${subnet_mask}? Type 'yes' to confirm:"
-      into: confirm
-      validate: "^(yes|no)$"
-      validation_error: "Please type 'yes' or 'no'"
+  # Confirm before applying (uses confirm dialog instead of text input)
+  - confirm:
+      prompt: "Configure ${interface} with ${ip_address}/${subnet_mask}?"
+      into: confirmed
+      default: false
 
-  - if:
-      condition: confirm != "yes"
-      then:
-        - exit:
-            message: "Configuration cancelled by user"
+  - if: confirmed == "false"
+    then:
+      - exit: "Configuration cancelled by user"
 
   # Apply configuration
-  - print:
-      message: "Configuring ${interface}..."
-  - send:
-      command: configure terminal
-  - send:
-      command: interface ${interface}
-  - send:
-      command: ip address ${ip_address} ${subnet_mask}
-  - send:
-      command: no shutdown
-  - send:
-      command: end
+  - print: "Configuring ${interface}..."
+  - send: configure terminal
+  - send: interface ${interface}
+  - send: ip address ${ip_address} ${subnet_mask}
+  - send: no shutdown
+  - send: end
 
-  - print:
-      message: "Interface ${interface} configured with ${ip_address}"
+  - print: "Interface ${interface} configured with ${ip_address}"
 ```
 
 ### Example 8: Extract and Store Data to Host Table
@@ -4514,6 +5049,8 @@ steps:
 
 ### Example 11: Compliance Check with JSON Report
 
+**Traditional approach** using `if`/`else` blocks — explicit and easy to follow:
+
 ```yaml
 ---
 name: Security Compliance Check
@@ -4612,6 +5149,69 @@ steps:
 
   - print:
       message: "${Host_IP}: ${result.summary.overall} (${checks_passed} passed, ${checks_failed} failed)"
+```
+
+**Compact approach** using `iif()` and shorthand — same logic, fewer lines:
+
+```yaml
+---
+name: Security Compliance Check (Compact)
+description: Same check using iif() for inline conditionals
+
+vars:
+  required_version: "15.0"
+
+steps:
+  - set: checks_passed = 0
+  - set: checks_failed = 0
+
+  # Check 1: Software version
+  - send:
+      command: show version
+      capture: version_output
+  - extract:
+      from: version_output
+      pattern: 'Version (\d+\.\d+)'
+      into: current_version
+
+  - set: result.checks.version.current = ${current_version}
+  - set: result.checks.version.required = ${required_version}
+  - set: result.checks.version.status = iif(current_version >= required_version, "PASS", "FAIL")
+  - set: checks_passed = checks_passed + iif(current_version >= required_version, 1, 0)
+  - set: checks_failed = checks_failed + iif(current_version >= required_version, 0, 1)
+
+  # Check 2: SSH enabled
+  - send:
+      command: show ip ssh
+      capture: ssh_output
+      on_error: continue
+
+  - set: ssh_ok = contains(ssh_output, "SSH Enabled")
+  - set: result.checks.ssh.status = iif(ssh_ok, "PASS", "FAIL")
+  - set: result.checks.ssh.detail = iif(ssh_ok, "SSH is enabled", "SSH not enabled or not available")
+  - set: checks_passed = checks_passed + iif(ssh_ok, 1, 0)
+  - set: checks_failed = checks_failed + iif(ssh_ok, 0, 1)
+
+  # Build final report
+  - set: result.host = ${Host_IP}
+  - set: result.timestamp = ${_timestamp}
+  - set: result.summary.passed = ${checks_passed}
+  - set: result.summary.failed = ${checks_failed}
+  - set: result.summary.overall = iif(checks_failed == 0, "COMPLIANT", "NON-COMPLIANT")
+
+  # Write compliance report
+  - writefile:
+      path: "C:\\compliance\\${Host_IP}_report.json"
+      format: json
+      content: "${result}"
+      pretty: true
+
+  # Update host table
+  - updatecolumn:
+      column: compliance_status
+      value: ${result.summary.overall}
+
+  - print: "${Host_IP}: ${result.summary.overall} (${checks_passed} passed, ${checks_failed} failed)"
 ```
 
 ---
@@ -4916,9 +5516,23 @@ steps:
 15. **Use `json()` for inline objects**: Quick way to create JSON without building nested structures
 16. **Automatic type detection**: Numbers and booleans in arrays are preserved (e.g., `"42"` becomes `42` in JSON)
 17. **Use `json.merge()` for configuration overrides**: Combine base settings with host-specific overrides
+18. **Use inline expressions to skip `set` steps**: Print or use function results directly with `${json.format(data)}` or `${upper(json.get(data, "key"))}` — no intermediate variable needed
+
+### Working with Collections
+19. **Use `map`/`filter` instead of manual loops**: `filter(hosts, x => x != "")` is cleaner than a `foreach` with `if`/`push`
+20. **Use `any`/`all` for existence checks**: `any(results, x => x == "fail")` replaces manual loop-and-flag patterns
+21. **Use `reduce` for aggregation**: Sum, concatenation, and accumulation in one expression
+22. **Use `range()` for numeric sequences**: `range(1, 10)` instead of a `while` loop with a counter
+23. **Use `iif()` for conditional values**: `iif(count > 0, "found", "none")` instead of `if`/`else` with two `set` steps
+
+### Working with Types and Encoding
+24. **Use `typeof()` and `is_*()` for type checking**: Validate input before processing
+25. **Use `??` for defaults**: `timeout = custom ?? 30` instead of `if`/`else` for fallback values
+26. **Use `now()` and `epoch()` for timestamps**: More flexible than `${_timestamp}` when you need custom formats
+27. **Use `hash()` for checksums**: Detect configuration drift by hashing config output
 
 ### Working with Configuration Parsing
-18. **Use `parse` for structured device configs**: Parse FortiGate configs instead of regex for reliable data extraction
-19. **Filter sections for large configs**: Use the `sections` parameter to only parse what you need
-20. **Access parsed data with `json.get()`**: Use default values to handle missing keys gracefully
-21. **Iterate with `json.keys()`**: Get all interface names, policy IDs, etc. for processing in loops
+28. **Use `parse` for structured device configs**: Parse FortiGate configs instead of regex for reliable data extraction
+29. **Filter sections for large configs**: Use the `sections` parameter to only parse what you need
+30. **Access parsed data with `json.get()`**: Use default values to handle missing keys gracefully
+31. **Iterate with `json.keys()`**: Get all interface names, policy IDs, etc. for processing in loops

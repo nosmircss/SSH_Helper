@@ -1,5 +1,6 @@
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using SSH_Helper.Services.Scripting;
 using SSH_Helper.UI;
 
 namespace SSH_Helper
@@ -11,6 +12,8 @@ namespace SSH_Helper
     {
         private readonly ConfigurationService _configService;
         private readonly PresetManager? _presetManager;
+        private readonly IBrowserCallbackWebViewProfileManager _browserCallbackProfileManager;
+        private readonly ISettingsDialogPromptService _promptService;
 
         private readonly BorderlessTabControl _tabControl;
 
@@ -97,6 +100,7 @@ namespace SSH_Helper
         // Reset buttons
         private Button _btnResetDefaults = null!;
         private Button _btnResetPresetTimeouts = null!;
+        private Button _btnClearEmbeddedBrowserData = null!;
 
         private readonly Button _btnSave;
         private readonly Button _btnCancel;
@@ -107,9 +111,26 @@ namespace SSH_Helper
         public bool PresetTimeoutsWereCleared { get; private set; }
 
         public SettingsDialog(ConfigurationService configService, PresetManager? presetManager = null, bool darkMode = false)
+            : this(
+                configService,
+                presetManager,
+                darkMode,
+                BrowserCallbackWebViewProfileManager.Shared,
+                new SettingsDialogPromptService())
+        {
+        }
+
+        internal SettingsDialog(
+            ConfigurationService configService,
+            PresetManager? presetManager,
+            bool darkMode,
+            IBrowserCallbackWebViewProfileManager browserCallbackProfileManager,
+            ISettingsDialogPromptService promptService)
         {
             _configService = configService;
             _presetManager = presetManager;
+            _browserCallbackProfileManager = browserCallbackProfileManager ?? throw new ArgumentNullException(nameof(browserCallbackProfileManager));
+            _promptService = promptService ?? throw new ArgumentNullException(nameof(promptService));
 
             // Enable DPI scaling - must be set before any Size/Location values
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -223,6 +244,7 @@ namespace SSH_Helper
             DialogTheme.StyleButton(_btnCancel, darkMode);
             DialogTheme.StyleButton(_btnResetDefaults, darkMode);
             DialogTheme.StyleButton(_btnResetPresetTimeouts, darkMode);
+            DialogTheme.StyleButton(_btnClearEmbeddedBrowserData, darkMode);
             DialogTheme.StyleButton(_btnChooseAccentColor, darkMode);
             DialogTheme.SetDarkTitleBar(this, darkMode);
             DialogTheme.StyleTabControl(_tabControl, darkMode);
@@ -349,6 +371,18 @@ namespace SSH_Helper
             flow.Controls.Add(SectionHeader("Credentials"));
             flow.Controls.Add(new CheckBox { Name = "chkUseCredentialManager", Text = "Store passwords in Windows Credential Manager", AutoSize = true });
             flow.Controls.Add(new CheckBox { Name = "chkPreferSshAgent", Text = "Prefer SSH agent when available", AutoSize = true });
+
+            // === Browser Callback ===
+            flow.Controls.Add(SectionHeader("Browser Callback"));
+            _btnClearEmbeddedBrowserData = new Button
+            {
+                Text = "Clear Embedded Browser Data...",
+                AutoSize = true,
+                Margin = new Padding(15, 8, 0, 0)
+            };
+            _btnClearEmbeddedBrowserData.Click += BtnClearEmbeddedBrowserData_Click;
+            flow.Controls.Add(_btnClearEmbeddedBrowserData);
+            flow.Controls.Add(NoteLabel("Resets SSH Helper's embedded-browser cookies, cache, local storage, IndexedDB, and related site data."));
 
             tabGeneral.Controls.Add(flow);
             return tabGeneral;
@@ -1096,7 +1130,7 @@ namespace SSH_Helper
             if (_presetManager == null)
                 return;
 
-            var result = DialogTheme.Show(
+            var result = _promptService.Show(
                 this,
                 "Clear custom timeout values from all presets?\n\n" +
                 "Presets will inherit the global default timeout instead.",
@@ -1108,12 +1142,50 @@ namespace SSH_Helper
             {
                 int count = _presetManager.ClearAllTimeouts();
                 PresetTimeoutsWereCleared |= count > 0;
-                DialogTheme.Show(
+                _promptService.Show(
                     this,
                     $"Cleared timeout overrides from {count} preset(s).",
                     "Reset Preset Timeouts",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
+            }
+        }
+
+        private void BtnClearEmbeddedBrowserData_Click(object? sender, EventArgs e)
+        {
+            var result = _promptService.Show(
+                this,
+                "Clear SSH Helper's embedded browser data?\n\n" +
+                "This resets SSH Helper's embedded-browser cookies, cache, local storage, IndexedDB, and related site data only.",
+                "Clear Embedded Browser Data",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes)
+            {
+                return;
+            }
+
+            var clearResult = _browserCallbackProfileManager.ClearEmbeddedBrowserData();
+            switch (clearResult)
+            {
+                case EmbeddedBrowserDataClearResult.Cleared:
+                    _promptService.Show(
+                        this,
+                        "Embedded browser data was cleared.",
+                        "Clear Embedded Browser Data",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    break;
+
+                case EmbeddedBrowserDataClearResult.ActiveSessionBlocked:
+                    _promptService.Show(
+                        this,
+                        "Embedded browser data cannot be cleared while an embedded browser callback window is open.",
+                        "Clear Embedded Browser Data",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    break;
             }
         }
 

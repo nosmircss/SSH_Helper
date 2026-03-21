@@ -50,9 +50,9 @@ namespace SSH_Helper
         private void InitializeComponent()
         {
             components = new System.ComponentModel.Container();
-            mainSplitContainer = new SplitContainer();
-            topSplitContainer = new SplitContainer();
-            hostsPanel = new Panel();
+            mainSplitContainer = new BufferedSplitContainer();
+            topSplitContainer = new BufferedSplitContainer();
+            hostsPanel = new BufferedPanel();
             dgv_variables = new DataGridView();
             contextMenuStrip1 = new ContextMenuStrip(components);
             addColumnToolStripMenuItem = new ToolStripMenuItem();
@@ -64,12 +64,14 @@ namespace SSH_Helper
             selectAllHostsToolStripMenuItem = new ToolStripMenuItem();
             deselectAllHostsToolStripMenuItem = new ToolStripMenuItem();
             invertSelectionToolStripMenuItem = new ToolStripMenuItem();
-            hostsHeaderPanel = new Panel();
+            hostsHeaderPanel = new BufferedPanel();
             lblHostsTitle = new Label();
             lblHostCount = new Label();
-            commandPanel = new Panel();
-            commandSplitContainer = new SplitContainer();
-            presetsPanel = new Panel();
+            commandPanel = new BufferedPanel();
+            commandSplitContainer = new BufferedSplitContainer();
+            presetsPanel = new BufferedPanel();
+            presetsTabViewportPanel = new BufferedPanel();
+            presetsTabHeaderStrip = new SSH_Helper.UI.PresetTabHeaderStrip();
             presetsTabControl = new BorderlessTabControl();
             tabPresets = new TabPage();
             tabFavorites = new TabPage();
@@ -99,10 +101,10 @@ namespace SSH_Helper
             tsbSeparatorFolders = new ToolStripSeparator();
             tsbAddFolder = new ToolStripButton();
             tsbDeleteFolder = new ToolStripButton();
-            presetsHeaderPanel = new Panel();
+            presetsHeaderPanel = new BufferedPanel();
             lblPresetsTitle = new Label();
             lblFavoritesEmpty = new Label();
-            scriptPanel = new Panel();
+            scriptPanel = new BufferedPanel();
             txtCommand = new SSH_Helper.UI.ScintillaScriptEditorControl();
             contextCommandBox = new ContextMenuStrip(components);
             ctxCut = new ToolStripMenuItem();
@@ -111,24 +113,24 @@ namespace SSH_Helper
             ctxSelectAll = new ToolStripMenuItem();
             ctxSeparator1 = new ToolStripSeparator();
             ctxValidateScript = new ToolStripMenuItem();
-            scriptFooterPanel = new Panel();
+            scriptFooterPanel = new BufferedPanel();
             lblLinePosition = new Label();
-            scriptHeaderPanel = new Panel();
+            scriptHeaderPanel = new BufferedPanel();
             lblPresetName = new Label();
             txtPreset = new TextBox();
             lblTimeoutHeader = new Label();
             txtTimeoutHeader = new TextBox();
             btnSavePreset = new Button();
             lblScriptTitle = new Label();
-            executePanel = new Panel();
+            executePanel = new BufferedPanel();
             btnExecuteAll = new Button();
             btnExecuteSelected = new Button();
             btnStopAll = new Button();
-            outputPanel = new Panel();
-            outputSplitContainer = new SplitContainer();
-            outputRightPanel = new Panel();
-            historyPanel = new Panel();
-            historySplitContainer = new SplitContainer();
+            outputPanel = new BufferedPanel();
+            outputSplitContainer = new BufferedSplitContainer();
+            outputRightPanel = new BufferedPanel();
+            historyPanel = new BufferedPanel();
+            historySplitContainer = new BufferedSplitContainer();
             lstOutput = new UI.HistoryListBox();
             contextHistoryLst = new ContextMenuStrip(components);
             saveAsToolStripMenuItem = new ToolStripMenuItem();
@@ -139,7 +141,7 @@ namespace SSH_Helper
             toolStripSeparator9 = new ToolStripSeparator();
             deleteEntryToolStripMenuItem = new ToolStripMenuItem();
             deleteAllHistoryToolStripMenuItem = new ToolStripMenuItem();
-            hostListPanel = new Panel();
+            hostListPanel = new BufferedPanel();
             lstHosts = new ListBox();
             contextHostLst = new ContextMenuStrip(components);
             viewHostDetailsToolStripMenuItem = new ToolStripMenuItem();
@@ -147,7 +149,7 @@ namespace SSH_Helper
             exportHostOutputToolStripMenuItem = new ToolStripMenuItem();
             hostHeaderPanel = new Panel();
             lblHostsListTitle = new Label();
-            historyHeaderPanel = new Panel();
+            historyHeaderPanel = new BufferedPanel();
             lblHistoryTitle = new Label();
             txtOutput = new TextBox();
             mainToolStrip = new ToolStrip();
@@ -184,6 +186,7 @@ namespace SSH_Helper
             toolStripSeparator10 = new ToolStripSeparator();
             ExitMenuItem = new ToolStripMenuItem();
             editToolStripMenuItem = new ToolStripMenuItem();
+            undoDeleteToolStripMenuItem = new ToolStripMenuItem();
             findToolStripMenuItem = new ToolStripMenuItem();
             validateScriptToolStripMenuItem = new ToolStripMenuItem();
 #if DEBUG
@@ -221,6 +224,7 @@ namespace SSH_Helper
             commandSplitContainer.Panel2.SuspendLayout();
             commandSplitContainer.SuspendLayout();
             presetsPanel.SuspendLayout();
+            presetsTabViewportPanel.SuspendLayout();
             presetsTabControl.SuspendLayout();
             tabPresets.SuspendLayout();
             tabFavorites.SuspendLayout();
@@ -452,11 +456,12 @@ namespace SSH_Helper
             commandSplitContainer.Size = new Size(901, 346);
             commandSplitContainer.SplitterDistance = 639;
             commandSplitContainer.TabIndex = 0;
-            // 
+            //
             // presetsPanel
             //
             presetsPanel.BackColor = Color.FromArgb(248, 249, 250);
-            presetsPanel.Controls.Add(presetsTabControl);
+            presetsPanel.Controls.Add(presetsTabViewportPanel);
+            presetsPanel.Controls.Add(presetsTabHeaderStrip);
             presetsPanel.Controls.Add(presetsToolStrip);
             presetsPanel.Dock = DockStyle.Fill;
             presetsPanel.Location = new Point(0, 0);
@@ -465,16 +470,36 @@ namespace SSH_Helper
             presetsPanel.Size = new Size(639, 346);
             presetsPanel.TabIndex = 0;
             //
+            // presetsTabViewportPanel
+            //
+            presetsTabViewportPanel.BackColor = Color.FromArgb(248, 249, 250);
+            presetsTabViewportPanel.Controls.Add(presetsTabControl);
+            presetsTabViewportPanel.Dock = DockStyle.Fill;
+            presetsTabViewportPanel.Location = new Point(8, 57);
+            presetsTabViewportPanel.Name = "presetsTabViewportPanel";
+            presetsTabViewportPanel.Size = new Size(623, 281);
+            presetsTabViewportPanel.TabIndex = 2;
+            //
+            // presetsTabHeaderStrip
+            //
+            presetsTabHeaderStrip.Dock = DockStyle.Top;
+            presetsTabHeaderStrip.Location = new Point(8, 33);
+            presetsTabHeaderStrip.Name = "presetsTabHeaderStrip";
+            presetsTabHeaderStrip.SelectedIndex = 0;
+            presetsTabHeaderStrip.Size = new Size(623, 24);
+            presetsTabHeaderStrip.TabIndex = 1;
+            presetsTabHeaderStrip.SelectedIndexChanged += presetsTabHeaderStrip_SelectedIndexChanged;
+            //
             // presetsTabControl
             //
             presetsTabControl.Controls.Add(tabPresets);
             presetsTabControl.Controls.Add(tabFavorites);
-            presetsTabControl.Dock = DockStyle.Fill;
-            presetsTabControl.Location = new Point(8, 33);
+            presetsTabControl.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            presetsTabControl.Location = new Point(0, -24);
             presetsTabControl.Name = "presetsTabControl";
             presetsTabControl.SelectedIndex = 0;
             presetsTabControl.Size = new Size(623, 305);
-            presetsTabControl.TabIndex = 3;
+            presetsTabControl.TabIndex = 0;
             presetsTabControl.SelectedIndexChanged += presetsTabControl_SelectedIndexChanged;
             //
             // tabPresets
@@ -907,7 +932,7 @@ namespace SSH_Helper
             txtPreset.Font = new Font("Segoe UI", 9F);
             txtPreset.Location = new Point(55, 7);
             txtPreset.Name = "txtPreset";
-            txtPreset.PlaceholderText = "Preset name...";
+            txtPreset.PlaceholderText = string.Empty;
             txtPreset.Size = new Size(20, 23);
             txtPreset.TabIndex = 1;
             // 
@@ -1529,7 +1554,7 @@ namespace SSH_Helper
             // 
             // editToolStripMenuItem
             // 
-            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, validateScriptToolStripMenuItem,
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { undoDeleteToolStripMenuItem, findToolStripMenuItem, validateScriptToolStripMenuItem,
 #if DEBUG
                 memoryDebuggerToolStripMenuItem,
                 viewAllPopupsToolStripMenuItem,
@@ -1538,6 +1563,15 @@ namespace SSH_Helper
             editToolStripMenuItem.Name = "editToolStripMenuItem";
             editToolStripMenuItem.Size = new Size(39, 20);
             editToolStripMenuItem.Text = "&Edit";
+            // 
+            // undoDeleteToolStripMenuItem
+            // 
+            undoDeleteToolStripMenuItem.Enabled = false;
+            undoDeleteToolStripMenuItem.Name = "undoDeleteToolStripMenuItem";
+            undoDeleteToolStripMenuItem.ShortcutKeyDisplayString = "Ctrl+Z";
+            undoDeleteToolStripMenuItem.Size = new Size(188, 22);
+            undoDeleteToolStripMenuItem.Text = "Undo Delete";
+            undoDeleteToolStripMenuItem.Click += undoDeleteToolStripMenuItem_Click;
             // 
             // findToolStripMenuItem
             // 
@@ -1697,6 +1731,7 @@ namespace SSH_Helper
             ((System.ComponentModel.ISupportInitialize)commandSplitContainer).EndInit();
             commandSplitContainer.ResumeLayout(false);
             presetsPanel.ResumeLayout(false);
+            presetsTabViewportPanel.ResumeLayout(false);
             presetsTabControl.ResumeLayout(false);
             tabPresets.ResumeLayout(false);
             tabFavorites.ResumeLayout(false);
@@ -1744,9 +1779,9 @@ namespace SSH_Helper
         #endregion
 
         // Main layout
-        private SplitContainer mainSplitContainer;
-        private SplitContainer topSplitContainer;
-        private SplitContainer commandSplitContainer;
+        private BufferedSplitContainer mainSplitContainer;
+        private BufferedSplitContainer topSplitContainer;
+        private BufferedSplitContainer commandSplitContainer;
 
         // Toolbar
         private ToolStrip mainToolStrip;
@@ -1767,21 +1802,23 @@ namespace SSH_Helper
         private ToolStripButton tsbManageEnvironments;
 
         // Hosts panel
-        private Panel hostsPanel;
-        private Panel hostsHeaderPanel;
+        private BufferedPanel hostsPanel;
+        private BufferedPanel hostsHeaderPanel;
         private Label lblHostsTitle;
         private Label lblHostCount;
         private DataGridView dgv_variables;
 
         // Command panel
-        private Panel commandPanel;
+        private BufferedPanel commandPanel;
 
         // Presets panel
-        private Panel presetsPanel;
+        private BufferedPanel presetsPanel;
+        private BufferedPanel presetsTabViewportPanel;
+        private SSH_Helper.UI.PresetTabHeaderStrip presetsTabHeaderStrip;
         private BorderlessTabControl presetsTabControl;
         private TabPage tabPresets;
         private TabPage tabFavorites;
-        private Panel presetsHeaderPanel;
+        private BufferedPanel presetsHeaderPanel;
         private Label lblPresetsTitle;
         private TreeView trvPresets;
         private TreeView trvFavorites;
@@ -1796,9 +1833,9 @@ namespace SSH_Helper
         private ToolStripButton tsbDeleteFolder;
 
         // Script panel
-        private Panel scriptPanel;
-        private Panel scriptHeaderPanel;
-        private Panel scriptFooterPanel;
+        private BufferedPanel scriptPanel;
+        private BufferedPanel scriptHeaderPanel;
+        private BufferedPanel scriptFooterPanel;
         private Label lblScriptTitle;
         private Label lblLinePosition;
         private Label lblPresetName;
@@ -1816,24 +1853,24 @@ namespace SSH_Helper
         private ToolStripMenuItem ctxValidateScript;
 
         // Execute panel
-        private Panel executePanel;
+        private BufferedPanel executePanel;
         private Button btnExecuteAll;
         private Button btnExecuteSelected;
         private Button btnStopAll;
 
         // Output panel
-        private Panel outputPanel;
-        private SplitContainer outputSplitContainer;
+        private BufferedPanel outputPanel;
+        private BufferedSplitContainer outputSplitContainer;
         private TextBox txtOutput;
-        private Panel outputRightPanel;
-        private Panel historyPanel;
-        private SplitContainer historySplitContainer;
-        private Panel historyHeaderPanel;
+        private BufferedPanel outputRightPanel;
+        private BufferedPanel historyPanel;
+        private BufferedSplitContainer historySplitContainer;
+        private BufferedPanel historyHeaderPanel;
         private Label lblHistoryTitle;
         private UI.HistoryListBox lstOutput;
 
         // Host list panel (for folder history)
-        private Panel hostListPanel;
+        private BufferedPanel hostListPanel;
         private Panel hostHeaderPanel;
         private Label lblHostsListTitle;
         private ListBox lstHosts;
@@ -1863,6 +1900,7 @@ namespace SSH_Helper
         private ToolStripSeparator toolStripSeparator10;
         private ToolStripMenuItem ExitMenuItem;
         private ToolStripMenuItem editToolStripMenuItem;
+        private ToolStripMenuItem undoDeleteToolStripMenuItem;
         private ToolStripMenuItem findToolStripMenuItem;
         private ToolStripMenuItem validateScriptToolStripMenuItem;
 #if DEBUG
@@ -2200,8 +2238,17 @@ namespace SSH_Helper
         private const int WM_ERASEBKGND = 0x0014;
 
         private bool _hideBorder;
-        private Color _borderColor = Color.FromArgb(30, 30, 30);
         private Color _backgroundColor = Color.FromArgb(30, 30, 30);
+        private Color _headerBackgroundColor = Color.FromArgb(37, 37, 38);
+        private Color _inactiveTabColor = Color.FromArgb(45, 45, 46);
+        private Color _inactiveTabTopLineColor = Color.FromArgb(60, 60, 60);
+
+        public BorderlessTabControl()
+        {
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
+            DoubleBuffered = true;
+            UpdateStyles();
+        }
 
         /// <summary>
         /// When true, the control hides its default border.
@@ -2225,90 +2272,142 @@ namespace SSH_Helper
             set
             {
                 _backgroundColor = value;
-                _borderColor = value;
+                Invalidate();
+            }
+        }
+
+        public Color HiddenBorderHeaderColor
+        {
+            get => _headerBackgroundColor;
+            set
+            {
+                _headerBackgroundColor = value;
+                Invalidate();
+            }
+        }
+
+        public Color HiddenBorderInactiveTabColor
+        {
+            get => _inactiveTabColor;
+            set
+            {
+                _inactiveTabColor = value;
+                Invalidate();
+            }
+        }
+
+        public Color HiddenBorderInactiveTabTopLineColor
+        {
+            get => _inactiveTabTopLineColor;
+            set
+            {
+                _inactiveTabTopLineColor = value;
                 Invalidate();
             }
         }
 
         protected override void WndProc(ref Message m)
         {
+            if (_hideBorder && m.Msg == WM_ERASEBKGND)
+            {
+                if (m.WParam != IntPtr.Zero && Width > 0 && Height > 0)
+                {
+                    using var eraseGraphics = Graphics.FromHdc(m.WParam);
+                    PaintHiddenBorderBackground(eraseGraphics);
+                }
+
+                m.Result = (IntPtr)1;
+                return;
+            }
+
             base.WndProc(ref m);
 
-            if (_hideBorder && m.Msg == WM_PAINT)
+            if (_hideBorder && m.Msg == WM_PAINT && IsHandleCreated && Width > 0 && Height > 0)
             {
-                using var g = Graphics.FromHwnd(Handle);
-                using var brush = new SolidBrush(_backgroundColor);
+                using var overlay = new Bitmap(Width, Height);
+                using var overlayGraphics = Graphics.FromImage(overlay);
+                PaintHiddenBorderOverlay(overlayGraphics);
 
-                // Get the display rectangle (content area inside the border)
-                var displayRect = DisplayRectangle;
+                using var windowGraphics = Graphics.FromHwnd(Handle);
+                windowGraphics.DrawImageUnscaled(overlay, 0, 0);
+            }
+        }
 
-                // Paint over borders around the content area
-                // Left border of content area
-                g.FillRectangle(brush, 0, displayRect.Top - 2, displayRect.Left + 2, Height - displayRect.Top + 2);
-                // Right border of content area
-                g.FillRectangle(brush, displayRect.Right - 2, displayRect.Top - 2, Width - displayRect.Right + 4, Height - displayRect.Top + 2);
-                // Bottom border
-                g.FillRectangle(brush, 0, displayRect.Bottom - 2, Width, Height - displayRect.Bottom + 4);
-                // Top border (between tabs and content)
-                g.FillRectangle(brush, 0, displayRect.Top - 2, Width, 4);
+        private void PaintHiddenBorderBackground(Graphics g)
+        {
+            if (!_hideBorder || Width <= 0 || Height <= 0)
+            {
+                return;
+            }
 
-                // Now paint over the tab header area borders
-                // Get the first tab rect to find where tabs start
-                if (TabCount > 0)
+            using var contentBrush = new SolidBrush(_backgroundColor);
+            using var headerBrush = new SolidBrush(_headerBackgroundColor);
+
+            g.FillRectangle(contentBrush, 0, 0, Width, Height);
+
+            var headerHeight = Math.Max(ItemSize.Height + 4, 0);
+            for (int i = 0; i < TabCount; i++)
+            {
+                headerHeight = Math.Max(headerHeight, GetTabRect(i).Bottom + 4);
+            }
+
+            headerHeight = Math.Min(headerHeight, Height);
+            if (headerHeight > 0)
+            {
+                g.FillRectangle(headerBrush, 0, 0, Width, headerHeight);
+            }
+        }
+
+        private void PaintHiddenBorderOverlay(Graphics g)
+        {
+            if (!_hideBorder || TabCount <= 0)
+            {
+                return;
+            }
+
+            using var contentBrush = new SolidBrush(_backgroundColor);
+            using var headerBrush = new SolidBrush(_headerBackgroundColor);
+
+            var displayRect = DisplayRectangle;
+            if (displayRect.Width > 0 && displayRect.Height > 0)
+            {
+                g.FillRectangle(contentBrush, 0, displayRect.Top - 2, displayRect.Left + 2, Height - displayRect.Top + 2);
+                g.FillRectangle(contentBrush, displayRect.Right - 2, displayRect.Top - 2, Width - displayRect.Right + 4, Height - displayRect.Top + 2);
+                g.FillRectangle(contentBrush, 0, displayRect.Bottom - 2, Width, Height - displayRect.Bottom + 4);
+                g.FillRectangle(contentBrush, 0, displayRect.Top - 2, Width, 4);
+            }
+
+            var firstTab = GetTabRect(0);
+            var lastTab = GetTabRect(TabCount - 1);
+
+            if (firstTab.Left > 0)
+            {
+                g.FillRectangle(headerBrush, 0, 0, firstTab.Left, firstTab.Height + 4);
+            }
+
+            if (lastTab.Right < Width)
+            {
+                g.FillRectangle(headerBrush, lastTab.Right - 2, 0, Width - lastTab.Right + 4, lastTab.Height + 4);
+            }
+
+            g.FillRectangle(headerBrush, 0, 0, Width, 2);
+            g.FillRectangle(contentBrush, lastTab.Right - 2, lastTab.Bottom - 3, 4, 5);
+
+            using var unselectedTopLinePen = new Pen(_inactiveTabTopLineColor, 2);
+            for (int i = 0; i < TabCount; i++)
+            {
+                var tabRect = GetTabRect(i);
+                var tabColor = SelectedIndex == i ? _backgroundColor : _inactiveTabColor;
+                using var tabBrush = new SolidBrush(tabColor);
+
+                g.FillRectangle(tabBrush, tabRect.Left, tabRect.Top, 2, tabRect.Height);
+                g.FillRectangle(tabBrush, tabRect.Left, tabRect.Top, 3, 3);
+                g.FillRectangle(tabBrush, tabRect.Right - 2, tabRect.Top, 2, tabRect.Height);
+                g.FillRectangle(tabBrush, tabRect.Right - 3, tabRect.Top, 3, 3);
+
+                if (SelectedIndex != i)
                 {
-                    var firstTab = GetTabRect(0);
-                    var lastTab = GetTabRect(TabCount - 1);
-
-                    // Left side of tab header (before first tab)
-                    if (firstTab.Left > 0)
-                    {
-                        g.FillRectangle(brush, 0, 0, firstTab.Left, firstTab.Height + 4);
-                    }
-
-                    // Right side of tab header (after last tab) - start a bit earlier to cover edge
-                    if (lastTab.Right < Width)
-                    {
-                        g.FillRectangle(brush, lastTab.Right - 2, 0, Width - lastTab.Right + 4, lastTab.Height + 4);
-                    }
-
-                    // Top edge above the tabs
-                    g.FillRectangle(brush, 0, 0, Width, 2);
-
-                    // Cover the border at the right edge of the last tab where it meets the header area
-                    g.FillRectangle(brush, lastTab.Right - 2, lastTab.Bottom - 3, 4, 5);
-
-                    // Paint over the edge highlights of each tab (Windows 3D border artifact)
-                    for (int i = 0; i < TabCount; i++)
-                    {
-                        var tabRect = GetTabRect(i);
-                        bool isSelected = SelectedIndex == i;
-
-                        // Use appropriate color based on selection state
-                        var tabBgColor = isSelected
-                            ? Color.FromArgb(30, 30, 30)   // DarkSurface1 - selected tab
-                            : Color.FromArgb(45, 45, 46);  // DarkSurface3 - unselected tab
-
-                        using var tabBrush = new SolidBrush(tabBgColor);
-
-                        // Cover left edge of tab
-                        g.FillRectangle(tabBrush, tabRect.Left, tabRect.Top, 2, tabRect.Height);
-
-                        // Cover top-left corner
-                        g.FillRectangle(tabBrush, tabRect.Left, tabRect.Top, 3, 3);
-
-                        // Cover right edge of tab
-                        g.FillRectangle(tabBrush, tabRect.Right - 2, tabRect.Top, 2, tabRect.Height);
-
-                        // Cover top-right corner
-                        g.FillRectangle(tabBrush, tabRect.Right - 3, tabRect.Top, 3, 3);
-
-                        // For unselected tabs, draw a darker top line
-                        if (!isSelected)
-                        {
-                            using var topPen = new Pen(Color.FromArgb(60, 60, 60), 2);
-                            g.DrawLine(topPen, tabRect.Left, tabRect.Top + 1, tabRect.Right, tabRect.Top + 1);
-                        }
-                    }
+                    g.DrawLine(unselectedTopLinePen, tabRect.Left, tabRect.Top + 1, tabRect.Right, tabRect.Top + 1);
                 }
             }
         }

@@ -54,6 +54,31 @@ public class PresetManagerTests
         _presetManager.Presets.Should().NotBeNull();
     }
 
+    [Fact]
+    public void Load_FromSuppliedConfiguration_PopulatesPresetsAndFoldersWithoutDiskReload()
+    {
+        var config = new AppConfiguration
+        {
+            Presets = new Dictionary<string, PresetInfo>
+            {
+                ["Alpha"] = new PresetInfo { Commands = "show version", Folder = "Ops/Core" }
+            },
+            PresetFolders = new Dictionary<string, FolderInfo>
+            {
+                ["Ops"] = new FolderInfo { IsExpanded = true },
+                ["Ops/Core"] = new FolderInfo { IsExpanded = false }
+            }
+        };
+
+        var manager = new PresetManager(new ConfigurationService(_configService.ConfigFilePath));
+
+        manager.Load(config);
+
+        Assert.Equal("Ops/Core", manager.Get("Alpha")?.Folder);
+        Assert.True(manager.Folders.ContainsKey("Ops"));
+        Assert.True(manager.Folders.ContainsKey("Ops/Core"));
+    }
+
     #endregion
 
     #region Get Tests
