@@ -1999,3 +1999,22 @@
 - Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~JobStorageServiceTests|FullyQualifiedName~JobExportServiceTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~JobDefinitionTests|FullyQualifiedName~JobEditorDialogTimeoutOverrideTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\scheduler-timeouts-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\scheduler-timeouts-tests\\obj\\` passed (163/163).
 - Verification: `openspec validate update-scheduler-job-timeouts --strict --no-interactive` passed.
 - Manual interactive verification was not run from this CLI environment; the OpenSpec manual verification item remains unchecked.
+
+## 133. Implement add-preset-delete-undo
+- [x] 133.1 Add OpenSpec change `add-preset-delete-undo` plus this task checklist, then validate the change once the deltas are written.
+- [x] 133.2 Add failing service and UI coverage for session-scoped delete undo, guarded `Ctrl+Z`, delete-stack invalidation, descendant-folder preservation, and recursive folder-delete scheduler effects.
+- [x] 133.3 Implement snapshot-based preset/folder delete undo support, including preset-library snapshot capture/restore and affected-job snapshot restore.
+- [x] 133.4 Correct folder delete semantics so move-to-parent preserves descendant folder structure, and recursive folder delete disables preset-target jobs for removed presets.
+- [x] 133.5 Wire `Edit > Undo Delete`, guarded `Ctrl+Z`, undo-menu state refresh, and non-delete mutation invalidation through `Form1`.
+- [x] 133.6 Run focused verification, broader regression verification, `openspec validate`, and capture the review outcome below.
+
+### 133 Review
+- Added OpenSpec change `add-preset-delete-undo` with proposal, tasks, and spec deltas for `preset-organization` and `job-scheduler`.
+- Added focused regression coverage for preset/folder delete undo, undo stack ordering/clearing, guarded `Ctrl+Z`, folder delete subtree preservation, and scheduler job disable/restore behavior.
+- Implemented `PresetDeleteUndoService` plus preset-library snapshot restore and affected-job snapshot restore.
+- Fixed `PresetManager.DeleteFolder(..., deletePresets: false)` so descendant folders are renamed upward instead of flattened, and `deletePresets: true` now disables preset-target jobs for presets removed from the subtree.
+- Wired `Edit > Undo Delete`, session-scoped multi-level undo capture/restore, and stale-history invalidation across preset/folder/order/favorite/base-environment mutations in `Form1`.
+- Verification passed:
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PresetManagerDeleteBehaviorTests|FullyQualifiedName~PresetDeleteUndoServiceTests|FullyQualifiedName~Form1DeleteUndoTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-delete-undo-red\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-delete-undo-red\obj\`
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-delete-undo-full\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-delete-undo-full\obj\`
+  - `openspec validate add-preset-delete-undo --strict --no-interactive`

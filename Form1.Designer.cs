@@ -186,6 +186,7 @@ namespace SSH_Helper
             toolStripSeparator10 = new ToolStripSeparator();
             ExitMenuItem = new ToolStripMenuItem();
             editToolStripMenuItem = new ToolStripMenuItem();
+            undoDeleteToolStripMenuItem = new ToolStripMenuItem();
             findToolStripMenuItem = new ToolStripMenuItem();
             validateScriptToolStripMenuItem = new ToolStripMenuItem();
 #if DEBUG
@@ -1553,7 +1554,7 @@ namespace SSH_Helper
             // 
             // editToolStripMenuItem
             // 
-            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { findToolStripMenuItem, validateScriptToolStripMenuItem,
+            editToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { undoDeleteToolStripMenuItem, findToolStripMenuItem, validateScriptToolStripMenuItem,
 #if DEBUG
                 memoryDebuggerToolStripMenuItem,
                 viewAllPopupsToolStripMenuItem,
@@ -1562,6 +1563,15 @@ namespace SSH_Helper
             editToolStripMenuItem.Name = "editToolStripMenuItem";
             editToolStripMenuItem.Size = new Size(39, 20);
             editToolStripMenuItem.Text = "&Edit";
+            // 
+            // undoDeleteToolStripMenuItem
+            // 
+            undoDeleteToolStripMenuItem.Enabled = false;
+            undoDeleteToolStripMenuItem.Name = "undoDeleteToolStripMenuItem";
+            undoDeleteToolStripMenuItem.ShortcutKeyDisplayString = "Ctrl+Z";
+            undoDeleteToolStripMenuItem.Size = new Size(188, 22);
+            undoDeleteToolStripMenuItem.Text = "Undo Delete";
+            undoDeleteToolStripMenuItem.Click += undoDeleteToolStripMenuItem_Click;
             // 
             // findToolStripMenuItem
             // 
@@ -1890,6 +1900,7 @@ namespace SSH_Helper
         private ToolStripSeparator toolStripSeparator10;
         private ToolStripMenuItem ExitMenuItem;
         private ToolStripMenuItem editToolStripMenuItem;
+        private ToolStripMenuItem undoDeleteToolStripMenuItem;
         private ToolStripMenuItem findToolStripMenuItem;
         private ToolStripMenuItem validateScriptToolStripMenuItem;
 #if DEBUG

@@ -5,6 +5,7 @@ using System.Runtime;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using Newtonsoft.Json;
 using SSH_Helper.Models;
 using SSH_Helper.Services.Editor;
 using SSH_Helper.Services;
@@ -117,6 +118,7 @@ namespace SSH_Helper
         private readonly UpdateService _updateService;
         private readonly SshConfigService _sshConfigService;
         private readonly HistoryStorageService _historyStorage;
+        private readonly PresetDeleteUndoService _presetDeleteUndoService = new();
 
         // Scheduler services
         private JobStorageService? _jobStorage;
@@ -322,6 +324,7 @@ namespace SSH_Helper
             InitializePresetsTabChrome();
             InitializeConnectionTesting();
             InitializeSchedulerStatusBar();
+            RefreshPresetDeleteUndoUi();
             UpdateStatusBar("Ready");
 
             // Apply saved theme and fonts
@@ -4120,13 +4123,19 @@ namespace SSH_Helper
                     var folderName = FolderPathUtility.GetFolderName(draggedTag.Name);
                     var newPath = _presetManager.GetUniqueFolderName(folderName);
                     _presetManager.RenameFolder(draggedTag.Name, newPath);
+                    ClearPresetDeleteUndoHistory();
                     return newPath;
                 }
                 return draggedTag.Name;
             }
             else
             {
-                _presetManager.MovePresetToFolder(draggedTag.Name, null);
+                var currentPreset = _presetManager.Get(draggedTag.Name);
+                if (!string.IsNullOrEmpty(currentPreset?.Folder))
+                {
+                    _presetManager.MovePresetToFolder(draggedTag.Name, null);
+                    ClearPresetDeleteUndoHistory();
+                }
                 return draggedTag.Name;
             }
         }
@@ -4143,11 +4152,17 @@ namespace SSH_Helper
                 var newPath = FolderPathUtility.CombinePath(targetTag.Name, folderName);
                 newPath = _presetManager.GetUniqueFolderName(newPath);
                 _presetManager.RenameFolder(draggedTag.Name, newPath);
+                ClearPresetDeleteUndoHistory();
                 return newPath;
             }
             else
             {
-                _presetManager.MovePresetToFolder(draggedTag.Name, targetTag.Name);
+                var currentPreset = _presetManager.Get(draggedTag.Name);
+                if (!string.Equals(currentPreset?.Folder, targetTag.Name, StringComparison.Ordinal))
+                {
+                    _presetManager.MovePresetToFolder(draggedTag.Name, targetTag.Name);
+                    ClearPresetDeleteUndoHistory();
+                }
                 return draggedTag.Name;
             }
         }
@@ -4174,6 +4189,7 @@ namespace SSH_Helper
                 {
                     newPath = _presetManager.GetUniqueFolderName(newPath);
                     _presetManager.RenameFolder(draggedTag.Name, newPath);
+                    ClearPresetDeleteUndoHistory();
                 }
 
                 // Position in manual order relative to the target
@@ -4195,7 +4211,10 @@ namespace SSH_Helper
 
                 var currentPreset = _presetManager.Get(draggedTag.Name);
                 if (currentPreset?.Folder != targetFolder)
+                {
                     _presetManager.MovePresetToFolder(draggedTag.Name, targetFolder);
+                    ClearPresetDeleteUndoHistory();
+                }
 
                 // Position in manual order
                 if (!targetTag.IsFolder)
@@ -4331,6 +4350,7 @@ namespace SSH_Helper
             var config = _configService.Load();
             ReorderInList(config.ManualFolderOrder, sourceFolderName, targetFolderName);
             _configService.Save(config);
+            ClearPresetDeleteUndoHistory();
         }
 
         private void ReorderPresetsInFolder(string sourcePresetName, string targetPresetName, string? folder)
@@ -4348,6 +4368,7 @@ namespace SSH_Helper
 
             config.ManualPresetOrderByFolder[folderKey] = presetOrder;
             _configService.Save(config);
+            ClearPresetDeleteUndoHistory();
         }
 
         private void InsertIntoFolderOrder(string folderToInsert, string? referenceItem, DropPosition position)
@@ -4384,6 +4405,7 @@ namespace SSH_Helper
 
             config.ManualFolderOrder = folderOrder;
             _configService.Save(config);
+            ClearPresetDeleteUndoHistory();
         }
 
         private void InsertIntoPresetOrder(string presetToInsert, string? folder, string referenceItem, DropPosition position)
@@ -4419,6 +4441,7 @@ namespace SSH_Helper
 
             config.ManualPresetOrderByFolder[folderKey] = presetOrder;
             _configService.Save(config);
+            ClearPresetDeleteUndoHistory();
         }
 
         #endregion
@@ -4826,6 +4849,7 @@ namespace SSH_Helper
             // Save new order
             config.ManualFavoriteOrder = currentOrder;
             _configService.Save(config);
+            ClearPresetDeleteUndoHistory();
         }
 
         private bool CanDropOnFavorites(TreeNode draggedNode, TreeNode targetNode)
@@ -5689,8 +5713,6 @@ namespace SSH_Helper
 
         private void toggleSortingToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            // Cycle through sort modes: Ascending -> Descending -> Manual -> Ascending
-            var previousMode = _currentSortMode;
             _currentSortMode = _currentSortMode switch
             {
                 PresetSortMode.Ascending => PresetSortMode.Descending,
@@ -5713,6 +5735,7 @@ namespace SSH_Helper
             RefreshPresetList();
             UpdateSortModeIndicator();
             UpdateStatusBar($"Sort mode: {_currentSortMode}");
+            ClearPresetDeleteUndoHistory();
         }
 
         private void UpdateSortModeIndicator()
@@ -6084,6 +6107,7 @@ namespace SSH_Helper
 
             TryApplyFolderEnvironment(folderPath);
             DisplayFolderSummary(folderPath);
+            ClearPresetDeleteUndoHistory();
 
             if (string.IsNullOrWhiteSpace(explicitEnvironmentName))
             {
@@ -6109,9 +6133,15 @@ namespace SSH_Helper
             };
             rootItem.Click += (s, e) =>
             {
+                if (string.IsNullOrEmpty(currentFolder))
+                {
+                    return;
+                }
+
                 _presetManager.MovePresetToFolder(presetName, null);
                 RefreshPresetList();
                 SelectPresetByName(presetName);
+                ClearPresetDeleteUndoHistory();
             };
             ctxMoveToFolder.DropDownItems.Add(rootItem);
 
@@ -6140,9 +6170,15 @@ namespace SSH_Helper
                 var targetPath = folderPath;
                 folderItem.Click += (s, e) =>
                 {
+                    if (string.Equals(currentFolder, targetPath, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+
                     _presetManager.MovePresetToFolder(presetName, targetPath);
                     RefreshPresetList();
                     SelectPresetByName(presetName);
+                    ClearPresetDeleteUndoHistory();
                 };
 
                 // Add to parent menu or root
@@ -6190,6 +6226,7 @@ namespace SSH_Helper
             {
                 RefreshPresetList();
                 UpdateStatusBar($"Folder '{fullPath}' created");
+                ClearPresetDeleteUndoHistory();
             }
         }
 
@@ -6220,6 +6257,7 @@ namespace SSH_Helper
             {
                 RefreshPresetList();
                 UpdateStatusBar($"Folder renamed to '{newPath}'");
+                ClearPresetDeleteUndoHistory();
             }
             else
             {
@@ -6276,11 +6314,14 @@ namespace SSH_Helper
                     txtTimeoutHeader.Clear();
                 }
 
-                _presetManager.DeleteFolder(folderPath, deletePresets: deletePresets);
-                RefreshPresetList();
+                if (TryDeleteFolderWithUndo(folderPath, deletePresets))
+                {
+                    RefreshPresetList();
+                    RefreshFavoritesList();
 
-                string action = deletePresets ? "and its presets deleted" : "deleted (presets moved)";
-                UpdateStatusBar($"Folder '{folderPath}' {action}");
+                    string action = deletePresets ? "and its presets deleted" : "deleted (presets moved)";
+                    UpdateStatusBar($"Folder '{folderPath}' {action}");
+                }
             }
             else
             {
@@ -6289,9 +6330,12 @@ namespace SSH_Helper
 
                 if (DialogTheme.Show(this, message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                 {
-                    _presetManager.DeleteFolder(folderPath, deletePresets: false);
-                    RefreshPresetList();
-                    UpdateStatusBar($"Folder '{folderPath}' deleted");
+                    if (TryDeleteFolderWithUndo(folderPath, deletePresets: false))
+                    {
+                        RefreshPresetList();
+                        RefreshFavoritesList();
+                        UpdateStatusBar($"Folder '{folderPath}' deleted");
+                    }
                 }
             }
         }
@@ -6328,7 +6372,7 @@ namespace SSH_Helper
                 ? $" and ALL its contents ({string.Join(" and ", messageParts)})"
                 : "";
 
-            string message = $"Are you sure you want to delete the folder '{folderName}'{contentsDescription}?\n\nThis action cannot be undone.";
+            string message = $"Are you sure you want to delete the folder '{folderName}'{contentsDescription}?";
 
             if (DialogTheme.Show(this, message, "Delete Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
             {
@@ -6338,9 +6382,12 @@ namespace SSH_Helper
                 txtCommand.Clear();
                 txtTimeoutHeader.Clear();
 
-                _presetManager.DeleteFolder(folderPath, deletePresets: true);
-                RefreshPresetList();
-                UpdateStatusBar($"Folder '{folderName}' and its presets deleted");
+                if (TryDeleteFolderWithUndo(folderPath, deletePresets: true))
+                {
+                    RefreshPresetList();
+                    RefreshFavoritesList();
+                    UpdateStatusBar($"Folder '{folderName}' and its presets deleted");
+                }
             }
         }
 
@@ -7752,6 +7799,210 @@ namespace SSH_Helper
 
         #region Preset Operations
 
+        private void RefreshPresetDeleteUndoUi()
+        {
+            undoDeleteToolStripMenuItem.Enabled = _presetDeleteUndoService.CanUndo;
+            undoDeleteToolStripMenuItem.Text = _presetDeleteUndoService.PendingActionText;
+        }
+
+        private void ClearPresetDeleteUndoHistory()
+        {
+            _presetDeleteUndoService.Clear();
+            RefreshPresetDeleteUndoUi();
+        }
+
+        private AppConfiguration CapturePresetDeleteUndoConfigSnapshot()
+        {
+            var currentConfig = _configService.GetCurrent();
+            var snapshot = JsonConvert.DeserializeObject<AppConfiguration>(JsonConvert.SerializeObject(currentConfig)) ?? new AppConfiguration();
+            snapshot.ManualPresetOrder = new List<string>(_manualPresetOrder);
+            return snapshot;
+        }
+
+        private IReadOnlyCollection<JobDefinition> CaptureAffectedJobsForPresetDelete(string presetName)
+        {
+            if (_jobStorage == null)
+            {
+                return Array.Empty<JobDefinition>();
+            }
+
+            return _jobStorage.GetJobsReferencingPreset(presetName)
+                .Select(CloneJobDefinition)
+                .ToArray();
+        }
+
+        private IReadOnlyCollection<JobDefinition> CaptureAffectedJobsForFolderDelete(string folderPath, bool deletePresets)
+        {
+            if (_jobStorage == null)
+            {
+                return Array.Empty<JobDefinition>();
+            }
+
+            var affectedJobs = new Dictionary<string, JobDefinition>(StringComparer.Ordinal);
+
+            foreach (var job in _jobStorage.GetJobsReferencingFolder(folderPath))
+            {
+                affectedJobs[job.Id] = CloneJobDefinition(job);
+            }
+
+            if (deletePresets)
+            {
+                foreach (var presetName in GetPresetNamesInFolderSubtree(folderPath))
+                {
+                    foreach (var job in _jobStorage.GetJobsReferencingPreset(presetName))
+                    {
+                        affectedJobs[job.Id] = CloneJobDefinition(job);
+                    }
+                }
+            }
+
+            return affectedJobs.Values.ToArray();
+        }
+
+        private IEnumerable<string> GetPresetNamesInFolderSubtree(string folderPath)
+        {
+            return _presetManager.Presets
+                .Where(kvp =>
+                    string.Equals(kvp.Value.Folder, folderPath, StringComparison.Ordinal) ||
+                    (!string.IsNullOrEmpty(kvp.Value.Folder) && FolderPathUtility.IsDescendantOf(kvp.Value.Folder, folderPath)))
+                .Select(kvp => kvp.Key)
+                .ToList();
+        }
+
+        private void RecordPresetDeleteUndo(
+            string targetName,
+            bool isFolder,
+            AppConfiguration configSnapshot,
+            IReadOnlyCollection<JobDefinition> affectedJobs)
+        {
+            _presetDeleteUndoService.RecordDelete(targetName, isFolder, configSnapshot, affectedJobs);
+            RefreshPresetDeleteUndoUi();
+        }
+
+        private void UndoLatestPresetDelete()
+        {
+            var undoResult = _presetDeleteUndoService.UndoLatest(_presetManager, _jobStorage);
+            if (undoResult == null)
+            {
+                RefreshPresetDeleteUndoUi();
+                return;
+            }
+
+            var restoredConfig = _configService.GetCurrent();
+            _manualPresetOrder.Clear();
+            _manualPresetOrder.AddRange(restoredConfig.ManualPresetOrder);
+
+            RefreshPresetList();
+            RefreshFavoritesList();
+
+            if (presetsTabControl.SelectedTab != tabPresets)
+            {
+                presetsTabControl.SelectedTab = tabPresets;
+            }
+
+            _suppressPresetSelectionChange = true;
+            try
+            {
+                if (undoResult.IsFolder)
+                {
+                    SelectFolderByName(undoResult.TargetName);
+                    LoadFolderIntoSummary(undoResult.TargetName);
+                }
+                else
+                {
+                    SelectPresetByName(undoResult.TargetName);
+                    var restoredPreset = _presetManager.Get(undoResult.TargetName);
+                    if (restoredPreset != null)
+                    {
+                        LoadPresetIntoEditor(undoResult.TargetName, restoredPreset);
+                    }
+                }
+            }
+            finally
+            {
+                _suppressPresetSelectionChange = false;
+            }
+
+            RefreshPresetDeleteUndoUi();
+        }
+
+        private void undoDeleteToolStripMenuItem_Click(object? sender, EventArgs e)
+        {
+            UndoLatestPresetDelete();
+        }
+
+        private bool ShouldHandlePresetDeleteShortcut()
+        {
+            if (!_presetDeleteUndoService.CanUndo)
+            {
+                return false;
+            }
+
+            if (txtCommand.ContainsFocus ||
+                dgv_variables.IsCurrentCellInEditMode ||
+                tsbUsername.TextBox.Focused ||
+                tsbPassword.TextBox.Focused)
+            {
+                return false;
+            }
+
+            return !ContainsFocusedEditableTextControl(this);
+        }
+
+        private static bool ContainsFocusedEditableTextControl(Control parent)
+        {
+            foreach (Control child in parent.Controls)
+            {
+                if (!child.ContainsFocus)
+                {
+                    continue;
+                }
+
+                if (child is TextBoxBase)
+                {
+                    return true;
+                }
+
+                if (ContainsFocusedEditableTextControl(child))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static JobDefinition CloneJobDefinition(JobDefinition job)
+        {
+            return JsonConvert.DeserializeObject<JobDefinition>(JsonConvert.SerializeObject(job))!;
+        }
+
+        private bool TryDeletePresetWithUndo(string presetName)
+        {
+            var configSnapshot = CapturePresetDeleteUndoConfigSnapshot();
+            var affectedJobs = CaptureAffectedJobsForPresetDelete(presetName);
+            if (!_presetManager.Delete(presetName))
+            {
+                return false;
+            }
+
+            RecordPresetDeleteUndo(presetName, isFolder: false, configSnapshot, affectedJobs);
+            return true;
+        }
+
+        private bool TryDeleteFolderWithUndo(string folderPath, bool deletePresets)
+        {
+            var configSnapshot = CapturePresetDeleteUndoConfigSnapshot();
+            var affectedJobs = CaptureAffectedJobsForFolderDelete(folderPath, deletePresets);
+            if (!_presetManager.DeleteFolder(folderPath, deletePresets))
+            {
+                return false;
+            }
+
+            RecordPresetDeleteUndo(folderPath, isFolder: true, configSnapshot, affectedJobs);
+            return true;
+        }
+
         private bool SaveCurrentPreset(PresetSaveImpactAction? selectedAction = null)
         {
             // Don't save when a folder is selected (folder summary is displayed)
@@ -7890,6 +8141,7 @@ namespace SSH_Helper
             _activePresetName = presetName;
             UpdatePresetHeaderIndicator();
             UpdateStatusBar($"Preset '{presetName}' saved");
+            ClearPresetDeleteUndoHistory();
             return true;
         }
 
@@ -7960,6 +8212,7 @@ namespace SSH_Helper
             _selectedFolderName = null;
             UpdateRunButtonText();
             UpdatePresetHeaderIndicator();
+            ClearPresetDeleteUndoHistory();
         }
 
         private string? ResolvePresetNameForActions(bool preferContextSource)
@@ -8096,6 +8349,8 @@ namespace SSH_Helper
                         LoadPresetIntoEditor(finalName, preset);
                     }
                 }
+
+                ClearPresetDeleteUndoHistory();
             }
             catch (Exception ex)
             {
@@ -8136,6 +8391,7 @@ namespace SSH_Helper
             txtPreset.Text = newName;
             _activePresetName = newName;
             UpdatePresetHeaderIndicator();
+            ClearPresetDeleteUndoHistory();
         }
 
         private void DeletePreset(bool preferContextSource = false)
@@ -8158,7 +8414,7 @@ namespace SSH_Helper
             // Check if this is the currently active preset being deleted
             bool isDeletingActivePreset = string.Equals(selectedPreset, _activePresetName, StringComparison.Ordinal);
 
-            if (_presetManager.Delete(selectedPreset))
+            if (TryDeletePresetWithUndo(selectedPreset))
             {
                 _manualPresetOrder.Remove(selectedPreset);
 
@@ -8265,6 +8521,7 @@ namespace SSH_Helper
                 }
 
                 DialogTheme.Show(this, $"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ClearPresetDeleteUndoHistory();
             }
             catch (FormatException)
             {
@@ -8337,6 +8594,11 @@ namespace SSH_Helper
 
                 DialogTheme.Show(this, $"Imported {count} presets.\n\n{locationMsg}\n\nNote: If any preset names already existed, '_imported' was appended to avoid overwriting.",
                     "Import All Presets", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                if (count > 0)
+                {
+                    ClearPresetDeleteUndoHistory();
+                }
             }
             catch (FormatException ex)
             {
@@ -9079,6 +9341,7 @@ namespace SSH_Helper
             SelectPresetByName(presetName);
 
             UpdateStatusBar(preset.IsFavorite ? $"'{presetName}' added to favorites" : $"'{presetName}' removed from favorites");
+            ClearPresetDeleteUndoHistory();
         }
 
         private void ToggleFolderFavorite(string folderName)
@@ -9094,6 +9357,7 @@ namespace SSH_Helper
             SelectFolderByName(folderName);
 
             UpdateStatusBar(newFavoriteState ? $"Folder '{folderName}' added to favorites" : $"Folder '{folderName}' removed from favorites");
+            ClearPresetDeleteUndoHistory();
         }
 
         private string GetPresetNameFromDisplay(string displayName)
@@ -10898,6 +11162,13 @@ namespace SSH_Helper
                 case Keys.Control | Keys.F:
                     ShowFindDialog();
                     return true;
+                case Keys.Control | Keys.Z:
+                    if (ShouldHandlePresetDeleteShortcut())
+                    {
+                        UndoLatestPresetDelete();
+                        return true;
+                    }
+                    break;
                 case Keys.F3:
                     NavigateToMatch(forward: true);
                     return true;

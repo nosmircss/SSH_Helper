@@ -211,16 +211,7 @@ namespace SSH_Helper.Services
             PersistToConfig();
 
             // Auto-disable jobs that reference the deleted preset
-            if (_jobStorageService != null)
-            {
-                var referencingJobs = _jobStorageService.GetJobsReferencingPreset(name);
-                foreach (var job in referencingJobs)
-                {
-                    job.IsEnabled = false;
-                    job.DisabledReason = $"Preset '{name}' was deleted";
-                    _jobStorageService.Save(job);
-                }
-            }
+            DisableJobsForDeletedPreset(name);
 
             OnPresetsChanged();
             return true;
@@ -577,30 +568,31 @@ namespace SSH_Helper.Services
         /// <returns>True if folder was deleted</returns>
         public bool DeleteFolder(string path, bool deletePresets = false)
         {
-            if (!_folders.Remove(path))
+            if (!_folders.ContainsKey(path))
                 return false;
 
-            // Find and remove all descendant folders
             var descendantFolders = _folders.Keys
                 .Where(k => FolderPathUtility.IsDescendantOf(k, path))
+                .OrderBy(k => FolderPathUtility.GetDepth(k))
                 .ToList();
-
-            foreach (var descendant in descendantFolders)
-            {
-                _folders.Remove(descendant);
-            }
-
-            // Determine parent folder for moving presets (null = root)
             var parentPath = FolderPathUtility.GetParentPath(path);
-
-            // Handle presets in the deleted folder and all descendants
             var affectedPresets = _presets.Where(p =>
                 string.Equals(p.Value.Folder, path, StringComparison.Ordinal) ||
                 (!string.IsNullOrEmpty(p.Value.Folder) && FolderPathUtility.IsDescendantOf(p.Value.Folder, path))
             ).ToList();
+            var deletedPresetNames = deletePresets
+                ? affectedPresets.Select(kvp => kvp.Key).ToList()
+                : new List<string>();
+
+            _folders.Remove(path);
 
             if (deletePresets)
             {
+                foreach (var descendant in descendantFolders)
+                {
+                    _folders.Remove(descendant);
+                }
+
                 foreach (var kvp in affectedPresets)
                 {
                     _presets.Remove(kvp.Key);
@@ -608,10 +600,35 @@ namespace SSH_Helper.Services
             }
             else
             {
-                // Move presets to parent folder (or root if no parent)
+                var renamedFolderPaths = BuildMovedDescendantFolderPaths(path, parentPath, descendantFolders);
+                var renamedFolderPathsByOldPath = renamedFolderPaths.ToDictionary(
+                    renamedFolder => renamedFolder.OldPath,
+                    renamedFolder => renamedFolder.NewPath,
+                    StringComparer.Ordinal);
+
+                foreach (var descendant in descendantFolders)
+                {
+                    _folders.Remove(descendant);
+                }
+
+                foreach (var renamedFolder in renamedFolderPaths)
+                {
+                    _folders[renamedFolder.NewPath] = renamedFolder.Info.Clone();
+                }
+
                 foreach (var kvp in affectedPresets)
                 {
-                    kvp.Value.Folder = parentPath;
+                    if (string.Equals(kvp.Value.Folder, path, StringComparison.Ordinal))
+                    {
+                        kvp.Value.Folder = parentPath;
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(kvp.Value.Folder) &&
+                        renamedFolderPathsByOldPath.TryGetValue(kvp.Value.Folder, out var newFolderPath))
+                    {
+                        kvp.Value.Folder = newFolderPath;
+                    }
                 }
             }
 
@@ -626,6 +643,14 @@ namespace SSH_Helper.Services
                     job.IsEnabled = false;
                     job.DisabledReason = $"Folder '{path}' was deleted";
                     _jobStorageService.Save(job);
+                }
+
+                if (deletePresets)
+                {
+                    foreach (var presetName in deletedPresetNames)
+                    {
+                        DisableJobsForDeletedPreset(presetName);
+                    }
                 }
             }
 
@@ -921,6 +946,38 @@ namespace SSH_Helper.Services
             _configService.Save(config);
         }
 
+        internal void RestoreLibrarySnapshot(PresetLibrarySnapshot snapshot)
+        {
+            ArgumentNullException.ThrowIfNull(snapshot);
+
+            _presets.Clear();
+            foreach (var kvp in snapshot.Presets)
+            {
+                _presets[kvp.Key] = kvp.Value.Clone();
+            }
+
+            _folders.Clear();
+            foreach (var kvp in snapshot.PresetFolders)
+            {
+                _folders[kvp.Key] = kvp.Value.Clone();
+            }
+
+            var config = _configService.GetCurrent();
+            config.Presets = snapshot.Presets.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Clone(), StringComparer.Ordinal);
+            config.PresetFolders = snapshot.PresetFolders.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Clone(), StringComparer.Ordinal);
+            config.ManualPresetOrder = new List<string>(snapshot.ManualPresetOrder);
+            config.ManualPresetOrderByFolder = snapshot.ManualPresetOrderByFolder.ToDictionary(
+                kvp => kvp.Key,
+                kvp => new List<string>(kvp.Value),
+                StringComparer.Ordinal);
+            config.ManualFolderOrder = new List<string>(snapshot.ManualFolderOrder);
+            config.ManualFavoriteOrder = new List<string>(snapshot.ManualFavoriteOrder);
+            _configService.Save(config);
+
+            OnFoldersChanged();
+            OnPresetsChanged();
+        }
+
         private static string? NormalizeFolderBaseEnvironment(string? environmentName)
         {
             return string.IsNullOrWhiteSpace(environmentName)
@@ -933,6 +990,59 @@ namespace SSH_Helper.Services
 
         private static string DecompressEncoded(string encoded)
             => GZipBase64Utility.Decompress(encoded);
+
+        private void DisableJobsForDeletedPreset(string presetName)
+        {
+            if (_jobStorageService == null)
+                return;
+
+            var referencingJobs = _jobStorageService.GetJobsReferencingPreset(presetName);
+            foreach (var job in referencingJobs)
+            {
+                job.IsEnabled = false;
+                job.DisabledReason = $"Preset '{presetName}' was deleted";
+                _jobStorageService.Save(job);
+            }
+        }
+
+        private List<RenamedFolderPath> BuildMovedDescendantFolderPaths(string deletedPath, string? parentPath, IReadOnlyList<string> descendantFolders)
+        {
+            var subtreePaths = new HashSet<string>(descendantFolders, StringComparer.Ordinal);
+            var renamedFolderPaths = new List<RenamedFolderPath>();
+            var renamedPathByOldPath = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            foreach (var descendant in descendantFolders)
+            {
+                var oldParentPath = FolderPathUtility.GetParentPath(descendant);
+                string? newParentPath = null;
+                if (!string.IsNullOrEmpty(oldParentPath))
+                {
+                    if (string.Equals(oldParentPath, deletedPath, StringComparison.Ordinal))
+                    {
+                        newParentPath = parentPath;
+                    }
+                    else if (renamedPathByOldPath.TryGetValue(oldParentPath, out var mappedParent))
+                    {
+                        newParentPath = mappedParent;
+                    }
+                }
+
+                var candidatePath = FolderPathUtility.CombinePath(newParentPath, FolderPathUtility.GetFolderName(descendant));
+                if (!string.Equals(candidatePath, descendant, StringComparison.Ordinal) &&
+                    _folders.ContainsKey(candidatePath) &&
+                    !subtreePaths.Contains(candidatePath))
+                {
+                    candidatePath = GetUniqueFolderName(candidatePath);
+                }
+
+                renamedPathByOldPath[descendant] = candidatePath;
+                renamedFolderPaths.Add(new RenamedFolderPath(descendant, candidatePath, _folders[descendant]));
+            }
+
+            return renamedFolderPaths;
+        }
+
+        private readonly record struct RenamedFolderPath(string OldPath, string NewPath, FolderInfo Info);
 
         protected virtual void OnPresetsChanged()
         {
