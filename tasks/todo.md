@@ -1,5 +1,17 @@
 # TODO
 
+## 134. Archive completed OpenSpec changes
+- [x] 134.1 Confirm which active OpenSpec changes are complete and archive-ready.
+- [x] 134.2 Archive each completed change with `openspec archive <id> --yes` and review the CLI output for spec updates/archive placement.
+- [x] 134.3 Run strict OpenSpec validation after archiving and capture the review outcome below.
+
+### 134 Review
+- `openspec list` showed one archive-ready completed change: `add-browser-callback-webview2-mode`. The other active changes (`add-preset-delete-undo`, `add-script-subroutines-and-libraries`, `add-script-assertions`) were not complete and were left untouched.
+- `openspec show add-browser-callback-webview2-mode` confirmed the change was still active before archiving.
+- `openspec archive add-browser-callback-webview2-mode --yes` succeeded. The CLI updated two live specs: `openspec/specs/scripting-network-steps/spec.md` (`+4`) and `openspec/specs/scripting-runtime/spec.md` (`+5`), then moved the change into `openspec/changes/archive/2026-03-21-add-browser-callback-webview2-mode`.
+- Post-archive verification: `openspec list` no longer shows `add-browser-callback-webview2-mode` as an active change, and the archive directory now contains `2026-03-21-add-browser-callback-webview2-mode`.
+- `openspec validate --strict --no-interactive` produced the CLI's "Nothing to validate" message after the archive because no explicit target was selected, so I reran the effective repo-wide check as `openspec validate --all --strict --no-interactive`, which passed (`23` items, `0` failed).
+
 ## 133. Show connection-test status in row headers for selected hosts
 - [x] 133.1 Add focused failing WinForms coverage for row-header connection-test visuals, including selected-row visibility, clearing on reset/edit, and theme reapplication.
 - [x] 133.2 Update `Form1` connection-test state/rendering so row headers reflect testing/success/failure while preserving existing `Host_IP` cell tinting for unselected rows.

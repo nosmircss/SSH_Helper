@@ -1,5 +1,144 @@
 # Changelog
 
+## Changes Since `f7d3ac5` (0.51.10)
+
+### Comprehensive Scripting Function Library (55+ Built-in Functions)
+
+The scripting language gains a full-featured expression and function system built on a new `FunctionRegistry` singleton (`Services/Scripting/FunctionRegistry.cs`) with category-based registration via `IFunctionCategory`. Six function categories are implemented, each in its own class under `Services/Scripting/Functions/`:
+
+**Math** (`MathFunctions`) — `abs`, `min`, `max`, `round`, `floor`, `ceil`, `random`, `pow`, `sqrt`, `clamp`, `iif`
+
+**String** (`StringFunctions`) — `contains`, `startswith`, `endswith`, `pad_left`, `pad_right`, `repeat`, `reverse`, `regex_replace`, `format`, `char_at`, `index_of`
+
+**Collection** (`CollectionFunctions`) — `map`, `filter`, `reduce`, `find`, `any`, `all`, `count`, `range`, `slice`, `flatten`, `zip`
+
+**DateTime** (`DateTimeFunctions`) — `now`, `epoch`, `epoch_to_date`, `date_add`, `date_diff`, `date_format`
+
+**Encoding** (`EncodingFunctions`) — `base64_encode`, `base64_decode`, `url_encode`, `url_decode`, `hash` (SHA256/MD5/SHA1/SHA512), `hex_encode`, `hex_decode`
+
+**Type** (`TypeFunctions`) — `int`, `float`, `str`, `bool`, `typeof`, `is_number`, `is_list`, `is_json`, `is_empty`
+
+Functions are dispatched by name through `FunctionRegistry.TryEvaluate` and are case-insensitive. All functions accept a raw argument string and the current `ScriptContext`, enabling variable resolution within arguments.
+
+### Inline Function Expressions and Expression Parser
+
+A new unified recursive-descent `ExpressionParser` (`Services/Scripting/ExpressionParser.cs`) replaces the previous `ArithmeticParser`. The grammar supports:
+
+- **Arithmetic**: `+`, `-`, `*`, `/`, `%` with standard precedence
+- **Comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=`
+- **Ternary**: `condition ? trueVal : falseVal`
+- **Null coalescing**: `value ?? fallback`
+- **Unary**: `-x`, `+x`
+- **Nested function calls**: `upper(trim(name))`
+- **String literals**: `'single'` and `"double"` quoted
+- **Variable references**: resolved from `ScriptContext`
+
+**Lambda expressions** (`LambdaExpression`) enable arrow-style inline functions for collection operations:
+
+```yaml
+- set:
+    filtered: "${filter(items, x => x > 10)}"
+    totals: "${reduce(values, (acc, x) => acc + x, 0)}"
+```
+
+`LambdaExpression.TryParse` handles both single-parameter (`x => body`) and multi-parameter (`(acc, x) => body`) forms. Lambda evaluation saves and restores existing variables to avoid scope leakage.
+
+### Browser Callback Capture Command
+
+`browser_callback_capture` is a new scripting command (`Services/Scripting/Commands/BrowserCallbackCaptureCommand.cs`) that captures localhost callback values from browser-driven OAuth/SSO flows:
+
+```yaml
+- browser_callback_capture:
+    start_url: "https://idp.example.com/auth?redirect_uri=http://127.0.0.1:8086/oauth_callback"
+    callback_path: "/oauth_callback"
+    local_port: 8086
+    capture_mode: auto       # auto | query | fragment | body
+    browser_mode: external   # external | webview2
+    into: callback
+    required_fields: ["access_token"]
+    timeout: 300
+    show_after_seconds: 2
+```
+
+The command starts an `HttpListener` on the specified local port, opens a browser (external system browser or embedded WebView2), and waits for the callback URL to be hit. Captured fields are stored as variables in the script context.
+
+**WebView2 mode** — `BrowserCallbackWebViewDialog` (`UI/BrowserCallbackWebViewDialog.cs`) provides an embedded WebView2 browser window with dark mode support. `BrowserCallbackWebViewProfileManager` manages a shared user data directory under `%LocalAppData%\SSH_Helper\WebView2\BrowserCallback\` with session-aware lifecycle and a `ClearEmbeddedBrowserData` method in Settings. `BrowserCallbackUiHost` (`Services/Scripting/BrowserCallbackUiHost.cs`) coordinates UI session lifecycle, supporting `show_after_seconds` delayed display and `keep_window_open_on_success`.
+
+**Focus restoration** — `BrowserCallbackFocusRestorer` (`Services/Scripting/Commands/BrowserCallbackFocusRestorer.cs`) restores application focus after browser callback completion using Win32 `AttachThreadInput`/`SetForegroundWindow` with a retry loop at 350ms, 650ms, 1000ms, 1500ms, and 2200ms intervals.
+
+**Template literals** — The capture command supports template literal syntax for constructing dynamic URLs with variable substitution and cleanup logic for stale capture fields.
+
+### Session-Scoped Undo for Preset and Folder Deletes
+
+`PresetDeleteUndoService` (`Services/PresetDeleteUndoService.cs`) provides a session-scoped undo stack (max 50 entries) for preset and folder deletions. On delete, the service records a `PresetDeleteUndoEntry` containing:
+
+- The target name and whether it is a folder
+- A `PresetLibrarySnapshot` of the full preset/folder tree before deletion
+- Deep-cloned copies of any `JobDefinition` objects that referenced the deleted item
+
+`UndoLatest` restores the library snapshot via `PresetManager.RestoreLibrarySnapshot` and re-enables affected scheduler jobs via `JobStorageService.RestoreSnapshots`. The undo stack is cleared on application exit (session-scoped, not persistent).
+
+### Connection Test Visual State in Row Headers
+
+Connection test results now display visual indicators directly in DataGridView row headers for selected hosts. `ApplyConnectionTestCellResult` colors both the `Host_IP` cell and the row header based on `ConnectionTestResult` (success/failure with timing). Colors are theme-aware and regenerated on theme changes via `ApplyTheme`. `ClearConnectionTestIndicators` resets row header state. The progress bar and status label track test completion, with guards against queued per-host progress callbacks overwriting the final completion status.
+
+### Preset and Favorites Tab Selection Sync
+
+`PresetTabHeaderStrip` (`UI/PresetTabHeaderStrip.cs`) is a custom owner-drawn tab header control for switching between Presets and Favorites views. Selection state synchronizes across tab switches — switching to Favorites preserves the selected preset, and switching back restores it. The control features dark-mode styling, hover effects, and a blue accent underline on the selected tab.
+
+### Startup Performance Optimizations
+
+Three targeted optimizations reduce application startup time:
+
+- **Deferred scheduler bootstrap** — `JobExecutionService` initialization is deferred until after the main form is visible, preventing scheduler tick evaluation from blocking the startup path
+- **Batched host grid restore** — `HostGridRestoreBatcher` (`UI/HostGridRestoreBatcher.cs`) batches scrollbar refreshes, host count updates, and dirty-marking during grid restoration using `IDisposable` scoped batches (`BeginRestoreScope`/`BeginMutationScope`). Pending operations flush once when the outermost scope ends
+- **Reused startup config snapshot** — The configuration snapshot read during startup is reused across consumers rather than re-reading `config.json` multiple times
+
+### UI Flicker Reduction
+
+`BufferedPanel` and `BufferedSplitContainer` (`UI/BufferedPanel.cs`, `UI/BufferedSplitContainer.cs`) are double-buffered WinForms control subclasses that suppress `WM_ERASEBKGND` when all child controls are fully opaque. These replace standard `Panel` and `SplitContainer` in the main form layout to eliminate visible flicker during resize and layout operations. `ScintillaScriptEditorControl` receives additional painting and resize optimizations.
+
+### Incremental Preset Tree Mutations
+
+The presets `TreeView` now supports incremental add/rename/delete operations that preserve expand/collapse state and selection, rather than rebuilding the entire tree on every change. The add-preset button visibility is corrected for edge cases.
+
+### Enhanced Error Handling and Scripting Improvements
+
+- **`SetCommand` hyphenated values** — `set:` correctly handles right-hand-side values containing hyphens (e.g., `name: "my-value"`) without interpreting the hyphen as an arithmetic operator
+- **`SendCommand` improvements** — Enhanced error handling for malformed YAML preprocessing and validation in `ScriptParser`
+- **`random()` edge cases** — `random(n, n)` returns `n` instead of throwing; `random()` with no args returns a random integer in the default range
+- **`iif()` function** — `iif(condition, trueVal, falseVal)` provides inline conditional evaluation as an alternative to the ternary operator in expressions
+
+### Dependency Changes
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `Microsoft.Web.WebView2` | 1.0.3124.44 | Embedded browser for `browser_callback_capture` WebView2 mode |
+
+The `WebView2LoaderPreference` is set to `Static` in the project file. A custom MSBuild target (`RemoveWebView2WpfReference`) strips the WPF assembly reference since this is a WinForms-only project.
+
+### Documentation
+
+`SCRIPTING.md` updated with:
+- `browser_callback_capture` command with full option table, capture modes, browser modes, and examples
+- Complete function reference tables for all 55+ built-in functions organized by category (Math, String, Collection, DateTime, Encoding, Type)
+- Lambda expression syntax documentation with `map`, `filter`, `reduce` examples
+- Inline function expression syntax in `print` and `set` commands
+- Service restart command examples with `fail_on_nonzero`
+
+New script samples:
+- `ScriptSamples/browser_callback_self_contained_presets.json` — Self-contained preset examples for browser callback workflows
+
+### Test Coverage
+
+New test suites added:
+
+- **Scripting** — `BrowserCallbackCaptureCommandTests` (listener lifecycle, capture modes, timeout, required fields), `BrowserCallbackSelfContainedPresetTests` (preset integration), `CollectionFunctionTests` (map/filter/reduce/find/any/all/count/range/slice/flatten/zip with lambdas), `DateTimeFunctionTests` (now/epoch/date_add/date_diff/date_format), `EncodingFunctionTests` (base64/url/hex encoding, hash algorithms), `ExpressionParserTests` (arithmetic, comparison, ternary, null coalescing, nested functions), `FunctionRegistryTests` (registration, dispatch, case insensitivity), `MathFunctionTests` (all math functions including edge cases), `StringFunctionTests` (contains/startswith/endswith/pad/repeat/reverse/regex_replace/format/char_at/index_of), `TypeFunctionTests` (conversion and type inspection), `QaPresetExecutionTests` (end-to-end QA fixture validation)
+- **Services** — `PresetDeleteUndoServiceTests` (record/undo/clear lifecycle, max entries, job restoration), `PresetManagerDeleteBehaviorTests` (delete behavior with undo integration), `BrowserCallbackUiHostTests` (UI session lifecycle), `BrowserCallbackWebViewProfileManagerTests` (profile directory management, session counting, clear blocking)
+- **UI** — `BorderlessTabControlTests` (custom tab control rendering), `BrowserCallbackFocusRestorerTests` (focus restoration with native method mocking), `BrowserCallbackWebViewDialogTests` (dialog lifecycle), `BufferedContainerControlTests` (double-buffering and WM_ERASEBKGND suppression), `Form1BufferedSurfacesTests` (main form buffered control verification), `Form1ConnectionTestStatusTests` (connection test visual state, progress handling, theme reapplication), `Form1DeleteUndoTests` (undo UI integration), `Form1PresetTabSelectionTests` (tab sync across Presets/Favorites), `Form1PresetTreeIncrementalMutationTests` (incremental tree operations), `HistoryListBoxTests` (variable-height list rendering), `HostGridRestoreBatcherTests` (batched restore/mutation scopes), `SettingsDialogBrowserCallbackTests` (WebView2 data clear integration)
+
+---
+
 ## Changes Since `729f4e6` (0.51.8)
 
 ### Job Scheduler
