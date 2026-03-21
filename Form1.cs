@@ -99,6 +99,7 @@ namespace SSH_Helper
         private const int SmallHistoryPayloadCharThreshold = 500_000;
         private const int OutputTextRecreateThresholdChars = 500_000;
         private const int OutputTextRecreateTargetChars = 100_000;
+        private const int HiddenPresetsTabHeaderFallbackHeight = 24;
         private static readonly TimeSpan AutomaticHistoryCompactionCooldown = TimeSpan.FromSeconds(2);
         private static readonly string FolderSummarySeparator = new string('=', 60);
         private static readonly string FolderSummarySubSeparator = new string('=', 9);
@@ -161,7 +162,7 @@ namespace SSH_Helper
         private bool _isTestingConnections;
 
         // Preset search/filter
-        private Panel? _presetSearchPanel;
+        private BufferedPanel? _presetSearchPanel;
         private TextBox? _txtPresetSearch;
         private Label? _btnPresetSearchClear;
         private System.Windows.Forms.Timer? _presetSearchDebounceTimer;
@@ -314,6 +315,7 @@ namespace SSH_Helper
             UpdateSortModeIndicator();
             RebuildRecentFilesMenu();
             InitializePresetSearchFilter();
+            InitializePresetsTabChrome();
             InitializeConnectionTesting();
             InitializeSchedulerStatusBar();
             UpdateStatusBar("Ready");
@@ -865,6 +867,8 @@ namespace SSH_Helper
         }
 
         private IDisposable BeginHostGridRestoreScope() => _hostGridRestoreBatcher.BeginRestoreScope();
+
+        private IDisposable BeginHostGridMutationScope() => _hostGridRestoreBatcher.BeginMutationScope();
 
         private void RequestHostGridScrollbarRefresh() => _hostGridRestoreBatcher.RequestScrollbarRefresh();
 
@@ -2379,7 +2383,6 @@ namespace SSH_Helper
             ApplyActiveEnvironmentLabelColor();
 
             ResumeLayout(true);
-            Refresh();
         }
 
         // Fonts created by ApplyFontSettings — disposed on next call or in Form1.Dispose
@@ -2488,6 +2491,9 @@ namespace SSH_Helper
             var tabFont = new Font(uiFont, Scaled(fontSettings.TabFontSize));
             _managedFonts.Add(tabFont);
             presetsTabControl.Font = tabFont;
+            presetsTabHeaderStrip.Font = tabFont;
+            presetsTabHeaderStrip.Height = Math.Max(24, tabFont.Height + 10);
+            UpdatePresetsTabViewportLayout();
 
             // Host list (DataGridView) - apply row height setting
             // Don't change font on DataGridView as it interferes with existing styling
@@ -2722,7 +2728,7 @@ namespace SSH_Helper
                 titleHeight);
 
             scriptHeaderPanel.Height = Math.Max(60, lblScriptTitle.Bottom + scriptHeaderPanel.Padding.Bottom);
-            scriptHeaderPanel.Invalidate(true);
+            scriptHeaderPanel.Invalidate();
         }
 
         private void ApplyColumnAutoResize(bool autoResize)
@@ -2870,10 +2876,19 @@ namespace SSH_Helper
 
             // Presets panel
             presetsPanel.BackColor = LightBackground;
+            presetsTabViewportPanel.BackColor = LightBackground;
             presetsHeaderPanel.BackColor = LightBackground;
             presetsToolStrip.BackColor = LightBackground;
             lblPresetsTitle.ForeColor = LightTextColor;
             presetsTabControl.BackColor = LightBackground;
+            presetsTabHeaderStrip.BackColor = LightBackground;
+            presetsTabHeaderStrip.HeaderBackgroundColor = LightBackground;
+            presetsTabHeaderStrip.SelectedTabBackgroundColor = LightPanelBackground;
+            presetsTabHeaderStrip.HoverTabBackgroundColor = LightControlBackground;
+            presetsTabHeaderStrip.SelectedTextColor = LightTextColor;
+            presetsTabHeaderStrip.UnselectedTextColor = LightSecondaryText;
+            presetsTabHeaderStrip.SelectedAccentColor = LightAccent;
+            presetsTabHeaderStrip.BorderColor = LightBorderColor;
             tabPresets.BackColor = LightPanelBackground;
             tabFavorites.BackColor = LightPanelBackground;
             trvPresets.BackColor = LightPanelBackground;
@@ -2955,6 +2970,8 @@ namespace SSH_Helper
 
             // Reset TabControl to default drawing
             ApplyLightTabControl(presetsTabControl);
+            presetsTabHeaderStrip.Invalidate();
+            UpdatePresetsTabViewportLayout();
         }
 
         private void ApplyDarkTheme()
@@ -3003,10 +3020,19 @@ namespace SSH_Helper
 
             // Presets panel
             presetsPanel.BackColor = DarkSurface1;
+            presetsTabViewportPanel.BackColor = DarkSurface1;
             presetsHeaderPanel.BackColor = DarkSurface2;
             presetsToolStrip.BackColor = DarkSurface2;
             lblPresetsTitle.ForeColor = DarkTextPrimary;
             presetsTabControl.BackColor = DarkSurface1;
+            presetsTabHeaderStrip.BackColor = DarkSurface2;
+            presetsTabHeaderStrip.HeaderBackgroundColor = DarkSurface2;
+            presetsTabHeaderStrip.SelectedTabBackgroundColor = DarkSurface1;
+            presetsTabHeaderStrip.HoverTabBackgroundColor = DarkSurface3;
+            presetsTabHeaderStrip.SelectedTextColor = Color.White;
+            presetsTabHeaderStrip.UnselectedTextColor = DarkTextSecondary;
+            presetsTabHeaderStrip.SelectedAccentColor = DarkSelectionBorder;
+            presetsTabHeaderStrip.BorderColor = DarkBorder;
             tabPresets.BackColor = DarkSurface1;
             tabFavorites.BackColor = DarkSurface1;
             trvPresets.BackColor = DarkSurface1;
@@ -3087,6 +3113,8 @@ namespace SSH_Helper
 
             // Style TabControl for dark mode
             ApplyDarkTabControl(presetsTabControl);
+            presetsTabHeaderStrip.Invalidate();
+            UpdatePresetsTabViewportLayout();
         }
 
         private void ApplyToolStripTheme(ToolStrip strip, bool darkMode)
@@ -3209,15 +3237,21 @@ namespace SSH_Helper
             tabControl.DrawItem -= TabControl_DrawItem;
             tabControl.DrawItem += TabControl_DrawItem;
 
-            // Handle painting to cover any remaining artifacts
             tabControl.Paint -= TabControl_Paint;
-            tabControl.Paint += TabControl_Paint;
 
             // Use the custom BorderlessTabControl properties if available
             if (tabControl is BorderlessTabControl borderlessTab)
             {
                 borderlessTab.HideBorder = true;
                 borderlessTab.BorderBackgroundColor = DarkSurface1;
+                borderlessTab.HiddenBorderHeaderColor = DarkSurface2;
+                borderlessTab.HiddenBorderInactiveTabColor = DarkSurface3;
+                borderlessTab.HiddenBorderInactiveTabTopLineColor = DarkSurface2;
+            }
+            else
+            {
+                // Non-borderless tabs still rely on the managed paint overlay to hide native artifacts.
+                tabControl.Paint += TabControl_Paint;
             }
 
             // Style the parent panel
@@ -3345,7 +3379,7 @@ namespace SSH_Helper
                 // Cover the left edge
                 e.Graphics.FillRectangle(edgeBrush, tabRect.Left - 3, tabRect.Y, 4, tabRect.Height);
                 // Cover the top edge highlight with a darker line
-                using var topPen = new Pen(Color.Red, 2);
+                using var topPen = new Pen(DarkSurface2, 2);
                 e.Graphics.DrawLine(topPen, tabRect.Left, tabRect.Top + 1, tabRect.Right - 1, tabRect.Top + 1);
 
                 // Draw bottom border line
@@ -3713,7 +3747,7 @@ namespace SSH_Helper
             }
 
             _csvDirty = true;
-            UpdateHostCount();
+            RequestHostGridHostCountRefresh();
 
             // Clear connection test indicator when Host_IP is edited
             if (e.ColumnIndex >= 0 && e.RowIndex >= 0 &&
@@ -4418,8 +4452,21 @@ namespace SSH_Helper
 
         #region Favorites TreeView Handlers
 
+        private void presetsTabHeaderStrip_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            if (presetsTabControl.SelectedIndex != presetsTabHeaderStrip.SelectedIndex)
+            {
+                presetsTabControl.SelectedIndex = presetsTabHeaderStrip.SelectedIndex;
+            }
+        }
+
         private void presetsTabControl_SelectedIndexChanged(object? sender, EventArgs e)
         {
+            if (presetsTabHeaderStrip.SelectedIndex != presetsTabControl.SelectedIndex)
+            {
+                presetsTabHeaderStrip.SelectedIndex = presetsTabControl.SelectedIndex;
+            }
+
             if (presetsTabControl.SelectedTab == tabFavorites)
             {
                 RefreshFavoritesList();
@@ -7051,7 +7098,7 @@ namespace SSH_Helper
 
         private void InitializePresetSearchFilter()
         {
-            _presetSearchPanel = new Panel
+            _presetSearchPanel = new BufferedPanel
             {
                 Height = 28,
                 Dock = DockStyle.Top,
@@ -7119,6 +7166,44 @@ namespace SSH_Helper
             // and the Fill control occupies the remaining space without overlap.
             tabPresets.Controls.Add(_presetSearchPanel);
             trvPresets.BringToFront();
+        }
+
+        private void InitializePresetsTabChrome()
+        {
+            presetsTabHeaderStrip.SelectedIndex = presetsTabControl.SelectedIndex;
+            presetsTabViewportPanel.Resize += (_, _) => UpdatePresetsTabViewportLayout();
+            presetsTabControl.HandleCreated += (_, _) => UpdatePresetsTabViewportLayout();
+            presetsTabControl.FontChanged += (_, _) => UpdatePresetsTabViewportLayout();
+            UpdatePresetsTabViewportLayout();
+        }
+
+        private void UpdatePresetsTabViewportLayout()
+        {
+            if (presetsTabViewportPanel.ClientSize.Width <= 0 || presetsTabViewportPanel.ClientSize.Height <= 0)
+            {
+                return;
+            }
+
+            var nativeHeaderHeight = GetNativePresetsTabHeaderHeight();
+            presetsTabControl.Bounds = new Rectangle(
+                0,
+                -nativeHeaderHeight,
+                presetsTabViewportPanel.ClientSize.Width,
+                presetsTabViewportPanel.ClientSize.Height + nativeHeaderHeight);
+        }
+
+        private int GetNativePresetsTabHeaderHeight()
+        {
+            if (presetsTabControl.TabCount > 0 && presetsTabControl.IsHandleCreated)
+            {
+                var tabRect = presetsTabControl.GetTabRect(0);
+                if (tabRect.Height > 0)
+                {
+                    return Math.Max(HiddenPresetsTabHeaderFallbackHeight, tabRect.Bottom + 1);
+                }
+            }
+
+            return Math.Max(HiddenPresetsTabHeaderFallbackHeight, presetsTabHeaderStrip.Height);
         }
 
         private string? _activePresetFilter;
@@ -7254,25 +7339,30 @@ namespace SSH_Helper
             {
                 var dataTable = _csvManager.LoadFromFile(filePath);
                 _loadedFilePath = filePath;
-                dgv_variables.Columns.Clear();
-                dgv_variables.DataSource = dataTable;
-                EnsureSelectColumn();
-
-                // Apply row template height to all rows (DataSource binding doesn't use RowTemplate)
-                foreach (DataGridViewRow row in dgv_variables.Rows)
+                using (BeginHostGridMutationScope())
                 {
-                    if (!row.IsNewRow)
-                        row.Height = dgv_variables.RowTemplate.Height;
+                    dgv_variables.Columns.Clear();
+                    dgv_variables.DataSource = dataTable;
+                    EnsureSelectColumn();
+
+                    // Apply row template height to all rows (DataSource binding doesn't use RowTemplate)
+                    foreach (DataGridViewRow row in dgv_variables.Rows)
+                    {
+                        if (!row.IsNewRow)
+                            row.Height = dgv_variables.RowTemplate.Height;
+                    }
+
+                    _csvDirty = false;
+                    _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
+                    _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
+                        ? CsvFileSyncStatus.NotTracked
+                        : CsvFileSyncStatus.Current;
+                    CaptureLoadedFileSnapshotFromGrid();
+                    AutoSizeColumnsToContent();
+                    RequestHostGridHostCountRefresh();
+                    RequestHostGridScrollbarRefresh();
                 }
 
-                _csvDirty = false;
-                _loadedFileFingerprint = CsvFileSyncEvaluator.Capture(_loadedFilePath);
-                _loadedFileSyncStatus = string.IsNullOrWhiteSpace(_loadedFilePath)
-                    ? CsvFileSyncStatus.NotTracked
-                    : CsvFileSyncStatus.Current;
-                CaptureLoadedFileSnapshotFromGrid();
-                AutoSizeColumnsToContent();
-                UpdateHostCount();
                 UpdateStatusBar($"Loaded: {Path.GetFileName(filePath)}");
 
                 AddToRecentFiles(filePath);
@@ -7367,25 +7457,31 @@ namespace SSH_Helper
 
         private void ClearGrid()
         {
-            if (dgv_variables.DataSource is DataTable dt)
+            using (BeginHostGridMutationScope())
             {
-                dt.Rows.Clear();
-                dt.Columns.Clear();
-                dt.Columns.Add(CsvManager.HostColumnName, typeof(string));
+                if (dgv_variables.DataSource is DataTable dt)
+                {
+                    dt.Rows.Clear();
+                    dt.Columns.Clear();
+                    dt.Columns.Add(CsvManager.HostColumnName, typeof(string));
+                }
+                else
+                {
+                    dgv_variables.Rows.Clear();
+                    dgv_variables.Columns.Clear();
+                    dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
+                }
+                EnsureSelectColumn();
+                _csvDirty = true;
+                RequestHostGridHostCountRefresh();
+                RequestHostGridScrollbarRefresh();
             }
-            else
-            {
-                dgv_variables.Rows.Clear();
-                dgv_variables.Columns.Clear();
-                dgv_variables.Columns.Add(CsvManager.HostColumnName, CsvManager.HostColumnName);
-            }
-            EnsureSelectColumn();
-            _csvDirty = true;
+
             _loadedFilePath = null;
             _loadedFileFingerprint = null;
             _loadedFileSnapshot = null;
             _loadedFileSyncStatus = CsvFileSyncStatus.NotTracked;
-            UpdateHostCount();
+            UpdateHostsFileIndicator();
             UpdateStatusBar("Grid cleared");
         }
 
@@ -7590,56 +7686,74 @@ namespace SSH_Helper
 
             string[] rows = Clipboard.GetText().Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
 
-            dgv_variables.AllowUserToAddRows = false;
-
-            for (int i = 0; i < rows.Length; i++)
+            using (BeginHostGridMutationScope())
             {
-                string[] columns = rows[i].Split('\t');
-                for (int j = 0; j < columns.Length; j++)
+                dgv_variables.AllowUserToAddRows = false;
+
+                for (int i = 0; i < rows.Length; i++)
                 {
-                    int rowIndex = startRow + i;
-                    while (rowIndex >= dgv_variables.Rows.Count)
+                    string[] columns = rows[i].Split('\t');
+                    for (int j = 0; j < columns.Length; j++)
                     {
-                        dgv_variables.Rows.Add(new DataGridViewRow());
-                    }
+                        int rowIndex = startRow + i;
+                        while (rowIndex >= dgv_variables.Rows.Count)
+                        {
+                            dgv_variables.Rows.Add(new DataGridViewRow());
+                        }
 
-                    int columnIndex = startCol + j;
-                    while (columnIndex >= dgv_variables.Columns.Count)
-                    {
-                        int nextNum = dgv_variables.Columns.Count + 1;
-                        dgv_variables.Columns.Add($"Column{nextNum}", $"Column{nextNum}");
-                    }
+                        int columnIndex = startCol + j;
+                        while (columnIndex >= dgv_variables.Columns.Count)
+                        {
+                            int nextNum = dgv_variables.Columns.Count + 1;
+                            dgv_variables.Columns.Add($"Column{nextNum}", $"Column{nextNum}");
+                        }
 
-                    if (!dgv_variables.Columns[columnIndex].ReadOnly)
-                    {
-                        dgv_variables.Rows[rowIndex].Cells[columnIndex].Value = columns[j];
+                        if (!dgv_variables.Columns[columnIndex].ReadOnly)
+                        {
+                            dgv_variables.Rows[rowIndex].Cells[columnIndex].Value = columns[j];
+                        }
                     }
                 }
+
+                dgv_variables.AllowUserToAddRows = true;
+
+                // Select the new empty row so user can continue pasting
+                dgv_variables.ClearSelection();
+                int newRowIndex = dgv_variables.Rows.Count - 1; // The new empty row
+                if (newRowIndex >= 0 && dgv_variables.Rows[newRowIndex].IsNewRow)
+                {
+                    dgv_variables.CurrentCell = dgv_variables.Rows[newRowIndex].Cells[startCol];
+                }
+
+                _csvDirty = true;
+                RequestHostGridHostCountRefresh();
+                RequestHostGridScrollbarRefresh();
             }
 
-            dgv_variables.AllowUserToAddRows = true;
-
-            // Select the new empty row so user can continue pasting
-            dgv_variables.ClearSelection();
-            int newRowIndex = dgv_variables.Rows.Count - 1; // The new empty row
-            if (newRowIndex >= 0 && dgv_variables.Rows[newRowIndex].IsNewRow)
-            {
-                dgv_variables.CurrentCell = dgv_variables.Rows[newRowIndex].Cells[startCol];
-            }
-
-            _csvDirty = true;
-            UpdateHostCount();
         }
 
         private void DeleteSelectedCells()
         {
-            foreach (DataGridViewCell cell in dgv_variables.SelectedCells)
+            using (BeginHostGridMutationScope())
             {
-                if (!cell.ReadOnly) cell.Value = null;
+                var cellsToInvalidate = new List<DataGridViewCell>();
+                foreach (DataGridViewCell cell in dgv_variables.SelectedCells)
+                {
+                    if (!cell.ReadOnly)
+                    {
+                        cell.Value = null;
+                        cellsToInvalidate.Add(cell);
+                    }
+                }
+
+                foreach (var cell in cellsToInvalidate)
+                {
+                    dgv_variables.InvalidateCell(cell);
+                }
+
+                _csvDirty = true;
+                UpdateHostsFileIndicator();
             }
-            dgv_variables.Refresh();
-            _csvDirty = true;
-            UpdateHostsFileIndicator();
         }
 
         #endregion
@@ -10096,10 +10210,27 @@ namespace SSH_Helper
             var sw = System.Diagnostics.Stopwatch.StartNew();
             SshDebugLog("UI", $"SetExecutionMode({executing}) entered");
 
-            Cursor = executing ? Cursors.WaitCursor : Cursors.Default;
-            btnExecuteAll.Enabled = !executing;
-            btnExecuteSelected.Enabled = !executing;
-            btnStopAll.Visible = executing;
+            executePanel.SuspendLayout();
+            try
+            {
+                var targetCursor = executing ? Cursors.WaitCursor : Cursors.Default;
+                if (Cursor != targetCursor)
+                    Cursor = targetCursor;
+
+                var runButtonsEnabled = !executing;
+                if (btnExecuteAll.Enabled != runButtonsEnabled)
+                    btnExecuteAll.Enabled = runButtonsEnabled;
+                if (btnExecuteSelected.Enabled != runButtonsEnabled)
+                    btnExecuteSelected.Enabled = runButtonsEnabled;
+                if (btnStopAll.Visible != executing)
+                    btnStopAll.Visible = executing;
+            }
+            finally
+            {
+                executePanel.ResumeLayout(performLayout: false);
+                executePanel.Invalidate();
+            }
+
             lstOutput.Enabled = !executing;
             tsbOpenCsv.Enabled = !executing;
             tsbSaveCsv.Enabled = !executing;

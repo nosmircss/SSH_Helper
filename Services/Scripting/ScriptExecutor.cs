@@ -15,7 +15,14 @@ namespace SSH_Helper.Services.Scripting
         private readonly Dictionary<StepType, IScriptCommand> _commands;
 
         public ScriptExecutor()
+            : this(null)
         {
+        }
+
+        internal ScriptExecutor(IBrowserCallbackUiHost? browserCallbackUiHost)
+        {
+            browserCallbackUiHost ??= new BrowserCallbackUiHost(BrowserCallbackWebViewProfileManager.Shared);
+
             // Register command handlers
             _commands = new Dictionary<StepType, IScriptCommand>
             {
@@ -38,7 +45,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.UpdateEnvironment, new UpdateEnvironmentCommand() },
                 { StepType.Log, new LogCommand() },
                 { StepType.Http, new HttpCommand() },
-                { StepType.BrowserCallbackCapture, new BrowserCallbackCaptureCommand() },
+                { StepType.BrowserCallbackCapture, new BrowserCallbackCaptureCommand(browserCallbackUiHost, BrowserCallbackCaptureCommand.CreateListener) },
                 { StepType.Ping, new PingCommand() },
                 { StepType.Dns, new DnsCommand() },
                 { StepType.Portcheck, new PortcheckCommand() },

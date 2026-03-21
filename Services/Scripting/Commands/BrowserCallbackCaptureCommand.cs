@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -8,6 +7,8 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
+using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Models;
 
 namespace SSH_Helper.Services.Scripting.Commands
@@ -17,19 +18,19 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     public class BrowserCallbackCaptureCommand : IScriptCommand
     {
-        private readonly Func<string, bool> _browserLauncher;
+        private readonly IBrowserCallbackUiHost _uiHost;
         private readonly Func<int, HttpListener> _listenerFactory;
 
         public BrowserCallbackCaptureCommand()
-            : this(LaunchBrowser, CreateListener)
+            : this(new BrowserCallbackUiHost(BrowserCallbackWebViewProfileManager.Shared), CreateListener)
         {
         }
 
         internal BrowserCallbackCaptureCommand(
-            Func<string, bool> browserLauncher,
+            IBrowserCallbackUiHost uiHost,
             Func<int, HttpListener> listenerFactory)
         {
-            _browserLauncher = browserLauncher ?? throw new ArgumentNullException(nameof(browserLauncher));
+            _uiHost = uiHost ?? throw new ArgumentNullException(nameof(uiHost));
             _listenerFactory = listenerFactory ?? throw new ArgumentNullException(nameof(listenerFactory));
         }
 
@@ -45,6 +46,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             var startUrl = context.SubstituteVariables(options.StartUrl ?? string.Empty).Trim();
             var callbackPath = context.SubstituteVariables(options.CallbackPath ?? string.Empty).Trim();
             var captureMode = ParseCaptureMode(context.SubstituteVariables(options.CaptureMode ?? "auto"));
+            var browserMode = ParseBrowserMode(context.SubstituteVariables(options.BrowserMode ?? "external"));
 
             if (string.IsNullOrWhiteSpace(startUrl))
                 return CommandResult.ApplyOnError(step, "browser_callback_capture requires 'start_url'");
@@ -74,14 +76,34 @@ namespace SSH_Helper.Services.Scripting.Commands
             var callbackUrl = $"http://127.0.0.1:{options.LocalPort}{callbackPath}";
             context.EmitOutput($"Browser callback listener started at {callbackUrl}", ScriptOutputType.Debug);
 
+            IBrowserCallbackUiSession? uiSession = null;
+            var keepUiSessionOpenAfterSuccess = false;
             if (options.OpenBrowser)
             {
-                if (!_browserLauncher(startUrl))
+                try
                 {
-                    return CommandResult.ApplyOnError(step, "browser_callback_capture could not launch default browser");
+                    uiSession = await _uiHost.LaunchAsync(
+                        new BrowserCallbackUiLaunchRequest(
+                            browserMode,
+                            startUrl,
+                            IsDarkModeEnabled(),
+                            options.ShowAfterSeconds,
+                            keepWindowOpenOnSuccess: !options.AutoCloseBrowser),
+                        timeoutCts.Token).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    return CommandResult.ApplyOnError(step, ex.Message);
                 }
 
-                context.EmitOutput($"Opened browser to {startUrl}", ScriptOutputType.Debug);
+                if (uiSession.Mode == BrowserCallbackUiMode.WebView2)
+                {
+                    context.EmitOutput("Opened embedded browser callback window", ScriptOutputType.Debug);
+                }
+                else
+                {
+                    context.EmitOutput($"Opened browser to {startUrl}", ScriptOutputType.Debug);
+                }
             }
             else
             {
@@ -90,17 +112,42 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             try
             {
-                var captured = await CaptureAsync(
+                var captureTask = CaptureAsync(
                     listener,
                     callbackPath,
                     postPath,
                     completionPath,
                     captureMode,
+                    options.AutoCloseBrowser,
                     options.CompletionMessage,
                     options.FailureMessage,
-                    timeoutCts.Token).ConfigureAwait(false);
+                    timeoutCts.Token);
 
-                BrowserCallbackFocusRestorer.RequestApplicationFocusRestore();
+                Dictionary<string, string> captured;
+                if (uiSession != null && uiSession.Mode == BrowserCallbackUiMode.WebView2)
+                {
+                    var completed = await Task.WhenAny(captureTask, uiSession.ClosedByUser).ConfigureAwait(false);
+                    if (completed == uiSession.ClosedByUser)
+                    {
+                        timeoutCts.Cancel();
+                        await ObserveCompletionAsync(captureTask).ConfigureAwait(false);
+                        return CommandResult.ApplyOnError(step, "browser_callback_capture embedded browser window was closed before callback completion");
+                    }
+
+                    captured = await captureTask.ConfigureAwait(false);
+                    if (options.AutoCloseBrowser)
+                    {
+                        await uiSession.CloseAsync().ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    captured = await captureTask.ConfigureAwait(false);
+                    if (options.OpenBrowser && browserMode == BrowserCallbackUiMode.External)
+                    {
+                        BrowserCallbackFocusRestorer.RequestApplicationFocusRestore();
+                    }
+                }
 
                 var requiredFields = (options.RequiredFields ?? new List<string>())
                     .Select(field => context.SubstituteVariables(field ?? string.Empty).Trim())
@@ -125,6 +172,22 @@ namespace SSH_Helper.Services.Scripting.Commands
                 {
                     context.EmitOutput($"Captured {captured.Count} callback value(s) into ${{{into}}}", ScriptOutputType.Success);
                 }
+
+                if (uiSession != null &&
+                    uiSession.Mode == BrowserCallbackUiMode.WebView2 &&
+                    !options.AutoCloseBrowser)
+                {
+                    await uiSession.MarkCompletedAsync().ConfigureAwait(false);
+                }
+
+                if (uiSession != null &&
+                    uiSession.Mode == BrowserCallbackUiMode.WebView2 &&
+                    uiSession.WasShownToUser &&
+                    !options.AutoCloseBrowser)
+                {
+                    keepUiSessionOpenAfterSuccess = true;
+                }
+
                 return CommandResult.Ok();
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -145,31 +208,19 @@ namespace SSH_Helper.Services.Scripting.Commands
                 {
                     listener.Stop();
                 }
+
+                if (uiSession != null && !keepUiSessionOpenAfterSuccess)
+                {
+                    await uiSession.DisposeAsync().ConfigureAwait(false);
+                }
             }
         }
 
-        private static HttpListener CreateListener(int localPort)
+        internal static HttpListener CreateListener(int localPort)
         {
             var listener = new HttpListener();
             listener.Prefixes.Add($"http://127.0.0.1:{localPort}/");
             return listener;
-        }
-
-        private static bool LaunchBrowser(string startUrl)
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = startUrl,
-                    UseShellExecute = true
-                });
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         private static async Task<Dictionary<string, string>> CaptureAsync(
@@ -178,6 +229,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             string postPath,
             string completionPath,
             CaptureMode captureMode,
+            bool autoCloseBrowser,
             string? completionMessage,
             string? failureMessage,
             CancellationToken cancellationToken)
@@ -197,13 +249,22 @@ namespace SSH_Helper.Services.Scripting.Commands
                         if (captureMode == CaptureMode.Query && queryValues.Count > 0)
                         {
                             pendingPayload = queryValues;
-                            var completionHtml = BuildCompletionHtml(completionPath, completionMessage, autoCloseDelayMs: 200);
+                            var completionHtml = BuildCompletionHtml(
+                                completionPath,
+                                completionMessage,
+                                autoCloseBrowser,
+                                autoCloseDelayMs: 200);
                             await WriteHtmlResponseAsync(context.Response, 200, completionHtml)
                                 .ConfigureAwait(false);
                             continue;
                         }
 
-                        var captureHtml = BuildCaptureHtml(postPath, completionPath, completionMessage, failureMessage);
+                        var captureHtml = BuildCaptureHtml(
+                            postPath,
+                            completionPath,
+                            completionMessage,
+                            failureMessage,
+                            autoCloseBrowser);
                         await WriteHtmlResponseAsync(context.Response, 200, captureHtml).ConfigureAwait(false);
                         continue;
                     }
@@ -437,6 +498,29 @@ namespace SSH_Helper.Services.Scripting.Commands
             return CaptureMode.Auto;
         }
 
+        private static BrowserCallbackUiMode ParseBrowserMode(string mode)
+        {
+            return string.Equals(mode, "webview2", StringComparison.OrdinalIgnoreCase)
+                ? BrowserCallbackUiMode.WebView2
+                : BrowserCallbackUiMode.External;
+        }
+
+        private static async Task ObserveCompletionAsync(Task task)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when the embedded browser window closes before callback completion.
+            }
+            catch
+            {
+                // Listener shutdown after cancellation is best-effort only.
+            }
+        }
+
         private static async Task WriteTextResponseAsync(HttpListenerResponse response, int statusCode, string message)
         {
             var payload = Encoding.UTF8.GetBytes(message);
@@ -457,7 +541,12 @@ namespace SSH_Helper.Services.Scripting.Commands
             response.Close();
         }
 
-        private static string BuildCaptureHtml(string postPath, string completionPath, string? completionMessage, string? failureMessage)
+        private static string BuildCaptureHtml(
+            string postPath,
+            string completionPath,
+            string? completionMessage,
+            string? failureMessage,
+            bool autoCloseBrowser)
         {
             var completion = EscapeForJavaScriptString(string.IsNullOrWhiteSpace(completionMessage)
                 ? "Callback captured. You may close this tab."
@@ -468,11 +557,15 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             var encodedPostPath = EscapeForJavaScriptString(postPath);
             var encodedCompletionPath = EscapeForJavaScriptString(completionPath);
+            var autoCloseScript = autoCloseBrowser
+                ? "setTimeout(function(){ window.close(); }, 200);"
+                : string.Empty;
+            var documentStyles = BuildCallbackPageStyles();
 
             return $$"""
                 <!DOCTYPE html>
-                <html><head><meta charset="utf-8"><title>Processing callback...</title></head>
-                <body style="font-family:Segoe UI,Arial,sans-serif;margin:40px;">
+                <html><head><meta charset="utf-8"><title>Processing callback...</title>{{documentStyles}}</head>
+                <body>
                 <h3>Processing browser callback...</h3>
                 <p id="status">Collecting callback values...</p>
                 <script>
@@ -490,7 +583,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     .then(function(response){
                       if (!response.ok) { throw new Error('completion failed'); }
                       document.getElementById('status').textContent='{{completion}}';
-                      setTimeout(function(){ window.close(); }, 200);
+                      {{autoCloseScript}}
                     })
                     .catch(function(){ document.getElementById('status').textContent='{{failure}}'; });
                 })();
@@ -499,17 +592,25 @@ namespace SSH_Helper.Services.Scripting.Commands
                 """;
         }
 
-        private static string BuildCompletionHtml(string completionPath, string? completionMessage, int autoCloseDelayMs)
+        private static string BuildCompletionHtml(
+            string completionPath,
+            string? completionMessage,
+            bool autoCloseBrowser,
+            int autoCloseDelayMs)
         {
             var completion = EscapeForJavaScriptString(string.IsNullOrWhiteSpace(completionMessage)
                 ? "Callback captured. You may close this tab."
                 : completionMessage);
             var encodedCompletionPath = EscapeForJavaScriptString(completionPath);
+            var autoCloseScript = autoCloseBrowser
+                ? $"setTimeout(function(){{ window.close(); }}, {autoCloseDelayMs});"
+                : string.Empty;
+            var documentStyles = BuildCallbackPageStyles();
 
             return $$"""
                 <!DOCTYPE html>
-                <html><head><meta charset="utf-8"><title>Callback captured</title></head>
-                <body style="font-family:Segoe UI,Arial,sans-serif;margin:40px;">
+                <html><head><meta charset="utf-8"><title>Callback captured</title>{{documentStyles}}</head>
+                <body>
                 <h3>Browser callback captured</h3>
                 <p id="status">{{completion}}</p>
                 <script>
@@ -517,12 +618,41 @@ namespace SSH_Helper.Services.Scripting.Commands
                   fetch('{{encodedCompletionPath}}', { method:'POST', keepalive:true })
                     .then(function(response){
                       if (!response.ok) { throw new Error('completion failed'); }
-                      setTimeout(function(){ window.close(); }, {{autoCloseDelayMs}});
+                      {{autoCloseScript}}
                     })
                     .catch(function(){ document.getElementById('status').textContent='Failed to finalize browser callback.'; });
                 })();
                 </script>
                 </body></html>
+                """;
+        }
+
+        private static string BuildCallbackPageStyles()
+        {
+            return """
+                <style>
+                :root { color-scheme: light dark; }
+                body {
+                  font-family: "Segoe UI", Arial, sans-serif;
+                  margin: 40px;
+                  background: #ffffff;
+                  color: #1f2328;
+                }
+                h3 {
+                  margin: 0 0 16px 0;
+                  color: inherit;
+                }
+                p {
+                  margin: 0;
+                  color: inherit;
+                }
+                @media (prefers-color-scheme: dark) {
+                  body {
+                    background: #1e1e1e;
+                    color: #f5f7fa;
+                  }
+                }
+                </style>
                 """;
         }
 
@@ -552,6 +682,24 @@ namespace SSH_Helper.Services.Scripting.Commands
             while (normalized.Contains("//", StringComparison.Ordinal))
                 normalized = normalized.Replace("//", "/", StringComparison.Ordinal);
             return normalized;
+        }
+
+        private static bool IsDarkModeEnabled()
+        {
+            if (Form.ActiveForm != null)
+            {
+                return Form.ActiveForm.BackColor.GetBrightness() < 0.5f;
+            }
+
+            foreach (Form form in Application.OpenForms)
+            {
+                if (!form.IsDisposed && form.Visible)
+                {
+                    return form.BackColor.GetBrightness() < 0.5f;
+                }
+            }
+
+            return false;
         }
 
         private enum CaptureMode

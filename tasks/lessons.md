@@ -1,9 +1,24 @@
 # Lessons
 
 ## 2026-03-20
+- When a WinForms tab-strip flicker survives buffered overlays and `WM_ERASEBKGND` fixes, I must remove the native tab header from the visible surface entirely; as long as native `TabControl` chrome is still what the user sees, repaint flashes can survive any seam patch around it.
+- When a user still sees WinForms flicker specifically in the tab-header gap beside the last tab, I must inspect `WM_ERASEBKGND` for the tab control itself; buffering nearby panels is not enough if the header gap stays unpainted until the post-paint seam patch.
+- When a WinForms dark-mode flicker survives earlier header buffering, I must inspect runtime-created panels and `UseVisualStyleBackColor` on the tab pages themselves; raw child panels and themed tab-page background erase can still flash even when the tab strip overlay looks fixed.
+- When a WinForms tab control looks correct in an isolated managed-paint test but still shows native seams at runtime, I must treat that as a paint-order bug and look for a buffered post-`WM_PAINT` overlay path instead of continuing to tune only the managed `Paint` rectangles.
+- When a user still sees WinForms tab-strip flicker after I remove an extra managed handler, I must inspect any remaining direct `Graphics.FromHwnd` or post-`WM_PAINT` overdraw next; buffered event wiring alone does not eliminate flicker if a control still patches pixels after native paint.
+- When a custom WinForms tab control already owns its border/header overlay in `WndProc`, I must not also layer a form-level `Paint` handler onto that same control; the duplicate overlay can survive broader buffering fixes as a small residual flicker around the tab strip.
+- When I verify WinForms repaint batching, I should not assert absolute `Invalidated` counts across a font change unless I control the framework noise; the safer contract is to compare the counts before and after the explicit follow-up call.
+- When I add WinForms handle/paint regression tests, I must avoid showing a real top-level `Form` unless visibility is part of the behavior under test; otherwise the test can leak a blank desktop window during runs.
+- When a user reports multi-window callback focus still falls through to another app, I must verify the modeless close path explicitly restores activation to the main SSH Helper form; fixing owner selection and modal flicker alone is not enough.
+- When I keep a modal browser surface open after success, I must also update its affordances and completion styling; leaving the footer button as `Cancel` and the embedded HTML unthemed creates a misleading, half-finished UX.
+- When a user names an option by the visible behavior they expect, I must verify the entire user-facing surface, not just one internal layer; `auto_close_browser: false` was incomplete when the page stayed open but the host WebView2 window still auto-closed.
 - When I hand off a self-contained `browser_callback_capture` preset, I must state explicitly that the command itself starts the temporary localhost listener before opening the browser; users should not have to infer that from the `start_url` alone.
 - When I change WinForms/browser callback focus restoration, I must verify the real interactive foreground result, not just native-call ordering in a unit test; Windows activation behavior can still regress even when the API sequence looks stronger on paper.
 - When I wrap Windows P/Invoke calls in helper names like `NativeIsIconic`, I must explicitly set `EntryPoint` (or keep the extern name exact) and add a test for the import mapping; mocked focus tests will not catch missing exports and the bug will surface only at runtime.
+- When I add a new script option that changes live browser-launch behavior, I must verify the end-to-end preset execution path in the actual app, not just parser/command unit tests; otherwise the UI can still behave like the old path and I will miss it until the user tries it manually.
+- When I add a buffered WinForms container wrapper, I must make background-erase suppression conditional on a clearly opaque, fully-owned surface; unconditional `WM_ERASEBKGND` suppression is too broad for a reusable control.
+- When I verify WinForms/browser-callback repaint behavior, I must not run multiple UI-heavy `dotnet test` processes in parallel; shared activation state and visible-form cleanup can create false failures that disappear on a serial rerun.
+- When I keep a browser callback window modeless to avoid modal close flicker, I must not disable the entire owner form as a substitute lock; that broad disabled-state repaint can blank labels and reintroduce whole-form flicker during launch.
 
 ## 2026-03-15
 - When a user narrows a popup-ownership cleanup to allow some ownerless dialogs, I must preserve explicit exceptions for startup/global flows instead of force-owning every modal call site.

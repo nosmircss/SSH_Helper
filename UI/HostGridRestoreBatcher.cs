@@ -5,6 +5,7 @@ internal sealed class HostGridRestoreBatcher
     private readonly Action _onScrollbarRefresh;
     private readonly Action _onHostCountRefresh;
     private readonly Action _onMarkDirty;
+    private int _mutationScopeDepth;
     private int _restoreScopeDepth;
     private bool _scrollbarRefreshRequested;
     private bool _hostCountRefreshRequested;
@@ -23,12 +24,18 @@ internal sealed class HostGridRestoreBatcher
     public IDisposable BeginRestoreScope()
     {
         _restoreScopeDepth++;
-        return new RestoreScope(this);
+        return new Scope(this, ScopeKind.Restore);
+    }
+
+    public IDisposable BeginMutationScope()
+    {
+        _mutationScopeDepth++;
+        return new Scope(this, ScopeKind.Mutation);
     }
 
     public void RequestScrollbarRefresh()
     {
-        if (_restoreScopeDepth == 0)
+        if (!IsRepaintBatchingActive)
         {
             _onScrollbarRefresh();
             return;
@@ -39,7 +46,7 @@ internal sealed class HostGridRestoreBatcher
 
     public void RequestHostCountRefresh()
     {
-        if (_restoreScopeDepth == 0)
+        if (!IsRepaintBatchingActive)
         {
             _onHostCountRefresh();
             return;
@@ -67,7 +74,23 @@ internal sealed class HostGridRestoreBatcher
         }
 
         _restoreScopeDepth--;
-        if (_restoreScopeDepth != 0)
+        if (IsRepaintBatchingActive)
+        {
+            return;
+        }
+
+        FlushPendingRequests();
+    }
+
+    private void EndMutationScope()
+    {
+        if (_mutationScopeDepth == 0)
+        {
+            throw new InvalidOperationException("Mutation scope ended without a matching begin.");
+        }
+
+        _mutationScopeDepth--;
+        if (IsRepaintBatchingActive)
         {
             return;
         }
@@ -96,13 +119,23 @@ internal sealed class HostGridRestoreBatcher
         }
     }
 
-    private sealed class RestoreScope : IDisposable
+    private bool IsRepaintBatchingActive => _restoreScopeDepth != 0 || _mutationScopeDepth != 0;
+
+    private enum ScopeKind
+    {
+        Restore,
+        Mutation
+    }
+
+    private sealed class Scope : IDisposable
     {
         private HostGridRestoreBatcher? _owner;
+        private readonly ScopeKind _kind;
 
-        public RestoreScope(HostGridRestoreBatcher owner)
+        public Scope(HostGridRestoreBatcher owner, ScopeKind kind)
         {
             _owner = owner;
+            _kind = kind;
         }
 
         public void Dispose()
@@ -114,7 +147,17 @@ internal sealed class HostGridRestoreBatcher
             }
 
             _owner = null;
-            owner.EndRestoreScope();
+            switch (_kind)
+            {
+                case ScopeKind.Restore:
+                    owner.EndRestoreScope();
+                    break;
+                case ScopeKind.Mutation:
+                    owner.EndMutationScope();
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
         }
     }
 }

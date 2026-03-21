@@ -7,6 +7,7 @@ using Xunit;
 
 namespace SSH_Helper.Tests.UI;
 
+[Collection(CallbackUiSerialCollection.Name)]
 public class BrowserCallbackFocusRestorerTests
 {
     [Fact]

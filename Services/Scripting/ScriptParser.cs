@@ -111,7 +111,7 @@ namespace SSH_Helper.Services.Scripting
                 ["updateenvironment"] = ["variable", "value"],
                 ["log"] = ["message", "level"],
                 ["http"] = ["url", "method", "body", "headers", "into", "timeout", "follow_redirects", "allow_failure", "verify_tls", "auth", "username", "password", "token", "content_type", "on_error"],
-                ["browser_callback_capture"] = ["start_url", "callback_path", "local_port", "capture_mode", "into", "required_fields", "timeout", "open_browser", "completion_message", "failure_message", "quiet", "on_error"],
+                ["browser_callback_capture"] = ["start_url", "callback_path", "local_port", "capture_mode", "browser_mode", "show_after_seconds", "into", "required_fields", "timeout", "open_browser", "auto_close_browser", "completion_message", "failure_message", "quiet", "on_error"],
                 ["ping"] = ["host", "count", "timeout", "into", "on_error"],
                 ["dns"] = ["host", "type", "timeout", "into", "on_error"],
                 ["portcheck"] = ["host", "port", "timeout", "into", "on_error"],
@@ -234,7 +234,9 @@ namespace SSH_Helper.Services.Scripting
                 ["allow_failure"] = ["true", "false"],
                 ["verify_tls"] = ["true", "false"],
                 ["capture_mode"] = ["auto", "fragment", "query", "post_body"],
+                ["browser_mode"] = ["external", "webview2"],
                 ["open_browser"] = ["true", "false"],
+                ["auto_close_browser"] = ["true", "false"],
                 ["quiet"] = ["true", "false"],
                 ["session"] = ["separate", "shared"],
                 ["mirror_output"] = ["true", "false"],
@@ -2643,6 +2645,15 @@ namespace SSH_Helper.Services.Scripting
                         case "capturemode":
                             options.CaptureMode = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
                             break;
+                        case "browser_mode":
+                        case "browsermode":
+                            options.BrowserMode = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "show_after_seconds":
+                        case "showafterseconds":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var showAfterSeconds))
+                                options.ShowAfterSeconds = showAfterSeconds;
+                            break;
                         case "into":
                             options.Into = parser.Consume<Scalar>().Value;
                             break;
@@ -2657,6 +2668,10 @@ namespace SSH_Helper.Services.Scripting
                         case "open_browser":
                         case "openbrowser":
                             options.OpenBrowser = ParseBooleanOrDefault(parser, options.OpenBrowser);
+                            break;
+                        case "auto_close_browser":
+                        case "autoclosebrowser":
+                            options.AutoCloseBrowser = ParseBooleanOrDefault(parser, options.AutoCloseBrowser);
                             break;
                         case "completion_message":
                         case "completionmessage":
@@ -3934,6 +3949,20 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.capture_mode must be one of auto, fragment, query, post_body{lineContent}");
+                        }
+
+                        if (!IsDynamicValue(step.BrowserCallbackCapture.BrowserMode) &&
+                            !string.Equals(step.BrowserCallbackCapture.BrowserMode, "external", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.BrowserCallbackCapture.BrowserMode, "webview2", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.browser_mode must be one of external, webview2{lineContent}");
+                        }
+
+                        if (step.BrowserCallbackCapture.ShowAfterSeconds < 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: browser_callback_capture.show_after_seconds must be greater than or equal to 0{lineContent}");
                         }
                         break;
 

@@ -21,6 +21,7 @@ namespace SSH_Helper.Services.Scripting.Commands
     internal static class BrowserCallbackFocusRestorer
     {
         private static readonly IBrowserCallbackFocusNativeMethods NativeMethods = new NativeMethodsAdapter();
+        internal static Action<Form>? ScheduleUiActivationAttemptsOverrideForTests { get; set; }
 
         internal static void RequestApplicationFocusRestore()
         {
@@ -56,6 +57,13 @@ namespace SSH_Helper.Services.Scripting.Commands
         {
             if (form.IsDisposed || !form.IsHandleCreated)
                 return;
+
+            var activationOverride = ScheduleUiActivationAttemptsOverrideForTests;
+            if (activationOverride != null)
+            {
+                activationOverride(form);
+                return;
+            }
 
             var methods = nativeMethods ?? NativeMethods;
             var intervals = new[] { 350, 650, 1000, 1500, 2200 };

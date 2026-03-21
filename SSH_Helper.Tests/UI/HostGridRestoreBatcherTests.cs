@@ -1,3 +1,4 @@
+using System;
 using SSH_Helper.UI;
 using Xunit;
 
@@ -5,6 +6,34 @@ namespace SSH_Helper.Tests.UI;
 
 public class HostGridRestoreBatcherTests
 {
+    [Fact]
+    public void MutationScope_CollapsesRepeatedRefreshRequestsIntoSingleFlush()
+    {
+        int scrollbarRefreshes = 0;
+        int hostCountRefreshes = 0;
+
+        var batcher = new HostGridRestoreBatcher(
+            onScrollbarRefresh: () => scrollbarRefreshes++,
+            onHostCountRefresh: () => hostCountRefreshes++,
+            onMarkDirty: () => { });
+
+        using (batcher.BeginMutationScope())
+        {
+            batcher.RequestScrollbarRefresh();
+            Assert.Equal(0, scrollbarRefreshes);
+            Assert.Equal(0, hostCountRefreshes);
+
+            batcher.RequestScrollbarRefresh();
+            batcher.RequestHostCountRefresh();
+            batcher.RequestHostCountRefresh();
+            Assert.Equal(0, scrollbarRefreshes);
+            Assert.Equal(0, hostCountRefreshes);
+        }
+
+        Assert.Equal(1, scrollbarRefreshes);
+        Assert.Equal(1, hostCountRefreshes);
+    }
+
     [Fact]
     public void RestoreScope_CollapsesRepeatedRequestsIntoSingleFlush()
     {

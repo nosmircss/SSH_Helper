@@ -8,6 +8,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseAppHost>true</UseAppHost>
+    <WebView2LoaderPreference>Static</WebView2LoaderPreference>
     <RebexLicenseKey Condition="'$(REBEX_LICENSE_KEY)' != ''">$(REBEX_LICENSE_KEY)</RebexLicenseKey>
   </PropertyGroup>
 
@@ -52,12 +53,24 @@
   <ItemGroup>
     <PackageReference Include="CronExpressionDescriptor" Version="2.45.0" />
     <PackageReference Include="Cronos" Version="0.11.1" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3124.44" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Rebex.SshShell" Version="7.0.9448" />
     <PackageReference Include="Scintilla5.NET" Version="6.1.1" GeneratePathProperty="true" />
     <PackageReference Include="SSH.NET" Version="2024.1.0" />
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Reference Remove="$(NuGetPackageRoot)microsoft.web.webview2\1.0.3124.44\lib_manual\net5.0-windows10.0.17763.0\Microsoft.Web.WebView2.Wpf.dll" />
+  </ItemGroup>
+
+  <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)"
+                 Condition="'%(Reference.Identity)' != '' and $([System.String]::Copy('%(Reference.Identity)').EndsWith('Microsoft.Web.WebView2.Wpf.dll'))" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup Condition="'$(PkgScintilla5_NET)' != ''">
     <EmbeddedResource Include="$(PkgScintilla5_NET)\runtimes\win-x64\native\Scintilla.dll">

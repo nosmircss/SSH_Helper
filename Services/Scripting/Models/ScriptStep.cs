@@ -904,6 +904,16 @@ namespace SSH_Helper.Services.Scripting.Models
         public string CaptureMode { get; set; } = "auto";
 
         /// <summary>
+        /// Browser launch surface: external or webview2.
+        /// </summary>
+        public string BrowserMode { get; set; } = "external";
+
+        /// <summary>
+        /// When greater than zero in WebView2 mode, keep the embedded browser hidden until the callback is still pending after this many seconds.
+        /// </summary>
+        public int ShowAfterSeconds { get; set; }
+
+        /// <summary>
         /// Variable name prefix used to persist captured values.
         /// </summary>
         public string Into { get; set; } = string.Empty;
@@ -922,6 +932,11 @@ namespace SSH_Helper.Services.Scripting.Models
         /// When true, open the start_url in the default browser.
         /// </summary>
         public bool OpenBrowser { get; set; } = true;
+
+        /// <summary>
+        /// When true, successful callback pages attempt to close themselves after completion.
+        /// </summary>
+        public bool AutoCloseBrowser { get; set; } = true;
 
         /// <summary>
         /// Optional message shown on callback completion page.

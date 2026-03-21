@@ -2705,6 +2705,9 @@ Starts a localhost callback listener and captures values returned from browser-d
     callback_path: "/oauth_callback"
     local_port: 8086
     capture_mode: auto
+    browser_mode: external
+    show_after_seconds: 0
+    auto_close_browser: true
     into: callback_data
     required_fields: ["access_token"]
     timeout: 300
@@ -2720,6 +2723,9 @@ Starts a localhost callback listener and captures values returned from browser-d
 | `callback_path` | Yes | `/oauth_callback` | Local callback path starting with `/` |
 | `local_port` | No | `8086` | Loopback listener port |
 | `capture_mode` | No | `auto` | `auto`, `fragment`, `query`, `post_body` |
+| `browser_mode` | No | `external` | `external` or `webview2` when `open_browser: true` |
+| `show_after_seconds` | No | `0` | WebView2-only delayed reveal in seconds; `0` shows immediately |
+| `auto_close_browser` | No | `true` | Whether successful callback pages and visible embedded WebView2 windows auto-close |
 | `into` | Yes | - | Variable prefix for captured values |
 | `required_fields` | No | - | Keys that must be present and non-empty |
 | `timeout` | No | `300` | Maximum wait in seconds |
@@ -2739,9 +2745,23 @@ Starts a localhost callback listener and captures values returned from browser-d
 - It is blocked in folder and multi-host runs; run it against a single current host.
 
 **Browser UX Behavior:**
-- After successful callback capture, SSH Helper attempts to close the callback tab automatically.
-- SSH Helper also attempts to restore focus to the main application window after capture.
+- `open_browser: false` keeps the step in manual mode and ignores `browser_mode`.
+- If `open_browser: true` and `browser_mode` is omitted, SSH Helper uses the external system browser for backward compatibility.
+- `browser_mode: webview2` opens the flow in an owned in-app WebView2 dialog instead of launching the default browser.
+- `show_after_seconds` only affects `browser_mode: webview2`. Values above `0` start the embedded browser hidden and only show the dialog if the callback is still pending after the configured delay.
+- `auto_close_browser: false` keeps the successful callback surface open for inspection.
+- In external-browser mode that means the callback page stays open instead of calling `window.close()`.
+- In `browser_mode: webview2`, a visible embedded callback window stays open after successful completion until you close it manually.
+- If a delayed WebView2 dialog never became visible because the callback finished before reveal, SSH Helper still cleans up that hidden session automatically.
+- By default, after successful callback capture, SSH Helper attempts to close the callback tab automatically.
+- External-browser mode also attempts to restore focus to the main application window after capture.
 - Browser and OS focus policies may prevent forced focus changes in some environments.
+
+**Embedded Browser Data:**
+- WebView2 mode uses a shared SSH Helper browser profile under `%LocalAppData%\SSH_Helper`.
+- Cookies, cache, local storage, IndexedDB, and related site data persist across runs until cleared.
+- Use `Settings > General > Browser Callback > Clear Embedded Browser Data...` to reset that shared embedded-browser profile.
+- The clear action is blocked while an embedded browser callback window is open.
 
 **Example:**
 ```yaml
@@ -2754,6 +2774,18 @@ Starts a localhost callback listener and captures values returned from browser-d
 
 - print:
     message: "${callback_access_token}"
+```
+
+**Embedded WebView2 Example:**
+```yaml
+- browser_callback_capture:
+    start_url: "https://idp.example.com/auth?response_type=code&redirect_uri=http://127.0.0.1:8086/oauth_callback"
+    callback_path: "/oauth_callback"
+    capture_mode: query
+    browser_mode: webview2
+    show_after_seconds: 2
+    into: callback
+    required_fields: ["code"]
 ```
 
 **Security Note:**

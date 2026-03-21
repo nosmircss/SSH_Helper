@@ -368,12 +368,18 @@ namespace SSH_Helper.UI
                 tabControl.DrawItem -= DarkTabControl_DrawItem;
                 tabControl.DrawItem += DarkTabControl_DrawItem;
                 tabControl.Paint -= DarkTabControl_Paint;
-                tabControl.Paint += DarkTabControl_Paint;
 
                 if (tabControl is BorderlessTabControl borderlessTab)
                 {
                     borderlessTab.HideBorder = true;
                     borderlessTab.BorderBackgroundColor = DarkBackground;
+                    borderlessTab.HiddenBorderHeaderColor = DarkSurface1;
+                    borderlessTab.HiddenBorderInactiveTabColor = DarkSurface2;
+                    borderlessTab.HiddenBorderInactiveTabTopLineColor = DarkSurface1;
+                }
+                else
+                {
+                    tabControl.Paint += DarkTabControl_Paint;
                 }
 
                 if (tabControl.Parent is Panel parentPanel)

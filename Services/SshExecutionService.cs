@@ -71,6 +71,7 @@ namespace SSH_Helper.Services
 
         private readonly SshConnectionPool? _connectionPool;
         private readonly bool _ownsPool;
+        private readonly IBrowserCallbackUiHost? _browserCallbackUiHost;
 
         public event EventHandler<SshProgressEventArgs>? ProgressChanged;
         public event EventHandler<SshOutputEventArgs>? OutputReceived;
@@ -189,6 +190,24 @@ namespace SSH_Helper.Services
             _connectionPool = sharedPool ?? throw new ArgumentNullException(nameof(sharedPool));
             _ownsPool = false;
             UseConnectionPooling = true;
+        }
+
+        internal SshExecutionService(IBrowserCallbackUiHost browserCallbackUiHost)
+            : this()
+        {
+            _browserCallbackUiHost = browserCallbackUiHost ?? throw new ArgumentNullException(nameof(browserCallbackUiHost));
+        }
+
+        internal SshExecutionService(bool enablePooling, SshTimeoutOptions? poolTimeouts, IBrowserCallbackUiHost browserCallbackUiHost)
+            : this(enablePooling, poolTimeouts)
+        {
+            _browserCallbackUiHost = browserCallbackUiHost ?? throw new ArgumentNullException(nameof(browserCallbackUiHost));
+        }
+
+        internal SshExecutionService(SshConnectionPool sharedPool, IBrowserCallbackUiHost browserCallbackUiHost)
+            : this(sharedPool)
+        {
+            _browserCallbackUiHost = browserCallbackUiHost ?? throw new ArgumentNullException(nameof(browserCallbackUiHost));
         }
 
         /// <summary>
@@ -1118,7 +1137,7 @@ namespace SSH_Helper.Services
                 };
 
                 // Execute the script
-                var executor = new ScriptExecutor();
+                var executor = new ScriptExecutor(_browserCallbackUiHost);
                 var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                     .GetAwaiter().GetResult();
                 EnsureScriptSucceeded(scriptResult, cancellationToken);
@@ -1273,7 +1292,7 @@ namespace SSH_Helper.Services
             };
 
             // Execute the script
-            var executor = new ScriptExecutor();
+            var executor = new ScriptExecutor(_browserCallbackUiHost);
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
             EnsureScriptSucceeded(scriptResult, cancellationToken);
@@ -1340,7 +1359,7 @@ namespace SSH_Helper.Services
                 OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
             };
 
-            var executor = new ScriptExecutor();
+            var executor = new ScriptExecutor(_browserCallbackUiHost);
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
             EnsureScriptSucceeded(scriptResult, cancellationToken);
