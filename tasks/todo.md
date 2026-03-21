@@ -1,5 +1,21 @@
 # TODO
 
+## 133. Show connection-test status in row headers for selected hosts
+- [x] 133.1 Add focused failing WinForms coverage for row-header connection-test visuals, including selected-row visibility, clearing on reset/edit, and theme reapplication.
+- [x] 133.2 Update `Form1` connection-test state/rendering so row headers reflect testing/success/failure while preserving existing `Host_IP` cell tinting for unselected rows.
+- [x] 133.3 Run focused UI verification, broader regression verification, and build verification; then capture the review outcome below.
+
+### 133 Review
+- Root cause was the host grid’s owner-drawn selected-cell path in `Form1`: `Dgv_Variables_CellPainting(...)` repaints selected data cells with the selection color, so the existing green/red `Host_IP` tint disappeared whenever the tested row stayed selected.
+- Added focused coverage in `SSH_Helper.Tests/UI/Form1ConnectionTestStatusTests.cs` for the exact contracts the user asked for: successful selected rows, failed selected rows, clearing via `ClearConnectionTestIndicators()`, clearing on `Host_IP` edits, theme reapplication, and the existing queued-progress completion-status regression.
+- The red verification failed for the right runtime reason before the fix: every new assertion showed `row.HeaderCell.Style.BackColor` staying `Color.Empty`, proving there was no row-header status lane for selected hosts.
+- `Form1.cs` now keeps per-row connection-test visual state, applies both `Host_IP` cell styling and row-header styling from that state, marks rows as `Testing` before async connection checks complete, and clears/reapplies the state through clear, edit, and theme-change paths.
+- `Dgv_Variables_RowPostPaint(...)` now paints the row-header background from the stored connection-test state and draws the row number with a contrast-aware foreground so success/failure/testing remain readable in both themes.
+- Focused red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-status-red\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-status-red\obj\`` failed as intended (`5` failed, `1` passed) because row-header styles remained empty before the implementation.
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-status-green\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-status-green\obj\`` passed (`6` passed, `0` failed).
+- Broader host-grid/UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~HostGridUtilitiesTests|FullyQualifiedName~JobEditorDialogHostGridParityTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-status-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-status-ui\obj\`` (`27` passed, `0` failed).
+- `dotnet build .\SSH_Helper.sln -nologo` passed. The build still reported the existing `MSB3277` `WindowsBase`/WebView2 warnings, the existing `xUnit1031` warnings in `ExpressionParserTests.cs`, and transient `MSB3026` copy-retry warnings because a running `SSH_Helper.exe` process (`PID 86392`) had the apphost locked while the build produced `SSH_Helper.dll`.
+
 ## 132. Restore Presets/Favorites selection sync across tab switches
 - [x] 132.1 Add failing WinForms coverage for switching between Presets and Favorites while each tab keeps its own selected preset.
 - [x] 132.2 Update `Form1` so tab changes re-sync the commands pane to the active tab selection and Favorites rebuilds preserve their selected node.

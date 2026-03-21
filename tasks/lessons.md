@@ -1,6 +1,7 @@
 # Lessons
 
 ## 2026-03-20
+- When a user points out that a cell-level WinForms status cue disappears under selection, I must look for a non-selected-owned surface such as the row header instead of continuing to fight the selected-cell paint path.
 - When I smooth a WinForms add-preset tree mutation, I must verify the new selection is fully visible in the actual viewport instead of only preserving `TopNode`; a preserved anchor is not enough if the inserted row ends up clipped below the fold.
 - When I create a new preset in `Form1`, I must route the post-create load through the same preset-loading path as ordinary selection changes; hand-populating the editor can skip required environment-restore logic.
 - When I fix full-visibility for one preset-tree insertion path in WinForms, I must audit the matching undo/restore path in the same pass; undelete uses the same viewport-sensitive selection pattern and can regress independently if I only patch add.

@@ -2,6 +2,7 @@
 using System.Data;
 using System.Diagnostics;
 using System.Runtime;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -85,6 +86,27 @@ namespace SSH_Helper
 
     public partial class Form1 : Form
     {
+        private enum ConnectionTestVisualState
+        {
+            None,
+            Testing,
+            Success,
+            Failure
+        }
+
+        private sealed class ConnectionTestRowVisualStateInfo
+        {
+            public ConnectionTestRowVisualStateInfo(ConnectionTestVisualState state, string toolTipText)
+            {
+                State = state;
+                ToolTipText = toolTipText ?? string.Empty;
+            }
+
+            public ConnectionTestVisualState State { get; }
+
+            public string ToolTipText { get; }
+        }
+
         #region Constants
 
         private const string ApplicationVersion = "0.51.10";
@@ -163,6 +185,7 @@ namespace SSH_Helper
         private CancellationTokenSource? _connectionTestCts;
         private bool _isTestingConnections;
         private int _connectionTestProgressRunId;
+        private readonly ConditionalWeakTable<DataGridViewRow, ConnectionTestRowVisualStateInfo> _connectionTestRowStates = new();
 
         // Preset search/filter
         private BufferedPanel? _presetSearchPanel;
@@ -2330,6 +2353,127 @@ namespace SSH_Helper
             }
         }
 
+        private static Color GetConnectionTestHeaderTextColor(Color backgroundColor)
+        {
+            int weightedBrightness = ((backgroundColor.R * 299) + (backgroundColor.G * 587) + (backgroundColor.B * 114)) / 1000;
+            return weightedBrightness >= 140 ? LightTextColor : Color.White;
+        }
+
+        private static (Color CellBackColor, Color CellForeColor, Color HeaderBackColor, Color HeaderForeColor) GetConnectionTestPalette(
+            ConnectionTestVisualState state,
+            bool darkMode)
+        {
+            Color cellBackColor;
+            Color cellForeColor;
+
+            switch (state)
+            {
+                case ConnectionTestVisualState.Testing:
+                    cellBackColor = darkMode ? Color.FromArgb(92, 67, 0) : Color.FromArgb(255, 243, 205);
+                    cellForeColor = darkMode ? Color.FromArgb(255, 231, 153) : Color.FromArgb(102, 77, 3);
+                    break;
+                case ConnectionTestVisualState.Success:
+                    cellBackColor = darkMode ? Color.FromArgb(30, 70, 40) : Color.FromArgb(212, 237, 218);
+                    cellForeColor = darkMode ? Color.FromArgb(180, 230, 180) : Color.Empty;
+                    break;
+                case ConnectionTestVisualState.Failure:
+                    cellBackColor = darkMode ? Color.FromArgb(80, 30, 30) : Color.FromArgb(248, 215, 218);
+                    cellForeColor = darkMode ? Color.FromArgb(230, 150, 150) : Color.Empty;
+                    break;
+                default:
+                    return (Color.Empty, Color.Empty, Color.Empty, Color.Empty);
+            }
+
+            var headerBackColor = cellBackColor;
+            var headerForeColor = GetConnectionTestHeaderTextColor(headerBackColor);
+            return (cellBackColor, cellForeColor, headerBackColor, headerForeColor);
+        }
+
+        private int GetHostIpColumnIndex()
+        {
+            return dgv_variables.Columns["Host_IP"]?.Index ?? -1;
+        }
+
+        private void SetConnectionTestVisualState(
+            DataGridViewRow row,
+            int hostIpColIndex,
+            ConnectionTestVisualState state,
+            string toolTipText)
+        {
+            if (hostIpColIndex < 0 || row.IsNewRow)
+            {
+                return;
+            }
+
+            _connectionTestRowStates.Remove(row);
+            if (state != ConnectionTestVisualState.None)
+            {
+                _connectionTestRowStates.Add(row, new ConnectionTestRowVisualStateInfo(state, toolTipText));
+            }
+
+            ApplyConnectionTestVisualState(row, hostIpColIndex);
+        }
+
+        private void ApplyConnectionTestVisualState(DataGridViewRow row, int hostIpColIndex)
+        {
+            if (hostIpColIndex < 0 || row.IsNewRow)
+            {
+                return;
+            }
+
+            var cell = row.Cells[hostIpColIndex];
+            if (!_connectionTestRowStates.TryGetValue(row, out var visualState) ||
+                visualState.State == ConnectionTestVisualState.None)
+            {
+                cell.Style.BackColor = Color.Empty;
+                cell.Style.ForeColor = Color.Empty;
+                cell.ToolTipText = string.Empty;
+                row.HeaderCell.Style.BackColor = Color.Empty;
+                row.HeaderCell.Style.ForeColor = Color.Empty;
+                if (row.Index >= 0)
+                {
+                    dgv_variables.InvalidateRow(row.Index);
+                }
+                return;
+            }
+
+            var palette = GetConnectionTestPalette(visualState.State, _isDarkMode);
+            cell.Style.BackColor = palette.CellBackColor;
+            cell.Style.ForeColor = palette.CellForeColor;
+            cell.ToolTipText = visualState.ToolTipText;
+            row.HeaderCell.Style.BackColor = palette.HeaderBackColor;
+            row.HeaderCell.Style.ForeColor = palette.HeaderForeColor;
+
+            if (row.Index >= 0)
+            {
+                dgv_variables.InvalidateRow(row.Index);
+            }
+        }
+
+        private void ClearConnectionTestVisualState(DataGridViewRow row, int hostIpColIndex)
+        {
+            SetConnectionTestVisualState(row, hostIpColIndex, ConnectionTestVisualState.None, string.Empty);
+        }
+
+        private void ReapplyConnectionTestVisualStates()
+        {
+            int hostIpColIndex = GetHostIpColumnIndex();
+            if (hostIpColIndex < 0)
+            {
+                return;
+            }
+
+            foreach (DataGridViewRow row in dgv_variables.Rows)
+            {
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                ApplyConnectionTestVisualState(row, hostIpColIndex);
+            }
+        }
+
         private void ApplyConnectionTestCellResult(DataGridViewRow row, int hostIpColIndex, Models.ConnectionTestResult result)
         {
             if (hostIpColIndex < 0)
@@ -2337,19 +2481,23 @@ namespace SSH_Helper
                 return;
             }
 
-            var cell = row.Cells[hostIpColIndex];
-            bool dark = _configService.GetCurrent().DarkMode;
             if (result.Success)
             {
-                cell.Style.BackColor = dark ? Color.FromArgb(30, 70, 40) : Color.FromArgb(212, 237, 218);
-                cell.Style.ForeColor = dark ? Color.FromArgb(180, 230, 180) : Color.Empty;
-                cell.ToolTipText = $"Reachable ({result.LatencyMs}ms)";
+                SetConnectionTestVisualState(
+                    row,
+                    hostIpColIndex,
+                    ConnectionTestVisualState.Success,
+                    $"Reachable ({result.LatencyMs}ms)");
             }
             else
             {
-                cell.Style.BackColor = dark ? Color.FromArgb(80, 30, 30) : Color.FromArgb(248, 215, 218);
-                cell.Style.ForeColor = dark ? Color.FromArgb(230, 150, 150) : Color.Empty;
-                cell.ToolTipText = $"{result.ErrorCategory}: {result.ErrorMessage}";
+                string errorCategory = string.IsNullOrWhiteSpace(result.ErrorCategory) ? "Error" : result.ErrorCategory;
+                string errorMessage = string.IsNullOrWhiteSpace(result.ErrorMessage) ? "Connection test failed" : result.ErrorMessage;
+                SetConnectionTestVisualState(
+                    row,
+                    hostIpColIndex,
+                    ConnectionTestVisualState.Failure,
+                    $"{errorCategory}: {errorMessage}");
             }
         }
 
@@ -2467,6 +2615,7 @@ namespace SSH_Helper
             // Update custom DataGridView scrollbar colors
             ApplyScrollbarColors();
             ApplyActiveEnvironmentLabelColor();
+            ReapplyConnectionTestVisualStates();
 
             ResumeLayout(true);
         }
@@ -3644,6 +3793,7 @@ namespace SSH_Helper
             var grid = sender as DataGridView;
             if (grid == null) return;
 
+            var row = grid.Rows[e.RowIndex];
             var rowIdx = (e.RowIndex + 1).ToString();
             using var centerFormat = new StringFormat
             {
@@ -3651,7 +3801,24 @@ namespace SSH_Helper
                 LineAlignment = StringAlignment.Center
             };
             var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
-            using var brush = new SolidBrush(Color.FromArgb(108, 117, 125));
+            var headerBackColor = row.HeaderCell.Style.BackColor.IsEmpty
+                ? grid.RowHeadersDefaultCellStyle.BackColor
+                : row.HeaderCell.Style.BackColor;
+            using (var backgroundBrush = new SolidBrush(headerBackColor))
+            {
+                e.Graphics.FillRectangle(backgroundBrush, headerBounds);
+            }
+
+            using (var borderPen = new Pen(grid.GridColor))
+            {
+                e.Graphics.DrawLine(borderPen, headerBounds.Right - 1, headerBounds.Top, headerBounds.Right - 1, headerBounds.Bottom - 1);
+                e.Graphics.DrawLine(borderPen, headerBounds.Left, headerBounds.Bottom - 1, headerBounds.Right - 1, headerBounds.Bottom - 1);
+            }
+
+            var headerForeColor = row.HeaderCell.Style.ForeColor.IsEmpty
+                ? grid.RowHeadersDefaultCellStyle.ForeColor
+                : row.HeaderCell.Style.ForeColor;
+            using var brush = new SolidBrush(headerForeColor);
             SafeDrawString(e.Graphics, rowIdx, grid.Font, brush, headerBounds, centerFormat);
         }
 
@@ -3839,10 +4006,7 @@ namespace SSH_Helper
             if (e.ColumnIndex >= 0 && e.RowIndex >= 0 &&
                 dgv_variables.Columns[e.ColumnIndex].Name == "Host_IP")
             {
-                var cell = dgv_variables.Rows[e.RowIndex].Cells[e.ColumnIndex];
-                cell.Style.BackColor = Color.Empty;
-                cell.Style.ForeColor = Color.Empty;
-                cell.ToolTipText = "";
+                ClearConnectionTestVisualState(dgv_variables.Rows[e.RowIndex], e.ColumnIndex);
             }
         }
 
@@ -7142,16 +7306,13 @@ namespace SSH_Helper
 
         private void ClearConnectionTestIndicators()
         {
-            var colIndex = dgv_variables.Columns["Host_IP"]?.Index ?? -1;
+            var colIndex = GetHostIpColumnIndex();
             if (colIndex < 0) return;
 
             foreach (DataGridViewRow row in dgv_variables.Rows)
             {
                 if (row.IsNewRow) continue;
-                var cell = row.Cells[colIndex];
-                cell.Style.BackColor = Color.Empty;
-                cell.Style.ForeColor = Color.Empty;
-                cell.ToolTipText = "";
+                ClearConnectionTestVisualState(row, colIndex);
             }
         }
 
@@ -7201,12 +7362,12 @@ namespace SSH_Helper
                         var host = hosts[0];
 
                         // Show "Testing..." in Host_IP cell
-                        var hostIpColIndex = dgv_variables.Columns["Host_IP"]?.Index ?? -1;
+                        var hostIpColIndex = GetHostIpColumnIndex();
                         if (hostIpColIndex >= 0)
                         {
                             BeginInvoke(() =>
                             {
-                                row.Cells[hostIpColIndex].ToolTipText = "Testing...";
+                                SetConnectionTestVisualState(row, hostIpColIndex, ConnectionTestVisualState.Testing, "Testing...");
                             });
                         }
 
