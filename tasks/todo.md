@@ -2053,3 +2053,33 @@
   - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests|FullyQualifiedName~Form1DeleteUndoTests|FullyQualifiedName~PresetTreeDeleteMutationTests|FullyQualifiedName~PresetTreeViewportRestorerTests|FullyQualifiedName~PresetTreeSelectionGuardTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-followup-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-followup-regression\obj\`
   - `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\preset-tree-followup-build\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-followup-build\obj\`
 - Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.
+
+## 136. Fix undo-delete preset visibility regression
+- [x] 136.1 Add focused WinForms coverage around single-preset undelete visibility scenarios, including scroll-away and rebuild-fallback undo flows.
+- [x] 136.2 Patch the undo-delete path so restored presets are fully visible after both incremental restore and fallback rebuild selection.
+- [x] 136.3 Run focused verification, update lessons, and capture the review outcome below.
+
+### 136 Review
+- Added focused WinForms coverage for undo-delete visibility scenarios in the shared preset-tree mutation test class, including user-scroll-before-undo and filtered rebuild-fallback undo flows.
+- The exact invisible restored-node case from the user report did not reproduce in the current WinForms harness, but code inspection showed the undo path still lacked the same explicit visibility guarantee already added for add-preset.
+- Patched `UndoLatestPresetDelete` so the rebuild fallback reselects with `ensureVisible: true`, and the incremental restore path now calls the shared tree-visibility helper on the restored node.
+- Updated `tasks/lessons.md` with the missed pattern: when I fix visibility for add, I must audit the matching undo/restore path in the same pass.
+- Verification passed:
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-undo-visibility-green\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-undo-visibility-green\obj\`
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests|FullyQualifiedName~Form1DeleteUndoTests|FullyQualifiedName~PresetTreeDeleteMutationTests|FullyQualifiedName~PresetTreeViewportRestorerTests|FullyQualifiedName~PresetTreeSelectionGuardTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-undo-visibility-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-undo-visibility-regression\obj\`
+  - `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\preset-tree-undo-visibility-build\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-undo-visibility-build\obj\`
+- Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.
+
+## 137. Fix Test Connection status-bar completion regression
+- [x] 137.1 Add focused WinForms coverage that reproduces `Test Connection(s)` leaving the status label on `Testing connections...` after queued UI callbacks drain.
+- [x] 137.2 Patch `Form1` connection-test progress handling so only the active test run can update the status/progress UI, and completed/cancelled runs cannot be overwritten by stale callbacks.
+- [x] 137.3 Run focused verification, build verification, and capture the review outcome below.
+
+### 137 Review
+- Added `SSH_Helper.Tests/UI/Form1ConnectionTestStatusTests.cs` with a focused WinForms regression that drives the real `TestSelectedConnections()` path against a loopback `TcpListener` and proves the status label remains `Connection test complete (1 hosts)` after queued UI callbacks drain.
+- Root cause was `TestSelectedConnections()` queuing per-host progress/status updates through `BeginInvoke(...)`. `Task.WhenAll(...)` could complete before those UI callbacks executed, so the method would set the final completion text and then a late `Testing connections... N of N` callback would overwrite it.
+- `Form1.cs` now tracks connection-test progress with a run id, mirroring the existing manual-execution progress pattern. Per-host cell coloring still applies when callbacks arrive, but status/progress updates are ignored once that connection-test run has been invalidated by completion or cancellation.
+- Focused red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-test-status-red\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-red\obj\`` failed as intended with the status label stuck on `Testing connections... 1 of 1`.
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-test-status-green\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-green\obj\`` passed (`1` passed, `0` failed).
+- Build verification: `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\connection-test-status-build\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-build\obj\`` passed.
+- Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.

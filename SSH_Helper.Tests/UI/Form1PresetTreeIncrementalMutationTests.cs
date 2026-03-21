@@ -150,6 +150,73 @@ public sealed class Form1PresetTreeIncrementalMutationTests : IDisposable
     }
 
     [WinFormsFact]
+    public void UndoLatestPresetDelete_WhenRestoredNodeLandsOutsideViewport_MakesItFullyVisible()
+    {
+        using var form = CreateLoadedForm(CreatePresetConfig());
+        var visibleOpenFormsBefore = SnapshotVisibleOpenForms();
+
+        var presetsTree = GetField<TreeView>(form, "trvPresets");
+        var topNode = FindNodeByTag(presetsTree.Nodes, "Preset 10", isFolder: false);
+        topNode.Should().NotBeNull();
+
+        presetsTree.TopNode = topNode;
+        Application.DoEvents();
+
+        presetsTree.SelectedNode = topNode;
+        InvokeMethod(form, "trvPresets_AfterSelect", presetsTree, new TreeViewEventArgs(topNode!));
+        var deletedPresetName = ((PresetNodeTag)topNode!.Tag!).Name;
+
+        InvokeMethod(form, "DeletePreset", false);
+        var scrolledAwayTopNode = FindNodeByTag(presetsTree.Nodes, "Preset 20", isFolder: false);
+        scrolledAwayTopNode.Should().NotBeNull();
+        presetsTree.TopNode = scrolledAwayTopNode;
+        Application.DoEvents();
+
+        InvokeMethod(form, "UndoLatestPresetDelete");
+
+        var restoredNode = FindNodeByTag(presetsTree.Nodes, deletedPresetName, isFolder: false);
+        restoredNode.Should().NotBeNull();
+        IsNodeFullyVisible(presetsTree, restoredNode!).Should().BeTrue(
+            "undoing a preset delete should reveal the restored preset even if the user has scrolled elsewhere before invoking undo");
+        AssertNoNewVisibleOpenForms(visibleOpenFormsBefore);
+    }
+
+    [WinFormsFact]
+    public void UndoLatestPresetDelete_WhenFallbackRefreshIsUsed_MakesRestoredPresetFullyVisible()
+    {
+        using var form = CreateLoadedForm(CreatePresetConfig());
+        var visibleOpenFormsBefore = SnapshotVisibleOpenForms();
+
+        form.Height = 360;
+        form.PerformLayout();
+        Application.DoEvents();
+
+        var presetsTree = GetField<TreeView>(form, "trvPresets");
+        InvokeMethod(form, "RefreshPresetList", true, null, "Preset 1", null);
+
+        var deletedNode = FindNodeByTag(presetsTree.Nodes, "Preset 10", isFolder: false);
+        deletedNode.Should().NotBeNull();
+
+        presetsTree.SelectedNode = deletedNode;
+        InvokeMethod(form, "trvPresets_AfterSelect", presetsTree, new TreeViewEventArgs(deletedNode!));
+
+        InvokeMethod(form, "DeletePreset", false);
+
+        var scrolledAwayTopNode = FindNodeByTag(presetsTree.Nodes, "Preset 17", isFolder: false);
+        scrolledAwayTopNode.Should().NotBeNull();
+        presetsTree.TopNode = scrolledAwayTopNode;
+        Application.DoEvents();
+
+        InvokeMethod(form, "UndoLatestPresetDelete");
+
+        var restoredNode = FindNodeByTag(presetsTree.Nodes, "Preset 10", isFolder: false);
+        restoredNode.Should().NotBeNull();
+        IsNodeFullyVisible(presetsTree, restoredNode!).Should().BeTrue(
+            "undoing a preset delete through the rebuild fallback should still reveal the restored preset");
+        AssertNoNewVisibleOpenForms(visibleOpenFormsBefore);
+    }
+
+    [WinFormsFact]
     public void RenamePreset_PreservesViewportAndUpdatesExistingNodeInPlace()
     {
         using var form = CreateLoadedForm(CreatePresetConfig());

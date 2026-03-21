@@ -3,6 +3,7 @@
 ## 2026-03-20
 - When I smooth a WinForms add-preset tree mutation, I must verify the new selection is fully visible in the actual viewport instead of only preserving `TopNode`; a preserved anchor is not enough if the inserted row ends up clipped below the fold.
 - When I create a new preset in `Form1`, I must route the post-create load through the same preset-loading path as ordinary selection changes; hand-populating the editor can skip required environment-restore logic.
+- When I fix full-visibility for one preset-tree insertion path in WinForms, I must audit the matching undo/restore path in the same pass; undelete uses the same viewport-sensitive selection pattern and can regress independently if I only patch add.
 - When a WinForms tab-strip flicker survives buffered overlays and `WM_ERASEBKGND` fixes, I must remove the native tab header from the visible surface entirely; as long as native `TabControl` chrome is still what the user sees, repaint flashes can survive any seam patch around it.
 - When a user still sees WinForms flicker specifically in the tab-header gap beside the last tab, I must inspect `WM_ERASEBKGND` for the tab control itself; buffering nearby panels is not enough if the header gap stays unpainted until the post-paint seam patch.
 - When a WinForms dark-mode flicker survives earlier header buffering, I must inspect runtime-created panels and `UseVisualStyleBackColor` on the tab pages themselves; raw child panels and themed tab-page background erase can still flash even when the tab strip overlay looks fixed.

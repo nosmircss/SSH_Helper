@@ -162,6 +162,7 @@ namespace SSH_Helper
         private ToolStripSeparator? _testConnectionSeparator;
         private CancellationTokenSource? _connectionTestCts;
         private bool _isTestingConnections;
+        private int _connectionTestProgressRunId;
 
         // Preset search/filter
         private BufferedPanel? _presetSearchPanel;
@@ -2298,6 +2299,57 @@ namespace SSH_Helper
             {
                 statusProgress.Maximum = total;
                 statusProgress.Value = Math.Min(progress, total);
+            }
+        }
+
+        private int BeginConnectionTestProgress(int totalConnections)
+        {
+            int runId = unchecked(++_connectionTestProgressRunId);
+            statusProgress.Visible = true;
+            statusProgress.Maximum = totalConnections;
+            statusProgress.Value = 0;
+            return runId;
+        }
+
+        private void UpdateConnectionTestProgress(int runId, int completedConnections, int totalConnections)
+        {
+            if (!_isTestingConnections || runId != _connectionTestProgressRunId)
+            {
+                return;
+            }
+
+            statusProgress.Value = Math.Min(completedConnections, totalConnections);
+            UpdateStatusBar($"Testing connections... {completedConnections} of {totalConnections}");
+        }
+
+        private void InvalidateConnectionTestProgress()
+        {
+            unchecked
+            {
+                _connectionTestProgressRunId++;
+            }
+        }
+
+        private void ApplyConnectionTestCellResult(DataGridViewRow row, int hostIpColIndex, Models.ConnectionTestResult result)
+        {
+            if (hostIpColIndex < 0)
+            {
+                return;
+            }
+
+            var cell = row.Cells[hostIpColIndex];
+            bool dark = _configService.GetCurrent().DarkMode;
+            if (result.Success)
+            {
+                cell.Style.BackColor = dark ? Color.FromArgb(30, 70, 40) : Color.FromArgb(212, 237, 218);
+                cell.Style.ForeColor = dark ? Color.FromArgb(180, 230, 180) : Color.Empty;
+                cell.ToolTipText = $"Reachable ({result.LatencyMs}ms)";
+            }
+            else
+            {
+                cell.Style.BackColor = dark ? Color.FromArgb(80, 30, 30) : Color.FromArgb(248, 215, 218);
+                cell.Style.ForeColor = dark ? Color.FromArgb(230, 150, 150) : Color.Empty;
+                cell.ToolTipText = $"{result.ErrorCategory}: {result.ErrorMessage}";
             }
         }
 
@@ -7133,10 +7185,7 @@ namespace SSH_Helper
             var config = _configService.GetCurrent();
             var timeoutMs = config.ConnectionTimeout * 1000;
             var completed = 0;
-
-            statusProgress.Visible = true;
-            statusProgress.Maximum = rows.Count;
-            statusProgress.Value = 0;
+            var progressRunId = BeginConnectionTestProgress(rows.Count);
 
             try
             {
@@ -7162,30 +7211,12 @@ namespace SSH_Helper
                         }
 
                         var result = await _sshService.TestConnectionAsync(host, timeoutMs, ct);
+                        var done = Interlocked.Increment(ref completed);
 
                         BeginInvoke(() =>
                         {
-                            if (hostIpColIndex >= 0)
-                            {
-                                var cell = row.Cells[hostIpColIndex];
-                                bool dark = _configService.GetCurrent().DarkMode;
-                                if (result.Success)
-                                {
-                                    cell.Style.BackColor = dark ? Color.FromArgb(30, 70, 40) : Color.FromArgb(212, 237, 218);
-                                    cell.Style.ForeColor = dark ? Color.FromArgb(180, 230, 180) : Color.Empty;
-                                    cell.ToolTipText = $"Reachable ({result.LatencyMs}ms)";
-                                }
-                                else
-                                {
-                                    cell.Style.BackColor = dark ? Color.FromArgb(80, 30, 30) : Color.FromArgb(248, 215, 218);
-                                    cell.Style.ForeColor = dark ? Color.FromArgb(230, 150, 150) : Color.Empty;
-                                    cell.ToolTipText = $"{result.ErrorCategory}: {result.ErrorMessage}";
-                                }
-                            }
-
-                            var done = Interlocked.Increment(ref completed);
-                            statusProgress.Value = done;
-                            UpdateStatusBar($"Testing connections... {done} of {rows.Count}");
+                            ApplyConnectionTestCellResult(row, hostIpColIndex, result);
+                            UpdateConnectionTestProgress(progressRunId, done, rows.Count);
                         });
                     }
                     finally
@@ -7195,10 +7226,12 @@ namespace SSH_Helper
                 });
 
                 await Task.WhenAll(tasks);
+                InvalidateConnectionTestProgress();
                 UpdateStatusBar($"Connection test complete ({completed} hosts)");
             }
             catch (OperationCanceledException)
             {
+                InvalidateConnectionTestProgress();
                 UpdateStatusBar("Connection test cancelled");
             }
             finally
@@ -8008,7 +8041,11 @@ namespace SSH_Helper
                 {
                     if (!usedIncrementalMutation)
                     {
-                        SelectPresetByName(undoResult.TargetName, ensureVisible: false);
+                        SelectPresetByName(undoResult.TargetName, ensureVisible: true);
+                    }
+                    else if (restoredNode != null)
+                    {
+                        EnsureTreeNodeFullyVisible(trvPresets, restoredNode);
                     }
 
                     var restoredPreset = _presetManager.Get(undoResult.TargetName);
