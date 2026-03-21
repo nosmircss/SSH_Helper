@@ -183,6 +183,10 @@ namespace SSH_Helper
         private TreeNode? _dropTargetNode;
         private DropPosition _dropPosition = DropPosition.None;
         private TreeNode? _favLastHighlightedNode;
+        private int _lastPresetsTabIndex;
+        private bool _restoringPresetsTabSelection;
+        private PresetNodeTag? _lastPresetsTreeSelection;
+        private PresetNodeTag? _lastFavoritesTreeSelection;
 
         // Track selected folder for Run button (TreeView selection can be unreliable on button click)
         private string? _selectedFolderName;
@@ -3886,46 +3890,15 @@ namespace SSH_Helper
             if (_suppressPresetSelectionChange || e.Node == null)
                 return;
 
-            var tag = e.Node.Tag as PresetNodeTag;
-            if (tag == null)
-                return;
-
-            // If a folder is selected, clear the editor to avoid confusion
-            if (tag.IsFolder)
-            {
-                HandleFolderSelection(
-                    tag.Name,
-                    onCancel: () =>
-                    {
-                        _suppressPresetSelectionChange = true;
-                        SelectPresetByName(_activePresetName);
-                        _suppressPresetSelectionChange = false;
-                    });
-                return;
-            }
-
-            string newPresetName = tag.Name;
-
-            if (!string.IsNullOrEmpty(_activePresetName) &&
-                !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
-                IsPresetDirty())
-            {
-                if (!TryResolvePendingPresetChanges(() =>
-                    {
-                        _suppressPresetSelectionChange = true;
-                        SelectPresetByName(_activePresetName);
-                        _suppressPresetSelectionChange = false;
-                    }))
+            TryApplySelectedPresetNode(
+                trvPresets,
+                e.Node,
+                onCancel: () =>
                 {
-                    return;
-                }
-            }
-
-            var preset = _presetManager.Get(newPresetName);
-            if (preset != null)
-            {
-                LoadPresetIntoEditor(newPresetName, preset);
-            }
+                    _suppressPresetSelectionChange = true;
+                    SelectPresetByName(_activePresetName);
+                    _suppressPresetSelectionChange = false;
+                });
         }
 
         private void trvPresets_AfterCollapse(object? sender, TreeViewEventArgs e)
@@ -4467,15 +4440,43 @@ namespace SSH_Helper
                 presetsTabHeaderStrip.SelectedIndex = presetsTabControl.SelectedIndex;
             }
 
+            if (_restoringPresetsTabSelection)
+            {
+                return;
+            }
+
+            var previousTabIndex = _lastPresetsTabIndex;
+
             if (presetsTabControl.SelectedTab == tabFavorites)
             {
                 RefreshFavoritesList();
+
+                if (!TryApplySelectedPresetNode(
+                        trvFavorites,
+                        onCancel: () => RestorePresetTabSelection(previousTabIndex)))
+                {
+                    return;
+                }
             }
+            else if (presetsTabControl.SelectedTab == tabPresets)
+            {
+                if (!TryApplySelectedPresetNode(
+                        trvPresets,
+                        onCancel: () => RestorePresetTabSelection(previousTabIndex)))
+                {
+                    return;
+                }
+            }
+
+            _lastPresetsTabIndex = presetsTabControl.SelectedIndex;
         }
 
         private void RefreshFavoritesList(string? filterText = null)
         {
             var filter = string.IsNullOrWhiteSpace(filterText) ? null : filterText.Trim();
+            var previousSelection = CaptureSelectedPresetNodeTag(trvFavorites) ?? ClonePresetNodeTag(_lastFavoritesTreeSelection);
+            var previousSuppressSelectionChange = _suppressPresetSelectionChange;
+            _suppressPresetSelectionChange = true;
             trvFavorites.Nodes.Clear();
 
             // Get favorite folders
@@ -4501,6 +4502,8 @@ namespace SSH_Helper
             {
                 lblFavoritesEmpty.Visible = true;
                 trvFavorites.Visible = false;
+                _lastFavoritesTreeSelection = null;
+                _suppressPresetSelectionChange = previousSuppressSelectionChange;
                 return;
             }
 
@@ -4551,6 +4554,22 @@ namespace SSH_Helper
                     trvFavorites.Nodes.Add(node);
                 }
             }
+
+            if (previousSelection != null)
+            {
+                var restoredNode = FindNodeByTag(trvFavorites.Nodes, previousSelection.Name, previousSelection.IsFolder);
+                if (restoredNode != null)
+                {
+                    trvFavorites.SelectedNode = restoredNode;
+                    _lastFavoritesTreeSelection = ClonePresetNodeTag(previousSelection);
+                }
+                else
+                {
+                    _lastFavoritesTreeSelection = null;
+                }
+            }
+
+            _suppressPresetSelectionChange = previousSuppressSelectionChange;
         }
 
         private static string BuildFavoriteKey(PresetNodeTag tag) =>
@@ -4625,35 +4644,7 @@ namespace SSH_Helper
             if (_suppressPresetSelectionChange || e.Node == null)
                 return;
 
-            var tag = e.Node.Tag as PresetNodeTag;
-            if (tag == null)
-                return;
-
-            // Handle folder selection
-            if (tag.IsFolder)
-            {
-                HandleFolderSelection(tag.Name);
-                return;
-            }
-
-            string newPresetName = tag.Name;
-
-            // Check for unsaved changes
-            if (!string.IsNullOrEmpty(_activePresetName) &&
-                !string.Equals(newPresetName, _activePresetName, StringComparison.Ordinal) &&
-                IsPresetDirty())
-            {
-                if (!TryResolvePendingPresetChanges())
-                {
-                    return;
-                }
-            }
-
-            var preset = _presetManager.Get(newPresetName);
-            if (preset != null)
-            {
-                LoadPresetIntoEditor(newPresetName, preset);
-            }
+            TryApplySelectedPresetNode(trvFavorites, e.Node);
         }
 
         private void trvFavorites_MouseDown(object? sender, MouseEventArgs e)
@@ -7171,6 +7162,7 @@ namespace SSH_Helper
         private void InitializePresetsTabChrome()
         {
             presetsTabHeaderStrip.SelectedIndex = presetsTabControl.SelectedIndex;
+            _lastPresetsTabIndex = presetsTabControl.SelectedIndex;
             presetsTabViewportPanel.Resize += (_, _) => UpdatePresetsTabViewportLayout();
             presetsTabControl.HandleCreated += (_, _) => UpdatePresetsTabViewportLayout();
             presetsTabControl.FontChanged += (_, _) => UpdatePresetsTabViewportLayout();
@@ -8847,6 +8839,141 @@ namespace SSH_Helper
             return null;
         }
 
+        private static PresetNodeTag? CaptureSelectedPresetNodeTag(TreeView treeView)
+        {
+            if (treeView.SelectedNode?.Tag is not PresetNodeTag tag)
+            {
+                return null;
+            }
+
+            return ClonePresetNodeTag(tag);
+        }
+
+        private static PresetNodeTag? ClonePresetNodeTag(PresetNodeTag? tag)
+        {
+            if (tag == null)
+            {
+                return null;
+            }
+
+            return new PresetNodeTag
+            {
+                IsFolder = tag.IsFolder,
+                Name = tag.Name
+            };
+        }
+
+        private PresetNodeTag? GetRememberedPresetTreeSelection(TreeView treeView)
+        {
+            if (ReferenceEquals(treeView, trvFavorites))
+            {
+                return ClonePresetNodeTag(_lastFavoritesTreeSelection);
+            }
+
+            if (ReferenceEquals(treeView, trvPresets))
+            {
+                return ClonePresetNodeTag(_lastPresetsTreeSelection);
+            }
+
+            return null;
+        }
+
+        private void RememberPresetTreeSelection(TreeView treeView, PresetNodeTag? tag)
+        {
+            var clone = ClonePresetNodeTag(tag);
+            if (ReferenceEquals(treeView, trvFavorites))
+            {
+                _lastFavoritesTreeSelection = clone;
+            }
+            else if (ReferenceEquals(treeView, trvPresets))
+            {
+                _lastPresetsTreeSelection = clone;
+            }
+        }
+
+        private bool TryApplySelectedPresetNode(TreeView treeView, Action? onCancel = null)
+        {
+            return TryApplySelectedPresetNode(treeView, treeView.SelectedNode, onCancel);
+        }
+
+        private bool TryApplySelectedPresetNode(TreeView treeView, TreeNode? node, Action? onCancel = null)
+        {
+            var tag = node?.Tag as PresetNodeTag ?? GetRememberedPresetTreeSelection(treeView);
+            if (tag == null)
+            {
+                return true;
+            }
+
+            if (!TryApplySelectedPresetNodeTag(tag, onCancel))
+            {
+                return false;
+            }
+
+            RememberPresetTreeSelection(treeView, tag);
+            return true;
+        }
+
+        private bool TryApplySelectedPresetNodeTag(PresetNodeTag tag, Action? onCancel = null)
+        {
+            if (tag.IsFolder)
+            {
+                if (string.IsNullOrEmpty(_activePresetName) &&
+                    string.Equals(_selectedFolderName, tag.Name, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                HandleFolderSelection(tag.Name, onCancel);
+                return string.IsNullOrEmpty(_activePresetName) &&
+                    string.Equals(_selectedFolderName, tag.Name, StringComparison.Ordinal);
+            }
+
+            if (string.Equals(_activePresetName, tag.Name, StringComparison.Ordinal) &&
+                string.IsNullOrEmpty(_selectedFolderName))
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrEmpty(_activePresetName) &&
+                !string.Equals(tag.Name, _activePresetName, StringComparison.Ordinal) &&
+                IsPresetDirty())
+            {
+                if (!TryResolvePendingPresetChanges(onCancel))
+                {
+                    return false;
+                }
+            }
+
+            var preset = _presetManager.Get(tag.Name);
+            if (preset == null)
+            {
+                return false;
+            }
+
+            LoadPresetIntoEditor(tag.Name, preset);
+            return true;
+        }
+
+        private void RestorePresetTabSelection(int tabIndex)
+        {
+            if (tabIndex < 0 ||
+                tabIndex >= presetsTabControl.TabCount ||
+                presetsTabControl.SelectedIndex == tabIndex)
+            {
+                return;
+            }
+
+            _restoringPresetsTabSelection = true;
+            try
+            {
+                presetsTabControl.SelectedIndex = tabIndex;
+            }
+            finally
+            {
+                _restoringPresetsTabSelection = false;
+            }
+        }
+
         private void SelectPresetByName(string? presetName, bool ensureVisible = true)
         {
             if (string.IsNullOrEmpty(presetName))
@@ -8871,6 +8998,7 @@ namespace SSH_Helper
                     targetNode.EnsureVisible();
                 }
                 _suppressExpandCollapseEvents = false;
+                RememberPresetTreeSelection(trvPresets, targetNode.Tag as PresetNodeTag);
             }
         }
 
@@ -8902,6 +9030,7 @@ namespace SSH_Helper
                     targetNode.EnsureVisible();
                 }
                 _suppressExpandCollapseEvents = false;
+                RememberPresetTreeSelection(trvPresets, targetNode.Tag as PresetNodeTag);
             }
         }
 

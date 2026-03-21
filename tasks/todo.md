@@ -1,5 +1,20 @@
 # TODO
 
+## 132. Restore Presets/Favorites selection sync across tab switches
+- [x] 132.1 Add failing WinForms coverage for switching between Presets and Favorites while each tab keeps its own selected preset.
+- [x] 132.2 Update `Form1` so tab changes re-sync the commands pane to the active tab selection and Favorites rebuilds preserve their selected node.
+- [x] 132.3 Run focused UI verification, broader regression verification, and capture the review outcome below.
+
+### 132 Review
+- Root cause was split across two gaps in `Form1`: switching between `Presets` and `Favorites` only synchronized the visible tab/header state, not the commands editor, and `RefreshFavoritesList()` rebuilt the Favorites tree from scratch without restoring its selected node.
+- Added `SSH_Helper.Tests/UI/Form1PresetTabSelectionTests.cs` with a focused WinForms regression that loads a temp config snapshot, selects different presets on each tab, and proves two contracts: returning to `Presets` reloads the preset already selected there, and returning to `Favorites` restores the previously selected favorite and its commands.
+- `Form1.cs` now routes both tree selection handlers and tab switches through one shared preset/folder selection application path, including the existing dirty-check behavior. The form also remembers the last selected node per tree so tab changes do not depend on `TreeView.SelectedNode` surviving a hide/show cycle.
+- `RefreshFavoritesList()` now preserves the previously selected favorite across tree rebuilds and restores it quietly before the active-tab sync reapplies the corresponding commands in the editor.
+- Focused red verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTabSelectionTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tab-selection-red\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tab-selection-red\obj\`` failed as intended on the original bug (`editor.Text` stayed on `echo beta` after switching back to `Presets`).
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTabSelectionTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tab-selection-green\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tab-selection-green\obj\`` passed (`1` passed, `0` failed).
+- Broader preset/UI verification passed with `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTabSelectionTests|FullyQualifiedName~Form1BufferedSurfacesTests|FullyQualifiedName~PresetTreeSelectionGuardTests|FullyQualifiedName~PresetTreeViewportRestorerTests|FullyQualifiedName~PresetTreeDeleteMutationTests|FullyQualifiedName~PresetDeletionSelectionResolverTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tab-selection-ui\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tab-selection-ui\obj\`` (`22` passed, `0` failed).
+- `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\preset-tab-selection-build\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tab-selection-build\obj\`` passed. The build still reports the existing `MSB3277` WebView2/`WindowsBase` warnings and the existing `xUnit1031` warnings from `ExpressionParserTests`.
+
 ## 131. Replace visible Presets/Favorites native tab chrome with a buffered custom header
 - [x] 131.1 Add failing coverage that requires the presets area to use a dedicated buffered header strip and a clipped viewport for the underlying native tab control.
 - [x] 131.2 Keep `presetsTabControl` as the content/state host, but hide its native header from the visible surface and route the visible `Presets` / `Favorites` switching through a custom buffered header strip.
