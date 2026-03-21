@@ -189,6 +189,7 @@ namespace SSH_Helper
         private bool _restoringPresetsTabSelection;
         private PresetNodeTag? _lastPresetsTreeSelection;
         private PresetNodeTag? _lastFavoritesTreeSelection;
+        private Func<string, string, string, string>? _inputBoxPromptOverrideForTests = null;
 
         // Track selected folder for Run button (TreeView selection can be unreliable on button click)
         private string? _selectedFolderName;
@@ -424,14 +425,40 @@ namespace SSH_Helper
             if (selectedNode == null)
                 return;
 
-            // Preserve saved collapse state: do not auto-expand collapsed branches.
-            if (HasCollapsedAncestor(selectedNode))
+            EnsureTreeNodeFullyVisible(trvPresets, selectedNode);
+        }
+
+        private void EnsureTreeNodeFullyVisible(TreeView treeView, TreeNode node)
+        {
+            if (treeView.IsDisposed || node.TreeView != treeView)
                 return;
 
-            if (!selectedNode.IsVisible)
+            // Preserve saved collapse state: do not auto-expand collapsed branches.
+            if (HasCollapsedAncestor(node))
+                return;
+
+            treeView.Update();
+            if (IsTreeNodeFullyVisible(treeView, node))
+                return;
+
+            var previousSuppressExpand = _suppressExpandCollapseEvents;
+            _suppressExpandCollapseEvents = true;
+            try
             {
-                selectedNode.EnsureVisible();
+                node.EnsureVisible();
             }
+            finally
+            {
+                _suppressExpandCollapseEvents = previousSuppressExpand;
+            }
+        }
+
+        private static bool IsTreeNodeFullyVisible(TreeView treeView, TreeNode node)
+        {
+            var bounds = node.Bounds;
+            return bounds.Height > 0 &&
+                bounds.Top >= 0 &&
+                bounds.Bottom <= treeView.ClientSize.Height;
         }
 
         private static bool HasCollapsedAncestor(TreeNode node)
@@ -6138,9 +6165,30 @@ namespace SSH_Helper
                     return;
                 }
 
+                var preActionExpandState = CapturePresetTreeExpandState();
+                var movingNode = FindPresetNodeByName(trvPresets.Nodes, presetName);
                 _presetManager.MovePresetToFolder(presetName, null);
-                RefreshPresetList();
-                SelectPresetByName(presetName);
+
+                bool usedIncrementalMutation = false;
+                if (CanMutatePresetTreeIncrementally() && movingNode != null)
+                {
+                    ApplyIncrementalPresetTreeMutation(
+                        () => { usedIncrementalMutation = TryReinsertExistingPresetNodeIncrementally(movingNode, presetName); },
+                        () => movingNode);
+                }
+
+                if (!usedIncrementalMutation)
+                {
+                    RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                    SelectPresetByName(presetName, ensureVisible: false);
+                }
+
+                if (ShouldRefreshFavoritesForPreset(presetName, currentFolder))
+                {
+                    RefreshFavoritesListPreservingCurrentFilter();
+                }
+
+                EnsurePresetLoadedInEditor(presetName);
                 ClearPresetDeleteUndoHistory();
             };
             ctxMoveToFolder.DropDownItems.Add(rootItem);
@@ -6175,9 +6223,30 @@ namespace SSH_Helper
                         return;
                     }
 
+                    var preActionExpandState = CapturePresetTreeExpandState();
+                    var movingNode = FindPresetNodeByName(trvPresets.Nodes, presetName);
                     _presetManager.MovePresetToFolder(presetName, targetPath);
-                    RefreshPresetList();
-                    SelectPresetByName(presetName);
+
+                    bool usedIncrementalMutation = false;
+                    if (CanMutatePresetTreeIncrementally() && movingNode != null)
+                    {
+                        ApplyIncrementalPresetTreeMutation(
+                            () => { usedIncrementalMutation = TryReinsertExistingPresetNodeIncrementally(movingNode, presetName); },
+                            () => movingNode);
+                    }
+
+                    if (!usedIncrementalMutation)
+                    {
+                        RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                        SelectPresetByName(presetName, ensureVisible: false);
+                    }
+
+                    if (ShouldRefreshFavoritesForPreset(presetName, currentFolder))
+                    {
+                        RefreshFavoritesListPreservingCurrentFilter();
+                    }
+
+                    EnsurePresetLoadedInEditor(presetName);
                     ClearPresetDeleteUndoHistory();
                 };
 
@@ -6208,7 +6277,7 @@ namespace SSH_Helper
                 ? $"Enter a name for the new subfolder in '{parentPath}':"
                 : "Enter a name for the new folder (use / for nested paths, e.g., 'Network/Cisco'):";
 
-            string folderName = Microsoft.VisualBasic.Interaction.InputBox(
+            string folderName = ShowInputBox(
                 prompt,
                 "New Folder",
                 "New Folder");
@@ -6224,7 +6293,18 @@ namespace SSH_Helper
 
             if (_presetManager.CreateFolder(fullPath))
             {
-                RefreshPresetList();
+                bool usedIncrementalMutation = false;
+                if (CanMutatePresetTreeIncrementally())
+                {
+                    ApplyIncrementalPresetTreeMutation(
+                        () => { usedIncrementalMutation = TryInsertFolderNodeIncrementally(fullPath, out _); });
+                }
+
+                if (!usedIncrementalMutation)
+                {
+                    RefreshPresetList();
+                }
+
                 UpdateStatusBar($"Folder '{fullPath}' created");
                 ClearPresetDeleteUndoHistory();
             }
@@ -7892,8 +7972,24 @@ namespace SSH_Helper
             _manualPresetOrder.Clear();
             _manualPresetOrder.AddRange(restoredConfig.ManualPresetOrder);
 
-            RefreshPresetList();
-            RefreshFavoritesList();
+            bool usedIncrementalMutation = false;
+            TreeNode? restoredNode = null;
+            if (!undoResult.IsFolder && CanMutatePresetTreeIncrementally())
+            {
+                ApplyIncrementalPresetTreeMutation(
+                    () => { usedIncrementalMutation = TryInsertPresetNodeIncrementally(undoResult.TargetName, out restoredNode); },
+                    () => restoredNode);
+            }
+
+            if (!usedIncrementalMutation)
+            {
+                RefreshPresetListPreservingCurrentFilter();
+            }
+
+            if (undoResult.IsFolder || ShouldRefreshFavoritesForPreset(undoResult.TargetName))
+            {
+                RefreshFavoritesListPreservingCurrentFilter();
+            }
 
             if (presetsTabControl.SelectedTab != tabPresets)
             {
@@ -7910,7 +8006,11 @@ namespace SSH_Helper
                 }
                 else
                 {
-                    SelectPresetByName(undoResult.TargetName);
+                    if (!usedIncrementalMutation)
+                    {
+                        SelectPresetByName(undoResult.TargetName, ensureVisible: false);
+                    }
+
                     var restoredPreset = _presetManager.Get(undoResult.TargetName);
                     if (restoredPreset != null)
                     {
@@ -8035,6 +8135,10 @@ namespace SSH_Helper
                 _presetManager.Get(originalPresetName) != null;
             bool nameChanged = hasActivePreset &&
                 !string.Equals(presetName, originalPresetName, StringComparison.Ordinal);
+            string? originalFolder = hasActivePreset && !string.IsNullOrWhiteSpace(originalPresetName)
+                ? _presetManager.Get(originalPresetName!)?.Folder
+                : null;
+            TreeNode? renamedNode = null;
 
             var action = selectedAction ?? ShowPresetSavePrompt(
                 presetName,
@@ -8063,6 +8167,8 @@ namespace SSH_Helper
                         DialogTheme.Show(this, "Unable to rename preset.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return false;
                     }
+
+                    renamedNode = FindPresetNodeByName(trvPresets.Nodes, originalPresetName!);
 
                     int orderIndex = _manualPresetOrder.IndexOf(originalPresetName!);
                     if (orderIndex >= 0)
@@ -8125,16 +8231,44 @@ namespace SSH_Helper
                 // Align active preset before programmatic selection to avoid false
                 // unsaved prompts in AfterSelect handlers.
                 _activePresetName = presetName;
-                RefreshPresetList(expandStatesOverride: preActionExpandState);
 
-                _suppressPresetSelectionChange = true;
-                try
+                bool usedIncrementalMutation = false;
+                TreeNode? mutatedNode = null;
+                if (CanMutatePresetTreeIncrementally())
                 {
-                    SelectPresetByName(presetName, ensureVisible: false);
+                    if (isNew)
+                    {
+                        ApplyIncrementalPresetTreeMutation(
+                            () => { usedIncrementalMutation = TryInsertPresetNodeIncrementally(presetName, out mutatedNode); },
+                            () => mutatedNode);
+                    }
+                    else if (nameChanged && action == PresetSaveImpactAction.RenameExisting && renamedNode != null)
+                    {
+                        ApplyIncrementalPresetTreeMutation(
+                            () => { usedIncrementalMutation = TryReinsertExistingPresetNodeIncrementally(renamedNode, presetName); },
+                            () => renamedNode);
+                    }
                 }
-                finally
+
+                if (!usedIncrementalMutation)
                 {
-                    _suppressPresetSelectionChange = false;
+                    RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+
+                    _suppressPresetSelectionChange = true;
+                    try
+                    {
+                        SelectPresetByName(presetName, ensureVisible: false);
+                    }
+                    finally
+                    {
+                        _suppressPresetSelectionChange = false;
+                    }
+                }
+
+                if ((isNew || (nameChanged && action == PresetSaveImpactAction.RenameExisting)) &&
+                    ShouldRefreshFavoritesForPreset(presetName, originalFolder))
+                {
+                    RefreshFavoritesListPreservingCurrentFilter();
                 }
             }
 
@@ -8156,7 +8290,7 @@ namespace SSH_Helper
                 }
             }
 
-            string presetName = Microsoft.VisualBasic.Interaction.InputBox(
+            string presetName = ShowInputBox(
                 "Enter the name of the new preset:",
                 "Add Preset",
                 "New Preset");
@@ -8201,17 +8335,31 @@ namespace SSH_Helper
                 _manualPresetOrder.Add(presetName);
             }
 
-            RefreshPresetList();
-            SelectPresetByName(presetName);
+            bool usedIncrementalMutation = false;
+            TreeNode? insertedNode = null;
+            if (CanMutatePresetTreeIncrementally())
+            {
+                ApplyIncrementalPresetTreeMutation(
+                    () => { usedIncrementalMutation = TryInsertPresetNodeIncrementally(presetName, out insertedNode); },
+                    () => insertedNode);
+            }
 
-            // Load the new preset into the editor
-            txtPreset.Text = presetName;
-            txtCommand.Clear();
-            txtTimeoutHeader.Text = string.Empty;
-            _activePresetName = presetName;
-            _selectedFolderName = null;
-            UpdateRunButtonText();
-            UpdatePresetHeaderIndicator();
+            if (!usedIncrementalMutation)
+            {
+                RefreshPresetListPreservingCurrentFilter();
+                SelectPresetByName(presetName, ensureVisible: true);
+            }
+            else if (insertedNode != null)
+            {
+                EnsureTreeNodeFullyVisible(trvPresets, insertedNode);
+            }
+
+            if (ShouldRefreshFavoritesForPreset(presetName))
+            {
+                RefreshFavoritesListPreservingCurrentFilter();
+            }
+
+            EnsurePresetLoadedInEditor(presetName);
             ClearPresetDeleteUndoHistory();
         }
 
@@ -8301,7 +8449,7 @@ namespace SSH_Helper
             var preActionExpandState = CapturePresetTreeExpandState();
             string suggested = _presetManager.GetUniqueName(sourceName + "_Copy");
 
-            string newName = Microsoft.VisualBasic.Interaction.InputBox(
+            string newName = ShowInputBox(
                 $"Enter name for the copied preset (from '{sourceName}'):",
                 "Copy Preset",
                 suggested);
@@ -8338,18 +8486,27 @@ namespace SSH_Helper
                     _manualPresetOrder.Add(finalName);
                 }
 
-                RefreshPresetList(expandStatesOverride: preActionExpandState);
-                SelectPresetByName(finalName, ensureVisible: false);
-
-                if (!string.Equals(_activePresetName, finalName, StringComparison.Ordinal))
+                bool usedIncrementalMutation = false;
+                TreeNode? duplicatedNode = null;
+                if (CanMutatePresetTreeIncrementally())
                 {
-                    var preset = _presetManager.Get(finalName);
-                    if (preset != null)
-                    {
-                        LoadPresetIntoEditor(finalName, preset);
-                    }
+                    ApplyIncrementalPresetTreeMutation(
+                        () => { usedIncrementalMutation = TryInsertPresetNodeIncrementally(finalName, out duplicatedNode); },
+                        () => duplicatedNode);
                 }
 
+                if (!usedIncrementalMutation)
+                {
+                    RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                    SelectPresetByName(finalName, ensureVisible: false);
+                }
+
+                if (ShouldRefreshFavoritesForPreset(finalName, sourcePreset.Folder))
+                {
+                    RefreshFavoritesListPreservingCurrentFilter();
+                }
+
+                EnsurePresetLoadedInEditor(finalName);
                 ClearPresetDeleteUndoHistory();
             }
             catch (Exception ex)
@@ -8364,20 +8521,22 @@ namespace SSH_Helper
             if (string.IsNullOrWhiteSpace(selectedPreset))
                 return;
 
-            string newName = Microsoft.VisualBasic.Interaction.InputBox(
+            string newName = ShowInputBox(
                 $"Enter a new name for the preset '{selectedPreset}':",
                 "Rename Preset",
                 selectedPreset);
 
             if (string.IsNullOrEmpty(newName) || newName == selectedPreset) return;
 
+            var renamedNode = FindPresetNodeByName(trvPresets.Nodes, selectedPreset);
+            var preActionExpandState = CapturePresetTreeExpandState();
+            var originalFolder = _presetManager.Get(selectedPreset)?.Folder;
+
             if (!_presetManager.Rename(selectedPreset, newName))
             {
                 DialogTheme.Show(this, "This preset name already exists.", "Rename Preset Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
-
-            var preActionExpandState = CapturePresetTreeExpandState();
 
             // Update manual order list
             int orderIndex = _manualPresetOrder.IndexOf(selectedPreset);
@@ -8386,8 +8545,25 @@ namespace SSH_Helper
                 _manualPresetOrder[orderIndex] = newName;
             }
 
-            RefreshPresetList(expandStatesOverride: preActionExpandState);
-            SelectPresetByName(newName, ensureVisible: false);
+            bool usedIncrementalMutation = false;
+            if (CanMutatePresetTreeIncrementally() && renamedNode != null)
+            {
+                ApplyIncrementalPresetTreeMutation(
+                    () => { usedIncrementalMutation = TryReinsertExistingPresetNodeIncrementally(renamedNode, newName); },
+                    () => renamedNode);
+            }
+
+            if (!usedIncrementalMutation)
+            {
+                RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                SelectPresetByName(newName, ensureVisible: false);
+            }
+
+            if (ShouldRefreshFavoritesForPreset(newName, originalFolder))
+            {
+                RefreshFavoritesListPreservingCurrentFilter();
+            }
+
             txtPreset.Text = newName;
             _activePresetName = newName;
             UpdatePresetHeaderIndicator();
@@ -8433,10 +8609,10 @@ namespace SSH_Helper
                 }
                 else
                 {
-                    RefreshPresetList(expandStatesOverride: preActionExpandState);
+                    RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
                 }
 
-                RefreshFavoritesList();
+                RefreshFavoritesListPreservingCurrentFilter();
 
                 if (!string.IsNullOrEmpty(selectionTargetPresetName))
                 {
@@ -8495,7 +8671,7 @@ namespace SSH_Helper
 
         private void ImportPreset()
         {
-            string input = Microsoft.VisualBasic.Interaction.InputBox(
+            string input = ShowInputBox(
                 "Paste the encoded preset string:\r\nFormat: <name>_<encoded>",
                 "Import Preset",
                 "");
@@ -8508,18 +8684,27 @@ namespace SSH_Helper
 
                 string finalName = _presetManager.Import(input, defaultTimeout);
 
-                RefreshPresetList();
-                SelectPresetByName(finalName, ensureVisible: false);
-
-                if (!string.Equals(_activePresetName, finalName, StringComparison.Ordinal))
+                bool usedIncrementalMutation = false;
+                TreeNode? importedNode = null;
+                if (CanMutatePresetTreeIncrementally())
                 {
-                    var preset = _presetManager.Get(finalName);
-                    if (preset != null)
-                    {
-                        LoadPresetIntoEditor(finalName, preset);
-                    }
+                    ApplyIncrementalPresetTreeMutation(
+                        () => { usedIncrementalMutation = TryInsertPresetNodeIncrementally(finalName, out importedNode); },
+                        () => importedNode);
                 }
 
+                if (!usedIncrementalMutation)
+                {
+                    RefreshPresetListPreservingCurrentFilter();
+                    SelectPresetByName(finalName, ensureVisible: false);
+                }
+
+                if (ShouldRefreshFavoritesForPreset(finalName))
+                {
+                    RefreshFavoritesListPreservingCurrentFilter();
+                }
+
+                EnsurePresetLoadedInEditor(finalName);
                 DialogTheme.Show(this, $"Preset '{finalName}' imported.", "Import Preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 ClearPresetDeleteUndoHistory();
             }
@@ -9087,6 +9272,348 @@ namespace SSH_Helper
             }
         }
 
+        private string ShowInputBox(string prompt, string title, string defaultResponse)
+        {
+            var promptOverride = _inputBoxPromptOverrideForTests;
+            if (promptOverride != null)
+            {
+                return promptOverride(prompt, title, defaultResponse);
+            }
+
+            return Microsoft.VisualBasic.Interaction.InputBox(prompt, title, defaultResponse);
+        }
+
+        private bool CanMutatePresetTreeIncrementally()
+        {
+            return string.IsNullOrWhiteSpace(_activePresetFilter) && !trvPresets.IsDisposed;
+        }
+
+        private string BuildPresetTreeNodeText(string presetName)
+        {
+            var preset = _presetManager.Get(presetName);
+            return preset?.IsFavorite == true ? $"{StarIcon} {presetName}" : presetName;
+        }
+
+        private string BuildFolderTreeNodeText(string folderPath)
+        {
+            var folderName = FolderPathUtility.GetFolderName(folderPath);
+            var folderInfo = _presetManager.Folders.GetValueOrDefault(folderPath);
+            return folderInfo?.IsFavorite == true
+                ? $"{StarIcon} {FolderIcon} {folderName}"
+                : $"{FolderIcon} {folderName}";
+        }
+
+        private TreeNode CreatePresetTreeNode(string presetName)
+        {
+            return new TreeNode(BuildPresetTreeNodeText(presetName))
+            {
+                Tag = new PresetNodeTag { IsFolder = false, Name = presetName }
+            };
+        }
+
+        private TreeNode CreateFolderTreeNode(string folderPath)
+        {
+            return new TreeNode(BuildFolderTreeNodeText(folderPath))
+            {
+                Tag = new PresetNodeTag { IsFolder = true, Name = folderPath }
+            };
+        }
+
+        private void UpdatePresetTreeNodeDisplay(TreeNode node)
+        {
+            if (node.Tag is not PresetNodeTag tag)
+            {
+                return;
+            }
+
+            node.Text = tag.IsFolder
+                ? BuildFolderTreeNodeText(tag.Name)
+                : BuildPresetTreeNodeText(tag.Name);
+        }
+
+        private void ApplyIncrementalPresetTreeMutation(Action mutate, Func<TreeNode?>? preferredSelectionNodeResolver = null)
+        {
+            var topNodeBefore = PresetTreeViewportRestorer.Capture(trvPresets.TopNode);
+            var selectionBefore = CaptureSelectedPresetNodeTag(trvPresets) ?? ClonePresetNodeTag(_lastPresetsTreeSelection);
+            var previousSuppressSelection = _suppressPresetSelectionChange;
+            var previousSuppressExpand = _suppressExpandCollapseEvents;
+
+            _suppressPresetSelectionChange = true;
+            _suppressExpandCollapseEvents = true;
+            PresetNodeTag? selectionTag = null;
+            trvPresets.BeginUpdate();
+            try
+            {
+                mutate();
+
+                var preferredSelectionNode = preferredSelectionNodeResolver?.Invoke();
+                TreeNode? selectionNode = null;
+                if (preferredSelectionNode != null && preferredSelectionNode.TreeView == trvPresets)
+                {
+                    selectionNode = preferredSelectionNode;
+                }
+                else if (selectionBefore != null)
+                {
+                    selectionNode = FindNodeByTag(trvPresets.Nodes, selectionBefore.Name, selectionBefore.IsFolder);
+                }
+
+                selectionTag = selectionNode?.Tag as PresetNodeTag ?? selectionBefore;
+                if (selectionNode != null)
+                {
+                    trvPresets.SelectedNode = selectionNode;
+                }
+
+                RememberPresetTreeSelection(trvPresets, selectionTag);
+                PresetTreeViewportRestorer.TryRestoreTopNode(
+                    trvPresets,
+                    trvPresets.Nodes,
+                    topNodeBefore,
+                    selectionTag);
+            }
+            finally
+            {
+                trvPresets.EndUpdate();
+                _suppressExpandCollapseEvents = previousSuppressExpand;
+                _suppressPresetSelectionChange = previousSuppressSelection;
+            }
+
+            PresetTreeViewportRestorer.TryRestoreTopNode(
+                trvPresets,
+                trvPresets.Nodes,
+                topNodeBefore,
+                selectionTag);
+        }
+
+        private bool TryInsertPresetNodeIncrementally(string presetName, out TreeNode? insertedNode)
+        {
+            insertedNode = null;
+            var preset = _presetManager.Get(presetName);
+            if (preset == null)
+            {
+                return false;
+            }
+
+            var parentNode = string.IsNullOrEmpty(preset.Folder)
+                ? null
+                : FindNodeByTag(trvPresets.Nodes, preset.Folder, isFolder: true);
+            if (!string.IsNullOrEmpty(preset.Folder) && parentNode == null)
+            {
+                return false;
+            }
+
+            var node = CreatePresetTreeNode(presetName);
+            InsertPresetNode(node, presetName, preset.Folder, _configService.GetCurrent());
+            insertedNode = node;
+            return true;
+        }
+
+        private bool TryInsertFolderNodeIncrementally(string folderPath, out TreeNode? insertedNode)
+        {
+            insertedNode = null;
+            var parentPath = FolderPathUtility.GetParentPath(folderPath);
+            var parentNode = string.IsNullOrEmpty(parentPath)
+                ? null
+                : FindNodeByTag(trvPresets.Nodes, parentPath, isFolder: true);
+            if (!string.IsNullOrEmpty(parentPath) && parentNode == null)
+            {
+                return false;
+            }
+
+            var node = CreateFolderTreeNode(folderPath);
+            InsertFolderNode(node, folderPath, _configService.GetCurrent());
+            insertedNode = node;
+            return true;
+        }
+
+        private bool TryReinsertExistingPresetNodeIncrementally(TreeNode node, string presetName)
+        {
+            var preset = _presetManager.Get(presetName);
+            if (preset == null)
+            {
+                return false;
+            }
+
+            var parentNode = string.IsNullOrEmpty(preset.Folder)
+                ? null
+                : FindNodeByTag(trvPresets.Nodes, preset.Folder, isFolder: true);
+            if (!string.IsNullOrEmpty(preset.Folder) && parentNode == null)
+            {
+                return false;
+            }
+
+            if (node.Tag is PresetNodeTag tag)
+            {
+                tag.Name = presetName;
+                tag.IsFolder = false;
+            }
+
+            DetachTreeNode(node);
+            UpdatePresetTreeNodeDisplay(node);
+            InsertPresetNode(node, presetName, preset.Folder, _configService.GetCurrent());
+            return true;
+        }
+
+        private void InsertPresetNode(TreeNode node, string presetName, string? folder, AppConfiguration config)
+        {
+            var parentNode = string.IsNullOrEmpty(folder)
+                ? null
+                : FindNodeByTag(trvPresets.Nodes, folder, isFolder: true);
+            var targetNodes = parentNode?.Nodes ?? trvPresets.Nodes;
+            var orderedPresets = GetSortedPresetsInFolder(folder, config).ToList();
+            var desiredPresetIndex = orderedPresets.IndexOf(presetName);
+            if (desiredPresetIndex < 0)
+            {
+                desiredPresetIndex = orderedPresets.Count;
+            }
+
+            var insertIndex = ResolvePresetInsertIndex(targetNodes, desiredPresetIndex, insideFolder: parentNode != null);
+            targetNodes.Insert(insertIndex, node);
+        }
+
+        private void InsertFolderNode(TreeNode node, string folderPath, AppConfiguration config)
+        {
+            var parentPath = FolderPathUtility.GetParentPath(folderPath);
+            var parentNode = string.IsNullOrEmpty(parentPath)
+                ? null
+                : FindNodeByTag(trvPresets.Nodes, parentPath, isFolder: true);
+            var targetNodes = parentNode?.Nodes ?? trvPresets.Nodes;
+            var siblingFolders = GetSortedFolders(config)
+                .Where(path => string.Equals(FolderPathUtility.GetParentPath(path), parentPath, StringComparison.Ordinal))
+                .ToList();
+            var desiredFolderIndex = siblingFolders.IndexOf(folderPath);
+            if (desiredFolderIndex < 0)
+            {
+                desiredFolderIndex = siblingFolders.Count;
+            }
+
+            var insertIndex = ResolveFolderInsertIndex(targetNodes, desiredFolderIndex, insideFolder: parentNode != null);
+            targetNodes.Insert(insertIndex, node);
+        }
+
+        private static int ResolvePresetInsertIndex(TreeNodeCollection nodes, int desiredPresetIndex, bool insideFolder)
+        {
+            var seenPresets = 0;
+            for (var i = 0; i < nodes.Count; i++)
+            {
+                if (nodes[i].Tag is not PresetNodeTag tag)
+                {
+                    continue;
+                }
+
+                if (!tag.IsFolder)
+                {
+                    if (seenPresets == desiredPresetIndex)
+                    {
+                        return i;
+                    }
+
+                    seenPresets++;
+                    continue;
+                }
+
+                if (insideFolder)
+                {
+                    return i;
+                }
+            }
+
+            return nodes.Count;
+        }
+
+        private static int ResolveFolderInsertIndex(TreeNodeCollection nodes, int desiredFolderIndex, bool insideFolder)
+        {
+            var seenFolders = 0;
+            for (var i = 0; i < nodes.Count; i++)
+            {
+                if (nodes[i].Tag is not PresetNodeTag tag)
+                {
+                    continue;
+                }
+
+                if (tag.IsFolder)
+                {
+                    if (seenFolders == desiredFolderIndex)
+                    {
+                        return i;
+                    }
+
+                    seenFolders++;
+                    continue;
+                }
+
+                if (!insideFolder)
+                {
+                    return i;
+                }
+            }
+
+            return nodes.Count;
+        }
+
+        private static void DetachTreeNode(TreeNode node)
+        {
+            if (node.Parent != null)
+            {
+                node.Parent.Nodes.Remove(node);
+            }
+            else
+            {
+                node.TreeView?.Nodes.Remove(node);
+            }
+        }
+
+        private bool IsFavoriteFolder(string? folderPath)
+        {
+            return !string.IsNullOrEmpty(folderPath) &&
+                _presetManager.Folders.TryGetValue(folderPath, out var folderInfo) &&
+                folderInfo.IsFavorite;
+        }
+
+        private bool ShouldRefreshFavoritesForPreset(string presetName, string? previousFolder = null)
+        {
+            var preset = _presetManager.Get(presetName);
+            if (preset == null)
+            {
+                return IsFavoriteFolder(previousFolder);
+            }
+
+            return preset.IsFavorite ||
+                IsFavoriteFolder(previousFolder) ||
+                IsFavoriteFolder(preset.Folder);
+        }
+
+        private void EnsurePresetLoadedInEditor(string presetName)
+        {
+            if (string.Equals(_activePresetName, presetName, StringComparison.Ordinal) &&
+                string.IsNullOrEmpty(_selectedFolderName))
+            {
+                return;
+            }
+
+            var preset = _presetManager.Get(presetName);
+            if (preset != null)
+            {
+                LoadPresetIntoEditor(presetName, preset);
+            }
+        }
+
+        private void RefreshPresetListPreservingCurrentFilter(
+            bool restoreExpandState = true,
+            IReadOnlyDictionary<string, bool>? expandStatesOverride = null,
+            AppConfiguration? configOverride = null)
+        {
+            RefreshPresetList(
+                restoreExpandState: restoreExpandState,
+                expandStatesOverride: expandStatesOverride,
+                filterText: _activePresetFilter,
+                configOverride: configOverride);
+        }
+
+        private void RefreshFavoritesListPreservingCurrentFilter()
+        {
+            RefreshFavoritesList(_activePresetFilter);
+        }
+
         private static TreeNode? FindNodeByTag(TreeNodeCollection nodes, string name, bool isFolder)
         {
             foreach (TreeNode node in nodes)
@@ -9332,13 +9859,27 @@ namespace SSH_Helper
         {
             var preset = _presetManager.Get(presetName);
             if (preset == null) return;
+            var presetNode = FindPresetNodeByName(trvPresets.Nodes, presetName);
+            var preActionExpandState = CapturePresetTreeExpandState();
 
             preset.IsFavorite = !preset.IsFavorite;
             _presetManager.Save(presetName, preset);
 
-            RefreshPresetList();
-            RefreshFavoritesList();
-            SelectPresetByName(presetName);
+            bool usedIncrementalMutation = false;
+            if (CanMutatePresetTreeIncrementally() && presetNode != null)
+            {
+                ApplyIncrementalPresetTreeMutation(
+                    () => { usedIncrementalMutation = TryReinsertExistingPresetNodeIncrementally(presetNode, presetName); },
+                    () => presetNode);
+            }
+
+            if (!usedIncrementalMutation)
+            {
+                RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                SelectPresetByName(presetName, ensureVisible: false);
+            }
+
+            RefreshFavoritesListPreservingCurrentFilter();
 
             UpdateStatusBar(preset.IsFavorite ? $"'{presetName}' added to favorites" : $"'{presetName}' removed from favorites");
             ClearPresetDeleteUndoHistory();
@@ -9348,13 +9889,31 @@ namespace SSH_Helper
         {
             if (!_presetManager.Folders.TryGetValue(folderName, out var folderInfo))
                 return;
+            var folderNode = FindNodeByTag(trvPresets.Nodes, folderName, isFolder: true);
+            var preActionExpandState = CapturePresetTreeExpandState();
 
             bool newFavoriteState = !folderInfo.IsFavorite;
             _presetManager.SetFolderFavorite(folderName, newFavoriteState);
 
-            RefreshPresetList();
-            RefreshFavoritesList();
-            SelectFolderByName(folderName);
+            bool usedIncrementalMutation = false;
+            if (CanMutatePresetTreeIncrementally() && folderNode != null)
+            {
+                ApplyIncrementalPresetTreeMutation(
+                    () =>
+                    {
+                        UpdatePresetTreeNodeDisplay(folderNode);
+                        usedIncrementalMutation = true;
+                    },
+                    () => folderNode);
+            }
+
+            if (!usedIncrementalMutation)
+            {
+                RefreshPresetListPreservingCurrentFilter(expandStatesOverride: preActionExpandState);
+                SelectFolderByName(folderName, ensureVisible: false);
+            }
+
+            RefreshFavoritesListPreservingCurrentFilter();
 
             UpdateStatusBar(newFavoriteState ? $"Folder '{folderName}' added to favorites" : $"Folder '{folderName}' removed from favorites");
             ClearPresetDeleteUndoHistory();

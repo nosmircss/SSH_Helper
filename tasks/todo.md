@@ -2018,3 +2018,38 @@
   - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PresetManagerDeleteBehaviorTests|FullyQualifiedName~PresetDeleteUndoServiceTests|FullyQualifiedName~Form1DeleteUndoTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-delete-undo-red\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-delete-undo-red\obj\`
   - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-delete-undo-full\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-delete-undo-full\obj\`
   - `openspec validate add-preset-delete-undo --strict --no-interactive`
+
+## 134. Preset tree incremental mutation cleanup
+- [x] 134.1 Add failing WinForms coverage for in-place preset-tree insertion/restore flows, including add preset, single-preset undo delete, and at least one adjacent single-item mutation path.
+- [x] 134.2 Add a focused preset-tree mutation helper layer that can insert, relabel, move, and restore local nodes while preserving viewport and selection memory.
+- [x] 134.3 Route eligible single-item preset-tree operations through the incremental path and keep full rebuilds only for filtered, bulk, or structural folder-tree changes.
+- [x] 134.4 Run focused regression verification, broader preset-tree regression verification, build verification, and capture the review outcome below.
+
+### 134 Review
+- Added focused WinForms regression coverage for add-preset insertion, single-preset undo delete restore, in-place rename mutation, filtered fallback rebuild behavior, and favorite-rename Favorites-tree refresh.
+- Added an internal incremental preset-tree mutation layer in `Form1` that captures/restores `TopNode`, preserves remembered selection, and supports local preset/folder insert, relabel, move, and reinsertion without rebuilding unrelated nodes.
+- Routed local unfiltered mutations through that helper for add preset, save-as-new, duplicate, single import, rename, move-to-folder, empty-folder create, single-preset undo delete, and preset/folder favorite toggles, while keeping filtered, bulk, and structural operations on the rebuild path.
+- Kept Favorites refreshes scoped to actual visibility/order changes, and fixed the rename path so favorite presets or presets inside favorite folders still update the Favorites tree label/order.
+- Verification passed:
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-incremental-green6\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-incremental-green6\obj\`
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1DeleteUndoTests|FullyQualifiedName~PresetTreeDeleteMutationTests|FullyQualifiedName~PresetTreeViewportRestorerTests|FullyQualifiedName~PresetTreeSelectionGuardTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-incremental-regression2\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-incremental-regression2\obj\`
+  - `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\preset-tree-incremental-build2\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-incremental-build2\obj\`
+- Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.
+
+## 135. Fix add-preset visibility and base-environment restore regressions
+- [x] 135.1 Add focused WinForms regressions for add-preset viewport visibility and add-preset base-environment restore behavior.
+- [x] 135.2 Patch the add-preset incremental selection path so a newly inserted preset is fully visible without unnecessary tree rebuilds or viewport jumps.
+- [x] 135.3 Route add-preset editor loading through the normal preset load path so environment restore behavior matches other preset selections.
+- [x] 135.4 Run focused verification, update lessons, and capture the review outcome below.
+
+### 135 Review
+- Added focused WinForms regressions for the two reported follow-up bugs: add-preset now verifies a newly inserted row becomes fully visible when it lands below the fold, and creating a blank preset now verifies the active environment restores to the base environment instead of staying on the prior preset's declared environment.
+- Updated `AddPreset` to stop hand-populating the editor and instead load the new preset through `EnsurePresetLoadedInEditor(...)`, which reuses the existing environment-restore logic from normal preset selection.
+- Added a small `TreeView` visibility helper in `Form1` so the incremental add path only scrolls when the new node is not fully visible, while still avoiding full preset-tree rebuilds.
+- Tightened the older add-preset no-rebuild regression to focus on preserved node instances rather than strict `TopNode` equality; with the corrected UX, add-preset is allowed to scroll just enough to reveal the new row.
+- Updated `tasks/lessons.md` with the two missed patterns from this regression.
+- Verification passed:
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-followup-green4\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-followup-green4\obj\`
+  - `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests|FullyQualifiedName~Form1DeleteUndoTests|FullyQualifiedName~PresetTreeDeleteMutationTests|FullyQualifiedName~PresetTreeViewportRestorerTests|FullyQualifiedName~PresetTreeSelectionGuardTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\preset-tree-followup-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-followup-regression\obj\`
+  - `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\preset-tree-followup-build\bin\ -p:BaseIntermediateOutputPath=artifacts\preset-tree-followup-build\obj\`
+- Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.
