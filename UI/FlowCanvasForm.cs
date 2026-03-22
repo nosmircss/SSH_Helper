@@ -152,26 +152,21 @@ namespace SSH_Helper.UI
             // Listen for messages from React
             _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
 
-            // Find and load the single-file HTML
-            var indexPath = GetIndexHtmlPath();
-            System.Diagnostics.Debug.WriteLine($"[FlowCanvas] index.html path: {indexPath}");
+            // Find the dist folder and serve via virtual host mapping
+            var distPath = GetDistPath();
+            System.Diagnostics.Debug.WriteLine($"[FlowCanvas] dist path: {distPath}");
 
-            if (indexPath != null && File.Exists(indexPath))
+            if (distPath != null)
             {
-                var html = File.ReadAllText(indexPath);
+                // Map the dist folder as a virtual host — this serves all files
+                // (HTML, JS, CSS) from the same origin, so type="module" works correctly
+                _webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                    "flowcanvas.local",
+                    distPath,
+                    CoreWebView2HostResourceAccessKind.Allow);
 
-                // Strip 'type="module"' and 'crossorigin' — these block execution
-                // when loaded via NavigateToString (about:blank origin).
-                // Wrap in DOMContentLoaded since removing type="module" makes it
-                // synchronous (runs before <body> is parsed).
-                html = html.Replace("<script type=\"module\" crossorigin>",
-                    "<script>document.addEventListener('DOMContentLoaded',function(){");
-                html = html.Replace("</script>\n  </head>",
-                    "});</script>\n  </head>");
-                html = html.Replace(" crossorigin ", " ");
-
-                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Loading {html.Length} chars");
-                _webView.CoreWebView2.NavigateToString(html);
+                _webView.CoreWebView2.Navigate("https://flowcanvas.local/index.html");
+                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Navigating to https://flowcanvas.local/index.html");
             }
             else
             {
@@ -180,8 +175,8 @@ namespace SSH_Helper.UI
                 var projectRoot = FindProjectRoot(exeDir);
                 var searchedPaths = new[]
                 {
-                    Path.Combine(exeDir, "FlowCanvas", "dist", "index.html"),
-                    projectRoot != null ? Path.Combine(projectRoot, "FlowCanvas", "dist", "index.html") : "(no project root found)"
+                    Path.Combine(exeDir, "FlowCanvas", "dist"),
+                    projectRoot != null ? Path.Combine(projectRoot, "FlowCanvas", "dist") : "(no project root found)"
                 };
 
                 _statusLabel.Text = "Flow Canvas build not found.\n\n" +
@@ -289,21 +284,21 @@ namespace SSH_Helper.UI
             DialogTheme.SetDarkTitleBar(this, _darkMode);
         }
 
-        private static string? GetIndexHtmlPath()
+        private static string? GetDistPath()
         {
             var exeDir = AppDomain.CurrentDomain.BaseDirectory;
 
             // Try relative to executable (production)
-            var fromExe = Path.Combine(exeDir, "FlowCanvas", "dist", "index.html");
-            if (File.Exists(fromExe))
+            var fromExe = Path.Combine(exeDir, "FlowCanvas", "dist");
+            if (Directory.Exists(fromExe) && File.Exists(Path.Combine(fromExe, "index.html")))
                 return fromExe;
 
             // Try relative to project root (development)
             var projectRoot = FindProjectRoot(exeDir);
             if (projectRoot != null)
             {
-                var fromProject = Path.Combine(projectRoot, "FlowCanvas", "dist", "index.html");
-                if (File.Exists(fromProject))
+                var fromProject = Path.Combine(projectRoot, "FlowCanvas", "dist");
+                if (Directory.Exists(fromProject) && File.Exists(Path.Combine(fromProject, "index.html")))
                     return fromProject;
             }
 
