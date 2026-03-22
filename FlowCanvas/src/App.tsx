@@ -19,6 +19,8 @@ import BaseBlock from './nodes/BaseBlock';
 import Palette from './panels/Palette';
 import Properties from './panels/Properties';
 import Toolbar from './panels/Toolbar';
+import VariableInspector, { type VariableEntry } from './panels/VariableInspector';
+import OutputPreview from './panels/OutputPreview';
 import { blockDefMap, categoryColors } from './blockDefs/registry';
 
 // Register custom node types
@@ -95,6 +97,10 @@ export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [variables, setVariables] = useState<VariableEntry[]>([]);
+  const [variablesVisible, setVariablesVisible] = useState(false);
+  const [outputText, setOutputText] = useState<string | null>(null);
+  const [outputLabel, setOutputLabel] = useState<string>('');
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -144,19 +150,67 @@ export default function App() {
   useEffect(() => {
     messageBus.sendReady();
 
-    const unsub = messageBus.on('load-graph', (msg) => {
-      if (msg.nodes && msg.edges) {
-        setNodes(msg.nodes as Node[]);
-        setEdges(msg.edges as Edge[]);
-      }
-    });
+    const unsubs = [
+      messageBus.on('load-graph', (msg) => {
+        if (msg.nodes && msg.edges) {
+          setNodes(msg.nodes as Node[]);
+          setEdges(msg.edges as Edge[]);
+        }
+      }),
+      messageBus.on('test-step-result', (msg) => {
+        // Show output from a test-step execution
+        if (msg.output) {
+          setOutputText(String(msg.output));
+          setOutputLabel(String(msg.stepId ?? ''));
+        }
+        // Update variables
+        if (msg.variables && typeof msg.variables === 'object') {
+          const vars = Object.entries(msg.variables as Record<string, unknown>).map(
+            ([name, value]) => ({ name, value }),
+          );
+          setVariables(vars);
+          setVariablesVisible(true);
+        }
+        // Update block execution state
+        if (msg.stepId) {
+          setNodes((nds) =>
+            nds.map((n) =>
+              n.id === msg.stepId
+                ? { ...n, data: { ...n.data, execState: msg.success ? 'success' : 'error' } }
+                : n,
+            ),
+          );
+        }
+      }),
+      messageBus.on('execution-update', (msg) => {
+        if (msg.stepId && msg.state) {
+          setNodes((nds) =>
+            nds.map((n) =>
+              n.id === msg.stepId
+                ? { ...n, data: { ...n.data, execState: String(msg.state) } }
+                : n,
+            ),
+          );
+        }
+        if (msg.variables && typeof msg.variables === 'object') {
+          const vars = Object.entries(msg.variables as Record<string, unknown>).map(
+            ([name, value]) => ({ name, value }),
+          );
+          setVariables(vars);
+        }
+      }),
+    ];
 
-    return unsub;
+    return () => unsubs.forEach((u) => u());
   }, [setNodes, setEdges]);
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Toolbar />
+      <Toolbar
+        selectedNodeId={selectedNodeId}
+        variablesVisible={variablesVisible}
+        onToggleVariables={() => setVariablesVisible((v) => !v)}
+      />
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
       <Palette />
       <div ref={wrapperRef} style={{ flex: 1, height: '100%' }}>
@@ -193,6 +247,18 @@ export default function App() {
         </ReactFlow>
       </div>
       <Properties selectedNodeId={selectedNodeId} />
+      <VariableInspector
+        variables={variables}
+        visible={variablesVisible}
+        onToggle={() => setVariablesVisible(false)}
+      />
+      {outputText !== null && (
+        <OutputPreview
+          output={outputText}
+          blockLabel={outputLabel}
+          onClose={() => setOutputText(null)}
+        />
+      )}
       </div>
     </div>
   );

@@ -1,17 +1,26 @@
 import { messageBus } from '../MessageBus';
 import { useReactFlow } from '@xyflow/react';
 
-export default function Toolbar() {
+interface ToolbarProps {
+  selectedNodeId: string | null;
+  variablesVisible: boolean;
+  onToggleVariables: () => void;
+}
+
+export default function Toolbar({ selectedNodeId, variablesVisible, onToggleVariables }: ToolbarProps) {
   const { getNodes, getEdges } = useReactFlow();
 
   const handleApplyYaml = () => {
-    const nodes = getNodes();
-    const edges = getEdges();
-    messageBus.send({
-      type: 'apply-yaml',
-      nodes,
-      edges,
-    });
+    messageBus.send({ type: 'apply-yaml', nodes: getNodes(), edges: getEdges() });
+  };
+
+  const handleTestStep = () => {
+    if (!selectedNodeId) return;
+    messageBus.send({ type: 'test-step', stepId: selectedNodeId });
+  };
+
+  const handleRun = () => {
+    messageBus.send({ type: 'run-request' });
   };
 
   return (
@@ -21,12 +30,30 @@ export default function Toolbar() {
       padding: '4px 12px',
       background: '#16162a',
       borderBottom: '1px solid #2a2a4a',
-      gap: 8,
+      gap: 6,
       fontSize: 12,
       flexShrink: 0,
     }}>
+      <button onClick={handleRun} style={btnStyle('#2ecc71')}>
+        ▶ Run
+      </button>
+      <button
+        onClick={handleTestStep}
+        disabled={!selectedNodeId}
+        style={btnStyle(selectedNodeId ? '#f0c040' : '#555')}
+        title="Execute this step and prerequisites on a test host (Ctrl+Enter)"
+      >
+        ⏩ Test Step
+      </button>
+      <div style={{ width: 1, height: 16, background: '#2a2a4a', margin: '0 4px' }} />
       <button onClick={handleApplyYaml} style={btnStyle('#4a9eff')}>
         Apply to YAML
+      </button>
+      <button
+        onClick={onToggleVariables}
+        style={btnStyle(variablesVisible ? '#e0c040' : '#888')}
+      >
+        {variablesVisible ? '🔍 Variables' : '🔍 Variables'}
       </button>
       <div style={{ flex: 1 }} />
       <span style={{ color: '#555', fontSize: 11 }}>Flow Canvas</span>
@@ -44,5 +71,6 @@ function btnStyle(color: string): React.CSSProperties {
     fontSize: 12,
     cursor: 'pointer',
     fontFamily: 'inherit',
+    opacity: color === '#555' ? 0.5 : 1,
   };
 }
