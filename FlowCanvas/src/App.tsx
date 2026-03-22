@@ -21,6 +21,7 @@ import Properties from './panels/Properties';
 import Toolbar from './panels/Toolbar';
 import VariableInspector, { type VariableEntry } from './panels/VariableInspector';
 import OutputPreview from './panels/OutputPreview';
+import DebugPanel, { type DebugState } from './panels/DebugPanel';
 import { blockDefMap, categoryColors } from './blockDefs/registry';
 
 // Register custom node types
@@ -101,6 +102,8 @@ export default function App() {
   const [variablesVisible, setVariablesVisible] = useState(false);
   const [outputText, setOutputText] = useState<string | null>(null);
   const [outputLabel, setOutputLabel] = useState<string>('');
+  const [debugState, setDebugState] = useState<DebugState>({ paused: false, callStack: [] });
+  const [debugVisible, setDebugVisible] = useState(false);
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -199,6 +202,32 @@ export default function App() {
           setVariables(vars);
         }
       }),
+      messageBus.on('debug-paused', (msg) => {
+        setDebugState({
+          paused: true,
+          pausedAtStepId: String(msg.stepId ?? ''),
+          callStack: (msg.callStack as string[]) ?? [],
+        });
+        setDebugVisible(true);
+        // Highlight the paused block
+        if (msg.stepId) {
+          setNodes((nds) =>
+            nds.map((n) =>
+              n.id === msg.stepId
+                ? { ...n, data: { ...n.data, execState: 'running', breakpoint: true } }
+                : n,
+            ),
+          );
+        }
+        // Update variables
+        if (msg.variables && typeof msg.variables === 'object') {
+          const vars = Object.entries(msg.variables as Record<string, unknown>).map(
+            ([name, value]) => ({ name, value }),
+          );
+          setVariables(vars);
+          setVariablesVisible(true);
+        }
+      }),
     ];
 
     return () => unsubs.forEach((u) => u());
@@ -252,6 +281,7 @@ export default function App() {
         visible={variablesVisible}
         onToggle={() => setVariablesVisible(false)}
       />
+      <DebugPanel debugState={debugState} visible={debugVisible} />
       {outputText !== null && (
         <OutputPreview
           output={outputText}
