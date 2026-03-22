@@ -16,11 +16,16 @@ export default function Toolbar({ selectedNodeId, variablesVisible, onToggleVari
 
   const handleTestStep = () => {
     if (!selectedNodeId) return;
-    messageBus.send({ type: 'test-step', stepId: selectedNodeId });
+    // Apply graph first, then request test step
+    messageBus.send({ type: 'apply-yaml', nodes: getNodes(), edges: getEdges() });
+    setTimeout(() => messageBus.send({ type: 'test-step', stepId: selectedNodeId }), 50);
   };
 
   const handleRun = () => {
-    messageBus.send({ type: 'run-request' });
+    // First apply the current graph as YAML, then request execution
+    messageBus.send({ type: 'apply-yaml', nodes: getNodes(), edges: getEdges() });
+    // Small delay to let YAML apply before triggering run
+    setTimeout(() => messageBus.send({ type: 'run-request' }), 50);
   };
 
   return (

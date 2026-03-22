@@ -6035,6 +6035,62 @@ namespace SSH_Helper
                 }
             };
 
+            // Handle "Run" from canvas — graph was already applied via apply-yaml message
+            _flowCanvasForm.OnRunRequest += (_) =>
+            {
+                BeginInvoke(() => btnExecuteAll.PerformClick());
+            };
+
+            // Handle "Test Step" — graph was already applied via apply-yaml message
+            _flowCanvasForm.OnTestStep += (msg) =>
+            {
+                BeginInvoke(() => btnExecuteSelected.PerformClick());
+            };
+
+            // Handle debug actions (continue, step, stop)
+            _flowCanvasForm.OnDebugAction += (msg) =>
+            {
+                var action = msg["action"]?.ToString();
+                BeginInvoke(() =>
+                {
+                    switch (action)
+                    {
+                        case "continue":
+                            if (_sshService.IsRunning)
+                            {
+                                // Signal DebugState to continue
+                                // DebugState is accessed via the active ScriptContext
+                                // For now, use the debug mode toggle
+                                debugModeToolStripMenuItem.Checked = false;
+                            }
+                            break;
+                        case "step":
+                            // Step is handled by the DebugState's StepRequested flag
+                            break;
+                        case "stop":
+                            if (_sshService.IsRunning)
+                                _sshService.Stop();
+                            break;
+                    }
+                });
+            };
+
+            // Handle breakpoint toggle
+            _flowCanvasForm.OnBreakpointToggle += (msg) =>
+            {
+                var stepId = msg["stepId"]?.ToString();
+                if (stepId != null)
+                {
+                    // Toggle breakpoint visual on the canvas
+                    _flowCanvasForm.SendMessage(new
+                    {
+                        type = "execution-update",
+                        stepId,
+                        state = "idle"
+                    });
+                }
+            };
+
             _flowCanvasForm.Show(this);
 
             // Load current script into canvas if it's a YAML script
