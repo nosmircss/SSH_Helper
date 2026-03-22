@@ -17,9 +17,11 @@ namespace SSH_Helper.UI
     internal sealed class FlowCanvasForm : Form
     {
         private readonly WebView2 _webView;
+        private readonly Label _statusLabel;
         private readonly bool _darkMode;
         private readonly ConcurrentQueue<string> _pendingMessages = new();
         private bool _reactReady;
+        private bool _initStarted;
 
         // Remember window position across open/close within the same session
         private static Point? _lastLocation;
@@ -41,9 +43,22 @@ namespace SSH_Helper.UI
             ShowInTaskbar = true;
             KeyPreview = true;
 
-            // Layout: WebView2 fills the entire form
+            // Status label — visible until WebView2 loads content
+            _statusLabel = new Label
+            {
+                Text = "Initializing Flow Canvas...",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 12F),
+                ForeColor = Color.FromArgb(136, 136, 136),
+                BackColor = _darkMode ? DialogTheme.DarkBackground : SystemColors.Control,
+            };
+            Controls.Add(_statusLabel);
+
+            // WebView2 control — hidden initially, shown when ready
             ((System.ComponentModel.ISupportInitialize)_webView).BeginInit();
             _webView.Dock = DockStyle.Fill;
+            _webView.Visible = false;
             Controls.Add(_webView);
             ((System.ComponentModel.ISupportInitialize)_webView).EndInit();
 
@@ -62,28 +77,32 @@ namespace SSH_Helper.UI
                     _lastSize = Size;
             };
 
-            // Initialize WebView2 after handle creation
-            HandleCreated += async (_, _) =>
+            // Use Shown event — fires after form is fully visible and message loop is running
+            Shown += OnFormShown;
+        }
+
+        private async void OnFormShown(object? sender, EventArgs e)
+        {
+            if (_initStarted) return;
+            _initStarted = true;
+
+            try
             {
-                try
-                {
-                    await InitializeWebView2Async();
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(
-                        $"Failed to initialize Flow Canvas:\n{ex.Message}",
-                        "Flow Canvas Error",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                    Close();
-                }
-            };
+                await InitializeWebView2Async();
+            }
+            catch (Exception ex)
+            {
+                _statusLabel.Text = $"Error: {ex.Message}";
+                _statusLabel.ForeColor = Color.FromArgb(231, 76, 60);
+                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Init error: {ex}");
+            }
         }
 
         private async System.Threading.Tasks.Task InitializeWebView2Async()
         {
-            // Ensure handles exist (required for EnsureCoreWebView2Async)
+            UpdateStatus("Creating WebView2 environment...");
+
+            // Ensure WebView2 control handle exists
             if (!_webView.IsHandleCreated)
                 _webView.CreateControl();
 
@@ -95,60 +114,79 @@ namespace SSH_Helper.UI
 
             var environment = await CoreWebView2Environment.CreateAsync(
                 browserExecutableFolder: null,
-                userDataFolder: userDataDir).ConfigureAwait(true);
+                userDataFolder: userDataDir);
 
-            await _webView.EnsureCoreWebView2Async(environment).ConfigureAwait(true);
+            UpdateStatus("Initializing WebView2 runtime...");
+
+            await _webView.EnsureCoreWebView2Async(environment);
+
+            UpdateStatus("Loading Flow Canvas app...");
 
             // Configure settings
             _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-            _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true; // Allow right-click for DevTools
-            _webView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = true; // Allow F12 for DevTools
+            _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
+            _webView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = true;
             _webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
             _webView.CoreWebView2.Settings.IsZoomControlEnabled = false;
 
             if (_darkMode)
                 _webView.DefaultBackgroundColor = DialogTheme.DarkBackground;
 
-            // Log navigation events and JS console errors
-            _webView.CoreWebView2.NavigationCompleted += (s, e) =>
+            // Navigation events
+            _webView.CoreWebView2.NavigationCompleted += (s, ev) =>
             {
-                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Navigation completed: success={e.IsSuccess}, status={e.WebErrorStatus}");
-                if (!e.IsSuccess)
+                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Nav done: success={ev.IsSuccess} status={ev.WebErrorStatus}");
+                if (ev.IsSuccess)
                 {
-                    _webView.CoreWebView2.NavigateToString(
-                        $"<html><body style='background:#1a1a2e;color:#e74c3c;font-family:sans-serif;padding:40px;'>" +
-                        $"<h2>Navigation Error</h2>" +
-                        $"<p>WebErrorStatus: {e.WebErrorStatus}</p></body></html>");
+                    // Show WebView2, hide status label
+                    _webView.Visible = true;
+                    _statusLabel.Visible = false;
+                }
+                else
+                {
+                    UpdateStatus($"Navigation error: {ev.WebErrorStatus}");
+                    _statusLabel.ForeColor = Color.FromArgb(231, 76, 60);
                 }
             };
-
 
             // Listen for messages from React
             _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
 
-            // Load the React app — single-file HTML with all JS/CSS inlined
+            // Find and load the single-file HTML
             var indexPath = GetIndexHtmlPath();
-            System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Resolved index.html: {indexPath}");
+            System.Diagnostics.Debug.WriteLine($"[FlowCanvas] index.html path: {indexPath}");
 
             if (indexPath != null && File.Exists(indexPath))
             {
                 var html = File.ReadAllText(indexPath);
+                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Loading {html.Length} chars");
                 _webView.CoreWebView2.NavigateToString(html);
-                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Loaded {html.Length} chars via NavigateToString");
             }
             else
             {
-                // Fallback: show diagnostic error
+                // Show diagnostic info directly in the status label
                 var exeDir = AppDomain.CurrentDomain.BaseDirectory;
                 var projectRoot = FindProjectRoot(exeDir);
-                _webView.CoreWebView2.NavigateToString(
-                    "<html><body style='background:#1a1a2e;color:#e74c3c;font-family:sans-serif;padding:40px;'>" +
-                    "<h2>Flow Canvas build not found</h2>" +
-                    "<p>Run <code>cd FlowCanvas && npm run build</code> in the project directory.</p>" +
-                    $"<p>Exe dir: {exeDir}</p>" +
-                    $"<p>Project root: {projectRoot ?? "not found"}</p>" +
-                    $"<p>Looked for: {indexPath ?? "null"}</p></body></html>");
+                var searchedPaths = new[]
+                {
+                    Path.Combine(exeDir, "FlowCanvas", "dist", "index.html"),
+                    projectRoot != null ? Path.Combine(projectRoot, "FlowCanvas", "dist", "index.html") : "(no project root found)"
+                };
+
+                _statusLabel.Text = "Flow Canvas build not found.\n\n" +
+                    "Run: cd FlowCanvas && npm run build\n\n" +
+                    $"Searched:\n{string.Join("\n", searchedPaths)}";
+                _statusLabel.ForeColor = Color.FromArgb(231, 76, 60);
+                _statusLabel.Font = new Font("Consolas", 10F);
+                _statusLabel.TextAlign = ContentAlignment.MiddleLeft;
+                _statusLabel.Padding = new Padding(40);
             }
+        }
+
+        private void UpdateStatus(string text)
+        {
+            if (!IsDisposed && _statusLabel.Visible)
+                _statusLabel.Text = text;
         }
 
         private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -163,11 +201,8 @@ namespace SSH_Helper.UI
                 {
                     case "ready":
                         _reactReady = true;
-                        // Flush any queued messages
                         while (_pendingMessages.TryDequeue(out var pending))
-                        {
                             _webView.CoreWebView2.PostWebMessageAsJson(pending);
-                        }
                         break;
 
                     case "apply-yaml":
@@ -193,7 +228,7 @@ namespace SSH_Helper.UI
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Message parse error: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Message error: {ex.Message}");
             }
         }
 
@@ -245,8 +280,9 @@ namespace SSH_Helper.UI
 
         private static string? GetIndexHtmlPath()
         {
-            // Try relative to executable first (production)
             var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            // Try relative to executable (production)
             var fromExe = Path.Combine(exeDir, "FlowCanvas", "dist", "index.html");
             if (File.Exists(fromExe))
                 return fromExe;
@@ -283,6 +319,7 @@ namespace SSH_Helper.UI
                 if (_webView.CoreWebView2 != null)
                     _webView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
                 _webView.Dispose();
+                _statusLabel.Dispose();
             }
             base.Dispose(disposing);
         }
