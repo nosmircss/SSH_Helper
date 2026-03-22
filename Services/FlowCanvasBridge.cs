@@ -60,6 +60,12 @@ namespace SSH_Helper.Services
                 // Get a display label from the step
                 var (blockType, previewText) = GetStepPreview(step, stepType);
 
+                // Build props: snippet for round-trip + individual fields for the Properties panel
+                var stepProps = new JObject { ["_yamlSnippet"] = snippet };
+                if (previewText != null)
+                    stepProps["_preview"] = previewText;
+                ExtractStepProperties(step, stepType, stepProps);
+
                 var node = new JObject
                 {
                     ["id"] = nodeId,
@@ -69,16 +75,9 @@ namespace SSH_Helper.Services
                     {
                         ["blockType"] = blockType,
                         ["label"] = blockType.ToUpperInvariant(),
-                        ["props"] = new JObject { ["_yamlSnippet"] = snippet },
+                        ["props"] = stepProps,
                     },
                 };
-
-                // Add a preview property for display
-                if (previewText != null)
-                {
-                    var props = (JObject)node["data"]!["props"]!;
-                    props["_preview"] = previewText;
-                }
 
                 nodes.Add(node);
 
@@ -277,6 +276,182 @@ namespace SSH_Helper.Services
             {
                 foreach (var t in targets)
                     BuildChain(t, outgoing, ordered, visited);
+            }
+        }
+
+        /// <summary>
+        /// Extracts individual property values from a parsed ScriptStep into the props JObject.
+        /// These populate the Properties panel fields when a block is clicked.
+        /// </summary>
+        private static void ExtractStepProperties(ScriptStep step, StepType stepType, JObject props)
+        {
+            // Common properties
+            if (step.Timeout.HasValue) props["timeout"] = step.Timeout.Value;
+            if (step.OnError != null) props["on_error"] = step.OnError;
+            if (step.Capture != null) props["capture"] = step.Capture;
+            if (step.Suppress) props["suppress"] = true;
+
+            switch (stepType)
+            {
+                case StepType.Send:
+                    if (step.Send != null) props["command"] = step.Send;
+                    if (step.Expect != null) props["expect"] = step.Expect;
+                    break;
+
+                case StepType.Print:
+                    if (step.Print != null) props["message"] = step.Print;
+                    break;
+
+                case StepType.Wait:
+                    if (step.Wait.HasValue) props["duration"] = step.Wait.Value;
+                    break;
+
+                case StepType.Set:
+                    if (step.Set != null) props["expression"] = step.Set;
+                    break;
+
+                case StepType.Exit:
+                    if (step.Exit != null) props["status"] = step.Exit;
+                    break;
+
+                case StepType.Extract:
+                    if (step.Extract != null)
+                    {
+                        props["pattern"] = step.Extract.Pattern;
+                        if (step.Extract.Into != null) props["into"] = JToken.FromObject(step.Extract.Into);
+                        if (!string.IsNullOrEmpty(step.Extract.From)) props["source"] = step.Extract.From;
+                        props["match"] = step.Extract.Match;
+                    }
+                    break;
+
+                case StepType.If:
+                    if (step.If != null) props["condition"] = step.If;
+                    break;
+
+                case StepType.Foreach:
+                    if (step.Foreach != null) props["expression"] = step.Foreach;
+                    break;
+
+                case StepType.While:
+                    if (step.While != null) props["condition"] = step.While;
+                    break;
+
+                case StepType.Switch:
+                    if (step.Switch != null) props["expression"] = step.Switch;
+                    break;
+
+                case StepType.Call:
+                    if (step.Call != null) props["subroutine"] = step.Call.Subroutine;
+                    break;
+
+                case StepType.Assert:
+                    if (step.Assert != null)
+                    {
+                        props["condition"] = step.Assert.Condition;
+                        if (step.Assert.Message != null) props["message"] = step.Assert.Message;
+                    }
+                    break;
+
+                case StepType.Parse:
+                    if (step.Parse != null)
+                    {
+                        props["format"] = step.Parse.Format;
+                        props["from"] = step.Parse.From;
+                        props["into"] = step.Parse.Into;
+                    }
+                    break;
+
+                case StepType.Readfile:
+                    if (step.Readfile != null) props["path"] = step.Readfile.Path;
+                    break;
+
+                case StepType.Writefile:
+                    if (step.Writefile != null)
+                    {
+                        props["path"] = step.Writefile.Path;
+                        props["content"] = step.Writefile.Content;
+                        props["mode"] = step.Writefile.Mode;
+                        if (step.Writefile.Format != null) props["format"] = step.Writefile.Format;
+                        if (step.Writefile.Headers != null) props["headers"] = JToken.FromObject(step.Writefile.Headers);
+                    }
+                    break;
+
+                case StepType.Input:
+                    if (step.Input != null)
+                    {
+                        props["prompt"] = step.Input.Prompt;
+                        props["into"] = step.Input.Into;
+                    }
+                    break;
+
+                case StepType.Choose:
+                    if (step.Choose != null) props["prompt"] = step.Choose.Prompt;
+                    break;
+
+                case StepType.Multiselect:
+                    if (step.Multiselect != null) props["prompt"] = step.Multiselect.Prompt;
+                    break;
+
+                case StepType.Confirm:
+                    if (step.Confirm != null) props["prompt"] = step.Confirm.Prompt;
+                    break;
+
+                case StepType.Ping:
+                    if (step.Ping != null) props["target"] = step.Ping.Host;
+                    break;
+
+                case StepType.Dns:
+                    if (step.Dns != null) props["hostname"] = step.Dns.Host;
+                    break;
+
+                case StepType.Portcheck:
+                    if (step.Portcheck != null) props["target"] = $"{step.Portcheck.Host}:{step.Portcheck.Port}";
+                    break;
+
+                case StepType.Http:
+                    if (step.Http != null)
+                    {
+                        props["url"] = step.Http.Url;
+                        if (step.Http.Method != null) props["method"] = step.Http.Method;
+                    }
+                    break;
+
+                case StepType.Webhook:
+                    if (step.Webhook != null) props["url"] = step.Webhook.Url;
+                    break;
+
+                case StepType.Sftp:
+                    if (step.Sftp != null)
+                    {
+                        props["action"] = step.Sftp.Action;
+                        props["local"] = step.Sftp.LocalPath;
+                        props["remote"] = step.Sftp.RemotePath;
+                    }
+                    break;
+
+                case StepType.UpdateColumn:
+                    if (step.UpdateColumn != null)
+                    {
+                        props["column"] = step.UpdateColumn.Column;
+                        props["expression"] = step.UpdateColumn.Value;
+                    }
+                    break;
+
+                case StepType.UpdateEnvironment:
+                    if (step.UpdateEnvironment != null)
+                    {
+                        props["variable"] = step.UpdateEnvironment.Variable;
+                        props["expression"] = step.UpdateEnvironment.Value;
+                    }
+                    break;
+
+                case StepType.BrowserCallbackCapture:
+                    if (step.BrowserCallbackCapture != null) props["url"] = step.BrowserCallbackCapture.StartUrl;
+                    break;
+
+                case StepType.Log:
+                    if (step.Log != null) props["message"] = step.Log.ToString();
+                    break;
             }
         }
 
