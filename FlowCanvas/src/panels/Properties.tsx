@@ -2,10 +2,7 @@ import { useCallback } from 'react';
 import { useReactFlow, type Node } from '@xyflow/react';
 import { blockDefMap, categoryColors, type BlockCategory, type PropertyDef } from '../blockDefs/registry';
 import type { BlockNodeData } from '../nodes/BaseBlock';
-
-interface PropertiesProps {
-  selectedNodeId: string | null;
-}
+import { useFlowStore } from '../stores/useFlowStore';
 
 function PropertyField({
   def,
@@ -21,10 +18,10 @@ function PropertyField({
   const inputStyle: React.CSSProperties = {
     width: '100%',
     padding: '4px 6px',
-    background: '#0d1117',
+    background: 'var(--fc-input-bg, #0d1117)',
     border: `1px solid ${colors.border}44`,
     borderRadius: 4,
-    color: colors.text,
+    color: 'var(--fc-text, #ccc)',
     fontSize: 12,
     fontFamily: def.type === 'code' ? 'monospace' : 'inherit',
     outline: 'none',
@@ -33,7 +30,7 @@ function PropertyField({
   switch (def.type) {
     case 'boolean':
       return (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#aaa', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fc-text-secondary, #aaa)', cursor: 'pointer' }}>
           <input
             type="checkbox"
             checked={!!value}
@@ -95,16 +92,31 @@ function PropertyField({
   }
 }
 
-export default function Properties({ selectedNodeId }: PropertiesProps) {
+export default function Properties() {
+  const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
+  const pushSnapshot = useFlowStore((s) => s.pushSnapshot);
   const { getNode, setNodes } = useReactFlow();
+
+  const selectedNodeId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
 
   const node = selectedNodeId ? getNode(selectedNodeId) : null;
   const blockData = node?.data as BlockNodeData | undefined;
   const def = blockData?.blockType ? blockDefMap.get(blockData.blockType) : null;
 
+  // Debounced undo snapshot for property edits
+  const snapshotTimeoutRef = useCallback(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    return () => {
+      if (timer) return; // Already have a pending snapshot
+      timer = setTimeout(() => { timer = null; }, 500);
+      pushSnapshot('Edit property');
+    };
+  }, [pushSnapshot])();
+
   const updateProp = useCallback(
     (key: string, value: unknown) => {
       if (!selectedNodeId) return;
+      snapshotTimeoutRef();
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id !== selectedNodeId) return n;
@@ -119,12 +131,13 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
         }),
       );
     },
-    [selectedNodeId, setNodes],
+    [selectedNodeId, setNodes, snapshotTimeoutRef],
   );
 
   const updateLabel = useCallback(
     (label: string) => {
       if (!selectedNodeId) return;
+      snapshotTimeoutRef();
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id !== selectedNodeId) return n;
@@ -132,8 +145,25 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
         }),
       );
     },
-    [selectedNodeId, setNodes],
+    [selectedNodeId, setNodes, snapshotTimeoutRef],
   );
+
+  // Multi-select info
+  if (selectedNodeIds.size > 1) {
+    return (
+      <div style={{
+        flex: 1,
+        padding: 16,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <span style={{ color: 'var(--fc-text-muted, #555)', fontSize: 12, textAlign: 'center' }}>
+          {selectedNodeIds.size} blocks selected
+        </span>
+      </div>
+    );
+  }
 
   if (!node || !def || !blockData) {
     return (
@@ -144,7 +174,7 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
         alignItems: 'center',
         justifyContent: 'center',
       }}>
-        <span style={{ color: '#555', fontSize: 12, textAlign: 'center' }}>
+        <span style={{ color: 'var(--fc-text-muted, #555)', fontSize: 12, textAlign: 'center' }}>
           Select a block to edit its properties
         </span>
       </div>
@@ -156,7 +186,7 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
   const branchLabel = blockData.props?.['_branchLabel'] as string | undefined;
   const branchColor = blockData.props?.['_branchColor'] as string | undefined;
 
-  // Read-only view for child nodes (nested inside container blocks)
+  // Read-only view for child nodes
   if (isChild) {
     return (
       <div style={{
@@ -167,8 +197,7 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
         flexDirection: 'column',
         gap: 12,
       }}>
-        {/* Header with nested indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid #2a2a4a' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)' }}>
           <span style={{
             background: colors.badge,
             color: colors.badgeText,
@@ -180,12 +209,11 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
           }}>
             {def.type}
           </span>
-          <span style={{ color: '#ccc', fontSize: 12, fontWeight: 600 }}>
+          <span style={{ color: 'var(--fc-text, #ccc)', fontSize: 12, fontWeight: 600 }}>
             {def.label}
           </span>
         </div>
 
-        {/* Branch indicator */}
         {branchLabel && (
           <div style={{
             display: 'flex',
@@ -199,24 +227,23 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
             <span style={{ fontSize: 10, color: branchColor || '#888', fontWeight: 600, textTransform: 'uppercase' }}>
               {branchLabel}
             </span>
-            <span style={{ fontSize: 10, color: '#666' }}>branch (read-only)</span>
+            <span style={{ fontSize: 10, color: 'var(--fc-text-muted, #666)' }}>branch (read-only)</span>
           </div>
         )}
 
-        {/* Property values (read-only) */}
         {def.properties.map((propDef) => {
           const val = blockData.props?.[propDef.key];
           if (val === undefined || val === null || val === '') return null;
           return (
             <div key={propDef.key}>
-              <label style={{ fontSize: 11, color: '#666', display: 'block', marginBottom: 3 }}>
+              <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
                 {propDef.label}
               </label>
               <div style={{
                 padding: '4px 6px',
-                background: '#0d111799',
+                background: 'var(--fc-input-bg, #0d1117)99',
                 borderRadius: 4,
-                color: '#aaa',
+                color: 'var(--fc-text-secondary, #aaa)',
                 fontSize: 12,
                 fontFamily: propDef.type === 'code' ? 'monospace' : 'inherit',
                 whiteSpace: 'pre-wrap',
@@ -228,13 +255,12 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
           );
         })}
 
-        {/* Description */}
         <div style={{
           marginTop: 'auto',
           paddingTop: 12,
-          borderTop: '1px solid #2a2a4a',
+          borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
           fontSize: 11,
-          color: '#555',
+          color: 'var(--fc-text-muted, #555)',
           lineHeight: 1.5,
         }}>
           {def.description}
@@ -252,8 +278,7 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
       flexDirection: 'column',
       gap: 12,
     }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid #2a2a4a' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)' }}>
         <span style={{
           background: colors.badge,
           color: colors.badgeText,
@@ -265,14 +290,13 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
         }}>
           {def.type}
         </span>
-        <span style={{ color: '#ccc', fontSize: 12, fontWeight: 600 }}>
+        <span style={{ color: 'var(--fc-text, #ccc)', fontSize: 12, fontWeight: 600 }}>
           {def.label}
         </span>
       </div>
 
-      {/* Label field */}
       <div>
-        <label style={{ fontSize: 11, color: '#666', display: 'block', marginBottom: 3 }}>Display Name</label>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>Display Name</label>
         <input
           type="text"
           value={String(blockData.label ?? '')}
@@ -281,21 +305,20 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
           style={{
             width: '100%',
             padding: '4px 6px',
-            background: '#0d1117',
+            background: 'var(--fc-input-bg, #0d1117)',
             border: `1px solid ${colors.border}44`,
             borderRadius: 4,
-            color: '#ccc',
+            color: 'var(--fc-text, #ccc)',
             fontSize: 12,
             outline: 'none',
           }}
         />
       </div>
 
-      {/* Property fields */}
       {def.properties.map((propDef) => (
         <div key={propDef.key}>
           {propDef.type !== 'boolean' && (
-            <label style={{ fontSize: 11, color: '#666', display: 'block', marginBottom: 3 }}>
+            <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
               {propDef.label}
               {propDef.required && <span style={{ color: '#e74c3c', marginLeft: 2 }}>*</span>}
             </label>
@@ -309,13 +332,12 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
         </div>
       ))}
 
-      {/* Description */}
       <div style={{
         marginTop: 'auto',
         paddingTop: 12,
-        borderTop: '1px solid #2a2a4a',
+        borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
         fontSize: 11,
-        color: '#555',
+        color: 'var(--fc-text-muted, #555)',
         lineHeight: 1.5,
       }}>
         {def.description}

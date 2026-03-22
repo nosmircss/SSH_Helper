@@ -1,24 +1,14 @@
 import { useState } from 'react';
-
-export interface VariableEntry {
-  name: string;
-  value: unknown;
-  setBy?: string; // block ID that last set this variable
-}
-
-interface VariableInspectorProps {
-  variables: VariableEntry[];
-  visible: boolean;
-  onToggle: () => void;
-}
+import { useFlowStore } from '../stores/useFlowStore';
 
 /**
  * Docked variable inspector panel — sits below the Properties panel in the right sidebar.
+ * Now reads from Zustand store and shows yellow flash on changed variables.
  */
-export default function VariableInspector({ variables, visible, onToggle }: VariableInspectorProps) {
+export default function VariableInspector() {
+  const variables = useFlowStore((s) => s.variables);
+  const togglePanel = useFlowStore((s) => s.togglePanel);
   const [filter, setFilter] = useState('');
-
-  if (!visible) return null;
 
   const filtered = filter
     ? variables.filter((v) => v.name.toLowerCase().includes(filter.toLowerCase()))
@@ -26,7 +16,7 @@ export default function VariableInspector({ variables, visible, onToggle }: Vari
 
   return (
     <div style={{
-      borderTop: '1px solid #2a2a4a',
+      borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
       maxHeight: '40%',
       display: 'flex',
       flexDirection: 'column',
@@ -34,16 +24,16 @@ export default function VariableInspector({ variables, visible, onToggle }: Vari
     }}>
       <div style={{
         padding: '6px 10px',
-        background: '#1a1a3a',
-        borderBottom: '1px solid #2a2a4a',
+        background: 'var(--fc-header-bg, #1a1a3a)',
+        borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         flexShrink: 0,
       }}>
-        <span style={{ fontSize: 12, color: '#888', fontWeight: 600 }}>Variables</span>
-        <button onClick={onToggle} style={{
-          background: 'none', border: 'none', color: '#555',
+        <span style={{ fontSize: 12, color: 'var(--fc-text-secondary, #888)', fontWeight: 600 }}>Variables</span>
+        <button onClick={() => togglePanel('variables')} style={{
+          background: 'none', border: 'none', color: 'var(--fc-text-muted, #555)',
           cursor: 'pointer', fontSize: 14, padding: 0,
         }}>×</button>
       </div>
@@ -57,10 +47,10 @@ export default function VariableInspector({ variables, visible, onToggle }: Vari
           style={{
             width: '100%',
             padding: '3px 6px',
-            background: '#0d1117',
-            border: '1px solid #2a2a4a',
+            background: 'var(--fc-input-bg, #0d1117)',
+            border: '1px solid var(--fc-panel-border, #2a2a4a)',
             borderRadius: 3,
-            color: '#ccc',
+            color: 'var(--fc-text, #ccc)',
             fontSize: 11,
             outline: 'none',
           }}
@@ -69,7 +59,7 @@ export default function VariableInspector({ variables, visible, onToggle }: Vari
 
       <div style={{ overflowY: 'auto', flex: 1, padding: '4px 8px' }}>
         {filtered.length === 0 ? (
-          <div style={{ color: '#555', fontSize: 11, padding: '8px 0', textAlign: 'center' }}>
+          <div style={{ color: 'var(--fc-text-muted, #555)', fontSize: 11, padding: '8px 0', textAlign: 'center' }}>
             {variables.length === 0 ? 'No variables set' : 'No matches'}
           </div>
         ) : (
@@ -78,12 +68,20 @@ export default function VariableInspector({ variables, visible, onToggle }: Vari
               fontFamily: 'monospace',
               fontSize: 11,
               lineHeight: 1.8,
-              borderBottom: '1px solid #1a1a2e',
+              borderBottom: '1px solid var(--fc-canvas-bg, #1a1a2e)',
               padding: '2px 0',
+              transition: 'background-color 0.3s ease',
+              backgroundColor: v.changed ? 'rgba(224, 192, 64, 0.15)' : 'transparent',
+              borderLeft: v.changed ? '2px solid #e0c040' : '2px solid transparent',
+              paddingLeft: v.changed ? 6 : 2,
             }}>
               <span style={{ color: '#e0c040' }}>{v.name}</span>
-              <span style={{ color: '#555' }}> = </span>
-              <span style={{ color: '#8adb8a' }}>
+              <span style={{ color: 'var(--fc-text-muted, #555)' }}> = </span>
+              <span style={{
+                color: '#8adb8a',
+                transition: 'color 0.3s ease',
+                fontWeight: v.changed ? 700 : 400,
+              }}>
                 {typeof v.value === 'string'
                   ? `"${v.value.length > 40 ? v.value.slice(0, 40) + '...' : v.value}"`
                   : String(v.value)}
@@ -95,3 +93,6 @@ export default function VariableInspector({ variables, visible, onToggle }: Vari
     </div>
   );
 }
+
+// Re-export the type for compatibility
+export type { VariableEntry } from '../stores/slices/variableSlice';

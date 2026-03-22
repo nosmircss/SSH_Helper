@@ -1168,5 +1168,51 @@ namespace SSH_Helper.Services
         }
 
         #endregion
+
+        #region Node-ID mapping
+
+        /// <summary>
+        /// Builds a mapping from canvas node IDs (like "node-0", "node-1") to step indices
+        /// for correlating execution events with canvas blocks.
+        /// </summary>
+        public Dictionary<string, int> BuildNodeIdToStepIndexMap(string yamlText)
+        {
+            var map = new Dictionary<string, int>();
+
+            if (string.IsNullOrWhiteSpace(yamlText))
+                return map;
+
+            try
+            {
+                var (nodes, _) = TextToGraph(yamlText);
+                int stepIndex = 0;
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    var node = nodes[i];
+                    var id = node["id"]?.ToString();
+                    if (id == null)
+                        continue;
+
+                    // Skip metadata nodes (preamble, etc.)
+                    if (id.StartsWith("__"))
+                        continue;
+
+                    // Skip child nodes (they are visual-only, not top-level steps)
+                    if (node["data"]?["props"]?["_isChildOf"] != null)
+                        continue;
+
+                    map[id] = stepIndex;
+                    stepIndex++;
+                }
+            }
+            catch
+            {
+                // If parsing fails, return empty map
+            }
+
+            return map;
+        }
+
+        #endregion
     }
 }

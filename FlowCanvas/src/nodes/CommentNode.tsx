@@ -1,0 +1,150 @@
+import { memo, useState, useRef, useEffect, useCallback } from 'react';
+import type { NodeProps } from '@xyflow/react';
+import { useFlowStore } from '../stores/useFlowStore';
+
+export interface CommentNodeData {
+  commentId: string;
+  text: string;
+  color?: string;
+  [key: string]: unknown;
+}
+
+function CommentNode({ data, id }: NodeProps) {
+  const commentData = data as CommentNodeData;
+  const updateComment = useFlowStore((s) => s.updateComment);
+  const removeComment = useFlowStore((s) => s.removeComment);
+
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(commentData.text || '');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const commentId = commentData.commentId || id;
+  const color = commentData.color || '#e0c040';
+
+  useEffect(() => {
+    setText(commentData.text || '');
+  }, [commentData.text]);
+
+  useEffect(() => {
+    if (editing && textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.select();
+    }
+  }, [editing]);
+
+  const handleDoubleClick = useCallback(() => {
+    setEditing(true);
+  }, []);
+
+  const handleBlur = useCallback(() => {
+    setEditing(false);
+    updateComment(commentId, { text });
+  }, [commentId, text, updateComment]);
+
+  const handleDelete = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      removeComment(commentId);
+    },
+    [commentId, removeComment],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setEditing(false);
+        setText(commentData.text || '');
+      }
+    },
+    [commentData.text],
+  );
+
+  return (
+    <div
+      onDoubleClick={handleDoubleClick}
+      style={{
+        background: `${color}cc`,
+        borderRadius: 6,
+        minWidth: 150,
+        minHeight: 80,
+        padding: 10,
+        position: 'relative',
+        cursor: editing ? 'text' : 'grab',
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+      }}
+    >
+      {/* Delete button */}
+      <button
+        onClick={handleDelete}
+        style={{
+          position: 'absolute',
+          top: 4,
+          right: 4,
+          width: 18,
+          height: 18,
+          background: 'rgba(0, 0, 0, 0.2)',
+          border: 'none',
+          borderRadius: 3,
+          color: '#333',
+          fontSize: 12,
+          lineHeight: '16px',
+          textAlign: 'center',
+          cursor: 'pointer',
+          padding: 0,
+          opacity: 0.6,
+          transition: 'opacity 0.15s',
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLElement).style.opacity = '1';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.opacity = '0.6';
+        }}
+        title="Delete comment"
+      >
+        &#10005;
+      </button>
+
+      {editing ? (
+        <textarea
+          ref={textareaRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={handleBlur}
+          onKeyDown={handleKeyDown}
+          style={{
+            width: '100%',
+            minHeight: 60,
+            background: 'rgba(255, 255, 255, 0.2)',
+            border: 'none',
+            borderRadius: 3,
+            color: '#1a1a1a',
+            fontSize: 12,
+            lineHeight: 1.4,
+            padding: 4,
+            outline: 'none',
+            resize: 'both',
+            fontFamily: 'inherit',
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            color: '#1a1a1a',
+            fontSize: 12,
+            lineHeight: 1.4,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            minHeight: 40,
+            paddingRight: 16,
+          }}
+        >
+          {text || 'Double-click to edit...'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default memo(CommentNode);

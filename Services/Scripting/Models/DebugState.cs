@@ -138,6 +138,70 @@ namespace SSH_Helper.Services.Scripting.Models
             return StepMode || _breakpoints.ContainsKey(lineNumber);
         }
 
+        // Node-ID-based breakpoints (for FlowCanvas integration)
+        private readonly ConcurrentDictionary<string, byte> _nodeBreakpoints = new();
+
+        // Disabled nodes (skipped during execution)
+        private readonly ConcurrentDictionary<string, byte> _disabledNodes = new();
+
+        // Node-ID-to-StepIndex mapping (set before execution starts)
+        private readonly ConcurrentDictionary<string, int> _nodeToStepIndexMap = new();
+        // Reverse: StepIndex-to-NodeId for fast lookup during execution
+        private readonly ConcurrentDictionary<int, string> _stepIndexToNodeMap = new();
+
+        public void SetNodeToStepIndexMap(Dictionary<string, int> map)
+        {
+            _nodeToStepIndexMap.Clear();
+            _stepIndexToNodeMap.Clear();
+            foreach (var kvp in map)
+            {
+                _nodeToStepIndexMap[kvp.Key] = kvp.Value;
+                _stepIndexToNodeMap[kvp.Value] = kvp.Key;
+            }
+        }
+
+        public void ToggleNodeBreakpoint(string nodeId)
+        {
+            if (_nodeBreakpoints.ContainsKey(nodeId))
+                _nodeBreakpoints.TryRemove(nodeId, out _);
+            else
+                _nodeBreakpoints[nodeId] = 0;
+        }
+
+        public bool HasNodeBreakpoint(string nodeId) => _nodeBreakpoints.ContainsKey(nodeId);
+
+        /// <summary>
+        /// Checks if execution should pause at the given step index.
+        /// Checks both line-number breakpoints AND node-ID breakpoints.
+        /// </summary>
+        public bool ShouldPauseAtStep(int stepIndex, int lineNumber)
+        {
+            if (StepMode) return true;
+            if (_breakpoints.ContainsKey(lineNumber)) return true;
+
+            // Check node breakpoints via step index mapping
+            if (_stepIndexToNodeMap.TryGetValue(stepIndex, out var nodeId))
+                return _nodeBreakpoints.ContainsKey(nodeId);
+
+            return false;
+        }
+
+        public void ToggleNodeDisabled(string nodeId)
+        {
+            if (_disabledNodes.ContainsKey(nodeId))
+                _disabledNodes.TryRemove(nodeId, out _);
+            else
+                _disabledNodes[nodeId] = 0;
+        }
+
+        public bool IsNodeDisabled(string nodeId) => _disabledNodes.ContainsKey(nodeId);
+
+        public string? GetNodeIdForStepIndex(int stepIndex)
+        {
+            _stepIndexToNodeMap.TryGetValue(stepIndex, out var nodeId);
+            return nodeId;
+        }
+
         /// <summary>
         /// Resets the debug state for a new execution.
         /// </summary>

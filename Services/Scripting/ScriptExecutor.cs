@@ -26,6 +26,15 @@ namespace SSH_Helper.Services.Scripting
 
         /// <summary>Whether the step completed successfully (only set on StepCompleted).</summary>
         public bool? Success { get; init; }
+
+        /// <summary>The output produced by the step (only set on StepCompleted).</summary>
+        public string? Output { get; init; }
+
+        /// <summary>Wall-clock execution time in milliseconds (only set on StepCompleted).</summary>
+        public long? DurationMs { get; init; }
+
+        /// <summary>Whether the step was skipped (e.g., disabled node).</summary>
+        public bool Skipped { get; init; }
     }
 
     /// <summary>
@@ -213,12 +222,27 @@ namespace SSH_Helper.Services.Scripting
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // Handle debug pausing
-                    if (context.DebugState.ShouldPauseAt(step.LineNumber))
+                    if (context.DebugState.ShouldPauseAtStep(stepIndex, step.LineNumber))
                     {
                         await HandleDebugPauseAsync(step, context, cancellationToken);
                     }
 
                     var stepType = step.GetStepType();
+
+                    // Check if node is disabled
+                    var nodeId = context.DebugState.GetNodeIdForStepIndex(stepIndex);
+                    if (nodeId != null && context.DebugState.IsNodeDisabled(nodeId))
+                    {
+                        StepCompleted?.Invoke(this, new StepExecutionEventArgs
+                        {
+                            StepIndex = stepIndex,
+                            StepType = stepType,
+                            LineNumber = step.LineNumber,
+                            Success = true,
+                            Skipped = true
+                        });
+                        continue;
+                    }
 
                     // Fire step-starting event
                     StepStarting?.Invoke(this, new StepExecutionEventArgs
@@ -229,7 +253,9 @@ namespace SSH_Helper.Services.Scripting
                         StepName = null
                     });
 
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
                     var result = await ExecuteStepAsync(step, context, cancellationToken);
+                    sw.Stop();
 
                     // Fire step-completed event
                     StepCompleted?.Invoke(this, new StepExecutionEventArgs
@@ -238,7 +264,9 @@ namespace SSH_Helper.Services.Scripting
                         StepType = stepType,
                         LineNumber = step.LineNumber,
                         StepName = null,
-                        Success = result.Success
+                        Success = result.Success,
+                        Output = context.LastCommandOutput,
+                        DurationMs = sw.ElapsedMilliseconds
                     });
 
                     if (result.SuppressedError)

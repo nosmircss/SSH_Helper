@@ -1,95 +1,44 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, type DragEvent } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
   MiniMap,
   Controls,
   Background,
-  useNodesState,
-  useEdgesState,
-  addEdge,
   BackgroundVariant,
-  type Connection,
   type Node,
-  type Edge,
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { messageBus } from './MessageBus';
+import { useFlowStore } from './stores/useFlowStore';
+import { initMessageBridge } from './stores/messageBridge';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { applyTheme } from './utils/theme';
 import BaseBlock from './nodes/BaseBlock';
+import CommentNode from './nodes/CommentNode';
+import AnimatedEdge from './nodes/AnimatedEdge';
 import Palette from './panels/Palette';
 import Properties from './panels/Properties';
 import RightPanel from './panels/RightPanel';
 import Toolbar from './panels/Toolbar';
-import VariableInspector, { type VariableEntry } from './panels/VariableInspector';
+import VariableInspector from './panels/VariableInspector';
 import OutputPreview from './panels/OutputPreview';
-import DebugPanel, { type DebugState } from './panels/DebugPanel';
+import DebugPanel from './panels/DebugPanel';
+import SearchOverlay from './panels/SearchOverlay';
+import TimelinePanel from './panels/TimelinePanel';
+import BlockContextMenu from './panels/BlockContextMenu';
 import { blockDefMap, categoryColors } from './blockDefs/registry';
 
 // Register custom node types
 const nodeTypes = {
   block: BaseBlock,
+  comment: CommentNode,
 };
 
-// Demo nodes showing the custom block component
-const initialNodes: Node[] = [
-  {
-    id: 'demo-send',
-    type: 'block',
-    position: { x: 250, y: 40 },
-    data: {
-      blockType: 'send',
-      label: 'Get Version',
-      props: { command: 'show version | include Software' },
-    },
-  },
-  {
-    id: 'demo-extract',
-    type: 'block',
-    position: { x: 250, y: 160 },
-    data: {
-      blockType: 'extract',
-      label: 'Parse Version',
-      props: { pattern: 'Version (\\S+)', into: 'firmware_ver' },
-    },
-  },
-  {
-    id: 'demo-if',
-    type: 'block',
-    position: { x: 250, y: 280 },
-    data: {
-      blockType: 'if',
-      label: 'Version Check',
-      props: { condition: 'firmware_ver != "17.9.5"' },
-    },
-  },
-  {
-    id: 'demo-print',
-    type: 'block',
-    position: { x: 150, y: 400 },
-    data: {
-      blockType: 'print',
-      props: { message: '⚠ Outdated firmware!' },
-      execState: 'idle',
-    },
-  },
-  {
-    id: 'demo-updatecol',
-    type: 'block',
-    position: { x: 380, y: 400 },
-    data: {
-      blockType: 'updatecolumn',
-      props: { column: 'Status', expression: '"OUTDATED"' },
-    },
-  },
-];
-
-const initialEdges: Edge[] = [
-  { id: 'e1', source: 'demo-send', target: 'demo-extract', style: { stroke: '#4a9eff' } },
-  { id: 'e2', source: 'demo-extract', target: 'demo-if', style: { stroke: '#9b59b6' } },
-  { id: 'e3', source: 'demo-if', target: 'demo-print', style: { stroke: '#f0c040' } },
-  { id: 'e4', source: 'demo-if', sourceHandle: 'false', target: 'demo-updatecol', style: { stroke: '#e74c3c' } },
-];
+// Register custom edge types
+const edgeTypes = {
+  animated: AnimatedEdge,
+};
 
 let idCounter = 0;
 function nextId() {
@@ -105,24 +54,54 @@ export default function App() {
 }
 
 function FlowCanvasInner() {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [variables, setVariables] = useState<VariableEntry[]>([]);
-  const [variablesVisible, setVariablesVisible] = useState(true);
-  const [outputText, setOutputText] = useState<string | null>(null);
-  const [outputLabel, setOutputLabel] = useState<string>('');
-  const [debugState, setDebugState] = useState<DebugState>({ paused: false, callStack: [] });
-  const [debugVisible, setDebugVisible] = useState(false);
-  const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
+  // Store selectors
+  const nodes = useFlowStore((s) => s.nodes);
+  const edges = useFlowStore((s) => s.edges);
+  const onNodesChange = useFlowStore((s) => s.onNodesChange);
+  const onEdgesChange = useFlowStore((s) => s.onEdgesChange);
+  const onConnect = useFlowStore((s) => s.onConnect);
+  const addNode = useFlowStore((s) => s.addNode);
+  const selectNode = useFlowStore((s) => s.selectNode);
+  const clearSelection = useFlowStore((s) => s.clearSelection);
+  const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
+  const showContextMenu = useFlowStore((s) => s.showContextMenu);
+  const hideContextMenu = useFlowStore((s) => s.hideContextMenu);
+  const pushSnapshot = useFlowStore((s) => s.pushSnapshot);
+  const theme = useFlowStore((s) => s.theme);
+  const snapToGrid = useFlowStore((s) => s.snapToGrid);
+  const gridSize = useFlowStore((s) => s.gridSize);
+  const searchResults = useFlowStore((s) => s.searchResults);
+  const searchIndex = useFlowStore((s) => s.searchIndex);
+  const isRunning = useFlowStore((s) => s.isRunning);
+  const panelsVisible = useFlowStore((s) => s.panelsVisible);
+  const variables = useFlowStore((s) => s.variables);
+  const paused = useFlowStore((s) => s.paused);
+  const pausedAtNodeId = useFlowStore((s) => s.pausedAtNodeId);
+  const callStack = useFlowStore((s) => s.callStack);
+  const blockOutputs = useFlowStore((s) => s.blockOutputs);
+
+  const reactFlowInstance = useRef<ReactFlowInstance<any, any> | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  const onConnect = useCallback(
-    (connection: Connection) =>
-      setEdges((eds) => addEdge({ ...connection, style: { stroke: '#666' } }, eds)),
-    [setEdges],
-  );
+  // Initialize message bridge and keyboard shortcuts
+  useEffect(() => {
+    const cleanup = initMessageBridge();
+    return cleanup;
+  }, []);
 
+  useKeyboardShortcuts();
+
+  // Apply theme CSS variables
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  // Push undo snapshot on node drag stop
+  const onNodeDragStop = useCallback(() => {
+    pushSnapshot('Move blocks');
+  }, [pushSnapshot]);
+
+  // Drag and drop from palette
   const onDragOver = useCallback((event: DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
@@ -153,174 +132,138 @@ function FlowCanvasInner() {
         },
       };
 
-      setNodes((nds) => [...nds, newNode]);
+      addNode(newNode);
     },
-    [setNodes],
+    [addNode],
   );
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+Enter: Test Step on selected node
-      if (e.ctrlKey && e.key === 'Enter' && selectedNodeId) {
-        e.preventDefault();
-        messageBus.send({ type: 'test-step', stepId: selectedNodeId });
+  // Right-click context menu
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      event.preventDefault();
+      showContextMenu(event.clientX, event.clientY, node.id);
+    },
+    [showContextMenu],
+  );
+
+  // Click handlers
+  const onNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      // If shift is held, toggle multi-select
+      if (_.shiftKey) {
+        useFlowStore.getState().toggleNodeSelection(node.id);
+      } else {
+        selectNode(node.id);
       }
-      // Escape: deselect / close panels
-      if (e.key === 'Escape') {
-        setSelectedNodeId(null);
-        setOutputText(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeId]);
+      hideContextMenu();
+    },
+    [selectNode, hideContextMenu],
+  );
 
-  // Signal ready to WinForms host
-  useEffect(() => {
-    messageBus.sendReady();
+  const onPaneClick = useCallback(() => {
+    clearSelection();
+    hideContextMenu();
+  }, [clearSelection, hideContextMenu]);
 
-    const unsubs = [
-      messageBus.on('load-graph', (msg) => {
-        if (msg.nodes && msg.edges) {
-          setNodes(msg.nodes as Node[]);
-          setEdges(msg.edges as Edge[]);
-        }
-      }),
-      messageBus.on('test-step-result', (msg) => {
-        // Show output from a test-step execution
-        if (msg.output) {
-          setOutputText(String(msg.output));
-          setOutputLabel(String(msg.stepId ?? ''));
-        }
-        // Update variables
-        if (msg.variables && typeof msg.variables === 'object') {
-          const vars = Object.entries(msg.variables as Record<string, unknown>).map(
-            ([name, value]) => ({ name, value }),
-          );
-          setVariables(vars);
-          setVariablesVisible(true);
-        }
-        // Update block execution state
-        if (msg.stepId) {
-          setNodes((nds) =>
-            nds.map((n) =>
-              n.id === msg.stepId
-                ? { ...n, data: { ...n.data, execState: msg.success ? 'success' : 'error' } }
-                : n,
-            ),
-          );
-        }
-      }),
-      messageBus.on('execution-update', (msg) => {
-        if (msg.stepId && msg.state) {
-          setNodes((nds) =>
-            nds.map((n) =>
-              n.id === msg.stepId
-                ? { ...n, data: { ...n.data, execState: String(msg.state) } }
-                : n,
-            ),
-          );
-        }
-        if (msg.variables && typeof msg.variables === 'object') {
-          const vars = Object.entries(msg.variables as Record<string, unknown>).map(
-            ([name, value]) => ({ name, value }),
-          );
-          setVariables(vars);
-        }
-      }),
-      messageBus.on('debug-paused', (msg) => {
-        setDebugState({
-          paused: true,
-          pausedAtStepId: String(msg.stepId ?? ''),
-          callStack: (msg.callStack as string[]) ?? [],
-        });
-        setDebugVisible(true);
-        // Highlight the paused block
-        if (msg.stepId) {
-          setNodes((nds) =>
-            nds.map((n) =>
-              n.id === msg.stepId
-                ? { ...n, data: { ...n.data, execState: 'running', breakpoint: true } }
-                : n,
-            ),
-          );
-        }
-        // Update variables
-        if (msg.variables && typeof msg.variables === 'object') {
-          const vars = Object.entries(msg.variables as Record<string, unknown>).map(
-            ([name, value]) => ({ name, value }),
-          );
-          setVariables(vars);
-          setVariablesVisible(true);
-        }
-      }),
-    ];
+  // Highlight search results on nodes
+  const searchHighlightSet = new Set(searchResults);
+  const highlightedNodeId = searchResults.length > 0 ? searchResults[searchIndex] : null;
 
-    return () => unsubs.forEach((u) => u());
-  }, [setNodes, setEdges]);
+  // Get first selected node for output preview
+  const firstSelectedId = selectedNodeIds.size > 0
+    ? [...selectedNodeIds][0]
+    : null;
+  const selectedOutput = firstSelectedId
+    ? blockOutputs.get(firstSelectedId)
+    : null;
+  const latestOutput = selectedOutput && selectedOutput.length > 0
+    ? selectedOutput[selectedOutput.length - 1]
+    : null;
+
+  // Build enhanced edges with animated type when running
+  const displayEdges = isRunning
+    ? edges.map((e) => ({ ...e, type: 'animated' }))
+    : edges;
+
+  // Add visual selection and search highlight to nodes
+  const displayNodes = nodes.map((n) => ({
+    ...n,
+    selected: selectedNodeIds.has(n.id),
+    className: [
+      searchHighlightSet.has(n.id) ? 'search-match' : '',
+      n.id === highlightedNodeId ? 'search-current' : '',
+    ].filter(Boolean).join(' ') || undefined,
+  }));
+
+  // Theme-dependent colors
+  const isDark = theme === 'dark';
+  const canvasBg = isDark ? '#1a1a2e' : '#f5f5f8';
+  const controlsBg = isDark ? '#222244' : '#e8e8f0';
+  const controlsBorder = isDark ? '#2a2a4a' : '#d0d0d8';
+  const minimapBg = isDark ? '#12122a' : '#e0e0e8';
+  const minimapMask = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.6)';
+  const dotColor = isDark ? '#2a2a4a' : '#c0c0c8';
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Toolbar
-        selectedNodeId={selectedNodeId}
-        variablesVisible={variablesVisible}
-        onToggleVariables={() => setVariablesVisible((v) => !v)}
-      />
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-      <Palette />
-      <div ref={wrapperRef} style={{ flex: 1, height: '100%' }}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onDragOver={onDragOver}
-          onDrop={onDrop}
-          onInit={(instance) => { reactFlowInstance.current = instance; }}
-          onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-          onPaneClick={() => setSelectedNodeId(null)}
-          nodeTypes={nodeTypes}
-          fitView
-          proOptions={{ hideAttribution: true }}
-          style={{ background: '#1a1a2e' }}
-          defaultEdgeOptions={{ style: { stroke: '#555' } }}
-        >
-          <Controls
-            style={{ background: '#222244', borderColor: '#2a2a4a', borderRadius: '6px' }}
-          />
-          <MiniMap
-            style={{ background: '#12122a', borderColor: '#2a2a4a', borderRadius: '6px' }}
-            nodeColor={(node) => {
-              const bt = (node.data as any)?.blockType;
-              const def = bt ? blockDefMap.get(bt) : null;
-              return def ? categoryColors[def.category].border : '#4a9eff';
-            }}
-            maskColor="rgba(0,0,0,0.6)"
-          />
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#2a2a4a" />
-        </ReactFlow>
-      </div>
-      {/* Right panel area — resizable via drag handle */}
-      <RightPanel>
-        <Properties selectedNodeId={selectedNodeId} />
-        {variablesVisible && (
-          <VariableInspector
-            variables={variables}
-            visible={variablesVisible}
-            onToggle={() => setVariablesVisible(false)}
+      <Toolbar />
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+        <Palette />
+        <div ref={wrapperRef} style={{ flex: 1, height: '100%', position: 'relative' }}>
+          <ReactFlow
+            nodes={displayNodes}
+            edges={displayEdges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+            onInit={(instance) => { reactFlowInstance.current = instance; }}
+            onNodeClick={onNodeClick}
+            onPaneClick={onPaneClick}
+            onNodeContextMenu={onNodeContextMenu}
+            onNodeDragStop={onNodeDragStop}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            snapToGrid={snapToGrid}
+            snapGrid={[gridSize, gridSize]}
+            selectionOnDrag
+            panOnDrag={[1, 2]}
+            fitView
+            proOptions={{ hideAttribution: true }}
+            style={{ background: canvasBg }}
+            defaultEdgeOptions={{ style: { stroke: isDark ? '#555' : '#aaa' } }}
+          >
+            <Controls
+              style={{ background: controlsBg, borderColor: controlsBorder, borderRadius: '6px' }}
+            />
+            <MiniMap
+              style={{ background: minimapBg, borderColor: controlsBorder, borderRadius: '6px' }}
+              nodeColor={(node) => {
+                const bt = (node.data as any)?.blockType;
+                const def = bt ? blockDefMap.get(bt) : null;
+                return def ? categoryColors[def.category].border : '#4a9eff';
+              }}
+              maskColor={minimapMask}
+            />
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={dotColor} />
+          </ReactFlow>
+          <SearchOverlay />
+          <BlockContextMenu />
+        </div>
+        <RightPanel>
+          <Properties />
+          {panelsVisible.variables && <VariableInspector />}
+          {panelsVisible.timeline && <TimelinePanel />}
+        </RightPanel>
+        <DebugPanel />
+        {latestOutput && firstSelectedId && (
+          <OutputPreview
+            output={latestOutput.text}
+            blockLabel={firstSelectedId}
+            nodeId={firstSelectedId}
           />
         )}
-      </RightPanel>
-      <DebugPanel debugState={debugState} visible={debugVisible} />
-      {outputText !== null && (
-        <OutputPreview
-          output={outputText}
-          blockLabel={outputLabel}
-          onClose={() => setOutputText(null)}
-        />
-      )}
       </div>
     </div>
   );

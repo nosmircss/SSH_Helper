@@ -79,14 +79,23 @@ namespace SSH_Helper.Services
         public event EventHandler<SshEnvironmentVariableUpdateEventArgs>? EnvironmentVariableUpdateRequested;
         public event EventHandler<SshCommandCompletedEventArgs>? CommandCompleted;
         public event EventHandler? ExecutionCompleted;
+        public event EventHandler<StepExecutionEventArgs>? StepStarting;
+        public event EventHandler<StepExecutionEventArgs>? StepCompleted;
 
         private volatile bool _isRunning;
         private CancellationTokenSource? _cts;
         private volatile bool _stopOnFirstErrorCancellationRequested;
         private bool _disposed;
         private readonly object _executionLock = new();
+        private volatile ScriptContext? _activeScriptContext;
 
         public bool IsRunning => _isRunning;
+
+        /// <summary>
+        /// The script context for the currently executing script, if any.
+        /// Used by FlowCanvas to access DebugState for breakpoint/step control.
+        /// </summary>
+        public ScriptContext? ActiveScriptContext => _activeScriptContext;
 
         private CancellationToken BeginExecution()
         {
@@ -107,6 +116,7 @@ namespace SSH_Helper.Services
             {
                 _isRunning = false;
                 _stopOnFirstErrorCancellationRequested = false;
+                _activeScriptContext = null;
                 var cts = _cts;
                 _cts = null;
                 cts?.Dispose();
@@ -1105,6 +1115,7 @@ namespace SSH_Helper.Services
                 context.Session = session;
                 context.DebugMode = DebugMode;
                 context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
+                _activeScriptContext = context;
                 SeedConnectionVariables(context, host, username, password, timeouts);
                 var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
@@ -1138,6 +1149,8 @@ namespace SSH_Helper.Services
 
                 // Execute the script
                 var executor = new ScriptExecutor(_browserCallbackUiHost);
+                executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
+                executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
                 var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                     .GetAwaiter().GetResult();
                 EnsureScriptSucceeded(scriptResult, cancellationToken);
@@ -1260,6 +1273,7 @@ namespace SSH_Helper.Services
             context.Session = session;
             context.DebugMode = DebugMode;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
+            _activeScriptContext = context;
             SeedConnectionVariables(context, host, username, password, timeouts);
             var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
@@ -1293,6 +1307,8 @@ namespace SSH_Helper.Services
 
             // Execute the script
             var executor = new ScriptExecutor(_browserCallbackUiHost);
+            executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
+            executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
             EnsureScriptSucceeded(scriptResult, cancellationToken);
@@ -1330,6 +1346,7 @@ namespace SSH_Helper.Services
             context.Session = null;
             context.DebugMode = DebugMode;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
+            _activeScriptContext = context;
             SeedConnectionVariables(context, host, username, password, SshTimeoutOptions.Default);
             var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
@@ -1360,6 +1377,8 @@ namespace SSH_Helper.Services
             };
 
             var executor = new ScriptExecutor(_browserCallbackUiHost);
+            executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
+            executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
             EnsureScriptSucceeded(scriptResult, cancellationToken);

@@ -1,0 +1,114 @@
+<h2>FlowCanvas v2 — Architecture Overview</h2>
+<p class="subtitle">Zustand store + message bridge pattern</p>
+
+<div class="mockup">
+  <div class="mockup-header">System Architecture</div>
+  <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 20px; background: #0d1117; color: #c9d1d9;">
+<pre style="margin:0; white-space: pre; overflow-x: auto;">
+┌─────────────────────────────────────────────────────────────────────┐
+│  WinForms (C#)                                                      │
+│  ┌──────────────┐  ┌──────────────────┐  ┌────────────────────────┐ │
+│  │ Form1.cs     │  │ FlowCanvasBridge │  │ ScriptExecutor         │ │
+│  │              │←→│ • YAML↔Graph     │  │ • StepStarting event   │ │
+│  │ • Wire events│  │ • NodeId↔StepIdx │  │ • StepCompleted event  │ │
+│  │ • Debug cmds │  │ • Disabled nodes │  │ • DebugState checks    │ │
+│  └──────┬───────┘  └──────────────────┘  └──────────┬─────────────┘ │
+│         │                                           │               │
+│  ┌──────┴───────────────────────────────────────────┴─────────────┐ │
+│  │ FlowCanvasForm.cs  (WebView2 Host)                             │ │
+│  │ PostWebMessageAsJson ←→ WebMessageReceived                     │ │
+│  └──────────────────────────────┬────────────────────────────────┘  │
+└─────────────────────────────────┼──────────────────────────────────┘
+                                  │ JSON messages
+┌─────────────────────────────────┼──────────────────────────────────┐
+│  React App (FlowCanvas)         │                                   │
+│  ┌──────────────────────────────┴────────────────────────────────┐ │
+│  │ MessageBus.ts  (WebView2 ↔ React transport)                   │ │
+│  └──────────────────────────────┬────────────────────────────────┘ │
+│                                 │                                   │
+│  ┌──────────────────────────────┴────────────────────────────────┐ │
+│  │ messageBridge.ts  (NEW — connects messages ↔ store)           │ │
+│  │ • C# messages → store.dispatch()                              │ │
+│  │ • store.subscribe() → C# messages                             │ │
+│  └──────────────────────────────┬────────────────────────────────┘ │
+│                                 │                                   │
+│  ┌──────────────────────────────┴────────────────────────────────┐ │
+│  │              Zustand Store (useFlowStore.ts)                   │ │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │ │
+│  │  │ graph    │ │ execution│ │  debug   │ │ variable │        │ │
+│  │  │ Slice    │ │ Slice    │ │  Slice   │ │ Slice    │        │ │
+│  │  │•nodes   │ │•blockSts │ │•breakpts │ │•values   │        │ │
+│  │  │•edges   │ │•outputs  │ │•disabled │ │•changed  │        │ │
+│  │  │•select  │ │•timings  │ │•paused   │ │•previous │        │ │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘        │ │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │ │
+│  │  │  undo    │ │ timeline │ │    ui    │ │ comment  │        │ │
+│  │  │  Slice   │ │  Slice   │ │  Slice   │ │  Slice   │        │ │
+│  │  │•past[]  │ │•entries  │ │•theme   │ │•notes   │        │ │
+│  │  │•future[]│ │•scrubIdx │ │•snap    │ │•attached │        │ │
+│  │  │•push/pop│ │•duration │ │•search  │ │•position │        │ │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘        │ │
+│  └───────────────────────────────────────────────────────────────┘ │
+│                                 │                                   │
+│  ┌──────────────────────────────┴────────────────────────────────┐ │
+│  │                    React Components                            │ │
+│  │  Toolbar │ Palette │ ReactFlow Canvas │ RightPanel │ Overlays │ │
+│  └───────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+</pre>
+  </div>
+</div>
+
+<div style="margin-top: 24px;"></div>
+
+<div class="mockup">
+  <div class="mockup-header">Build Order (4 Phases)</div>
+  <div class="mockup-body" style="font-family: monospace; font-size: 12px; line-height: 1.5; padding: 16px; background: #0d1117; color: #c9d1d9;">
+<pre style="margin:0; white-space: pre;">
+Phase 1: Foundation                    Phase 2: Canvas Features
+─────────────────────                  ─────────────────────────
+ ① Zustand store setup                 ④ Multi-select & bulk ops
+ ② Message bridge                      ⑤ Snap-to-grid
+ ③ Theme toggle                        ⑥ Undo / Redo
+                                        ⑦ Copy / Paste
+        │                               ⑧ Search / Find
+        ▼                               ⑨ Auto-layout (dagre)
+Phase 3: Execution Wiring              ⑩ Block comments
+─────────────────────────
+ ⑪ Rich status indicators                     │
+ ⑫ Animated edge flow                         ▼
+ ⑬ Step-through execution     ←──── Phase 4: Advanced
+ ⑭ Breakpoints wiring         ─────────────────────────
+ ⑮ Live variable watch         ⑰ Skip / Disable blocks
+ ⑯ Per-block output panel      ⑱ Execution timeline
+</pre>
+  </div>
+</div>
+
+<div style="margin-top: 24px;"></div>
+
+<div class="mockup">
+  <div class="mockup-header">New Message Protocol (C# ↔ React)</div>
+  <div class="mockup-body" style="padding: 16px; background: #0d1117; color: #c9d1d9; font-size: 13px;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+      <div>
+        <div style="color: #58a6ff; font-weight: bold; margin-bottom: 8px;">C# → React (new)</div>
+        <div style="font-family: monospace; font-size: 12px; line-height: 1.8;">
+          <div><span style="color: #7ee787;">execution-started</span> — run begins</div>
+          <div><span style="color: #7ee787;">execution-finished</span> — run ends + duration</div>
+          <div><span style="color: #7ee787;">step-output</span> — SSH output per block</div>
+          <div><span style="color: #7ee787;">step-timing</span> — start/end timestamps</div>
+          <div><span style="color: #7ee787;">variables-snapshot</span> — vars + changedKeys</div>
+          <div><span style="color: #7ee787;">theme-sync</span> — dark/light from WinForms</div>
+        </div>
+      </div>
+      <div>
+        <div style="color: #58a6ff; font-weight: bold; margin-bottom: 8px;">React → C# (new)</div>
+        <div style="font-family: monospace; font-size: 12px; line-height: 1.8;">
+          <div><span style="color: #ffa657;">disable-block</span> — skip/enable a block</div>
+          <div><span style="color: #ffa657;">debug-action</span> — extended with step-into</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

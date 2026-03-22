@@ -158,6 +158,11 @@ namespace SSH_Helper
         #region State
 
         private FlowCanvasForm? _flowCanvasForm;
+        private Dictionary<string, int>? _nodeToStepIndexMap;
+        /// <summary>Breakpoints set via FlowCanvas before execution starts (nodeId set).</summary>
+        private readonly HashSet<string> _pendingBreakpoints = new();
+        /// <summary>Disabled blocks set via FlowCanvas before execution starts (nodeId set).</summary>
+        private readonly HashSet<string> _pendingDisabledBlocks = new();
         private string? _loadedFilePath;
         private CsvFileFingerprint? _loadedFileFingerprint;
         private HostGridSnapshot? _loadedFileSnapshot;
@@ -323,6 +328,8 @@ namespace SSH_Helper
             _sshService.EnvironmentVariableUpdateRequested += SshService_EnvironmentVariableUpdateRequested;
             _sshService.CommandCompleted += SshService_CommandCompleted;
             _sshService.ExecutionCompleted += SshService_ExecutionCompleted;
+            _sshService.StepStarting += SshService_StepStarting;
+            _sshService.StepCompleted += SshService_StepCompleted;
             _environmentService.EnvironmentChanged += EnvironmentService_EnvironmentChanged;
 
             // Initialize update service
@@ -6020,6 +6027,7 @@ namespace SSH_Helper
                 {
                     var bridge = new FlowCanvasBridge();
                     var yaml = bridge.ToYaml(graphData);
+                    _nodeToStepIndexMap = bridge.BuildNodeIdToStepIndexMap(yaml);
                     BeginInvoke(() =>
                     {
                         txtCommand.Text = yaml;
@@ -6047,7 +6055,7 @@ namespace SSH_Helper
                 BeginInvoke(() => btnExecuteSelected.PerformClick());
             };
 
-            // Handle debug actions (continue, step, stop)
+            // Handle debug actions (continue, step, step-into, stop)
             _flowCanvasForm.OnDebugAction += (msg) =>
             {
                 var action = msg["action"]?.ToString();
@@ -6056,38 +6064,62 @@ namespace SSH_Helper
                     switch (action)
                     {
                         case "continue":
-                            if (_sshService.IsRunning)
+                            if (_sshService.ActiveScriptContext?.DebugState != null)
                             {
-                                // Signal DebugState to continue
-                                // DebugState is accessed via the active ScriptContext
-                                // For now, use the debug mode toggle
-                                debugModeToolStripMenuItem.Checked = false;
+                                _sshService.ActiveScriptContext.DebugState.ContinueRequested = true;
                             }
                             break;
                         case "step":
-                            // Step is handled by the DebugState's StepRequested flag
+                            if (_sshService.ActiveScriptContext?.DebugState != null)
+                            {
+                                _sshService.ActiveScriptContext.DebugState.StepRequested = true;
+                            }
+                            break;
+                        case "step-into":
+                            if (_sshService.ActiveScriptContext?.DebugState != null)
+                            {
+                                _sshService.ActiveScriptContext.DebugState.StepRequested = true;
+                            }
                             break;
                         case "stop":
-                            if (_sshService.IsRunning)
-                                _sshService.Stop();
+                            _sshService.Stop();
                             break;
                     }
                 });
             };
 
-            // Handle breakpoint toggle
+            // Handle breakpoint toggle — store pending if no active execution
             _flowCanvasForm.OnBreakpointToggle += (msg) =>
             {
                 var stepId = msg["stepId"]?.ToString();
-                if (stepId != null)
+                if (stepId == null) return;
+
+                if (_sshService.ActiveScriptContext?.DebugState != null)
                 {
-                    // Toggle breakpoint visual on the canvas
-                    _flowCanvasForm.SendMessage(new
-                    {
-                        type = "execution-update",
-                        stepId,
-                        state = "idle"
-                    });
+                    _sshService.ActiveScriptContext.DebugState.ToggleNodeBreakpoint(stepId);
+                }
+                else
+                {
+                    // No active execution — store for when execution starts
+                    if (!_pendingBreakpoints.Remove(stepId))
+                        _pendingBreakpoints.Add(stepId);
+                }
+            };
+
+            // Handle disable block toggle — store pending if no active execution
+            _flowCanvasForm.OnDisableBlock += (msg) =>
+            {
+                var stepId = msg["stepId"]?.ToString();
+                if (stepId == null) return;
+
+                if (_sshService.ActiveScriptContext?.DebugState != null)
+                {
+                    _sshService.ActiveScriptContext.DebugState.ToggleNodeDisabled(stepId);
+                }
+                else
+                {
+                    if (!_pendingDisabledBlocks.Remove(stepId))
+                        _pendingDisabledBlocks.Add(stepId);
                 }
             };
 
@@ -10570,6 +10602,40 @@ namespace SSH_Helper
 
             SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
             SetExecutionMode(true);
+
+            // Notify FlowCanvas of execution start and build node mapping
+            if (_flowCanvasForm != null)
+            {
+                var bridge = new Services.FlowCanvasBridge();
+                _nodeToStepIndexMap = bridge.BuildNodeIdToStepIndexMap(txtCommand.Text);
+                _flowCanvasForm.SendMessage(new { type = "execution-started" });
+
+                // Apply pending breakpoints/disabled blocks and node mapping to DebugState
+                // once the execution context becomes available
+                _ = Task.Run(async () =>
+                {
+                    // Wait briefly for ActiveScriptContext to be set by execution startup
+                    for (int i = 0; i < 50; i++)
+                    {
+                        if (_sshService.ActiveScriptContext?.DebugState != null) break;
+                        await Task.Delay(100);
+                    }
+                    var debugState = _sshService.ActiveScriptContext?.DebugState;
+                    if (debugState == null || _nodeToStepIndexMap == null) return;
+
+                    // Set the nodeId-to-stepIndex mapping so breakpoints work
+                    debugState.SetNodeToStepIndexMap(_nodeToStepIndexMap);
+
+                    // Apply any breakpoints that were set before execution started
+                    foreach (var nodeId in _pendingBreakpoints)
+                        debugState.ToggleNodeBreakpoint(nodeId);
+
+                    // Apply any disabled blocks that were set before execution started
+                    foreach (var nodeId in _pendingDisabledBlocks)
+                        debugState.ToggleNodeDisabled(nodeId);
+                });
+            }
+
             ClearOutput();
             if (includeCommandPreview)
             {
@@ -11552,6 +11618,47 @@ namespace SSH_Helper
         private void SshService_ExecutionCompleted(object? sender, EventArgs e)
         {
             _uiOutputThrottler.Flush();
+            _flowCanvasForm?.SendMessage(new { type = "execution-finished", success = true });
+        }
+
+        private void SshService_StepStarting(object? sender, StepExecutionEventArgs e)
+        {
+            if (_flowCanvasForm == null || _nodeToStepIndexMap == null) return;
+            var nodeId = _nodeToStepIndexMap.FirstOrDefault(kvp => kvp.Value == e.StepIndex).Key;
+            if (nodeId == null) return;
+
+            _flowCanvasForm.SendMessage(new
+            {
+                type = "execution-update",
+                stepId = nodeId,
+                state = e.Skipped ? "skipped" : "running"
+            });
+        }
+
+        private void SshService_StepCompleted(object? sender, StepExecutionEventArgs e)
+        {
+            if (_flowCanvasForm == null || _nodeToStepIndexMap == null) return;
+            var nodeId = _nodeToStepIndexMap.FirstOrDefault(kvp => kvp.Value == e.StepIndex).Key;
+            if (nodeId == null) return;
+
+            _flowCanvasForm.SendMessage(new
+            {
+                type = "execution-update",
+                stepId = nodeId,
+                state = e.Skipped ? "skipped" : (e.Success == true ? "success" : "error"),
+                duration = e.DurationMs
+            });
+
+            // Send step output if available
+            if (!string.IsNullOrEmpty(e.Output))
+            {
+                _flowCanvasForm.SendMessage(new
+                {
+                    type = "step-output",
+                    stepId = nodeId,
+                    output = e.Output
+                });
+            }
         }
 
         private void AppendOutputText(string output)

@@ -230,6 +230,10 @@ namespace SSH_Helper.UI
                     case "run-request":
                         OnRunRequest?.Invoke(msg);
                         break;
+
+                    case "disable-block":
+                        OnDisableBlock?.Invoke(msg);
+                        break;
                 }
             }
             catch (Exception ex)
@@ -245,16 +249,22 @@ namespace SSH_Helper.UI
         {
             var json = JsonConvert.SerializeObject(message);
 
-            if (_reactReady && _webView.CoreWebView2 != null)
+            // Always marshal to UI thread first — accessing CoreWebView2
+            // from a background thread throws InvalidOperationException
+            if (InvokeRequired)
             {
-                if (InvokeRequired)
-                    BeginInvoke(() =>
-                    {
-                        if (!IsDisposed && _webView.CoreWebView2 != null)
-                            _webView.CoreWebView2.PostWebMessageAsJson(json);
-                    });
-                else if (!IsDisposed)
-                    _webView.CoreWebView2.PostWebMessageAsJson(json);
+                BeginInvoke(() => PostOrQueue(json));
+                return;
+            }
+
+            PostOrQueue(json);
+        }
+
+        private void PostOrQueue(string json)
+        {
+            if (_reactReady && !IsDisposed && _webView.CoreWebView2 != null)
+            {
+                _webView.CoreWebView2.PostWebMessageAsJson(json);
             }
             else
             {
@@ -276,6 +286,7 @@ namespace SSH_Helper.UI
         public event Action<JObject>? OnTestStep;
         public event Action<JObject>? OnBreakpointToggle;
         public event Action<JObject>? OnRunRequest;
+        public event Action<JObject>? OnDisableBlock;
 
         private void ApplyTheme()
         {

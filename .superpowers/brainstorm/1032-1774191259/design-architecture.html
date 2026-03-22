@@ -1,0 +1,117 @@
+<h2>Flow Canvas — Architecture Design</h2>
+<p class="subtitle">Section 1 of 4: How the pieces fit together</p>
+
+<div class="mockup">
+  <div class="mockup-header">System Architecture</div>
+  <div class="mockup-body" style="padding:20px; background:#0d1117; font-family:monospace; font-size:0.78em; line-height:1.7; color:#8b949e;">
+
+<pre style="margin:0; color:#c9d1d9; overflow-x:auto;">
+<span style="color:#79c0ff;">┌─────────────────────────────────────────────────────────────┐</span>
+<span style="color:#79c0ff;">│</span>  <span style="color:#ffa657; font-weight:bold;">WinForms Layer</span>                                              <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>                                                             <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  ┌──────────────┐    ┌──────────────────┐                   <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │  <span style="color:#7ee787;">Form1.cs</span>     │───▶│ <span style="color:#7ee787;">FlowCanvasForm</span>   │  (new, modeless)  <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │  (main form)  │    │                  │                   <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │              │◀───│  WebView2 host   │                   <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │  Script Editor│    │  Message bridge  │                   <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │  YAML text   │    │  Size/state mgmt │                   <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  └──────┬───────┘    └────────┬─────────┘                   <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>         │                     │                              <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>         │  ┌─────────────────────────────────┐               <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>         └──│ <span style="color:#d2a8ff;">FlowCanvasBridge</span> (new service)    │               <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>            │                                 │               <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>            │  • YAML → JSON graph message    │               <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>            │  • JSON graph → YAML message    │               <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>            │  • Execution state → updates    │               <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>            │  • Debug events ↔ DebugState    │               <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>            └─────────────────────────────────┘               <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>                          ▲                                  <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>            ┌─────────────┼────────────────┐                  <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>            ▼             ▼                ▼                  <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  ┌──────────────┐ ┌──────────┐ ┌─────────────────┐          <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │<span style="color:#8b949e;">ScriptParser</span>  │ │<span style="color:#8b949e;">DebugState</span>│ │<span style="color:#8b949e;">SshExecutionSvc</span>  │          <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │ (existing)   │ │(existing)│ │ (existing)      │          <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  └──────────────┘ └──────────┘ └─────────────────┘          <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">└─────────────────────────────────────────────────────────────┘</span>
+
+        <span style="color:#f0c040;">PostWebMessage / WebMessageReceived</span>
+                          │
+<span style="color:#79c0ff;">┌─────────────────────────┼───────────────────────────────────┐</span>
+<span style="color:#79c0ff;">│</span>  <span style="color:#ffa657; font-weight:bold;">WebView2 Layer</span> (React + React Flow)                        <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>                          │                                  <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  ┌──────────────────────┼──────────────────────────────┐    <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │  <span style="color:#d2a8ff;">MessageBus</span>  ◀───────┘                               │    <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │  (receives WinForms messages, dispatches to stores)  │    <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  └──────┬──────────┬───────────┬──────────┬─────────────┘    <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>         │          │           │          │                   <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>         ▼          ▼           ▼          ▼                   <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  ┌──────────┐ ┌─────────┐ ┌────────┐ ┌──────────────┐       <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │ <span style="color:#7ee787;">Canvas</span>   │ │ <span style="color:#7ee787;">Palette</span> │ │ <span style="color:#7ee787;">Props</span>  │ │ <span style="color:#7ee787;">Debug Panel</span>  │       <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │          │ │         │ │ Panel  │ │              │       <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │ ReactFlow│ │ Drag &  │ │ Edit   │ │ Breakpoints  │       <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │ instance │ │ drop    │ │ block  │ │ Call stack   │       <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │ + custom │ │ blocks  │ │ config │ │ Variables    │       <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  │ nodes    │ │ 35 types│ │        │ │ Step controls│       <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">│</span>  └──────────┘ └─────────┘ └────────┘ └──────────────┘       <span style="color:#79c0ff;">│</span>
+<span style="color:#79c0ff;">└─────────────────────────────────────────────────────────────┘</span>
+</pre>
+  </div>
+</div>
+
+<div style="height:16px;"></div>
+
+<div class="section">
+  <h3>Key Design Decisions</h3>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; font-size:0.88em;">
+    <div style="padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px;">
+      <div style="color:#7ee787; font-weight:600; margin-bottom:4px;">New WinForms Files</div>
+      <div style="color:#aaa; font-size:0.9em;">
+        <strong>FlowCanvasForm.cs</strong> — WebView2 host window, size/position memory, modeless like InteractiveTerminalForm<br/><br/>
+        <strong>FlowCanvasBridge.cs</strong> — Service that converts between YAML ↔ JSON graph format, pipes execution/debug events to WebView2
+      </div>
+    </div>
+
+    <div style="padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px;">
+      <div style="color:#d2a8ff; font-weight:600; margin-bottom:4px;">Reused Existing Code</div>
+      <div style="color:#aaa; font-size:0.9em;">
+        <strong>ScriptParser</strong> — Already parses YAML → Script model. We convert Script → graph JSON<br/><br/>
+        <strong>DebugState</strong> — Already has breakpoints, step/pause/continue. Bridge connects to canvas<br/><br/>
+        <strong>BrowserCallbackWebViewDialog</strong> — Existing WebView2 hosting pattern to follow
+      </div>
+    </div>
+
+    <div style="padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px;">
+      <div style="color:#ffa657; font-weight:600; margin-bottom:4px;">New React Project</div>
+      <div style="color:#aaa; font-size:0.9em;">
+        <strong>FlowCanvas/</strong> — Separate directory in repo root<br/>
+        Vite + React + TypeScript + React Flow<br/>
+        <code style="color:#79c0ff;">npm run build</code> → <code style="color:#79c0ff;">dist/</code> folder<br/>
+        Built assets copied to WinForms embedded resources
+      </div>
+    </div>
+
+    <div style="padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px;">
+      <div style="color:#f0c040; font-weight:600; margin-bottom:4px;">Message Protocol</div>
+      <div style="color:#aaa; font-size:0.9em;">
+        JSON messages over PostWebMessage:<br/>
+        <code style="color:#79c0ff;">{ type: "load-script", yaml: "..." }</code><br/>
+        <code style="color:#79c0ff;">{ type: "execution-update", stepId, state }</code><br/>
+        <code style="color:#79c0ff;">{ type: "apply-yaml", yaml: "..." }</code><br/>
+        <code style="color:#79c0ff;">{ type: "debug-action", action: "step" }</code>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="height:16px;"></div>
+
+<div class="section">
+  <h3>User Flow</h3>
+  <div style="padding:16px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; font-size:0.85em; color:#aaa; line-height:1.8;">
+    <strong style="color:#ccc;">Opening:</strong> User clicks "Flow Canvas" button (in script header or menu) → FlowCanvasForm opens → loads current YAML from script editor → renders as visual graph<br/><br/>
+    <strong style="color:#ccc;">Building:</strong> Drag blocks from palette → configure in properties panel → connect outputs to inputs → graph validates connections in real-time<br/><br/>
+    <strong style="color:#ccc;">Debugging:</strong> Click breakpoint gutter on any block → Run from canvas → execution animates through blocks → pauses at breakpoints → inspect variables → step/continue<br/><br/>
+    <strong style="color:#ccc;">Applying:</strong> Click "Apply to YAML" → graph converts back to YAML → script editor updates → canvas closes (or stays open, read-only)
+  </div>
+</div>

@@ -1,0 +1,58 @@
+<h2>SSH Helper — What's the Next Big Thing?</h2>
+<p class="subtitle">Four ideas that could transform how you work with multi-host SSH. Click any that excite you — or click multiple.</p>
+
+<div class="options" data-multiselect>
+
+  <div class="option" data-choice="diff-engine" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Cross-Host Output Diff Engine</h3>
+      <p><strong>"Run one command on 50 hosts. Instantly see what's different."</strong></p>
+      <p>After executing a command across multiple hosts, get a visual diff that highlights exactly where outputs diverge. Color-coded heatmap of differences. Grouped by similarity clusters. Perfect for detecting config drift, version mismatches, or anomalies across a fleet.</p>
+      <div style="margin-top:8px; padding:8px 12px; background:rgba(255,255,255,0.05); border-radius:6px; font-size:0.85em; color:#999;">
+        Think: "show version" on 50 switches → instantly see which 3 are running old firmware
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="mission-control" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Live Execution Topology — "Mission Control"</h3>
+      <p><strong>"Watch your commands ripple across your infrastructure in real-time."</strong></p>
+      <p>A visual map of all your hosts as nodes. During execution, each node animates through states — connecting, running, streaming output, success/failure. Click any node to see its live output. After execution, the map becomes a status dashboard showing results at a glance. Hosts auto-group by subnet or custom tags.</p>
+      <div style="margin-top:8px; padding:8px 12px; background:rgba(255,255,255,0.05); border-radius:6px; font-size:0.85em; color:#999;">
+        Think: network operations center meets SSH command runner — pure wow factor
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="output-intelligence" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Smart Output Intelligence</h3>
+      <p><strong>"Your terminal output, parsed into interactive data you can actually use."</strong></p>
+      <p>Auto-detect structured output (tables, key-value pairs, interface lists, routing tables) and render it as sortable, filterable data grids. Extract metrics into dashboard cards. Compare parsed results across hosts. Export structured data to CSV/JSON. No more eyeballing walls of text.</p>
+      <div style="margin-top:8px; padding:8px 12px; background:rgba(255,255,255,0.05); border-radius:6px; font-size:0.85em; color:#999;">
+        Think: "show interfaces" → interactive table with search, sort, filter, and export
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="flow-canvas" onclick="toggleSelect(this)">
+    <div class="letter">D</div>
+    <div class="content">
+      <h3>Visual Script Builder — "Flow Canvas"</h3>
+      <p><strong>"Build complex SSH workflows by dragging blocks, not writing YAML."</strong></p>
+      <p>A drag-and-drop visual editor where each command is a block. Connect blocks with arrows for flow. Conditional branches fan out visually. Loops wrap around. Live debugging shows execution stepping through the visual flow. Generates clean YAML scripts underneath. Lower the barrier for non-scripters while giving power users a bird's-eye view.</p>
+      <div style="margin-top:8px; padding:8px 12px; background:rgba(255,255,255,0.05); border-radius:6px; font-size:0.85em; color:#999;">
+        Think: Node-RED meets SSH — visual programming for infrastructure automation
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div style="margin-top:24px; padding:16px; border:1px solid rgba(255,255,255,0.1); border-radius:8px; background:rgba(255,255,255,0.02);">
+  <p style="margin:0; color:#888; font-size:0.9em;">💡 <strong>Don't limit yourself to these four.</strong> If something sparks an idea that's not listed here — or a mashup of multiple ideas — tell me in the terminal. These are conversation starters, not a final menu.</p>
+</div>
