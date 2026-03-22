@@ -138,7 +138,10 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
   if (!node || !def || !blockData) {
     return (
       <div style={{
-        width: 220,
+        width: 300,
+      minWidth: 200,
+      maxWidth: 500,
+      resize: 'horizontal' as const,
         background: '#12122a',
         borderLeft: '1px solid #2a2a4a',
         padding: 16,
@@ -158,7 +161,10 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
 
   return (
     <div style={{
-      width: 220,
+      width: 300,
+      minWidth: 200,
+      maxWidth: 500,
+      resize: 'horizontal' as const,
       background: '#12122a',
       borderLeft: '1px solid #2a2a4a',
       overflowY: 'auto',
