@@ -126,24 +126,15 @@ namespace SSH_Helper.UI
             // Listen for messages from React
             _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
 
-            // Load the React app from the dist folder
-            var distPath = GetDistPath();
-            System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Resolved dist path: {distPath}");
+            // Load the React app — single-file HTML with all JS/CSS inlined
+            var indexPath = GetIndexHtmlPath();
+            System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Resolved index.html: {indexPath}");
 
-            if (distPath != null && Directory.Exists(distPath))
+            if (indexPath != null && File.Exists(indexPath))
             {
-                var indexPath = Path.Combine(distPath, "index.html");
-                if (File.Exists(indexPath))
-                {
-                    // Navigate via file:// URI — works reliably with local assets
-                    var fileUri = new Uri(indexPath).AbsoluteUri;
-                    _webView.CoreWebView2.Navigate(fileUri);
-                    System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Navigating to: {fileUri}");
-                }
-                else
-                {
-                    System.Diagnostics.Debug.WriteLine($"[FlowCanvas] index.html not found at: {indexPath}");
-                }
+                var html = File.ReadAllText(indexPath);
+                _webView.CoreWebView2.NavigateToString(html);
+                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Loaded {html.Length} chars via NavigateToString");
             }
             else
             {
@@ -156,7 +147,7 @@ namespace SSH_Helper.UI
                     "<p>Run <code>cd FlowCanvas && npm run build</code> in the project directory.</p>" +
                     $"<p>Exe dir: {exeDir}</p>" +
                     $"<p>Project root: {projectRoot ?? "not found"}</p>" +
-                    $"<p>Expected dist at: {distPath ?? "null"}</p></body></html>");
+                    $"<p>Looked for: {indexPath ?? "null"}</p></body></html>");
             }
         }
 
@@ -252,21 +243,21 @@ namespace SSH_Helper.UI
             DialogTheme.SetDarkTitleBar(this, _darkMode);
         }
 
-        private static string? GetDistPath()
+        private static string? GetIndexHtmlPath()
         {
             // Try relative to executable first (production)
             var exeDir = AppDomain.CurrentDomain.BaseDirectory;
-            var distFromExe = Path.Combine(exeDir, "FlowCanvas", "dist");
-            if (Directory.Exists(distFromExe))
-                return distFromExe;
+            var fromExe = Path.Combine(exeDir, "FlowCanvas", "dist", "index.html");
+            if (File.Exists(fromExe))
+                return fromExe;
 
             // Try relative to project root (development)
             var projectRoot = FindProjectRoot(exeDir);
             if (projectRoot != null)
             {
-                var distFromProject = Path.Combine(projectRoot, "FlowCanvas", "dist");
-                if (Directory.Exists(distFromProject))
-                    return distFromProject;
+                var fromProject = Path.Combine(projectRoot, "FlowCanvas", "dist", "index.html");
+                if (File.Exists(fromProject))
+                    return fromProject;
             }
 
             return null;
