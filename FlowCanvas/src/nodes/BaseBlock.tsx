@@ -37,10 +37,12 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const execState = blockData.execState || 'idle';
   const hasBreakpoint = blockData.breakpoint;
 
-  // Preview text from the primary property
-  const previewText = def.previewKey && blockData.props?.[def.previewKey]
-    ? String(blockData.props[def.previewKey])
-    : null;
+  // Preview text — prefer _preview (set by bridge), then fall back to previewKey from registry
+  const previewText = blockData.props?.['_preview']
+    ? String(blockData.props['_preview'])
+    : def.previewKey && blockData.props?.[def.previewKey]
+      ? String(blockData.props[def.previewKey])
+      : null;
 
   const containerStyle: CSSProperties = {
     background: colors.bg,

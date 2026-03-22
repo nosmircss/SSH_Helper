@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Models;
@@ -9,7 +11,11 @@ namespace SSH_Helper.Services
 {
     /// <summary>
     /// Converts between YAML Script models and Flow Canvas graph JSON.
-    /// Handles YAML → Graph (for import) and Graph → YAML (for export).
+    ///
+    /// Strategy: Each graph node stores the original YAML snippet for its step.
+    /// On import, steps are split from the YAML text and stored verbatim.
+    /// On export, snippets are reassembled into valid YAML.
+    /// This preserves all properties, comments, and formatting.
     /// </summary>
     internal sealed class FlowCanvasBridge
     {
@@ -17,10 +23,103 @@ namespace SSH_Helper.Services
         private const double NodeStartX = 250;
         private const double NodeStartY = 40;
 
-        #region YAML → Graph
+        #region YAML → Graph (using raw text splitting)
 
         /// <summary>
-        /// Converts a parsed Script model into graph JSON (nodes + edges) for React Flow.
+        /// Converts YAML script text into graph JSON by splitting into step snippets.
+        /// Each node stores the original YAML for lossless round-tripping.
+        /// </summary>
+        public (JArray nodes, JArray edges) TextToGraph(string yamlText)
+        {
+            var nodes = new JArray();
+            var edges = new JArray();
+            var idCounter = 0;
+
+            string NextId() => $"node-{idCounter++}";
+
+            // Parse to get step types/labels, but use raw text for data
+            var parser = new ScriptParser();
+            var script = parser.Parse(yamlText);
+
+            // Split the YAML text into individual step snippets
+            var stepSnippets = SplitYamlSteps(yamlText);
+
+            // Build preamble (everything before "steps:")
+            var preamble = ExtractPreamble(yamlText);
+
+            var currentY = NodeStartY;
+            string? lastNodeId = null;
+
+            for (int i = 0; i < script.Steps.Count && i < stepSnippets.Count; i++)
+            {
+                var step = script.Steps[i];
+                var snippet = stepSnippets[i];
+                var stepType = step.GetStepType();
+                var nodeId = NextId();
+
+                // Get a display label from the step
+                var (blockType, previewText) = GetStepPreview(step, stepType);
+
+                var node = new JObject
+                {
+                    ["id"] = nodeId,
+                    ["type"] = "block",
+                    ["position"] = new JObject { ["x"] = NodeStartX, ["y"] = currentY },
+                    ["data"] = new JObject
+                    {
+                        ["blockType"] = blockType,
+                        ["label"] = blockType.ToUpperInvariant(),
+                        ["props"] = new JObject { ["_yamlSnippet"] = snippet },
+                    },
+                };
+
+                // Add a preview property for display
+                if (previewText != null)
+                {
+                    var props = (JObject)node["data"]!["props"]!;
+                    props["_preview"] = previewText;
+                }
+
+                nodes.Add(node);
+
+                if (lastNodeId != null)
+                {
+                    edges.Add(new JObject
+                    {
+                        ["id"] = $"e-{lastNodeId}-{nodeId}",
+                        ["source"] = lastNodeId,
+                        ["target"] = nodeId,
+                        ["style"] = new JObject { ["stroke"] = "#555" },
+                    });
+                }
+
+                lastNodeId = nodeId;
+                currentY += NodeSpacingY;
+            }
+
+            // Store preamble in a special metadata node (hidden, used for export)
+            if (!string.IsNullOrWhiteSpace(preamble))
+            {
+                var metaNode = new JObject
+                {
+                    ["id"] = "__preamble__",
+                    ["type"] = "block",
+                    ["position"] = new JObject { ["x"] = -9999, ["y"] = -9999 },
+                    ["hidden"] = true,
+                    ["data"] = new JObject
+                    {
+                        ["blockType"] = "_preamble",
+                        ["props"] = new JObject { ["_yamlSnippet"] = preamble },
+                    },
+                };
+                nodes.Add(metaNode);
+            }
+
+            return (nodes, edges);
+        }
+
+        /// <summary>
+        /// Converts a parsed Script model into graph JSON (fallback when raw text isn't available).
         /// </summary>
         public (JArray nodes, JArray edges) ToGraph(Script script)
         {
@@ -30,278 +129,48 @@ namespace SSH_Helper.Services
 
             string NextId() => $"node-{idCounter++}";
 
-            ConvertSteps(script.Steps, nodes, edges, NextId, null, NodeStartX, NodeStartY);
+            var currentY = NodeStartY;
+            string? lastNodeId = null;
 
-            return (nodes, edges);
-        }
-
-        private string? ConvertSteps(
-            List<ScriptStep> steps,
-            JArray nodes,
-            JArray edges,
-            Func<string> nextId,
-            string? previousNodeId,
-            double startX,
-            double startY,
-            string? sourceHandle = null)
-        {
-            var currentY = startY;
-            var lastNodeId = previousNodeId;
-
-            foreach (var step in steps)
+            foreach (var step in script.Steps)
             {
-                var nodeId = nextId();
                 var stepType = step.GetStepType();
-                var (blockType, props, label) = ExtractStepData(step, stepType);
+                var nodeId = NextId();
+                var (blockType, previewText) = GetStepPreview(step, stepType);
 
                 var node = new JObject
                 {
                     ["id"] = nodeId,
                     ["type"] = "block",
-                    ["position"] = new JObject { ["x"] = startX, ["y"] = currentY },
+                    ["position"] = new JObject { ["x"] = NodeStartX, ["y"] = currentY },
                     ["data"] = new JObject
                     {
                         ["blockType"] = blockType,
-                        ["label"] = label,
-                        ["props"] = props,
+                        ["label"] = blockType.ToUpperInvariant(),
+                        ["props"] = new JObject
+                        {
+                            ["_preview"] = previewText ?? blockType,
+                        },
                     },
                 };
                 nodes.Add(node);
 
-                // Connect from previous node
                 if (lastNodeId != null)
                 {
-                    var edge = new JObject
+                    edges.Add(new JObject
                     {
                         ["id"] = $"e-{lastNodeId}-{nodeId}",
                         ["source"] = lastNodeId,
                         ["target"] = nodeId,
                         ["style"] = new JObject { ["stroke"] = "#555" },
-                    };
-                    if (sourceHandle != null)
-                    {
-                        edge["sourceHandle"] = sourceHandle;
-                        sourceHandle = null; // Only use for the first connection
-                    }
-                    edges.Add(edge);
-                }
-
-                // Handle container blocks with child steps
-                if (stepType == StepType.If)
-                {
-                    // Then branch
-                    if (step.Then != null && step.Then.Count > 0)
-                    {
-                        ConvertSteps(step.Then, nodes, edges, nextId, nodeId, startX - 120, currentY + NodeSpacingY);
-                    }
-                    // Else branch
-                    if (step.Else != null && step.Else.Count > 0)
-                    {
-                        ConvertSteps(step.Else, nodes, edges, nextId, nodeId, startX + 120, currentY + NodeSpacingY, "false");
-                    }
-                }
-                else if (stepType == StepType.Foreach || stepType == StepType.While)
-                {
-                    var bodySteps = step.Do;
-                    if (bodySteps != null && bodySteps.Count > 0)
-                    {
-                        ConvertSteps(bodySteps, nodes, edges, nextId, nodeId, startX + 50, currentY + NodeSpacingY);
-                    }
-                }
-                else if (stepType == StepType.Try)
-                {
-                    if (step.Try != null && step.Try.Count > 0)
-                    {
-                        ConvertSteps(step.Try, nodes, edges, nextId, nodeId, startX - 80, currentY + NodeSpacingY);
-                    }
-                    if (step.Catch != null && step.Catch.Count > 0)
-                    {
-                        ConvertSteps(step.Catch, nodes, edges, nextId, nodeId, startX + 160, currentY + NodeSpacingY);
-                    }
+                    });
                 }
 
                 lastNodeId = nodeId;
                 currentY += NodeSpacingY;
             }
 
-            return lastNodeId;
-        }
-
-        private static (string blockType, JObject props, string? label) ExtractStepData(ScriptStep step, StepType stepType)
-        {
-            var props = new JObject();
-            string? label = null;
-
-            switch (stepType)
-            {
-                case StepType.Send:
-                    props["command"] = step.Send;
-                    if (step.Timeout.HasValue) props["timeout"] = step.Timeout.Value;
-                    if (step.Expect != null) props["expect"] = step.Expect;
-                    if (step.OnError != null) props["on_error"] = step.OnError;
-                    return ("send", props, label);
-
-                case StepType.Print:
-                    props["message"] = step.Print;
-                    return ("print", props, label);
-
-                case StepType.Wait:
-                    props["duration"] = step.Wait ?? 1000;
-                    return ("wait", props, label);
-
-                case StepType.Set:
-                    props["expression"] = step.Set;
-                    return ("set", props, label);
-
-                case StepType.Exit:
-                    props["status"] = step.Exit;
-                    return ("exit", props, label);
-
-                case StepType.Extract:
-                    if (step.Extract != null)
-                    {
-                        props["pattern"] = step.Extract.Pattern;
-                        if (step.Extract.Into != null) props["into"] = JToken.FromObject(step.Extract.Into);
-                        if (!string.IsNullOrEmpty(step.Extract.From)) props["source"] = step.Extract.From;
-                    }
-                    return ("extract", props, label);
-
-                case StepType.If:
-                    props["condition"] = step.If;
-                    return ("if", props, label);
-
-                case StepType.Foreach:
-                    props["expression"] = step.Foreach;
-                    return ("foreach", props, label);
-
-                case StepType.While:
-                    props["condition"] = step.While;
-                    return ("while", props, label);
-
-                case StepType.Switch:
-                    props["expression"] = step.Switch;
-                    return ("switch", props, label);
-
-                case StepType.Try:
-                    return ("try", props, label);
-
-                case StepType.Break:
-                    return ("break", props, label);
-
-                case StepType.Continue:
-                    return ("continue", props, label);
-
-                case StepType.Call:
-                    if (step.Call != null) props["subroutine"] = step.Call.Subroutine;
-                    return ("call", props, label);
-
-                case StepType.Return:
-                    return ("return", props, label);
-
-                case StepType.Parallel:
-                    return ("parallel", props, label);
-
-                case StepType.UpdateColumn:
-                    if (step.UpdateColumn != null)
-                    {
-                        props["column"] = step.UpdateColumn.Column;
-                        props["expression"] = step.UpdateColumn.Value;
-                    }
-                    return ("updatecolumn", props, label);
-
-                case StepType.UpdateEnvironment:
-                    if (step.UpdateEnvironment != null)
-                    {
-                        props["variable"] = step.UpdateEnvironment.Variable;
-                        props["expression"] = step.UpdateEnvironment.Value;
-                    }
-                    return ("updateenvironment", props, label);
-
-                case StepType.Ping:
-                    if (step.Ping != null) props["target"] = step.Ping.Host;
-                    return ("ping", props, label);
-
-                case StepType.Dns:
-                    if (step.Dns != null) props["hostname"] = step.Dns.Host;
-                    return ("dns", props, label);
-
-                case StepType.Portcheck:
-                    if (step.Portcheck != null) props["target"] = $"{step.Portcheck.Host}:{step.Portcheck.Port}";
-                    return ("portcheck", props, label);
-
-                case StepType.Http:
-                    if (step.Http != null)
-                    {
-                        props["url"] = step.Http.Url;
-                        if (step.Http.Method != null) props["method"] = step.Http.Method;
-                    }
-                    return ("http", props, label);
-
-                case StepType.Webhook:
-                    if (step.Webhook != null) props["url"] = step.Webhook.Url;
-                    return ("webhook", props, label);
-
-                case StepType.Readfile:
-                    if (step.Readfile != null) props["path"] = step.Readfile.Path;
-                    return ("readfile", props, label);
-
-                case StepType.Writefile:
-                    if (step.Writefile != null) props["path"] = step.Writefile.Path;
-                    return ("writefile", props, label);
-
-                case StepType.Log:
-                    props["message"] = step.Log?.ToString();
-                    return ("log", props, label);
-
-                case StepType.Input:
-                    if (step.Input != null)
-                    {
-                        props["prompt"] = step.Input.Prompt;
-                        props["into"] = step.Input.Into;
-                    }
-                    return ("input", props, label);
-
-                case StepType.Choose:
-                    if (step.Choose != null) props["prompt"] = step.Choose.Prompt;
-                    return ("choose", props, label);
-
-                case StepType.Multiselect:
-                    if (step.Multiselect != null) props["prompt"] = step.Multiselect.Prompt;
-                    return ("multiselect", props, label);
-
-                case StepType.Confirm:
-                    if (step.Confirm != null) props["prompt"] = step.Confirm.Prompt;
-                    return ("confirm", props, label);
-
-                case StepType.Interactive:
-                    return ("interactive", props, label);
-
-                case StepType.Assert:
-                    if (step.Assert != null) props["condition"] = step.Assert.Condition;
-                    return ("assert", props, label);
-
-                case StepType.Sftp:
-                    if (step.Sftp != null)
-                    {
-                        props["action"] = step.Sftp.Action;
-                        props["local"] = step.Sftp.LocalPath;
-                        props["remote"] = step.Sftp.RemotePath;
-                    }
-                    return ("sftp", props, label);
-
-                case StepType.Table:
-                    return ("table", props, label);
-
-                case StepType.Parse:
-                    return ("parse", props, label);
-
-                case StepType.BrowserCallbackCapture:
-                    if (step.BrowserCallbackCapture != null) props["url"] = step.BrowserCallbackCapture.StartUrl;
-                    return ("browser_callback", props, label);
-
-                default:
-                    return ("send", props, $"Unknown: {stepType}");
-            }
+            return (nodes, edges);
         }
 
         #endregion
@@ -309,35 +178,16 @@ namespace SSH_Helper.Services
         #region Graph → YAML
 
         /// <summary>
-        /// Converts graph JSON from React Flow back to YAML script text.
-        /// This is a simplified conversion — generates clean, readable YAML.
+        /// Converts graph JSON back to YAML by reassembling stored snippets.
+        /// Nodes that have _yamlSnippet are emitted verbatim.
+        /// Nodes created visually (no snippet) are generated from properties.
         /// </summary>
         public string ToYaml(JObject graphData)
         {
             var nodes = graphData["nodes"] as JArray ?? new JArray();
             var edges = graphData["edges"] as JArray ?? new JArray();
 
-            // Build adjacency: source → targets
-            var outgoing = new Dictionary<string, List<(string targetId, string? sourceHandle)>>();
-            foreach (var edge in edges)
-            {
-                var src = edge["source"]?.ToString();
-                var tgt = edge["target"]?.ToString();
-                if (src == null || tgt == null) continue;
-
-                if (!outgoing.ContainsKey(src))
-                    outgoing[src] = new List<(string, string?)>();
-                outgoing[src].Add((tgt, edge["sourceHandle"]?.ToString()));
-            }
-
-            // Find roots (nodes with no incoming edges)
-            var hasIncoming = new HashSet<string>();
-            foreach (var edge in edges)
-            {
-                var tgt = edge["target"]?.ToString();
-                if (tgt != null) hasIncoming.Add(tgt);
-            }
-
+            // Build node map and adjacency
             var nodeMap = new Dictionary<string, JToken>();
             foreach (var n in nodes)
             {
@@ -345,167 +195,294 @@ namespace SSH_Helper.Services
                 if (id != null) nodeMap[id] = n;
             }
 
+            // Find the execution order by following edges from roots
+            var outgoing = new Dictionary<string, List<string>>();
+            var hasIncoming = new HashSet<string>();
+            foreach (var edge in edges)
+            {
+                var src = edge["source"]?.ToString();
+                var tgt = edge["target"]?.ToString();
+                if (src == null || tgt == null) continue;
+                if (!outgoing.ContainsKey(src)) outgoing[src] = new List<string>();
+                outgoing[src].Add(tgt);
+                hasIncoming.Add(tgt);
+            }
+
+            // Root nodes = no incoming edges, not hidden
             var roots = nodes
+                .Where(n => n["hidden"]?.Value<bool>() != true)
                 .Select(n => n["id"]?.ToString())
                 .Where(id => id != null && !hasIncoming.Contains(id))
                 .ToList();
 
-            var lines = new List<string>();
-            lines.Add("steps:");
-
+            // Build ordered chain following edges
+            var orderedIds = new List<string>();
             var visited = new HashSet<string>();
             foreach (var rootId in roots!)
             {
-                EmitChain(rootId!, nodeMap, outgoing, lines, visited, indent: 2);
+                BuildChain(rootId!, outgoing, orderedIds, visited);
             }
 
-            return string.Join("\n", lines);
-        }
-
-        private void EmitChain(
-            string nodeId,
-            Dictionary<string, JToken> nodeMap,
-            Dictionary<string, List<(string targetId, string? sourceHandle)>> outgoing,
-            List<string> lines,
-            HashSet<string> visited,
-            int indent)
-        {
-            if (!visited.Add(nodeId)) return;
-            if (!nodeMap.TryGetValue(nodeId, out var node)) return;
-
-            var data = node["data"];
-            var blockType = data?["blockType"]?.ToString() ?? "send";
-            var props = data?["props"] as JObject ?? new JObject();
-            var pad = new string(' ', indent);
-
-            EmitStep(blockType, props, lines, pad);
-
-            // Follow outgoing edges (skip "false" handle — those are else branches)
-            if (outgoing.TryGetValue(nodeId, out var targets))
+            // Check for preamble
+            var sb = new StringBuilder();
+            if (nodeMap.TryGetValue("__preamble__", out var preambleNode))
             {
-                foreach (var (targetId, handle) in targets)
+                var preambleSnippet = preambleNode["data"]?["props"]?["_yamlSnippet"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(preambleSnippet))
                 {
-                    if (handle != "false")
-                    {
-                        EmitChain(targetId, nodeMap, outgoing, lines, visited, indent);
-                    }
+                    sb.Append(preambleSnippet);
+                    if (!preambleSnippet.EndsWith("\n"))
+                        sb.AppendLine();
                 }
             }
+
+            // Check if we need to add "steps:" header
+            var preambleText = sb.ToString();
+            if (!preambleText.Contains("steps:"))
+                sb.AppendLine("steps:");
+
+            // Emit each node's YAML
+            foreach (var nodeId in orderedIds)
+            {
+                if (!nodeMap.TryGetValue(nodeId, out var node)) continue;
+                if (node["hidden"]?.Value<bool>() == true) continue;
+
+                var data = node["data"];
+                var props = data?["props"] as JObject;
+                var yamlSnippet = props?["_yamlSnippet"]?.ToString();
+
+                if (!string.IsNullOrWhiteSpace(yamlSnippet))
+                {
+                    // Emit the original YAML verbatim
+                    sb.Append(yamlSnippet);
+                    if (!yamlSnippet.EndsWith("\n"))
+                        sb.AppendLine();
+                }
+                else
+                {
+                    // Visually created node — generate minimal YAML
+                    var blockType = data?["blockType"]?.ToString() ?? "print";
+                    sb.AppendLine(GenerateStepYaml(blockType, props));
+                }
+            }
+
+            return sb.ToString().TrimEnd() + "\n";
         }
 
-        private static void EmitStep(string blockType, JObject props, List<string> lines, string pad)
+        private void BuildChain(string nodeId, Dictionary<string, List<string>> outgoing, List<string> ordered, HashSet<string> visited)
         {
+            if (!visited.Add(nodeId)) return;
+            ordered.Add(nodeId);
+            if (outgoing.TryGetValue(nodeId, out var targets))
+            {
+                foreach (var t in targets)
+                    BuildChain(t, outgoing, ordered, visited);
+            }
+        }
+
+        private static string GenerateStepYaml(string blockType, JObject? props)
+        {
+            // Generate YAML for visually-created blocks (no original snippet)
+            var preview = props?["_preview"]?.ToString();
             switch (blockType)
             {
                 case "send":
-                    lines.Add($"{pad}- send: {props["command"] ?? ""}");
-                    if (props["timeout"] != null) lines.Add($"{pad}  timeout: {props["timeout"]}");
-                    if (props["on_error"] != null && props["on_error"]!.ToString() != "stop")
-                        lines.Add($"{pad}  on_error: {props["on_error"]}");
-                    break;
-
+                    var cmd = props?["command"]?.ToString() ?? preview ?? "echo hello";
+                    return $"- send: {cmd}";
                 case "print":
-                    lines.Add($"{pad}- print: {props["message"] ?? ""}");
-                    break;
-
+                    return $"- print: \"{props?["message"]?.ToString() ?? preview ?? ""}\"";
                 case "wait":
-                    lines.Add($"{pad}- wait: {props["duration"] ?? 1000}");
-                    break;
-
+                    return $"- wait: {props?["duration"] ?? 1000}";
                 case "set":
-                    lines.Add($"{pad}- set: {props["expression"] ?? ""}");
-                    break;
-
-                case "exit":
-                    lines.Add($"{pad}- exit: {props["status"] ?? "success"}");
-                    break;
-
+                    return $"- set: {props?["expression"]?.ToString() ?? preview ?? "x = 1"}";
                 case "extract":
-                    lines.Add($"{pad}- extract:");
-                    lines.Add($"{pad}    pattern: \"{props["pattern"] ?? ""}\"");
-                    if (props["into"] != null) lines.Add($"{pad}    into: {props["into"]}");
-                    break;
-
+                    return $"- extract:\n    pattern: \"{props?["pattern"] ?? ""}\"\n    into: {props?["into"] ?? "result"}";
                 case "if":
-                    lines.Add($"{pad}- if: {props["condition"] ?? "true"}");
-                    lines.Add($"{pad}  then:");
-                    lines.Add($"{pad}    - print: \"(then branch)\"");
-                    break;
-
+                    return $"- if: {props?["condition"]?.ToString() ?? "true"}\n  then:\n    - print: \"(condition met)\"";
                 case "foreach":
-                    lines.Add($"{pad}- foreach: {props["variable"] ?? "item"} in {props["expression"] ?? "[]"}");
-                    lines.Add($"{pad}  do:");
-                    lines.Add($"{pad}    - print: \"(loop body)\"");
-                    break;
-
+                    return $"- foreach: {props?["variable"] ?? "item"} in {props?["expression"] ?? "[]"}\n  do:\n    - print: \"${{item}}\"";
                 case "while":
-                    lines.Add($"{pad}- while: {props["condition"] ?? "false"}");
-                    lines.Add($"{pad}  do:");
-                    lines.Add($"{pad}    - print: \"(loop body)\"");
-                    break;
-
+                    return $"- while: {props?["condition"] ?? "false"}\n  do:\n    - print: \"loop\"";
+                case "exit":
+                    return $"- exit: {props?["status"] ?? "success"}";
                 case "break":
-                    lines.Add($"{pad}- break:");
-                    break;
-
+                    return "- break:";
                 case "continue":
-                    lines.Add($"{pad}- continue:");
-                    break;
-
-                case "call":
-                    lines.Add($"{pad}- call: {props["subroutine"] ?? ""}");
-                    break;
-
-                case "return":
-                    lines.Add($"{pad}- return:");
-                    break;
-
-                case "updatecolumn":
-                    lines.Add($"{pad}- updatecolumn:");
-                    lines.Add($"{pad}    column: {props["column"] ?? ""}");
-                    lines.Add($"{pad}    value: {props["expression"] ?? ""}");
-                    break;
-
-                case "updateenvironment":
-                    lines.Add($"{pad}- updateenvironment:");
-                    lines.Add($"{pad}    variable: {props["variable"] ?? ""}");
-                    lines.Add($"{pad}    value: {props["expression"] ?? ""}");
-                    break;
-
+                    return "- continue:";
                 case "ping":
-                    lines.Add($"{pad}- ping: {props["target"] ?? ""}");
-                    break;
-
+                    return $"- ping: {props?["target"] ?? "127.0.0.1"}";
                 case "dns":
-                    lines.Add($"{pad}- dns: {props["hostname"] ?? ""}");
-                    break;
-
-                case "portcheck":
-                    lines.Add($"{pad}- portcheck: {props["target"] ?? ""}");
-                    break;
-
-                case "http":
-                    lines.Add($"{pad}- http:");
-                    lines.Add($"{pad}    url: {props["url"] ?? ""}");
-                    if (props["method"] != null) lines.Add($"{pad}    method: {props["method"]}");
-                    break;
-
-                case "webhook":
-                    lines.Add($"{pad}- webhook: {props["url"] ?? ""}");
-                    break;
-
+                    return $"- dns: {props?["hostname"] ?? "example.com"}";
                 case "log":
-                    lines.Add($"{pad}- log: {props["message"] ?? ""}");
-                    break;
-
-                case "assert":
-                    lines.Add($"{pad}- assert: {props["condition"] ?? "true"}");
-                    break;
-
+                    return $"- log: {props?["message"]?.ToString() ?? ""}";
                 default:
-                    lines.Add($"{pad}- {blockType}: # unsupported in visual export");
+                    return $"- {blockType}: # added from Flow Canvas";
+            }
+        }
+
+        #endregion
+
+        #region Helpers
+
+        private static (string blockType, string? preview) GetStepPreview(ScriptStep step, StepType stepType)
+        {
+            return stepType switch
+            {
+                StepType.Send => ("send", step.Send),
+                StepType.Print => ("print", step.Print),
+                StepType.Wait => ("wait", step.Wait?.ToString()),
+                StepType.Set => ("set", step.Set),
+                StepType.Exit => ("exit", step.Exit),
+                StepType.Extract => ("extract", step.Extract?.Pattern),
+                StepType.If => ("if", step.If),
+                StepType.Foreach => ("foreach", step.Foreach),
+                StepType.While => ("while", step.While),
+                StepType.Switch => ("switch", step.Switch),
+                StepType.Try => ("try", null),
+                StepType.Break => ("break", null),
+                StepType.Continue => ("continue", null),
+                StepType.Call => ("call", step.Call?.Subroutine),
+                StepType.Return => ("return", null),
+                StepType.Parallel => ("parallel", null),
+                StepType.Ping => ("ping", step.Ping?.Host),
+                StepType.Dns => ("dns", step.Dns?.Host),
+                StepType.Portcheck => ("portcheck", step.Portcheck?.Host),
+                StepType.Http => ("http", step.Http?.Url),
+                StepType.Webhook => ("webhook", step.Webhook?.Url),
+                StepType.Readfile => ("readfile", step.Readfile?.Path),
+                StepType.Writefile => ("writefile", step.Writefile?.Path),
+                StepType.Log => ("log", step.Log?.ToString()),
+                StepType.Input => ("input", step.Input?.Prompt),
+                StepType.Choose => ("choose", step.Choose?.Prompt),
+                StepType.Multiselect => ("multiselect", step.Multiselect?.Prompt),
+                StepType.Confirm => ("confirm", step.Confirm?.Prompt),
+                StepType.Interactive => ("interactive", null),
+                StepType.Assert => ("assert", step.Assert?.Condition),
+                StepType.Sftp => ("sftp", step.Sftp?.Action),
+                StepType.Table => ("table", null),
+                StepType.Parse => ("parse", step.Parse?.Format),
+                StepType.BrowserCallbackCapture => ("browser_callback", step.BrowserCallbackCapture?.StartUrl),
+                StepType.UpdateColumn => ("updatecolumn", step.UpdateColumn?.Column),
+                StepType.UpdateEnvironment => ("updateenvironment", step.UpdateEnvironment?.Variable),
+                _ => ("unknown", null),
+            };
+        }
+
+        /// <summary>
+        /// Splits YAML text into individual top-level step snippets.
+        /// Each snippet is the complete YAML text for one step (including nested blocks).
+        /// </summary>
+        private static List<string> SplitYamlSteps(string yamlText)
+        {
+            var steps = new List<string>();
+            var lines = yamlText.Split('\n');
+
+            // Find where "steps:" starts
+            int stepsLineIndex = -1;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var trimmed = lines[i].TrimEnd('\r');
+                if (trimmed == "steps:" || trimmed == "steps: ")
+                {
+                    stepsLineIndex = i;
+                    break;
+                }
+            }
+
+            if (stepsLineIndex < 0) return steps;
+
+            // Determine the indent level of step items (first "- " after "steps:")
+            int stepIndent = -1;
+            var currentStep = new StringBuilder();
+            bool inStep = false;
+
+            for (int i = stepsLineIndex + 1; i < lines.Length; i++)
+            {
+                var line = lines[i].TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    if (inStep) currentStep.AppendLine(line);
+                    continue;
+                }
+
+                var indent = line.Length - line.TrimStart().Length;
+                var trimmed = line.TrimStart();
+
+                if (trimmed.StartsWith("- ") || trimmed == "-")
+                {
+                    if (stepIndent < 0) stepIndent = indent;
+
+                    if (indent == stepIndent)
+                    {
+                        // New top-level step
+                        if (inStep && currentStep.Length > 0)
+                        {
+                            steps.Add(currentStep.ToString().TrimEnd('\r', '\n') + "\n");
+                        }
+                        currentStep.Clear();
+                        currentStep.AppendLine(line);
+                        inStep = true;
+                        continue;
+                    }
+                }
+
+                // Continuation of current step (deeper indent or non-list line)
+                if (inStep && (indent > stepIndent || string.IsNullOrWhiteSpace(line)))
+                {
+                    currentStep.AppendLine(line);
+                }
+                else if (inStep && indent <= stepIndent && !trimmed.StartsWith("- "))
+                {
+                    // Back to step indent but not a new step — belongs to previous step
+                    currentStep.AppendLine(line);
+                }
+            }
+
+            // Last step
+            if (inStep && currentStep.Length > 0)
+            {
+                steps.Add(currentStep.ToString().TrimEnd('\r', '\n') + "\n");
+            }
+
+            return steps;
+        }
+
+        /// <summary>
+        /// Extracts everything before "steps:" as the preamble.
+        /// </summary>
+        private static string ExtractPreamble(string yamlText)
+        {
+            var lines = yamlText.Split('\n');
+            var sb = new StringBuilder();
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var trimmed = lines[i].TrimEnd('\r');
+                sb.AppendLine(lines[i].TrimEnd('\r'));
+                if (trimmed == "steps:" || trimmed == "steps: ")
                     break;
             }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Gets the block type property name for display in the block preview.
+        /// </summary>
+        private static string? GetPreviewKey(string blockType)
+        {
+            return blockType switch
+            {
+                "send" => "command",
+                "print" => "message",
+                "extract" => "pattern",
+                "if" => "condition",
+                "foreach" => "expression",
+                "while" => "condition",
+                "set" => "expression",
+                "wait" => "duration",
+                _ => null,
+            };
         }
 
         #endregion

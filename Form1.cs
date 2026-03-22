@@ -6109,10 +6109,8 @@ namespace SSH_Helper
 
             try
             {
-                var parser = new Services.Scripting.ScriptParser();
-                var script = parser.Parse(scriptText);
                 var bridge = new FlowCanvasBridge();
-                var (nodes, edges) = bridge.ToGraph(script);
+                var (nodes, edges) = bridge.TextToGraph(scriptText);
                 _flowCanvasForm.LoadGraph(nodes, edges);
             }
             catch
