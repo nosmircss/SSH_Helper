@@ -101,35 +101,62 @@ namespace SSH_Helper.UI
 
             // Configure settings
             _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-            _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-            _webView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = false;
+            _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true; // Allow right-click for DevTools
+            _webView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = true; // Allow F12 for DevTools
+            _webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
             _webView.CoreWebView2.Settings.IsZoomControlEnabled = false;
 
             if (_darkMode)
                 _webView.DefaultBackgroundColor = DialogTheme.DarkBackground;
 
+            // Log navigation events and JS console errors
+            _webView.CoreWebView2.NavigationCompleted += (s, e) =>
+            {
+                System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Navigation completed: success={e.IsSuccess}, status={e.WebErrorStatus}");
+                if (!e.IsSuccess)
+                {
+                    _webView.CoreWebView2.NavigateToString(
+                        $"<html><body style='background:#1a1a2e;color:#e74c3c;font-family:sans-serif;padding:40px;'>" +
+                        $"<h2>Navigation Error</h2>" +
+                        $"<p>WebErrorStatus: {e.WebErrorStatus}</p></body></html>");
+                }
+            };
+
+
             // Listen for messages from React
             _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
 
-            // Map the dist folder as a virtual host so React app loads correctly
+            // Load the React app from the dist folder
             var distPath = GetDistPath();
+            System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Resolved dist path: {distPath}");
+
             if (distPath != null && Directory.Exists(distPath))
             {
-                _webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
-                    "flowcanvas.local",
-                    distPath,
-                    CoreWebView2HostResourceAccessKind.Allow);
-
-                _webView.CoreWebView2.Navigate("https://flowcanvas.local/index.html");
+                var indexPath = Path.Combine(distPath, "index.html");
+                if (File.Exists(indexPath))
+                {
+                    // Navigate via file:// URI — works reliably with local assets
+                    var fileUri = new Uri(indexPath).AbsoluteUri;
+                    _webView.CoreWebView2.Navigate(fileUri);
+                    System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Navigating to: {fileUri}");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FlowCanvas] index.html not found at: {indexPath}");
+                }
             }
             else
             {
-                // Fallback: show error message
+                // Fallback: show diagnostic error
+                var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+                var projectRoot = FindProjectRoot(exeDir);
                 _webView.CoreWebView2.NavigateToString(
                     "<html><body style='background:#1a1a2e;color:#e74c3c;font-family:sans-serif;padding:40px;'>" +
                     "<h2>Flow Canvas build not found</h2>" +
-                    "<p>Run <code>npm run build</code> in the FlowCanvas/ directory.</p>" +
-                    $"<p>Expected: {distPath ?? "unknown"}</p></body></html>");
+                    "<p>Run <code>cd FlowCanvas && npm run build</code> in the project directory.</p>" +
+                    $"<p>Exe dir: {exeDir}</p>" +
+                    $"<p>Project root: {projectRoot ?? "not found"}</p>" +
+                    $"<p>Expected dist at: {distPath ?? "null"}</p></body></html>");
             }
         }
 

@@ -7,11 +7,16 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
-    // Single-page app: inline everything into one HTML file for easy embedding
+    // Disable crossorigin attributes — they break virtual host mapping in WebView2
+    modulePreload: { polyfill: false },
     rollupOptions: {
       output: {
         manualChunks: undefined,
       },
     },
+  },
+  // Prevent crossorigin attribute on script/link tags
+  html: {
+    cspNonce: undefined,
   },
 });
