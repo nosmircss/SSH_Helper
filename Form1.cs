@@ -157,6 +157,7 @@ namespace SSH_Helper
 
         #region State
 
+        private FlowCanvasForm? _flowCanvasForm;
         private string? _loadedFilePath;
         private CsvFileFingerprint? _loadedFileFingerprint;
         private HostGridSnapshot? _loadedFileSnapshot;
@@ -280,6 +281,7 @@ namespace SSH_Helper
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
             InitializeComponent();
+            InitializeFlowCanvasMenuItem();
             _hostGridRestoreBatcher = new HostGridRestoreBatcher(
                 onScrollbarRefresh: UpdateDataGridViewScrollbars,
                 onHostCountRefresh: UpdateHostCount,
@@ -5984,6 +5986,33 @@ namespace SSH_Helper
         private void UpdateSortModeIndicator()
         {
             ctxToggleSorting.Text = $"Toggle Sorting ({_currentSortMode})";
+        }
+
+        private void InitializeFlowCanvasMenuItem()
+        {
+            var flowCanvasItem = new ToolStripMenuItem("Flow Canvas...");
+            flowCanvasItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.F;
+            flowCanvasItem.Click += (_, _) => OpenFlowCanvas();
+            // Insert before the last item (Debug Mode) with a separator
+            var editMenu = editToolStripMenuItem;
+            editMenu.DropDownItems.Add(new ToolStripSeparator());
+            editMenu.DropDownItems.Add(flowCanvasItem);
+        }
+
+        private void OpenFlowCanvas()
+        {
+            // Reuse existing window if still open
+            if (_flowCanvasForm != null && !_flowCanvasForm.IsDisposed)
+            {
+                _flowCanvasForm.BringToFront();
+                _flowCanvasForm.Activate();
+                return;
+            }
+
+            var config = _configService.GetCurrent();
+            _flowCanvasForm = new FlowCanvasForm(config.DarkMode);
+            _flowCanvasForm.FormClosed += (_, _) => _flowCanvasForm = null;
+            _flowCanvasForm.Show(this);
         }
 
         private void InitializeFolderExpandCollapseContextMenuItems()
