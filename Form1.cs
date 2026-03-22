@@ -6012,7 +6012,57 @@ namespace SSH_Helper
             var config = _configService.GetCurrent();
             _flowCanvasForm = new FlowCanvasForm(config.DarkMode);
             _flowCanvasForm.FormClosed += (_, _) => _flowCanvasForm = null;
+
+            // Handle "Apply to YAML" from canvas
+            _flowCanvasForm.OnApplyYaml += (graphData) =>
+            {
+                try
+                {
+                    var bridge = new FlowCanvasBridge();
+                    var yaml = bridge.ToYaml(graphData);
+                    BeginInvoke(() =>
+                    {
+                        txtCommand.Text = yaml;
+                    });
+                }
+                catch (Exception ex)
+                {
+                    BeginInvoke(() =>
+                    {
+                        DialogTheme.Show($"Failed to convert graph to YAML:\n{ex.Message}",
+                            "Flow Canvas", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    });
+                }
+            };
+
             _flowCanvasForm.Show(this);
+
+            // Load current script into canvas if it's a YAML script
+            LoadCurrentScriptIntoCanvas();
+        }
+
+        private void LoadCurrentScriptIntoCanvas()
+        {
+            if (_flowCanvasForm == null || _flowCanvasForm.IsDisposed) return;
+
+            var scriptText = txtCommand.Text?.Trim();
+            if (string.IsNullOrEmpty(scriptText)) return;
+
+            // Only convert YAML scripts (not plain commands)
+            if (!Services.Scripting.ScriptParser.IsYamlScript(scriptText)) return;
+
+            try
+            {
+                var parser = new Services.Scripting.ScriptParser();
+                var script = parser.Parse(scriptText);
+                var bridge = new FlowCanvasBridge();
+                var (nodes, edges) = bridge.ToGraph(script);
+                _flowCanvasForm.LoadGraph(nodes, edges);
+            }
+            catch
+            {
+                // Silently fail — canvas will show empty state
+            }
         }
 
         private void InitializeFolderExpandCollapseContextMenuItems()

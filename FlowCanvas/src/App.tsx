@@ -18,6 +18,7 @@ import { messageBus } from './MessageBus';
 import BaseBlock from './nodes/BaseBlock';
 import Palette from './panels/Palette';
 import Properties from './panels/Properties';
+import Toolbar from './panels/Toolbar';
 import { blockDefMap, categoryColors } from './blockDefs/registry';
 
 // Register custom node types
@@ -154,7 +155,9 @@ export default function App() {
   }, [setNodes, setEdges]);
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex' }}>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Toolbar />
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
       <Palette />
       <div ref={wrapperRef} style={{ flex: 1, height: '100%' }}>
         <ReactFlow
@@ -190,6 +193,7 @@ export default function App() {
         </ReactFlow>
       </div>
       <Properties selectedNodeId={selectedNodeId} />
+      </div>
     </div>
   );
 }
