@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef, type DragEvent } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -11,90 +11,136 @@ import {
   type Connection,
   type Node,
   type Edge,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { messageBus } from './MessageBus';
+import BaseBlock from './nodes/BaseBlock';
+import Palette from './panels/Palette';
+import { blockDefMap, categoryColors } from './blockDefs/registry';
 
-// Demo nodes to verify the canvas is working
+// Register custom node types
+const nodeTypes = {
+  block: BaseBlock,
+};
+
+// Demo nodes showing the custom block component
 const initialNodes: Node[] = [
   {
-    id: 'start',
-    type: 'default',
-    position: { x: 250, y: 0 },
-    data: { label: 'START' },
-    style: {
-      background: '#1e3a2e',
-      border: '2px solid #2ecc71',
-      borderRadius: '24px',
-      color: '#2ecc71',
-      fontWeight: 600,
-      padding: '8px 20px',
+    id: 'demo-send',
+    type: 'block',
+    position: { x: 250, y: 40 },
+    data: {
+      blockType: 'send',
+      label: 'Get Version',
+      props: { command: 'show version | include Software' },
     },
   },
   {
-    id: 'send-1',
-    type: 'default',
-    position: { x: 200, y: 100 },
-    data: { label: 'SEND: show version' },
-    style: {
-      background: '#1a2744',
-      border: '2px solid #4a9eff',
-      borderRadius: '8px',
-      color: '#8aafdb',
-      fontFamily: 'monospace',
-      fontSize: '13px',
+    id: 'demo-extract',
+    type: 'block',
+    position: { x: 250, y: 160 },
+    data: {
+      blockType: 'extract',
+      label: 'Parse Version',
+      props: { pattern: 'Version (\\S+)', into: 'firmware_ver' },
     },
   },
   {
-    id: 'extract-1',
-    type: 'default',
-    position: { x: 200, y: 220 },
-    data: { label: 'EXTRACT: Version (\\S+)' },
-    style: {
-      background: '#1a1a2a',
-      border: '2px solid #9b59b6',
-      borderRadius: '8px',
-      color: '#c9a0dc',
-      fontFamily: 'monospace',
-      fontSize: '13px',
+    id: 'demo-if',
+    type: 'block',
+    position: { x: 250, y: 280 },
+    data: {
+      blockType: 'if',
+      label: 'Version Check',
+      props: { condition: 'firmware_ver != "17.9.5"' },
     },
   },
   {
-    id: 'print-1',
-    type: 'default',
-    position: { x: 200, y: 340 },
-    data: { label: 'PRINT: "Check complete"' },
-    style: {
-      background: '#201a2a',
-      border: '2px solid #e67e22',
-      borderRadius: '8px',
-      color: '#e8a860',
-      fontFamily: 'monospace',
-      fontSize: '13px',
+    id: 'demo-print',
+    type: 'block',
+    position: { x: 150, y: 400 },
+    data: {
+      blockType: 'print',
+      props: { message: '⚠ Outdated firmware!' },
+      execState: 'idle',
+    },
+  },
+  {
+    id: 'demo-updatecol',
+    type: 'block',
+    position: { x: 380, y: 400 },
+    data: {
+      blockType: 'updatecolumn',
+      props: { column: 'Status', expression: '"OUTDATED"' },
     },
   },
 ];
 
 const initialEdges: Edge[] = [
-  { id: 'e-start-send', source: 'start', target: 'send-1', animated: true, style: { stroke: '#2ecc71' } },
-  { id: 'e-send-extract', source: 'send-1', target: 'extract-1', style: { stroke: '#4a9eff' } },
-  { id: 'e-extract-print', source: 'extract-1', target: 'print-1', style: { stroke: '#9b59b6' } },
+  { id: 'e1', source: 'demo-send', target: 'demo-extract', style: { stroke: '#4a9eff' } },
+  { id: 'e2', source: 'demo-extract', target: 'demo-if', style: { stroke: '#9b59b6' } },
+  { id: 'e3', source: 'demo-if', target: 'demo-print', style: { stroke: '#f0c040' } },
+  { id: 'e4', source: 'demo-if', sourceHandle: 'false', target: 'demo-updatecol', style: { stroke: '#e74c3c' } },
 ];
+
+let idCounter = 0;
+function nextId() {
+  return `block-${Date.now()}-${idCounter++}`;
+}
 
 export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const onConnect = useCallback(
-    (connection: Connection) => setEdges((eds) => addEdge({ ...connection, style: { stroke: '#666' } }, eds)),
+    (connection: Connection) =>
+      setEdges((eds) => addEdge({ ...connection, style: { stroke: '#666' } }, eds)),
     [setEdges],
+  );
+
+  const onDragOver = useCallback((event: DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback(
+    (event: DragEvent) => {
+      event.preventDefault();
+      const blockType = event.dataTransfer.getData('application/flowcanvas-block');
+      if (!blockType || !reactFlowInstance.current) return;
+
+      const def = blockDefMap.get(blockType);
+      if (!def) return;
+
+      const bounds = wrapperRef.current?.getBoundingClientRect();
+      const position = reactFlowInstance.current.screenToFlowPosition({
+        x: event.clientX - (bounds?.left ?? 0),
+        y: event.clientY - (bounds?.top ?? 0),
+      });
+
+      const newNode: Node = {
+        id: nextId(),
+        type: 'block',
+        position,
+        data: {
+          blockType,
+          label: def.label,
+          props: {},
+        },
+      };
+
+      setNodes((nds) => [...nds, newNode]);
+    },
+    [setNodes],
   );
 
   // Signal ready to WinForms host
   useEffect(() => {
     messageBus.sendReady();
 
-    // Listen for graph load messages from WinForms
     const unsub = messageBus.on('load-graph', (msg) => {
       if (msg.nodes && msg.edges) {
         setNodes(msg.nodes as Node[]);
@@ -106,27 +152,39 @@ export default function App() {
   }, [setNodes, setEdges]);
 
   return (
-    <div style={{ width: '100%', height: '100%' }}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        fitView
-        proOptions={{ hideAttribution: true }}
-        style={{ background: '#1a1a2e' }}
-      >
-        <Controls
-          style={{ background: '#222244', borderColor: '#2a2a4a', borderRadius: '6px' }}
-        />
-        <MiniMap
-          style={{ background: '#12122a', borderColor: '#2a2a4a', borderRadius: '6px' }}
-          nodeColor="#4a9eff"
-          maskColor="rgba(0,0,0,0.6)"
-        />
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#2a2a4a" />
-      </ReactFlow>
+    <div style={{ width: '100%', height: '100%', display: 'flex' }}>
+      <Palette />
+      <div ref={wrapperRef} style={{ flex: 1, height: '100%' }}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          onInit={(instance) => { reactFlowInstance.current = instance; }}
+          nodeTypes={nodeTypes}
+          fitView
+          proOptions={{ hideAttribution: true }}
+          style={{ background: '#1a1a2e' }}
+          defaultEdgeOptions={{ style: { stroke: '#555' } }}
+        >
+          <Controls
+            style={{ background: '#222244', borderColor: '#2a2a4a', borderRadius: '6px' }}
+          />
+          <MiniMap
+            style={{ background: '#12122a', borderColor: '#2a2a4a', borderRadius: '6px' }}
+            nodeColor={(node) => {
+              const bt = (node.data as any)?.blockType;
+              const def = bt ? blockDefMap.get(bt) : null;
+              return def ? categoryColors[def.category].border : '#4a9eff';
+            }}
+            maskColor="rgba(0,0,0,0.6)"
+          />
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#2a2a4a" />
+        </ReactFlow>
+      </div>
     </div>
   );
 }
