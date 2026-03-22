@@ -162,8 +162,12 @@ namespace SSH_Helper.UI
 
                 // Strip 'type="module"' and 'crossorigin' — these block execution
                 // when loaded via NavigateToString (about:blank origin).
-                // The bundled script is already a self-contained IIFE, not an ES module.
-                html = html.Replace(" type=\"module\" crossorigin>", ">");
+                // Wrap in DOMContentLoaded since removing type="module" makes it
+                // synchronous (runs before <body> is parsed).
+                html = html.Replace("<script type=\"module\" crossorigin>",
+                    "<script>document.addEventListener('DOMContentLoaded',function(){");
+                html = html.Replace("</script>\n  </head>",
+                    "});</script>\n  </head>");
                 html = html.Replace(" crossorigin ", " ");
 
                 System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Loading {html.Length} chars");
