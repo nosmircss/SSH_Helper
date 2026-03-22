@@ -159,6 +159,13 @@ namespace SSH_Helper.UI
             if (indexPath != null && File.Exists(indexPath))
             {
                 var html = File.ReadAllText(indexPath);
+
+                // Strip 'type="module"' and 'crossorigin' — these block execution
+                // when loaded via NavigateToString (about:blank origin).
+                // The bundled script is already a self-contained IIFE, not an ES module.
+                html = html.Replace(" type=\"module\" crossorigin>", ">");
+                html = html.Replace(" crossorigin ", " ");
+
                 System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Loading {html.Length} chars");
                 _webView.CoreWebView2.NavigateToString(html);
             }
