@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -17,6 +17,7 @@ import '@xyflow/react/dist/style.css';
 import { messageBus } from './MessageBus';
 import BaseBlock from './nodes/BaseBlock';
 import Palette from './panels/Palette';
+import Properties from './panels/Properties';
 import { blockDefMap, categoryColors } from './blockDefs/registry';
 
 // Register custom node types
@@ -92,6 +93,7 @@ function nextId() {
 export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -164,6 +166,8 @@ export default function App() {
           onDragOver={onDragOver}
           onDrop={onDrop}
           onInit={(instance) => { reactFlowInstance.current = instance; }}
+          onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+          onPaneClick={() => setSelectedNodeId(null)}
           nodeTypes={nodeTypes}
           fitView
           proOptions={{ hideAttribution: true }}
@@ -185,6 +189,7 @@ export default function App() {
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#2a2a4a" />
         </ReactFlow>
       </div>
+      <Properties selectedNodeId={selectedNodeId} />
     </div>
   );
 }
