@@ -102,7 +102,7 @@ namespace SSH_Helper.Services
                 }
                 else if (stepType == StepType.Foreach || stepType == StepType.While)
                 {
-                    var bodySteps = stepType == StepType.Foreach ? step.Do : step.Do;
+                    var bodySteps = step.Do;
                     if (bodySteps != null && bodySteps.Count > 0)
                     {
                         ConvertSteps(bodySteps, nodes, edges, nextId, nodeId, startX + 50, currentY + NodeSpacingY);

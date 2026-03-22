@@ -46,8 +46,9 @@ function PaletteItem({ def }: { def: BlockDef }) {
   );
 }
 
+const byCategory = getBlocksByCategory(); // computed once at module level
+
 export default function Palette() {
-  const byCategory = getBlocksByCategory();
 
   return (
     <div style={{

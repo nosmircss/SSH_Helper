@@ -35,8 +35,9 @@ class MessageBusImpl {
       });
     }
 
-    // Also listen for window messages (useful for dev/testing without WebView2)
+    // Listen for window messages (dev/testing without WebView2 only)
     window.addEventListener('message', (event: MessageEvent) => {
+      if (this.isWebView2) return; // already handled by chrome.webview listener
       if (event.source !== window) return;
       try {
         const msg: BridgeMessage = typeof event.data === 'string'

@@ -127,10 +127,9 @@ export default function App() {
       const def = blockDefMap.get(blockType);
       if (!def) return;
 
-      const bounds = wrapperRef.current?.getBoundingClientRect();
       const position = reactFlowInstance.current.screenToFlowPosition({
-        x: event.clientX - (bounds?.left ?? 0),
-        y: event.clientY - (bounds?.top ?? 0),
+        x: event.clientX,
+        y: event.clientY,
       });
 
       const newNode: Node = {

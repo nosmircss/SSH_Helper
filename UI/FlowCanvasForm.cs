@@ -189,8 +189,12 @@ namespace SSH_Helper.UI
             if (_reactReady && _webView.CoreWebView2 != null)
             {
                 if (InvokeRequired)
-                    BeginInvoke(() => _webView.CoreWebView2.PostWebMessageAsJson(json));
-                else
+                    BeginInvoke(() =>
+                    {
+                        if (!IsDisposed && _webView.CoreWebView2 != null)
+                            _webView.CoreWebView2.PostWebMessageAsJson(json);
+                    });
+                else if (!IsDisposed)
                     _webView.CoreWebView2.PostWebMessageAsJson(json);
             }
             else

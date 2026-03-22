@@ -378,6 +378,7 @@ namespace SSH_Helper.Services.Scripting
             context.EmitOutput($"[DEBUG] Paused at line {step.LineNumber}", ScriptOutputType.Debug);
 
             // Wait for resume signal (step or continue) — instant response, no polling
+            // WaitForResumeAsync resets request flags atomically before waiting
             var action = await context.DebugState.WaitForResumeAsync(cancellationToken);
 
             if (action == DebugResumeAction.Continue)
@@ -385,10 +386,7 @@ namespace SSH_Helper.Services.Scripting
                 context.DebugState.StepMode = false; // Exit step mode
             }
 
-            // Reset flags
             context.DebugState.IsPaused = false;
-            context.DebugState.ContinueRequested = false;
-            context.DebugState.StepRequested = false;
         }
 
         /// <summary>

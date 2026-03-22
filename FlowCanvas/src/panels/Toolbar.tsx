@@ -53,7 +53,7 @@ export default function Toolbar({ selectedNodeId, variablesVisible, onToggleVari
         onClick={onToggleVariables}
         style={btnStyle(variablesVisible ? '#e0c040' : '#888')}
       >
-        {variablesVisible ? '🔍 Variables' : '🔍 Variables'}
+        {variablesVisible ? '🔍 Hide Vars' : '🔍 Variables'}
       </button>
       <div style={{ flex: 1 }} />
       <span style={{ color: '#555', fontSize: 11 }}>Flow Canvas</span>
