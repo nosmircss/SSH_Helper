@@ -19,6 +19,7 @@ import { messageBus } from './MessageBus';
 import BaseBlock from './nodes/BaseBlock';
 import Palette from './panels/Palette';
 import Properties from './panels/Properties';
+import RightPanel from './panels/RightPanel';
 import Toolbar from './panels/Toolbar';
 import VariableInspector, { type VariableEntry } from './panels/VariableInspector';
 import OutputPreview from './panels/OutputPreview';
@@ -108,7 +109,7 @@ function FlowCanvasInner() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [variables, setVariables] = useState<VariableEntry[]>([]);
-  const [variablesVisible, setVariablesVisible] = useState(false);
+  const [variablesVisible, setVariablesVisible] = useState(true);
   const [outputText, setOutputText] = useState<string | null>(null);
   const [outputLabel, setOutputLabel] = useState<string>('');
   const [debugState, setDebugState] = useState<DebugState>({ paused: false, callStack: [] });
@@ -301,12 +302,17 @@ function FlowCanvasInner() {
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#2a2a4a" />
         </ReactFlow>
       </div>
-      <Properties selectedNodeId={selectedNodeId} />
-      <VariableInspector
-        variables={variables}
-        visible={variablesVisible}
-        onToggle={() => setVariablesVisible(false)}
-      />
+      {/* Right panel area — resizable via drag handle */}
+      <RightPanel>
+        <Properties selectedNodeId={selectedNodeId} />
+        {variablesVisible && (
+          <VariableInspector
+            variables={variables}
+            visible={variablesVisible}
+            onToggle={() => setVariablesVisible(false)}
+          />
+        )}
+      </RightPanel>
       <DebugPanel debugState={debugState} visible={debugVisible} />
       {outputText !== null && (
         <OutputPreview

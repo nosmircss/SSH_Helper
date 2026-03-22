@@ -138,17 +138,11 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
   if (!node || !def || !blockData) {
     return (
       <div style={{
-        width: 300,
-      minWidth: 200,
-      maxWidth: 500,
-      resize: 'horizontal' as const,
-        background: '#12122a',
-        borderLeft: '1px solid #2a2a4a',
+        flex: 1,
         padding: 16,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        flexShrink: 0,
       }}>
         <span style={{ color: '#555', fontSize: 12, textAlign: 'center' }}>
           Select a block to edit its properties
@@ -161,18 +155,12 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
 
   return (
     <div style={{
-      width: 300,
-      minWidth: 200,
-      maxWidth: 500,
-      resize: 'horizontal' as const,
-      background: '#12122a',
-      borderLeft: '1px solid #2a2a4a',
+      flex: 1,
       overflowY: 'auto',
       padding: 12,
       display: 'flex',
       flexDirection: 'column',
       gap: 12,
-      flexShrink: 0,
     }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid #2a2a4a' }}>
