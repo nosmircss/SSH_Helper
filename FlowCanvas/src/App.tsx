@@ -149,6 +149,24 @@ export default function App() {
     [setNodes],
   );
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+Enter: Test Step on selected node
+      if (e.ctrlKey && e.key === 'Enter' && selectedNodeId) {
+        e.preventDefault();
+        messageBus.send({ type: 'test-step', stepId: selectedNodeId });
+      }
+      // Escape: deselect / close panels
+      if (e.key === 'Escape') {
+        setSelectedNodeId(null);
+        setOutputText(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNodeId]);
+
   // Signal ready to WinForms host
   useEffect(() => {
     messageBus.sendReady();

@@ -1,6 +1,7 @@
-import { memo, type CSSProperties } from 'react';
+import { memo, type CSSProperties, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { blockDefMap, categoryColors, type BlockCategory } from '../blockDefs/registry';
+import { messageBus } from '../MessageBus';
 
 export interface BlockNodeData {
   blockType: string;
@@ -20,9 +21,16 @@ const execGlowColors: Record<string, string> = {
   error: 'rgba(231, 76, 60, 0.3)',
 };
 
-function BaseBlock({ data, selected }: NodeProps) {
+function BaseBlock({ data, selected, id }: NodeProps) {
   const blockData = data as BlockNodeData;
   const def = blockDefMap.get(blockData.blockType);
+
+  const handleBreakpointToggle = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    messageBus.send({ type: 'breakpoint-toggle', stepId: id });
+  }, [id]);
+
   if (!def) return <div style={{ color: '#e74c3c' }}>Unknown: {blockData.blockType}</div>;
 
   const colors = categoryColors[def.category as BlockCategory];
@@ -86,7 +94,7 @@ function BaseBlock({ data, selected }: NodeProps) {
   ) : null;
 
   return (
-    <div style={containerStyle}>
+    <div style={containerStyle} onContextMenu={handleBreakpointToggle}>
       {/* Input handle (top) */}
       <Handle
         type="target"
@@ -96,14 +104,20 @@ function BaseBlock({ data, selected }: NodeProps) {
 
       {/* Header */}
       <div style={headerStyle}>
-        {/* Breakpoint gutter */}
-        {hasBreakpoint && (
-          <span style={{
-            width: 8, height: 8, borderRadius: '50%',
-            background: '#e74c3c', flexShrink: 0,
-            boxShadow: '0 0 4px rgba(231,76,60,0.6)',
-          }} />
-        )}
+        {/* Breakpoint gutter — click to toggle */}
+        <span
+          onClick={handleBreakpointToggle}
+          style={{
+            width: 10, height: 10, borderRadius: '50%',
+            background: hasBreakpoint ? '#e74c3c' : 'transparent',
+            border: hasBreakpoint ? 'none' : '1px solid #444',
+            flexShrink: 0,
+            cursor: 'pointer',
+            boxShadow: hasBreakpoint ? '0 0 4px rgba(231,76,60,0.6)' : 'none',
+            transition: 'background 0.15s',
+          }}
+          title="Toggle breakpoint (right-click)"
+        />
 
         <span style={badgeStyle}>{def.type}</span>
         <span style={{ color: '#ccc', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
