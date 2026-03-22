@@ -8,11 +8,42 @@ using SSH_Helper.Services.Scripting.Models;
 namespace SSH_Helper.Services.Scripting
 {
     /// <summary>
+    /// Event args for step execution lifecycle events.
+    /// </summary>
+    public class StepExecutionEventArgs : EventArgs
+    {
+        /// <summary>Position of the step within its parent step list.</summary>
+        public int StepIndex { get; init; }
+
+        /// <summary>The command type being executed.</summary>
+        public StepType StepType { get; init; }
+
+        /// <summary>The YAML line number of the step.</summary>
+        public int LineNumber { get; init; }
+
+        /// <summary>The step's user-defined name, if any.</summary>
+        public string? StepName { get; init; }
+
+        /// <summary>Whether the step completed successfully (only set on StepCompleted).</summary>
+        public bool? Success { get; init; }
+    }
+
+    /// <summary>
     /// Executes parsed scripts by interpreting steps and dispatching to command handlers.
     /// </summary>
     public class ScriptExecutor
     {
         private readonly Dictionary<StepType, IScriptCommand> _commands;
+
+        /// <summary>
+        /// Raised before a step begins execution.
+        /// </summary>
+        public event EventHandler<StepExecutionEventArgs>? StepStarting;
+
+        /// <summary>
+        /// Raised after a step finishes execution.
+        /// </summary>
+        public event EventHandler<StepExecutionEventArgs>? StepCompleted;
 
         public ScriptExecutor()
             : this(null)
@@ -176,8 +207,9 @@ namespace SSH_Helper.Services.Scripting
 
             try
             {
-                foreach (var step in steps)
+                for (int stepIndex = 0; stepIndex < steps.Count; stepIndex++)
                 {
+                    var step = steps[stepIndex];
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // Handle debug pausing
@@ -186,7 +218,28 @@ namespace SSH_Helper.Services.Scripting
                         await HandleDebugPauseAsync(step, context, cancellationToken);
                     }
 
+                    var stepType = step.GetStepType();
+
+                    // Fire step-starting event
+                    StepStarting?.Invoke(this, new StepExecutionEventArgs
+                    {
+                        StepIndex = stepIndex,
+                        StepType = stepType,
+                        LineNumber = step.LineNumber,
+                        StepName = null
+                    });
+
                     var result = await ExecuteStepAsync(step, context, cancellationToken);
+
+                    // Fire step-completed event
+                    StepCompleted?.Invoke(this, new StepExecutionEventArgs
+                    {
+                        StepIndex = stepIndex,
+                        StepType = stepType,
+                        LineNumber = step.LineNumber,
+                        StepName = null,
+                        Success = result.Success
+                    });
 
                     if (result.SuppressedError)
                     {
@@ -312,6 +365,7 @@ namespace SSH_Helper.Services.Scripting
 
         /// <summary>
         /// Handles debug pause at a breakpoint or in step mode.
+        /// Uses async signaling for instant response (no polling delay).
         /// </summary>
         private async Task HandleDebugPauseAsync(
             ScriptStep step,
@@ -323,17 +377,10 @@ namespace SSH_Helper.Services.Scripting
 
             context.EmitOutput($"[DEBUG] Paused at line {step.LineNumber}", ScriptOutputType.Debug);
 
-            // Wait for continue or step request
-            while (context.DebugState.IsPaused &&
-                   !context.DebugState.ContinueRequested &&
-                   !context.DebugState.StepRequested)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await Task.Delay(100, cancellationToken);
-            }
+            // Wait for resume signal (step or continue) — instant response, no polling
+            var action = await context.DebugState.WaitForResumeAsync(cancellationToken);
 
-            // Handle the request
-            if (context.DebugState.ContinueRequested)
+            if (action == DebugResumeAction.Continue)
             {
                 context.DebugState.StepMode = false; // Exit step mode
             }

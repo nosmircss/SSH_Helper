@@ -1,12 +1,25 @@
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SSH_Helper.Services.Scripting.Models
 {
+    /// <summary>
+    /// The action that caused the debugger to resume.
+    /// </summary>
+    public enum DebugResumeAction
+    {
+        Step,
+        Continue
+    }
+
     /// <summary>
     /// Tracks debug state for script execution including breakpoints and step mode.
     /// </summary>
     public class DebugState
     {
+        private TaskCompletionSource<DebugResumeAction>? _resumeSignal;
+
         /// <summary>
         /// Set of line numbers where execution should pause.
         /// </summary>
@@ -29,13 +42,46 @@ namespace SSH_Helper.Services.Scripting.Models
 
         /// <summary>
         /// Request to continue execution (set by UI).
+        /// Also signals the async resume mechanism.
         /// </summary>
-        public bool ContinueRequested { get; set; }
+        public bool ContinueRequested
+        {
+            get => _continueRequested;
+            set
+            {
+                _continueRequested = value;
+                if (value)
+                    _resumeSignal?.TrySetResult(DebugResumeAction.Continue);
+            }
+        }
+        private bool _continueRequested;
 
         /// <summary>
         /// Request to step to next instruction (set by UI).
+        /// Also signals the async resume mechanism.
         /// </summary>
-        public bool StepRequested { get; set; }
+        public bool StepRequested
+        {
+            get => _stepRequested;
+            set
+            {
+                _stepRequested = value;
+                if (value)
+                    _resumeSignal?.TrySetResult(DebugResumeAction.Step);
+            }
+        }
+        private bool _stepRequested;
+
+        /// <summary>
+        /// Waits asynchronously for a resume signal (step or continue) from the UI.
+        /// Replaces the 100ms polling loop for responsive debug pausing.
+        /// </summary>
+        public async Task<DebugResumeAction> WaitForResumeAsync(CancellationToken cancellationToken)
+        {
+            _resumeSignal = new TaskCompletionSource<DebugResumeAction>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var registration = cancellationToken.Register(() => _resumeSignal.TrySetCanceled());
+            return await _resumeSignal.Task;
+        }
 
         /// <summary>
         /// Adds a breakpoint at the specified line.
@@ -78,8 +124,9 @@ namespace SSH_Helper.Services.Scripting.Models
         {
             IsPaused = false;
             PausedAtLine = null;
-            ContinueRequested = false;
-            StepRequested = false;
+            _continueRequested = false;
+            _stepRequested = false;
+            _resumeSignal = null;
             // Keep breakpoints and step mode setting
         }
     }
