@@ -191,11 +191,10 @@ export const blockDefs: BlockDef[] = [
   },
   {
     type: 'set', label: 'Set', category: 'data', icon: '📝',
-    description: 'Set a variable value',
+    description: 'Set a variable value (format: varname = expression)',
     previewKey: 'expression',
     properties: [
-      { key: 'variable', label: 'Variable', type: 'text', required: true },
-      { key: 'expression', label: 'Value', type: 'code', required: true },
+      { key: 'expression', label: 'Expression', type: 'code', required: true, placeholder: 'varname = value' },
     ],
   },
   {

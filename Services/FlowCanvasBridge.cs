@@ -74,7 +74,7 @@ namespace SSH_Helper.Services
                     ["data"] = new JObject
                     {
                         ["blockType"] = blockType,
-                        ["label"] = blockType.ToUpperInvariant(),
+                        ["label"] = GetDisplayLabel(blockType, previewText),
                         ["props"] = stepProps,
                     },
                 };
@@ -145,7 +145,7 @@ namespace SSH_Helper.Services
                     ["data"] = new JObject
                     {
                         ["blockType"] = blockType,
-                        ["label"] = blockType.ToUpperInvariant(),
+                        ["label"] = GetDisplayLabel(blockType, previewText),
                         ["props"] = new JObject
                         {
                             ["_preview"] = previewText ?? blockType,
@@ -277,6 +277,29 @@ namespace SSH_Helper.Services
                 foreach (var t in targets)
                     BuildChain(t, outgoing, ordered, visited);
             }
+        }
+
+        /// <summary>
+        /// Creates a meaningful display label from the block type and preview text.
+        /// Shows "Get Version" instead of "SEND" when there's useful context.
+        /// </summary>
+        private static string GetDisplayLabel(string blockType, string? previewText)
+        {
+            if (string.IsNullOrWhiteSpace(previewText))
+                return char.ToUpper(blockType[0]) + blockType.Substring(1);
+
+            // For SET, show the variable name being assigned
+            if (blockType == "set" && previewText.Contains('='))
+            {
+                var varName = previewText.Split('=')[0].Trim();
+                return $"set {varName}";
+            }
+
+            // Truncate long previews
+            if (previewText.Length > 35)
+                previewText = previewText.Substring(0, 32) + "...";
+
+            return previewText;
         }
 
         /// <summary>
