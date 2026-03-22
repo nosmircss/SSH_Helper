@@ -22,20 +22,46 @@ namespace SSH_Helper.Services
         private const double NodeSpacingY = 120;
         private const double NodeStartX = 250;
         private const double NodeStartY = 40;
+        private const double ChildIndentX = 60;
+        private const double ChildMinX = 40;
+        private const int MaxNestingDepth = 5;
+
+        // Multi-branch horizontal layout constants
+        // MinColumnWidth must be >= max child node width + gap to prevent overlap
+        private const double ChildNodeMaxWidth = 260;
+        private const double ColumnGap = 30;
+        private const double BaseColumnWidth = ChildNodeMaxWidth + ColumnGap;  // 290
+        private const double ColumnWidthDecay = 0.92;
+        private const double MinColumnWidth = ChildNodeMaxWidth + ColumnGap;   // 290 — never narrower than a node
+        private const double MaxSpreadWidth = 1400;
+
+        // Branch edge colors
+        private const string ColorThen = "#2ecc71";
+        private const string ColorElse = "#e74c3c";
+        private const string ColorElif = "#f0c040";
+        private const string ColorLoop = "#f0c040";
+        private const string ColorTry = "#2ecc71";
+        private const string ColorCatch = "#e74c3c";
+        private const string ColorFinally = "#4a9eff";
+        private const string ColorCase = "#f0c040";
+        private const string ColorBranch = "#1abc9c";
+
+        private int _idCounter;
+        private string NextId() => $"node-{_idCounter++}";
 
         #region YAML → Graph (using raw text splitting)
 
         /// <summary>
         /// Converts YAML script text into graph JSON by splitting into step snippets.
         /// Each node stores the original YAML for lossless round-tripping.
+        /// Container blocks (if, foreach, while, try, switch) are recursively expanded
+        /// so their nested children appear as indented visual-only nodes.
         /// </summary>
         public (JArray nodes, JArray edges) TextToGraph(string yamlText)
         {
             var nodes = new JArray();
             var edges = new JArray();
-            var idCounter = 0;
-
-            string NextId() => $"node-{idCounter++}";
+            _idCounter = 0;
 
             // Parse to get step types/labels, but use raw text for data
             var parser = new ScriptParser();
@@ -48,7 +74,11 @@ namespace SSH_Helper.Services
             var preamble = ExtractPreamble(yamlText);
 
             var currentY = NodeStartY;
-            string? lastNodeId = null;
+
+            // Tracks nodes that need to connect to the next step.
+            // Each entry is (nodeId, sourceHandle, color, label) — sourceHandle is
+            // non-null for the false-path skip edge from an if without else.
+            var pendingConnections = new List<PendingEdge>();
 
             for (int i = 0; i < script.Steps.Count && i < stepSnippets.Count; i++)
             {
@@ -81,19 +111,64 @@ namespace SSH_Helper.Services
 
                 nodes.Add(node);
 
-                if (lastNodeId != null)
+                // Connect from all pending nodes to this one
+                foreach (var pe in pendingConnections)
                 {
-                    edges.Add(new JObject
+                    var edge = new JObject
                     {
-                        ["id"] = $"e-{lastNodeId}-{nodeId}",
-                        ["source"] = lastNodeId,
+                        ["id"] = $"e-{pe.NodeId}-{nodeId}{(pe.SourceHandle != null ? "-" + pe.SourceHandle : "")}",
+                        ["source"] = pe.NodeId,
                         ["target"] = nodeId,
-                        ["style"] = new JObject { ["stroke"] = "#555" },
-                    });
+                        ["style"] = new JObject { ["stroke"] = pe.Color ?? "#555" },
+                    };
+                    if (pe.SourceHandle != null)
+                        edge["sourceHandle"] = pe.SourceHandle;
+                    if (pe.Label != null)
+                    {
+                        edge["label"] = pe.Label;
+                        edge["labelStyle"] = new JObject
+                        {
+                            ["fill"] = pe.Color ?? "#555",
+                            ["fontSize"] = 11,
+                            ["fontWeight"] = 600,
+                        };
+                        edge["type"] = "smoothstep";
+                        edge["style"]!["strokeDasharray"] = "5,5";
+                    }
+                    edges.Add(edge);
                 }
+                pendingConnections.Clear();
 
-                lastNodeId = nodeId;
                 currentY += NodeSpacingY;
+
+                // Expand container children into visible indented nodes
+                if (IsContainerStep(stepType))
+                {
+                    var branchEnds = ExpandContainerChildren(step, stepType, nodeId, ref currentY, 1, NodeStartX, nodes, edges);
+                    if (branchEnds.Count > 0)
+                    {
+                        foreach (var be in branchEnds)
+                            pendingConnections.Add(new PendingEdge(be));
+                    }
+                    else
+                    {
+                        // No children expanded — this node connects to the next step
+                        pendingConnections.Add(new PendingEdge(nodeId));
+                    }
+
+                    // For IF without else: add a skip edge from the false handle
+                    // so the user sees both "then" and "skip" paths converging
+                    if (stepType == StepType.If
+                        && (step.Else == null || step.Else.Count == 0)
+                        && (step.Elif == null || step.Elif.Count == 0))
+                    {
+                        pendingConnections.Add(new PendingEdge(nodeId, "false", ColorElse, "else"));
+                    }
+                }
+                else
+                {
+                    pendingConnections.Add(new PendingEdge(nodeId));
+                }
             }
 
             // Store preamble in a special metadata node (hidden, used for export)
@@ -116,6 +191,411 @@ namespace SSH_Helper.Services
 
             return (nodes, edges);
         }
+
+        /// <summary>
+        /// Determines the branches for a container step and creates child nodes.
+        /// Single-branch containers (foreach, while, if-no-else) use left-indent layout.
+        /// Multi-branch containers (if/else, parallel, switch, try/catch) use side-by-side horizontal layout.
+        /// Returns the list of node IDs at the end of each branch (for merge edges to the next sibling).
+        /// </summary>
+        private List<string> ExpandContainerChildren(
+            ScriptStep parentStep,
+            StepType parentType,
+            string parentNodeId,
+            ref double currentY,
+            int depth,
+            double centerX,
+            JArray nodes,
+            JArray edges)
+        {
+            var branches = GetBranches(parentStep, parentType);
+            var nonEmptyBranches = branches.Where(b => b.Steps != null && b.Steps.Count > 0).ToList();
+
+            if (nonEmptyBranches.Count == 0)
+                return new List<string>();
+
+            if (IsMultiBranch(branches))
+                return ExpandMultiBranch(nonEmptyBranches, parentNodeId, ref currentY, depth, centerX, nodes, edges);
+            else
+                return ExpandSingleBranch(nonEmptyBranches[0], parentNodeId, ref currentY, depth, centerX, nodes, edges);
+        }
+
+        /// <summary>
+        /// Single-branch layout: children go LEFT of the center (existing behavior).
+        /// Used for foreach, while, if-without-else.
+        /// </summary>
+        private List<string> ExpandSingleBranch(
+            BranchInfo branch,
+            string parentNodeId,
+            ref double currentY,
+            int depth,
+            double centerX,
+            JArray nodes,
+            JArray edges)
+        {
+            // Children stay at the branch's own centerX — no further indentation.
+            // The indent was for the main-flow case; inside a branch column the
+            // children should just flow straight down within their allocated space.
+            var lastNodeId = PlaceBranchSteps(branch, parentNodeId, ref currentY, depth, centerX, centerX, nodes, edges);
+            return new List<string> { lastNodeId };
+        }
+
+        /// <summary>
+        /// Multi-branch layout: branches spread horizontally side-by-side.
+        /// All branches start at the same Y. The next sibling starts after the tallest branch.
+        /// </summary>
+        private List<string> ExpandMultiBranch(
+            List<BranchInfo> branches,
+            string parentNodeId,
+            ref double currentY,
+            int depth,
+            double centerX,
+            JArray nodes,
+            JArray edges)
+        {
+            // Pass 1: Measure each branch width
+            var branchSizes = new List<SubtreeSize>();
+            foreach (var branch in branches)
+                branchSizes.Add(MeasureSteps(branch.Steps));
+
+            int totalColumns = branchSizes.Sum(s => s.Columns);
+            double colWidth = GetColumnWidth(depth);
+            double totalPixelWidth = totalColumns * colWidth;
+
+            // Cap total spread
+            if (totalPixelWidth > MaxSpreadWidth)
+            {
+                colWidth = MaxSpreadWidth / totalColumns;
+                totalPixelWidth = MaxSpreadWidth;
+            }
+
+            // Calculate X positions for each branch, centered around centerX
+            double leftEdge = centerX - totalPixelWidth / 2.0;
+            var branchStartY = currentY;
+            var maxBranchEndY = currentY;
+            var branchEndNodes = new List<string>();
+
+            for (int i = 0; i < branches.Count; i++)
+            {
+                var branch = branches[i];
+                var branchSize = branchSizes[i];
+
+                // Each branch gets its proportional horizontal share
+                double branchPixelWidth = branchSize.Columns * colWidth;
+                double branchCenterX = leftEdge + branchPixelWidth / 2.0;
+
+                // Each branch starts at the same Y (independent tracking)
+                var branchY = branchStartY;
+                var lastNodeId = PlaceBranchSteps(branch, parentNodeId, ref branchY, depth, branchCenterX, branchCenterX, nodes, edges);
+
+                branchEndNodes.Add(lastNodeId);
+                maxBranchEndY = Math.Max(maxBranchEndY, branchY);
+                leftEdge += branchPixelWidth;
+            }
+
+            // Advance past the tallest branch
+            currentY = maxBranchEndY;
+            return branchEndNodes;
+        }
+
+        /// <summary>
+        /// Places a list of steps vertically at the given X position, creating child nodes and edges.
+        /// Returns the ID of the last node placed (for merge edges).
+        /// </summary>
+        private string PlaceBranchSteps(
+            BranchInfo branch,
+            string parentNodeId,
+            ref double currentY,
+            int depth,
+            double childX,
+            double centerX,
+            JArray nodes,
+            JArray edges)
+        {
+            string prevNodeId = parentNodeId;
+            string? sourceHandle = branch.SourceHandle;
+            bool isFirstInBranch = true;
+
+            foreach (var childStep in branch.Steps)
+            {
+                var childStepType = childStep.GetStepType();
+                var childNodeId = NextId();
+                var (childBlockType, childPreview) = GetStepPreview(childStep, childStepType);
+
+                // Build child node props (visual-only, no _yamlSnippet)
+                var childProps = new JObject
+                {
+                    ["_isChildOf"] = parentNodeId,
+                    ["_branchLabel"] = branch.Label,
+                    ["_branchColor"] = branch.Color,
+                    ["_depth"] = depth,
+                };
+                if (childPreview != null)
+                    childProps["_preview"] = childPreview;
+                ExtractStepProperties(childStep, childStepType, childProps);
+
+                var childNode = new JObject
+                {
+                    ["id"] = childNodeId,
+                    ["type"] = "block",
+                    ["position"] = new JObject { ["x"] = childX, ["y"] = currentY },
+                    ["data"] = new JObject
+                    {
+                        ["blockType"] = childBlockType,
+                        ["label"] = GetDisplayLabel(childBlockType, childPreview),
+                        ["props"] = childProps,
+                    },
+                };
+                nodes.Add(childNode);
+
+                // Create edge from previous node to this child
+                var edge = new JObject
+                {
+                    ["id"] = $"e-{prevNodeId}-{childNodeId}",
+                    ["source"] = prevNodeId,
+                    ["target"] = childNodeId,
+                    ["type"] = "smoothstep",
+                    ["style"] = new JObject { ["stroke"] = branch.Color },
+                };
+
+                if (sourceHandle != null)
+                    edge["sourceHandle"] = sourceHandle;
+
+                if (isFirstInBranch)
+                {
+                    // First edge in the branch gets a label and dashed style
+                    edge["label"] = branch.Label;
+                    edge["labelStyle"] = new JObject
+                    {
+                        ["fill"] = branch.Color,
+                        ["fontSize"] = 11,
+                        ["fontWeight"] = 600,
+                    };
+                    edge["style"]!["strokeDasharray"] = "5,5";
+                }
+
+                edges.Add(edge);
+                prevNodeId = childNodeId;
+                sourceHandle = null;
+                isFirstInBranch = false;
+                currentY += NodeSpacingY;
+
+                // Recursively expand if this child is also a container
+                if (IsContainerStep(childStepType) && depth < MaxNestingDepth)
+                {
+                    var nestedBranchEnds = ExpandContainerChildren(
+                        childStep, childStepType, childNodeId, ref currentY, depth + 1, centerX, nodes, edges);
+
+                    if (nestedBranchEnds.Count > 0)
+                    {
+                        prevNodeId = nestedBranchEnds[nestedBranchEnds.Count - 1];
+                    }
+                }
+            }
+
+            return prevNodeId;
+        }
+
+        /// <summary>
+        /// Extracts the branch definitions from a container step.
+        /// Each branch has a label, color, source handle, and list of child steps.
+        /// </summary>
+        private static List<BranchInfo> GetBranches(ScriptStep step, StepType stepType)
+        {
+            var branches = new List<BranchInfo>();
+
+            switch (stepType)
+            {
+                case StepType.If:
+                    if (step.Then != null && step.Then.Count > 0)
+                        branches.Add(new BranchInfo("then", ColorThen, null, step.Then));
+                    if (step.Elif != null)
+                    {
+                        foreach (var elif in step.Elif)
+                        {
+                            var label = elif.If.Length > 20
+                                ? "elif: " + elif.If.Substring(0, 17) + "..."
+                                : "elif: " + elif.If;
+                            branches.Add(new BranchInfo(label, ColorElif, null, elif.Then));
+                        }
+                    }
+                    if (step.Else != null && step.Else.Count > 0)
+                        branches.Add(new BranchInfo("else", ColorElse, "false", step.Else));
+                    break;
+
+                case StepType.Foreach:
+                    if (step.Do != null && step.Do.Count > 0)
+                        branches.Add(new BranchInfo("loop", ColorLoop, null, step.Do));
+                    break;
+
+                case StepType.While:
+                    if (step.Do != null && step.Do.Count > 0)
+                        branches.Add(new BranchInfo("loop", ColorLoop, null, step.Do));
+                    break;
+
+                case StepType.Try:
+                    if (step.Try != null && step.Try.Count > 0)
+                        branches.Add(new BranchInfo("try", ColorTry, null, step.Try));
+                    if (step.Catch != null && step.Catch.Count > 0)
+                        branches.Add(new BranchInfo("catch", ColorCatch, null, step.Catch));
+                    if (step.Finally != null && step.Finally.Count > 0)
+                        branches.Add(new BranchInfo("finally", ColorFinally, null, step.Finally));
+                    break;
+
+                case StepType.Switch:
+                    if (step.Cases != null)
+                    {
+                        foreach (var c in step.Cases)
+                        {
+                            var label = c.Value.Length > 20
+                                ? "case: " + c.Value.Substring(0, 17) + "..."
+                                : "case: " + c.Value;
+                            branches.Add(new BranchInfo(label, ColorCase, null, c.Do));
+                        }
+                    }
+                    break;
+
+                case StepType.Parallel:
+                    if (step.Parallel?.Steps != null)
+                    {
+                        for (int i = 0; i < step.Parallel.Steps.Count; i++)
+                        {
+                            branches.Add(new BranchInfo(
+                                $"branch {i + 1}", ColorBranch, null,
+                                new List<ScriptStep> { step.Parallel.Steps[i] }));
+                        }
+                    }
+                    break;
+            }
+
+            return branches;
+        }
+
+        private static bool IsContainerStep(StepType stepType)
+        {
+            return stepType == StepType.If
+                || stepType == StepType.Foreach
+                || stepType == StepType.While
+                || stepType == StepType.Try
+                || stepType == StepType.Switch
+                || stepType == StepType.Parallel;
+        }
+
+        /// <summary>
+        /// Holds information about a single branch of a container block.
+        /// </summary>
+        private sealed class BranchInfo
+        {
+            public string Label { get; }
+            public string Color { get; }
+            public string? SourceHandle { get; }
+            public List<ScriptStep> Steps { get; }
+
+            public BranchInfo(string label, string color, string? sourceHandle, List<ScriptStep> steps)
+            {
+                Label = label;
+                Color = color;
+                SourceHandle = sourceHandle;
+                Steps = steps;
+            }
+        }
+
+        /// <summary>
+        /// Represents an edge waiting to be connected to the next step in the main flow.
+        /// Carries optional source handle, color, and label for styled edges (e.g., if-else skip).
+        /// </summary>
+        private sealed class PendingEdge
+        {
+            public string NodeId { get; }
+            public string? SourceHandle { get; }
+            public string? Color { get; }
+            public string? Label { get; }
+
+            public PendingEdge(string nodeId, string? sourceHandle = null, string? color = null, string? label = null)
+            {
+                NodeId = nodeId;
+                SourceHandle = sourceHandle;
+                Color = color;
+                Label = label;
+            }
+        }
+
+        #region Subtree Measurement (Pass 1)
+
+        /// <summary>
+        /// Measures the dimensions of a list of steps for layout purposes.
+        /// Width = number of columns needed, Height = number of rows needed.
+        /// </summary>
+        private sealed class SubtreeSize
+        {
+            public int Columns { get; set; } = 1;
+            public int Rows { get; set; }
+        }
+
+        /// <summary>
+        /// Measures the subtree size for a list of steps.
+        /// </summary>
+        private SubtreeSize MeasureSteps(List<ScriptStep> steps)
+        {
+            var size = new SubtreeSize();
+
+            foreach (var step in steps)
+            {
+                var stepType = step.GetStepType();
+                size.Rows += 1; // the step itself
+
+                if (IsContainerStep(stepType))
+                {
+                    var branches = GetBranches(step, stepType);
+                    if (IsMultiBranch(branches))
+                    {
+                        int totalBranchCols = 0;
+                        int maxBranchRows = 0;
+                        foreach (var branch in branches)
+                        {
+                            if (branch.Steps == null || branch.Steps.Count == 0) continue;
+                            var branchSize = MeasureSteps(branch.Steps);
+                            totalBranchCols += branchSize.Columns;
+                            maxBranchRows = Math.Max(maxBranchRows, branchSize.Rows);
+                        }
+                        size.Columns = Math.Max(size.Columns, Math.Max(2, totalBranchCols));
+                        size.Rows += maxBranchRows;
+                    }
+                    else
+                    {
+                        // Single branch — takes 1 column, height adds to parent
+                        foreach (var branch in branches)
+                        {
+                            if (branch.Steps == null || branch.Steps.Count == 0) continue;
+                            var branchSize = MeasureSteps(branch.Steps);
+                            size.Columns = Math.Max(size.Columns, branchSize.Columns);
+                            size.Rows += branchSize.Rows;
+                        }
+                    }
+                }
+            }
+
+            return size;
+        }
+
+        /// <summary>
+        /// Returns true when a container has 2+ non-empty branches (needs side-by-side layout).
+        /// </summary>
+        private static bool IsMultiBranch(List<BranchInfo> branches)
+        {
+            return branches.Count(b => b.Steps != null && b.Steps.Count > 0) >= 2;
+        }
+
+        /// <summary>
+        /// Calculates the column width in pixels for a given nesting depth.
+        /// Deeper nesting = narrower columns to prevent extreme horizontal spread.
+        /// </summary>
+        private static double GetColumnWidth(int depth)
+        {
+            return Math.Max(MinColumnWidth, BaseColumnWidth * Math.Pow(ColumnWidthDecay, depth));
+        }
+
+        #endregion
 
         /// <summary>
         /// Converts a parsed Script model into graph JSON (fallback when raw text isn't available).
@@ -248,6 +728,10 @@ namespace SSH_Helper.Services
 
                 var data = node["data"];
                 var props = data?["props"] as JObject;
+
+                // Skip visual-only child nodes — their YAML is inside the parent's snippet
+                if (props?["_isChildOf"] != null) continue;
+
                 var yamlSnippet = props?["_yamlSnippet"]?.ToString();
 
                 if (!string.IsNullOrWhiteSpace(yamlSnippet))

@@ -10,20 +10,27 @@ interface ToolbarProps {
 export default function Toolbar({ selectedNodeId, variablesVisible, onToggleVariables }: ToolbarProps) {
   const { getNodes, getEdges } = useReactFlow();
 
+  /** Filter out visual-only child nodes before sending to C# for YAML export. */
+  const getExportData = () => {
+    const allNodes = getNodes();
+    const exportNodes = allNodes.filter(n => !(n.data as Record<string, unknown>)?.props || !((n.data as Record<string, unknown>).props as Record<string, unknown>)?._isChildOf);
+    return { nodes: exportNodes, edges: getEdges() };
+  };
+
   const handleApplyYaml = () => {
-    messageBus.send({ type: 'apply-yaml', nodes: getNodes(), edges: getEdges() });
+    messageBus.send({ type: 'apply-yaml', ...getExportData() });
   };
 
   const handleTestStep = () => {
     if (!selectedNodeId) return;
     // Apply graph first, then request test step
-    messageBus.send({ type: 'apply-yaml', nodes: getNodes(), edges: getEdges() });
+    messageBus.send({ type: 'apply-yaml', ...getExportData() });
     setTimeout(() => messageBus.send({ type: 'test-step', stepId: selectedNodeId }), 50);
   };
 
   const handleRun = () => {
     // First apply the current graph as YAML, then request execution
-    messageBus.send({ type: 'apply-yaml', nodes: getNodes(), edges: getEdges() });
+    messageBus.send({ type: 'apply-yaml', ...getExportData() });
     // Small delay to let YAML apply before triggering run
     setTimeout(() => messageBus.send({ type: 'run-request' }), 50);
   };

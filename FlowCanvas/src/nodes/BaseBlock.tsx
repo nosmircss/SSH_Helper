@@ -36,6 +36,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   const colors = categoryColors[def.category as BlockCategory];
   const execState = blockData.execState || 'idle';
   const hasBreakpoint = blockData.breakpoint;
+  const isChild = !!blockData.props?.['_isChildOf'];
+  const branchColor = blockData.props?.['_branchColor'] as string | undefined;
 
   // Preview text — prefer _preview (set by bridge), then fall back to previewKey from registry
   const previewText = blockData.props?.['_preview']
@@ -48,9 +50,10 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     background: colors.bg,
     border: `2px solid ${selected ? '#fff' : colors.border}`,
     borderRadius: 8,
-    minWidth: 180,
-    maxWidth: 280,
+    minWidth: isChild ? 160 : 180,
+    maxWidth: isChild ? 260 : 280,
     overflow: 'hidden',
+    opacity: isChild ? 0.95 : 1,
     boxShadow: execState !== 'idle'
       ? `0 0 16px ${execGlowColors[execState]}`
       : selected
@@ -106,20 +109,22 @@ function BaseBlock({ data, selected, id }: NodeProps) {
 
       {/* Header */}
       <div style={headerStyle}>
-        {/* Breakpoint gutter — click to toggle */}
-        <span
-          onClick={handleBreakpointToggle}
-          style={{
-            width: 10, height: 10, borderRadius: '50%',
-            background: hasBreakpoint ? '#e74c3c' : 'transparent',
-            border: hasBreakpoint ? 'none' : '1px solid #444',
-            flexShrink: 0,
-            cursor: 'pointer',
-            boxShadow: hasBreakpoint ? '0 0 4px rgba(231,76,60,0.6)' : 'none',
-            transition: 'background 0.15s',
-          }}
-          title="Toggle breakpoint (right-click)"
-        />
+        {/* Breakpoint gutter — click to toggle (hidden for child nodes) */}
+        {!isChild && (
+          <span
+            onClick={handleBreakpointToggle}
+            style={{
+              width: 10, height: 10, borderRadius: '50%',
+              background: hasBreakpoint ? '#e74c3c' : 'transparent',
+              border: hasBreakpoint ? 'none' : '1px solid #444',
+              flexShrink: 0,
+              cursor: 'pointer',
+              boxShadow: hasBreakpoint ? '0 0 4px rgba(231,76,60,0.6)' : 'none',
+              transition: 'background 0.15s',
+            }}
+            title="Toggle breakpoint (right-click)"
+          />
+        )}
 
         <span style={badgeStyle}>{def.type}</span>
         <span style={{ color: '#ccc', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -150,15 +155,16 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         style={{ background: colors.border, width: 8, height: 8, border: 'none' }}
       />
 
-      {/* Second output handle for IF blocks (true/false) */}
+      {/* Second output handle for IF blocks (false/else path) — on the right side
+          so the else edge routes around child blocks instead of through them */}
       {def.outputs === 2 && (
         <Handle
           type="source"
-          position={Position.Bottom}
+          position={Position.Right}
           id="false"
           style={{
             background: '#e74c3c', width: 8, height: 8, border: 'none',
-            left: '75%',
+            top: '50%',
           }}
         />
       )}

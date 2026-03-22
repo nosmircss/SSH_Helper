@@ -109,7 +109,7 @@ namespace SSH_Helper
 
         #region Constants
 
-        private const string ApplicationVersion = "0.51.10";
+        private const string ApplicationVersion = "0.51.11";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -6091,7 +6091,7 @@ namespace SSH_Helper
                 }
             };
 
-            _flowCanvasForm.Show(this);
+            _flowCanvasForm.Show();
 
             // Load current script into canvas if it's a YAML script
             LoadCurrentScriptIntoCanvas();

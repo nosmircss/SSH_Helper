@@ -152,6 +152,96 @@ export default function Properties({ selectedNodeId }: PropertiesProps) {
   }
 
   const colors = categoryColors[def.category as BlockCategory];
+  const isChild = !!(blockData.props?.['_isChildOf']);
+  const branchLabel = blockData.props?.['_branchLabel'] as string | undefined;
+  const branchColor = blockData.props?.['_branchColor'] as string | undefined;
+
+  // Read-only view for child nodes (nested inside container blocks)
+  if (isChild) {
+    return (
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}>
+        {/* Header with nested indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid #2a2a4a' }}>
+          <span style={{
+            background: colors.badge,
+            color: colors.badgeText,
+            fontSize: 10,
+            fontWeight: 700,
+            padding: '2px 6px',
+            borderRadius: 3,
+            textTransform: 'uppercase',
+          }}>
+            {def.type}
+          </span>
+          <span style={{ color: '#ccc', fontSize: 12, fontWeight: 600 }}>
+            {def.label}
+          </span>
+        </div>
+
+        {/* Branch indicator */}
+        {branchLabel && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 8px',
+            background: `${branchColor || '#555'}15`,
+            borderRadius: 4,
+            borderLeft: `2px solid ${branchColor || '#555'}`,
+          }}>
+            <span style={{ fontSize: 10, color: branchColor || '#888', fontWeight: 600, textTransform: 'uppercase' }}>
+              {branchLabel}
+            </span>
+            <span style={{ fontSize: 10, color: '#666' }}>branch (read-only)</span>
+          </div>
+        )}
+
+        {/* Property values (read-only) */}
+        {def.properties.map((propDef) => {
+          const val = blockData.props?.[propDef.key];
+          if (val === undefined || val === null || val === '') return null;
+          return (
+            <div key={propDef.key}>
+              <label style={{ fontSize: 11, color: '#666', display: 'block', marginBottom: 3 }}>
+                {propDef.label}
+              </label>
+              <div style={{
+                padding: '4px 6px',
+                background: '#0d111799',
+                borderRadius: 4,
+                color: '#aaa',
+                fontSize: 12,
+                fontFamily: propDef.type === 'code' ? 'monospace' : 'inherit',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}>
+                {String(val)}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Description */}
+        <div style={{
+          marginTop: 'auto',
+          paddingTop: 12,
+          borderTop: '1px solid #2a2a4a',
+          fontSize: 11,
+          color: '#555',
+          lineHeight: 1.5,
+        }}>
+          {def.description}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
