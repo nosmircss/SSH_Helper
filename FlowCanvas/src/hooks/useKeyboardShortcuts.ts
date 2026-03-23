@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
 import { copyNodes, pasteNodes } from '../utils/clipboard';
 import { messageBus } from '../MessageBus';
+import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
+import { buildExecutableGraphPayload } from '../utils/exportGraph';
 
 /**
  * Returns true if the currently focused element is a text input, textarea,
@@ -28,15 +30,15 @@ export function useKeyboardShortcuts(): void {
       const shift = e.shiftKey;
       const key = e.key.toLowerCase();
 
-      // Ctrl+Z: Undo
-      if (ctrl && !shift && key === 'z') {
+      // Ctrl+Z: Undo (skip when typing in an input — let browser handle text undo)
+      if (ctrl && !shift && key === 'z' && !isInputFocused()) {
         e.preventDefault();
         useFlowStore.getState().undo();
         return;
       }
 
-      // Ctrl+Y or Ctrl+Shift+Z: Redo
-      if ((ctrl && key === 'y') || (ctrl && shift && key === 'z')) {
+      // Ctrl+Y or Ctrl+Shift+Z: Redo (skip when typing in an input)
+      if (((ctrl && key === 'y') || (ctrl && shift && key === 'z')) && !isInputFocused()) {
         e.preventDefault();
         useFlowStore.getState().redo();
         return;
@@ -66,8 +68,8 @@ export function useKeyboardShortcuts(): void {
         return;
       }
 
-      // Ctrl+F: Toggle search
-      if (ctrl && key === 'f') {
+      // Ctrl+F: Toggle search (allow browser find in inputs)
+      if (ctrl && key === 'f' && !isInputFocused()) {
         e.preventDefault();
         useFlowStore.getState().toggleSearch();
         return;
@@ -99,10 +101,20 @@ export function useKeyboardShortcuts(): void {
       // Ctrl+Enter: Test step on first selected node
       if (ctrl && key === 'enter') {
         const store = useFlowStore.getState();
+        if (store.exportStatus.hasErrors) {
+          e.preventDefault();
+          return;
+        }
         const firstSelected = [...store.selectedNodeIds][0];
         if (firstSelected) {
           e.preventDefault();
-          messageBus.send({ type: 'testStep', stepId: firstSelected });
+          const graphData = buildExecutableGraphPayload(store.nodes, store.edges);
+          messageBus.send({
+            type: CANVAS_HOST_MESSAGES.outgoing.executeCanvas,
+            mode: 'test-step',
+            stepId: firstSelected,
+            ...graphData,
+          });
         }
         return;
       }
@@ -110,21 +122,26 @@ export function useKeyboardShortcuts(): void {
       // F5: Run
       if (key === 'f5' && !ctrl && !shift) {
         e.preventDefault();
-        messageBus.send({ type: 'run' });
+        const store = useFlowStore.getState();
+        if (store.exportStatus.hasErrors) {
+          return;
+        }
+        const graphData = buildExecutableGraphPayload(store.nodes, store.edges);
+        messageBus.send({
+          type: CANVAS_HOST_MESSAGES.outgoing.executeCanvas,
+          mode: 'run',
+          ...graphData,
+        });
         return;
       }
 
       // F10: Step
       if (key === 'f10' && !ctrl && !shift) {
         e.preventDefault();
-        messageBus.send({ type: 'step' });
-        return;
-      }
-
-      // F11: Step-into
-      if (key === 'f11' && !ctrl && !shift) {
-        e.preventDefault();
-        messageBus.send({ type: 'stepInto' });
+        messageBus.send({
+          type: CANVAS_HOST_MESSAGES.outgoing.debugAction,
+          action: CANVAS_HOST_MESSAGES.debugAction.step,
+        });
         return;
       }
     }

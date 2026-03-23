@@ -5,6 +5,8 @@
 import { messageBus } from '../MessageBus';
 import { useFlowStore } from './useFlowStore';
 import type { Node, Edge } from '@xyflow/react';
+import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
+import type { BlockExecState } from './slices/executionSlice';
 
 export function initMessageBridge(): () => void {
   const store = useFlowStore;
@@ -18,27 +20,59 @@ export function initMessageBridge(): () => void {
         store.getState().clearHistory();
         store.getState().clearExecution();
         store.getState().clearTimeline();
+        store.getState().clearExportStatus();
+      }
+    }),
+
+    // Apply/export result from host
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.applyResult, (msg) => {
+      const errors = Array.isArray(msg.errors) ? msg.errors.map(String) : [];
+      const warnings = Array.isArray(msg.warnings) ? msg.warnings.map(String) : [];
+      const success = !!msg.success;
+
+      store.getState().setExportStatus({
+        hasErrors: !success && errors.length > 0,
+        errors,
+        warnings,
+      });
+
+      if (!success && errors.length > 0) {
+        window.alert(`Flow Canvas export failed:\n\n${errors.join('\n')}`);
+      } else if (success && warnings.length > 0) {
+        console.warn('[FlowCanvas] Export warnings:', warnings);
       }
     }),
 
     // Execution started
-    messageBus.on('execution-started', () => {
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.executionStarted, () => {
       store.getState().clearExecution();
       store.getState().clearTimeline();
       store.getState().setRunning(true);
+      store.getState().clearExportStatus();
     }),
 
     // Execution finished
-    messageBus.on('execution-finished', (msg) => {
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.executionFinished, (msg) => {
       store.getState().setRunning(false);
       store.getState().setPaused(false);
     }),
 
     // Per-step execution state update
-    messageBus.on('execution-update', (msg) => {
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.executionUpdate, (msg) => {
       const state = store.getState();
+      if (msg.stepId === undefined || msg.stepId === null) {
+        console.warn('[FlowCanvas] execution-update missing stepId; message ignored.', msg);
+        return;
+      }
+
       const stepId = String(msg.stepId);
-      const execState = String(msg.state) as any;
+      const rawState = String(msg.state ?? '');
+      const allowedStates: BlockExecState[] = ['idle', 'running', 'success', 'error', 'skipped', 'disabled'];
+      if (!allowedStates.includes(rawState as BlockExecState)) {
+        console.warn(`[FlowCanvas] Unknown execution state '${rawState}' for step '${stepId}'; message ignored.`);
+        return;
+      }
+      const execState = rawState as BlockExecState;
 
       state.setBlockState(stepId, execState);
 
@@ -71,7 +105,7 @@ export function initMessageBridge(): () => void {
     }),
 
     // Per-step output
-    messageBus.on('step-output', (msg) => {
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.stepOutput, (msg) => {
       if (msg.stepId && msg.output) {
         store.getState().appendBlockOutput(
           String(msg.stepId),
@@ -82,7 +116,7 @@ export function initMessageBridge(): () => void {
     }),
 
     // Test step result (single-step execution)
-    messageBus.on('test-step-result', (msg) => {
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.testStepResult, (msg) => {
       const state = store.getState();
       const stepId = String(msg.stepId ?? '');
 
@@ -98,7 +132,7 @@ export function initMessageBridge(): () => void {
     }),
 
     // Variables snapshot (with change tracking)
-    messageBus.on('variables-snapshot', (msg) => {
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.variablesSnapshot, (msg) => {
       if (msg.variables && typeof msg.variables === 'object') {
         const changedKeys = Array.isArray(msg.changedKeys) ? msg.changedKeys as string[] : undefined;
         store.getState().setVariablesWithChanges(
@@ -109,18 +143,53 @@ export function initMessageBridge(): () => void {
     }),
 
     // Debug paused
-    messageBus.on('debug-paused', (msg) => {
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.debugPaused, (msg) => {
       const state = store.getState();
-      state.setPaused(true, String(msg.stepId ?? ''), (msg.callStack as string[]) ?? []);
-      state.setBlockState(String(msg.stepId), 'running');
+      const stepId = typeof msg.stepId === 'string' ? msg.stepId : '';
+      const callStack = Array.isArray(msg.callStack) ? (msg.callStack as string[]) : [];
+      state.setPaused(true, stepId || undefined, callStack);
+      if (stepId) {
+        state.setBlockState(stepId, 'running');
+      }
 
       if (msg.variables && typeof msg.variables === 'object') {
         state.setVariablesWithChanges(msg.variables as Record<string, unknown>);
       }
     }),
 
+    // Debug resumed
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.debugResumed, (msg) => {
+      const stepId = typeof msg.stepId === 'string' ? msg.stepId : '';
+      const state = store.getState();
+      const callStack = Array.isArray(msg.callStack) ? (msg.callStack as string[]) : [];
+      state.setPaused(false, stepId || undefined, callStack);
+      if (stepId) {
+        state.setBlockState(stepId, 'running');
+      }
+    }),
+
+    // Target host sync from WinForms
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.setTargetHost, (msg) => {
+      const hostData = msg.host as {
+        ip: string;
+        port: number;
+        username: string;
+        variables: Record<string, string>;
+      } | null;
+      store.getState().setTargetHost(
+        hostData
+          ? {
+              ip: hostData.ip ?? '',
+              port: hostData.port ?? 22,
+              username: hostData.username ?? '',
+              variables: hostData.variables ?? {},
+            }
+          : null,
+      );
+    }),
+
     // Theme sync from WinForms
-    messageBus.on('theme-sync', (msg) => {
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.themeSync, (msg) => {
       if (msg.theme === 'dark' || msg.theme === 'light') {
         store.getState().setTheme(msg.theme);
       }

@@ -1,19 +1,74 @@
-import { useCallback } from 'react';
-import { useReactFlow, type Node } from '@xyflow/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { blockDefMap, categoryColors, type BlockCategory, type PropertyDef } from '../blockDefs/registry';
 import type { BlockNodeData } from '../nodes/BaseBlock';
 import { useFlowStore } from '../stores/useFlowStore';
+
+/**
+ * Buffered text-like input state that avoids stale blur commits.
+ * The latest typed value is tracked in a ref so blur cannot commit an older
+ * render closure value when focus changes quickly.
+ */
+function useBufferedInput(externalValue: string, inputIdentity: string, onCommit: (val: string) => void) {
+  const [localValue, setLocalValue] = useState(externalValue);
+  const focusedRef = useRef(false);
+  const latestValueRef = useRef(externalValue);
+  const lastCommittedRef = useRef(externalValue);
+
+  const commitIfNeeded = useCallback(
+    (next: string) => {
+      latestValueRef.current = next;
+      if (next === lastCommittedRef.current) return;
+      onCommit(next);
+      lastCommittedRef.current = next;
+    },
+    [onCommit],
+  );
+
+  // Reset local buffer when we switch to a different node/field identity.
+  useEffect(() => {
+    focusedRef.current = false;
+    latestValueRef.current = externalValue;
+    lastCommittedRef.current = externalValue;
+    setLocalValue(externalValue);
+  }, [inputIdentity, externalValue]);
+
+  // Apply external updates only when not focused (undo/redo/import/sync).
+  useEffect(() => {
+    if (focusedRef.current) return;
+    latestValueRef.current = externalValue;
+    lastCommittedRef.current = externalValue;
+    setLocalValue(externalValue);
+  }, [externalValue]);
+
+  return {
+    value: localValue,
+    onChange: (next: string) => {
+      latestValueRef.current = next;
+      setLocalValue(next);
+      commitIfNeeded(next);
+    },
+    onFocus: () => { focusedRef.current = true; },
+    onBlur: () => {
+      focusedRef.current = false;
+      commitIfNeeded(latestValueRef.current);
+    },
+  };
+}
 
 function PropertyField({
   def,
   value,
   onChange,
   colors,
+  fieldTestId,
+  nodeId,
 }: {
   def: PropertyDef;
   value: unknown;
   onChange: (val: unknown) => void;
   colors: { text: string; border: string; bg: string };
+  fieldTestId: string;
+  nodeId: string;
 }) {
   const inputStyle: React.CSSProperties = {
     width: '100%',
@@ -27,11 +82,40 @@ function PropertyField({
     outline: 'none',
   };
 
+  const commitTextLikeValue = useCallback(
+    (next: string) => {
+      if (def.type === 'number') {
+        onChange(next ? Number(next) : undefined);
+        return;
+      }
+
+      onChange(next);
+    },
+    [def.type, onChange],
+  );
+
+  const textInput = useBufferedInput(
+    String(value ?? ''),
+    `${nodeId}:${def.key}:${def.type}`,
+    commitTextLikeValue,
+  );
+
+  const selectTouchedRef = useRef(false);
+  const commitSelectIfNeeded = useCallback(
+    (next: string) => {
+      const current = value === undefined || value === null ? undefined : String(value);
+      if (current === next) return;
+      onChange(next);
+    },
+    [onChange, value],
+  );
+
   switch (def.type) {
     case 'boolean':
       return (
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fc-text-secondary, #aaa)', cursor: 'pointer' }}>
           <input
+            data-testid={`${fieldTestId}-input`}
             type="checkbox"
             checked={!!value}
             onChange={(e) => onChange(e.target.checked)}
@@ -41,27 +125,46 @@ function PropertyField({
         </label>
       );
 
-    case 'select':
+    case 'select': {
+      const resolvedValue = value === undefined || value === null
+        ? String(def.defaultValue ?? '')
+        : String(value);
+
       return (
         <select
-          value={String(value ?? def.defaultValue ?? '')}
-          onChange={(e) => onChange(e.target.value)}
+          data-testid={`${fieldTestId}-input`}
+          value={resolvedValue}
+          onFocus={() => { selectTouchedRef.current = true; }}
+          onChange={(e) => {
+            selectTouchedRef.current = true;
+            commitSelectIfNeeded(e.target.value);
+          }}
+          onBlur={(e) => {
+            if (selectTouchedRef.current) {
+              commitSelectIfNeeded(e.currentTarget.value);
+            }
+            selectTouchedRef.current = false;
+          }}
           style={{ ...inputStyle, cursor: 'pointer' }}
         >
-          <option value="">—</option>
+          <option value="">-</option>
           {def.options?.map((opt) => (
             <option key={opt} value={opt}>{opt}</option>
           ))}
         </select>
       );
+    }
 
     case 'number':
       return (
         <input
+          data-testid={`${fieldTestId}-input`}
           type="number"
-          value={value !== undefined && value !== null ? String(value) : ''}
+          value={textInput.value}
           placeholder={def.placeholder}
-          onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
+          onChange={(e) => textInput.onChange(e.target.value)}
+          onFocus={textInput.onFocus}
+          onBlur={textInput.onBlur}
           style={inputStyle}
         />
       );
@@ -69,9 +172,12 @@ function PropertyField({
     case 'textarea':
       return (
         <textarea
-          value={String(value ?? '')}
+          data-testid={`${fieldTestId}-input`}
+          value={textInput.value}
           placeholder={def.placeholder}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => textInput.onChange(e.target.value)}
+          onFocus={textInput.onFocus}
+          onBlur={textInput.onBlur}
           rows={3}
           style={{ ...inputStyle, resize: 'vertical' }}
         />
@@ -82,10 +188,13 @@ function PropertyField({
     default:
       return (
         <input
+          data-testid={`${fieldTestId}-input`}
           type="text"
-          value={String(value ?? '')}
+          value={textInput.value}
           placeholder={def.placeholder}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => textInput.onChange(e.target.value)}
+          onFocus={textInput.onFocus}
+          onBlur={textInput.onBlur}
           style={inputStyle}
         />
       );
@@ -94,70 +203,71 @@ function PropertyField({
 
 export default function Properties() {
   const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
+  const nodes = useFlowStore((s) => s.nodes);
   const pushSnapshot = useFlowStore((s) => s.pushSnapshot);
-  const { getNode, setNodes } = useReactFlow();
+  const updateNodeLabel = useFlowStore((s) => s.updateNodeLabel);
+  const updateNodeProp = useFlowStore((s) => s.updateNodeProp);
 
   const selectedNodeId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
-
-  const node = selectedNodeId ? getNode(selectedNodeId) : null;
+  const node = selectedNodeId ? nodes.find((candidate) => candidate.id === selectedNodeId) ?? null : null;
   const blockData = node?.data as BlockNodeData | undefined;
   const def = blockData?.blockType ? blockDefMap.get(blockData.blockType) : null;
 
-  // Debounced undo snapshot for property edits
-  const snapshotTimeoutRef = useCallback(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
+  const snapshotTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
     return () => {
-      if (timer) return; // Already have a pending snapshot
-      timer = setTimeout(() => { timer = null; }, 500);
-      pushSnapshot('Edit property');
+      if (snapshotTimeoutRef.current) {
+        clearTimeout(snapshotTimeoutRef.current);
+        snapshotTimeoutRef.current = null;
+      }
     };
-  }, [pushSnapshot])();
+  }, []);
+
+  const pushDebouncedSnapshot = useCallback(() => {
+    if (snapshotTimeoutRef.current) return;
+    pushSnapshot('Edit property');
+    snapshotTimeoutRef.current = setTimeout(() => {
+      snapshotTimeoutRef.current = null;
+    }, 500);
+  }, [pushSnapshot]);
 
   const updateProp = useCallback(
     (key: string, value: unknown) => {
       if (!selectedNodeId) return;
-      snapshotTimeoutRef();
-      setNodes((nds) =>
-        nds.map((n) => {
-          if (n.id !== selectedNodeId) return n;
-          const data = n.data as BlockNodeData;
-          return {
-            ...n,
-            data: {
-              ...data,
-              props: { ...data.props, [key]: value },
-            },
-          };
-        }),
-      );
+      pushDebouncedSnapshot();
+      updateNodeProp(selectedNodeId, key, value);
     },
-    [selectedNodeId, setNodes, snapshotTimeoutRef],
+    [selectedNodeId, pushDebouncedSnapshot, updateNodeProp],
   );
 
   const updateLabel = useCallback(
     (label: string) => {
       if (!selectedNodeId) return;
-      snapshotTimeoutRef();
-      setNodes((nds) =>
-        nds.map((n) => {
-          if (n.id !== selectedNodeId) return n;
-          return { ...n, data: { ...n.data, label } };
-        }),
-      );
+      pushDebouncedSnapshot();
+      updateNodeLabel(selectedNodeId, label);
     },
-    [selectedNodeId, setNodes, snapshotTimeoutRef],
+    [selectedNodeId, pushDebouncedSnapshot, updateNodeLabel],
   );
 
-  // Multi-select info
+  const displayNameInput = useBufferedInput(
+    String(blockData?.label ?? ''),
+    `${selectedNodeId ?? 'none'}:display-name`,
+    updateLabel,
+  );
+
   if (selectedNodeIds.size > 1) {
     return (
-      <div style={{
-        flex: 1,
-        padding: 16,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
+      <div
+        data-testid="properties-panel"
+        style={{
+          flex: 1,
+          padding: 16,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         <span style={{ color: 'var(--fc-text-muted, #555)', fontSize: 12, textAlign: 'center' }}>
           {selectedNodeIds.size} blocks selected
         </span>
@@ -165,15 +275,18 @@ export default function Properties() {
     );
   }
 
-  if (!node || !def || !blockData) {
+  if (!node || !def || !blockData || !selectedNodeId) {
     return (
-      <div style={{
-        flex: 1,
-        padding: 16,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
+      <div
+        data-testid="properties-panel"
+        style={{
+          flex: 1,
+          padding: 16,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         <span style={{ color: 'var(--fc-text-muted, #555)', fontSize: 12, textAlign: 'center' }}>
           Select a block to edit its properties
         </span>
@@ -186,17 +299,19 @@ export default function Properties() {
   const branchLabel = blockData.props?.['_branchLabel'] as string | undefined;
   const branchColor = blockData.props?.['_branchColor'] as string | undefined;
 
-  // Read-only view for child nodes
   if (isChild) {
     return (
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: 12,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}>
+      <div
+        data-testid="properties-panel"
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)' }}>
           <span style={{
             background: colors.badge,
@@ -235,7 +350,7 @@ export default function Properties() {
           const val = blockData.props?.[propDef.key];
           if (val === undefined || val === null || val === '') return null;
           return (
-            <div key={propDef.key}>
+            <div key={`${selectedNodeId}-${propDef.key}`}>
               <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
                 {propDef.label}
               </label>
@@ -270,14 +385,17 @@ export default function Properties() {
   }
 
   return (
-    <div style={{
-      flex: 1,
-      overflowY: 'auto',
-      padding: 12,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 12,
-    }}>
+    <div
+      data-testid="properties-panel"
+      style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)' }}>
         <span style={{
           background: colors.badge,
@@ -298,10 +416,13 @@ export default function Properties() {
       <div>
         <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>Display Name</label>
         <input
+          data-testid="properties-display-name-input"
           type="text"
-          value={String(blockData.label ?? '')}
+          value={displayNameInput.value}
           placeholder={def.label}
-          onChange={(e) => updateLabel(e.target.value)}
+          onChange={(e) => displayNameInput.onChange(e.target.value)}
+          onFocus={displayNameInput.onFocus}
+          onBlur={displayNameInput.onBlur}
           style={{
             width: '100%',
             padding: '4px 6px',
@@ -315,22 +436,27 @@ export default function Properties() {
         />
       </div>
 
-      {def.properties.map((propDef) => (
-        <div key={propDef.key}>
-          {propDef.type !== 'boolean' && (
-            <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
-              {propDef.label}
-              {propDef.required && <span style={{ color: '#e74c3c', marginLeft: 2 }}>*</span>}
-            </label>
-          )}
-          <PropertyField
-            def={propDef}
-            value={blockData.props?.[propDef.key]}
-            onChange={(val) => updateProp(propDef.key, val)}
-            colors={colors}
-          />
-        </div>
-      ))}
+      {def.properties.map((propDef) => {
+        const fieldTestId = `properties-field-${propDef.key}-${propDef.type}`;
+        return (
+          <div key={`${selectedNodeId}-${propDef.key}`} data-testid={fieldTestId}>
+            {propDef.type !== 'boolean' && (
+              <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+                {propDef.label}
+                {propDef.required && <span style={{ color: '#e74c3c', marginLeft: 2 }}>*</span>}
+              </label>
+            )}
+            <PropertyField
+              def={propDef}
+              value={blockData.props?.[propDef.key]}
+              onChange={(val) => updateProp(propDef.key, val)}
+              colors={colors}
+              fieldTestId={fieldTestId}
+              nodeId={selectedNodeId}
+            />
+          </div>
+        );
+      })}
 
       <div style={{
         marginTop: 'auto',

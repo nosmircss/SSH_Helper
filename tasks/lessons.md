@@ -1,6 +1,15 @@
 # Lessons
 
+## 2026-03-23
+- When handling debug resume actions in `ScriptExecutor`, `Step` must explicitly enable `DebugState.StepMode`; otherwise stepping from a breakpoint degenerates into full-run continue behavior.
+- When rendering Flow Canvas Vars inspector entries, any password/secret/token/key-named variable must be masked at display time so raw credential values are never shown in the UI.
+- When debug pauses can happen concurrently (for example parallel branches), `DebugState.WaitForResumeAsync` must not replace the active resume signal per waiter; all current waiters must share the same signal or one branch can remain blocked forever.
+- When auditing Flow Canvas properties-panel reliability, I must explicitly include `select`/dropdown controls in the same root-cause pass as text inputs; first-interaction persistence can fail independently from typing behavior.
+- When rendering Flow Canvas node previews, I must treat `props._preview` as import metadata only; live block text must come from canonical editable props (`previewKey`) to avoid stale on-canvas text after property edits.
+
 ## 2026-03-20
+- When a Flow Canvas breakpoint must pause on the first block, I must apply node-map and breakpoint state synchronously before `ScriptExecutor.ExecuteAsync` starts; async polling bootstrap can miss step `steps/0`.
+- When Flow Canvas export mixes regenerated simple steps with stored container `_yamlSnippet` blocks, I must normalize top-level indentation before run/test so a no-edit canvas run cannot rewrite valid YAML into an invalid mixed-indent `steps` list.
 - When a user points out that a cell-level WinForms status cue disappears under selection, I must look for a non-selected-owned surface such as the row header instead of continuing to fight the selected-cell paint path.
 - When I smooth a WinForms add-preset tree mutation, I must verify the new selection is fully visible in the actual viewport instead of only preserving `TopNode`; a preserved anchor is not enough if the inserted row ends up clipped below the fold.
 - When I create a new preset in `Form1`, I must route the post-create load through the same preset-loading path as ordinary selection changes; hand-populating the editor can skip required environment-restore logic.

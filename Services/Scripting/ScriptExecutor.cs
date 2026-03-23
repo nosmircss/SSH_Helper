@@ -15,6 +15,9 @@ namespace SSH_Helper.Services.Scripting
         /// <summary>Position of the step within its parent step list.</summary>
         public int StepIndex { get; init; }
 
+        /// <summary>Canonical scope-aware step identity (e.g., steps/2/then/0).</summary>
+        public string? StepPath { get; init; }
+
         /// <summary>The command type being executed.</summary>
         public StepType StepType { get; init; }
 
@@ -38,6 +41,27 @@ namespace SSH_Helper.Services.Scripting
     }
 
     /// <summary>
+    /// Event args for debug pause state transitions.
+    /// </summary>
+    public class DebugPauseStateChangedEventArgs : EventArgs
+    {
+        /// <summary>True when entering pause, false when resuming.</summary>
+        public bool IsPaused { get; init; }
+
+        /// <summary>Position of the paused/resumed step in the current step list.</summary>
+        public int StepIndex { get; init; }
+
+        /// <summary>Canonical scope-aware step identity (e.g., steps/2/then/0).</summary>
+        public string? StepPath { get; init; }
+
+        /// <summary>The YAML line number of the paused/resumed step.</summary>
+        public int LineNumber { get; init; }
+
+        /// <summary>Resume action used when leaving pause.</summary>
+        public DebugResumeAction? ResumeAction { get; init; }
+    }
+
+    /// <summary>
     /// Executes parsed scripts by interpreting steps and dispatching to command handlers.
     /// </summary>
     public class ScriptExecutor
@@ -53,6 +77,11 @@ namespace SSH_Helper.Services.Scripting
         /// Raised after a step finishes execution.
         /// </summary>
         public event EventHandler<StepExecutionEventArgs>? StepCompleted;
+
+        /// <summary>
+        /// Raised when debug pause state changes.
+        /// </summary>
+        public event EventHandler<DebugPauseStateChangedEventArgs>? DebugPauseStateChanged;
 
         public ScriptExecutor()
             : this(null)
@@ -137,6 +166,17 @@ namespace SSH_Helper.Services.Scripting
                 // Reset debug state
                 context.DebugState.Reset();
                 context.RemoveVariable("_last_error");
+                AssignStepPaths(script.Steps, "steps");
+
+                if (script.Subroutines != null)
+                {
+                    foreach (var definition in script.Subroutines)
+                    {
+                        AssignStepPaths(
+                            definition.Value.Steps,
+                            $"subroutines/{definition.Key}/steps");
+                    }
+                }
 
                 // Execute all steps
                 var result = await ExecuteStepsAsync(script.Steps, context, cancellationToken, 0);
@@ -219,23 +259,25 @@ namespace SSH_Helper.Services.Scripting
                 for (int stepIndex = 0; stepIndex < steps.Count; stepIndex++)
                 {
                     var step = steps[stepIndex];
+                    var stepPath = step.StepPath ?? $"steps/{stepIndex}";
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // Handle debug pausing
-                    if (context.DebugState.ShouldPauseAtStep(stepIndex, step.LineNumber))
+                    if (context.DebugState.ShouldPauseAtStep(stepPath, step.LineNumber))
                     {
-                        await HandleDebugPauseAsync(step, context, cancellationToken);
+                        await HandleDebugPauseAsync(stepIndex, stepPath, step, context, cancellationToken);
                     }
 
                     var stepType = step.GetStepType();
 
                     // Check if node is disabled
-                    var nodeId = context.DebugState.GetNodeIdForStepIndex(stepIndex);
+                    var nodeId = context.DebugState.GetNodeIdForStepPath(stepPath);
                     if (nodeId != null && context.DebugState.IsNodeDisabled(nodeId))
                     {
                         StepCompleted?.Invoke(this, new StepExecutionEventArgs
                         {
                             StepIndex = stepIndex,
+                            StepPath = stepPath,
                             StepType = stepType,
                             LineNumber = step.LineNumber,
                             Success = true,
@@ -248,6 +290,7 @@ namespace SSH_Helper.Services.Scripting
                     StepStarting?.Invoke(this, new StepExecutionEventArgs
                     {
                         StepIndex = stepIndex,
+                        StepPath = stepPath,
                         StepType = stepType,
                         LineNumber = step.LineNumber,
                         StepName = null
@@ -261,6 +304,7 @@ namespace SSH_Helper.Services.Scripting
                     StepCompleted?.Invoke(this, new StepExecutionEventArgs
                     {
                         StepIndex = stepIndex,
+                        StepPath = stepPath,
                         StepType = stepType,
                         LineNumber = step.LineNumber,
                         StepName = null,
@@ -396,12 +440,21 @@ namespace SSH_Helper.Services.Scripting
         /// Uses async signaling for instant response (no polling delay).
         /// </summary>
         private async Task HandleDebugPauseAsync(
+            int stepIndex,
+            string stepPath,
             ScriptStep step,
             ScriptContext context,
             CancellationToken cancellationToken)
         {
             context.DebugState.IsPaused = true;
             context.DebugState.PausedAtLine = step.LineNumber;
+            DebugPauseStateChanged?.Invoke(this, new DebugPauseStateChangedEventArgs
+            {
+                IsPaused = true,
+                StepIndex = stepIndex,
+                StepPath = stepPath,
+                LineNumber = step.LineNumber
+            });
 
             context.EmitOutput($"[DEBUG] Paused at line {step.LineNumber}", ScriptOutputType.Debug);
 
@@ -409,12 +462,83 @@ namespace SSH_Helper.Services.Scripting
             // WaitForResumeAsync resets request flags atomically before waiting
             var action = await context.DebugState.WaitForResumeAsync(cancellationToken);
 
-            if (action == DebugResumeAction.Continue)
+            if (action == DebugResumeAction.Step)
+            {
+                context.DebugState.StepMode = true;
+            }
+            else if (action == DebugResumeAction.Continue)
             {
                 context.DebugState.StepMode = false; // Exit step mode
             }
 
             context.DebugState.IsPaused = false;
+            DebugPauseStateChanged?.Invoke(this, new DebugPauseStateChangedEventArgs
+            {
+                IsPaused = false,
+                StepIndex = stepIndex,
+                StepPath = stepPath,
+                LineNumber = step.LineNumber,
+                ResumeAction = action
+            });
+        }
+
+        private static void AssignStepPaths(List<ScriptStep> steps, string scopePath)
+        {
+            for (int i = 0; i < steps.Count; i++)
+            {
+                var step = steps[i];
+                var stepPath = $"{scopePath}/{i}";
+                step.StepPath = stepPath;
+
+                if (step.Then != null && step.Then.Count > 0)
+                    AssignStepPaths(step.Then, $"{stepPath}/then");
+
+                if (step.Else != null && step.Else.Count > 0)
+                    AssignStepPaths(step.Else, $"{stepPath}/else");
+
+                if (step.Elif != null && step.Elif.Count > 0)
+                {
+                    for (int elifIndex = 0; elifIndex < step.Elif.Count; elifIndex++)
+                    {
+                        var branch = step.Elif[elifIndex];
+                        if (branch.Then.Count > 0)
+                            AssignStepPaths(branch.Then, $"{stepPath}/elif/{elifIndex}/then");
+                    }
+                }
+
+                if (step.Do != null && step.Do.Count > 0)
+                    AssignStepPaths(step.Do, $"{stepPath}/do");
+
+                if (step.Try != null && step.Try.Count > 0)
+                    AssignStepPaths(step.Try, $"{stepPath}/try");
+
+                if (step.Catch != null && step.Catch.Count > 0)
+                    AssignStepPaths(step.Catch, $"{stepPath}/catch");
+
+                if (step.Finally != null && step.Finally.Count > 0)
+                    AssignStepPaths(step.Finally, $"{stepPath}/finally");
+
+                if (step.Cases != null && step.Cases.Count > 0)
+                {
+                    for (int caseIndex = 0; caseIndex < step.Cases.Count; caseIndex++)
+                    {
+                        var branch = step.Cases[caseIndex];
+                        if (branch.Do.Count > 0)
+                            AssignStepPaths(branch.Do, $"{stepPath}/cases/{caseIndex}/do");
+                    }
+                }
+
+                if (step.Parallel?.Steps != null && step.Parallel.Steps.Count > 0)
+                {
+                    for (int branchIndex = 0; branchIndex < step.Parallel.Steps.Count; branchIndex++)
+                    {
+                        var branchStep = step.Parallel.Steps[branchIndex];
+                        AssignStepPaths(
+                            new List<ScriptStep> { branchStep },
+                            $"{stepPath}/parallel/{branchIndex}");
+                    }
+                }
+            }
         }
 
         /// <summary>

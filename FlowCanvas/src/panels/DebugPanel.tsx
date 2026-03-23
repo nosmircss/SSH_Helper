@@ -68,9 +68,6 @@ export default function DebugPanel() {
         <button onClick={() => debugAction('step')} disabled={!paused} style={ctrlBtn('#4a9eff', paused)}>
           ⏭ Step
         </button>
-        <button onClick={() => debugAction('step-into')} disabled={!paused} style={ctrlBtn('#9b59b6', paused)}>
-          ⏬ Into
-        </button>
         <button onClick={() => debugAction('stop')} style={ctrlBtn('#e74c3c', true)}>
           ⏹ Stop
         </button>

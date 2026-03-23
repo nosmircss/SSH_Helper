@@ -3,6 +3,16 @@ import type { Node, Edge, OnNodesChange, OnEdgesChange, Connection } from '@xyfl
 import { applyNodeChanges, applyEdgeChanges, addEdge } from '@xyflow/react';
 import type { FlowStore } from '../useFlowStore';
 
+function clearedExportStatusState(): Pick<FlowStore, 'exportStatus'> {
+  return {
+    exportStatus: {
+      hasErrors: false,
+      errors: [],
+      warnings: [],
+    },
+  };
+}
+
 export interface GraphSlice {
   nodes: Node[];
   edges: Edge[];
@@ -16,6 +26,8 @@ export interface GraphSlice {
   addNode: (node: Node) => void;
   removeNodes: (ids: string[]) => void;
   updateNodeData: (id: string, data: Record<string, unknown>) => void;
+  updateNodeLabel: (id: string, label: string) => void;
+  updateNodeProp: (id: string, key: string, value: unknown) => void;
   updateNodePosition: (id: string, position: { x: number; y: number }) => void;
   selectNode: (id: string | null) => void;
   toggleNodeSelection: (id: string) => void;
@@ -28,18 +40,28 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   edges: [],
   selectedNodeIds: new Set<string>(),
 
-  setNodes: (nodes) => set({ nodes }),
-  setEdges: (edges) => set({ edges }),
+  setNodes: (nodes) => set({ nodes, ...clearedExportStatusState() }),
+  setEdges: (edges) => set({ edges, ...clearedExportStatusState() }),
 
   onNodesChange: (changes) => {
-    set((state) => ({
-      nodes: applyNodeChanges(changes, state.nodes),
-    }));
+    set((state) => {
+      const nextNodes = applyNodeChanges(changes, state.nodes);
+      const hasSelectionChange = changes.some((c) => c.type === 'select');
+      const hasGraphMutation = changes.some((c) => c.type !== 'select');
+      return {
+        nodes: nextNodes,
+        selectedNodeIds: hasSelectionChange
+          ? new Set(nextNodes.filter((n) => !!n.selected).map((n) => n.id))
+          : state.selectedNodeIds,
+        ...(hasGraphMutation ? clearedExportStatusState() : {}),
+      };
+    });
   },
 
   onEdgesChange: (changes) => {
     set((state) => ({
       edges: applyEdgeChanges(changes, state.edges),
+      ...(changes.length > 0 ? clearedExportStatusState() : {}),
     }));
   },
 
@@ -48,12 +70,13 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
     get().pushSnapshot('Connect edge');
     set((state) => ({
       edges: addEdge({ ...connection, style: { stroke: '#666' } }, state.edges),
+      ...clearedExportStatusState(),
     }));
   },
 
   addNode: (node) => {
     get().pushSnapshot('Add block');
-    set((state) => ({ nodes: [...state.nodes, node] }));
+    set((state) => ({ nodes: [...state.nodes, node], ...clearedExportStatusState() }));
   },
 
   removeNodes: (ids) => {
@@ -63,6 +86,7 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       nodes: state.nodes.filter((n) => !idSet.has(n.id)),
       edges: state.edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)),
       selectedNodeIds: new Set([...state.selectedNodeIds].filter((id) => !idSet.has(id))),
+      ...clearedExportStatusState(),
     }));
   },
 
@@ -74,9 +98,44 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
     }));
   },
 
+  updateNodeLabel: (id, label) => {
+    set((state) => ({
+      nodes: state.nodes.map((n) => {
+        if (n.id !== id) return n;
+        return {
+          ...n,
+          data: {
+            ...(n.data as Record<string, unknown>),
+            label,
+          },
+        };
+      }),
+      ...clearedExportStatusState(),
+    }));
+  },
+
+  updateNodeProp: (id, key, value) => {
+    set((state) => ({
+      nodes: state.nodes.map((n) => {
+        if (n.id !== id) return n;
+        const currentData = (n.data as Record<string, unknown>) ?? {};
+        const currentProps = (currentData.props as Record<string, unknown> | undefined) ?? {};
+        return {
+          ...n,
+          data: {
+            ...currentData,
+            props: { ...currentProps, [key]: value },
+          },
+        };
+      }),
+      ...clearedExportStatusState(),
+    }));
+  },
+
   updateNodePosition: (id, position) => {
     set((state) => ({
       nodes: state.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
+      ...clearedExportStatusState(),
     }));
   },
 

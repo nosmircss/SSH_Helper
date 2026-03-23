@@ -61,6 +61,11 @@ export const createUndoSlice: StateCreator<FlowStore, [], [], UndoSlice> = (set,
       ],
       nodes: prev.nodes,
       edges: prev.edges,
+      exportStatus: {
+        hasErrors: false,
+        errors: [],
+        warnings: [],
+      },
     }));
   },
 
@@ -82,6 +87,11 @@ export const createUndoSlice: StateCreator<FlowStore, [], [], UndoSlice> = (set,
       ],
       nodes: next.nodes,
       edges: next.edges,
+      exportStatus: {
+        hasErrors: false,
+        errors: [],
+        warnings: [],
+      },
     }));
   },
 

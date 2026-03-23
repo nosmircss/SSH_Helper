@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using SSH_Helper.Models;
 using SSH_Helper.Services.Editor;
 using SSH_Helper.Services;
@@ -158,11 +159,15 @@ namespace SSH_Helper
         #region State
 
         private FlowCanvasForm? _flowCanvasForm;
+        private Dictionary<string, string>? _nodeToStepPathMap;
+        private Dictionary<string, string>? _stepPathToNodeIdMap;
         private Dictionary<string, int>? _nodeToStepIndexMap;
+        private Dictionary<int, string>? _stepIndexToNodeIdMap;
         /// <summary>Breakpoints set via FlowCanvas before execution starts (nodeId set).</summary>
         private readonly HashSet<string> _pendingBreakpoints = new();
         /// <summary>Disabled blocks set via FlowCanvas before execution starts (nodeId set).</summary>
         private readonly HashSet<string> _pendingDisabledBlocks = new();
+        private CancellationTokenSource? _flowCanvasDebugBootstrapCts;
         private string? _loadedFilePath;
         private CsvFileFingerprint? _loadedFileFingerprint;
         private HostGridSnapshot? _loadedFileSnapshot;
@@ -330,6 +335,7 @@ namespace SSH_Helper
             _sshService.ExecutionCompleted += SshService_ExecutionCompleted;
             _sshService.StepStarting += SshService_StepStarting;
             _sshService.StepCompleted += SshService_StepCompleted;
+            _sshService.DebugPauseStateChanged += SshService_DebugPauseStateChanged;
             _environmentService.EnvironmentChanged += EnvironmentService_EnvironmentChanged;
 
             // Initialize update service
@@ -2294,6 +2300,7 @@ namespace SSH_Helper
 
             UpdateHostsFileIndicator();
             UpdateRunButtonText();
+            SendTargetHostToCanvas();
         }
 
         private void SetAllCheckboxes(bool value)
@@ -3986,6 +3993,14 @@ namespace SSH_Helper
                 var cell = dgv_variables.Rows[e.RowIndex].Cells[e.ColumnIndex];
                 bool currentValue = cell.Value is true;
                 cell.Value = !currentValue;
+                return; // CellValueChanged → UpdateSelectionCount → SendTargetHostToCanvas
+            }
+
+            // Re-sync the FlowCanvas Host Bar when the focused row changes
+            // (only matters when no checkboxes are checked — fallback uses focused row)
+            if (e.RowIndex >= 0 && GetCheckedHostCount() == 0)
+            {
+                SendTargetHostToCanvas();
             }
         }
 
@@ -6023,39 +6038,46 @@ namespace SSH_Helper
             // Handle "Apply to YAML" from canvas
             _flowCanvasForm.OnApplyYaml += (graphData) =>
             {
-                try
-                {
-                    var bridge = new FlowCanvasBridge();
-                    var yaml = bridge.ToYaml(graphData);
-                    _nodeToStepIndexMap = bridge.BuildNodeIdToStepIndexMap(yaml);
-                    BeginInvoke(() =>
-                    {
-                        txtCommand.Text = yaml;
-                    });
-                }
-                catch (Exception ex)
-                {
-                    BeginInvoke(() =>
-                    {
-                        DialogTheme.Show($"Failed to convert graph to YAML:\n{ex.Message}",
-                            "Flow Canvas", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    });
-                }
+                BeginInvoke(() => ApplyFlowCanvasGraph(graphData));
             };
 
-            // Handle "Run" from canvas — graph was already applied via apply-yaml message
+            // Unified execute path (run / test-step).
+            _flowCanvasForm.OnExecuteCanvas += (msg) =>
+            {
+                BeginInvoke(() =>
+                {
+                    var mode = msg["mode"]?.ToString();
+                    var stepId = msg["stepId"]?.ToString();
+                    if (!ApplyFlowCanvasGraph(msg, stepId))
+                    {
+                        return;
+                    }
+
+                    if (string.Equals(mode, "test-step", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ExecuteCanvasTestStep(stepId);
+                        return;
+                    }
+
+                    ExecuteCanvasRun();
+                });
+            };
+
+            // Legacy run request compatibility.
             _flowCanvasForm.OnRunRequest += (_) =>
             {
+                SshDebugLog("FLOWCANVAS", "Received deprecated 'run-request' message.");
                 BeginInvoke(() => btnExecuteAll.PerformClick());
             };
 
-            // Handle "Test Step" — graph was already applied via apply-yaml message
+            // Legacy test-step compatibility.
             _flowCanvasForm.OnTestStep += (msg) =>
             {
-                BeginInvoke(() => btnExecuteSelected.PerformClick());
+                SshDebugLog("FLOWCANVAS", "Received deprecated 'test-step' message; using selected-host test execution.");
+                BeginInvoke(() => ExecuteCanvasTestStep(msg["stepId"]?.ToString()));
             };
 
-            // Handle debug actions (continue, step, step-into, stop)
+            // Handle debug actions (continue, step, stop). "step-into" is accepted as deprecated alias.
             _flowCanvasForm.OnDebugAction += (msg) =>
             {
                 var action = msg["action"]?.ToString();
@@ -6076,6 +6098,7 @@ namespace SSH_Helper
                             }
                             break;
                         case "step-into":
+                            SshDebugLog("FLOWCANVAS", "Received deprecated debug action 'step-into'; mapping to 'step'.");
                             if (_sshService.ActiveScriptContext?.DebugState != null)
                             {
                                 _sshService.ActiveScriptContext.DebugState.StepRequested = true;
@@ -6083,6 +6106,9 @@ namespace SSH_Helper
                             break;
                         case "stop":
                             _sshService.Stop();
+                            break;
+                        default:
+                            SshDebugLog("FLOWCANVAS", $"Unknown debug action '{action ?? "<null>"}' ignored.");
                             break;
                     }
                 });
@@ -6094,15 +6120,15 @@ namespace SSH_Helper
                 var stepId = msg["stepId"]?.ToString();
                 if (stepId == null) return;
 
+                var shouldHaveBreakpoint = !_pendingBreakpoints.Remove(stepId);
+                if (shouldHaveBreakpoint)
+                    _pendingBreakpoints.Add(stepId);
+
                 if (_sshService.ActiveScriptContext?.DebugState != null)
                 {
-                    _sshService.ActiveScriptContext.DebugState.ToggleNodeBreakpoint(stepId);
-                }
-                else
-                {
-                    // No active execution — store for when execution starts
-                    if (!_pendingBreakpoints.Remove(stepId))
-                        _pendingBreakpoints.Add(stepId);
+                    var debugState = _sshService.ActiveScriptContext.DebugState;
+                    if (debugState.HasNodeBreakpoint(stepId) != shouldHaveBreakpoint)
+                        debugState.ToggleNodeBreakpoint(stepId);
                 }
             };
 
@@ -6112,14 +6138,15 @@ namespace SSH_Helper
                 var stepId = msg["stepId"]?.ToString();
                 if (stepId == null) return;
 
+                var shouldBeDisabled = !_pendingDisabledBlocks.Remove(stepId);
+                if (shouldBeDisabled)
+                    _pendingDisabledBlocks.Add(stepId);
+
                 if (_sshService.ActiveScriptContext?.DebugState != null)
                 {
-                    _sshService.ActiveScriptContext.DebugState.ToggleNodeDisabled(stepId);
-                }
-                else
-                {
-                    if (!_pendingDisabledBlocks.Remove(stepId))
-                        _pendingDisabledBlocks.Add(stepId);
+                    var debugState = _sshService.ActiveScriptContext.DebugState;
+                    if (debugState.IsNodeDisabled(stepId) != shouldBeDisabled)
+                        debugState.ToggleNodeDisabled(stepId);
                 }
             };
 
@@ -6127,6 +6154,9 @@ namespace SSH_Helper
 
             // Load current script into canvas if it's a YAML script
             LoadCurrentScriptIntoCanvas();
+
+            // Send the initial target host to the Host Bar
+            SendTargetHostToCanvas();
         }
 
         private void LoadCurrentScriptIntoCanvas()
@@ -6149,6 +6179,381 @@ namespace SSH_Helper
             {
                 // Silently fail — canvas will show empty state
             }
+        }
+
+        private bool ApplyFlowCanvasGraph(JObject graphMessage, string? selectedStepId = null)
+        {
+            var nodes = graphMessage["nodes"] as JArray;
+            var edges = graphMessage["edges"] as JArray;
+            if (nodes == null || edges == null)
+            {
+                SendFlowCanvasApplyResult(
+                    success: false,
+                    errors: new[] { "Flow Canvas payload is missing nodes/edges." },
+                    warnings: Array.Empty<string>(),
+                    nodeStepMap: null);
+                return false;
+            }
+
+            try
+            {
+                var bridge = new FlowCanvasBridge();
+                var exportResult = bridge.ExportGraphToYaml(new JObject
+                {
+                    ["nodes"] = nodes,
+                    ["edges"] = edges
+                });
+
+                var warnings = exportResult.Warnings.ToArray();
+                if (!exportResult.Success)
+                {
+                    _nodeToStepPathMap = null;
+                    _stepPathToNodeIdMap = null;
+                    _nodeToStepIndexMap = null;
+                    _stepIndexToNodeIdMap = null;
+
+                    SendFlowCanvasApplyResult(
+                        success: false,
+                        errors: exportResult.Errors.ToArray(),
+                        warnings: warnings,
+                        nodeStepMap: null);
+                    return false;
+                }
+
+                txtCommand.Text = exportResult.Yaml;
+
+                _nodeToStepPathMap = new Dictionary<string, string>(exportResult.NodeToStepPathMap, StringComparer.Ordinal);
+                _stepPathToNodeIdMap = BuildStepPathToNodeMap(_nodeToStepPathMap);
+                _nodeToStepIndexMap = BuildNodeToStepIndexMap(_nodeToStepPathMap);
+                _stepIndexToNodeIdMap = BuildStepIndexToNodeMap(_nodeToStepIndexMap);
+
+                if (!string.IsNullOrWhiteSpace(selectedStepId) &&
+                    !_nodeToStepPathMap.ContainsKey(selectedStepId))
+                {
+                    const string stepError = "Selected block is not executable in the exported graph.";
+                    SendFlowCanvasApplyResult(
+                        success: false,
+                        errors: new[] { stepError },
+                        warnings: warnings,
+                        nodeStepMap: _nodeToStepPathMap);
+                    SshDebugLog("FLOWCANVAS", $"execute-canvas rejected: selected step '{selectedStepId}' is not in export map.");
+                    return false;
+                }
+
+                SendFlowCanvasApplyResult(
+                    success: true,
+                    errors: Array.Empty<string>(),
+                    warnings: warnings,
+                    nodeStepMap: _nodeToStepPathMap);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _nodeToStepPathMap = null;
+                _stepPathToNodeIdMap = null;
+                _nodeToStepIndexMap = null;
+                _stepIndexToNodeIdMap = null;
+
+                SendFlowCanvasApplyResult(
+                    success: false,
+                    errors: new[] { $"Flow Canvas export exception: {ex.Message}" },
+                    warnings: Array.Empty<string>(),
+                    nodeStepMap: null);
+                return false;
+            }
+        }
+
+        private void SendFlowCanvasApplyResult(
+            bool success,
+            IReadOnlyCollection<string> errors,
+            IReadOnlyCollection<string> warnings,
+            Dictionary<string, string>? nodeStepMap)
+        {
+            _flowCanvasForm?.SendMessage(new
+            {
+                type = "apply-result",
+                success,
+                errors = errors.ToArray(),
+                warnings = warnings.ToArray(),
+                nodeStepMap = nodeStepMap ?? new Dictionary<string, string>(StringComparer.Ordinal)
+            });
+        }
+
+        private async void ExecuteCanvasTestStep(string? stepId)
+        {
+            if (string.IsNullOrWhiteSpace(stepId))
+                return;
+
+            if (_nodeToStepPathMap == null || !_nodeToStepPathMap.TryGetValue(stepId, out var stepPath))
+            {
+                _flowCanvasForm?.SendMessage(new
+                {
+                    type = "test-step-result",
+                    stepId,
+                    success = false,
+                    output = "Selected step could not be resolved to an executable path."
+                });
+                return;
+            }
+
+            if (!FlowCanvasBridge.TryGetTopLevelStepIndex(stepPath, out var topLevelStepIndex))
+            {
+                _flowCanvasForm?.SendMessage(new
+                {
+                    type = "test-step-result",
+                    stepId,
+                    success = false,
+                    output = $"Unsupported test target path '{stepPath}'."
+                });
+                return;
+            }
+
+            if (!TryBuildYamlThroughTopLevelStep(txtCommand.Text, topLevelStepIndex, out var commandOverride, out var error))
+            {
+                _flowCanvasForm?.SendMessage(new
+                {
+                    type = "test-step-result",
+                    stepId,
+                    success = false,
+                    output = error
+                });
+                return;
+            }
+
+            if (dgv_variables.CurrentCell == null)
+            {
+                _flowCanvasForm?.SendMessage(new
+                {
+                    type = "test-step-result",
+                    stepId,
+                    success = false,
+                    output = "No host selected for test-step execution."
+                });
+                return;
+            }
+
+            var row = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
+            var host = GetCellValue(row, CsvManager.HostColumnName);
+            if (row.IsNewRow || string.IsNullOrWhiteSpace(host) || !InputValidator.IsValidHostOrIp(host))
+            {
+                _flowCanvasForm?.SendMessage(new
+                {
+                    type = "test-step-result",
+                    stepId,
+                    success = false,
+                    output = "Selected row does not contain a valid host."
+                });
+                return;
+            }
+
+            // Scope node/path maps to the truncated script so debug/runtime mapping stays coherent.
+            var scopedPathMap = _nodeToStepPathMap
+                .Where(pair => FlowCanvasBridge.TryGetTopLevelStepIndex(pair.Value, out var idx) && idx <= topLevelStepIndex)
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+            _nodeToStepPathMap = scopedPathMap;
+            _stepPathToNodeIdMap = BuildStepPathToNodeMap(scopedPathMap);
+            _nodeToStepIndexMap = BuildNodeToStepIndexMap(scopedPathMap);
+            _stepIndexToNodeIdMap = BuildStepIndexToNodeMap(_nodeToStepIndexMap);
+
+            // Disable executable nodes that are outside the prerequisite chain + target scope.
+            var allowedRoots = BuildTestStepAllowedRoots(stepPath, topLevelStepIndex);
+            var testScopeDisabledNodes = scopedPathMap
+                .Where(pair => !IsStepPathAllowed(pair.Value, allowedRoots))
+                .Select(pair => pair.Key)
+                .ToHashSet(StringComparer.Ordinal);
+            var existingDisabledNodes = _pendingDisabledBlocks.ToHashSet(StringComparer.Ordinal);
+            _pendingDisabledBlocks.Clear();
+            foreach (var nodeId in existingDisabledNodes)
+                _pendingDisabledBlocks.Add(nodeId);
+            foreach (var nodeId in testScopeDisabledNodes)
+                _pendingDisabledBlocks.Add(nodeId);
+
+            var sw = Stopwatch.StartNew();
+            await ExecutePresetOnRowsAsync(
+                new List<DataGridViewRow> { row },
+                _ => $"Testing selected step on {host}...",
+                _ => $"Completed test-step execution on {host}",
+                sw,
+                includeCommandPreview: true,
+                commandTextOverride: commandOverride);
+        }
+
+        private static bool TryBuildYamlThroughTopLevelStep(
+            string yamlText,
+            int topLevelStepIndex,
+            out string truncatedYaml,
+            out string error)
+        {
+            truncatedYaml = string.Empty;
+            error = string.Empty;
+
+            if (!ScriptParser.IsYamlScript(yamlText))
+            {
+                error = "Test-step requires a YAML script.";
+                return false;
+            }
+
+            var stepSnippets = SplitTopLevelYamlSteps(yamlText, out var preamble);
+            if (topLevelStepIndex < 0 || topLevelStepIndex >= stepSnippets.Count)
+            {
+                error = $"Step index {topLevelStepIndex} is out of range for the current script.";
+                return false;
+            }
+
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(preamble))
+            {
+                sb.Append(preamble);
+                if (!preamble.EndsWith("\n", StringComparison.Ordinal))
+                    sb.AppendLine();
+            }
+
+            if (!sb.ToString().Contains("steps:", StringComparison.Ordinal))
+                sb.AppendLine("steps:");
+
+            for (var i = 0; i <= topLevelStepIndex; i++)
+                sb.Append(stepSnippets[i]);
+
+            truncatedYaml = sb.ToString().TrimEnd() + "\n";
+            return true;
+        }
+
+        private static HashSet<string> BuildTestStepAllowedRoots(string targetStepPath, int topLevelStepIndex)
+        {
+            var roots = new HashSet<string>(StringComparer.Ordinal);
+            for (var i = 0; i < topLevelStepIndex; i++)
+                roots.Add($"steps/{i}");
+
+            var segments = targetStepPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length < 2 || !string.Equals(segments[0], "steps", StringComparison.Ordinal))
+            {
+                roots.Add($"steps/{topLevelStepIndex}");
+                return roots;
+            }
+
+            var currentStepPath = $"steps/{topLevelStepIndex}";
+            roots.Add(currentStepPath);
+
+            if (segments.Length == 2)
+                return roots;
+
+            var cursor = 2;
+            while (cursor < segments.Length)
+            {
+                var scope = segments[cursor++];
+                var listScope = $"{currentStepPath}/{scope}";
+
+                if (string.Equals(scope, "elif", StringComparison.Ordinal) ||
+                    string.Equals(scope, "cases", StringComparison.Ordinal) ||
+                    string.Equals(scope, "parallel", StringComparison.Ordinal))
+                {
+                    if (cursor >= segments.Length)
+                        break;
+
+                    var scopeIndex = segments[cursor++];
+                    listScope = $"{currentStepPath}/{scope}/{scopeIndex}";
+                }
+
+                if (cursor >= segments.Length || !int.TryParse(segments[cursor++], out var targetIndexInScope))
+                    break;
+
+                for (var i = 0; i <= targetIndexInScope; i++)
+                    roots.Add($"{listScope}/{i}");
+
+                currentStepPath = $"{listScope}/{targetIndexInScope}";
+            }
+
+            return roots;
+        }
+
+        private static bool IsStepPathAllowed(string stepPath, IReadOnlyCollection<string> allowedRoots)
+        {
+            foreach (var root in allowedRoots)
+            {
+                if (string.Equals(stepPath, root, StringComparison.Ordinal))
+                    return true;
+
+                if (stepPath.StartsWith(root + "/", StringComparison.Ordinal))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static List<string> SplitTopLevelYamlSteps(string yamlText, out string preamble)
+        {
+            preamble = string.Empty;
+            var steps = new List<string>();
+            var lines = yamlText.Split('\n');
+
+            var stepsLineIndex = -1;
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var trimmed = lines[i].TrimEnd('\r');
+                if (trimmed == "steps:" || trimmed == "steps: ")
+                {
+                    stepsLineIndex = i;
+                    break;
+                }
+            }
+
+            if (stepsLineIndex < 0)
+                return steps;
+
+            var preambleBuilder = new StringBuilder();
+            for (var i = 0; i <= stepsLineIndex; i++)
+                preambleBuilder.AppendLine(lines[i].TrimEnd('\r'));
+            preamble = preambleBuilder.ToString();
+
+            var stepIndent = -1;
+            var currentStep = new StringBuilder();
+            var inStep = false;
+
+            for (var i = stepsLineIndex + 1; i < lines.Length; i++)
+            {
+                var line = lines[i].TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    if (inStep)
+                        currentStep.AppendLine(line);
+                    continue;
+                }
+
+                var indent = line.Length - line.TrimStart().Length;
+                var trimmed = line.TrimStart();
+
+                if (trimmed.StartsWith("- ", StringComparison.Ordinal) || trimmed == "-")
+                {
+                    if (stepIndent < 0)
+                        stepIndent = indent;
+
+                    if (indent == stepIndent)
+                    {
+                        if (inStep && currentStep.Length > 0)
+                            steps.Add(currentStep.ToString().TrimEnd('\r', '\n') + "\n");
+
+                        currentStep.Clear();
+                        currentStep.AppendLine(line);
+                        inStep = true;
+                        continue;
+                    }
+                }
+
+                if (inStep && (indent > stepIndent || string.IsNullOrWhiteSpace(line)))
+                {
+                    currentStep.AppendLine(line);
+                }
+                else if (inStep && indent <= stepIndent && !trimmed.StartsWith("- ", StringComparison.Ordinal))
+                {
+                    currentStep.AppendLine(line);
+                }
+            }
+
+            if (inStep && currentStep.Length > 0)
+                steps.Add(currentStep.ToString().TrimEnd('\r', '\n') + "\n");
+
+            return steps;
         }
 
         private void InitializeFolderExpandCollapseContextMenuItems()
@@ -10549,7 +10954,8 @@ namespace SSH_Helper
             Func<int, string> startStatus,
             Func<int, string> completionStatus,
             Stopwatch sw,
-            bool includeCommandPreview = false)
+            bool includeCommandPreview = false,
+            string? commandTextOverride = null)
         {
             SshDebugLog("EXEC", "ExecutePresetOnRowsAsync entered");
 
@@ -10591,7 +10997,8 @@ namespace SSH_Helper
 
             SshDebugLog("EXEC", "Preparing execution options", sw);
             int commandTimeout = InputValidator.ParseIntOrDefault(txtTimeoutHeader.Text, _configService.GetCurrent().Timeout);
-            var preparation = _executionCoordinator.PrepareExecution(txtCommand.Text, commandTimeout);
+            var commandText = commandTextOverride ?? txtCommand.Text;
+            var preparation = _executionCoordinator.PrepareExecution(commandText, commandTimeout);
             SshDebugLog("EXEC", $"Timeouts configured - command: {preparation.CommandTimeoutSeconds}s, connection: {preparation.ConnectionTimeoutSeconds}s", sw);
 
             var preset = preparation.Preset;
@@ -10603,37 +11010,51 @@ namespace SSH_Helper
             SshDebugLog("EXEC", "Calling SetExecutionMode(true)", sw);
             SetExecutionMode(true);
 
+            // Reset per-run FlowCanvas execution state before dispatch.
+            var pendingBreakpointsSnapshot = _pendingBreakpoints.ToList();
+            var pendingDisabledSnapshot = _pendingDisabledBlocks.ToList();
+            var existingNodeToStepPathMap = _nodeToStepPathMap != null
+                ? new Dictionary<string, string>(_nodeToStepPathMap, StringComparer.Ordinal)
+                : null;
+            PrepareFlowCanvasExecutionStateForRunStart();
+
             // Notify FlowCanvas of execution start and build node mapping
             if (_flowCanvasForm != null)
             {
                 var bridge = new Services.FlowCanvasBridge();
-                _nodeToStepIndexMap = bridge.BuildNodeIdToStepIndexMap(txtCommand.Text);
+                var nodeToStepPathMap = existingNodeToStepPathMap != null && existingNodeToStepPathMap.Count > 0
+                    ? existingNodeToStepPathMap
+                    : bridge.BuildNodeIdToStepPathMap(commandText);
+
+                _nodeToStepPathMap = nodeToStepPathMap;
+                _stepPathToNodeIdMap = BuildStepPathToNodeMap(nodeToStepPathMap);
+                _nodeToStepIndexMap = BuildNodeToStepIndexMap(nodeToStepPathMap);
+                _stepIndexToNodeIdMap = BuildStepIndexToNodeMap(_nodeToStepIndexMap);
                 _flowCanvasForm.SendMessage(new { type = "execution-started" });
 
-                // Apply pending breakpoints/disabled blocks and node mapping to DebugState
-                // once the execution context becomes available
-                _ = Task.Run(async () =>
+                if (preset.IsScript && nodeToStepPathMap.Count > 0)
                 {
-                    // Wait briefly for ActiveScriptContext to be set by execution startup
-                    for (int i = 0; i < 50; i++)
+                    foreach (var nodeId in pendingBreakpointsSnapshot)
                     {
-                        if (_sshService.ActiveScriptContext?.DebugState != null) break;
-                        await Task.Delay(100);
+                        if (nodeToStepPathMap.ContainsKey(nodeId))
+                            _pendingBreakpoints.Add(nodeId);
                     }
-                    var debugState = _sshService.ActiveScriptContext?.DebugState;
-                    if (debugState == null || _nodeToStepIndexMap == null) return;
 
-                    // Set the nodeId-to-stepIndex mapping so breakpoints work
-                    debugState.SetNodeToStepIndexMap(_nodeToStepIndexMap);
+                    foreach (var nodeId in pendingDisabledSnapshot)
+                    {
+                        if (nodeToStepPathMap.ContainsKey(nodeId))
+                            _pendingDisabledBlocks.Add(nodeId);
+                    }
 
-                    // Apply any breakpoints that were set before execution started
-                    foreach (var nodeId in _pendingBreakpoints)
-                        debugState.ToggleNodeBreakpoint(nodeId);
-
-                    // Apply any disabled blocks that were set before execution started
-                    foreach (var nodeId in _pendingDisabledBlocks)
-                        debugState.ToggleNodeDisabled(nodeId);
-                });
+                    _sshService.ConfigureFlowCanvasDebugStateForRun(
+                        nodeToStepPathMap,
+                        _pendingBreakpoints.ToList(),
+                        _pendingDisabledBlocks.ToList());
+                }
+                else if (pendingBreakpointsSnapshot.Count > 0 || pendingDisabledSnapshot.Count > 0)
+                {
+                    SshDebugLog("FLOWCANVAS", "FlowCanvas run started without an executable script mapping; pending debug flags were ignored.");
+                }
             }
 
             ClearOutput();
@@ -10714,6 +11135,7 @@ namespace SSH_Helper
                 finally
                 {
                     SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
+                    CleanupFlowCanvasExecutionStateAfterRun();
                     SetExecutionMode(false);
                 }
                 return;
@@ -10772,6 +11194,7 @@ namespace SSH_Helper
             finally
             {
                 SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
+                CleanupFlowCanvasExecutionStateAfterRun();
                 SetExecutionMode(false);
             }
         }
@@ -10915,6 +11338,39 @@ namespace SSH_Helper
                 hostRows,
                 hostCount => $"Executing on {hostCount} hosts...",
                 resultCount => $"Completed execution on {resultCount} hosts",
+                sw);
+        }
+
+        /// <summary>
+        /// Executes the current canvas script against the single target host
+        /// shown in the FlowCanvas Host Bar.
+        /// </summary>
+        private async void ExecuteCanvasRun()
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            SshDebugLog("EXEC", "ExecuteCanvasRun entered");
+
+            var row = ResolveTargetHostRow();
+            if (row == null)
+            {
+                ClearOutput();
+                AppendOutputText("No valid target host available. Select a host in the main grid.");
+                _flowCanvasForm?.SendMessage(new
+                {
+                    type = "execution-finished",
+                    success = false,
+                    error = "No valid target host available."
+                });
+                return;
+            }
+
+            string host = GetCellValue(row, CsvManager.HostColumnName);
+            SshDebugLog("EXEC", $"ExecuteCanvasRun on {host}", sw);
+
+            await ExecutePresetOnRowsAsync(
+                new List<DataGridViewRow> { row },
+                _ => $"Canvas: executing on {host}...",
+                _ => $"Canvas: completed on {host}",
                 sw);
         }
 
@@ -11101,6 +11557,7 @@ namespace SSH_Helper
                 return;
 
             SetExecutionMode(true);
+            PrepareFlowCanvasExecutionStateForRunStart();
             ClearOutput();
 
             int totalOperations = hosts.Count * presets.Count;
@@ -11169,6 +11626,7 @@ namespace SSH_Helper
             }
             finally
             {
+                CleanupFlowCanvasExecutionStateAfterRun();
                 SetExecutionMode(false);
             }
         }
@@ -11554,6 +12012,78 @@ namespace SSH_Helper
             return row.Cells[columnName].Value?.ToString() ?? "";
         }
 
+        /// <summary>
+        /// Resolves the target host row using fallback logic:
+        /// first checked row → focused/selected row → first valid row.
+        /// </summary>
+        private DataGridViewRow? ResolveTargetHostRow()
+        {
+            // 1. First checked row with a valid Host_IP
+            var checkedRow = dgv_variables.Rows.Cast<DataGridViewRow>()
+                .FirstOrDefault(r => !r.IsNewRow
+                    && r.Cells[SelectColumnName].Value is true
+                    && !string.IsNullOrWhiteSpace(GetCellValue(r, CsvManager.HostColumnName)));
+            if (checkedRow != null) return checkedRow;
+
+            // 2. Currently focused/selected row
+            if (dgv_variables.CurrentCell != null)
+            {
+                var currentRow = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
+                if (!currentRow.IsNewRow && !string.IsNullOrWhiteSpace(GetCellValue(currentRow, CsvManager.HostColumnName)))
+                    return currentRow;
+            }
+
+            // 3. First row with a valid Host_IP
+            return dgv_variables.Rows.Cast<DataGridViewRow>()
+                .FirstOrDefault(r => !r.IsNewRow
+                    && !string.IsNullOrWhiteSpace(GetCellValue(r, CsvManager.HostColumnName)));
+        }
+
+        /// <summary>
+        /// Converts a grid row into the anonymous payload sent to the React Host Bar.
+        /// </summary>
+        private object BuildHostPayload(DataGridViewRow row)
+        {
+            var ip = GetCellValue(row, CsvManager.HostColumnName);
+            var portStr = GetCellValue(row, "port");
+            var username = GetCellValue(row, "username");
+
+            var variables = new Dictionary<string, string>();
+            foreach (DataGridViewColumn col in dgv_variables.Columns)
+            {
+                if (col.Name == SelectColumnName) continue;
+                var val = row.Cells[col.Index].Value?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(val))
+                    variables[col.Name] = val;
+            }
+
+            return new
+            {
+                ip,
+                port = int.TryParse(portStr, out var p) ? p : 22,
+                username = string.IsNullOrWhiteSpace(username) ? tsbUsername.Text : username,
+                variables
+            };
+        }
+
+        /// <summary>
+        /// Sends the current target host to the FlowCanvas Host Bar.
+        /// Safe to call even when the canvas is not open.
+        /// </summary>
+        private void SendTargetHostToCanvas()
+        {
+            if (_flowCanvasForm == null || _flowCanvasForm.IsDisposed) return;
+
+            var row = ResolveTargetHostRow();
+            if (row == null)
+            {
+                _flowCanvasForm.SetTargetHost(null);
+                return;
+            }
+
+            _flowCanvasForm.SetTargetHost(BuildHostPayload(row));
+        }
+
         private void SetExecutionMode(bool executing)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -11619,13 +12149,13 @@ namespace SSH_Helper
         {
             _uiOutputThrottler.Flush();
             _flowCanvasForm?.SendMessage(new { type = "execution-finished", success = true });
+            _flowCanvasForm?.SendMessage(new { type = "debug-resumed", callStack = Array.Empty<string>() });
         }
 
         private void SshService_StepStarting(object? sender, StepExecutionEventArgs e)
         {
-            if (_flowCanvasForm == null || _nodeToStepIndexMap == null) return;
-            var nodeId = _nodeToStepIndexMap.FirstOrDefault(kvp => kvp.Value == e.StepIndex).Key;
-            if (nodeId == null) return;
+            if (_flowCanvasForm == null) return;
+            if (!TryResolveCanvasNodeId(e.StepPath, e.StepIndex, out var nodeId)) return;
 
             _flowCanvasForm.SendMessage(new
             {
@@ -11637,9 +12167,8 @@ namespace SSH_Helper
 
         private void SshService_StepCompleted(object? sender, StepExecutionEventArgs e)
         {
-            if (_flowCanvasForm == null || _nodeToStepIndexMap == null) return;
-            var nodeId = _nodeToStepIndexMap.FirstOrDefault(kvp => kvp.Value == e.StepIndex).Key;
-            if (nodeId == null) return;
+            if (_flowCanvasForm == null) return;
+            if (!TryResolveCanvasNodeId(e.StepPath, e.StepIndex, out var nodeId)) return;
 
             _flowCanvasForm.SendMessage(new
             {
@@ -11659,6 +12188,240 @@ namespace SSH_Helper
                     output = e.Output
                 });
             }
+        }
+
+        private void SshService_DebugPauseStateChanged(object? sender, DebugPauseStateChangedEventArgs e)
+        {
+            if (_flowCanvasForm == null) return;
+            if (!TryResolveCanvasNodeId(e.StepPath, e.StepIndex, out var nodeId)) return;
+
+            if (e.IsPaused)
+            {
+                var activeContext = _sshService.ActiveScriptContext;
+                var currentSubroutine = activeContext?.CurrentSubroutine?.QualifiedName;
+                var callStack = !string.IsNullOrWhiteSpace(currentSubroutine)
+                    ? new[] { currentSubroutine }
+                    : Array.Empty<string>();
+
+                _flowCanvasForm.SendMessage(new
+                {
+                    type = "debug-paused",
+                    stepId = nodeId,
+                    lineNumber = e.LineNumber,
+                    variables = activeContext?.GetAllVariables(),
+                    callStack
+                });
+            }
+            else
+            {
+                _flowCanvasForm.SendMessage(new
+                {
+                    type = "debug-resumed",
+                    stepId = nodeId,
+                    action = e.ResumeAction?.ToString().ToLowerInvariant(),
+                    callStack = Array.Empty<string>()
+                });
+            }
+        }
+
+        private static Dictionary<int, string> BuildStepIndexToNodeMap(Dictionary<string, int> nodeToStepIndexMap)
+        {
+            var map = new Dictionary<int, string>();
+            foreach (var pair in nodeToStepIndexMap)
+            {
+                if (!map.ContainsKey(pair.Value))
+                {
+                    map[pair.Value] = pair.Key;
+                }
+            }
+
+            return map;
+        }
+
+        private static Dictionary<string, string> BuildStepPathToNodeMap(Dictionary<string, string> nodeToStepPathMap)
+        {
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var pair in nodeToStepPathMap)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value))
+                    continue;
+
+                if (!map.ContainsKey(pair.Value))
+                    map[pair.Value] = pair.Key;
+            }
+
+            return map;
+        }
+
+        private static Dictionary<string, int> BuildNodeToStepIndexMap(Dictionary<string, string> nodeToStepPathMap)
+        {
+            var map = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var pair in nodeToStepPathMap)
+            {
+                if (FlowCanvasBridge.TryGetTopLevelStepIndex(pair.Value, out var stepIndex))
+                    map[pair.Key] = stepIndex;
+            }
+
+            return map;
+        }
+
+        private bool TryResolveCanvasNodeId(string? stepPath, int stepIndex, out string? nodeId)
+        {
+            nodeId = null;
+
+            if (!string.IsNullOrWhiteSpace(stepPath))
+            {
+                if (stepPath.StartsWith("subroutines/", StringComparison.Ordinal))
+                {
+                    SshDebugLog("FLOWCANVAS", $"Ignoring subroutine step event '{stepPath}' (no canvas mapping).");
+                    return false;
+                }
+
+                if (_stepPathToNodeIdMap == null)
+                {
+                    SshDebugLog("FLOWCANVAS", $"Step-path map unavailable for '{stepPath}', attempting step-index fallback ({stepIndex}).");
+                }
+                else if (!_stepPathToNodeIdMap.TryGetValue(stepPath, out var resolvedByPath))
+                {
+                    SshDebugLog("FLOWCANVAS", $"No canvas node mapped for step path '{stepPath}', attempting step-index fallback ({stepIndex}).");
+                }
+                else if (_nodeToStepPathMap == null || !_nodeToStepPathMap.TryGetValue(resolvedByPath, out var mappedPath) || !string.Equals(mappedPath, stepPath, StringComparison.Ordinal))
+                {
+                    SshDebugLog("FLOWCANVAS", $"Node '{resolvedByPath}' no longer maps to step path '{stepPath}', attempting step-index fallback ({stepIndex}).");
+                }
+                else
+                {
+                    nodeId = resolvedByPath;
+                    return true;
+                }
+            }
+
+            if (_stepIndexToNodeIdMap == null)
+            {
+                SshDebugLog("FLOWCANVAS", $"Dropped step event at index {stepIndex}: step-index map is unavailable.");
+                return false;
+            }
+
+            if (!_stepIndexToNodeIdMap.TryGetValue(stepIndex, out var resolvedNodeId))
+            {
+                SshDebugLog("FLOWCANVAS", $"Dropped stale step event at index {stepIndex}: no mapped canvas node.");
+                return false;
+            }
+
+            if (_nodeToStepIndexMap == null || !_nodeToStepIndexMap.ContainsKey(resolvedNodeId))
+            {
+                SshDebugLog("FLOWCANVAS", $"Dropped stale step event at index {stepIndex}: node '{resolvedNodeId}' is not in the current canvas map.");
+                return false;
+            }
+
+            nodeId = resolvedNodeId;
+            return true;
+        }
+
+        private void PrepareFlowCanvasExecutionStateForRunStart()
+        {
+            _flowCanvasDebugBootstrapCts?.Cancel();
+            _flowCanvasDebugBootstrapCts?.Dispose();
+            _flowCanvasDebugBootstrapCts = null;
+            _sshService.ClearFlowCanvasDebugStateForRun();
+
+            _nodeToStepPathMap = null;
+            _stepPathToNodeIdMap = null;
+            _nodeToStepIndexMap = null;
+            _stepIndexToNodeIdMap = null;
+            _pendingBreakpoints.Clear();
+            _pendingDisabledBlocks.Clear();
+        }
+
+        private void CleanupFlowCanvasExecutionStateAfterRun()
+        {
+            _flowCanvasDebugBootstrapCts?.Cancel();
+            _flowCanvasDebugBootstrapCts?.Dispose();
+            _flowCanvasDebugBootstrapCts = null;
+            _sshService.ClearFlowCanvasDebugStateForRun();
+
+            _nodeToStepPathMap = null;
+            _stepPathToNodeIdMap = null;
+            _nodeToStepIndexMap = null;
+            _stepIndexToNodeIdMap = null;
+        }
+
+        private void StartFlowCanvasDebugBootstrap(
+            Dictionary<string, string> nodeToStepPathMap,
+            IReadOnlyCollection<string> breakpointNodeIds,
+            IReadOnlyCollection<string> disabledNodeIds)
+        {
+            _flowCanvasDebugBootstrapCts?.Cancel();
+            _flowCanvasDebugBootstrapCts?.Dispose();
+            _flowCanvasDebugBootstrapCts = new CancellationTokenSource();
+
+            _ = ApplyFlowCanvasDebugStateAsync(
+                nodeToStepPathMap,
+                breakpointNodeIds,
+                disabledNodeIds,
+                _flowCanvasDebugBootstrapCts.Token);
+        }
+
+        private async Task ApplyFlowCanvasDebugStateAsync(
+            Dictionary<string, string> nodeToStepPathMap,
+            IReadOnlyCollection<string> breakpointNodeIds,
+            IReadOnlyCollection<string> disabledNodeIds,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var debugState = await WaitForActiveDebugStateAsync(TimeSpan.FromSeconds(8), cancellationToken);
+                if (debugState == null)
+                {
+                    SshDebugLog("FLOWCANVAS", "Timed out waiting for active debug context. Stopping execution to avoid silently dropping debug flags.");
+                    foreach (var nodeId in breakpointNodeIds)
+                        _pendingBreakpoints.Add(nodeId);
+                    foreach (var nodeId in disabledNodeIds)
+                        _pendingDisabledBlocks.Add(nodeId);
+
+                    if (_sshService.IsRunning)
+                        _sshService.Stop();
+                    return;
+                }
+
+                debugState.SetNodeToStepPathMap(nodeToStepPathMap);
+                foreach (var nodeId in breakpointNodeIds)
+                    debugState.ToggleNodeBreakpoint(nodeId);
+                foreach (var nodeId in disabledNodeIds)
+                    debugState.ToggleNodeDisabled(nodeId);
+            }
+            catch (OperationCanceledException)
+            {
+                // Run completed/cancelled before bootstrap finished.
+            }
+            catch (Exception ex)
+            {
+                SshDebugLog("FLOWCANVAS", $"Failed to bootstrap debug state: {ex.Message}");
+            }
+        }
+
+        private async Task<DebugState?> WaitForActiveDebugStateAsync(TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            var timeoutAt = DateTime.UtcNow + timeout;
+            while (DateTime.UtcNow < timeoutAt)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var debugState = _sshService.ActiveScriptContext?.DebugState;
+                if (debugState != null)
+                    return debugState;
+
+                var remaining = timeoutAt - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                    break;
+
+                var delay = remaining > TimeSpan.FromMilliseconds(100)
+                    ? TimeSpan.FromMilliseconds(100)
+                    : remaining;
+                await Task.Delay(delay, cancellationToken);
+            }
+
+            return null;
         }
 
         private void AppendOutputText(string output)

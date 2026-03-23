@@ -65,6 +65,11 @@
     <Reference Remove="$(NuGetPackageRoot)microsoft.web.webview2\1.0.3124.44\lib_manual\net5.0-windows10.0.17763.0\Microsoft.Web.WebView2.Wpf.dll" />
   </ItemGroup>
 
+  <!-- Build FlowCanvas Vite app before .NET build -->
+  <Target Name="BuildFlowCanvas" BeforeTargets="BeforeBuild" Condition="Exists('FlowCanvas\package.json')">
+    <Exec Command="npm run build" WorkingDirectory="FlowCanvas" />
+  </Target>
+
   <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveReferences">
     <ItemGroup>
       <Reference Remove="@(Reference)"

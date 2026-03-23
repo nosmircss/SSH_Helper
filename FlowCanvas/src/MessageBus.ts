@@ -2,8 +2,8 @@
  * MessageBus handles bidirectional communication between the React app
  * and the WinForms host via WebView2's PostWebMessage API.
  *
- * WinForms → React: window.chrome.webview.addEventListener('message', ...)
- * React → WinForms: window.chrome.webview.postMessage(...)
+ * WinForms -> React: window.chrome.webview.addEventListener('message', ...)
+ * React -> WinForms: window.chrome.webview.postMessage(...)
  */
 
 export interface BridgeMessage {
@@ -12,6 +12,10 @@ export interface BridgeMessage {
 }
 
 type MessageHandler = (msg: BridgeMessage) => void;
+
+interface TestHooks {
+  onOutgoingMessage?: (msg: BridgeMessage) => void;
+}
 
 class MessageBusImpl {
   private handlers = new Map<string, Set<MessageHandler>>();
@@ -59,12 +63,22 @@ class MessageBusImpl {
     return () => this.handlers.get(type)?.delete(handler);
   }
 
-  /** Send a message to WinForms (or to window for dev testing). */
+  /** Send a message to WinForms (or to window for dev/testing). */
   send(msg: BridgeMessage): void {
     if (this.isWebView2) {
       (window as any).chrome.webview.postMessage(msg);
-    } else {
-      console.log('[MessageBus → Host]', msg);
+      return;
+    }
+
+    console.log('[MessageBus -> Host]', msg);
+
+    const testHooks = (window as any).__FLOWCANVAS_TEST_HOOKS__ as TestHooks | undefined;
+    if (typeof testHooks?.onOutgoingMessage === 'function') {
+      try {
+        testHooks.onOutgoingMessage(msg);
+      } catch (e) {
+        console.warn('[MessageBus] Test hook onOutgoingMessage failed:', e);
+      }
     }
   }
 
@@ -76,16 +90,24 @@ class MessageBusImpl {
   }
 
   private dispatch(msg: BridgeMessage): void {
-    const handlers = this.handlers.get(msg.type);
-    if (handlers) {
-      handlers.forEach((h) => {
-        try {
-          h(msg);
-        } catch (e) {
-          console.error(`[MessageBus] Handler error for '${msg.type}':`, e);
-        }
-      });
+    if (typeof msg.type !== 'string') {
+      console.warn('[MessageBus] Dropped message with non-string type', msg);
+      return;
     }
+
+    const handlers = this.handlers.get(msg.type);
+    if (!handlers || handlers.size === 0) {
+      console.warn(`[MessageBus] Unknown inbound message type '${msg.type}'`);
+      return;
+    }
+
+    handlers.forEach((h) => {
+      try {
+        h(msg);
+      } catch (e) {
+        console.error(`[MessageBus] Handler error for '${msg.type}':`, e);
+      }
+    });
   }
 }
 

@@ -50,11 +50,14 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     ? durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`
     : null;
 
-  // Preview text
-  const previewText = blockData.props?.['_preview']
-    ? String(blockData.props['_preview'])
-    : def.previewKey && blockData.props?.[def.previewKey]
+  // Preview text should follow live editable props for this block type.
+  // _preview is importer metadata and can become stale after local edits.
+  const previewText = def.previewKey
+    ? blockData.props?.[def.previewKey] !== undefined && blockData.props?.[def.previewKey] !== null
       ? String(blockData.props[def.previewKey])
+      : null
+    : blockData.props?.['_preview']
+      ? String(blockData.props['_preview'])
       : null;
 
   const containerStyle: CSSProperties = {
@@ -152,7 +155,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         .search-match { outline: 2px dashed #e0c040 !important; outline-offset: 2px; }
         .search-current { outline: 2px solid #e0c040 !important; outline-offset: 2px; }
       `}</style>
-      <div style={containerStyle} onContextMenu={handleBreakpointToggle}>
+      <div style={containerStyle}>
         {/* Input handle (top) */}
         <Handle
           type="target"
@@ -175,7 +178,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
                 boxShadow: hasBreakpoint ? '0 0 4px rgba(231,76,60,0.6)' : 'none',
                 transition: 'background 0.15s',
               }}
-              title="Toggle breakpoint (right-click)"
+              title="Toggle breakpoint"
             />
           )}
 

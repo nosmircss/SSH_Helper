@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:dist": "npm run build && playwright test --config playwright.preview.config.ts",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:install": "playwright install chromium"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +25,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/dagre": "^0.7.54",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

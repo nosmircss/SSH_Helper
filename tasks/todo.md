@@ -1,5 +1,241 @@
 # TODO
 
+## 148. Fix Flow Canvas print-space export validation and stale Run disable
+- [x] 148.1 Add failing `FlowCanvasBridgeTests` coverage proving `print.message` accepts whitespace-only payloads (for blank-line separators).
+- [x] 148.2 Add failing FlowCanvas Playwright coverage proving Run/Test re-enable after editing any graph property following an export validation error.
+- [x] 148.3 Patch `FlowCanvasBridge` required-option validation so `print.message` allows whitespace-only strings while still rejecting empty/`null` values.
+- [x] 148.4 Patch FlowCanvas graph mutation state handling to clear stale export errors after user edits so Run/Test can be retried.
+- [x] 148.5 Run focused verification (`dotnet` + Playwright + FlowCanvas build) and capture results in the review section below.
+
+### 148 Review
+- Added `FlowCanvasBridgeTests.ExportGraphToYaml_PrintWithSingleSpaceMessage_IsAccepted` to reproduce the whitespace-only `print.message` export failure.
+- Added Playwright regression `run re-enables after editing graph following export error` in `FlowCanvas/e2e/flow-canvas-parity.spec.ts` to reproduce sticky Run disable after `apply-result` validation error.
+- Patched `Services/FlowCanvasBridge.cs` so required-option validation and string normalization preserve non-empty whitespace for `print.message` (still rejects empty string/`null`).
+- Patched `FlowCanvas/src/stores/slices/graphSlice.ts` and `FlowCanvas/src/stores/slices/undoSlice.ts` to clear stale export-error state on graph mutations and undo/redo, re-enabling Run/Test once user edits.
+- Red verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests.ExportGraphToYaml_PrintWithSingleSpaceMessage_IsAccepted" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-print-space-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-print-space-red\\obj\\` (failed with `Block 'print' is missing required option(s): message.`).
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-parity.spec.ts --grep "run re-enables after editing graph following export error"` (failed with Run button still disabled).
+- Green verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests.ExportGraphToYaml_PrintWithSingleSpaceMessage_IsAccepted" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-print-space-green2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-print-space-green2\\obj\\` (passed).
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-print-space-regression\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-print-space-regression\\obj\\` (11 passed).
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-parity.spec.ts` (3 passed).
+- `cd FlowCanvas; npm run build` (passed).
+
+## 147. Implement Flow Canvas preset rewrite correctness plan
+- [x] 147.1 Add Flow Canvas bridge regression coverage for full `qa_presets.json` rewrite parity and targeted option-preservation cases.
+- [x] 147.2 Refactor `FlowCanvasBridge` non-container export to schema-driven map emission with hard diagnostics for unsupported props.
+- [x] 147.3 Expand `FlowCanvasBridge` property extraction/export support for high-risk command options (`send`, `log`, `sftp`, `table`, `portcheck`, `http`, `readfile`, `interactive`, `browser_callback_capture`).
+- [x] 147.4 Align Flow Canvas block property schema in `FlowCanvas/src/blockDefs/registry.ts` (add missing send capture/options, remove invalid drifted fields, fix enum options).
+- [x] 147.5 Add drift-guard tests comparing parser-known command options vs bridge extraction/export support and Flow Canvas block definitions.
+- [x] 147.6 Run focused verification (`FlowCanvasBridgeTests`, QA catalog/execution tests, and FlowCanvas Playwright parity/properties tests where applicable) and record review notes.
+
+### 147 Review
+- Added new Flow Canvas rewrite regression tests covering targeted option preservation (`send`, `log`, `sftp`, `portcheck`, `table`) plus full YAML QA catalog rewrite/validation contract checks.
+- Replaced `FlowCanvasBridge` non-container export from hardcoded string templates with schema-driven map emission: parse existing snippet, preserve untouched options, apply canonical property aliases, normalize value types, enforce required keys, and serialize YAML with command-key fidelity.
+- Added hard export diagnostics for unsupported/invalid drifted properties (`send.delay`, `interactive.timeout`, `return.value`) and legacy-to-canonical normalization (`sftp local/remote -> local_path/remote_path`, `table source -> data`, `portcheck target -> host/port`, `writefile append -> mode`).
+- Expanded property extraction for high-risk commands/options including `send.capture/retry/retry_delay/fail_on_nonzero/respond`, `log.message/level`, full `http` options, `readfile` options, `interactive` options, `browser_callback_capture` options, canonical `sftp`, canonical `table`, and canonical `portcheck`.
+- Replaced `FlowCanvas/src/blockDefs/registry.ts` with a runtime-aligned canonical property schema: added missing send capture/options, removed drifted invalid fields, aligned key names and enums (including `log.level=success`), and updated preview keys to canonical fields.
+- Added drift guards:
+- parser-vs-bridge export option catalog parity test,
+- registry property key mapping test against parser-known runtime options plus bridge alias map,
+- explicit assertions for high-risk schema points (`send.capture` present, `send.delay` absent, `interactive.timeout` absent, `return.value` absent, canonical `sftp`/`table`/`portcheck` fields present, `log.level` includes `success`).
+- Verification passed:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false`
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~QaPresetsSyntaxTests|FullyQualifiedName~QaPresetCatalogTests|FullyQualifiedName~QaPresetExecutionTests" -v minimal -p:UseAppHost=false`
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts e2e/flow-canvas-parity.spec.ts`
+- `cd FlowCanvas; npm run build`
+
+## 146. Fix stale block command preview after properties edit
+- [x] 146.1 Trace block preview render data flow and confirm why display-name updates but command preview stays stale.
+- [x] 146.2 Patch block preview rendering to prefer live `props[previewKey]` over importer metadata (`_preview`) for editable block types.
+- [x] 146.3 Add a focused Playwright regression fixture/spec that includes stale imported `_preview` and verifies command preview updates after edit.
+- [x] 146.4 Run focused verification and capture results below.
+
+### 146 Review
+- Root cause: `FlowCanvas/src/nodes/BaseBlock.tsx` rendered preview text from `props._preview` first, while `props._preview` is import-time metadata set by `FlowCanvasBridge`. Editing `props.command` in the Properties panel did not update `_preview`, so node preview text remained stale.
+- Patched `BaseBlock` so when a block definition has `previewKey`, preview comes from the live property value (`props[previewKey]`) and no longer falls back to stale `_preview` for that block type.
+- Kept `_preview` fallback only for block types without a `previewKey`.
+- Updated `FlowCanvas/e2e/fixtures/graphs.ts` to seed `node-send` with stale imported `_preview` + matching old `command`.
+- Extended `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts` to assert the node shows the new command and not the stale imported preview after editing.
+- Verification passed:
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts`
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-interactions.spec.ts e2e/flow-canvas-parity.spec.ts`
+- `cd FlowCanvas; npm run build`
+
+## 145. Fix Flow Canvas properties canonical state path + dropdown first-select persistence
+- [x] 145.1 Add/route properties edits through Zustand graph-slice actions (`updateNodeLabel`, `updateNodeProp`) and remove `Properties.tsx` dependence on ReactFlow `getNode/setNodes`.
+- [x] 145.2 Fix buffered input commit race (`onBlur` stale closure) and add node+field identity resets to prevent cross-field/node state bleed.
+- [x] 145.3 Harden select/dropdown behavior so first interaction persists explicit value, including default-backed selects.
+- [x] 145.4 Extend Playwright properties coverage for dropdown persistence and mixed text/code/textarea/select focus-switch regressions.
+- [x] 145.5 Stabilize parity harness preconditions (`set-target-host`) and add shipped-bundle (`dist`) e2e script/config.
+- [x] 145.6 Run verification commands and record results in the review section.
+
+### 145 Review
+- Moved properties-panel editing to a single canonical state path in Zustand: `Properties.tsx` now reads selected nodes from `useFlowStore.nodes` and writes through new `graphSlice` actions `updateNodeLabel(...)` and `updateNodeProp(...)`.
+- Removed `Properties.tsx` usage of ReactFlow `getNode/setNodes`, eliminating split-brain state between ReactFlow internals and the app store/undo snapshots.
+- Replaced the old local input hook with `useBufferedInput(...)` that tracks the latest typed value in a ref and commits only when changed, preventing stale `onBlur` closure commits.
+- Added node+field identity-scoped buffering (`${nodeId}:${fieldKey}:${fieldType}` plus display-name identity) to prevent cross-node/cross-field local state bleed during rapid reselection.
+- Hardened dropdown/select behavior: first user interaction now persists explicit selection even when the displayed value comes from `defaultValue` fallback and the user re-confirms that same option.
+- Extended Playwright coverage in `flow-canvas-properties-typing.spec.ts` with three select-focused regressions:
+- mixed text/code/textarea/select persistence across reselection,
+- default-backed select first-interaction persistence,
+- immediate select-change payload persistence via `apply-yaml`.
+- Stabilized parity harness precondition by setting `set-target-host` in `flow-canvas-parity.spec.ts` before asserting toolbar Run behavior.
+- Added shipped-bundle E2E path:
+- `FlowCanvas/playwright.preview.config.ts`,
+- `FlowCanvas/package.json` script `test:e2e:dist`.
+- Verification passed:
+- `cd FlowCanvas; npm run build`
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts e2e/flow-canvas-interactions.spec.ts e2e/flow-canvas-parity.spec.ts`
+- `cd FlowCanvas; npm run test:e2e:dist -- e2e/flow-canvas-properties-typing.spec.ts e2e/flow-canvas-parity.spec.ts`
+
+## 144. Fix Flow Canvas properties-panel keypress swallowing and add Playwright regression coverage
+- [x] 144.1 Add focused Playwright regression fixture/spec covering per-keystroke typing for `Display Name`, one `text`, one `code`, and one `textarea` property.
+- [x] 144.2 Run focused properties regression to capture red failure prior to fix.
+- [x] 144.3 Implement minimal `Properties.tsx` fix (local buffered `Display Name`, safer blur sync) and add stable `data-testid` hooks.
+- [x] 144.4 Re-run focused Playwright verification (new properties spec + nearby interaction sanity) and document results below.
+
+### 144 Review
+- Root cause in `FlowCanvas/src/panels/Properties.tsx` was twofold: `Display Name` was still a directly controlled input (unlike other text-like property fields), and `useLocalInput.onBlur` reset local value from external state, which could overwrite in-flight typed characters during rapid render churn.
+- Added deterministic fixture `createPropertiesTypingFixture()` in `FlowCanvas/e2e/fixtures/graphs.ts` with `send` (`code` + `text`) and `http` (`textarea`) blocks to cover representative text-like input types.
+- Added focused regression `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts` with per-keystroke assertions for:
+- `Display Name` (`properties-display-name-input`)
+- `command` code input (`properties-field-command-code-input`)
+- `expect` text input (`properties-field-expect-text-input`)
+- `body` textarea (`properties-field-body-textarea-input`)
+- Updated `FlowCanvas/src/panels/Properties.tsx` to:
+- apply local buffered input behavior to `Display Name`,
+- commit current local value on blur instead of resetting from external state,
+- expose stable `data-testid` hooks for panel root and per-property controls.
+- Red verification (before fix): `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts` failed as expected (`getByTestId('properties-panel')` not found).
+- Green verification (after fix): same focused command passed (`1` passed).
+- Focused sanity suite passed:
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts e2e/flow-canvas-interactions.spec.ts e2e/flow-canvas-variable-inspector.spec.ts` (`6` passed).
+
+## 143. Obscure `password` in Flow Canvas Variables panel
+- [x] 143.1 Confirm Variables panel render path masks `password`-named variables.
+- [x] 143.2 Rebuild Flow Canvas dist bundle so runtime WebView uses the masking code.
+- [x] 143.3 Run focused masking verification and capture review notes below.
+
+### 143 Review
+- Root cause was deployment drift: `FlowCanvas/src/panels/VariableInspector.tsx` already masks `password`/secret-style names, but the checked-in `FlowCanvas/dist` bundle was stale and still rendered raw string values.
+- Rebuilt Flow Canvas (`npm run build`) so `dist/assets/index-gKmJIjpA.js` includes the `formatVariableDisplay` masking path and `"********"` output for sensitive variable names.
+- Focused verification passed: `npm run test:e2e -- e2e/flow-canvas-variable-inspector.spec.ts` (`1` passed).
+
+## 142. Fix Flow Canvas breakpoint rerun persistence
+- [x] 142.1 Add a focused failing regression that reproduces: breakpoint hit on run 1, ignored on run 2 with no toggle changes.
+- [x] 142.2 Fix Flow Canvas debug-state lifecycle so user breakpoint/disabled toggles persist across runs while run-local maps still reset safely.
+- [x] 142.3 Run focused verification and capture review notes below.
+
+### 142 Review
+- Root cause was lifecycle mismatch in `Form1`: `_pendingBreakpoints`/`_pendingDisabledBlocks` were treated as run-prep state and cleared during `CleanupFlowCanvasExecutionStateAfterRun()`, so reruns lost breakpoint/disabled toggles even though Flow Canvas still showed them enabled.
+- Added focused regression `Form1FlowCanvasBreakpointPersistenceTests.CleanupFlowCanvasExecutionStateAfterRun_PreservesPendingDebugTogglesForRerun` to prove pending debug toggles survive cleanup and remain available for the next run-start bootstrap.
+- Updated Flow Canvas toggle handlers in `Form1` so pending sets are always updated (even during active debug sessions), then active `DebugState` is synchronized to the desired pending state without double-toggling.
+- Moved pending-set clearing back to run-start preparation (`PrepareFlowCanvasExecutionStateForRunStart`) and removed it from run cleanup, preserving rerun persistence while still allowing per-run node-map filtering.
+- Focused red verification (before fix): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasBreakpointPersistenceTests.CleanupFlowCanvasExecutionStateAfterRun_PreservesPendingDebugTogglesForRerun" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flowcanvas-breakpoint-rerun-red\bin\ -p:BaseIntermediateOutputPath=artifacts\flowcanvas-breakpoint-rerun-red\obj\` failed as expected (`pendingBreakpoints {empty} to contain "node-breakpoint"`).
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasBreakpointPersistenceTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-newtest\bin\ -p:BaseIntermediateOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-newtest\obj\` passed (`1` passed).
+- Adjacent verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasTestStepScopingTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-scoping\bin\ -p:BaseIntermediateOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-scoping\obj\` passed (`4` passed).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceFlowCanvasDebugBootstrapTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-bootstrap\bin\ -p:BaseIntermediateOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-bootstrap\obj\` passed (`1` passed).
+
+## 141. Fix debug step-into hang inside parallel branches
+- [x] 141.1 Reproduce and capture a focused failing regression for stepping into a `parallel` block under debug mode.
+- [x] 141.2 Implement a minimal runtime fix so stepping through parallel branches does not deadlock/stall in `running`.
+- [x] 141.3 Run focused + adjacent debug regressions and document review findings below.
+
+### 141 Review
+- Root cause was `DebugState` resume signaling not being multi-waiter-safe: each paused branch in `parallel` called `WaitForResumeAsync(...)` and overwrote `_resumeSignal`, so only the most recent waiter resumed; earlier paused branches stayed blocked forever and the parent `parallel` step remained `running`.
+- Added focused regression `ScriptExecutorDebugStepTests.ExecuteAsync_StepIntoParallel_ContinueReleasesAllPausedBranches`.
+- Focused red verification (before fix): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptExecutorDebugStepTests.ExecuteAsync_StepIntoParallel_ContinueReleasesAllPausedBranches" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\parallel-step-red\bin\ -p:BaseIntermediateOutputPath=artifacts\parallel-step-red\obj\` failed as expected (`continue should release all paused parallel branches` timeout).
+- Implemented fix in `DebugState.WaitForResumeAsync(...)`: concurrent pause waiters now share one active `TaskCompletionSource<DebugResumeAction>` until it completes, instead of replacing the signal per waiter.
+- Focused green verification: same command with `parallel-step-green` paths passed (`1` passed).
+- Adjacent regression verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptExecutorDebugStepTests|FullyQualifiedName~ScriptExecutorControlFlowTests.ExecuteAsync_ParallelPropagatesBreak_OutOfWhileLoop|FullyQualifiedName~ScriptExecutorControlFlowTests.ExecuteAsync_ParallelPropagatesContinue_SkipsRemainingWhileBody|FullyQualifiedName~SshExecutionServiceFlowCanvasDebugBootstrapTests|FullyQualifiedName~DebugStateStepPathTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\parallel-step-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\parallel-step-regression\obj\` passed (`7` passed).
+
+## 140. Fix Flow Canvas debug-step semantics and secret-variable masking
+- [x] 140.1 Add failing regression coverage for breakpoint `Step` so it pauses on the next executable block instead of continuing to completion.
+- [x] 140.2 Implement the minimal runtime fix for debug resume handling and verify step-by-step pause behavior.
+- [x] 140.3 Add focused Flow Canvas UI coverage for masking password/secret variables in the Vars panel and implement masking.
+- [x] 140.4 Run focused verification and capture review notes below.
+
+### 140 Review
+- Root cause for `Step` behavior was in `ScriptExecutor.HandleDebugPauseAsync(...)`: `Continue` explicitly disabled `StepMode`, but `Step` did not enable `StepMode`, so a step-resume from breakpoint behaved like continue and execution ran to completion.
+- Added focused regression `ScriptExecutorDebugStepTests.ExecuteAsync_StepResumeFromBreakpoint_PausesAtNextStep` to require pause-at-next-step semantics.
+- Runtime fix: when resume action is `DebugResumeAction.Step`, executor now sets `context.DebugState.StepMode = true`; `Continue` still disables step mode.
+- Added focused browser regression `FlowCanvas/e2e/flow-canvas-variable-inspector.spec.ts` requiring password-like variable names to be masked in the Vars panel.
+- Flow Canvas fix: `VariableInspector` now masks values for sensitive names (`password`, `secret`, `token`, key variants) with `"********"` while preserving existing rendering for non-sensitive variables.
+- Focused red verification (step semantics): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptExecutorDebugStepTests.ExecuteAsync_StepResumeFromBreakpoint_PausesAtNextStep" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flow-step-red\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-step-red\obj\` failed as expected (`second debug pause after step should be observed within 2000ms`).
+- Focused green verification (step semantics): same command with `flow-step-green` paths passed (`1` passed).
+- Focused red verification (vars masking): `npm run test:e2e -- e2e/flow-canvas-variable-inspector.spec.ts` failed as expected (`password = "super-secret-password"` visible).
+- Focused green verification (vars masking): same command passed (`1` passed).
+- Broader verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptExecutorDebugStepTests|FullyQualifiedName~ScriptExecutorStepPathTests|FullyQualifiedName~DebugStateStepPathTests|FullyQualifiedName~SshExecutionServiceFlowCanvasDebugBootstrapTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flow-step-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-step-regression\obj\` passed (`6` passed).
+- `npm run test:e2e -- e2e/flow-canvas-parity.spec.ts e2e/flow-canvas-interactions.spec.ts e2e/flow-canvas-variable-inspector.spec.ts` passed (`7` passed).
+
+## 139. Fix Flow Canvas first-breakpoint run-start race
+- [x] 139.1 Add a focused failing regression that proves Flow Canvas-configured breakpoints pause before first script step.
+- [x] 139.2 Add deterministic run-start debug bootstrap in `SshExecutionService` and wire Flow Canvas run path to use it.
+- [x] 139.3 Run focused and broader debug/flow-canvas verification and record review findings.
+
+### 139 Review
+- Root cause was a race in run-start debug bootstrap: Flow Canvas breakpoints were applied via async polling (`WaitForActiveDebugStateAsync`), which could attach after step `steps/0` had already executed. This made first-block breakpoints unreliable and the run appeared to ignore pause/debug controls.
+- Added focused regression `SshExecutionServiceFlowCanvasDebugBootstrapTests.ExecutePresetAsync_WithConfiguredFlowCanvasBreakpoint_PausesBeforeFirstStep` to require deterministic run-start breakpoint pause behavior.
+- Added deterministic bootstrap API in `SshExecutionService`: `ConfigureFlowCanvasDebugStateForRun(...)` and `ClearFlowCanvasDebugStateForRun()`, with synchronous application to each new `ScriptContext` before `ScriptExecutor.ExecuteAsync(...)`.
+- Updated `Form1` Flow Canvas run wiring to use `_sshService.ConfigureFlowCanvasDebugStateForRun(...)` instead of async bootstrap polling for initial run-state attach, and clear pending run bootstrap state on both run start prep and cleanup.
+- Focused red verification (before service API): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceFlowCanvasDebugBootstrapTests.ExecutePresetAsync_WithConfiguredFlowCanvasBreakpoint_PausesBeforeFirstStep" -v minimal` failed as expected.
+- Focused green verification: same command passed (`1` passed).
+- Broader regression verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-build --filter "FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~DebugStateStepPathTests|FullyQualifiedName~Form1FlowCanvasTestStepScopingTests|FullyQualifiedName~ScriptExecutorStepPathTests" -v minimal` passed (`12` passed).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-build --filter "FullyQualifiedName~SshExecutionServiceFlowCanvasDebugBootstrapTests" -v minimal` passed (`1` passed).
+
+## 138. Fix Flow Canvas run export rewriting valid scripts into invalid YAML
+- [x] 138.1 Add a focused failing regression test that reproduces `set + while + parallel` round-trip export and parser failure risk.
+- [x] 138.2 Normalize container `_yamlSnippet` indentation during export so mixed generated/snippet top-level steps stay YAML-valid.
+- [x] 138.3 Run focused bridge/parsing verification and record findings in a review section.
+
+### 138 Review
+- Root cause was mixed top-level sequence indentation during Flow Canvas export: simple blocks were regenerated at column 0 while container blocks (`while/if/parallel/...`) were appended from stored `_yamlSnippet` with original leading indentation, producing invalid YAML when both appeared in the same `steps` list.
+- Added focused regression `ExportGraphToYaml_MixedGeneratedAndContainerSteps_ProducesParsableYaml` in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` using a `set + while + parallel` script shape matching the user repro. Red run failed with `ScriptParseException` (`While parsing a block mapping, did not find expected key.`).
+- Implemented fix in `Services/FlowCanvasBridge.cs` by normalizing (dedenting) stored container snippets to top-level step indentation before appending.
+- Focused red verification (before fix): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests.ExportGraphToYaml_MixedGeneratedAndContainerSteps_ProducesParsableYaml" -v minimal` failed with the expected YAML parse error.
+- Focused green verification (after fix): same command passed (`1` passed).
+- Broader regression verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~Form1FlowCanvasTestStepScopingTests|FullyQualifiedName~DebugStateStepPathTests" -v minimal` passed (`10` passed).
+
+## 135. Implement Flow Canvas correctness recovery plan
+- [x] 135.1 Phase 0: Scaffold OpenSpec change `refactor-flow-canvas-correctness` with proposal/tasks/spec deltas and define acceptance gates.
+- [x] 135.2 Phase 0: Add temporary Flow Canvas safety guardrails to prevent silent export loss and block unsafe run/test actions.
+- [x] 135.3 Phase 1: Replace fragile snippet-first export path with canonical graph export behavior and structured diagnostics.
+- [x] 135.4 Phase 1: Ensure all palette block types are export-supported or explicitly rejected with actionable diagnostics.
+- [x] 135.5 Phase 2: Introduce scope-aware step identity (`StepPath`) in execution/debug events and remove flat step-index-only mapping assumptions.
+- [x] 135.6 Phase 2: Update host-side Flow Canvas mapping and event routing to resolve by `StepPath -> nodeId` for nested flow correctness.
+- [x] 135.7 Phase 3: Implement unified canvas execution message flow (`execute-canvas`) and route toolbar + keyboard run/test through it.
+- [x] 135.8 Phase 3: Implement true `Test Step` semantics (single-host prerequisite chain + target step) and remove button-proxy behavior.
+- [x] 135.9 Phase 4: Fix interaction regressions (move undo timing, breakpoint visual parity, context-menu separation, comment rendering, box-selection sync).
+- [x] 135.10 Phase 5: Add focused tests for bridge/export diagnostics, nested mapping, run/test parity, and interaction correctness.
+- [x] 135.11 Phase 5: Run focused + broader verification and document rollout notes in changelog/operator-facing docs.
+- [x] 135.12 Phase 6 (Follow-up): Add a browser test harness for Flow Canvas (`FlowCanvas` app boot + host bridge stubs + deterministic fixture loading).
+- [x] 135.13 Phase 6 (Follow-up): Add browser-driven parity/interaction specs (run vs test-step entry parity, context-menu/breakpoint gesture separation, comment persistence, box-select sync, drag undo behavior).
+- [x] 135.14 Phase 6 (Follow-up): Wire browser harness into CI and document local/operator usage (`npm` scripts, artifact capture, troubleshooting notes).
+
+### 135 Review
+- Added OpenSpec change set under `openspec/changes/refactor-flow-canvas-correctness/` (`proposal.md`, `tasks.md`, `design.md`, and spec deltas for flow-canvas + scripting-runtime) and validated with `openspec validate refactor-flow-canvas-correctness --strict --no-interactive`.
+- Added host/bridge safety gate: `apply-result` diagnostics now return structured `success/errors/warnings/nodeStepMap`; run/test requests are rejected when export is invalid or selected step is not executable.
+- Implemented `execute-canvas` unified path end-to-end (toolbar + keyboard) and removed legacy step-into UI usage while preserving compatibility handlers for deprecated host message aliases.
+- Implemented test-step execution scoping: host now truncates script to the selected top-level boundary and applies path-aware disable filters so only prerequisite-chain nodes + target scope execute for nested targets.
+- Implemented runtime StepPath propagation: `ScriptStep.StepPath`, executor-assigned canonical nested paths, debug pause/start/complete payloads with `StepPath`, and host-side `StepPath -> nodeId` resolution.
+- Updated debug bootstrap to configure `DebugState` with node-to-step-path mapping, keeping line breakpoints compatibility while removing index-only assumptions from the main event path.
+- Added focused regression tests: `FlowCanvasBridgeTests` (unsupported blocks, comment diagnostics, child-node step-path mapping), `DebugStateStepPathTests` (step-path breakpoint resolution + index-map compatibility), `Form1FlowCanvasTestStepScopingTests` (YAML truncation + prerequisite chain scoping), and `ScriptExecutorStepPathTests` (nested canonical paths + step lifecycle event payload paths).
+- Added follow-up Phase 6 plan for browser-harness automation to cover browser-level Flow Canvas parity and interaction behavior beyond host/runtime unit coverage.
+- Scaffolded browser harness in `FlowCanvas` with Playwright (`playwright.config.ts`, `e2e/support/harness.ts`, deterministic graph fixtures, and first parity suite in `e2e/flow-canvas-parity.spec.ts`), plus local run/operator notes in `docs/flow-canvas-browser-harness.md`.
+- Added interaction browser specs in `e2e/flow-canvas-interactions.spec.ts` for drag-undo restoration, context-menu/breakpoint gesture separation, comment undo/redo persistence, and box-select -> delete sync.
+- Wired browser harness into CI in `.github/workflows/build-release.yml` (`flowcanvas-browser-tests` with Playwright artifact upload) and extended troubleshooting/operator notes.
+- Verification executed:
+- `dotnet build -v minimal`
+- `npm run build` in `FlowCanvas/`
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~DebugStateStepPathTests|FullyQualifiedName~Form1FlowCanvasTestStepScopingTests|FullyQualifiedName~ScriptExecutorStepPathTests" -v minimal`
+- `dotnet test -v minimal` (`1724` passed)
+- `npm run test:e2e` in `FlowCanvas/` (`6` passed)
+
 ## 134. Archive completed OpenSpec changes
 - [x] 134.1 Confirm which active OpenSpec changes are complete and archive-ready.
 - [x] 134.2 Archive each completed change with `openspec archive <id> --yes` and review the CLI output for spec updates/archive placement.

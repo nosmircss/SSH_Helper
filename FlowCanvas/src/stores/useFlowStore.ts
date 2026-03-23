@@ -7,6 +7,7 @@ import { createUndoSlice, type UndoSlice } from './slices/undoSlice';
 import { createTimelineSlice, type TimelineSlice } from './slices/timelineSlice';
 import { createUISlice, type UISlice } from './slices/uiSlice';
 import { createCommentSlice, type CommentSlice } from './slices/commentSlice';
+import { createHostSlice, type HostSlice } from './slices/hostSlice';
 
 export type FlowStore = GraphSlice &
   ExecutionSlice &
@@ -15,7 +16,8 @@ export type FlowStore = GraphSlice &
   UndoSlice &
   TimelineSlice &
   UISlice &
-  CommentSlice;
+  CommentSlice &
+  HostSlice;
 
 export const useFlowStore = create<FlowStore>()((...a) => ({
   ...createGraphSlice(...a),
@@ -26,4 +28,5 @@ export const useFlowStore = create<FlowStore>()((...a) => ({
   ...createTimelineSlice(...a),
   ...createUISlice(...a),
   ...createCommentSlice(...a),
+  ...createHostSlice(...a),
 }));

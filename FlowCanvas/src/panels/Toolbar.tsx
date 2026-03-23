@@ -2,6 +2,8 @@ import { messageBus } from '../MessageBus';
 import { useReactFlow } from '@xyflow/react';
 import { useFlowStore } from '../stores/useFlowStore';
 import { useAutoLayout } from '../hooks/useAutoLayout';
+import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
+import { buildExecutableGraphPayload } from '../utils/exportGraph';
 
 export default function Toolbar() {
   const { getNodes, getEdges } = useReactFlow();
@@ -25,27 +27,36 @@ export default function Toolbar() {
   const autoLayout = useAutoLayout();
 
   const selectedNodeId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
+  const exportStatus = useFlowStore((s) => s.exportStatus);
+  const targetHost = useFlowStore((s) => s.targetHost);
 
-  /** Filter out visual-only child nodes before sending to C# for YAML export. */
   const getExportData = () => {
-    const allNodes = getNodes();
-    const exportNodes = allNodes.filter(n => !(n.data as Record<string, unknown>)?.props || !((n.data as Record<string, unknown>).props as Record<string, unknown>)?._isChildOf);
-    return { nodes: exportNodes, edges: getEdges() };
+    return buildExecutableGraphPayload(getNodes(), getEdges());
   };
 
   const handleApplyYaml = () => {
-    messageBus.send({ type: 'apply-yaml', ...getExportData() });
+    messageBus.send({
+      type: CANVAS_HOST_MESSAGES.outgoing.applyYaml,
+      ...getExportData(),
+    });
   };
 
   const handleTestStep = () => {
     if (!selectedNodeId) return;
-    messageBus.send({ type: 'apply-yaml', ...getExportData() });
-    setTimeout(() => messageBus.send({ type: 'test-step', stepId: selectedNodeId }), 50);
+    messageBus.send({
+      type: CANVAS_HOST_MESSAGES.outgoing.executeCanvas,
+      mode: 'test-step',
+      stepId: selectedNodeId,
+      ...getExportData(),
+    });
   };
 
   const handleRun = () => {
-    messageBus.send({ type: 'apply-yaml', ...getExportData() });
-    setTimeout(() => messageBus.send({ type: 'run-request' }), 50);
+    messageBus.send({
+      type: CANVAS_HOST_MESSAGES.outgoing.executeCanvas,
+      mode: 'run',
+      ...getExportData(),
+    });
   };
 
   const isDark = theme === 'dark';
@@ -65,13 +76,27 @@ export default function Toolbar() {
       flexShrink: 0,
     }}>
       {/* Execution controls */}
-      <button onClick={handleRun} disabled={isRunning} style={btnStyle('#2ecc71', !isRunning)} title="Run script (F5)">
+      <button
+        onClick={handleRun}
+        disabled={isRunning || exportStatus.hasErrors || !targetHost}
+        style={btnStyle('#2ecc71', !isRunning && !exportStatus.hasErrors && !!targetHost)}
+        title={
+          exportStatus.hasErrors
+            ? 'Fix export errors before run'
+            : targetHost
+              ? `Run on ${targetHost.ip} (F5)`
+              : 'No target host — select a host in the main grid (F5)'
+        }
+      >
         ▶ Run
       </button>
       <button
         onClick={handleTestStep}
-        disabled={!selectedNodeId || isRunning}
-        style={btnStyle(selectedNodeId && !isRunning ? '#f0c040' : '#555', !!selectedNodeId && !isRunning)}
+        disabled={!selectedNodeId || isRunning || exportStatus.hasErrors}
+        style={btnStyle(
+          selectedNodeId && !isRunning && !exportStatus.hasErrors ? '#f0c040' : '#555',
+          !!selectedNodeId && !isRunning && !exportStatus.hasErrors,
+        )}
         title="Test selected step (Ctrl+Enter)"
       >
         ⏩ Test Step
@@ -115,14 +140,6 @@ export default function Toolbar() {
               title="Step to next block (F10)"
             >
               ⏭ Step
-            </button>
-            <button
-              onClick={() => debugAction('step-into')}
-              disabled={!paused}
-              style={debugBtnStyle('#9b59b6', paused)}
-              title="Step into subroutine (F11)"
-            >
-              ⏬ Into
             </button>
             <button
               onClick={() => debugAction('stop')}

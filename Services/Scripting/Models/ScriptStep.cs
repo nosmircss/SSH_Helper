@@ -14,6 +14,12 @@ namespace SSH_Helper.Services.Scripting.Models
         public int LineNumber { get; set; }
 
         /// <summary>
+        /// Canonical scope-aware step identity (for example: steps/2/then/0).
+        /// Assigned by the executor before runtime to correlate debug/runtime events with Flow Canvas nodes.
+        /// </summary>
+        public string? StepPath { get; set; }
+
+        /// <summary>
         /// Step command key discovered during parse, even when required payload fields are missing.
         /// Enables precise validation errors instead of generic "unknown step" diagnostics.
         /// </summary>

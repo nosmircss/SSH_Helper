@@ -21,6 +21,7 @@ import Palette from './panels/Palette';
 import Properties from './panels/Properties';
 import RightPanel from './panels/RightPanel';
 import Toolbar from './panels/Toolbar';
+import HostBar from './panels/HostBar';
 import VariableInspector from './panels/VariableInspector';
 import OutputPreview from './panels/OutputPreview';
 import DebugPanel from './panels/DebugPanel';
@@ -82,6 +83,7 @@ function FlowCanvasInner() {
 
   const reactFlowInstance = useRef<ReactFlowInstance<any, any> | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const dragSnapshotTaken = useRef(false);
 
   // Initialize message bridge and keyboard shortcuts
   useEffect(() => {
@@ -96,10 +98,16 @@ function FlowCanvasInner() {
     applyTheme(theme);
   }, [theme]);
 
-  // Push undo snapshot on node drag stop
-  const onNodeDragStop = useCallback(() => {
+  // Capture one undo snapshot at drag start (pre-move state).
+  const onNodeDragStart = useCallback(() => {
+    if (dragSnapshotTaken.current) return;
+    dragSnapshotTaken.current = true;
     pushSnapshot('Move blocks');
   }, [pushSnapshot]);
+
+  const onNodeDragStop = useCallback(() => {
+    dragSnapshotTaken.current = false;
+  }, []);
 
   // Drag and drop from palette
   const onDragOver = useCallback((event: DragEvent) => {
@@ -207,6 +215,7 @@ function FlowCanvasInner() {
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Toolbar />
+      <HostBar />
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         <Palette />
         <div ref={wrapperRef} style={{ flex: 1, height: '100%', position: 'relative' }}>
@@ -222,6 +231,7 @@ function FlowCanvasInner() {
             onNodeClick={onNodeClick}
             onPaneClick={onPaneClick}
             onNodeContextMenu={onNodeContextMenu}
+            onNodeDragStart={onNodeDragStart}
             onNodeDragStop={onNodeDragStop}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
@@ -250,6 +260,13 @@ function FlowCanvasInner() {
           </ReactFlow>
           <SearchOverlay />
           <BlockContextMenu />
+          {latestOutput && firstSelectedId && (
+            <OutputPreview
+              output={latestOutput.text}
+              blockLabel={firstSelectedId}
+              nodeId={firstSelectedId}
+            />
+          )}
         </div>
         <RightPanel>
           <Properties />
@@ -257,13 +274,6 @@ function FlowCanvasInner() {
           {panelsVisible.timeline && <TimelinePanel />}
         </RightPanel>
         <DebugPanel />
-        {latestOutput && firstSelectedId && (
-          <OutputPreview
-            output={latestOutput.text}
-            blockLabel={firstSelectedId}
-            nodeId={firstSelectedId}
-          />
-        )}
       </div>
     </div>
   );

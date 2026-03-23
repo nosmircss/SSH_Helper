@@ -1,51 +1,69 @@
 import type { StateCreator } from 'zustand';
 import type { FlowStore } from '../useFlowStore';
 
-export interface CanvasComment {
-  id: string;
-  text: string;
-  position: { x: number; y: number };
-  width: number;
-  height: number;
-  color: string;
-  attachedToNodeId?: string;
-}
-
 export interface CommentSlice {
-  comments: CanvasComment[];
-
   addComment: (position: { x: number; y: number }, attachedToNodeId?: string) => void;
-  updateComment: (id: string, updates: Partial<CanvasComment>) => void;
+  updateComment: (id: string, updates: Record<string, unknown>) => void;
   removeComment: (id: string) => void;
 }
 
 let commentCounter = 0;
 
 export const createCommentSlice: StateCreator<FlowStore, [], [], CommentSlice> = (set, get) => ({
-  comments: [],
-
   addComment: (position, attachedToNodeId) => {
     get().pushSnapshot('Add comment');
-    const comment: CanvasComment = {
-      id: `comment-${Date.now()}-${commentCounter++}`,
-      text: '',
+    const id = `comment-${Date.now()}-${commentCounter++}`;
+    const commentNode = {
+      id,
+      type: 'comment',
       position,
-      width: 200,
-      height: 100,
-      color: '#e0c040',
-      attachedToNodeId,
+      data: {
+        commentId: id,
+        text: '',
+        color: '#e0c040',
+        attachedToNodeId,
+      },
+      style: {
+        width: 200,
+        height: 100,
+      },
     };
-    set((s) => ({ comments: [...s.comments, comment] }));
+    set((s) => ({ nodes: [...s.nodes, commentNode] }));
   },
 
   updateComment: (id, updates) => {
     set((s) => ({
-      comments: s.comments.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+      nodes: s.nodes.map((n) => {
+        if (n.id !== id) return n;
+
+        const nextData = { ...(n.data as Record<string, unknown>), ...updates };
+        const nextNode = {
+          ...n,
+          data: nextData,
+        };
+
+        if (updates.position && typeof updates.position === 'object') {
+          nextNode.position = updates.position as { x: number; y: number };
+        }
+        if (typeof updates.width === 'number' || typeof updates.height === 'number') {
+          nextNode.style = {
+            ...(n.style ?? {}),
+            ...(typeof updates.width === 'number' ? { width: updates.width } : {}),
+            ...(typeof updates.height === 'number' ? { height: updates.height } : {}),
+          };
+        }
+
+        return nextNode;
+      }),
     }));
   },
 
   removeComment: (id) => {
     get().pushSnapshot('Remove comment');
-    set((s) => ({ comments: s.comments.filter((c) => c.id !== id) }));
+    set((s) => ({
+      nodes: s.nodes.filter((n) => n.id !== id),
+      selectedNodeIds: new Set([...s.selectedNodeIds].filter((selectedId) => selectedId !== id)),
+    }));
   },
 });
+

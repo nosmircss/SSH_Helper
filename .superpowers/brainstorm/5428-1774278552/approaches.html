@@ -1,0 +1,165 @@
+<h2>FlowCanvas Host Targeting — 3 Approaches</h2>
+<p class="subtitle">How should the canvas know which host to run against?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Host Bar (Recommended)</h3>
+      <p>A slim, always-visible bar at the top or bottom of the FlowCanvas showing the active host as a read-only summary row. Shows Host_IP, port, username, and a few key variables. Auto-populated on canvas open using fallback logic.</p>
+
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">FlowCanvas with Host Bar</div>
+        <div class="mockup-body" style="font-family: monospace; font-size: 12px; background: #1a1a2e; color: #e0e0e0; padding: 0;">
+          <!-- Toolbar -->
+          <div style="background: #16213e; padding: 8px 12px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #333;">
+            <span style="color: #4ecca3;">▶ Run</span>
+            <span style="color: #888;">🐛 Debug</span>
+            <span style="color: #888;">⏹ Stop</span>
+            <span style="color: #888;">💾 Save</span>
+          </div>
+          <!-- Host Bar -->
+          <div style="background: #0f3460; padding: 6px 12px; display: flex; gap: 20px; align-items: center; border-bottom: 1px solid #4ecca3; font-size: 11px;">
+            <span style="color: #4ecca3; font-weight: bold;">🎯 TARGET:</span>
+            <span><span style="color: #888;">Host:</span> <span style="color: #fff;">192.168.1.10</span></span>
+            <span><span style="color: #888;">Port:</span> <span style="color: #fff;">22</span></span>
+            <span><span style="color: #888;">User:</span> <span style="color: #fff;">admin</span></span>
+            <span><span style="color: #888;">env:</span> <span style="color: #fff;">production</span></span>
+            <span style="margin-left: auto; color: #888; font-style: italic;">Change in main grid ↗</span>
+          </div>
+          <!-- Canvas area -->
+          <div style="padding: 30px; text-align: center; color: #555; min-height: 120px;">
+            [ Flow Canvas Graph Area ]
+          </div>
+        </div>
+      </div>
+
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Always visible — you always know what you're running against</li>
+          <li>No extra clicks to run — just hit ▶</li>
+          <li>Minimal UI footprint</li>
+          <li>Simple C# ↔ React integration (one message to sync host data)</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Takes vertical space (though slim — ~30px)</li>
+          <li>Read-only — must go back to main form to switch hosts</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Host Chip in Toolbar</h3>
+      <p>Embed a compact "host chip" directly in the existing toolbar row, next to the Run button. Shows just the Host_IP. Hover or click reveals a tooltip/popover with the full row details.</p>
+
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">FlowCanvas with Host Chip</div>
+        <div class="mockup-body" style="font-family: monospace; font-size: 12px; background: #1a1a2e; color: #e0e0e0; padding: 0;">
+          <!-- Toolbar with embedded chip -->
+          <div style="background: #16213e; padding: 8px 12px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #333;">
+            <span style="color: #4ecca3;">▶ Run</span>
+            <span style="background: #0f3460; border: 1px solid #4ecca3; border-radius: 12px; padding: 2px 10px; font-size: 11px;">
+              🎯 <span style="color: #fff;">192.168.1.10</span>
+            </span>
+            <span style="color: #888;">🐛 Debug</span>
+            <span style="color: #888;">⏹ Stop</span>
+            <span style="color: #888;">💾 Save</span>
+          </div>
+          <!-- Popover (shown on hover/click) -->
+          <div style="margin: 8px 60px; background: #16213e; border: 1px solid #4ecca3; border-radius: 6px; padding: 10px; font-size: 11px; max-width: 300px;">
+            <div style="color: #4ecca3; font-weight: bold; margin-bottom: 6px;">Target Host Details</div>
+            <div style="display: grid; grid-template-columns: 80px 1fr; gap: 2px 8px;">
+              <span style="color: #888;">Host:</span> <span>192.168.1.10</span>
+              <span style="color: #888;">Port:</span> <span>22</span>
+              <span style="color: #888;">Username:</span> <span>admin</span>
+              <span style="color: #888;">env:</span> <span>production</span>
+            </div>
+            <div style="color: #888; margin-top: 6px; font-style: italic; font-size: 10px;">Change in main grid ↗</div>
+          </div>
+          <!-- Canvas area -->
+          <div style="padding: 30px; text-align: center; color: #555; min-height: 80px;">
+            [ Flow Canvas Graph Area ]
+          </div>
+        </div>
+      </div>
+
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Zero extra vertical space — fits in existing toolbar</li>
+          <li>Clean, minimal — just a chip next to Run</li>
+          <li>Details available on demand via popover</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Less visible — easy to miss which host you're targeting</li>
+          <li>Popover requires extra interaction to see details</li>
+          <li>IP-only chip might not be enough context at a glance</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Collapsible Host Panel</h3>
+      <p>A panel (like the existing Properties or Variable Inspector panels) that shows the target host as a mini data-grid row. Can be collapsed to a thin strip showing just the IP, or expanded to show all columns.</p>
+
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">FlowCanvas with Host Panel (expanded)</div>
+        <div class="mockup-body" style="font-family: monospace; font-size: 12px; background: #1a1a2e; color: #e0e0e0; padding: 0;">
+          <!-- Toolbar -->
+          <div style="background: #16213e; padding: 8px 12px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #333;">
+            <span style="color: #4ecca3;">▶ Run</span>
+            <span style="color: #888;">🐛 Debug</span>
+            <span style="color: #888;">⏹ Stop</span>
+          </div>
+          <!-- Host Panel -->
+          <div style="background: #0f3460; border-bottom: 1px solid #333;">
+            <div style="padding: 4px 12px; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+              <span style="color: #4ecca3; font-weight: bold; font-size: 11px;">🎯 Target Host</span>
+              <span style="color: #888; font-size: 10px;">▼ collapse</span>
+            </div>
+            <div style="padding: 4px 12px 8px;">
+              <table style="width: 100%; font-size: 11px; border-collapse: collapse;">
+                <tr style="color: #888; border-bottom: 1px solid #333;">
+                  <th style="text-align: left; padding: 2px 8px;">Host_IP</th>
+                  <th style="text-align: left; padding: 2px 8px;">port</th>
+                  <th style="text-align: left; padding: 2px 8px;">username</th>
+                  <th style="text-align: left; padding: 2px 8px;">env</th>
+                  <th style="text-align: left; padding: 2px 8px;">region</th>
+                </tr>
+                <tr>
+                  <td style="padding: 2px 8px; color: #fff;">192.168.1.10</td>
+                  <td style="padding: 2px 8px;">22</td>
+                  <td style="padding: 2px 8px;">admin</td>
+                  <td style="padding: 2px 8px;">production</td>
+                  <td style="padding: 2px 8px;">us-east-1</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+          <!-- Canvas area -->
+          <div style="padding: 30px; text-align: center; color: #555; min-height: 80px;">
+            [ Flow Canvas Graph Area ]
+          </div>
+        </div>
+      </div>
+
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Shows the most detail — full row with all columns</li>
+          <li>Collapsible — can minimize when not needed</li>
+          <li>Familiar pattern — matches existing canvas panels</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Heaviest UI — most vertical space when expanded</li>
+          <li>More complex to implement (collapsible panel + table rendering)</li>
+          <li>May feel like overkill for "just show me which host"</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>

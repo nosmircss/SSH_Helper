@@ -9,7 +9,7 @@ interface RightPanelProps {
  * Contains the Properties panel and Variable Inspector.
  */
 export default function RightPanel({ children }: RightPanelProps) {
-  const [width, setWidth] = useState(300);
+  const [width, setWidth] = useState(600);
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);

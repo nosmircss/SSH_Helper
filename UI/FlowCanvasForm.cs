@@ -223,16 +223,29 @@ namespace SSH_Helper.UI
                         OnTestStep?.Invoke(msg);
                         break;
 
+                    case "execute-canvas":
+                        OnExecuteCanvas?.Invoke(msg);
+                        break;
+
                     case "breakpoint-toggle":
                         OnBreakpointToggle?.Invoke(msg);
                         break;
 
+                    case "run":
+                        OnRunRequest?.Invoke(msg);
+                        break;
+
                     case "run-request":
+                        System.Diagnostics.Debug.WriteLine("[FlowCanvas] Deprecated outbound message 'run-request' received; use 'run' instead.");
                         OnRunRequest?.Invoke(msg);
                         break;
 
                     case "disable-block":
                         OnDisableBlock?.Invoke(msg);
+                        break;
+
+                    default:
+                        System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Unknown outbound message type '{type}' ignored.");
                         break;
                 }
             }
@@ -240,6 +253,15 @@ namespace SSH_Helper.UI
             {
                 System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Message error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Sends the target host data to the React Host Bar.
+        /// Pass null to indicate no valid host is available.
+        /// </summary>
+        public void SetTargetHost(object? hostData)
+        {
+            SendMessage(new { type = "set-target-host", host = hostData });
         }
 
         /// <summary>
@@ -284,6 +306,7 @@ namespace SSH_Helper.UI
         public event Action<JObject>? OnApplyYaml;
         public event Action<JObject>? OnDebugAction;
         public event Action<JObject>? OnTestStep;
+        public event Action<JObject>? OnExecuteCanvas;
         public event Action<JObject>? OnBreakpointToggle;
         public event Action<JObject>? OnRunRequest;
         public event Action<JObject>? OnDisableBlock;

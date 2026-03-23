@@ -2,6 +2,28 @@
 
 ## Changes Since `f7d3ac5` (0.51.10)
 
+### Flow Canvas Correctness Recovery (Partial Rollout)
+
+Flow Canvas execution/export/debug contracts were hardened for correctness and loss prevention across the WinForms host and ReactFlow surface:
+
+- **Unified execution trigger**: Run/Test now route through `execute-canvas` with graph payload, replacing split trigger paths and eliminating keyboard/toolbar drift.
+- **Structured export diagnostics**: Host now returns `apply-result` with `success`, `errors`, `warnings`, and `nodeStepMap`; invalid exports block run/test instead of silently proceeding.
+- **StepPath runtime identity**: Executor now emits scope-aware `StepPath` on step lifecycle and debug pause/resume events, and host resolves canvas highlights via `StepPath -> nodeId` (with legacy index fallback).
+- **Debug bootstrap mapping update**: Active debug state now receives node-to-step-path mapping instead of index-only mapping.
+- **Interaction fixes in FlowCanvas UI**:
+  - Move undo snapshots captured at drag start
+  - Breakpoint visual toggle parity fixed
+  - Right-click context menu separated from breakpoint toggle gesture
+  - Comments promoted to persistent ReactFlow nodes
+  - Store selection synchronized with ReactFlow multi/box selection changes
+- **Bridge/export hardening**:
+  - Export now surfaces explicit diagnostics for unsupported nodes
+  - Comment nodes are explicitly ignored with warnings
+  - Child node step-path mappings are preserved for nested debug correlation
+
+Known follow-up scope (not included in this pass):
+- Deeply nested test-step prerequisite slicing still needs strict branch-level pruning.
+
 ### Comprehensive Scripting Function Library (55+ Built-in Functions)
 
 The scripting language gains a full-featured expression and function system built on a new `FunctionRegistry` singleton (`Services/Scripting/FunctionRegistry.cs`) with category-based registration via `IFunctionCategory`. Six function categories are implemented, each in its own class under `Services/Scripting/Functions/`:

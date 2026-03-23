@@ -31,7 +31,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
     <div style={{
       position: 'absolute',
       left: 0,
-      right: 240,
+      right: 0,
       bottom: 0,
       maxHeight: 200,
       background: 'var(--fc-input-bg, #0d1117)',

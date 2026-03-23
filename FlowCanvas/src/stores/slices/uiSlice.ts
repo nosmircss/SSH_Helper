@@ -17,6 +17,11 @@ export interface UISlice {
     output: boolean;
     timeline: boolean;
   };
+  exportStatus: {
+    hasErrors: boolean;
+    errors: string[];
+    warnings: string[];
+  };
 
   setTheme: (theme: 'dark' | 'light') => void;
   toggleTheme: () => void;
@@ -29,6 +34,8 @@ export interface UISlice {
   showContextMenu: (x: number, y: number, nodeId: string) => void;
   hideContextMenu: () => void;
   togglePanel: (panel: keyof UISlice['panelsVisible']) => void;
+  setExportStatus: (status: UISlice['exportStatus']) => void;
+  clearExportStatus: () => void;
 }
 
 export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get) => ({
@@ -45,6 +52,11 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     debug: false,
     output: false,
     timeline: false,
+  },
+  exportStatus: {
+    hasErrors: false,
+    errors: [],
+    warnings: [],
   },
 
   setTheme: (theme) => set({ theme }),
@@ -111,5 +123,19 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
         [panel]: !s.panelsVisible[panel],
       },
     }));
+  },
+
+  setExportStatus: (status) => {
+    set({ exportStatus: status });
+  },
+
+  clearExportStatus: () => {
+    set({
+      exportStatus: {
+        hasErrors: false,
+        errors: [],
+        warnings: [],
+      },
+    });
   },
 });

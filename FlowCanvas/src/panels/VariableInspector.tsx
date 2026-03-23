@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
 
+const SENSITIVE_VARIABLE_NAME = /(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)/i;
+const MASKED_VALUE = '"********"';
+
 /**
- * Docked variable inspector panel — sits below the Properties panel in the right sidebar.
- * Now reads from Zustand store and shows yellow flash on changed variables.
+ * Docked variable inspector panel - sits below the Properties panel in the right sidebar.
+ * Reads from Zustand store and shows yellow flash on changed variables.
  */
 export default function VariableInspector() {
   const variables = useFlowStore((s) => s.variables);
@@ -35,7 +38,7 @@ export default function VariableInspector() {
         <button onClick={() => togglePanel('variables')} style={{
           background: 'none', border: 'none', color: 'var(--fc-text-muted, #555)',
           cursor: 'pointer', fontSize: 14, padding: 0,
-        }}>×</button>
+        }}>&times;</button>
       </div>
 
       <div style={{ padding: '4px 8px', flexShrink: 0 }}>
@@ -82,9 +85,7 @@ export default function VariableInspector() {
                 transition: 'color 0.3s ease',
                 fontWeight: v.changed ? 700 : 400,
               }}>
-                {typeof v.value === 'string'
-                  ? `"${v.value.length > 40 ? v.value.slice(0, 40) + '...' : v.value}"`
-                  : String(v.value)}
+                {formatVariableDisplay(v.name, v.value)}
               </span>
             </div>
           ))
@@ -92,6 +93,18 @@ export default function VariableInspector() {
       </div>
     </div>
   );
+}
+
+function formatVariableDisplay(name: string, value: unknown): string {
+  if (SENSITIVE_VARIABLE_NAME.test(name)) {
+    return MASKED_VALUE;
+  }
+
+  if (typeof value === 'string') {
+    return `"${value.length > 40 ? value.slice(0, 40) + '...' : value}"`;
+  }
+
+  return String(value);
 }
 
 // Re-export the type for compatibility
