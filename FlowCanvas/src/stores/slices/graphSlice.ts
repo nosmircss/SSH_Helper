@@ -17,6 +17,7 @@ export interface GraphSlice {
   nodes: Node[];
   edges: Edge[];
   selectedNodeIds: Set<string>;
+  selectedEdgeIds: Set<string>;
   /** True when the user has made structural/property changes since the graph was loaded. */
   isDirty: boolean;
 
@@ -27,6 +28,8 @@ export interface GraphSlice {
   onConnect: (connection: Connection) => void;
   addNode: (node: Node) => void;
   removeNodes: (ids: string[]) => void;
+  removeEdges: (ids: string[]) => void;
+  selectEdge: (id: string | null) => void;
   updateNodeData: (id: string, data: Record<string, unknown>) => void;
   updateNodeLabel: (id: string, label: string) => void;
   updateNodeProp: (id: string, key: string, value: unknown) => void;
@@ -42,6 +45,7 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   nodes: [],
   edges: [],
   selectedNodeIds: new Set<string>(),
+  selectedEdgeIds: new Set<string>(),
   isDirty: false,
 
   setNodes: (nodes) => set({ nodes, ...clearedExportStatusState() }),
@@ -98,6 +102,24 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
     }));
   },
 
+  removeEdges: (ids) => {
+    get().pushSnapshot('Delete connections');
+    const idSet = new Set(ids);
+    set((state) => ({
+      edges: state.edges.filter((e) => !idSet.has(e.id)),
+      selectedEdgeIds: new Set<string>(),
+      isDirty: true,
+      ...clearedExportStatusState(),
+    }));
+  },
+
+  selectEdge: (id) => {
+    set({
+      selectedEdgeIds: id ? new Set([id]) : new Set(),
+      selectedNodeIds: new Set(),
+    });
+  },
+
   updateNodeData: (id, data) => {
     set((state) => ({
       nodes: state.nodes.map((n) =>
@@ -150,7 +172,7 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   },
 
   selectNode: (id) => {
-    set({ selectedNodeIds: id ? new Set([id]) : new Set() });
+    set({ selectedNodeIds: id ? new Set([id]) : new Set(), selectedEdgeIds: new Set() });
   },
 
   toggleNodeSelection: (id) => {
@@ -167,7 +189,7 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   },
 
   clearSelection: () => {
-    set({ selectedNodeIds: new Set() });
+    set({ selectedNodeIds: new Set(), selectedEdgeIds: new Set() });
   },
 
   clearDirty: () => {

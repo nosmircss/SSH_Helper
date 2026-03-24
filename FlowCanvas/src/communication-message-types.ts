@@ -12,6 +12,7 @@ export const CANVAS_HOST_MESSAGES = {
     debugResumed: 'debug-resumed',
     themeSync: 'theme-sync',
     setTargetHost: 'set-target-host',
+    layoutRestore: 'layout-restore',
   },
   outgoing: {
     ready: 'ready',
@@ -24,6 +25,7 @@ export const CANVAS_HOST_MESSAGES = {
     breakpointToggle: 'breakpoint-toggle',
     testDataBlock: 'test-data-block',
     testStepResult: 'test-step-result',
+    layoutSave: 'layout-save',
   },
   deprecatedOutgoingAliases: {
     runRequest: 'run-request',

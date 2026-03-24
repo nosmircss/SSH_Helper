@@ -75,6 +75,7 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
       blockStates: new Map(),
       blockOutputs: new Map(),
       blockTimings: new Map(),
+      dataBlockTestResults: new Map(),
     });
     // Reset all node exec states to idle
     set((s) => ({

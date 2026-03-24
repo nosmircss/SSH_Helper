@@ -7,6 +7,7 @@ using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using SSH_Helper.Services;
 
 namespace SSH_Helper.UI
 {
@@ -19,6 +20,7 @@ namespace SSH_Helper.UI
         private readonly WebView2 _webView;
         private readonly Label _statusLabel;
         private readonly bool _darkMode;
+        private readonly ConfigurationService? _configService;
         private readonly ConcurrentQueue<string> _pendingMessages = new();
         private bool _reactReady;
         private bool _initStarted;
@@ -27,13 +29,17 @@ namespace SSH_Helper.UI
         private static Point? _lastLocation;
         private static Size? _lastSize;
 
-        public FlowCanvasForm(bool darkMode)
+        public FlowCanvasForm(bool darkMode, ConfigurationService? configService = null)
         {
             _darkMode = darkMode;
+            _configService = configService;
             _webView = new WebView2();
 
+            // Resolve initial size: session cache > persisted config > default
+            var initialSize = _lastSize ?? GetPersistedSize() ?? new Size(1200, 800);
+
             Text = "Flow Canvas";
-            Size = _lastSize ?? new Size(1200, 800);
+            Size = initialSize;
             MinimumSize = new Size(800, 600);
             StartPosition = _lastLocation.HasValue
                 ? FormStartPosition.Manual
@@ -209,6 +215,7 @@ namespace SSH_Helper.UI
                         _reactReady = true;
                         while (_pendingMessages.TryDequeue(out var pending))
                             _webView.CoreWebView2.PostWebMessageAsJson(pending);
+                        SendPersistedLayout();
                         break;
 
                     case "apply-yaml":
@@ -246,6 +253,10 @@ namespace SSH_Helper.UI
 
                     case "test-data-block":
                         OnTestDataBlock?.Invoke(msg);
+                        break;
+
+                    case "layout-save":
+                        SavePanelSizes(msg["panelSizes"] as JObject);
                         break;
 
                     case "show-error":
@@ -362,10 +373,61 @@ namespace SSH_Helper.UI
             return null;
         }
 
+        private void SendPersistedLayout()
+        {
+            var ws = _configService?.GetCurrent().WindowState;
+            if (ws == null) return;
+
+            var panelSizes = new JObject();
+            if (ws.FlowCanvasRightPanelWidth > 0)
+                panelSizes["rightPanelWidth"] = ws.FlowCanvasRightPanelWidth;
+            if (ws.FlowCanvasOutputHeight > 0)
+                panelSizes["outputHeight"] = ws.FlowCanvasOutputHeight;
+
+            if (panelSizes.Count > 0)
+                SendMessage(new { type = "layout-restore", panelSizes });
+        }
+
+        private void SavePanelSizes(JObject? panelSizes)
+        {
+            if (_configService == null || panelSizes == null) return;
+
+            var rightWidth = panelSizes["rightPanelWidth"]?.Value<int>();
+            var outputHeight = panelSizes["outputHeight"]?.Value<int>();
+
+            _configService.Update(c =>
+            {
+                c.WindowState ??= new Models.WindowState();
+                if (rightWidth > 0) c.WindowState.FlowCanvasRightPanelWidth = rightWidth;
+                if (outputHeight > 0) c.WindowState.FlowCanvasOutputHeight = outputHeight;
+            });
+        }
+
+        private Size? GetPersistedSize()
+        {
+            var ws = _configService?.GetCurrent().WindowState;
+            if (ws?.FlowCanvasWidth > 0 && ws?.FlowCanvasHeight > 0)
+                return new Size(ws.FlowCanvasWidth.Value, ws.FlowCanvasHeight.Value);
+            return null;
+        }
+
+        private void SavePersistedSize()
+        {
+            if (_configService == null || _lastSize == null) return;
+            var size = _lastSize.Value;
+            _configService.Update(c =>
+            {
+                c.WindowState ??= new Models.WindowState();
+                c.WindowState.FlowCanvasWidth = size.Width;
+                c.WindowState.FlowCanvasHeight = size.Height;
+            });
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
+                SavePersistedSize();
                 if (_webView.CoreWebView2 != null)
                     _webView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
                 _webView.Dispose();

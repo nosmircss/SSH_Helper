@@ -475,6 +475,14 @@ namespace SSH_Helper.Models
         public int? EnvironmentDialogWidth { get; set; } = 920;
         public int? EnvironmentDialogHeight { get; set; } = 620;
         public int? EnvironmentDialogSplitterDistance { get; set; } = 270;
+
+        // Flow Canvas window size
+        public int? FlowCanvasWidth { get; set; }
+        public int? FlowCanvasHeight { get; set; }
+
+        // Flow Canvas panel sizes (persisted from React UI)
+        public int? FlowCanvasRightPanelWidth { get; set; }
+        public int? FlowCanvasOutputHeight { get; set; }
     }
 
     /// <summary>

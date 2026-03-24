@@ -7,6 +7,7 @@ import {
   Background,
   BackgroundVariant,
   type Node,
+  type Edge,
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -28,6 +29,7 @@ import DebugPanel from './panels/DebugPanel';
 import SearchOverlay from './panels/SearchOverlay';
 import TimelinePanel from './panels/TimelinePanel';
 import BlockContextMenu from './panels/BlockContextMenu';
+import EdgeContextMenu from './panels/EdgeContextMenu';
 import { blockDefMap, categoryColors } from './blockDefs/registry';
 
 // Register custom node types
@@ -65,8 +67,12 @@ function FlowCanvasInner() {
   const selectNode = useFlowStore((s) => s.selectNode);
   const clearSelection = useFlowStore((s) => s.clearSelection);
   const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
+  const selectedEdgeIds = useFlowStore((s) => s.selectedEdgeIds);
+  const selectEdge = useFlowStore((s) => s.selectEdge);
   const showContextMenu = useFlowStore((s) => s.showContextMenu);
   const hideContextMenu = useFlowStore((s) => s.hideContextMenu);
+  const showEdgeContextMenu = useFlowStore((s) => s.showEdgeContextMenu);
+  const hideEdgeContextMenu = useFlowStore((s) => s.hideEdgeContextMenu);
   const pushSnapshot = useFlowStore((s) => s.pushSnapshot);
   const theme = useFlowStore((s) => s.theme);
   const snapToGrid = useFlowStore((s) => s.snapToGrid);
@@ -177,10 +183,31 @@ function FlowCanvasInner() {
     [selectNode, hideContextMenu],
   );
 
+  const onEdgeClick = useCallback(
+    (_: React.MouseEvent, edge: Edge) => {
+      selectEdge(edge.id);
+      hideContextMenu();
+      hideEdgeContextMenu();
+    },
+    [selectEdge, hideContextMenu, hideEdgeContextMenu],
+  );
+
+  const onEdgeContextMenu = useCallback(
+    (event: React.MouseEvent, edge: Edge) => {
+      event.preventDefault();
+      selectEdge(edge.id);
+      showEdgeContextMenu(event.clientX, event.clientY, edge.id);
+    },
+    [selectEdge, showEdgeContextMenu],
+  );
+
   const onPaneClick = useCallback(() => {
     clearSelection();
     hideContextMenu();
-  }, [clearSelection, hideContextMenu]);
+    hideEdgeContextMenu();
+    // Clear any text selection (e.g. from the output panel)
+    window.getSelection()?.removeAllRanges();
+  }, [clearSelection, hideContextMenu, hideEdgeContextMenu]);
 
   // Highlight search results on nodes
   const searchHighlightSet = new Set(searchResults);
@@ -196,11 +223,6 @@ function FlowCanvasInner() {
   const latestOutput = selectedOutput && selectedOutput.length > 0
     ? selectedOutput[selectedOutput.length - 1]
     : null;
-
-  // Build enhanced edges with animated type when running
-  const displayEdges = isRunning
-    ? edges.map((e) => ({ ...e, type: 'animated' }))
-    : edges;
 
   // Add visual selection and search highlight to nodes
   const displayNodes = nodes.map((n) => ({
@@ -220,6 +242,20 @@ function FlowCanvasInner() {
   const minimapBg = isDark ? '#12122a' : '#e0e0e8';
   const minimapMask = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.6)';
   const dotColor = isDark ? '#2a2a4a' : '#c0c0c8';
+
+  // Build enhanced edges with animated type when running + selection highlight
+  const selectedStroke = isDark ? '#4a9eff' : '#2563eb';
+  const displayEdges = edges.map((e) => ({
+    ...e,
+    ...(isRunning ? { type: 'animated' } : {}),
+    selected: selectedEdgeIds.has(e.id),
+    style: {
+      ...e.style,
+      ...(selectedEdgeIds.has(e.id)
+        ? { stroke: selectedStroke, strokeWidth: 3 }
+        : {}),
+    },
+  }));
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -241,6 +277,8 @@ function FlowCanvasInner() {
               onNodeClick={onNodeClick}
               onPaneClick={onPaneClick}
               onNodeContextMenu={onNodeContextMenu}
+              onEdgeClick={onEdgeClick}
+              onEdgeContextMenu={onEdgeContextMenu}
               onNodeDragStart={onNodeDragStart}
               onNodeDragStop={onNodeDragStop}
               nodeTypes={nodeTypes}
@@ -250,6 +288,7 @@ function FlowCanvasInner() {
               selectionOnDrag
               panOnDrag={[1, 2]}
               fitView
+              fitViewOptions={{ maxZoom: 0.85, padding: 0.15 }}
               proOptions={{ hideAttribution: true }}
               style={{ background: canvasBg }}
               defaultEdgeOptions={{ style: { stroke: isDark ? '#555' : '#aaa' } }}
@@ -270,12 +309,13 @@ function FlowCanvasInner() {
             </ReactFlow>
             <SearchOverlay />
             <BlockContextMenu />
+            <EdgeContextMenu />
           </div>
-          {latestOutput && firstSelectedId && (
+          {panelsVisible.output && (
             <OutputPreview
-              output={latestOutput.text}
-              blockLabel={firstSelectedId}
-              nodeId={firstSelectedId}
+              output={latestOutput?.text || ''}
+              blockLabel={firstSelectedId || undefined}
+              nodeId={firstSelectedId || undefined}
             />
           )}
         </div>

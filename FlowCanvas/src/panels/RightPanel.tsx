@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef, type ReactNode } from 'react';
+import { useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
+import { useFlowStore } from '../stores/useFlowStore';
 
 interface RightPanelProps {
   children: ReactNode;
@@ -9,10 +10,19 @@ interface RightPanelProps {
  * Contains the Properties panel and Variable Inspector.
  */
 export default function RightPanel({ children }: RightPanelProps) {
-  const [width, setWidth] = useState(600);
+  const storeWidth = useFlowStore((s) => s.panelSizes.rightPanelWidth);
+  const setPanelSize = useFlowStore((s) => s.setPanelSize);
+  const [width, setWidth] = useState(storeWidth);
+  const widthRef = useRef(width);
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
+
+  // Keep ref in sync for the mouseup handler
+  useEffect(() => { widthRef.current = width; }, [width]);
+
+  // Sync from store when restored from WinForms
+  useEffect(() => { setWidth(storeWidth); }, [storeWidth]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     isDragging.current = true;
@@ -28,7 +38,11 @@ export default function RightPanel({ children }: RightPanelProps) {
     };
 
     const onMouseUp = () => {
-      isDragging.current = false;
+      if (isDragging.current) {
+        isDragging.current = false;
+        // Persist final width to store (which notifies WinForms)
+        setPanelSize('rightPanelWidth', widthRef.current);
+      }
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
@@ -39,7 +53,7 @@ export default function RightPanel({ children }: RightPanelProps) {
     document.addEventListener('mouseup', onMouseUp);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
-  }, [width]);
+  }, [width, setPanelSize]);
 
   return (
     <div style={{

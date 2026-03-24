@@ -2,6 +2,7 @@
  * Output preview overlay for a block's execution output.
  * Now supports per-block output history from the store.
  * Vertically resizable via a drag handle at the top edge.
+ * Can be pinned open (default) — shows empty state when no block is selected.
  */
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
@@ -15,16 +16,26 @@ interface OutputPreviewProps {
 
 const MIN_HEIGHT = 80;
 const MAX_HEIGHT = 600;
-const DEFAULT_HEIGHT = 200;
 
 export default function OutputPreview({ output, onClose, blockLabel, nodeId }: OutputPreviewProps) {
   const blockOutputs = useFlowStore((s) => s.blockOutputs);
-  const clearSelection = useFlowStore((s) => s.clearSelection);
+  const togglePanel = useFlowStore((s) => s.togglePanel);
+  const storeHeight = useFlowStore((s) => s.panelSizes.outputHeight);
+  const setPanelSize = useFlowStore((s) => s.setPanelSize);
   const [historyIndex, setHistoryIndex] = useState(-1); // -1 = latest
-  const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  const [height, setHeight] = useState(storeHeight);
+  const heightRef = useRef(height);
   const dragging = useRef(false);
   const startY = useRef(0);
   const startHeight = useRef(0);
+
+  // Keep ref in sync with state for the mouseup handler
+  useEffect(() => { heightRef.current = height; }, [height]);
+
+  // Sync from store when restored from WinForms
+  useEffect(() => {
+    setHeight(storeHeight);
+  }, [storeHeight]);
 
   const allOutputs = nodeId ? blockOutputs.get(nodeId) || [] : [];
   const displayOutput = historyIndex >= 0 && historyIndex < allOutputs.length
@@ -33,8 +44,13 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
 
   const handleClose = () => {
     if (onClose) onClose();
-    else clearSelection();
+    else togglePanel('output');
   };
+
+  // Reset history index when selected node changes
+  useEffect(() => {
+    setHistoryIndex(-1);
+  }, [nodeId]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -52,7 +68,11 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
       setHeight(newHeight);
     };
     const onMouseUp = () => {
-      dragging.current = false;
+      if (dragging.current) {
+        dragging.current = false;
+        // Persist final height to store (which notifies WinForms)
+        setPanelSize('outputHeight', heightRef.current);
+      }
     };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
@@ -60,9 +80,10 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, []);
+  }, [setPanelSize]);
 
   const headerHeight = 28;
+  const hasOutput = nodeId && displayOutput;
 
   return (
     <div style={{
@@ -130,11 +151,13 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
           </span>
         )}
         <div style={{ flex: 1 }} />
-        <button onClick={() => navigator.clipboard.writeText(displayOutput)} style={{
-          background: 'none', border: 'none', color: 'var(--fc-text-muted, #666)',
-          cursor: 'pointer', fontSize: 11, marginRight: 8,
-        }}>Copy</button>
-        <button onClick={handleClose} style={{
+        {hasOutput && (
+          <button onClick={() => navigator.clipboard.writeText(displayOutput)} style={{
+            background: 'none', border: 'none', color: 'var(--fc-text-muted, #666)',
+            cursor: 'pointer', fontSize: 11, marginRight: 8,
+          }}>Copy</button>
+        )}
+        <button onClick={handleClose} title="Unpin output panel" style={{
           background: 'none', border: 'none', color: 'var(--fc-text-muted, #666)',
           cursor: 'pointer', fontSize: 14, padding: 0,
         }}>×</button>
@@ -144,7 +167,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
         margin: 0,
         padding: 8,
         fontSize: 11,
-        color: 'var(--fc-text, #c9d1d9)',
+        color: hasOutput ? 'var(--fc-text, #c9d1d9)' : 'var(--fc-text-muted, #666)',
         lineHeight: 1.5,
         overflowY: 'auto',
         flex: 1,
@@ -152,7 +175,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-all',
       }}>
-        {displayOutput || '(no output)'}
+        {hasOutput ? displayOutput : (nodeId ? '(no output)' : 'Select a block to view its output')}
       </pre>
     </div>
   );

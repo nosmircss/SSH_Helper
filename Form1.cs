@@ -6044,7 +6044,7 @@ namespace SSH_Helper
             }
 
             var config = _configService.GetCurrent();
-            _flowCanvasForm = new FlowCanvasForm(config.DarkMode);
+            _flowCanvasForm = new FlowCanvasForm(config.DarkMode, _configService);
             _flowCanvasForm.FormClosed += (_, _) => _flowCanvasForm = null;
 
             // Handle "Apply to YAML" from canvas

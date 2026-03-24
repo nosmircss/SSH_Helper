@@ -10,6 +10,7 @@ export default function Toolbar() {
   const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
   const variablesVisible = useFlowStore((s) => s.panelsVisible.variables);
   const timelineVisible = useFlowStore((s) => s.panelsVisible.timeline);
+  const outputVisible = useFlowStore((s) => s.panelsVisible.output);
   const togglePanel = useFlowStore((s) => s.togglePanel);
   const canUndo = useFlowStore((s) => s.past.length > 0);
   const canRedo = useFlowStore((s) => s.future.length > 0);
@@ -192,6 +193,13 @@ export default function Toolbar() {
         title="Toggle variable inspector"
       >
         {variablesVisible ? '🔍 Vars' : '🔍 Vars'}
+      </button>
+      <button
+        onClick={() => togglePanel('output')}
+        style={btnStyle(outputVisible ? '#4a9eff' : '#888', true)}
+        title="Toggle output panel"
+      >
+        ▤ Output
       </button>
       <button
         onClick={() => togglePanel('timeline')}

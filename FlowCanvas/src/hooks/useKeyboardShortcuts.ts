@@ -44,8 +44,13 @@ export function useKeyboardShortcuts(): void {
         return;
       }
 
-      // Ctrl+C: Copy selected nodes
+      // Ctrl+C: Copy selected nodes (but let browser handle text selection copy)
       if (ctrl && key === 'c' && !isInputFocused()) {
+        const textSelection = window.getSelection();
+        if (textSelection && textSelection.toString().length > 0) {
+          // User has text highlighted — let the browser's native copy handle it
+          return;
+        }
         const store = useFlowStore.getState();
         if (store.selectedNodeIds.size > 0) {
           e.preventDefault();
@@ -75,24 +80,29 @@ export function useKeyboardShortcuts(): void {
         return;
       }
 
-      // Delete / Backspace: Remove selected nodes (unless typing in an input)
+      // Delete / Backspace: Remove selected nodes or edges (unless typing in an input)
       if ((key === 'delete' || key === 'backspace') && !isInputFocused()) {
         const store = useFlowStore.getState();
-        if (store.selectedNodeIds.size > 0) {
+        if (store.selectedEdgeIds.size > 0) {
+          e.preventDefault();
+          store.removeEdges([...store.selectedEdgeIds]);
+        } else if (store.selectedNodeIds.size > 0) {
           e.preventDefault();
           store.removeNodes([...store.selectedNodeIds]);
         }
         return;
       }
 
-      // Escape: Close search, clear selection, hide context menu
+      // Escape: Close search, clear selection, hide context menus
       if (key === 'escape') {
         const store = useFlowStore.getState();
         if (store.searchVisible) {
           store.closeSearch();
         } else if (store.contextMenu) {
           store.hideContextMenu();
-        } else if (store.selectedNodeIds.size > 0) {
+        } else if (store.edgeContextMenu) {
+          store.hideEdgeContextMenu();
+        } else if (store.selectedNodeIds.size > 0 || store.selectedEdgeIds.size > 0) {
           store.clearSelection();
         }
         return;

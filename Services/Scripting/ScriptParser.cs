@@ -118,9 +118,9 @@ namespace SSH_Helper.Services.Scripting
                 ["sftp"] = ["action", "local_path", "remote_path", "host", "port", "username", "password", "overwrite", "timeout", "into", "on_error"],
                 ["webhook"] = ["url", "method", "body", "headers", "into", "timeout", "on_error"],
                 ["parse"] = ["format", "from", "into", "sections"],
-                ["choose"] = ["title", "prompt", "into", "options", "default"],
-                ["multiselect"] = ["title", "prompt", "into", "options", "min", "max"],
-                ["confirm"] = ["title", "prompt", "into", "default"],
+                ["choose"] = ["title", "prompt", "into", "options", "default", "on_error"],
+                ["multiselect"] = ["title", "prompt", "into", "options", "min", "max", "on_error"],
+                ["confirm"] = ["title", "prompt", "into", "default", "on_error"],
                 ["interactive"] = ["session", "title", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"],
                 ["assert"] = ["condition", "message", "severity"],
                 ["switch"] = ["value", "cases", "default"],
@@ -942,15 +942,15 @@ namespace SSH_Helper.Services.Scripting
                         break;
                     case "choose":
                         step.DeclaredStepType = StepType.Choose;
-                        step.Choose = ParseChooseOptions(parser);
+                        step.Choose = ParseChooseOptions(parser, step);
                         break;
                     case "multiselect":
                         step.DeclaredStepType = StepType.Multiselect;
-                        step.Multiselect = ParseMultiselectOptions(parser);
+                        step.Multiselect = ParseMultiselectOptions(parser, step);
                         break;
                     case "confirm":
                         step.DeclaredStepType = StepType.Confirm;
-                        step.Confirm = ParseConfirmOptions(parser);
+                        step.Confirm = ParseConfirmOptions(parser, step);
                         break;
                     case "interactive":
                         step.DeclaredStepType = StepType.Interactive;
@@ -2006,7 +2006,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private ChooseOptions ParseChooseOptions(IParser parser)
+        private ChooseOptions ParseChooseOptions(IParser parser, ScriptStep step)
         {
             var options = new ChooseOptions();
 
@@ -2036,6 +2036,10 @@ namespace SSH_Helper.Services.Scripting
                         case "default":
                             options.Default = parser.Consume<Scalar>().Value;
                             break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
                         default:
                             AddUnknownKeyWarning($"Unknown choose key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
@@ -2053,7 +2057,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private MultiselectOptions ParseMultiselectOptions(IParser parser)
+        private MultiselectOptions ParseMultiselectOptions(IParser parser, ScriptStep step)
         {
             var options = new MultiselectOptions();
 
@@ -2088,6 +2092,10 @@ namespace SSH_Helper.Services.Scripting
                             if (int.TryParse(parser.Consume<Scalar>().Value, out var max))
                                 options.Max = max;
                             break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
                         default:
                             AddUnknownKeyWarning($"Unknown multiselect key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
@@ -2105,7 +2113,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private ConfirmOptions ParseConfirmOptions(IParser parser)
+        private ConfirmOptions ParseConfirmOptions(IParser parser, ScriptStep step)
         {
             var options = new ConfirmOptions();
 
@@ -2132,6 +2140,10 @@ namespace SSH_Helper.Services.Scripting
                         case "default":
                             var defVal = parser.Consume<Scalar>().Value.ToLowerInvariant();
                             options.Default = defVal == "true" || defVal == "yes" || defVal == "1";
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown confirm key '{keyScalar.Value}'", (int)keyScalar.Start.Line);

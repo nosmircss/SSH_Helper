@@ -219,6 +219,17 @@ export function initMessageBridge(): () => void {
         store.getState().setTheme(msg.theme);
       }
     }),
+
+    // Restore panel sizes from WinForms persisted settings
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.layoutRestore, (msg) => {
+      if (msg.panelSizes && typeof msg.panelSizes === 'object') {
+        const sizes: Record<string, number> = {};
+        for (const [k, v] of Object.entries(msg.panelSizes as Record<string, unknown>)) {
+          if (typeof v === 'number' && v > 0) sizes[k] = v;
+        }
+        store.getState().restorePanelSizes(sizes);
+      }
+    }),
   ];
 
   // Signal ready

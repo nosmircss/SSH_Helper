@@ -1,6 +1,18 @@
 import type { StateCreator } from 'zustand';
 import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
+import { messageBus } from '../../MessageBus';
+import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
+
+export interface PanelSizes {
+  rightPanelWidth: number;
+  outputHeight: number;
+}
+
+export const DEFAULT_PANEL_SIZES: PanelSizes = {
+  rightPanelWidth: 600,
+  outputHeight: 200,
+};
 
 export interface UISlice {
   theme: 'dark' | 'light';
@@ -11,12 +23,14 @@ export interface UISlice {
   searchIndex: number;
   searchVisible: boolean;
   contextMenu: { x: number; y: number; nodeId: string } | null;
+  edgeContextMenu: { x: number; y: number; edgeId: string } | null;
   panelsVisible: {
     variables: boolean;
     debug: boolean;
     output: boolean;
     timeline: boolean;
   };
+  panelSizes: PanelSizes;
   exportStatus: {
     hasErrors: boolean;
     errors: string[];
@@ -33,7 +47,11 @@ export interface UISlice {
   closeSearch: () => void;
   showContextMenu: (x: number, y: number, nodeId: string) => void;
   hideContextMenu: () => void;
+  showEdgeContextMenu: (x: number, y: number, edgeId: string) => void;
+  hideEdgeContextMenu: () => void;
   togglePanel: (panel: keyof UISlice['panelsVisible']) => void;
+  setPanelSize: (key: keyof PanelSizes, value: number) => void;
+  restorePanelSizes: (sizes: Partial<PanelSizes>) => void;
   setExportStatus: (status: UISlice['exportStatus']) => void;
   clearExportStatus: () => void;
 }
@@ -47,12 +65,14 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   searchIndex: 0,
   searchVisible: false,
   contextMenu: null,
+  edgeContextMenu: null,
   panelsVisible: {
     variables: true,
     debug: false,
-    output: false,
+    output: true,
     timeline: false,
   },
+  panelSizes: { ...DEFAULT_PANEL_SIZES },
   exportStatus: {
     hasErrors: false,
     errors: [],
@@ -113,8 +133,10 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     set({ searchVisible: false, searchQuery: '', searchResults: [], searchIndex: 0 });
   },
 
-  showContextMenu: (x, y, nodeId) => set({ contextMenu: { x, y, nodeId } }),
+  showContextMenu: (x, y, nodeId) => set({ contextMenu: { x, y, nodeId }, edgeContextMenu: null }),
   hideContextMenu: () => set({ contextMenu: null }),
+  showEdgeContextMenu: (x, y, edgeId) => set({ edgeContextMenu: { x, y, edgeId }, contextMenu: null }),
+  hideEdgeContextMenu: () => set({ edgeContextMenu: null }),
 
   togglePanel: (panel) => {
     set((s) => ({
@@ -122,6 +144,21 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
         ...s.panelsVisible,
         [panel]: !s.panelsVisible[panel],
       },
+    }));
+  },
+
+  setPanelSize: (key, value) => {
+    set((s) => {
+      const panelSizes = { ...s.panelSizes, [key]: value };
+      // Notify WinForms so it can persist the sizes
+      messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, panelSizes });
+      return { panelSizes };
+    });
+  },
+
+  restorePanelSizes: (sizes) => {
+    set((s) => ({
+      panelSizes: { ...s.panelSizes, ...sizes },
     }));
   },
 
