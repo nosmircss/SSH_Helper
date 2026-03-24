@@ -3,6 +3,8 @@ import type { Node, Edge, OnNodesChange, OnEdgesChange, Connection } from '@xyfl
 import { applyNodeChanges, applyEdgeChanges, addEdge } from '@xyflow/react';
 import type { FlowStore } from '../useFlowStore';
 
+export const START_NODE_ID = '__start__';
+
 function clearedExportStatusState(): Pick<FlowStore, 'exportStatus'> {
   return {
     exportStatus: {
@@ -64,10 +66,13 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   }),
 
   onNodesChange: (changes) => {
+    const filtered = changes.filter(
+      (c) => c.type !== 'remove' || c.id !== START_NODE_ID,
+    );
     set((state) => {
-      const nextNodes = applyNodeChanges(changes, state.nodes);
-      const hasSelectionChange = changes.some((c) => c.type === 'select');
-      const hasGraphMutation = changes.some((c) => c.type !== 'select');
+      const nextNodes = applyNodeChanges(filtered, state.nodes);
+      const hasSelectionChange = filtered.some((c) => c.type === 'select');
+      const hasGraphMutation = filtered.some((c) => c.type !== 'select');
       return {
         nodes: nextNodes,
         selectedNodeIds: hasSelectionChange
@@ -103,8 +108,10 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   },
 
   removeNodes: (ids) => {
+    const filtered = ids.filter((id) => id !== START_NODE_ID);
+    if (filtered.length === 0) return;
     get().pushSnapshot('Delete blocks');
-    const idSet = new Set(ids);
+    const idSet = new Set(filtered);
     set((state) => ({
       nodes: state.nodes.filter((n) => !idSet.has(n.id)),
       edges: state.edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)),
