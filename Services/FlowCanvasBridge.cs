@@ -271,7 +271,7 @@ namespace SSH_Helper.Services
             // Build preamble (everything before "steps:")
             var preamble = ExtractPreamble(yamlText);
 
-            var currentY = NodeStartY;
+            var currentY = NodeStartY + NodeSpacingY; // leave room for Start node at Y=0
 
             // Tracks nodes that need to connect to the next step.
             // Each entry is (nodeId, sourceHandle, color, label) — sourceHandle is
@@ -374,22 +374,47 @@ namespace SSH_Helper.Services
                 }
             }
 
-            // Store preamble in a special metadata node (hidden, used for export)
+            // Create the Start node (always present, visible)
+            var startProps = new JObject();
             if (!string.IsNullOrWhiteSpace(preamble))
             {
-                var metaNode = new JObject
+                ParsePreambleIntoProps(preamble, script, startProps);
+            }
+
+            var startNode = new JObject
+            {
+                ["id"] = "__start__",
+                ["type"] = "start",
+                ["position"] = new JObject { ["x"] = NodeStartX, ["y"] = 0 },
+                ["data"] = new JObject
                 {
-                    ["id"] = "__preamble__",
-                    ["type"] = "block",
-                    ["position"] = new JObject { ["x"] = -9999, ["y"] = -9999 },
-                    ["hidden"] = true,
-                    ["data"] = new JObject
-                    {
-                        ["blockType"] = "_preamble",
-                        ["props"] = new JObject { ["_yamlSnippet"] = preamble },
-                    },
-                };
-                nodes.Add(metaNode);
+                    ["blockType"] = "_start",
+                    ["label"] = script.Name ?? "Untitled Script",
+                    ["props"] = startProps,
+                },
+            };
+            nodes.Add(startNode);
+
+            // Connect Start to the first step node (if any steps exist)
+            string? firstStepId = null;
+            for (int n = 0; n < nodes.Count; n++)
+            {
+                var nid = nodes[n]["id"]?.ToString();
+                if (nid != null && nid != "__start__")
+                {
+                    firstStepId = nid;
+                    break;
+                }
+            }
+            if (firstStepId != null)
+            {
+                edges.Add(new JObject
+                {
+                    ["id"] = $"edge-start-{firstStepId}",
+                    ["source"] = "__start__",
+                    ["target"] = firstStepId,
+                    ["style"] = new JObject { ["stroke"] = "#666" },
+                });
             }
 
             return (nodes, edges);
@@ -900,35 +925,46 @@ namespace SSH_Helper.Services
                 hasIncoming.Add(tgt);
             }
 
-            // Root nodes = no incoming edges, not hidden
-            var roots = nodes
-                .Where(n => n["hidden"]?.Value<bool>() != true)
-                .Select(n => n["id"]?.ToString())
-                .Where(id => id != null && !hasIncoming.Contains(id))
-                .ToList();
+            // --- Start node: determine root and build ordered chain ---
+            string? startTarget = null;
+            if (outgoing.TryGetValue("__start__", out var startTargets) && startTargets.Count > 0)
+                startTarget = startTargets[0];
 
-            // Build ordered chain following edges
+            // Build ordered chain from Start's outgoing target
             var orderedIds = new List<string>();
             var visited = new HashSet<string>();
-            foreach (var rootId in roots!)
+            if (startTarget != null)
             {
-                BuildChain(rootId!, outgoing, orderedIds, visited);
+                BuildChain(startTarget, outgoing, orderedIds, visited);
             }
 
-            // Check for preamble
-            var sb = new StringBuilder();
-            if (nodeMap.TryGetValue("__preamble__", out var preambleNode))
+            // Warn about disconnected nodes (not reachable from Start, excluded from export)
+            foreach (var n in nodes)
             {
-                var preambleSnippet = preambleNode["data"]?["props"]?["_yamlSnippet"]?.ToString();
-                if (!string.IsNullOrWhiteSpace(preambleSnippet))
+                var nid = n["id"]?.ToString();
+                if (nid == null || nid == "__start__") continue;
+                if (n["hidden"]?.Value<bool>() == true) continue;
+                if (!visited.Contains(nid) && !hasIncoming.Contains(nid))
                 {
-                    sb.Append(preambleSnippet);
-                    if (!preambleSnippet.EndsWith("\n"))
-                        sb.AppendLine();
+                    result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
+                        ExportDiagnosticSeverity.Warning,
+                        $"Node '{nid}' is not reachable from the Start block and will be excluded from the exported YAML.",
+                        nid));
                 }
             }
 
-            // Check if we need to add "steps:" header
+            // Build preamble from Start node props
+            var sb = new StringBuilder();
+            if (nodeMap.TryGetValue("__start__", out var startNode))
+            {
+                var startProps = startNode["data"]?["props"] as JObject;
+                if (startProps != null)
+                {
+                    sb.Append(SerializeStartPropsToPreamble(startProps));
+                }
+            }
+
+            // Ensure "steps:" header is present
             var preambleText = sb.ToString();
             if (!preambleText.Contains("steps:"))
                 sb.AppendLine("steps:");
@@ -939,6 +975,7 @@ namespace SSH_Helper.Services
             {
                 if (!nodeMap.TryGetValue(nodeId, out var node)) continue;
                 if (node["hidden"]?.Value<bool>() == true) continue;
+                if (nodeId == "__start__") continue;
 
                 var data = node["data"];
                 var props = data?["props"] as JObject;
@@ -2663,6 +2700,202 @@ namespace SSH_Helper.Services
                 sb.AppendLine(lines[i].TrimEnd('\r'));
                 if (trimmed == "steps:" || trimmed == "steps: ")
                     break;
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Parses known preamble fields from the Script model into Start node props.
+        /// Unknown preamble content is stored in _yamlSnippet for round-trip safety.
+        /// </summary>
+        private static void ParsePreambleIntoProps(string preamble, Script script, JObject props)
+        {
+            if (!string.IsNullOrEmpty(script.Name))
+                props["name"] = script.Name;
+            if (!string.IsNullOrEmpty(script.Description))
+                props["description"] = script.Description;
+            if (script.Version != 1)
+                props["version"] = script.Version;
+            if (!string.IsNullOrEmpty(script.Environment))
+                props["environment"] = script.Environment;
+            if (script.Debug)
+                props["debug"] = true;
+            if (script.NoBanner)
+                props["nobanner"] = true;
+            if (script.SuppressMissingColumnWarning)
+                props["suppress_missing_column_warning"] = true;
+            if (script.Library)
+                props["library"] = true;
+
+            // Store vars as JObject for read-only display
+            if (script.Vars.Count > 0)
+            {
+                var varsObj = new JObject();
+                foreach (var kv in script.Vars)
+                    varsObj[kv.Key] = kv.Value != null ? JToken.FromObject(kv.Value) : JValue.CreateNull();
+                props["vars"] = varsObj;
+            }
+
+            // Store imports as JArray for read-only display
+            if (script.Imports.Count > 0)
+            {
+                var importsArr = new JArray();
+                foreach (var imp in script.Imports)
+                    importsArr.Add(imp.Path);
+                props["imports"] = importsArr;
+            }
+
+            // Store full preamble as fallback for unrecognized keys
+            props["_yamlSnippet"] = preamble;
+        }
+
+        /// <summary>
+        /// Serializes Start node props back to YAML preamble text.
+        /// </summary>
+        private static string SerializeStartPropsToPreamble(JObject props)
+        {
+            var sb = new StringBuilder();
+
+            var name = props["name"]?.ToString();
+            var description = props["description"]?.ToString();
+            var version = props["version"]?.Value<int?>() ?? 0;
+            var environment = props["environment"]?.ToString();
+            var debug = props["debug"]?.Value<bool>() == true;
+            var nobanner = props["nobanner"]?.Value<bool>() == true;
+            var suppressWarning = props["suppress_missing_column_warning"]?.Value<bool>() == true;
+            var library = props["library"]?.Value<bool>() == true;
+            var vars = props["vars"] as JObject;
+            var imports = props["imports"] as JArray;
+            var snippet = props["_yamlSnippet"]?.ToString();
+
+            if (!string.IsNullOrEmpty(name))
+                sb.AppendLine($"name: {name}");
+            if (!string.IsNullOrEmpty(description))
+                sb.AppendLine($"description: {EscapeYamlString(description)}");
+            if (version > 1)
+                sb.AppendLine($"version: {version}");
+            if (!string.IsNullOrEmpty(environment))
+                sb.AppendLine($"environment: {environment}");
+            if (debug)
+                sb.AppendLine("debug: true");
+            if (nobanner)
+                sb.AppendLine("nobanner: true");
+            if (suppressWarning)
+                sb.AppendLine("suppress_missing_column_warning: true");
+            if (library)
+                sb.AppendLine("library: true");
+
+            // Vars and imports: use snippet section if available (edits not supported yet)
+            if (vars != null && vars.Count > 0 && snippet != null)
+            {
+                var varsSection = ExtractYamlSection(snippet, "vars:");
+                if (!string.IsNullOrEmpty(varsSection))
+                    sb.Append(varsSection);
+            }
+            if (imports != null && imports.Count > 0 && snippet != null)
+            {
+                var importsSection = ExtractYamlSection(snippet, "imports:");
+                if (!string.IsNullOrEmpty(importsSection))
+                    sb.Append(importsSection);
+            }
+
+            // Append any unrecognized sections from the original snippet
+            if (snippet != null)
+            {
+                var unrecognized = ExtractUnrecognizedSections(snippet);
+                if (!string.IsNullOrEmpty(unrecognized))
+                    sb.Append(unrecognized);
+            }
+
+            return sb.ToString();
+        }
+
+        private static string EscapeYamlString(string value)
+        {
+            if (value.Contains('\n') || value.Contains(':') || value.Contains('#') ||
+                value.StartsWith(' ') || value.EndsWith(' '))
+                return $"\"{value.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
+            return value;
+        }
+
+        private static string ExtractYamlSection(string yaml, string sectionKey)
+        {
+            var lines = yaml.Split('\n');
+            var sb = new StringBuilder();
+            bool inSection = false;
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var trimmed = lines[i].TrimEnd('\r');
+                if (trimmed.TrimStart() == sectionKey || trimmed.TrimStart().StartsWith(sectionKey))
+                {
+                    inSection = true;
+                    sb.AppendLine(trimmed);
+                    continue;
+                }
+                if (inSection)
+                {
+                    if (trimmed.Length > 0 && (trimmed[0] == ' ' || trimmed[0] == '\t' || trimmed.TrimStart().StartsWith("-")))
+                    {
+                        sb.AppendLine(trimmed);
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private static string ExtractUnrecognizedSections(string snippet)
+        {
+            var knownKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "name:", "description:", "version:", "environment:",
+                "debug:", "nobanner:", "suppress_missing_column_warning:", "library:",
+                "vars:", "imports:", "subroutines:", "steps:",
+            };
+
+            var lines = snippet.Split('\n');
+            var sb = new StringBuilder();
+            bool inUnrecognized = false;
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var trimmed = lines[i].TrimEnd('\r').TrimStart();
+                if (trimmed.Length == 0 || trimmed.StartsWith("#"))
+                {
+                    if (inUnrecognized)
+                        sb.AppendLine(lines[i].TrimEnd('\r'));
+                    continue;
+                }
+
+                bool isKnown = false;
+                foreach (var key in knownKeys)
+                {
+                    if (trimmed.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+                    {
+                        isKnown = true;
+                        break;
+                    }
+                }
+
+                if (!isKnown && !trimmed.StartsWith("-"))
+                {
+                    inUnrecognized = true;
+                    sb.AppendLine(lines[i].TrimEnd('\r'));
+                }
+                else if (inUnrecognized && (lines[i].TrimEnd('\r').StartsWith(" ") || lines[i].TrimEnd('\r').StartsWith("\t") || trimmed.StartsWith("-")))
+                {
+                    sb.AppendLine(lines[i].TrimEnd('\r'));
+                }
+                else
+                {
+                    inUnrecognized = false;
+                }
             }
 
             return sb.ToString();
