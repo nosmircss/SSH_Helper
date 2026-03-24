@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
+import { START_NODE_ID } from '../stores/slices/graphSlice';
 
 interface MenuItem {
   label: string;
@@ -58,6 +59,7 @@ export default function BlockContextMenu() {
   if (!contextMenu) return null;
 
   const { x, y, nodeId } = contextMenu;
+  const isStartNode = nodeId === START_NODE_ID;
   const disabled = isDisabled(nodeId);
 
   // Find node position for comment placement
@@ -67,22 +69,24 @@ export default function BlockContextMenu() {
     : { x, y };
 
   const menuItems: MenuEntry[] = [
-    {
-      label: 'Toggle Breakpoint',
-      icon: '\uD83D\uDD34',
-      action: () => {
-        toggleBreakpoint(nodeId);
-        hideContextMenu();
-      },
-    },
-    {
-      label: disabled ? 'Enable Block' : 'Disable Block',
-      icon: disabled ? '\u25B6' : '\u23ED',
-      action: () => {
-        toggleDisabled(nodeId);
-        hideContextMenu();
-      },
-    },
+    ...(!isStartNode ? [
+      {
+        label: 'Toggle Breakpoint',
+        icon: '\uD83D\uDD34',
+        action: () => {
+          toggleBreakpoint(nodeId);
+          hideContextMenu();
+        },
+      } as MenuItem,
+      {
+        label: disabled ? 'Enable Block' : 'Disable Block',
+        icon: disabled ? '\u25B6' : '\u23ED',
+        action: () => {
+          toggleDisabled(nodeId);
+          hideContextMenu();
+        },
+      } as MenuItem,
+    ] : []),
     {
       label: 'Add Comment',
       icon: '\uD83D\uDCDD',
@@ -91,15 +95,17 @@ export default function BlockContextMenu() {
         hideContextMenu();
       },
     },
-    { separator: true },
-    {
-      label: 'Delete Block',
-      icon: '\uD83D\uDDD1',
-      action: () => {
-        removeNodes([nodeId]);
-        hideContextMenu();
-      },
-    },
+    ...(!isStartNode ? [
+      { separator: true } as Separator,
+      {
+        label: 'Delete Block',
+        icon: '\uD83D\uDDD1',
+        action: () => {
+          removeNodes([nodeId]);
+          hideContextMenu();
+        },
+      } as MenuItem,
+    ] : []),
   ];
 
   return (
