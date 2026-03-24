@@ -17,6 +17,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { applyTheme } from './utils/theme';
 import BaseBlock from './nodes/BaseBlock';
 import CommentNode from './nodes/CommentNode';
+import StartNode from './nodes/StartNode';
 import AnimatedEdge from './nodes/AnimatedEdge';
 import Palette from './panels/Palette';
 import Properties from './panels/Properties';
@@ -36,6 +37,7 @@ import { blockDefMap, categoryColors } from './blockDefs/registry';
 const nodeTypes = {
   block: BaseBlock,
   comment: CommentNode,
+  start: StartNode,
 };
 
 // Register custom edge types
