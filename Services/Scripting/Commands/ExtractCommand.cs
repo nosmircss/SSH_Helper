@@ -32,6 +32,10 @@ namespace SSH_Helper.Services.Scripting.Commands
             var sourceText = context.GetVariableString(options.From);
             if (string.IsNullOrEmpty(sourceText))
             {
+                if (options.Required)
+                {
+                    return Task.FromResult(CommandResult.Fail($"Extract: source variable '{options.From}' is empty"));
+                }
                 SetEmptyResults(options.Into, context);
                 context.EmitOutput($"Extract: source variable '{options.From}' is empty", ScriptOutputType.Warning);
                 return Task.FromResult(CommandResult.Ok());
@@ -58,9 +62,12 @@ namespace SSH_Helper.Services.Scripting.Commands
 
                 if (matches.Count == 0)
                 {
-                    context.EmitOutput($"Extract: no matches found for pattern '{pattern}'", ScriptOutputType.Debug);
-                    // Set empty value(s)
+                    if (options.Required)
+                    {
+                        return Task.FromResult(CommandResult.Fail($"Extract: no matches found for pattern '{pattern}'"));
+                    }
                     SetEmptyResults(options.Into, context);
+                    context.EmitOutput($"Extract: no matches found for pattern '{pattern}'", ScriptOutputType.Debug);
                     return Task.FromResult(CommandResult.Ok());
                 }
 

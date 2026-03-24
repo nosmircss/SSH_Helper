@@ -9,11 +9,20 @@ export interface BlockOutput {
   stepType?: string;
 }
 
+export interface DataBlockTestResult {
+  success: boolean;
+  output: string;
+  error?: string;
+  changedKeys?: string[];
+  timestamp: number;
+}
+
 export interface ExecutionSlice {
   isRunning: boolean;
   blockStates: Map<string, BlockExecState>;
   blockOutputs: Map<string, BlockOutput[]>;
   blockTimings: Map<string, { start: number; end?: number; duration?: number }>;
+  dataBlockTestResults: Map<string, DataBlockTestResult>;
 
   setRunning: (running: boolean) => void;
   setBlockState: (id: string, state: BlockExecState) => void;
@@ -21,6 +30,8 @@ export interface ExecutionSlice {
   setBlockTiming: (id: string, start: number, end?: number) => void;
   clearExecution: () => void;
   getBlockOutput: (id: string) => BlockOutput[];
+  setDataBlockTestResult: (id: string, result: DataBlockTestResult) => void;
+  clearDataBlockTestResult: (id: string) => void;
 }
 
 export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlice> = (set, get) => ({
@@ -28,6 +39,7 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
   blockStates: new Map(),
   blockOutputs: new Map(),
   blockTimings: new Map(),
+  dataBlockTestResults: new Map(),
 
   setRunning: (running) => set({ isRunning: running }),
 
@@ -75,5 +87,21 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
 
   getBlockOutput: (id) => {
     return get().blockOutputs.get(id) || [];
+  },
+
+  setDataBlockTestResult: (id, result) => {
+    set((s) => {
+      const next = new Map(s.dataBlockTestResults);
+      next.set(id, result);
+      return { dataBlockTestResults: next };
+    });
+  },
+
+  clearDataBlockTestResult: (id) => {
+    set((s) => {
+      const next = new Map(s.dataBlockTestResults);
+      next.delete(id);
+      return { dataBlockTestResults: next };
+    });
   },
 });

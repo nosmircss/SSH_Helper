@@ -1394,6 +1394,7 @@ namespace SSH_Helper
             dgv_variables.KeyDown += Dgv_Variables_KeyDown;
             dgv_variables.ColumnHeaderMouseClick += Dgv_Variables_ColumnHeaderMouseClick;
             dgv_variables.CurrentCellDirtyStateChanged += Dgv_Variables_CurrentCellDirtyStateChanged;
+            dgv_variables.CurrentCellChanged += Dgv_Variables_CurrentCellChanged;
 
             // Preset TreeView events are wired up in Designer
             trvPresets.NodeMouseClick += TrvPresets_NodeMouseClick;
@@ -4004,6 +4005,17 @@ namespace SSH_Helper
             }
         }
 
+        private void Dgv_Variables_CurrentCellChanged(object? sender, EventArgs e)
+        {
+            // Update the FlowCanvas Host Bar when the focused row changes via keyboard.
+            // When checkboxes are checked, the target is pinned to the first checked row,
+            // so we only need to re-sync when no checkboxes are checked.
+            if (GetCheckedHostCount() == 0)
+            {
+                SendTargetHostToCanvas();
+            }
+        }
+
         private void Dgv_Variables_ColumnAdded(object? sender, DataGridViewColumnEventArgs e)
         {
             e.Column.SortMode = DataGridViewColumnSortMode.NotSortable;
@@ -6070,6 +6082,13 @@ namespace SSH_Helper
                 BeginInvoke(() => btnExecuteAll.PerformClick());
             };
 
+            // Lightweight data-block test — runs a single data block (extract, parse, set, table, assert)
+            // against the provided variable snapshot without SSH or prerequisite steps.
+            _flowCanvasForm.OnTestDataBlock += (msg) =>
+            {
+                BeginInvoke(() => ExecuteCanvasTestDataBlock(msg));
+            };
+
             // Legacy test-step compatibility.
             _flowCanvasForm.OnTestStep += (msg) =>
             {
@@ -6333,21 +6352,21 @@ namespace SSH_Helper
                 return;
             }
 
-            if (dgv_variables.CurrentCell == null)
+            var row = ResolveTargetHostRow();
+            if (row == null)
             {
                 _flowCanvasForm?.SendMessage(new
                 {
                     type = "test-step-result",
                     stepId,
                     success = false,
-                    output = "No host selected for test-step execution."
+                    output = "No valid target host available. Select a host in the main grid."
                 });
                 return;
             }
 
-            var row = dgv_variables.Rows[dgv_variables.CurrentCell.RowIndex];
             var host = GetCellValue(row, CsvManager.HostColumnName);
-            if (row.IsNewRow || string.IsNullOrWhiteSpace(host) || !InputValidator.IsValidHostOrIp(host))
+            if (!InputValidator.IsValidHostOrIp(host))
             {
                 _flowCanvasForm?.SendMessage(new
                 {
@@ -6382,13 +6401,210 @@ namespace SSH_Helper
                 _pendingDisabledBlocks.Add(nodeId);
 
             var sw = Stopwatch.StartNew();
-            await ExecutePresetOnRowsAsync(
-                new List<DataGridViewRow> { row },
-                _ => $"Testing selected step on {host}...",
-                _ => $"Completed test-step execution on {host}",
-                sw,
-                includeCommandPreview: true,
-                commandTextOverride: commandOverride);
+            ScriptPromptDialogRunner.AnchorFormOverride = _flowCanvasForm;
+            try
+            {
+                await ExecutePresetOnRowsAsync(
+                    new List<DataGridViewRow> { row },
+                    _ => $"Testing selected step on {host}...",
+                    _ => $"Completed test-step execution on {host}",
+                    sw,
+                    includeCommandPreview: true,
+                    commandTextOverride: commandOverride);
+            }
+            finally
+            {
+                ScriptPromptDialogRunner.AnchorFormOverride = null;
+            }
+        }
+
+        /// <summary>
+        /// Executes a single data block (extract, parse, set, table, assert) against a provided
+        /// variable snapshot — no SSH connection or prerequisite steps required.
+        /// </summary>
+        private async void ExecuteCanvasTestDataBlock(JObject msg)
+        {
+            var stepId = msg["stepId"]?.ToString();
+            var blockType = msg["blockType"]?.ToString()?.ToLowerInvariant();
+            var props = msg["props"] as JObject;
+            var variables = msg["variables"] as JObject;
+
+            if (string.IsNullOrWhiteSpace(stepId) || string.IsNullOrWhiteSpace(blockType) || props == null)
+            {
+                _flowCanvasForm?.SendMessage(new
+                {
+                    type = "test-data-block-result",
+                    stepId,
+                    success = false,
+                    error = "Invalid test-data-block request: missing stepId, blockType, or props."
+                });
+                return;
+            }
+
+            try
+            {
+                // Build a temporary ScriptContext populated with the provided variables.
+                var initialVars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (variables != null)
+                {
+                    foreach (var kvp in variables)
+                    {
+                        if (kvp.Value != null)
+                            initialVars[kvp.Key] = kvp.Value.ToString();
+                    }
+                }
+
+                var context = new Services.Scripting.ScriptContext(initialVars);
+                context.DebugMode = true; // Capture debug-level output (e.g., "Extract: var = 'value'")
+
+                // Special handling for _output: GetVariable("_output") reads from LastCommandOutput,
+                // not the dictionary, so we must hydrate it via RecordCommandOutput.
+                if (variables != null && variables["_output"] != null)
+                {
+                    context.RecordCommandOutput(variables["_output"]!.ToString());
+                }
+
+                // Capture emitted output
+                var outputBuilder = new System.Text.StringBuilder();
+                context.OutputReceived += (_, e) =>
+                {
+                    outputBuilder.AppendLine(e.Message);
+                };
+
+                // Snapshot variables before execution for change detection
+                var beforeVars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kvp in context.GetAllVariables())
+                {
+                    beforeVars[kvp.Key] = kvp.Value?.ToString() ?? "";
+                }
+
+                // Build the ScriptStep from the block properties
+                var step = new Services.Scripting.Models.ScriptStep();
+                Services.Scripting.Commands.IScriptCommand? command = null;
+
+                switch (blockType)
+                {
+                    case "extract":
+                    {
+                        var intoRaw = props["into"]?.ToString() ?? "";
+                        object into;
+                        if (intoRaw.Contains(','))
+                            into = intoRaw.Split(',').Select(s => (object)s.Trim()).ToList();
+                        else
+                            into = intoRaw;
+
+                        step.Extract = new Services.Scripting.Models.ExtractOptions
+                        {
+                            Pattern = props["pattern"]?.ToString() ?? "",
+                            From = string.IsNullOrWhiteSpace(props["from"]?.ToString()) ? "_output" : props["from"]!.ToString(),
+                            Into = into,
+                            Match = props["match"]?.ToString() ?? "first",
+                            Required = props["required"] == null || props["required"].Type == Newtonsoft.Json.Linq.JTokenType.Null
+                                ? true
+                                : props["required"].ToObject<bool>(),
+                        };
+                        command = new Services.Scripting.Commands.ExtractCommand();
+                        break;
+                    }
+                    case "parse":
+                    {
+                        step.Parse = new Services.Scripting.Models.ParseOptions
+                        {
+                            Format = props["format"]?.ToString() ?? "",
+                            From = string.IsNullOrWhiteSpace(props["from"]?.ToString()) ? "_output" : props["from"]!.ToString(),
+                            Into = props["into"]?.ToString() ?? "",
+                            Sections = string.IsNullOrWhiteSpace(props["sections"]?.ToString())
+                                ? null
+                                : props["sections"]!.ToString().Split(',').Select(s => s.Trim()).ToList(),
+                        };
+                        command = new Services.Scripting.Commands.ParseCommand();
+                        break;
+                    }
+                    case "set":
+                    {
+                        step.Set = props["expression"]?.ToString() ?? "";
+                        command = new Services.Scripting.Commands.SetCommand();
+                        break;
+                    }
+                    case "table":
+                    {
+                        step.Table = new Services.Scripting.Models.TableOptions
+                        {
+                            Data = props["data"]?.ToString() ?? "",
+                            Into = props["into"]?.ToString(),
+                            Align = props["align"]?.ToString() ?? "left",
+                            ShowHeader = props["show_header"]?.ToObject<bool>() ?? true,
+                        };
+                        command = new Services.Scripting.Commands.TableCommand();
+                        break;
+                    }
+                    case "assert":
+                    {
+                        step.Assert = new Services.Scripting.Models.AssertOptions
+                        {
+                            Condition = props["condition"]?.ToString() ?? "",
+                            Message = props["message"]?.ToString(),
+                            Severity = props["severity"]?.ToString() ?? "error",
+                        };
+                        command = new Services.Scripting.Commands.AssertCommand();
+                        break;
+                    }
+                    default:
+                    {
+                        _flowCanvasForm?.SendMessage(new
+                        {
+                            type = "test-data-block-result",
+                            stepId,
+                            success = false,
+                            error = $"Unsupported data block type for testing: '{blockType}'."
+                        });
+                        return;
+                    }
+                }
+
+                // Execute the command
+                var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+                // Compute changed keys by comparing before/after
+                var afterVars = context.GetAllVariables();
+                var changedKeys = new List<string>();
+                foreach (var kvp in afterVars)
+                {
+                    var afterVal = kvp.Value?.ToString() ?? "";
+                    if (!beforeVars.TryGetValue(kvp.Key, out var beforeVal) || beforeVal != afterVal)
+                    {
+                        changedKeys.Add(kvp.Key);
+                    }
+                }
+
+                // Serialize variables for the response (convert object? values to strings for JSON)
+                var varsResponse = new Dictionary<string, object?>();
+                foreach (var kvp in afterVars)
+                {
+                    varsResponse[kvp.Key] = kvp.Value;
+                }
+
+                _flowCanvasForm?.SendMessage(new
+                {
+                    type = "test-data-block-result",
+                    stepId,
+                    success = result.Success,
+                    output = outputBuilder.ToString().TrimEnd(),
+                    variables = varsResponse,
+                    changedKeys,
+                    error = result.Success ? (string?)null : result.Message,
+                });
+            }
+            catch (Exception ex)
+            {
+                _flowCanvasForm?.SendMessage(new
+                {
+                    type = "test-data-block-result",
+                    stepId,
+                    success = false,
+                    error = $"Test failed: {ex.Message}",
+                });
+            }
         }
 
         private static bool TryBuildYamlThroughTopLevelStep(
@@ -11379,11 +11595,19 @@ namespace SSH_Helper
             string host = GetCellValue(row, CsvManager.HostColumnName);
             SshDebugLog("EXEC", $"ExecuteCanvasRun on {host}", sw);
 
-            await ExecutePresetOnRowsAsync(
-                new List<DataGridViewRow> { row },
-                _ => $"Canvas: executing on {host}...",
-                _ => $"Canvas: completed on {host}",
-                sw);
+            ScriptPromptDialogRunner.AnchorFormOverride = _flowCanvasForm;
+            try
+            {
+                await ExecutePresetOnRowsAsync(
+                    new List<DataGridViewRow> { row },
+                    _ => $"Canvas: executing on {host}...",
+                    _ => $"Canvas: completed on {host}",
+                    sw);
+            }
+            finally
+            {
+                ScriptPromptDialogRunner.AnchorFormOverride = null;
+            }
         }
 
         private async void ExecuteOnSelectedHost()

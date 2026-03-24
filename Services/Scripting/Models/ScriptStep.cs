@@ -417,6 +417,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Which match to capture: "first" (default), "last", "all", or a number.
         /// </summary>
         public string Match { get; set; } = "first";
+
+        /// <summary>
+        /// When true (default), the step fails if the regex produces zero matches.
+        /// When false, zero matches silently set the target variable(s) to empty strings.
+        /// </summary>
+        public bool Required { get; set; } = true;
     }
 
     /// <summary>

@@ -6,6 +6,7 @@ export const CANVAS_HOST_MESSAGES = {
     executionUpdate: 'execution-update',
     stepOutput: 'step-output',
     testStepResult: 'test-step-result',
+    testDataBlockResult: 'test-data-block-result',
     variablesSnapshot: 'variables-snapshot',
     debugPaused: 'debug-paused',
     debugResumed: 'debug-resumed',
@@ -21,6 +22,7 @@ export const CANVAS_HOST_MESSAGES = {
     debugAction: 'debug-action',
     disableBlock: 'disable-block',
     breakpointToggle: 'breakpoint-toggle',
+    testDataBlock: 'test-data-block',
     testStepResult: 'test-step-result',
   },
   deprecatedOutgoingAliases: {

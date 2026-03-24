@@ -129,6 +129,14 @@ function FlowCanvasInner() {
         y: event.clientY,
       });
 
+      // Populate default property values from the block definition
+      const defaultProps: Record<string, unknown> = {};
+      for (const propDef of def.properties) {
+        if (propDef.defaultValue !== undefined) {
+          defaultProps[propDef.key] = propDef.defaultValue;
+        }
+      }
+
       const newNode: Node = {
         id: nextId(),
         type: 'block',
@@ -136,13 +144,14 @@ function FlowCanvasInner() {
         data: {
           blockType,
           label: def.label,
-          props: {},
+          props: defaultProps,
         },
       };
 
       addNode(newNode);
+      selectNode(newNode.id);
     },
-    [addNode],
+    [addNode, selectNode],
   );
 
   // Right-click context menu

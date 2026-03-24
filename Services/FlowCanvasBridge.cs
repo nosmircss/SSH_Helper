@@ -148,6 +148,7 @@ namespace SSH_Helper.Services
             "select_file",
             "skip_empty_lines",
             "trim_lines",
+            "required",
         };
 
         private static readonly HashSet<string> IntegerOptionKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -1158,6 +1159,7 @@ namespace SSH_Helper.Services
                             props["into"] = JToken.FromObject(step.Extract.Into);
                         SetIfNotNull(props, "from", step.Extract.From);
                         SetIfNotNull(props, "match", step.Extract.Match);
+                        props["required"] = step.Extract.Required;
                     }
                     break;
 

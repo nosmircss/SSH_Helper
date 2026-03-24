@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { blockDefMap, categoryColors, type BlockCategory, type PropertyDef } from '../blockDefs/registry';
 import type { BlockNodeData } from '../nodes/BaseBlock';
 import { useFlowStore } from '../stores/useFlowStore';
+import { messageBus } from '../MessageBus';
+import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
+import type { DataBlockTestResult } from '../stores/slices/executionSlice';
 
 /**
  * Buffered text-like input state that avoids stale blur commits.
@@ -199,6 +202,181 @@ function PropertyField({
         />
       );
   }
+}
+
+const DATA_BLOCK_TYPES = new Set(['extract', 'parse', 'set', 'table', 'assert']);
+
+function timeAgo(timestamp: number): string {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+function TestDataBlockSection({
+  selectedNodeId,
+  blockType,
+  props,
+  colors,
+}: {
+  selectedNodeId: string;
+  blockType: string;
+  props: Record<string, unknown> | undefined;
+  colors: { border: string; bg: string; badge: string };
+}) {
+  const variables = useFlowStore((s) => s.variables);
+  const isRunning = useFlowStore((s) => s.isRunning);
+  const testResult = useFlowStore((s) => s.dataBlockTestResults.get(selectedNodeId));
+  const clearResult = useFlowStore((s) => s.clearDataBlockTestResult);
+  const [isTesting, setIsTesting] = useState(false);
+  const [, setTick] = useState(0);
+
+  // Refresh the "Xs ago" label periodically
+  useEffect(() => {
+    if (!testResult) return;
+    const id = setInterval(() => setTick((t) => t + 1), 5000);
+    return () => clearInterval(id);
+  }, [testResult]);
+
+  // Reset testing spinner when result arrives
+  useEffect(() => {
+    if (testResult) setIsTesting(false);
+  }, [testResult]);
+
+  const hasVariables = variables.length > 0;
+  const disabled = isRunning || !hasVariables || isTesting;
+
+  const handleTest = () => {
+    const varsObj: Record<string, unknown> = {};
+    for (const v of variables) {
+      varsObj[v.name] = v.value;
+    }
+    setIsTesting(true);
+    messageBus.send({
+      type: CANVAS_HOST_MESSAGES.outgoing.testDataBlock,
+      stepId: selectedNodeId,
+      blockType,
+      props: props ?? {},
+      variables: varsObj,
+    });
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ borderTop: '1px solid var(--fc-panel-border, #2a2a4a)', paddingTop: 10 }}>
+        <button
+          data-testid="test-data-block-btn"
+          onClick={handleTest}
+          disabled={disabled}
+          title={
+            isRunning ? 'Cannot test while flow is running'
+              : !hasVariables ? 'Run the flow first to populate variables'
+                : `Test this ${blockType} block against current variables`
+          }
+          style={{
+            width: '100%',
+            padding: '6px 10px',
+            background: disabled ? '#333' : colors.badge,
+            color: disabled ? '#666' : colors.border === '#9b59b6' ? '#fff' : '#000',
+            border: 'none',
+            borderRadius: 4,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            opacity: disabled ? 0.5 : 1,
+            transition: 'opacity 0.15s',
+          }}
+        >
+          {isTesting ? 'Testing...' : 'Test Block'}
+        </button>
+      </div>
+
+      {testResult && (
+        <TestResultDisplay result={testResult} onDismiss={() => clearResult(selectedNodeId)} />
+      )}
+    </div>
+  );
+}
+
+function TestResultDisplay({ result, onDismiss }: { result: DataBlockTestResult; onDismiss: () => void }) {
+  const borderColor = result.success ? '#2ecc71' : '#e74c3c';
+  const bgColor = result.success ? 'rgba(46, 204, 113, 0.08)' : 'rgba(231, 76, 60, 0.08)';
+
+  return (
+    <div style={{
+      borderLeft: `3px solid ${borderColor}`,
+      background: bgColor,
+      borderRadius: '0 4px 4px 0',
+      padding: '8px 10px',
+      fontSize: 12,
+      position: 'relative',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ fontWeight: 600, color: borderColor, fontSize: 11 }}>
+          {result.success ? 'Success' : 'Failed'}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10, color: 'var(--fc-text-muted, #555)' }}>
+            {timeAgo(result.timestamp)}
+          </span>
+          <button
+            onClick={onDismiss}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--fc-text-muted, #555)',
+              cursor: 'pointer',
+              fontSize: 14,
+              padding: 0,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      </div>
+
+      {result.error && (
+        <div style={{ color: '#e74c3c', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {result.error}
+        </div>
+      )}
+
+      {result.output && (
+        <div style={{
+          fontFamily: 'monospace',
+          fontSize: 11,
+          color: 'var(--fc-text, #ccc)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          maxHeight: 150,
+          overflowY: 'auto',
+          marginTop: result.error ? 4 : 0,
+        }}>
+          {result.output}
+        </div>
+      )}
+
+      {result.changedKeys && result.changedKeys.length > 0 && (
+        <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {result.changedKeys.filter((k) => k !== '_timestamp').map((key) => (
+            <span key={key} style={{
+              background: 'rgba(224, 192, 64, 0.15)',
+              border: '1px solid rgba(224, 192, 64, 0.3)',
+              borderRadius: 3,
+              padding: '1px 5px',
+              fontSize: 10,
+              color: '#e0c040',
+              fontFamily: 'monospace',
+            }}>
+              {key}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Properties() {
@@ -457,6 +635,15 @@ export default function Properties() {
           </div>
         );
       })}
+
+      {DATA_BLOCK_TYPES.has(blockData.blockType) && (
+        <TestDataBlockSection
+          selectedNodeId={selectedNodeId}
+          blockType={blockData.blockType}
+          props={blockData.props}
+          colors={colors}
+        />
+      )}
 
       <div style={{
         marginTop: 'auto',

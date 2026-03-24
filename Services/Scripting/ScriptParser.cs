@@ -99,7 +99,7 @@ namespace SSH_Helper.Services.Scripting
                 ["wait"] = ["seconds"],
                 ["set"] = ["expression"],
                 ["exit"] = ["status", "message"],
-                ["extract"] = ["from", "pattern", "into", "match"],
+                ["extract"] = ["from", "pattern", "into", "match", "required"],
                 ["if"] = ["condition", "then", "elif", "else"],
                 ["foreach"] = ["iterator", "when", "do"],
                 ["while"] = ["condition", "max_iterations", "do"],
@@ -1721,6 +1721,10 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         case "match":
                             options.Match = parser.Consume<Scalar>().Value;
+                            break;
+                        case "required":
+                            var requiredVal = parser.Consume<Scalar>().Value;
+                            options.Required = !string.Equals(requiredVal, "false", StringComparison.OrdinalIgnoreCase);
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown extract key '{keyScalar.Value}'", (int)keyScalar.Start.Line);

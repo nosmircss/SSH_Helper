@@ -45,7 +45,8 @@ public class ExtractCommandTests
             {
                 From = "disk_line",
                 Pattern = "(\\d+%)\\s+(/\\S+)",
-                Into = new List<string> { "disk_pct", "disk_mount" }
+                Into = new List<string> { "disk_pct", "disk_mount" },
+                Required = false
             }
         };
 
@@ -92,7 +93,8 @@ public class ExtractCommandTests
             {
                 From = "command_output",
                 Pattern = "Version: (.+)",
-                Into = "version"
+                Into = "version",
+                Required = false
             }
         };
 
@@ -106,6 +108,52 @@ public class ExtractCommandTests
         context.HasVariable("version").Should().BeTrue();
         context.GetVariableString("version").Should().BeEmpty();
         evaluator.Evaluate("version is empty").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RequiredTrue_EmptySource_ReturnsFail()
+    {
+        var step = new ScriptStep
+        {
+            Extract = new ExtractOptions
+            {
+                From = "command_output",
+                Pattern = "Version: (.+)",
+                Into = "version"
+                // Required defaults to true
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("command_output", string.Empty);
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain("empty");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RequiredTrue_NoMatch_ReturnsFail()
+    {
+        var step = new ScriptStep
+        {
+            Extract = new ExtractOptions
+            {
+                From = "data",
+                Pattern = "not-going-to-match",
+                Into = "result"
+                // Required defaults to true
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("data", "some text that does not match");
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain("no matches");
     }
 
     [Fact]

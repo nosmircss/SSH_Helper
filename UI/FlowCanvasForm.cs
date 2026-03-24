@@ -244,6 +244,15 @@ namespace SSH_Helper.UI
                         OnDisableBlock?.Invoke(msg);
                         break;
 
+                    case "test-data-block":
+                        OnTestDataBlock?.Invoke(msg);
+                        break;
+
+                    case "show-error":
+                        var errorMsg = msg["message"]?.ToString() ?? "Unknown error";
+                        BeginInvoke(() => DialogTheme.Show(this, errorMsg, "Flow Canvas", MessageBoxButtons.OK, MessageBoxIcon.Error));
+                        break;
+
                     default:
                         System.Diagnostics.Debug.WriteLine($"[FlowCanvas] Unknown outbound message type '{type}' ignored.");
                         break;
@@ -310,6 +319,7 @@ namespace SSH_Helper.UI
         public event Action<JObject>? OnBreakpointToggle;
         public event Action<JObject>? OnRunRequest;
         public event Action<JObject>? OnDisableBlock;
+        public event Action<JObject>? OnTestDataBlock;
 
         private void ApplyTheme()
         {

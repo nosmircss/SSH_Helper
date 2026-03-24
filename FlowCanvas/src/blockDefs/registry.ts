@@ -211,6 +211,7 @@ export const blockDefs: BlockDef[] = [
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
       { key: 'from', label: 'From', type: 'text' },
       { key: 'match', label: 'Match', type: 'select', options: ['first', 'all', 'last'], defaultValue: 'first' },
+      { key: 'required', label: 'Required (fail on no match)', type: 'boolean', defaultValue: true },
     ],
   },
   {

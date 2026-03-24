@@ -38,7 +38,7 @@ export function initMessageBridge(): () => void {
       });
 
       if (!success && errors.length > 0) {
-        window.alert(`Flow Canvas export failed:\n\n${errors.join('\n')}`);
+        messageBus.send({ type: 'show-error', message: `Flow Canvas export failed:\n\n${errors.join('\n')}` });
       } else if (success && warnings.length > 0) {
         console.warn('[FlowCanvas] Export warnings:', warnings);
       }
@@ -130,6 +130,30 @@ export function initMessageBridge(): () => void {
       if (stepId) {
         state.setBlockState(stepId, msg.success ? 'success' : 'error');
       }
+    }),
+
+    // Test data block result (lightweight, no SSH)
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.testDataBlockResult, (msg) => {
+      const state = store.getState();
+      const stepId = String(msg.stepId ?? '');
+
+      if (msg.output) {
+        state.appendBlockOutput(stepId, String(msg.output), 'test-data-block');
+      }
+      if (msg.variables && typeof msg.variables === 'object') {
+        const changedKeys = Array.isArray(msg.changedKeys) ? msg.changedKeys as string[] : undefined;
+        state.setVariablesWithChanges(msg.variables as Record<string, unknown>, changedKeys);
+      }
+      if (stepId) {
+        state.setBlockState(stepId, msg.success ? 'success' : 'error');
+      }
+      state.setDataBlockTestResult(stepId, {
+        success: !!msg.success,
+        output: String(msg.output ?? ''),
+        error: msg.error ? String(msg.error) : undefined,
+        changedKeys: Array.isArray(msg.changedKeys) ? msg.changedKeys.map(String) : undefined,
+        timestamp: Date.now(),
+      });
     }),
 
     // Variables snapshot (with change tracking)
