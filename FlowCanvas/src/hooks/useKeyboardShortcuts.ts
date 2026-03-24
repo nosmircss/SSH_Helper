@@ -66,8 +66,8 @@ export function useKeyboardShortcuts(): void {
           e.preventDefault();
           const store = useFlowStore.getState();
           store.pushSnapshot('Paste');
-          store.setNodes([...store.nodes, ...result.nodes]);
-          store.setEdges([...store.edges, ...result.edges]);
+          store.setNodes([...store.nodes, ...result.nodes], { markDirty: true });
+          store.setEdges([...store.edges, ...result.edges], { markDirty: true });
           store.selectNodes(result.nodes.map((n) => n.id));
         }
         return;

@@ -1,5 +1,30 @@
 # TODO
 
+## 149. Fix verified FlowCanvas bugfix batch (debug side effects, dirty tracking, variable timer, BaseBlock style dedupe)
+- [x] 149.1 Refactor `toggleDisabled` in `FlowCanvas/src/stores/slices/debugSlice.ts` so updater remains side-effect free and side effects run after `set()`.
+- [x] 149.2 Fix variable highlight timer overlap in `FlowCanvas/src/stores/slices/variableSlice.ts` by tracking and resetting a single timeout.
+- [x] 149.3 Implement dirty-tracking hardening for direct `setNodes`/`setEdges` callers:
+- [x] 149.3a Add optional `markDirty` options to `GraphSlice.setNodes`/`setEdges` in `FlowCanvas/src/stores/slices/graphSlice.ts`.
+- [x] 149.3b Update Ctrl+V paste path in `FlowCanvas/src/hooks/useKeyboardShortcuts.ts` to pass `markDirty: true`.
+- [x] 149.3c Update auto-layout path in `FlowCanvas/src/hooks/useAutoLayout.ts` to pass `markDirty: true`.
+- [x] 149.4 Remove duplicate per-node inline `<style>` from `FlowCanvas/src/nodes/BaseBlock.tsx`, move styles into a shared CSS file loaded once.
+- [x] 149.5 Run verification (`npm run build`, targeted Playwright coverage) and record outcomes.
+
+### 149 Review
+- Refactored `toggleDisabled` in `debugSlice` so the Zustand updater is pure and side effects (`updateNodeData`, `disableBlock` message) run after `set()`.
+- Added a module-scoped timer guard in `variableSlice` to cancel/reset prior highlight-clear timers and prevent early `changed=false` clearing during rapid variable updates.
+- Extended `GraphSlice.setNodes`/`setEdges` with optional `markDirty` options and routed paste (`useKeyboardShortcuts`) + auto-layout (`useAutoLayout`) through `markDirty: true` so run/test payloads correctly report `graphChanged`.
+- Extracted BaseBlock keyframes/search highlight CSS into `FlowCanvas/src/nodes/baseblock.css` and removed per-node inline `<style>` injection from `BaseBlock.tsx`.
+- Added two Playwright regressions in `FlowCanvas/e2e/flow-canvas-parity.spec.ts`:
+- `run payload sets graphChanged after Ctrl+V paste`
+- `run payload sets graphChanged after auto-layout`
+- Hardened existing parity tests in the same file to match current harness behavior:
+- normalize edge payloads by dropping runtime-only `selected`/`style` fields before parity comparison
+- replace brittle browser `dialog` wait with `show-error` outgoing-message assertion
+- Verification:
+- `cd FlowCanvas; npm run build` (pass)
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-parity.spec.ts e2e/flow-canvas-interactions.spec.ts` (9 passed)
+
 ## 148. Fix Flow Canvas print-space export validation and stale Run disable
 - [x] 148.1 Add failing `FlowCanvasBridgeTests` coverage proving `print.message` accepts whitespace-only payloads (for blank-line separators).
 - [x] 148.2 Add failing FlowCanvas Playwright coverage proving Run/Test re-enable after editing any graph property following an export validation error.

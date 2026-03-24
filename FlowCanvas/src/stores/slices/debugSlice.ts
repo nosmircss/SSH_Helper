@@ -45,20 +45,21 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
   },
 
   toggleDisabled: (nodeId) => {
+    let nowDisabled = false;
     set((s) => {
       const next = new Set(s.disabledBlocks);
-      const nowDisabled = !next.has(nodeId);
+      nowDisabled = !next.has(nodeId);
       if (nowDisabled) next.add(nodeId);
       else next.delete(nodeId);
-      // Update node visual
-      get().updateNodeData(nodeId, { execState: nowDisabled ? 'disabled' : 'idle' });
-      // Notify C#
-      messageBus.send({
-        type: CANVAS_HOST_MESSAGES.outgoing.disableBlock,
-        stepId: nodeId,
-        disabled: nowDisabled,
-      });
       return { disabledBlocks: next };
+    });
+    // Update node visual
+    get().updateNodeData(nodeId, { execState: nowDisabled ? 'disabled' : 'idle' });
+    // Notify C#
+    messageBus.send({
+      type: CANVAS_HOST_MESSAGES.outgoing.disableBlock,
+      stepId: nodeId,
+      disabled: nowDisabled,
     });
   },
 

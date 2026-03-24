@@ -98,7 +98,6 @@ test.describe('Flow Canvas Browser Harness', () => {
     const runButton = page.getByRole('button', { name: /run/i });
     await expect(runButton).toBeEnabled();
 
-    const alertPromise = page.waitForEvent('dialog');
     await postHostMessage(page, {
       type: 'apply-result',
       success: false,
@@ -106,8 +105,7 @@ test.describe('Flow Canvas Browser Harness', () => {
       warnings: [],
       nodeStepMap: {},
     });
-    const alert = await alertPromise;
-    await alert.accept();
+    await waitForOutgoingMessage(page, 'show-error');
 
     await expect(runButton).toBeDisabled();
 
@@ -117,6 +115,50 @@ test.describe('Flow Canvas Browser Harness', () => {
     await messageInput.fill(' ');
 
     await expect(runButton).toBeEnabled();
+  });
+
+  test('run payload sets graphChanged after Ctrl+V paste', async ({ page }) => {
+    await loadGraphFixture(page, createRunParityFixture());
+    await postHostMessage(page, {
+      type: 'set-target-host',
+      host: {
+        ip: '10.0.0.10',
+        port: 22,
+        username: 'runner',
+        variables: {},
+      },
+    });
+
+    await page.getByText('Alpha', { exact: true }).click();
+    await page.keyboard.press('Control+C');
+    await page.keyboard.press('Control+V');
+
+    await clearOutgoingMessages(page);
+    await page.getByRole('button', { name: /run/i }).click();
+    const runAfterPaste = await waitForOutgoingMessage(page, 'execute-canvas');
+    expect(runAfterPaste.mode).toBe('run');
+    expect(runAfterPaste.graphChanged).toBeTruthy();
+  });
+
+  test('run payload sets graphChanged after auto-layout', async ({ page }) => {
+    await loadGraphFixture(page, createRunParityFixture());
+    await postHostMessage(page, {
+      type: 'set-target-host',
+      host: {
+        ip: '10.0.0.10',
+        port: 22,
+        username: 'runner',
+        variables: {},
+      },
+    });
+
+    await page.getByRole('button', { name: /layout/i }).click();
+
+    await clearOutgoingMessages(page);
+    await page.getByRole('button', { name: /run/i }).click();
+    const runAfterLayout = await waitForOutgoingMessage(page, 'execute-canvas');
+    expect(runAfterLayout.mode).toBe('run');
+    expect(runAfterLayout.graphChanged).toBeTruthy();
   });
 });
 
@@ -133,6 +175,10 @@ function normalizeGraphPayload(
       const { selected: _selected, className: _className, ...rest } = node as Record<string, unknown>;
       return rest;
     }),
-    edges,
+    edges: edges.map((edge) => {
+      if (!edge || typeof edge !== 'object') return edge;
+      const { selected: _selected, style: _style, ...rest } = edge as Record<string, unknown>;
+      return rest;
+    }),
   };
 }

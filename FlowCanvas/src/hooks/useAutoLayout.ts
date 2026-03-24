@@ -12,6 +12,6 @@ export function useAutoLayout(): () => void {
     const store = useFlowStore.getState();
     store.pushSnapshot('Auto-layout');
     const layouted = computeAutoLayout(store.nodes, store.edges);
-    store.setNodes(layouted);
+    store.setNodes(layouted, { markDirty: true });
   }, []);
 }

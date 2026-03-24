@@ -13,6 +13,10 @@ function clearedExportStatusState(): Pick<FlowStore, 'exportStatus'> {
   };
 }
 
+interface SetGraphOptions {
+  markDirty?: boolean;
+}
+
 export interface GraphSlice {
   nodes: Node[];
   edges: Edge[];
@@ -21,8 +25,8 @@ export interface GraphSlice {
   /** True when the user has made structural/property changes since the graph was loaded. */
   isDirty: boolean;
 
-  setNodes: (nodes: Node[]) => void;
-  setEdges: (edges: Edge[]) => void;
+  setNodes: (nodes: Node[], options?: SetGraphOptions) => void;
+  setEdges: (edges: Edge[], options?: SetGraphOptions) => void;
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: (connection: Connection) => void;
@@ -48,8 +52,16 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   selectedEdgeIds: new Set<string>(),
   isDirty: false,
 
-  setNodes: (nodes) => set({ nodes, ...clearedExportStatusState() }),
-  setEdges: (edges) => set({ edges, ...clearedExportStatusState() }),
+  setNodes: (nodes, options) => set({
+    nodes,
+    ...(options?.markDirty ? { isDirty: true } : {}),
+    ...clearedExportStatusState(),
+  }),
+  setEdges: (edges, options) => set({
+    edges,
+    ...(options?.markDirty ? { isDirty: true } : {}),
+    ...clearedExportStatusState(),
+  }),
 
   onNodesChange: (changes) => {
     set((state) => {

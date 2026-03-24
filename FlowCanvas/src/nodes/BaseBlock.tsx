@@ -2,6 +2,7 @@ import { memo, type CSSProperties, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { blockDefMap, categoryColors, type BlockCategory } from '../blockDefs/registry';
 import { useFlowStore } from '../stores/useFlowStore';
+import './baseblock.css';
 
 export interface BlockNodeData {
   blockType: string;
@@ -141,97 +142,82 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   ) : null;
 
   return (
-    <>
-      {/* CSS animations injected once */}
-      <style>{`
-        @keyframes exec-pulse {
-          0%, 100% { box-shadow: 0 0 8px rgba(74, 158, 255, 0.3); }
-          50% { box-shadow: 0 0 24px rgba(74, 158, 255, 0.6); }
-        }
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        .search-match { outline: 2px dashed #e0c040 !important; outline-offset: 2px; }
-        .search-current { outline: 2px solid #e0c040 !important; outline-offset: 2px; }
-      `}</style>
-      <div style={containerStyle}>
-        {/* Input handle (top) */}
-        <Handle
-          type="target"
-          position={Position.Top}
-          style={{ background: colors.border, width: 8, height: 8, border: 'none' }}
-        />
+    <div style={containerStyle}>
+      {/* Input handle (top) */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{ background: colors.border, width: 8, height: 8, border: 'none' }}
+      />
 
-        {/* Header */}
-        <div style={headerStyle}>
-          {/* Breakpoint gutter */}
-          {!isChild && (
-            <span
-              onClick={handleBreakpointToggle}
-              style={{
-                width: 10, height: 10, borderRadius: '50%',
-                background: hasBreakpoint ? '#e74c3c' : 'transparent',
-                border: hasBreakpoint ? 'none' : '1px solid #444',
-                flexShrink: 0,
-                cursor: 'pointer',
-                boxShadow: hasBreakpoint ? '0 0 4px rgba(231,76,60,0.6)' : 'none',
-                transition: 'background 0.15s',
-              }}
-              title="Toggle breakpoint"
-            />
-          )}
-
-          <span style={badgeStyle}>{def.type}</span>
-          <span style={{
-            color: isDisabled ? '#666' : '#ccc',
-            fontSize: 12,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            textDecoration: isDisabled ? 'line-through' : 'none',
-          }}>
-            {blockData.label || def.label}
-          </span>
-          {execIndicator}
-        </div>
-
-        {/* Preview content */}
-        {previewText && (
-          <div style={{
-            padding: '6px 8px',
-            fontFamily: 'monospace',
-            fontSize: 11,
-            color: isDisabled ? '#555' : colors.text,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            {previewText}
-          </div>
-        )}
-
-        {/* Output handle (bottom) */}
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          style={{ background: colors.border, width: 8, height: 8, border: 'none' }}
-        />
-
-        {/* Second output for IF blocks */}
-        {def.outputs === 2 && (
-          <Handle
-            type="source"
-            position={Position.Right}
-            id="false"
+      {/* Header */}
+      <div style={headerStyle}>
+        {/* Breakpoint gutter */}
+        {!isChild && (
+          <span
+            onClick={handleBreakpointToggle}
             style={{
-              background: '#e74c3c', width: 8, height: 8, border: 'none',
-              top: '50%',
+              width: 10, height: 10, borderRadius: '50%',
+              background: hasBreakpoint ? '#e74c3c' : 'transparent',
+              border: hasBreakpoint ? 'none' : '1px solid #444',
+              flexShrink: 0,
+              cursor: 'pointer',
+              boxShadow: hasBreakpoint ? '0 0 4px rgba(231,76,60,0.6)' : 'none',
+              transition: 'background 0.15s',
             }}
+            title="Toggle breakpoint"
           />
         )}
+
+        <span style={badgeStyle}>{def.type}</span>
+        <span style={{
+          color: isDisabled ? '#666' : '#ccc',
+          fontSize: 12,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          textDecoration: isDisabled ? 'line-through' : 'none',
+        }}>
+          {blockData.label || def.label}
+        </span>
+        {execIndicator}
       </div>
-    </>
+
+      {/* Preview content */}
+      {previewText && (
+        <div style={{
+          padding: '6px 8px',
+          fontFamily: 'monospace',
+          fontSize: 11,
+          color: isDisabled ? '#555' : colors.text,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>
+          {previewText}
+        </div>
+      )}
+
+      {/* Output handle (bottom) */}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        style={{ background: colors.border, width: 8, height: 8, border: 'none' }}
+      />
+
+      {/* Second output for IF blocks */}
+      {def.outputs === 2 && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="false"
+          style={{
+            background: '#e74c3c', width: 8, height: 8, border: 'none',
+            top: '50%',
+          }}
+        />
+      )}
+    </div>
   );
 }
 

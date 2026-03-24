@@ -1,6 +1,8 @@
 import type { StateCreator } from 'zustand';
 import type { FlowStore } from '../useFlowStore';
 
+let changeHighlightTimer: ReturnType<typeof setTimeout> | null = null;
+
 export interface VariableEntry {
   name: string;
   value: unknown;
@@ -41,12 +43,20 @@ export const createVariableSlice: StateCreator<FlowStore, [], [], VariableSlice>
     set({ variables: entries, previousValues: nextPrev });
 
     // Clear the 'changed' flag after animation duration (800ms)
-    setTimeout(() => {
+    if (changeHighlightTimer) clearTimeout(changeHighlightTimer);
+    changeHighlightTimer = setTimeout(() => {
+      changeHighlightTimer = null;
       set((s) => ({
         variables: s.variables.map((v) => ({ ...v, changed: false })),
       }));
     }, 800);
   },
 
-  clearVariables: () => set({ variables: [], previousValues: new Map() }),
+  clearVariables: () => {
+    if (changeHighlightTimer) {
+      clearTimeout(changeHighlightTimer);
+      changeHighlightTimer = null;
+    }
+    set({ variables: [], previousValues: new Map() });
+  },
 });
