@@ -40,7 +40,6 @@ function PaletteItem({ def }: { def: BlockDef }) {
       onMouseEnter={(e) => (e.currentTarget.style.borderColor = colors.border)}
       onMouseLeave={(e) => (e.currentTarget.style.borderColor = `${colors.border}55`)}
     >
-      <span style={{ fontSize: 13 }}>{def.icon}</span>
       <span>{def.label}</span>
     </div>
   );

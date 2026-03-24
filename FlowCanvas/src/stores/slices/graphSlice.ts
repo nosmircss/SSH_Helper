@@ -17,6 +17,8 @@ export interface GraphSlice {
   nodes: Node[];
   edges: Edge[];
   selectedNodeIds: Set<string>;
+  /** True when the user has made structural/property changes since the graph was loaded. */
+  isDirty: boolean;
 
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
@@ -33,12 +35,14 @@ export interface GraphSlice {
   toggleNodeSelection: (id: string) => void;
   selectNodes: (ids: string[]) => void;
   clearSelection: () => void;
+  clearDirty: () => void;
 }
 
 export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeIds: new Set<string>(),
+  isDirty: false,
 
   setNodes: (nodes) => set({ nodes, ...clearedExportStatusState() }),
   setEdges: (edges) => set({ edges, ...clearedExportStatusState() }),
@@ -59,8 +63,10 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   },
 
   onEdgesChange: (changes) => {
+    const hasStructuralChange = changes.some((c) => c.type === 'remove' || c.type === 'add');
     set((state) => ({
       edges: applyEdgeChanges(changes, state.edges),
+      ...(hasStructuralChange ? { isDirty: true } : {}),
       ...(changes.length > 0 ? clearedExportStatusState() : {}),
     }));
   },
@@ -70,13 +76,14 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
     get().pushSnapshot('Connect edge');
     set((state) => ({
       edges: addEdge({ ...connection, style: { stroke: '#666' } }, state.edges),
+      isDirty: true,
       ...clearedExportStatusState(),
     }));
   },
 
   addNode: (node) => {
     get().pushSnapshot('Add block');
-    set((state) => ({ nodes: [...state.nodes, node], ...clearedExportStatusState() }));
+    set((state) => ({ nodes: [...state.nodes, node], isDirty: true, ...clearedExportStatusState() }));
   },
 
   removeNodes: (ids) => {
@@ -86,6 +93,7 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       nodes: state.nodes.filter((n) => !idSet.has(n.id)),
       edges: state.edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)),
       selectedNodeIds: new Set([...state.selectedNodeIds].filter((id) => !idSet.has(id))),
+      isDirty: true,
       ...clearedExportStatusState(),
     }));
   },
@@ -110,6 +118,7 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
           },
         };
       }),
+      isDirty: true,
       ...clearedExportStatusState(),
     }));
   },
@@ -128,6 +137,7 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
           },
         };
       }),
+      isDirty: true,
       ...clearedExportStatusState(),
     }));
   },
@@ -158,5 +168,9 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
 
   clearSelection: () => {
     set({ selectedNodeIds: new Set() });
+  },
+
+  clearDirty: () => {
+    set({ isDirty: false });
   },
 });

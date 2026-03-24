@@ -6195,6 +6195,12 @@ namespace SSH_Helper
                 return false;
             }
 
+            // Check if the canvas reported that the graph actually changed.
+            // When graphChanged is false the user hasn't modified anything since
+            // the graph was loaded, so we skip re-serializing back to YAML to
+            // preserve the user's original formatting and spacing.
+            var graphChanged = graphMessage["graphChanged"]?.Value<bool>() ?? true;
+
             try
             {
                 var bridge = new FlowCanvasBridge();
@@ -6220,7 +6226,13 @@ namespace SSH_Helper
                     return false;
                 }
 
-                txtCommand.Text = exportResult.Yaml;
+                // Only overwrite the YAML editor when the user actually changed
+                // something on the canvas.  This preserves user formatting (blank
+                // lines, comments, etc.) for unmodified run/test-step actions.
+                if (graphChanged)
+                {
+                    txtCommand.Text = exportResult.Yaml;
+                }
 
                 _nodeToStepPathMap = new Dictionary<string, string>(exportResult.NodeToStepPathMap, StringComparer.Ordinal);
                 _stepPathToNodeIdMap = BuildStepPathToNodeMap(_nodeToStepPathMap);

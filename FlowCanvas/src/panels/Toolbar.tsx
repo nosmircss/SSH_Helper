@@ -30,6 +30,8 @@ export default function Toolbar() {
   const exportStatus = useFlowStore((s) => s.exportStatus);
   const targetHost = useFlowStore((s) => s.targetHost);
 
+  const isDirty = useFlowStore((s) => s.isDirty);
+
   const getExportData = () => {
     return buildExecutableGraphPayload(getNodes(), getEdges());
   };
@@ -37,6 +39,7 @@ export default function Toolbar() {
   const handleApplyYaml = () => {
     messageBus.send({
       type: CANVAS_HOST_MESSAGES.outgoing.applyYaml,
+      graphChanged: true,
       ...getExportData(),
     });
   };
@@ -47,6 +50,7 @@ export default function Toolbar() {
       type: CANVAS_HOST_MESSAGES.outgoing.executeCanvas,
       mode: 'test-step',
       stepId: selectedNodeId,
+      graphChanged: isDirty,
       ...getExportData(),
     });
   };
@@ -55,6 +59,7 @@ export default function Toolbar() {
     messageBus.send({
       type: CANVAS_HOST_MESSAGES.outgoing.executeCanvas,
       mode: 'run',
+      graphChanged: isDirty,
       ...getExportData(),
     });
   };

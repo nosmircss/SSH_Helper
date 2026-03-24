@@ -17,6 +17,7 @@ export function initMessageBridge(): () => void {
       if (msg.nodes && msg.edges) {
         store.getState().setNodes(msg.nodes as Node[]);
         store.getState().setEdges(msg.edges as Edge[]);
+        store.getState().clearDirty();
         store.getState().clearHistory();
         store.getState().clearExecution();
         store.getState().clearTimeline();

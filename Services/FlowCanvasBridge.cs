@@ -280,7 +280,8 @@ namespace SSH_Helper.Services
             for (int i = 0; i < script.Steps.Count && i < stepSnippets.Count; i++)
             {
                 var step = script.Steps[i];
-                var snippet = stepSnippets[i];
+                var snippetInfo = stepSnippets[i];
+                var snippet = snippetInfo.Snippet;
                 var stepType = step.GetStepType();
                 var nodeId = NextId();
                 var stepPath = BuildStepPath("steps", i);
@@ -290,6 +291,8 @@ namespace SSH_Helper.Services
 
                 // Build props: snippet for round-trip + individual fields for the Properties panel
                 var stepProps = new JObject { ["_yamlSnippet"] = snippet };
+                if (snippetInfo.BlankLinesBefore > 0)
+                    stepProps["_blankLinesBefore"] = snippetInfo.BlankLinesBefore;
                 stepProps["_stepPath"] = stepPath;
                 if (previewText != null)
                     stepProps["_preview"] = previewText;
@@ -964,6 +967,11 @@ namespace SSH_Helper.Services
                     result.NodeToStepPathMap[nodeId] = BuildStepPath("steps", topLevelIndex);
 
                 topLevelIndex++;
+
+                // Re-emit blank lines the user had between steps to preserve spacing.
+                var blankLinesBefore = props?["_blankLinesBefore"]?.Value<int>() ?? 0;
+                for (int bl = 0; bl < blankLinesBefore; bl++)
+                    sb.AppendLine();
 
                 var yamlSnippet = props?["_yamlSnippet"]?.ToString();
 
@@ -2537,12 +2545,19 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// A step snippet together with the number of blank lines that preceded it.
+        /// </summary>
+        private readonly record struct StepSnippetInfo(string Snippet, int BlankLinesBefore);
+
+        /// <summary>
         /// Splits YAML text into individual top-level step snippets.
         /// Each snippet is the complete YAML text for one step (including nested blocks).
+        /// Also records the number of blank lines between steps so the exporter can
+        /// reproduce the user's original spacing.
         /// </summary>
-        private static List<string> SplitYamlSteps(string yamlText)
+        private static List<StepSnippetInfo> SplitYamlSteps(string yamlText)
         {
-            var steps = new List<string>();
+            var steps = new List<StepSnippetInfo>();
             var lines = yamlText.Split('\n');
 
             // Find where "steps:" starts
@@ -2563,13 +2578,21 @@ namespace SSH_Helper.Services
             int stepIndent = -1;
             var currentStep = new StringBuilder();
             bool inStep = false;
+            int blankLinesBefore = 0;   // blank lines accumulated before next step
+            int currentBlankLines = 0;  // blank lines for the step being built
 
             for (int i = stepsLineIndex + 1; i < lines.Length; i++)
             {
                 var line = lines[i].TrimEnd('\r');
                 if (string.IsNullOrWhiteSpace(line))
                 {
-                    if (inStep) currentStep.AppendLine(line);
+                    if (inStep)
+                    {
+                        // Blank line while inside a step — tentatively include it.
+                        // We'll track separately in case it turns out to be inter-step spacing.
+                        currentStep.AppendLine(line);
+                    }
+                    blankLinesBefore++;
                     continue;
                 }
 
@@ -2582,17 +2605,24 @@ namespace SSH_Helper.Services
 
                     if (indent == stepIndent)
                     {
-                        // New top-level step
+                        // New top-level step — finalize the previous one
                         if (inStep && currentStep.Length > 0)
                         {
-                            steps.Add(currentStep.ToString().TrimEnd('\r', '\n') + "\n");
+                            steps.Add(new StepSnippetInfo(
+                                currentStep.ToString().TrimEnd('\r', '\n') + "\n",
+                                currentBlankLines));
                         }
                         currentStep.Clear();
                         currentStep.AppendLine(line);
+                        currentBlankLines = inStep ? blankLinesBefore : 0;
+                        blankLinesBefore = 0;
                         inStep = true;
                         continue;
                     }
                 }
+
+                // Non-blank line that is part of the current step — reset blank counter.
+                blankLinesBefore = 0;
 
                 // Continuation of current step (deeper indent or non-list line)
                 if (inStep && (indent > stepIndent || string.IsNullOrWhiteSpace(line)))
@@ -2609,7 +2639,9 @@ namespace SSH_Helper.Services
             // Last step
             if (inStep && currentStep.Length > 0)
             {
-                steps.Add(currentStep.ToString().TrimEnd('\r', '\n') + "\n");
+                steps.Add(new StepSnippetInfo(
+                    currentStep.ToString().TrimEnd('\r', '\n') + "\n",
+                    currentBlankLines));
             }
 
             return steps;
