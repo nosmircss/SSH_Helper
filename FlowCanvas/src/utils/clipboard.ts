@@ -1,4 +1,5 @@
 import type { Node, Edge } from '@xyflow/react';
+import { START_NODE_ID } from '../stores/slices/graphSlice';
 
 interface ClipboardData {
   nodes: Node[];
@@ -16,7 +17,9 @@ export function copyNodes(
   edges: Edge[],
   selectedIds: Set<string>,
 ): void {
-  const selectedNodes = nodes.filter((n) => selectedIds.has(n.id));
+  const selectedNodes = nodes.filter(
+    (n) => selectedIds.has(n.id) && n.id !== START_NODE_ID,
+  );
 
   const selectedEdges = edges.filter(
     (e) => selectedIds.has(e.source) && selectedIds.has(e.target),
