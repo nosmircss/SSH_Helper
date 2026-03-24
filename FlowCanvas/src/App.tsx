@@ -218,48 +218,50 @@ function FlowCanvasInner() {
       <HostBar />
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         <Palette />
-        <div ref={wrapperRef} style={{ flex: 1, height: '100%', position: 'relative' }}>
-          <ReactFlow
-            nodes={displayNodes}
-            edges={displayEdges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onDragOver={onDragOver}
-            onDrop={onDrop}
-            onInit={(instance) => { reactFlowInstance.current = instance; }}
-            onNodeClick={onNodeClick}
-            onPaneClick={onPaneClick}
-            onNodeContextMenu={onNodeContextMenu}
-            onNodeDragStart={onNodeDragStart}
-            onNodeDragStop={onNodeDragStop}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            snapToGrid={snapToGrid}
-            snapGrid={[gridSize, gridSize]}
-            selectionOnDrag
-            panOnDrag={[1, 2]}
-            fitView
-            proOptions={{ hideAttribution: true }}
-            style={{ background: canvasBg }}
-            defaultEdgeOptions={{ style: { stroke: isDark ? '#555' : '#aaa' } }}
-          >
-            <Controls
-              style={{ background: controlsBg, borderColor: controlsBorder, borderRadius: '6px' }}
-            />
-            <MiniMap
-              style={{ background: minimapBg, borderColor: controlsBorder, borderRadius: '6px' }}
-              nodeColor={(node) => {
-                const bt = (node.data as any)?.blockType;
-                const def = bt ? blockDefMap.get(bt) : null;
-                return def ? categoryColors[def.category].border : '#4a9eff';
-              }}
-              maskColor={minimapMask}
-            />
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={dotColor} />
-          </ReactFlow>
-          <SearchOverlay />
-          <BlockContextMenu />
+        <div ref={wrapperRef} style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+            <ReactFlow
+              nodes={displayNodes}
+              edges={displayEdges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onDragOver={onDragOver}
+              onDrop={onDrop}
+              onInit={(instance) => { reactFlowInstance.current = instance; }}
+              onNodeClick={onNodeClick}
+              onPaneClick={onPaneClick}
+              onNodeContextMenu={onNodeContextMenu}
+              onNodeDragStart={onNodeDragStart}
+              onNodeDragStop={onNodeDragStop}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              snapToGrid={snapToGrid}
+              snapGrid={[gridSize, gridSize]}
+              selectionOnDrag
+              panOnDrag={[1, 2]}
+              fitView
+              proOptions={{ hideAttribution: true }}
+              style={{ background: canvasBg }}
+              defaultEdgeOptions={{ style: { stroke: isDark ? '#555' : '#aaa' } }}
+            >
+              <Controls
+                style={{ background: controlsBg, borderColor: controlsBorder, borderRadius: '6px' }}
+              />
+              <MiniMap
+                style={{ background: minimapBg, borderColor: controlsBorder, borderRadius: '6px' }}
+                nodeColor={(node) => {
+                  const bt = (node.data as any)?.blockType;
+                  const def = bt ? blockDefMap.get(bt) : null;
+                  return def ? categoryColors[def.category].border : '#4a9eff';
+                }}
+                maskColor={minimapMask}
+              />
+              <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={dotColor} />
+            </ReactFlow>
+            <SearchOverlay />
+            <BlockContextMenu />
+          </div>
           {latestOutput && firstSelectedId && (
             <OutputPreview
               output={latestOutput.text}

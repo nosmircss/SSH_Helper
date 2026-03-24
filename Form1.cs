@@ -11985,9 +11985,10 @@ namespace SSH_Helper
 
                 host.Password = passwordValue;
 
-                // Collect all variables from the row
+                // Collect all variables from the row (skip the select checkbox column)
                 foreach (DataGridViewColumn col in dgv_variables.Columns)
                 {
+                    if (string.IsNullOrEmpty(col.Name)) continue;
                     host.Variables[col.Name] = row.Cells[col.Index].Value?.ToString() ?? "";
                 }
 
@@ -12182,12 +12183,16 @@ namespace SSH_Helper
             if (_flowCanvasForm == null) return;
             if (!TryResolveCanvasNodeId(e.StepPath, e.StepIndex, out var nodeId)) return;
 
+            var activeContext = _sshService.ActiveScriptContext;
+            var variables = activeContext?.GetAllVariables();
+
             _flowCanvasForm.SendMessage(new
             {
                 type = "execution-update",
                 stepId = nodeId,
                 state = e.Skipped ? "skipped" : (e.Success == true ? "success" : "error"),
-                duration = e.DurationMs
+                duration = e.DurationMs,
+                variables
             });
 
             // Send step output if available

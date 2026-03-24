@@ -1,8 +1,9 @@
 /**
  * Output preview overlay for a block's execution output.
  * Now supports per-block output history from the store.
+ * Vertically resizable via a drag handle at the top edge.
  */
-import { useState } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useFlowStore } from '../stores/useFlowStore';
 
 interface OutputPreviewProps {
@@ -12,10 +13,18 @@ interface OutputPreviewProps {
   nodeId?: string;
 }
 
+const MIN_HEIGHT = 80;
+const MAX_HEIGHT = 600;
+const DEFAULT_HEIGHT = 200;
+
 export default function OutputPreview({ output, onClose, blockLabel, nodeId }: OutputPreviewProps) {
   const blockOutputs = useFlowStore((s) => s.blockOutputs);
   const clearSelection = useFlowStore((s) => s.clearSelection);
   const [historyIndex, setHistoryIndex] = useState(-1); // -1 = latest
+  const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  const dragging = useRef(false);
+  const startY = useRef(0);
+  const startHeight = useRef(0);
 
   const allOutputs = nodeId ? blockOutputs.get(nodeId) || [] : [];
   const displayOutput = historyIndex >= 0 && historyIndex < allOutputs.length
@@ -27,27 +36,76 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
     else clearSelection();
   };
 
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    startY.current = e.clientY;
+    startHeight.current = height;
+  }, [height]);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      // Dragging up increases height
+      const delta = startY.current - e.clientY;
+      const newHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, startHeight.current + delta));
+      setHeight(newHeight);
+    };
+    const onMouseUp = () => {
+      dragging.current = false;
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
+  const headerHeight = 28;
+
   return (
     <div style={{
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      maxHeight: 200,
+      height,
+      flexShrink: 0,
       background: 'var(--fc-input-bg, #0d1117)',
-      border: '1px solid #2a3a5a',
-      borderRadius: '8px 8px 0 0',
+      borderTop: '1px solid #2a3a5a',
       overflow: 'hidden',
-      zIndex: 10,
       boxShadow: '0 -4px 20px rgba(0,0,0,0.4)',
+      display: 'flex',
+      flexDirection: 'column',
     }}>
+      {/* Resize handle */}
+      <div
+        onMouseDown={onMouseDown}
+        style={{
+          height: 6,
+          cursor: 'ns-resize',
+          background: 'transparent',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{
+          width: 36,
+          height: 3,
+          borderRadius: 2,
+          background: 'var(--fc-text-muted, #666)',
+          opacity: 0.5,
+        }} />
+      </div>
+      {/* Header */}
       <div style={{
-        padding: '4px 10px',
+        padding: '2px 10px',
         background: 'var(--fc-header-bg, #161b22)',
         borderBottom: '1px solid #21262d',
         display: 'flex',
         alignItems: 'center',
         fontSize: 12,
+        height: headerHeight,
+        flexShrink: 0,
       }}>
         <span style={{ color: 'var(--fc-text-muted, #666)' }}>Output</span>
         {blockLabel && (
@@ -81,6 +139,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
           cursor: 'pointer', fontSize: 14, padding: 0,
         }}>×</button>
       </div>
+      {/* Content */}
       <pre style={{
         margin: 0,
         padding: 8,
@@ -88,7 +147,7 @@ export default function OutputPreview({ output, onClose, blockLabel, nodeId }: O
         color: 'var(--fc-text, #c9d1d9)',
         lineHeight: 1.5,
         overflowY: 'auto',
-        maxHeight: 160,
+        flex: 1,
         fontFamily: 'monospace',
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-all',
