@@ -379,6 +379,243 @@ function TestResultDisplay({ result, onDismiss }: { result: DataBlockTestResult;
   );
 }
 
+const START_BOOL_FIELDS: { key: string; label: string }[] = [
+  { key: 'debug', label: 'Debug Mode' },
+  { key: 'nobanner', label: 'No Banner' },
+  { key: 'suppress_missing_column_warning', label: 'Suppress Missing Column Warning' },
+  { key: 'library', label: 'Library (non-executable)' },
+];
+
+function StartProperties({
+  nodeId,
+  data,
+  onPropChange,
+  onLabelChange,
+}: {
+  nodeId: string;
+  data: { label?: string; props?: Record<string, unknown> };
+  onPropChange: (key: string, value: unknown) => void;
+  onLabelChange: (label: string) => void;
+}) {
+  const props = data.props ?? {};
+
+  const nameInput = useBufferedInput(
+    String(props.name ?? ''),
+    `${nodeId}:start-name`,
+    (val) => {
+      onPropChange('name', val || undefined);
+      onLabelChange(val || 'Untitled Script');
+    },
+  );
+
+  const descInput = useBufferedInput(
+    String(props.description ?? ''),
+    `${nodeId}:start-desc`,
+    (val) => onPropChange('description', val || undefined),
+  );
+
+  const envInput = useBufferedInput(
+    String(props.environment ?? ''),
+    `${nodeId}:start-env`,
+    (val) => onPropChange('environment', val || undefined),
+  );
+
+  const versionInput = useBufferedInput(
+    String(props.version ?? ''),
+    `${nodeId}:start-version`,
+    (val) => onPropChange('version', val ? Number(val) : undefined),
+  );
+
+  const colors = { text: '#8aafdb', border: '#4a9eff', bg: '#0d1a2a' };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '4px 6px',
+    background: 'var(--fc-input-bg, #0d1117)',
+    border: `1px solid ${colors.border}44`,
+    borderRadius: 4,
+    color: 'var(--fc-text, #ccc)',
+    fontSize: 12,
+    outline: 'none',
+  };
+
+  const varsCount = props.vars ? Object.keys(props.vars as Record<string, unknown>).length : 0;
+  const importsCount = Array.isArray(props.imports) ? (props.imports as unknown[]).length : 0;
+
+  return (
+    <div
+      data-testid="properties-panel"
+      style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        paddingBottom: 8,
+        borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)',
+      }}>
+        <span style={{
+          background: '#4a9eff',
+          color: '#000',
+          fontSize: 10,
+          fontWeight: 700,
+          padding: '2px 6px',
+          borderRadius: 3,
+          textTransform: 'uppercase',
+        }}>
+          START
+        </span>
+        <span style={{ color: 'var(--fc-text, #ccc)', fontSize: 12, fontWeight: 600 }}>
+          Script Settings
+        </span>
+      </div>
+
+      {/* Name */}
+      <div>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+          Name
+        </label>
+        <input
+          data-testid="start-name-input"
+          type="text"
+          value={nameInput.value}
+          placeholder="Untitled Script"
+          onChange={(e) => nameInput.onChange(e.target.value)}
+          onFocus={nameInput.onFocus}
+          onBlur={nameInput.onBlur}
+          style={inputStyle}
+        />
+      </div>
+
+      {/* Description */}
+      <div>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+          Description
+        </label>
+        <textarea
+          data-testid="start-description-input"
+          value={descInput.value}
+          placeholder="What does this script do?"
+          onChange={(e) => descInput.onChange(e.target.value)}
+          onFocus={descInput.onFocus}
+          onBlur={descInput.onBlur}
+          rows={2}
+          style={{ ...inputStyle, resize: 'vertical' }}
+        />
+      </div>
+
+      {/* Environment */}
+      <div>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+          Environment
+        </label>
+        <input
+          data-testid="start-environment-input"
+          type="text"
+          value={envInput.value}
+          placeholder="Optional environment name"
+          onChange={(e) => envInput.onChange(e.target.value)}
+          onFocus={envInput.onFocus}
+          onBlur={envInput.onBlur}
+          style={inputStyle}
+        />
+      </div>
+
+      {/* Version */}
+      <div>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+          Version
+        </label>
+        <input
+          data-testid="start-version-input"
+          type="number"
+          value={versionInput.value}
+          placeholder="1"
+          onChange={(e) => versionInput.onChange(e.target.value)}
+          onFocus={versionInput.onFocus}
+          onBlur={versionInput.onBlur}
+          style={inputStyle}
+        />
+      </div>
+
+      {/* Boolean flags */}
+      <div style={{
+        borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
+        paddingTop: 10,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)' }}>Flags</label>
+        {START_BOOL_FIELDS.map((field) => (
+          <label
+            key={field.key}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              color: 'var(--fc-text-secondary, #aaa)',
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              data-testid={`start-${field.key}-input`}
+              type="checkbox"
+              checked={!!props[field.key]}
+              onChange={(e) => onPropChange(field.key, e.target.checked)}
+              style={{ accentColor: '#4a9eff' }}
+            />
+            {field.label}
+          </label>
+        ))}
+      </div>
+
+      {/* Read-only summaries for vars and imports */}
+      {(varsCount > 0 || importsCount > 0) && (
+        <div style={{
+          borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
+          paddingTop: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+        }}>
+          {varsCount > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)' }}>
+              {varsCount} variable{varsCount !== 1 ? 's' : ''} defined
+            </div>
+          )}
+          {importsCount > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)' }}>
+              {importsCount} import{importsCount !== 1 ? 's' : ''}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Footer */}
+      <div style={{
+        marginTop: 'auto',
+        paddingTop: 12,
+        borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
+        fontSize: 11,
+        color: 'var(--fc-text-muted, #555)',
+        lineHeight: 1.5,
+      }}>
+        Script-level settings that control execution behavior. These appear in the YAML preamble above the steps.
+      </div>
+    </div>
+  );
+}
+
 export default function Properties() {
   const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
   const nodes = useFlowStore((s) => s.nodes);
@@ -450,6 +687,19 @@ export default function Properties() {
           {selectedNodeIds.size} blocks selected
         </span>
       </div>
+    );
+  }
+
+  // Start node: render custom script-settings form (before def check,
+  // since _start is not in the block registry and def will be null)
+  if (selectedNodeId && node && blockData?.blockType === '_start') {
+    return (
+      <StartProperties
+        nodeId={selectedNodeId}
+        data={blockData}
+        onPropChange={updateProp}
+        onLabelChange={updateLabel}
+      />
     );
   }
 
