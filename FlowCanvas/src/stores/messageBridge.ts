@@ -17,6 +17,50 @@ export function initMessageBridge(): () => void {
       if (msg.nodes && msg.edges) {
         store.getState().setNodes(msg.nodes as Node[]);
         store.getState().setEdges(msg.edges as Edge[]);
+
+        // Ensure Start node always exists
+        const loadedNodes = store.getState().nodes;
+        const loadedEdges = store.getState().edges;
+        const hasStart = loadedNodes.some((n) => n.id === '__start__');
+        if (!hasStart) {
+          // Migrate: check for old __preamble__ node
+          const preambleNode = loadedNodes.find(
+            (n) => (n.data as any)?.blockType === '_preamble',
+          );
+          const startNode: Node = {
+            id: '__start__',
+            type: 'start',
+            position: { x: 250, y: 0 },
+            data: {
+              blockType: '_start',
+              label: 'Untitled Script',
+              props: preambleNode
+                ? (preambleNode.data as any)?.props ?? {}
+                : {},
+            },
+          };
+          // Remove old preamble node if present, add Start node
+          const filtered = loadedNodes.filter(
+            (n) => (n.data as any)?.blockType !== '_preamble',
+          );
+          store.getState().setNodes([startNode, ...filtered]);
+
+          // Create edge from Start to the first root node (no incoming edges)
+          const incomingTargets = new Set(loadedEdges.map((e) => e.target));
+          const firstRoot = filtered.find((n) => !incomingTargets.has(n.id));
+          if (firstRoot) {
+            store.getState().setEdges([
+              ...loadedEdges,
+              {
+                id: `edge-start-${firstRoot.id}`,
+                source: '__start__',
+                target: firstRoot.id,
+                style: { stroke: '#666' },
+              } as Edge,
+            ]);
+          }
+        }
+
         store.getState().clearDirty();
         store.getState().clearHistory();
         store.getState().clearExecution();
