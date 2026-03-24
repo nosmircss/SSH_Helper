@@ -45,15 +45,15 @@ function StartNode({ data, selected }: NodeProps) {
   if (importsCount > 0) activeBadges.push(`${importsCount} import${importsCount !== 1 ? 's' : ''}`);
 
   const containerStyle: CSSProperties = {
-    background: 'linear-gradient(135deg, #1a2a3a, #0d1a2a)',
-    border: `2px solid ${selected ? '#fff' : '#4a9eff'}`,
+    background: 'linear-gradient(135deg, #1a3a2a, #0d2a1a)',
+    border: `2px solid ${selected ? '#fff' : '#2ecc71'}`,
     borderRadius: 8,
     minWidth: 260,
     maxWidth: 300,
     overflow: 'hidden',
     boxShadow: selected
       ? '0 0 12px rgba(255,255,255,0.15)'
-      : '0 0 12px rgba(74, 158, 255, 0.15)',
+      : '0 0 12px rgba(46, 204, 113, 0.15)',
     transition: 'box-shadow 0.2s, border-color 0.2s',
   };
 
@@ -61,13 +61,13 @@ function StartNode({ data, selected }: NodeProps) {
     <div style={containerStyle}>
       <div style={{
         padding: '6px 10px',
-        borderBottom: '1px solid rgba(74,158,255,0.2)',
+        borderBottom: '1px solid rgba(46,204,113,0.2)',
         display: 'flex',
         alignItems: 'center',
         gap: 8,
       }}>
         <span style={{
-          background: '#4a9eff',
+          background: '#2ecc71',
           color: '#000',
           fontSize: 10,
           fontWeight: 700,
@@ -95,12 +95,12 @@ function StartNode({ data, selected }: NodeProps) {
         <div style={{ padding: '6px 10px', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {activeBadges.map((badge) => (
             <span key={badge} style={{
-              background: 'rgba(74,158,255,0.1)',
-              border: '1px solid rgba(74,158,255,0.25)',
+              background: 'rgba(46,204,113,0.1)',
+              border: '1px solid rgba(46,204,113,0.25)',
               borderRadius: 3,
               padding: '1px 5px',
               fontSize: 9,
-              color: '#8aafdb',
+              color: '#80d4a0',
             }}>
               {badge}
             </span>
@@ -111,7 +111,7 @@ function StartNode({ data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Bottom}
-        style={{ background: '#4a9eff', width: 8, height: 8, border: 'none' }}
+        style={{ background: '#2ecc71', width: 8, height: 8, border: 'none' }}
       />
     </div>
   );

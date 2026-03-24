@@ -426,7 +426,7 @@ function StartProperties({
     (val) => onPropChange('version', val ? Number(val) : undefined),
   );
 
-  const colors = { text: '#8aafdb', border: '#4a9eff', bg: '#0d1a2a' };
+  const colors = { text: '#80d4a0', border: '#2ecc71', bg: '#0d2a1a' };
 
   const inputStyle: React.CSSProperties = {
     width: '100%',
@@ -463,7 +463,7 @@ function StartProperties({
         borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)',
       }}>
         <span style={{
-          background: '#4a9eff',
+          background: '#2ecc71',
           color: '#000',
           fontSize: 10,
           fontWeight: 700,
@@ -572,7 +572,7 @@ function StartProperties({
               type="checkbox"
               checked={!!props[field.key]}
               onChange={(e) => onPropChange(field.key, e.target.checked)}
-              style={{ accentColor: '#4a9eff' }}
+              style={{ accentColor: '#2ecc71' }}
             />
             {field.label}
           </label>
