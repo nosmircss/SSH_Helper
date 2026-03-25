@@ -354,8 +354,8 @@ namespace SSH_Helper.Services
                     var branchEnds = ExpandContainerChildren(step, stepType, nodeId, stepPath, ref currentY, 1, NodeStartX, nodes, edges);
                     if (branchEnds.Count > 0)
                     {
-                        foreach (var be in branchEnds)
-                            pendingConnections.Add(new PendingEdge(be));
+                        // Single continuation edge from the container's diamond handle
+                        pendingConnections.Add(new PendingEdge(nodeId, "continue", ColorContinue, "next", dashed: false));
                     }
                     else
                     {

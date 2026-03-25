@@ -1266,6 +1266,82 @@ public class FlowCanvasBridgeTests
         };
     }
 
+    [Fact]
+    public void TextToGraph_IfWithThenAndElse_CreatesContinuationEdgeFromContainer()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            steps:
+              - if:
+                  condition: "true"
+                  then:
+                    - print: "a"
+                  else:
+                    - print: "b"
+              - print: "after"
+            """;
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+
+        // Find the IF node and the "after" print node
+        var ifNode = nodes.Cast<JObject>().First(n => n["data"]?["blockType"]?.ToString() == "if");
+        var afterNode = nodes.Cast<JObject>().First(n =>
+            n["data"]?["blockType"]?.ToString() == "print" &&
+            n["data"]?["props"]?["_isChildOf"] == null &&
+            (n["data"]?["props"]?["_preview"]?.ToString() == "after" ||
+             n["data"]?["props"]?["message"]?.ToString() == "after"));
+
+        var ifId = ifNode["id"]!.ToString();
+        var afterId = afterNode["id"]!.ToString();
+
+        // There should be exactly one edge from IF to after, using sourceHandle="continue"
+        var continueEdges = edges.Cast<JObject>().Where(e =>
+            e["source"]?.ToString() == ifId &&
+            e["target"]?.ToString() == afterId).ToList();
+
+        Assert.Single(continueEdges);
+        Assert.Equal("continue", continueEdges[0]["sourceHandle"]?.ToString());
+
+        // The edge should NOT be dashed (no strokeDasharray)
+        var style = continueEdges[0]["style"] as JObject;
+        Assert.Null(style?["strokeDasharray"]);
+    }
+
+    [Fact]
+    public void ImportExportRoundTrip_IfWithContinuation_ProducesValidYaml()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            steps:
+              - if:
+                  condition: "${x} > 0"
+                  then:
+                    - print: "positive"
+                  else:
+                    - print: "non-positive"
+              - print: "done"
+            """;
+
+        // Import
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        var graph = new JObject { ["nodes"] = nodes, ["edges"] = edges };
+
+        // Export
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        // Re-parse and validate
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        // Should have IF + print at top level
+        Assert.Equal(2, script.Steps.Count);
+        Assert.Equal(StepType.If, script.Steps[0].GetStepType());
+        Assert.Equal(StepType.Print, script.Steps[1].GetStepType());
+    }
+
     private static JObject CreateEdge(
         string source,
         string target,
