@@ -1,0 +1,158 @@
+<h2>Continuation Handle Placement</h2>
+<p class="subtitle">Which layout creates the clearest mental model for "branch vs. continue"?</p>
+
+<div class="cards">
+  <!-- Option A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 24px; background: #0d1117;">
+      <!-- IF block mockup - branches on sides, continue on bottom -->
+      <div style="position: relative; width: 200px; margin: 0 auto;">
+        <!-- Input handle top -->
+        <div style="width: 10px; height: 10px; background: #f0c040; border-radius: 50%; margin: 0 auto 4px;"></div>
+        <!-- Block -->
+        <div style="background: #2a2a1a; border: 2px solid #f0c040; border-radius: 8px; overflow: hidden;">
+          <div style="padding: 5px 8px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #f0c04033;">
+            <span style="background: #f0c040; color: #000; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px;">IF</span>
+            <span style="color: #ccc; font-size: 12px;">If</span>
+          </div>
+          <div style="padding: 6px 8px; font-family: monospace; font-size: 11px; color: #e0d080;">abc == true</div>
+        </div>
+        <!-- Left handle (then) -->
+        <div style="position: absolute; left: -5px; top: 50%; transform: translateY(-50%); width: 10px; height: 10px; background: #2ecc71; border-radius: 50%;"></div>
+        <div style="position: absolute; left: -48px; top: 50%; transform: translateY(-50%); font-size: 10px; color: #2ecc71; font-weight: 600;">then</div>
+        <!-- Right handle (else) -->
+        <div style="position: absolute; right: -5px; top: 50%; transform: translateY(-50%); width: 10px; height: 10px; background: #e74c3c; border-radius: 50%;"></div>
+        <div style="position: absolute; right: -42px; top: 50%; transform: translateY(-50%); font-size: 10px; color: #e74c3c; font-weight: 600;">else</div>
+        <!-- Bottom handle (continue) - bar shape -->
+        <div style="width: 24px; height: 6px; background: #4a9eff; border-radius: 3px; margin: 4px auto 0;"></div>
+        <div style="text-align: center; font-size: 9px; color: #4a9eff; margin-top: 2px;">next</div>
+      </div>
+      <div style="text-align: center; margin-top: 16px; color: #666; font-size: 11px;">
+        Branches = sides &nbsp;&bull;&nbsp; Continue = bottom
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A: Branches on Sides</h3>
+      <p>Move <em>then</em> to left, keep <em>else</em> on right, bottom becomes "next" (continuation). <strong>Bottom always means "what comes next" in the vertical flow.</strong></p>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Strongest spatial metaphor: down = sequence</li>
+          <li>Matches Unreal Blueprints, Node-RED conventions</li>
+          <li>Clear visual grammar across all containers</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Breaking change to existing IF layout</li>
+          <li>Branch children flow sideways, not down</li>
+          <li>Wider canvas usage</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Option B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 24px; background: #0d1117;">
+      <!-- IF block mockup - current layout + bar below -->
+      <div style="position: relative; width: 200px; margin: 0 auto;">
+        <!-- Input handle top -->
+        <div style="width: 10px; height: 10px; background: #f0c040; border-radius: 50%; margin: 0 auto 4px;"></div>
+        <!-- Block -->
+        <div style="background: #2a2a1a; border: 2px solid #f0c040; border-radius: 8px; overflow: hidden;">
+          <div style="padding: 5px 8px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #f0c04033;">
+            <span style="background: #f0c040; color: #000; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px;">IF</span>
+            <span style="color: #ccc; font-size: 12px;">If</span>
+          </div>
+          <div style="padding: 6px 8px; font-family: monospace; font-size: 11px; color: #e0d080;">abc == true</div>
+        </div>
+        <!-- Right handle (else) -->
+        <div style="position: absolute; right: -5px; top: 50%; transform: translateY(-50%); width: 10px; height: 10px; background: #e74c3c; border-radius: 50%;"></div>
+        <div style="position: absolute; right: -42px; top: 50%; transform: translateY(-50%); font-size: 10px; color: #e74c3c; font-weight: 600;">else</div>
+        <!-- Bottom handle (then) - circle -->
+        <div style="width: 10px; height: 10px; background: #2ecc71; border-radius: 50%; margin: 4px auto 0;"></div>
+        <div style="text-align: center; font-size: 9px; color: #2ecc71; margin-top: 1px;">then</div>
+        <!-- Gap -->
+        <div style="height: 8px;"></div>
+        <!-- Continue handle - distinct bar -->
+        <div style="width: 24px; height: 6px; background: #4a9eff; border-radius: 3px; margin: 0 auto;"></div>
+        <div style="text-align: center; font-size: 9px; color: #4a9eff; margin-top: 2px;">next</div>
+      </div>
+      <div style="text-align: center; margin-top: 16px; color: #666; font-size: 11px;">
+        Existing layout preserved + bar handle below
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B: Bar Below Existing</h3>
+      <p>Keep current layout (bottom circle = then, right = else). Add a <strong>distinct bar-shaped handle</strong> below the circle with a small gap. Different shape = different meaning.</p>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>No breaking changes to existing flows</li>
+          <li>Shape difference (bar vs circle) is immediately visible</li>
+          <li>Vertical flow preserved for branch children</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Two things stacked at bottom could confuse new users</li>
+          <li>"Down" means two different things (branch vs continue)</li>
+          <li>More vertical space per container block</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Option C (recommended) -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)" style="border-color: #4a9eff;">
+    <div class="card-image" style="padding: 24px; background: #0d1117;">
+      <!-- IF block mockup - current layout, bar on left bottom -->
+      <div style="position: relative; width: 200px; margin: 0 auto;">
+        <!-- Input handle top -->
+        <div style="width: 10px; height: 10px; background: #f0c040; border-radius: 50%; margin: 0 auto 4px;"></div>
+        <!-- Block -->
+        <div style="background: #2a2a1a; border: 2px solid #f0c040; border-radius: 8px; overflow: hidden;">
+          <div style="padding: 5px 8px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #f0c04033;">
+            <span style="background: #f0c040; color: #000; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px;">IF</span>
+            <span style="color: #ccc; font-size: 12px;">If</span>
+          </div>
+          <div style="padding: 6px 8px; font-family: monospace; font-size: 11px; color: #e0d080;">abc == true</div>
+        </div>
+        <!-- Right handle (else) -->
+        <div style="position: absolute; right: -5px; top: 50%; transform: translateY(-50%); width: 10px; height: 10px; background: #e74c3c; border-radius: 50%;"></div>
+        <div style="position: absolute; right: -42px; top: 50%; transform: translateY(-50%); font-size: 10px; color: #e74c3c; font-weight: 600;">else</div>
+        <!-- Bottom handle (then) - circle, center -->
+        <div style="width: 10px; height: 10px; background: #2ecc71; border-radius: 50%; margin: 4px auto 0;"></div>
+        <!-- Continue handle - left bottom, diamond/bar -->
+        <div style="position: absolute; bottom: -18px; left: 15px;">
+          <div style="width: 10px; height: 10px; background: #4a9eff; transform: rotate(45deg); border-radius: 2px;"></div>
+        </div>
+        <div style="position: absolute; bottom: -30px; left: 4px; font-size: 9px; color: #4a9eff;">next</div>
+      </div>
+      <div style="text-align: center; margin-top: 32px; color: #666; font-size: 11px;">
+        Branch = circle (bottom/right) &bull; Continue = diamond (bottom-left)
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C: Diamond Handle, Bottom-Left <span style="color: #4a9eff; font-size: 11px;">(recommended)</span></h3>
+      <p>Keep existing layout. Add a <strong>diamond-shaped</strong> handle at the bottom-left corner. Different shape <em>and</em> different position = zero ambiguity.</p>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>No breaking changes</li>
+          <li>Shape + position both differ from branch handles</li>
+          <li>Diamond universally reads as "decision resolved / merge point"</li>
+          <li>Bottom-left keeps it out of the way of branch edges</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Slightly asymmetric visual</li>
+          <li>Small handle could be hard to click (mitigated by making hitbox larger)</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px; padding: 16px; background: #161b22; border-radius: 8px; border: 1px solid #30363d;">
+  <h3 style="margin-top: 0;">Best Practices for Clarity in Node Editors</h3>
+  <ul style="color: #aaa; font-size: 13px; line-height: 1.7;">
+    <li><strong>Shape encodes meaning</strong> — circle = branch/flow, diamond = merge/decision, bar = terminator. Users learn the grammar once and apply it everywhere.</li>
+    <li><strong>Position encodes direction</strong> — bottom = down = "next in sequence", side = "alternative path". Mixing meanings at the same position forces users to read labels.</li>
+    <li><strong>Consistency across block types</strong> — if every container uses the same handle shape/position for "continue", users build muscle memory fast.</li>
+    <li><strong>Minimal reliance on labels</strong> — the handle should be self-explanatory from shape and position alone. Labels are confirmation, not primary signal.</li>
+  </ul>
+</div>

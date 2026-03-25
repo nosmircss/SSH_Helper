@@ -311,6 +311,55 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject
+                {
+                    ["condition"] = "abc == \"true\"",
+                    // Simulate stale snippet from a previously loaded/edited block.
+                    ["_yamlSnippet"] = "- if:\n    condition: abc == \"true\"\n"
+                }),
+                CreateBlockNode("then-1", "ping", new JObject
+                {
+                    ["host"] = "192.168.1.1",
+                    ["count"] = 1,
+                    ["into"] = "pingresults"
+                }),
+                CreateBlockNode("else-1", "ping", new JObject
+                {
+                    ["host"] = "192.168.1.1",
+                    ["count"] = 1
+                }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+                CreateEdge("if-1", "else-1", sourceHandle: "false", branchPath: "else"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        var ifStep = Assert.Single(script.Steps);
+        Assert.Equal(StepType.If, ifStep.GetStepType());
+        Assert.Single(ifStep.Then ?? new List<ScriptStep>());
+        Assert.Single(ifStep.Else ?? new List<ScriptStep>());
+    }
+
+    [Fact]
     public void ExportGraphToYaml_TryWithoutSnippet_ExportsDoCatchFinally()
     {
         var bridge = new FlowCanvasBridge();
@@ -320,6 +369,47 @@ public class FlowCanvasBridgeTests
             {
                 CreateStartNode(),
                 CreateBlockNode("try-1", "try"),
+                CreateBlockNode("do-1", "print", new JObject { ["message"] = "do-branch" }),
+                CreateBlockNode("catch-1", "print", new JObject { ["message"] = "catch-branch" }),
+                CreateBlockNode("finally-1", "print", new JObject { ["message"] = "finally-branch" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "try-1"),
+                CreateEdge("try-1", "do-1", branchPath: "try"),
+                CreateEdge("try-1", "catch-1", branchPath: "catch"),
+                CreateEdge("try-1", "finally-1", branchPath: "finally"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        var tryStep = Assert.Single(script.Steps);
+        Assert.Equal(StepType.Try, tryStep.GetStepType());
+        Assert.Single(tryStep.Try ?? new List<ScriptStep>());
+        Assert.Single(tryStep.Catch ?? new List<ScriptStep>());
+        Assert.Single(tryStep.Finally ?? new List<ScriptStep>());
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_TryWithStoredSnippetAndBranchEdges_UsesGraphBranchShape()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("try-1", "try", new JObject
+                {
+                    ["_yamlSnippet"] = "- try:\n    do:\n      - print:\n          message: stale\n"
+                }),
                 CreateBlockNode("do-1", "print", new JObject { ["message"] = "do-branch" }),
                 CreateBlockNode("catch-1", "print", new JObject { ["message"] = "catch-branch" }),
                 CreateBlockNode("finally-1", "print", new JObject { ["message"] = "finally-branch" }),
@@ -390,6 +480,50 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_SwitchWithStoredSnippetAndBranchEdges_UsesGraphBranchShape()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("switch-1", "switch", new JObject
+                {
+                    ["value"] = "${region}",
+                    ["_yamlSnippet"] = "- switch:\n    value: \"${region}\"\n    cases: []\n"
+                }),
+                CreateBlockNode("case-1", "print", new JObject { ["message"] = "north-case" }),
+                CreateBlockNode("case-2", "print", new JObject { ["message"] = "south-case" }),
+                CreateBlockNode("default-1", "print", new JObject { ["message"] = "default-case" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "switch-1"),
+                CreateEdge("switch-1", "case-1", branchPath: "cases/0/do", caseValue: "north"),
+                CreateEdge("switch-1", "case-2", branchPath: "cases/1/do", caseValue: "south"),
+                CreateEdge("switch-1", "default-1", branchPath: "default"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        var switchStep = Assert.Single(script.Steps);
+        Assert.Equal(StepType.Switch, switchStep.GetStepType());
+        Assert.NotNull(switchStep.Cases);
+        Assert.Equal(2, switchStep.Cases!.Count);
+        Assert.Equal("north", switchStep.Cases[0].Value);
+        Assert.Equal("south", switchStep.Cases[1].Value);
+        Assert.Single(switchStep.Else ?? new List<ScriptStep>());
+    }
+
+    [Fact]
     public void ExportGraphToYaml_ParallelWithoutSnippet_ExportsBranchSteps()
     {
         var bridge = new FlowCanvasBridge();
@@ -399,6 +533,44 @@ public class FlowCanvasBridgeTests
             {
                 CreateStartNode(),
                 CreateBlockNode("parallel-1", "parallel"),
+                CreateBlockNode("branch-1", "print", new JObject { ["message"] = "branch-one" }),
+                CreateBlockNode("branch-2", "print", new JObject { ["message"] = "branch-two" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "parallel-1"),
+                CreateEdge("parallel-1", "branch-1", branchPath: "parallel/0"),
+                CreateEdge("parallel-1", "branch-2", branchPath: "parallel/1"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        var parallelStep = Assert.Single(script.Steps);
+        Assert.Equal(StepType.Parallel, parallelStep.GetStepType());
+        Assert.NotNull(parallelStep.Parallel);
+        Assert.Equal(2, parallelStep.Parallel!.Steps.Count);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ParallelWithStoredSnippetAndBranchEdges_UsesGraphBranchShape()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("parallel-1", "parallel", new JObject
+                {
+                    ["_yamlSnippet"] = "- parallel:\n    steps: []\n"
+                }),
                 CreateBlockNode("branch-1", "print", new JObject { ["message"] = "branch-one" }),
                 CreateBlockNode("branch-2", "print", new JObject { ["message"] = "branch-two" }),
             },

@@ -45,7 +45,12 @@ export interface ParityEvaluationPayload {
 const repoRoot = path.resolve(__dirname, '../../..');
 const cliProjectPath = path.join(repoRoot, 'FlowCanvas', 'tools', 'FlowCanvasParityCli', 'FlowCanvasParityCli.csproj');
 const qaPresetsPath = path.join(repoRoot, 'qa_presets.json');
+const parityCliBaseOutputPath = toMsBuildDirectoryPath(path.join(repoRoot, 'artifacts', 'flowcanvas-parity-cli', 'bin'));
 let cliBuilt = false;
+
+function toMsBuildDirectoryPath(value: string): string {
+  return /[\\/]$/.test(value) ? value : `${value}${path.sep}`;
+}
 
 function ensureParityCliBuilt(): void {
   if (cliBuilt) return;
@@ -54,6 +59,7 @@ function ensureParityCliBuilt(): void {
     'build',
     cliProjectPath,
     '-p:SkipFlowCanvasBuild=true',
+    `-p:BaseOutputPath=${parityCliBaseOutputPath}`,
     '-clp:ErrorsOnly',
   ], {
     cwd: repoRoot,
@@ -86,6 +92,7 @@ function runParityCli(args: string[], input?: string): string {
     '--project',
     cliProjectPath,
     '-p:SkipFlowCanvasBuild=true',
+    `-p:BaseOutputPath=${parityCliBaseOutputPath}`,
     '--',
     ...args,
   ];

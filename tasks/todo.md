@@ -1,5 +1,49 @@
 # TODO
 
+## 155. Audit stale-container-snippet branch export impact across container families
+- [x] 155.1 Inspect `FlowCanvasBridge` container export precedence to confirm whether snippet-vs-graph logic is shared beyond `if`.
+- [x] 155.2 Add focused stale-snippet regression coverage for `try`, `switch`, and `parallel` with explicit graph branch metadata.
+- [x] 155.3 Run focused verification for stale-snippet branch-shape tests (`if`, `try`, `switch`, `parallel`).
+- [x] 155.4 Add review notes with findings and verification evidence.
+
+### 155 Review
+- `FlowCanvasBridge` uses shared container precedence (`IsContainerBlockType` + `HasGraphAuthoredContainerBranches`) for `if`, `foreach`, `while`, `switch`, `parallel`, and `try` in both top-level and nested export paths.
+- Added stale-snippet regression tests in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`:
+- `ExportGraphToYaml_TryWithStoredSnippetAndBranchEdges_UsesGraphBranchShape`
+- `ExportGraphToYaml_SwitchWithStoredSnippetAndBranchEdges_UsesGraphBranchShape`
+- `ExportGraphToYaml_ParallelWithStoredSnippetAndBranchEdges_UsesGraphBranchShape`
+- Verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_TryWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_SwitchWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_ParallelWithStoredSnippetAndBranchEdges_UsesGraphBranchShape" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\if-branch-impact-check2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\if-branch-impact-check2\\obj\\` (passed: `4/4`).
+
+## 154. Add focused FlowCanvas e2e coverage for `if` Apply-to-YAML branch nesting
+- [x] 154.1 Add a Playwright test that builds the `send -> extract -> print -> confirm -> if(then ping / else ping)` graph (with stale `if._yamlSnippet`) and clicks `Apply YAML`.
+- [x] 154.2 Assert exported graph semantics include nested `if.then` and `if.else` ping branches (not flattened top-level pings).
+- [x] 154.3 Run focused Playwright verification for the new test and capture command evidence.
+- [x] 154.4 Add review notes below with scope, assertions, and verification result.
+
+### 154 Review
+- Added Playwright regression `apply yaml preserves nested if branch shape when if node has stale snippet` in `FlowCanvas/e2e/flow-canvas-preset-parity.spec.ts`.
+- The test builds an action-based graph fixture with `send -> extract -> print -> confirm -> if`, attaches explicit `then`/`else` branch edges to two ping nodes, and seeds stale `if._yamlSnippet` to match the reported Apply/Run scenario.
+- Assertion path uses `evaluateParityCases(...)` against canonical source YAML that includes nested `if.then`/`if.else` blocks; test fails if export flattens branch pings to top-level.
+- Hardened parity CLI build helper in `FlowCanvas/e2e/support/parityCli.ts` to emit to an isolated output path and avoid local app-output locks during Playwright parity runs.
+- Verification:
+- `cd FlowCanvas; npx playwright test e2e/flow-canvas-preset-parity.spec.ts --grep "apply yaml preserves nested if branch shape when if node has stale snippet"` (passed: `1/1`).
+
+## 153. Fix Flow Canvas `if` export flattening on Apply-to-YAML/Run
+- [x] 153.1 Reproduce with a focused failing `FlowCanvasBridgeTests` case that includes an `if` node with stored `_yamlSnippet` plus branch edges (`then`/`else`) and assert nested branch export.
+- [x] 153.2 Patch `FlowCanvasBridge.ExportGraphToYaml` so container blocks prefer graph-derived branch export when branch topology exists, even if `_yamlSnippet` is present.
+- [x] 153.3 Run focused verification for the new regression and existing `if` container export tests.
+- [x] 153.4 Add review notes with root cause, behavior delta, and command evidence.
+
+### 153 Review
+- Root cause: `FlowCanvasBridge.ExportGraphToYaml` always prioritized container `_yamlSnippet` when present, so edited/authored `if` branch edges were ignored and branch nodes emitted as top-level sequential steps.
+- Fix: added branch-topology detection (`HasGraphAuthoredContainerBranches`) and changed container export precedence to regenerate from graph when explicit branch metadata (`data.branchPath`) points to non-child authored nodes; preserved snippet round-trip behavior for imported visual-child container graphs.
+- Added regression test: `ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape`.
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\if-branch-shape-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\if-branch-shape-red\\obj\\` (failed as expected before patch).
+- Green (focused): `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_IfWithElifAndElse_BranchMetadataProducesCanonicalYaml" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\if-branch-shape-green\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\if-branch-shape-green\\obj\\` (passed: 2/2).
+- Green (regression): `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\if-branch-shape-regression2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\if-branch-shape-regression2\\obj\\` (passed: 17/17).
+
 ## 152. Implement add-flow-canvas-preset-parity-process
 - [x] 152.1 Read `openspec/changes/add-flow-canvas-preset-parity-process/proposal.md`, `design.md`, and `tasks.md` to confirm scope and acceptance criteria.
 - [x] 152.2 Create and verify implementation plan/checklist in this tracker before coding.

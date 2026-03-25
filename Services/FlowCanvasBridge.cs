@@ -1062,7 +1062,23 @@ namespace SSH_Helper.Services
 
                 var yamlSnippet = props?["_yamlSnippet"]?.ToString();
 
-                // Container blocks with stored snippet: re-emit verbatim (round-trip path).
+                // Container blocks authored visually (branch metadata -> non-child targets)
+                // should be regenerated from graph structure even when a stale snippet exists.
+                if (IsContainerBlockType(blockType) &&
+                    (string.IsNullOrWhiteSpace(yamlSnippet) ||
+                     HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap)))
+                {
+                    if (TryGenerateContainerFromGraph(
+                            blockType, props, nodeId, outgoing, nodeMap, incomingCount,
+                            consumedByContainer, result, out var containerYaml))
+                    {
+                        sb.AppendLine(containerYaml);
+                        continue;
+                    }
+                }
+
+                // Round-trip path for imported containers whose branches are still represented
+                // by visual child nodes and do not require regeneration.
                 if (IsContainerBlockType(blockType) && !string.IsNullOrWhiteSpace(yamlSnippet))
                 {
                     var normalizedSnippet = NormalizeTopLevelSnippetIndent(yamlSnippet);
@@ -1074,19 +1090,6 @@ namespace SSH_Helper.Services
                     if (!normalizedSnippet.EndsWith("\n"))
                         sb.AppendLine();
                     continue;
-                }
-
-                // Container blocks WITHOUT snippet (created visually): generate nested YAML
-                // from graph structure.
-                if (IsContainerBlockType(blockType) && string.IsNullOrWhiteSpace(yamlSnippet))
-                {
-                    if (TryGenerateContainerFromGraph(
-                            blockType, props, nodeId, outgoing, nodeMap, incomingCount,
-                            consumedByContainer, result, out var containerYaml))
-                    {
-                        sb.AppendLine(containerYaml);
-                        continue;
-                    }
                 }
 
                 if (TryGenerateStepYaml(blockType, props, out var generatedYaml, out var error))
@@ -1123,6 +1126,34 @@ namespace SSH_Helper.Services
             }
 
             return exportResult.Yaml;
+        }
+
+        private static bool HasGraphAuthoredContainerBranches(
+            string nodeId,
+            Dictionary<string, List<EdgeInfo>> outgoing,
+            Dictionary<string, JToken> nodeMap)
+        {
+            if (!outgoing.TryGetValue(nodeId, out var edges) || edges.Count == 0)
+                return false;
+
+            foreach (var edge in edges)
+            {
+                // Require explicit branch metadata. SourceHandle-only false skip edges
+                // (used for imported if-without-else visualization) should not trigger
+                // regeneration from graph.
+                if (string.IsNullOrWhiteSpace(edge.BranchPath))
+                    continue;
+
+                if (!nodeMap.TryGetValue(edge.TargetId, out var targetNode))
+                    return true;
+
+                var targetProps = targetNode["data"]?["props"] as JObject;
+                var isVisualChild = targetProps?["_isChildOf"] != null;
+                if (!isVisualChild)
+                    return true;
+            }
+
+            return false;
         }
 
         private void BuildChain(string nodeId, Dictionary<string, List<EdgeInfo>> outgoing, List<string> ordered, HashSet<string> visited)
@@ -1665,13 +1696,9 @@ namespace SSH_Helper.Services
             var nodeBlockType = nodeData?["blockType"]?.ToString() ?? "print";
             var snippet = nodeProps?["_yamlSnippet"]?.ToString();
 
-            if (IsContainerBlockType(nodeBlockType) && !string.IsNullOrWhiteSpace(snippet))
-            {
-                nodeYaml = NormalizeTopLevelSnippetIndent(snippet).TrimEnd();
-                return true;
-            }
-
-            if (IsContainerBlockType(nodeBlockType) && string.IsNullOrWhiteSpace(snippet))
+            if (IsContainerBlockType(nodeBlockType) &&
+                (string.IsNullOrWhiteSpace(snippet) ||
+                 HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap)))
             {
                 if (!TryGenerateContainerFromGraph(
                         nodeBlockType,
@@ -1687,6 +1714,12 @@ namespace SSH_Helper.Services
                     return false;
                 }
 
+                return true;
+            }
+
+            if (IsContainerBlockType(nodeBlockType) && !string.IsNullOrWhiteSpace(snippet))
+            {
+                nodeYaml = NormalizeTopLevelSnippetIndent(snippet).TrimEnd();
                 return true;
             }
 

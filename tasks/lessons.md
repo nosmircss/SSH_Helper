@@ -1,5 +1,8 @@
 # Lessons
 
+## 2026-03-25
+- When giving Flow Canvas YAML expectations, I must verify against actual bridge/export output before answering; `if` containers can flatten when `_yamlSnippet` takes precedence over graph branch metadata.
+
 ## 2026-03-23
 - When handling debug resume actions in `ScriptExecutor`, `Step` must explicitly enable `DebugState.StepMode`; otherwise stepping from a breakpoint degenerates into full-run continue behavior.
 - When rendering Flow Canvas Vars inspector entries, any password/secret/token/key-named variable must be masked at display time so raw credential values are never shown in the UI.
