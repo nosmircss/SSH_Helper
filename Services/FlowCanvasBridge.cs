@@ -85,6 +85,7 @@ namespace SSH_Helper.Services
         private const string ColorFinally = "#4a9eff";
         private const string ColorCase = "#f0c040";
         private const string ColorBranch = "#1abc9c";
+        private const string ColorContinue = "#4a9eff";
 
         private static readonly IReadOnlyDictionary<string, string> BlockTypeToCommandKey =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -336,6 +337,9 @@ namespace SSH_Helper.Services
                             ["fontWeight"] = 600,
                         };
                         edge["type"] = "smoothstep";
+                    }
+                    if (pe.Dashed)
+                    {
                         edge["style"]!["strokeDasharray"] = "5,5";
                     }
                     edges.Add(edge);
@@ -365,7 +369,7 @@ namespace SSH_Helper.Services
                         && (step.Else == null || step.Else.Count == 0)
                         && (step.Elif == null || step.Elif.Count == 0))
                     {
-                        pendingConnections.Add(new PendingEdge(nodeId, "false", ColorElse, "else"));
+                        pendingConnections.Add(new PendingEdge(nodeId, "false", ColorElse, "else", dashed: true));
                     }
                 }
                 else
@@ -751,13 +755,15 @@ namespace SSH_Helper.Services
             public string? SourceHandle { get; }
             public string? Color { get; }
             public string? Label { get; }
+            public bool Dashed { get; }
 
-            public PendingEdge(string nodeId, string? sourceHandle = null, string? color = null, string? label = null)
+            public PendingEdge(string nodeId, string? sourceHandle = null, string? color = null, string? label = null, bool dashed = false)
             {
                 NodeId = nodeId;
                 SourceHandle = sourceHandle;
                 Color = color;
                 Label = label;
+                Dashed = dashed;
             }
         }
 
