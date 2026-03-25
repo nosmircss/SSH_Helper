@@ -1070,9 +1070,12 @@ namespace SSH_Helper.Services
 
                 // Container blocks authored visually (branch metadata -> non-child targets)
                 // should be regenerated from graph structure even when a stale snippet exists.
+                // Also regenerate when the user has modified an imported container's branches
+                // (e.g., deleted an else edge) — the stored snippet would be stale.
                 if (IsContainerBlockType(blockType) &&
                     (string.IsNullOrWhiteSpace(yamlSnippet) ||
-                     HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap)))
+                     HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap) ||
+                     HasImportedContainerBeenModified(nodeId, outgoing, nodeMap)))
                 {
                     if (TryGenerateContainerFromGraph(
                             blockType, props, nodeId, outgoing, nodeMap, incomingCount,
@@ -1161,6 +1164,62 @@ namespace SSH_Helper.Services
                 var isVisualChild = targetProps?["_isChildOf"] != null;
                 if (!isVisualChild)
                     return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Detects when an imported container's branch structure has been modified by the user
+        /// (e.g., an else edge was deleted). Compares the distinct branch labels among the
+        /// container's child nodes with the edges actually connecting them. If a branch's
+        /// first child is no longer reachable from the container, the snippet is stale.
+        /// </summary>
+        private static bool HasImportedContainerBeenModified(
+            string nodeId,
+            Dictionary<string, List<EdgeInfo>> outgoing,
+            Dictionary<string, JToken> nodeMap)
+        {
+            // Collect the set of node IDs directly reachable from the container
+            var directTargets = new HashSet<string>(StringComparer.Ordinal);
+            if (outgoing.TryGetValue(nodeId, out var edges))
+            {
+                foreach (var edge in edges)
+                    directTargets.Add(edge.TargetId);
+            }
+
+            // Collect the distinct branch labels among this container's children.
+            // Each branch (then, else, do, catch, etc.) should have its first child
+            // directly connected from the container. If a branch's first child is
+            // missing from directTargets, the user deleted that branch edge.
+            var branchFirstChildren = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in nodeMap)
+            {
+                if (kvp.Key == nodeId) continue;
+                var childProps = kvp.Value["data"]?["props"] as JObject;
+                if (childProps == null) continue;
+
+                var parentId = childProps["_isChildOf"]?.ToString();
+                if (!string.Equals(parentId, nodeId, StringComparison.Ordinal))
+                    continue;
+
+                var branchLabel = childProps["_branchLabel"]?.ToString();
+                if (string.IsNullOrWhiteSpace(branchLabel)) continue;
+
+                // Only the first child in each branch is directly connected from the container.
+                // Track the first child we find per branch label (by step path order).
+                if (!branchFirstChildren.ContainsKey(branchLabel))
+                    branchFirstChildren[branchLabel] = kvp.Key;
+            }
+
+            if (branchFirstChildren.Count == 0)
+                return false; // Not an imported container with children
+
+            // Check if any branch's first child is no longer directly reachable
+            foreach (var firstChildId in branchFirstChildren.Values)
+            {
+                if (!directTargets.Contains(firstChildId))
+                    return true; // Branch edge was deleted — snippet is stale
             }
 
             return false;

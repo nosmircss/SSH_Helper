@@ -1342,6 +1342,63 @@ public class FlowCanvasBridgeTests
         Assert.Equal(StepType.Print, script.Steps[1].GetStepType());
     }
 
+    [Fact]
+    public void ExportGraphToYaml_ImportedIfWithDeletedElseEdge_RegeneratesWithoutElse()
+    {
+        var bridge = new FlowCanvasBridge();
+
+        // Import a YAML with if/then/else
+        var yaml = """
+            steps:
+              - if:
+                  condition: "true"
+                  then:
+                    - print: "then-branch"
+                  else:
+                    - print: "else-branch"
+              - print: "after"
+            """;
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+
+        // Find the IF node
+        var ifNode = nodes.Cast<JObject>().First(n => n["data"]?["blockType"]?.ToString() == "if");
+        var ifId = ifNode["id"]!.ToString();
+
+        // Delete the else edge (the edge from the IF node to the else child)
+        var elseChildNode = nodes.Cast<JObject>().FirstOrDefault(n =>
+        {
+            var props = n["data"]?["props"] as JObject;
+            return props?["_isChildOf"]?.ToString() == ifId &&
+                   props?["_branchLabel"]?.ToString() == "else";
+        });
+
+        Assert.NotNull(elseChildNode);
+        var elseChildId = elseChildNode["id"]!.ToString();
+
+        // Remove only the edge connecting IF to the else child (user deletes edge in UI)
+        var filteredEdges = new JArray(edges.Cast<JObject>().Where(e =>
+            !(e["source"]?.ToString() == ifId && e["target"]?.ToString() == elseChildId)));
+
+        var graph = new JObject { ["nodes"] = nodes, ["edges"] = filteredEdges };
+
+        // Export — should regenerate from graph, NOT use stale snippet with else
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        // IF should have then but NO else
+        var ifStep = script.Steps[0];
+        Assert.Equal(StepType.If, ifStep.GetStepType());
+        Assert.NotNull(ifStep.Then);
+        Assert.Single(ifStep.Then);
+        Assert.Null(ifStep.Else);
+    }
+
     private static JObject CreateEdge(
         string source,
         string target,
