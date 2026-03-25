@@ -178,7 +178,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           whiteSpace: 'nowrap',
           textDecoration: isDisabled ? 'line-through' : 'none',
         }}>
-          {blockData.label || def.label}
+          {def.label}
         </span>
         {execIndicator}
       </div>

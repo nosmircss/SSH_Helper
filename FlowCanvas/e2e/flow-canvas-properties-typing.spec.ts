@@ -27,10 +27,6 @@ test.describe('Flow Canvas Properties Typing', () => {
     await sendNode.click();
     await expect(page.getByTestId('properties-panel')).toBeVisible();
 
-    const displayNameInput = page.getByTestId('properties-display-name-input');
-    await typePerKeystroke(displayNameInput, 'Send Updated');
-    await expect(sendNode).toContainText('Send Updated');
-
     const commandInput = page.getByTestId('properties-field-command-code-input');
     await typePerKeystroke(commandInput, 'show version');
     await expect(sendNode).toContainText('show version');
@@ -50,7 +46,6 @@ test.describe('Flow Canvas Properties Typing', () => {
     await expect(methodSelect).toHaveValue('POST');
 
     await sendNode.click();
-    await expect(displayNameInput).toHaveValue('Send Updated');
     await expect(commandInput).toHaveValue('show version');
     await expect(expectInput).toHaveValue('Version\\s+\\d+');
     await expect(onErrorSelect).toHaveValue('continue');

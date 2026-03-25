@@ -126,7 +126,7 @@ export function initMessageBridge(): () => void {
         const node = state.nodes.find((n) => n.id === stepId);
         state.addTimelineEntry({
           nodeId: stepId,
-          nodeLabel: String((node?.data as any)?.label || stepId),
+          nodeLabel: String((node?.data as any)?.blockType || stepId),
           blockType: String((node?.data as any)?.blockType || ''),
           state: 'running',
           startTime: Date.now(),

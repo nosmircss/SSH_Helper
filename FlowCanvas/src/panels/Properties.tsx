@@ -665,12 +665,6 @@ export default function Properties() {
     [selectedNodeId, pushDebouncedSnapshot, updateNodeLabel],
   );
 
-  const displayNameInput = useBufferedInput(
-    String(blockData?.label ?? ''),
-    `${selectedNodeId ?? 'none'}:display-name`,
-    updateLabel,
-  );
-
   if (selectedNodeIds.size > 1) {
     return (
       <div
@@ -839,29 +833,6 @@ export default function Properties() {
         <span style={{ color: 'var(--fc-text, #ccc)', fontSize: 12, fontWeight: 600 }}>
           {def.label}
         </span>
-      </div>
-
-      <div>
-        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>Display Name</label>
-        <input
-          data-testid="properties-display-name-input"
-          type="text"
-          value={displayNameInput.value}
-          placeholder={def.label}
-          onChange={(e) => displayNameInput.onChange(e.target.value)}
-          onFocus={displayNameInput.onFocus}
-          onBlur={displayNameInput.onBlur}
-          style={{
-            width: '100%',
-            padding: '4px 6px',
-            background: 'var(--fc-input-bg, #0d1117)',
-            border: `1px solid ${colors.border}44`,
-            borderRadius: 4,
-            color: 'var(--fc-text, #ccc)',
-            fontSize: 12,
-            outline: 'none',
-          }}
-        />
       </div>
 
       {def.properties.map((propDef) => {
