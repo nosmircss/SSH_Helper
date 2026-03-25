@@ -217,6 +217,26 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           }}
         />
       )}
+
+      {/* Continuation handle for container blocks (diamond, bottom-left) */}
+      {def.isContainer && (
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          id="continue"
+          style={{
+            background: '#4a9eff',
+            width: 10,
+            height: 10,
+            border: 'none',
+            borderRadius: 2,
+            transform: 'rotate(45deg)',
+            left: 15,
+            bottom: -5,
+            boxShadow: '0 0 0 5px transparent',
+          }}
+        />
+      )}
     </div>
   );
 }
