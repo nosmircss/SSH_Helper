@@ -759,6 +759,22 @@ namespace SSH_Helper.Services
             }
         }
 
+        /// <summary>
+        /// Represents an edge in the graph with its source handle information preserved.
+        /// Used during YAML export to distinguish branch paths (e.g., if-then vs if-else).
+        /// </summary>
+        private sealed class EdgeInfo
+        {
+            public string TargetId { get; }
+            public string? SourceHandle { get; }
+
+            public EdgeInfo(string targetId, string? sourceHandle)
+            {
+                TargetId = targetId;
+                SourceHandle = sourceHandle;
+            }
+        }
+
         #region Subtree Measurement (Pass 1)
 
         /// <summary>
@@ -913,22 +929,23 @@ namespace SSH_Helper.Services
             }
 
             // Find the execution order by following edges from roots
-            var outgoing = new Dictionary<string, List<string>>();
-            var hasIncoming = new HashSet<string>();
+            var outgoing = new Dictionary<string, List<EdgeInfo>>();
+            var incomingCount = new Dictionary<string, int>();
             foreach (var edge in edges)
             {
                 var src = edge["source"]?.ToString();
                 var tgt = edge["target"]?.ToString();
+                var sourceHandle = edge["sourceHandle"]?.ToString();
                 if (src == null || tgt == null) continue;
-                if (!outgoing.ContainsKey(src)) outgoing[src] = new List<string>();
-                outgoing[src].Add(tgt);
-                hasIncoming.Add(tgt);
+                if (!outgoing.ContainsKey(src)) outgoing[src] = new List<EdgeInfo>();
+                outgoing[src].Add(new EdgeInfo(tgt, sourceHandle));
+                incomingCount[tgt] = incomingCount.TryGetValue(tgt, out var count) ? count + 1 : 1;
             }
 
             // --- Start node: determine root and build ordered chain ---
             string? startTarget = null;
             if (outgoing.TryGetValue("__start__", out var startTargets) && startTargets.Count > 0)
-                startTarget = startTargets[0];
+                startTarget = startTargets[0].TargetId;
 
             // Build ordered chain from Start's outgoing target
             var orderedIds = new List<string>();
@@ -944,7 +961,7 @@ namespace SSH_Helper.Services
                 var nid = n["id"]?.ToString();
                 if (nid == null || nid == "__start__") continue;
                 if (n["hidden"]?.Value<bool>() == true) continue;
-                if (!visited.Contains(nid) && !hasIncoming.Contains(nid))
+                if (!visited.Contains(nid) && !incomingCount.ContainsKey(nid))
                 {
                     result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
                         ExportDiagnosticSeverity.Warning,
@@ -966,8 +983,12 @@ namespace SSH_Helper.Services
 
             // Ensure "steps:" header is present
             var preambleText = sb.ToString();
-            if (!preambleText.Contains("steps:"))
+            if (!HasTopLevelStepsHeader(preambleText))
                 sb.AppendLine("steps:");
+
+            // Tracks nodes consumed as branch children by container blocks (if/foreach/while).
+            // These are skipped in the main export loop since they're nested inside their parent's YAML.
+            var consumedByContainer = new HashSet<string>();
 
             // Emit each node's YAML
             int topLevelIndex = 0;
@@ -976,6 +997,7 @@ namespace SSH_Helper.Services
                 if (!nodeMap.TryGetValue(nodeId, out var node)) continue;
                 if (node["hidden"]?.Value<bool>() == true) continue;
                 if (nodeId == "__start__") continue;
+                if (consumedByContainer.Contains(nodeId)) continue;
 
                 var data = node["data"];
                 var props = data?["props"] as JObject;
@@ -1013,8 +1035,7 @@ namespace SSH_Helper.Services
 
                 var yamlSnippet = props?["_yamlSnippet"]?.ToString();
 
-                // Container blocks still rely on stored snippet because nested branch state
-                // remains visual-only and not fully editable in v1.
+                // Container blocks with stored snippet: re-emit verbatim (round-trip path).
                 if (IsContainerBlockType(blockType) && !string.IsNullOrWhiteSpace(yamlSnippet))
                 {
                     var normalizedSnippet = NormalizeTopLevelSnippetIndent(yamlSnippet);
@@ -1026,6 +1047,22 @@ namespace SSH_Helper.Services
                     if (!normalizedSnippet.EndsWith("\n"))
                         sb.AppendLine();
                     continue;
+                }
+
+                // Container blocks WITHOUT snippet (created visually): generate nested YAML
+                // from graph structure for supported types (if, foreach, while).
+                if (IsContainerBlockType(blockType) && string.IsNullOrWhiteSpace(yamlSnippet))
+                {
+                    var supportedContainers = new[] { "if", "foreach", "while" };
+                    if (supportedContainers.Contains(blockType) && TryGenerateContainerFromGraph(
+                            blockType, props, nodeId, outgoing, nodeMap, incomingCount,
+                            consumedByContainer, result, out var containerYaml))
+                    {
+                        sb.AppendLine(containerYaml);
+                        continue;
+                    }
+                    // Unsupported containers (try/switch/parallel) without snippet:
+                    // fall through to TryGenerateStepYaml which will produce incomplete YAML.
                 }
 
                 if (TryGenerateStepYaml(blockType, props, out var generatedYaml, out var error))
@@ -1064,15 +1101,239 @@ namespace SSH_Helper.Services
             return exportResult.Yaml;
         }
 
-        private void BuildChain(string nodeId, Dictionary<string, List<string>> outgoing, List<string> ordered, HashSet<string> visited)
+        private void BuildChain(string nodeId, Dictionary<string, List<EdgeInfo>> outgoing, List<string> ordered, HashSet<string> visited)
         {
             if (!visited.Add(nodeId)) return;
             ordered.Add(nodeId);
             if (outgoing.TryGetValue(nodeId, out var targets))
             {
-                foreach (var t in targets)
-                    BuildChain(t, outgoing, ordered, visited);
+                foreach (var ei in targets)
+                    BuildChain(ei.TargetId, outgoing, ordered, visited);
             }
+        }
+
+        /// <summary>
+        /// Collects a linear chain of nodes belonging to a branch, starting from the given node.
+        /// Stops when the chain ends, a node is already visited, or a convergence point is reached
+        /// (a node with more than one incoming edge, indicating it's a continuation after the container).
+        /// </summary>
+        private List<string> CollectBranchChain(
+            string startNodeId,
+            Dictionary<string, List<EdgeInfo>> outgoing,
+            Dictionary<string, int> incomingCount,
+            HashSet<string> branchVisited)
+        {
+            var chain = new List<string>();
+            var currentId = startNodeId;
+
+            while (currentId != null)
+            {
+                // Stop if already visited (convergence with another branch)
+                if (branchVisited.Contains(currentId))
+                    break;
+
+                // Stop if this node has multiple incoming edges (convergence point — continuation after container)
+                // Exception: the first node in the chain is always included even with multiple incoming edges,
+                // because it's directly connected from the container's branch handle.
+                if (chain.Count > 0 && incomingCount.TryGetValue(currentId, out var count) && count > 1)
+                    break;
+
+                branchVisited.Add(currentId);
+                chain.Add(currentId);
+
+                // Follow the default (non-false-handle) outgoing edge to continue the chain
+                string? nextId = null;
+                if (outgoing.TryGetValue(currentId, out var edges))
+                {
+                    foreach (var ei in edges)
+                    {
+                        if (string.IsNullOrEmpty(ei.SourceHandle))
+                        {
+                            nextId = ei.TargetId;
+                            break;
+                        }
+                    }
+                }
+
+                currentId = nextId;
+            }
+
+            return chain;
+        }
+
+        /// <summary>
+        /// Generates YAML for a container block (if, foreach, while) that was created visually
+        /// and has no stored _yamlSnippet. Builds nested branch content from the graph edges.
+        /// </summary>
+        private bool TryGenerateContainerFromGraph(
+            string blockType,
+            JObject? props,
+            string nodeId,
+            Dictionary<string, List<EdgeInfo>> outgoing,
+            Dictionary<string, JToken> nodeMap,
+            Dictionary<string, int> incomingCount,
+            HashSet<string> consumedByContainer,
+            FlowCanvasExportResult result,
+            out string yaml)
+        {
+            yaml = string.Empty;
+
+            // Generate the container header (e.g., "- if:\n    condition: abc = true")
+            if (!TryGenerateStepYaml(blockType, props, out var headerYaml, out var headerError))
+            {
+                result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
+                    ExportDiagnosticSeverity.Error,
+                    string.IsNullOrWhiteSpace(headerError)
+                        ? $"Unable to export container block '{blockType}'."
+                        : headerError!,
+                    nodeId));
+                return false;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append(headerYaml.TrimEnd());
+
+            // Classify outgoing edges by sourceHandle
+            var thenTargets = new List<string>();
+            var elseTargets = new List<string>();
+            if (outgoing.TryGetValue(nodeId, out var nodeEdges))
+            {
+                foreach (var ei in nodeEdges)
+                {
+                    if (string.Equals(ei.SourceHandle, "false", StringComparison.OrdinalIgnoreCase))
+                        elseTargets.Add(ei.TargetId);
+                    else
+                        thenTargets.Add(ei.TargetId);
+                }
+            }
+
+            // Determine branch label based on block type
+            string primaryBranchLabel = blockType == "if" ? "then" : "do";
+
+            // Collect the primary branch chain (then/do)
+            var branchVisited = new HashSet<string>();
+            var primaryChain = new List<string>();
+            if (thenTargets.Count > 0)
+            {
+                primaryChain = CollectBranchChain(thenTargets[0], outgoing, incomingCount, branchVisited);
+            }
+
+            // Collect the else branch chain (if block only)
+            var elseChain = new List<string>();
+            if (blockType == "if" && elseTargets.Count > 0)
+            {
+                elseChain = CollectBranchChain(elseTargets[0], outgoing, incomingCount, branchVisited);
+            }
+
+            // Generate primary branch YAML (then/do)
+            sb.AppendLine();
+            if (primaryChain.Count > 0)
+            {
+                sb.AppendLine($"    {primaryBranchLabel}:");
+                if (!TryGenerateBranchYaml(primaryChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb))
+                    return false;
+            }
+            else
+            {
+                sb.AppendLine($"    {primaryBranchLabel}: []");
+            }
+
+            // Generate else branch YAML (if block only, and only when nodes are connected)
+            if (blockType == "if" && elseChain.Count > 0)
+            {
+                sb.AppendLine("    else:");
+                if (!TryGenerateBranchYaml(elseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb))
+                    return false;
+            }
+
+            // Mark all branch nodes as consumed so they're skipped in the top-level export loop
+            foreach (var id in branchVisited)
+                consumedByContainer.Add(id);
+
+            yaml = sb.ToString().TrimEnd();
+            return true;
+        }
+
+        /// <summary>
+        /// Generates indented YAML for a list of nodes within a branch (then/else/do).
+        /// Each step is indented by 6 spaces (4 for container body + 2 for list dash).
+        /// </summary>
+        private bool TryGenerateBranchYaml(
+            List<string> nodeChain,
+            Dictionary<string, JToken> nodeMap,
+            Dictionary<string, List<EdgeInfo>> outgoing,
+            Dictionary<string, int> incomingCount,
+            HashSet<string> consumedByContainer,
+            FlowCanvasExportResult result,
+            StringBuilder sb)
+        {
+            foreach (var childId in nodeChain)
+            {
+                if (!nodeMap.TryGetValue(childId, out var childNode)) continue;
+
+                var childData = childNode["data"];
+                var childProps = childData?["props"] as JObject;
+                var childBlockType = childData?["blockType"]?.ToString() ?? "print";
+
+                string childYaml;
+
+                // Check if this child is itself a supported container without a snippet
+                var childSnippet = childProps?["_yamlSnippet"]?.ToString();
+                var supportedContainers = new[] { "if", "foreach", "while" };
+                if (IsContainerBlockType(childBlockType)
+                    && !string.IsNullOrWhiteSpace(childSnippet))
+                {
+                    // Container with snippet — re-emit normalized snippet
+                    childYaml = NormalizeTopLevelSnippetIndent(childSnippet).TrimEnd();
+                }
+                else if (supportedContainers.Contains(childBlockType)
+                    && string.IsNullOrWhiteSpace(childSnippet))
+                {
+                    // Nested container without snippet — recurse
+                    if (!TryGenerateContainerFromGraph(childBlockType, childProps, childId,
+                        outgoing, nodeMap, incomingCount, consumedByContainer, result, out childYaml))
+                        return false;
+                }
+                else
+                {
+                    // Regular step
+                    if (!TryGenerateStepYaml(childBlockType, childProps, out childYaml, out var childError))
+                    {
+                        result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
+                            ExportDiagnosticSeverity.Error,
+                            string.IsNullOrWhiteSpace(childError)
+                                ? $"Unable to export block type '{childBlockType}' inside container."
+                                : childError!,
+                            childId));
+                        return false;
+                    }
+                }
+
+                // Indent the child YAML by 6 spaces and append
+                sb.AppendLine(IndentYaml(childYaml.TrimEnd(), 6));
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Indents every line of a YAML string by the specified number of spaces.
+        /// </summary>
+        private static string IndentYaml(string yaml, int spaces)
+        {
+            var prefix = new string(' ', spaces);
+            var lines = yaml.Split('\n');
+            var sb = new StringBuilder();
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i].TrimEnd('\r');
+                if (i > 0) sb.AppendLine();
+                if (line.Length > 0)
+                    sb.Append(prefix + line);
+                else
+                    sb.Append(line);
+            }
+            return sb.ToString();
         }
 
         private static string BuildStepPath(string scopePath, int index)
@@ -2705,6 +2966,28 @@ namespace SSH_Helper.Services
             return sb.ToString();
         }
 
+        private static bool HasTopLevelStepsHeader(string yamlText)
+        {
+            var lines = yamlText.Split('\n');
+            foreach (var rawLine in lines)
+            {
+                var line = rawLine.TrimEnd('\r');
+                if (line.Length == 0)
+                    continue;
+
+                var isIndented = line.StartsWith(" ", StringComparison.Ordinal)
+                    || line.StartsWith("\t", StringComparison.Ordinal);
+                if (isIndented)
+                    continue;
+
+                var normalized = line.TrimEnd();
+                if (string.Equals(normalized, "steps:", StringComparison.Ordinal))
+                    return true;
+            }
+
+            return false;
+        }
+
         /// <summary>
         /// Parses known preamble fields from the Script model into Start node props.
         /// Unknown preamble content is stored in _yamlSnippet for round-trip safety.
@@ -2799,6 +3082,12 @@ namespace SSH_Helper.Services
                 if (!string.IsNullOrEmpty(importsSection))
                     sb.Append(importsSection);
             }
+            if (snippet != null)
+            {
+                var subroutinesSection = ExtractYamlSection(snippet, "subroutines:");
+                if (!string.IsNullOrEmpty(subroutinesSection))
+                    sb.Append(subroutinesSection);
+            }
 
             // Append any unrecognized sections from the original snippet
             if (snippet != null)
@@ -2865,11 +3154,14 @@ namespace SSH_Helper.Services
 
             for (int i = 0; i < lines.Length; i++)
             {
-                var trimmed = lines[i].TrimEnd('\r').TrimStart();
+                var line = lines[i].TrimEnd('\r');
+                var trimmed = line.TrimStart();
+                var isIndented = line.StartsWith(" ", StringComparison.Ordinal)
+                    || line.StartsWith("\t", StringComparison.Ordinal);
                 if (trimmed.Length == 0 || trimmed.StartsWith("#"))
                 {
                     if (inUnrecognized)
-                        sb.AppendLine(lines[i].TrimEnd('\r'));
+                        sb.AppendLine(line);
                     continue;
                 }
 
@@ -2883,14 +3175,14 @@ namespace SSH_Helper.Services
                     }
                 }
 
-                if (!isKnown && !trimmed.StartsWith("-"))
+                if (!isKnown && !isIndented && !trimmed.StartsWith("-"))
                 {
                     inUnrecognized = true;
-                    sb.AppendLine(lines[i].TrimEnd('\r'));
+                    sb.AppendLine(line);
                 }
-                else if (inUnrecognized && (lines[i].TrimEnd('\r').StartsWith(" ") || lines[i].TrimEnd('\r').StartsWith("\t") || trimmed.StartsWith("-")))
+                else if (inUnrecognized && (isIndented || trimmed.StartsWith("-")))
                 {
-                    sb.AppendLine(lines[i].TrimEnd('\r'));
+                    sb.AppendLine(line);
                 }
                 else
                 {

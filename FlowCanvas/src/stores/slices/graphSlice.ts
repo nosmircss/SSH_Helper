@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { Node, Edge, OnNodesChange, OnEdgesChange, Connection } from '@xyflow/react';
 import { applyNodeChanges, applyEdgeChanges, addEdge } from '@xyflow/react';
 import type { FlowStore } from '../useFlowStore';
+import { blockDefMap } from '../../blockDefs/registry';
 
 export const START_NODE_ID = '__start__';
 
@@ -95,11 +96,51 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   onConnect: (connection) => {
     // Push undo snapshot before connecting
     get().pushSnapshot('Connect edge');
-    set((state) => ({
-      edges: addEdge({ ...connection, style: { stroke: '#666' } }, state.edges),
-      isDirty: true,
-      ...clearedExportStatusState(),
-    }));
+    set((state) => {
+      // Determine if this connection originates from a container block's branch handle
+      const sourceNode = state.nodes.find((n) => n.id === connection.source);
+      const blockType = (sourceNode?.data as Record<string, unknown>)?.blockType as string | undefined;
+      const def = blockType ? blockDefMap.get(blockType) : undefined;
+
+      let edgeStyle: Record<string, unknown> = { stroke: '#666' };
+      let edgeLabel: string | undefined;
+      let labelStyle: Record<string, unknown> | undefined;
+
+      if (def?.isContainer) {
+        const handle = connection.sourceHandle;
+        if (blockType === 'if') {
+          if (handle === 'false') {
+            // Else branch (right/red handle)
+            edgeLabel = 'else';
+            edgeStyle = { stroke: '#e74c3c', strokeDasharray: '5,5' };
+            labelStyle = { fill: '#e74c3c', fontSize: 11, fontWeight: 600 };
+          } else {
+            // Then branch (bottom/default handle)
+            edgeLabel = 'then';
+            edgeStyle = { stroke: '#2ecc71', strokeDasharray: '5,5' };
+            labelStyle = { fill: '#2ecc71', fontSize: 11, fontWeight: 600 };
+          }
+        } else if (blockType === 'foreach' || blockType === 'while') {
+          // Loop body (bottom/default handle)
+          edgeLabel = 'do';
+          edgeStyle = { stroke: '#f0c040', strokeDasharray: '5,5' };
+          labelStyle = { fill: '#f0c040', fontSize: 11, fontWeight: 600 };
+        }
+      }
+
+      const edgeProps: Record<string, unknown> = {
+        ...connection,
+        style: edgeStyle,
+      };
+      if (edgeLabel) edgeProps.label = edgeLabel;
+      if (labelStyle) edgeProps.labelStyle = labelStyle;
+
+      return {
+        edges: addEdge(edgeProps as Edge, state.edges),
+        isDirty: true,
+        ...clearedExportStatusState(),
+      };
+    });
   },
 
   addNode: (node) => {

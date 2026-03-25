@@ -1,5 +1,33 @@
 # TODO
 
+## 151. Fix current `FlowCanvasBridgeTests` failures
+- [x] 151.1 Update `FlowCanvasBridgeTests` graph fixtures to include `__start__` node/edge for start-rooted export traversal.
+- [x] 151.2 Patch `FlowCanvasBridge` preamble serialization so known sections (including `subroutines:`) are preserved correctly without orphaned indented lines.
+- [x] 151.3 Run focused verification for `FlowCanvasBridgeTests` and capture results.
+- [x] 151.4 Add review notes with root-cause and fix summary.
+
+### 151 Review
+- Updated three fixture-only tests in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` to include the required `__start__` node and start-linked edges:
+- `ExportGraphToYaml_UnsupportedBlockType_ReturnsErrorDiagnostic`
+- `ExportGraphToYaml_IncludesChildNodeStepPathMapping`
+- `ExportGraphToYaml_CommentNodes_AreIgnoredWithWarning`
+- Patched preamble serialization in `Services/FlowCanvasBridge.cs` to preserve `subroutines:` as a first-class section and prevent indented child lines under known sections from being misclassified as unrecognized top-level content.
+- Patched top-level `steps:` header detection to check for an actual top-level key (`HasTopLevelStepsHeader`) instead of substring search, avoiding false positives from nested `subroutines.*.steps`.
+- Verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvasbridge-fix2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvasbridge-fix2\\obj\\` (passed: `11/11`).
+
+## 150. Review failing `FlowCanvasBridgeTests` and classify root cause
+- [x] 150.1 Reproduce current `FlowCanvasBridgeTests` failures with a focused `dotnet test` run and capture failing test names plus error messages.
+- [x] 150.2 Trace each failure to the responsible code path (`FlowCanvasBridge` logic vs test fixture/assertion assumptions) and compare against nearby working tests.
+- [x] 150.3 Classify each failure as either runtime regression or test issue, with concrete evidence references.
+- [x] 150.4 Add a short review section below with findings and recommended next action.
+
+### 150 Review
+- Reproduced on current workspace and on a clean `HEAD` worktree: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false` fails `4/11` in both places, so none of these are newly introduced by current uncommitted edits.
+- `ExportGraphToYaml_UnsupportedBlockType_ReturnsErrorDiagnostic`, `ExportGraphToYaml_IncludesChildNodeStepPathMapping`, and `ExportGraphToYaml_CommentNodes_AreIgnoredWithWarning` are test-fixture contract mismatches: those tests build graphs without the mandatory `__start__` node/edge, while current Flow Canvas/bridge contract traverses from `__start__` and excludes disconnected nodes with warnings (`Services/FlowCanvasBridge.cs` export traversal; `FlowCanvas/src/stores/slices/graphSlice.ts` protects `__start__`; `FlowCanvas/src/stores/messageBridge.ts` auto-injects `__start__` on load).
+- `RoundTrip_AllQaPresetYamlScripts_MaintainValidationContract` failure for `QA Local Subroutines` is a real bridge bug, not a test issue: preamble serialization currently appends nested `subroutines` children without the `subroutines:` header (via `ExtractUnrecognizedSections`), which yields invalid YAML parse at line 4.
+- Recommended next action: update the three graph-construction tests to include `__start__` linkage, and patch preamble serialization so `subroutines` is preserved as a full section (or excluded from `ExtractUnrecognizedSections` child-line capture).
+
 ## 149. Fix verified FlowCanvas bugfix batch (debug side effects, dirty tracking, variable timer, BaseBlock style dedupe)
 - [x] 149.1 Refactor `toggleDisabled` in `FlowCanvas/src/stores/slices/debugSlice.ts` so updater remains side-effect free and side effects run after `set()`.
 - [x] 149.2 Fix variable highlight timer overlap in `FlowCanvas/src/stores/slices/variableSlice.ts` by tracking and resetting a single timeout.

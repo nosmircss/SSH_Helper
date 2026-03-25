@@ -74,6 +74,18 @@ public class FlowCanvasBridgeTests
             {
                 new JObject
                 {
+                    ["id"] = "__start__",
+                    ["type"] = "start",
+                    ["position"] = new JObject { ["x"] = 0, ["y"] = 0 },
+                    ["data"] = new JObject
+                    {
+                        ["blockType"] = "_start",
+                        ["label"] = "Start",
+                        ["props"] = new JObject()
+                    }
+                },
+                new JObject
+                {
                     ["id"] = "node-1",
                     ["type"] = "block",
                     ["position"] = new JObject { ["x"] = 10, ["y"] = 10 },
@@ -85,7 +97,15 @@ public class FlowCanvasBridgeTests
                     }
                 }
             },
-            ["edges"] = new JArray()
+            ["edges"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "e-start-node-1",
+                    ["source"] = "__start__",
+                    ["target"] = "node-1"
+                }
+            }
         };
 
         var result = bridge.ExportGraphToYaml(graph);
@@ -102,6 +122,18 @@ public class FlowCanvasBridgeTests
         {
             ["nodes"] = new JArray
             {
+                new JObject
+                {
+                    ["id"] = "__start__",
+                    ["type"] = "start",
+                    ["position"] = new JObject { ["x"] = 40, ["y"] = 20 },
+                    ["data"] = new JObject
+                    {
+                        ["blockType"] = "_start",
+                        ["label"] = "Start",
+                        ["props"] = new JObject()
+                    }
+                },
                 new JObject
                 {
                     ["id"] = "parent",
@@ -140,6 +172,12 @@ public class FlowCanvasBridgeTests
             {
                 new JObject
                 {
+                    ["id"] = "e-start-parent",
+                    ["source"] = "__start__",
+                    ["target"] = "parent"
+                },
+                new JObject
+                {
                     ["id"] = "e-parent-child",
                     ["source"] = "parent",
                     ["target"] = "child"
@@ -165,6 +203,18 @@ public class FlowCanvasBridgeTests
         {
             ["nodes"] = new JArray
             {
+                new JObject
+                {
+                    ["id"] = "__start__",
+                    ["type"] = "start",
+                    ["position"] = new JObject { ["x"] = 20, ["y"] = 10 },
+                    ["data"] = new JObject
+                    {
+                        ["blockType"] = "_start",
+                        ["label"] = "Start",
+                        ["props"] = new JObject()
+                    }
+                },
                 new JObject
                 {
                     ["id"] = "comment-1",
@@ -193,7 +243,21 @@ public class FlowCanvasBridgeTests
                     }
                 }
             },
-            ["edges"] = new JArray()
+            ["edges"] = new JArray
+            {
+                new JObject
+                {
+                    ["id"] = "e-start-comment-1",
+                    ["source"] = "__start__",
+                    ["target"] = "comment-1"
+                },
+                new JObject
+                {
+                    ["id"] = "e-comment-1-node-1",
+                    ["source"] = "comment-1",
+                    ["target"] = "node-1"
+                }
+            }
         };
 
         var result = bridge.ExportGraphToYaml(graph);
