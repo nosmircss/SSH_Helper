@@ -1144,6 +1144,10 @@ namespace SSH_Helper.Services
 
             foreach (var edge in edges)
             {
+                // Continuation edges (sourceHandle="continue") are not branch edges.
+                if (string.Equals(edge.SourceHandle, "continue", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 // Require explicit branch metadata. SourceHandle-only false skip edges
                 // (used for imported if-without-else visualization) should not trigger
                 // regeneration from graph.
@@ -1258,7 +1262,7 @@ namespace SSH_Helper.Services
             }
 
             var nodeEdges = outgoing.TryGetValue(nodeId, out var edgesFromNode)
-                ? edgesFromNode
+                ? edgesFromNode.Where(e => !string.Equals(e.SourceHandle, "continue", StringComparison.OrdinalIgnoreCase)).ToList()
                 : new List<EdgeInfo>();
             var sb = new StringBuilder();
             sb.Append(headerYaml.TrimEnd());

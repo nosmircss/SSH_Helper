@@ -1034,6 +1034,84 @@ public class FlowCanvasBridgeTests
         Assert.Contains(logLevelOptions, value => string.Equals(value, "success", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void ExportGraphToYaml_IfWithContinueEdge_ContinuationTargetNotConsumedAsBranch()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject { ["condition"] = "true" }),
+                CreateBlockNode("then-1", "print", new JObject { ["message"] = "inside-then" }),
+                CreateBlockNode("after-1", "print", new JObject { ["message"] = "after-if" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+                CreateEdge("if-1", "after-1", sourceHandle: "continue"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        Assert.Equal(2, script.Steps.Count);
+        var ifStep = script.Steps[0];
+        Assert.Equal(StepType.If, ifStep.GetStepType());
+        Assert.Single(ifStep.Then ?? new List<ScriptStep>());
+        Assert.Null(ifStep.Elif);
+        Assert.Null(ifStep.Else);
+
+        var afterStep = script.Steps[1];
+        Assert.Equal(StepType.Print, afterStep.GetStepType());
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ForeachWithContinueEdge_ContinuationTargetNotConsumedAsDo()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("for-1", "foreach", new JObject { ["iterator"] = "item in ${items}" }),
+                CreateBlockNode("do-1", "print", new JObject { ["message"] = "inside-loop" }),
+                CreateBlockNode("after-1", "print", new JObject { ["message"] = "after-loop" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "for-1"),
+                CreateEdge("for-1", "do-1", branchPath: "do"),
+                CreateEdge("for-1", "after-1", sourceHandle: "continue"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        Assert.Equal(2, script.Steps.Count);
+        var forStep = script.Steps[0];
+        Assert.Equal(StepType.Foreach, forStep.GetStepType());
+        Assert.Single(forStep.Do ?? new List<ScriptStep>());
+
+        var afterStep = script.Steps[1];
+        Assert.Equal(StepType.Print, afterStep.GetStepType());
+    }
+
     private static FlowCanvasBridge.FlowCanvasExportResult RoundTripThroughBridge(string yaml)
     {
         var bridge = new FlowCanvasBridge();
