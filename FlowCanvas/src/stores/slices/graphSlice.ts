@@ -301,8 +301,9 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       const blockType = (sourceNode?.data as Record<string, unknown>)?.blockType as string | undefined;
       const def = blockType ? blockDefMap.get(blockType) : undefined;
 
+      const isContinuation = connection.sourceHandle === 'continue';
       const isContainer = !!def?.isContainer;
-      const branchMetadata = isContainer
+      const branchMetadata = (isContainer && !isContinuation)
         ? inferDefaultBranchMetadata(
             blockType ?? '',
             connection.sourceHandle,
@@ -310,17 +311,25 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
           )
         : {};
 
-      const branchVisual = isContainer
-        ? getBranchVisual(blockType, branchMetadata)
-        : { style: { stroke: '#666' } };
-
       const edgeProps: Record<string, unknown> = {
         ...connection,
-        style: branchVisual.style,
       };
-      if (branchVisual.label) edgeProps.label = branchVisual.label;
-      if (branchVisual.labelStyle) edgeProps.labelStyle = branchVisual.labelStyle;
-      if (isContainer) edgeProps.data = branchMetadata;
+
+      if (isContinuation) {
+        // Continuation edges get explicit styling — bypass getBranchVisual
+        edgeProps.style = { stroke: '#4a9eff' };
+        edgeProps.label = 'next';
+        edgeProps.labelStyle = { fill: '#4a9eff', fontSize: 9, fontWeight: 600 };
+        // No data assignment — continuation edges carry no branch metadata
+      } else {
+        const branchVisual = isContainer
+          ? getBranchVisual(blockType, branchMetadata)
+          : { style: { stroke: '#666' } };
+        edgeProps.style = branchVisual.style;
+        if (branchVisual.label) edgeProps.label = branchVisual.label;
+        if (branchVisual.labelStyle) edgeProps.labelStyle = branchVisual.labelStyle;
+        if (isContainer) edgeProps.data = branchMetadata;
+      }
 
       return {
         edges: addEdge(edgeProps as Edge, state.edges),
