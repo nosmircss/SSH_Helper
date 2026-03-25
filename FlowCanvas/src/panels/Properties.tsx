@@ -426,6 +426,24 @@ function StartProperties({
     (val) => onPropChange('version', val ? Number(val) : undefined),
   );
 
+  const varsYamlInput = useBufferedInput(
+    typeof props.vars_yaml === 'string' ? props.vars_yaml : '',
+    `${nodeId}:start-vars-yaml`,
+    (val) => onPropChange('vars_yaml', val.length > 0 ? val : undefined),
+  );
+
+  const importsYamlInput = useBufferedInput(
+    typeof props.imports_yaml === 'string' ? props.imports_yaml : '',
+    `${nodeId}:start-imports-yaml`,
+    (val) => onPropChange('imports_yaml', val.length > 0 ? val : undefined),
+  );
+
+  const subroutinesYamlInput = useBufferedInput(
+    typeof props.subroutines_yaml === 'string' ? props.subroutines_yaml : '',
+    `${nodeId}:start-subroutines-yaml`,
+    (val) => onPropChange('subroutines_yaml', val.length > 0 ? val : undefined),
+  );
+
   const colors = { text: '#80d4a0', border: '#2ecc71', bg: '#0d2a1a' };
 
   const inputStyle: React.CSSProperties = {
@@ -577,6 +595,65 @@ function StartProperties({
             {field.label}
           </label>
         ))}
+      </div>
+
+      {/* Advanced YAML sections */}
+      <div style={{
+        borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
+        paddingTop: 10,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}>
+        <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)' }}>Advanced Sections (YAML)</label>
+
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+            vars
+          </label>
+          <textarea
+            data-testid="start-vars-yaml-input"
+            value={varsYamlInput.value}
+            placeholder={`key: value\nother: 123`}
+            onChange={(e) => varsYamlInput.onChange(e.target.value)}
+            onFocus={varsYamlInput.onFocus}
+            onBlur={varsYamlInput.onBlur}
+            rows={4}
+            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'monospace' }}
+          />
+        </div>
+
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+            imports
+          </label>
+          <textarea
+            data-testid="start-imports-yaml-input"
+            value={importsYamlInput.value}
+            placeholder={`- path: C:\\\\scripts\\\\shared.yaml\n  as: shared`}
+            onChange={(e) => importsYamlInput.onChange(e.target.value)}
+            onFocus={importsYamlInput.onFocus}
+            onBlur={importsYamlInput.onBlur}
+            rows={4}
+            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'monospace' }}
+          />
+        </div>
+
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+            subroutines
+          </label>
+          <textarea
+            data-testid="start-subroutines-yaml-input"
+            value={subroutinesYamlInput.value}
+            placeholder={`name:\n  steps:\n    - print: "hello"`}
+            onChange={(e) => subroutinesYamlInput.onChange(e.target.value)}
+            onFocus={subroutinesYamlInput.onFocus}
+            onBlur={subroutinesYamlInput.onBlur}
+            rows={6}
+            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'monospace' }}
+          />
+        </div>
       </div>
 
       {/* Read-only summaries for vars and imports */}

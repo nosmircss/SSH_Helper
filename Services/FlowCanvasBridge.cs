@@ -690,6 +690,8 @@ namespace SSH_Helper.Services
                             branches.Add(new BranchInfo(label, $"cases/{caseIndex}/do", ColorCase, null, c.Do));
                         }
                     }
+                    if (step.Else != null && step.Else.Count > 0)
+                        branches.Add(new BranchInfo("default", "default", ColorElse, null, step.Else));
                     break;
 
                 case StepType.Parallel:
@@ -767,11 +769,25 @@ namespace SSH_Helper.Services
         {
             public string TargetId { get; }
             public string? SourceHandle { get; }
+            public string? BranchPath { get; }
+            public string? BranchCondition { get; }
+            public string? CaseValue { get; }
+            public string? Label { get; }
 
-            public EdgeInfo(string targetId, string? sourceHandle)
+            public EdgeInfo(
+                string targetId,
+                string? sourceHandle,
+                string? branchPath = null,
+                string? branchCondition = null,
+                string? caseValue = null,
+                string? label = null)
             {
                 TargetId = targetId;
                 SourceHandle = sourceHandle;
+                BranchPath = branchPath;
+                BranchCondition = branchCondition;
+                CaseValue = caseValue;
+                Label = label;
             }
         }
 
@@ -936,9 +952,20 @@ namespace SSH_Helper.Services
                 var src = edge["source"]?.ToString();
                 var tgt = edge["target"]?.ToString();
                 var sourceHandle = edge["sourceHandle"]?.ToString();
+                var edgeLabel = edge["label"]?.ToString();
+                var edgeData = edge["data"] as JObject;
+                var branchPath = edgeData?["branchPath"]?.ToString();
+                var branchCondition = edgeData?["condition"]?.ToString();
+                var caseValue = edgeData?["caseValue"]?.ToString();
                 if (src == null || tgt == null) continue;
                 if (!outgoing.ContainsKey(src)) outgoing[src] = new List<EdgeInfo>();
-                outgoing[src].Add(new EdgeInfo(tgt, sourceHandle));
+                outgoing[src].Add(new EdgeInfo(
+                    tgt,
+                    sourceHandle,
+                    branchPath,
+                    branchCondition,
+                    caseValue,
+                    edgeLabel));
                 incomingCount[tgt] = incomingCount.TryGetValue(tgt, out var count) ? count + 1 : 1;
             }
 
@@ -1050,19 +1077,16 @@ namespace SSH_Helper.Services
                 }
 
                 // Container blocks WITHOUT snippet (created visually): generate nested YAML
-                // from graph structure for supported types (if, foreach, while).
+                // from graph structure.
                 if (IsContainerBlockType(blockType) && string.IsNullOrWhiteSpace(yamlSnippet))
                 {
-                    var supportedContainers = new[] { "if", "foreach", "while" };
-                    if (supportedContainers.Contains(blockType) && TryGenerateContainerFromGraph(
+                    if (TryGenerateContainerFromGraph(
                             blockType, props, nodeId, outgoing, nodeMap, incomingCount,
                             consumedByContainer, result, out var containerYaml))
                     {
                         sb.AppendLine(containerYaml);
                         continue;
                     }
-                    // Unsupported containers (try/switch/parallel) without snippet:
-                    // fall through to TryGenerateStepYaml which will produce incomplete YAML.
                 }
 
                 if (TryGenerateStepYaml(blockType, props, out var generatedYaml, out var error))
@@ -1161,9 +1185,16 @@ namespace SSH_Helper.Services
             return chain;
         }
 
+        private sealed class BranchExportInfo
+        {
+            public int Index { get; set; }
+            public string TargetId { get; set; } = string.Empty;
+            public string? Condition { get; set; }
+            public string? CaseValue { get; set; }
+        }
+
         /// <summary>
-        /// Generates YAML for a container block (if, foreach, while) that was created visually
-        /// and has no stored _yamlSnippet. Builds nested branch content from the graph edges.
+        /// Generates YAML for a visually-authored container block by deriving branch structure from graph edge metadata.
         /// </summary>
         private bool TryGenerateContainerFromGraph(
             string blockType,
@@ -1178,8 +1209,7 @@ namespace SSH_Helper.Services
         {
             yaml = string.Empty;
 
-            // Generate the container header (e.g., "- if:\n    condition: abc = true")
-            if (!TryGenerateStepYaml(blockType, props, out var headerYaml, out var headerError))
+            if (!TryGenerateContainerHeaderYaml(blockType, props, out var headerYaml, out var headerError))
             {
                 result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
                     ExportDiagnosticSeverity.Error,
@@ -1190,63 +1220,385 @@ namespace SSH_Helper.Services
                 return false;
             }
 
+            var nodeEdges = outgoing.TryGetValue(nodeId, out var edgesFromNode)
+                ? edgesFromNode
+                : new List<EdgeInfo>();
             var sb = new StringBuilder();
             sb.Append(headerYaml.TrimEnd());
+            sb.AppendLine();
 
-            // Classify outgoing edges by sourceHandle
-            var thenTargets = new List<string>();
-            var elseTargets = new List<string>();
-            if (outgoing.TryGetValue(nodeId, out var nodeEdges))
+            var branchVisited = new HashSet<string>(StringComparer.Ordinal);
+
+            if (string.Equals(blockType, "if", StringComparison.OrdinalIgnoreCase))
             {
-                foreach (var ei in nodeEdges)
+                string? thenTarget = null;
+                string? elseTarget = null;
+                var elifBranches = new List<BranchExportInfo>();
+                var fallbackElifIndex = 0;
+
+                foreach (var edge in nodeEdges)
                 {
-                    if (string.Equals(ei.SourceHandle, "false", StringComparison.OrdinalIgnoreCase))
-                        elseTargets.Add(ei.TargetId);
+                    if (string.Equals(edge.SourceHandle, "false", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(edge.BranchPath, "else", StringComparison.OrdinalIgnoreCase))
+                    {
+                        elseTarget ??= edge.TargetId;
+                        continue;
+                    }
+
+                    if (TryParseIndexedScope(edge.BranchPath, "elif", out var elifIndex))
+                    {
+                        elifBranches.Add(new BranchExportInfo
+                        {
+                            Index = elifIndex,
+                            TargetId = edge.TargetId,
+                            Condition = edge.BranchCondition ?? ParseConditionFromLabel(edge.Label),
+                        });
+                        continue;
+                    }
+
+                    if (string.Equals(edge.BranchPath, "then", StringComparison.OrdinalIgnoreCase) && thenTarget == null)
+                    {
+                        thenTarget = edge.TargetId;
+                        continue;
+                    }
+
+                    if (thenTarget == null)
+                    {
+                        thenTarget = edge.TargetId;
+                        continue;
+                    }
+
+                    elifBranches.Add(new BranchExportInfo
+                    {
+                        Index = fallbackElifIndex++,
+                        TargetId = edge.TargetId,
+                        Condition = edge.BranchCondition ?? ParseConditionFromLabel(edge.Label),
+                    });
+                }
+
+                if (thenTarget == null)
+                {
+                    result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
+                        ExportDiagnosticSeverity.Error,
+                        "If block is missing a 'then' branch connection.",
+                        nodeId));
+                    return false;
+                }
+
+                var thenChain = CollectBranchChain(thenTarget, outgoing, incomingCount, branchVisited);
+                if (thenChain.Count == 0)
+                {
+                    sb.AppendLine("    then: []");
+                }
+                else
+                {
+                    sb.AppendLine("    then:");
+                    if (!TryGenerateBranchYaml(
+                            thenChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                    {
+                        return false;
+                    }
+                }
+
+                if (elifBranches.Count > 0)
+                {
+                    sb.AppendLine("    elif:");
+                    foreach (var elif in elifBranches.OrderBy(b => b.Index))
+                    {
+                        var elifCondition = string.IsNullOrWhiteSpace(elif.Condition) ? "false" : elif.Condition!;
+                        sb.AppendLine($"      - condition: {EscapeYamlString(elifCondition)}");
+                        var elifChain = CollectBranchChain(elif.TargetId, outgoing, incomingCount, branchVisited);
+                        if (elifChain.Count == 0)
+                        {
+                            sb.AppendLine("        then: []");
+                        }
+                        else
+                        {
+                            sb.AppendLine("        then:");
+                            if (!TryGenerateBranchYaml(
+                                    elifChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 10))
+                            {
+                                return false;
+                            }
+                        }
+                    }
+                }
+
+                if (elseTarget != null)
+                {
+                    var elseChain = CollectBranchChain(elseTarget, outgoing, incomingCount, branchVisited);
+                    if (elseChain.Count == 0)
+                    {
+                        sb.AppendLine("    else: []");
+                    }
                     else
-                        thenTargets.Add(ei.TargetId);
+                    {
+                        sb.AppendLine("    else:");
+                        if (!TryGenerateBranchYaml(
+                                elseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+            else if (string.Equals(blockType, "foreach", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(blockType, "while", StringComparison.OrdinalIgnoreCase))
+            {
+                var doEdge = nodeEdges.FirstOrDefault(edge =>
+                    string.Equals(edge.BranchPath, "do", StringComparison.OrdinalIgnoreCase))
+                    ?? nodeEdges.FirstOrDefault();
+
+                if (doEdge == null)
+                {
+                    result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
+                        ExportDiagnosticSeverity.Error,
+                        $"Container block '{blockType}' is missing a 'do' branch connection.",
+                        nodeId));
+                    return false;
+                }
+
+                var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited);
+                if (doChain.Count == 0)
+                {
+                    sb.AppendLine("    do: []");
+                }
+                else
+                {
+                    sb.AppendLine("    do:");
+                    if (!TryGenerateBranchYaml(
+                            doChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                    {
+                        return false;
+                    }
+                }
+            }
+            else if (string.Equals(blockType, "try", StringComparison.OrdinalIgnoreCase))
+            {
+                EdgeInfo? doEdge = null;
+                EdgeInfo? catchEdge = null;
+                EdgeInfo? finallyEdge = null;
+
+                foreach (var edge in nodeEdges)
+                {
+                    if (string.Equals(edge.BranchPath, "catch", StringComparison.OrdinalIgnoreCase))
+                    {
+                        catchEdge ??= edge;
+                        continue;
+                    }
+
+                    if (string.Equals(edge.BranchPath, "finally", StringComparison.OrdinalIgnoreCase))
+                    {
+                        finallyEdge ??= edge;
+                        continue;
+                    }
+
+                    if (string.Equals(edge.BranchPath, "try", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(edge.BranchPath, "do", StringComparison.OrdinalIgnoreCase))
+                    {
+                        doEdge ??= edge;
+                        continue;
+                    }
+
+                    if (doEdge == null) doEdge = edge;
+                    else if (catchEdge == null) catchEdge = edge;
+                    else if (finallyEdge == null) finallyEdge = edge;
+                }
+
+                if (doEdge == null)
+                {
+                    result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
+                        ExportDiagnosticSeverity.Error,
+                        "Try block is missing a 'do' branch connection.",
+                        nodeId));
+                    return false;
+                }
+
+                var doChain = CollectBranchChain(doEdge.TargetId, outgoing, incomingCount, branchVisited);
+                if (doChain.Count == 0)
+                {
+                    sb.AppendLine("    do: []");
+                }
+                else
+                {
+                    sb.AppendLine("    do:");
+                    if (!TryGenerateBranchYaml(
+                            doChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                    {
+                        return false;
+                    }
+                }
+
+                if (catchEdge != null)
+                {
+                    var catchChain = CollectBranchChain(catchEdge.TargetId, outgoing, incomingCount, branchVisited);
+                    if (catchChain.Count == 0)
+                    {
+                        sb.AppendLine("    catch: []");
+                    }
+                    else
+                    {
+                        sb.AppendLine("    catch:");
+                        if (!TryGenerateBranchYaml(
+                                catchChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                if (finallyEdge != null)
+                {
+                    var finallyChain = CollectBranchChain(finallyEdge.TargetId, outgoing, incomingCount, branchVisited);
+                    if (finallyChain.Count == 0)
+                    {
+                        sb.AppendLine("    finally: []");
+                    }
+                    else
+                    {
+                        sb.AppendLine("    finally:");
+                        if (!TryGenerateBranchYaml(
+                                finallyChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+            else if (string.Equals(blockType, "switch", StringComparison.OrdinalIgnoreCase))
+            {
+                var caseBranches = new List<BranchExportInfo>();
+                string? defaultTarget = null;
+                var fallbackCaseIndex = 0;
+
+                foreach (var edge in nodeEdges)
+                {
+                    if (string.Equals(edge.BranchPath, "default", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(edge.BranchPath, "else", StringComparison.OrdinalIgnoreCase))
+                    {
+                        defaultTarget ??= edge.TargetId;
+                        continue;
+                    }
+
+                    if (TryParseIndexedScope(edge.BranchPath, "cases", out var caseIndex))
+                    {
+                        caseBranches.Add(new BranchExportInfo
+                        {
+                            Index = caseIndex,
+                            TargetId = edge.TargetId,
+                            CaseValue = edge.CaseValue ?? ParseCaseValueFromLabel(edge.Label) ?? $"case_{caseIndex + 1}",
+                        });
+                        continue;
+                    }
+
+                    caseBranches.Add(new BranchExportInfo
+                    {
+                        Index = fallbackCaseIndex++,
+                        TargetId = edge.TargetId,
+                        CaseValue = edge.CaseValue ?? ParseCaseValueFromLabel(edge.Label) ?? $"case_{fallbackCaseIndex}",
+                    });
+                }
+
+                if (caseBranches.Count == 0)
+                {
+                    result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
+                        ExportDiagnosticSeverity.Error,
+                        "Switch block is missing case branch connections.",
+                        nodeId));
+                    return false;
+                }
+
+                sb.AppendLine("    cases:");
+                foreach (var branch in caseBranches.OrderBy(b => b.Index))
+                {
+                    var caseChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited);
+                    sb.AppendLine($"      - value: {EscapeYamlString(branch.CaseValue ?? $"case_{branch.Index + 1}")}");
+                    if (caseChain.Count == 0)
+                    {
+                        sb.AppendLine("        do: []");
+                    }
+                    else
+                    {
+                        sb.AppendLine("        do:");
+                        if (!TryGenerateBranchYaml(
+                                caseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 10))
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                if (defaultTarget != null)
+                {
+                    var defaultChain = CollectBranchChain(defaultTarget, outgoing, incomingCount, branchVisited);
+                    if (defaultChain.Count == 0)
+                    {
+                        sb.AppendLine("    default: []");
+                    }
+                    else
+                    {
+                        sb.AppendLine("    default:");
+                        if (!TryGenerateBranchYaml(
+                                defaultChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb, 6))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+            else if (string.Equals(blockType, "parallel", StringComparison.OrdinalIgnoreCase))
+            {
+                var branches = new List<BranchExportInfo>();
+                var fallbackParallelIndex = 0;
+
+                foreach (var edge in nodeEdges)
+                {
+                    if (TryParseIndexedScope(edge.BranchPath, "parallel", out var branchIndex))
+                    {
+                        branches.Add(new BranchExportInfo { Index = branchIndex, TargetId = edge.TargetId });
+                    }
+                    else
+                    {
+                        branches.Add(new BranchExportInfo { Index = fallbackParallelIndex++, TargetId = edge.TargetId });
+                    }
+                }
+
+                if (branches.Count == 0)
+                {
+                    result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
+                        ExportDiagnosticSeverity.Error,
+                        "Parallel block is missing branch connections.",
+                        nodeId));
+                    return false;
+                }
+
+                sb.AppendLine("    steps:");
+                foreach (var branch in branches.OrderBy(b => b.Index))
+                {
+                    var branchChain = CollectBranchChain(branch.TargetId, outgoing, incomingCount, branchVisited);
+                    if (branchChain.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    if (branchChain.Count > 1)
+                    {
+                        result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
+                            ExportDiagnosticSeverity.Warning,
+                            "Parallel branch contains multiple sequential nodes; exporting the first node only.",
+                            nodeId));
+                    }
+
+                    if (!TryGenerateSingleNodeYaml(
+                            branchChain[0], nodeMap, outgoing, incomingCount, consumedByContainer, result, out var branchYaml))
+                    {
+                        return false;
+                    }
+
+                    sb.AppendLine(IndentYaml(branchYaml.TrimEnd(), 6));
                 }
             }
 
-            // Determine branch label based on block type
-            string primaryBranchLabel = blockType == "if" ? "then" : "do";
-
-            // Collect the primary branch chain (then/do)
-            var branchVisited = new HashSet<string>();
-            var primaryChain = new List<string>();
-            if (thenTargets.Count > 0)
-            {
-                primaryChain = CollectBranchChain(thenTargets[0], outgoing, incomingCount, branchVisited);
-            }
-
-            // Collect the else branch chain (if block only)
-            var elseChain = new List<string>();
-            if (blockType == "if" && elseTargets.Count > 0)
-            {
-                elseChain = CollectBranchChain(elseTargets[0], outgoing, incomingCount, branchVisited);
-            }
-
-            // Generate primary branch YAML (then/do)
-            sb.AppendLine();
-            if (primaryChain.Count > 0)
-            {
-                sb.AppendLine($"    {primaryBranchLabel}:");
-                if (!TryGenerateBranchYaml(primaryChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb))
-                    return false;
-            }
-            else
-            {
-                sb.AppendLine($"    {primaryBranchLabel}: []");
-            }
-
-            // Generate else branch YAML (if block only, and only when nodes are connected)
-            if (blockType == "if" && elseChain.Count > 0)
-            {
-                sb.AppendLine("    else:");
-                if (!TryGenerateBranchYaml(elseChain, nodeMap, outgoing, incomingCount, consumedByContainer, result, sb))
-                    return false;
-            }
-
-            // Mark all branch nodes as consumed so they're skipped in the top-level export loop
             foreach (var id in branchVisited)
                 consumedByContainer.Add(id);
 
@@ -1254,9 +1606,106 @@ namespace SSH_Helper.Services
             return true;
         }
 
+        private static bool TryParseIndexedScope(string? branchPath, string scopePrefix, out int index)
+        {
+            index = -1;
+            if (string.IsNullOrWhiteSpace(branchPath))
+                return false;
+
+            var parts = branchPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+                return false;
+
+            if (!string.Equals(parts[0], scopePrefix, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return int.TryParse(parts[1], out index);
+        }
+
+        private static string? ParseConditionFromLabel(string? label)
+        {
+            if (string.IsNullOrWhiteSpace(label))
+                return null;
+
+            var trimmed = label.Trim();
+            if (trimmed.StartsWith("elif:", StringComparison.OrdinalIgnoreCase))
+                return trimmed.Substring("elif:".Length).Trim();
+
+            return null;
+        }
+
+        private static string? ParseCaseValueFromLabel(string? label)
+        {
+            if (string.IsNullOrWhiteSpace(label))
+                return null;
+
+            var trimmed = label.Trim();
+            if (trimmed.StartsWith("case:", StringComparison.OrdinalIgnoreCase))
+                return trimmed.Substring("case:".Length).Trim();
+
+            return null;
+        }
+
+        private bool TryGenerateSingleNodeYaml(
+            string nodeId,
+            Dictionary<string, JToken> nodeMap,
+            Dictionary<string, List<EdgeInfo>> outgoing,
+            Dictionary<string, int> incomingCount,
+            HashSet<string> consumedByContainer,
+            FlowCanvasExportResult result,
+            out string nodeYaml)
+        {
+            nodeYaml = string.Empty;
+
+            if (!nodeMap.TryGetValue(nodeId, out var node))
+                return true;
+
+            var nodeData = node["data"];
+            var nodeProps = nodeData?["props"] as JObject;
+            var nodeBlockType = nodeData?["blockType"]?.ToString() ?? "print";
+            var snippet = nodeProps?["_yamlSnippet"]?.ToString();
+
+            if (IsContainerBlockType(nodeBlockType) && !string.IsNullOrWhiteSpace(snippet))
+            {
+                nodeYaml = NormalizeTopLevelSnippetIndent(snippet).TrimEnd();
+                return true;
+            }
+
+            if (IsContainerBlockType(nodeBlockType) && string.IsNullOrWhiteSpace(snippet))
+            {
+                if (!TryGenerateContainerFromGraph(
+                        nodeBlockType,
+                        nodeProps,
+                        nodeId,
+                        outgoing,
+                        nodeMap,
+                        incomingCount,
+                        consumedByContainer,
+                        result,
+                        out nodeYaml))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            if (!TryGenerateStepYaml(nodeBlockType, nodeProps, out nodeYaml, out var nodeError))
+            {
+                result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
+                    ExportDiagnosticSeverity.Error,
+                    string.IsNullOrWhiteSpace(nodeError)
+                        ? $"Unable to export block type '{nodeBlockType}' inside container."
+                        : nodeError!,
+                    nodeId));
+                return false;
+            }
+
+            return true;
+        }
+
         /// <summary>
-        /// Generates indented YAML for a list of nodes within a branch (then/else/do).
-        /// Each step is indented by 6 spaces (4 for container body + 2 for list dash).
+        /// Generates indented YAML for a list of nodes within a branch (then/else/do/catch/finally).
         /// </summary>
         private bool TryGenerateBranchYaml(
             List<string> nodeChain,
@@ -1265,55 +1714,106 @@ namespace SSH_Helper.Services
             Dictionary<string, int> incomingCount,
             HashSet<string> consumedByContainer,
             FlowCanvasExportResult result,
-            StringBuilder sb)
+            StringBuilder sb,
+            int indent)
         {
             foreach (var childId in nodeChain)
             {
-                if (!nodeMap.TryGetValue(childId, out var childNode)) continue;
-
-                var childData = childNode["data"];
-                var childProps = childData?["props"] as JObject;
-                var childBlockType = childData?["blockType"]?.ToString() ?? "print";
-
-                string childYaml;
-
-                // Check if this child is itself a supported container without a snippet
-                var childSnippet = childProps?["_yamlSnippet"]?.ToString();
-                var supportedContainers = new[] { "if", "foreach", "while" };
-                if (IsContainerBlockType(childBlockType)
-                    && !string.IsNullOrWhiteSpace(childSnippet))
+                if (!TryGenerateSingleNodeYaml(
+                        childId,
+                        nodeMap,
+                        outgoing,
+                        incomingCount,
+                        consumedByContainer,
+                        result,
+                        out var childYaml))
                 {
-                    // Container with snippet — re-emit normalized snippet
-                    childYaml = NormalizeTopLevelSnippetIndent(childSnippet).TrimEnd();
-                }
-                else if (supportedContainers.Contains(childBlockType)
-                    && string.IsNullOrWhiteSpace(childSnippet))
-                {
-                    // Nested container without snippet — recurse
-                    if (!TryGenerateContainerFromGraph(childBlockType, childProps, childId,
-                        outgoing, nodeMap, incomingCount, consumedByContainer, result, out childYaml))
-                        return false;
-                }
-                else
-                {
-                    // Regular step
-                    if (!TryGenerateStepYaml(childBlockType, childProps, out childYaml, out var childError))
-                    {
-                        result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
-                            ExportDiagnosticSeverity.Error,
-                            string.IsNullOrWhiteSpace(childError)
-                                ? $"Unable to export block type '{childBlockType}' inside container."
-                                : childError!,
-                            childId));
-                        return false;
-                    }
+                    return false;
                 }
 
-                // Indent the child YAML by 6 spaces and append
-                sb.AppendLine(IndentYaml(childYaml.TrimEnd(), 6));
+                sb.AppendLine(IndentYaml(childYaml.TrimEnd(), indent));
             }
 
             return true;
+        }
+
+        private static bool TryGenerateContainerHeaderYaml(
+            string blockType,
+            JObject? props,
+            out string yaml,
+            out string? error)
+        {
+            yaml = string.Empty;
+            error = null;
+
+            if (!TryResolveCommandKey(blockType, out var commandKey))
+            {
+                error = $"Unsupported block type '{blockType}'.";
+                return false;
+            }
+
+            var options = new JObject();
+
+            void SetScalarOptionIfPresent(string propKey, string optionKey)
+            {
+                var token = props?[propKey];
+                if (token == null || token.Type == JTokenType.Null || token.Type == JTokenType.Undefined)
+                    return;
+
+                var text = token.Type == JTokenType.String ? token.ToString() : token.ToString(Newtonsoft.Json.Formatting.None);
+                if (string.IsNullOrWhiteSpace(text))
+                    return;
+
+                options[optionKey] = token.Type == JTokenType.String ? new JValue(text) : token.DeepClone();
+            }
+
+            if (string.Equals(blockType, "if", StringComparison.OrdinalIgnoreCase))
+            {
+                SetScalarOptionIfPresent("condition", "condition");
+                if (options["condition"] == null)
+                {
+                    error = "If block is missing required condition.";
+                    return false;
+                }
+            }
+            else if (string.Equals(blockType, "foreach", StringComparison.OrdinalIgnoreCase))
+            {
+                SetScalarOptionIfPresent("iterator", "iterator");
+                SetScalarOptionIfPresent("when", "when");
+                if (options["iterator"] == null)
+                {
+                    error = "Foreach block is missing required iterator.";
+                    return false;
+                }
+            }
+            else if (string.Equals(blockType, "while", StringComparison.OrdinalIgnoreCase))
+            {
+                SetScalarOptionIfPresent("condition", "condition");
+                if (props?["max_iterations"] != null)
+                    options["max_iterations"] = props["max_iterations"]!.DeepClone();
+                if (options["condition"] == null)
+                {
+                    error = "While block is missing required condition.";
+                    return false;
+                }
+            }
+            else if (string.Equals(blockType, "switch", StringComparison.OrdinalIgnoreCase))
+            {
+                SetScalarOptionIfPresent("value", "value");
+                if (options["value"] == null)
+                {
+                    error = "Switch block is missing required value expression.";
+                    return false;
+                }
+            }
+
+            var commandValue =
+                (string.Equals(blockType, "try", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(blockType, "parallel", StringComparison.OrdinalIgnoreCase))
+                && options.Count == 0
+                    ? JValue.CreateNull()
+                    : BuildCommandValueToken(commandKey, options);
+            return TrySerializeStepYaml(commandKey, commandValue, out yaml, out error);
         }
 
         /// <summary>
@@ -3025,9 +3525,27 @@ namespace SSH_Helper.Services
             {
                 var importsArr = new JArray();
                 foreach (var imp in script.Imports)
-                    importsArr.Add(imp.Path);
+                {
+                    importsArr.Add(new JObject
+                    {
+                        ["path"] = imp.Path,
+                        ["as"] = imp.Alias,
+                    });
+                }
                 props["imports"] = importsArr;
             }
+
+            var varsSection = ExtractYamlSection(preamble, "vars:");
+            if (!string.IsNullOrWhiteSpace(varsSection))
+                props["vars_yaml"] = varsSection.TrimEnd('\r', '\n');
+
+            var importsSection = ExtractYamlSection(preamble, "imports:");
+            if (!string.IsNullOrWhiteSpace(importsSection))
+                props["imports_yaml"] = importsSection.TrimEnd('\r', '\n');
+
+            var subroutinesSection = ExtractYamlSection(preamble, "subroutines:");
+            if (!string.IsNullOrWhiteSpace(subroutinesSection))
+                props["subroutines_yaml"] = subroutinesSection.TrimEnd('\r', '\n');
 
             // Store full preamble as fallback for unrecognized keys
             props["_yamlSnippet"] = preamble;
@@ -3050,6 +3568,10 @@ namespace SSH_Helper.Services
             var library = props["library"]?.Value<bool>() == true;
             var vars = props["vars"] as JObject;
             var imports = props["imports"] as JArray;
+            var subroutines = props["subroutines"] as JObject;
+            var varsYaml = props["vars_yaml"]?.ToString();
+            var importsYaml = props["imports_yaml"]?.ToString();
+            var subroutinesYaml = props["subroutines_yaml"]?.ToString();
             var snippet = props["_yamlSnippet"]?.ToString();
 
             if (!string.IsNullOrEmpty(name))
@@ -3069,20 +3591,48 @@ namespace SSH_Helper.Services
             if (library)
                 sb.AppendLine("library: true");
 
-            // Vars and imports: use snippet section if available (edits not supported yet)
-            if (vars != null && vars.Count > 0 && snippet != null)
+            if (AppendRawSection(sb, "vars:", varsYaml))
+            {
+            }
+            else if (vars != null && vars.Count > 0)
+            {
+                AppendSerializedSection(sb, "vars", vars);
+            }
+            else if (snippet != null)
             {
                 var varsSection = ExtractYamlSection(snippet, "vars:");
-                if (!string.IsNullOrEmpty(varsSection))
+                if (!string.IsNullOrWhiteSpace(varsSection))
+                {
                     sb.Append(varsSection);
+                }
             }
-            if (imports != null && imports.Count > 0 && snippet != null)
+
+            if (AppendRawSection(sb, "imports:", importsYaml))
+            {
+            }
+            else if (imports != null && imports.Count > 0)
+            {
+                var structuredImports = NormalizeImportsForSerialization(imports);
+                AppendSerializedSection(sb, "imports", structuredImports);
+            }
+            else if (snippet != null)
             {
                 var importsSection = ExtractYamlSection(snippet, "imports:");
-                if (!string.IsNullOrEmpty(importsSection))
+                if (!string.IsNullOrWhiteSpace(importsSection))
+                {
                     sb.Append(importsSection);
+                }
             }
-            if (snippet != null)
+
+            if (AppendRawSection(sb, "subroutines:", subroutinesYaml))
+            {
+                // explicit editor content wins
+            }
+            else if (subroutines != null && subroutines.Count > 0)
+            {
+                AppendSerializedSection(sb, "subroutines", subroutines);
+            }
+            else if (snippet != null)
             {
                 var subroutinesSection = ExtractYamlSection(snippet, "subroutines:");
                 if (!string.IsNullOrEmpty(subroutinesSection))
@@ -3098,6 +3648,79 @@ namespace SSH_Helper.Services
             }
 
             return sb.ToString();
+        }
+
+        private static bool AppendRawSection(StringBuilder sb, string header, string? rawSection)
+        {
+            if (string.IsNullOrWhiteSpace(rawSection))
+                return false;
+
+            var section = rawSection!.Trim('\r', '\n');
+            if (!section.TrimStart().StartsWith(header, StringComparison.OrdinalIgnoreCase))
+            {
+                section = $"{header}\n{section}";
+            }
+
+            sb.AppendLine(section.TrimEnd('\r', '\n'));
+            return true;
+        }
+
+        private static void AppendSerializedSection(StringBuilder sb, string sectionName, JToken sectionValue)
+        {
+            var serializer = new SerializerBuilder().Build();
+            var yamlObject = new Dictionary<string, object?>
+            {
+                [sectionName] = ConvertJTokenToYamlValue(sectionValue),
+            };
+
+            var sectionYaml = serializer.Serialize(yamlObject).TrimEnd('\r', '\n');
+            sb.AppendLine(sectionYaml);
+        }
+
+        private static JToken NormalizeImportsForSerialization(JArray imports)
+        {
+            var normalized = new JArray();
+            foreach (var item in imports)
+            {
+                if (item is JObject map)
+                {
+                    var path = map["path"]?.ToString();
+                    if (string.IsNullOrWhiteSpace(path))
+                        continue;
+
+                    var alias = map["as"]?.ToString();
+                    if (string.IsNullOrWhiteSpace(alias))
+                        alias = DeriveImportAlias(path!);
+
+                    normalized.Add(new JObject
+                    {
+                        ["path"] = path,
+                        ["as"] = alias,
+                    });
+                    continue;
+                }
+
+                var legacyPath = item?.ToString();
+                if (string.IsNullOrWhiteSpace(legacyPath))
+                    continue;
+
+                normalized.Add(new JObject
+                {
+                    ["path"] = legacyPath,
+                    ["as"] = DeriveImportAlias(legacyPath),
+                });
+            }
+
+            return normalized;
+        }
+
+        private static string DeriveImportAlias(string path)
+        {
+            var normalized = path.Replace('\\', '/');
+            var fileName = normalized.Split('/').LastOrDefault() ?? "import";
+            var dotIndex = fileName.IndexOf('.');
+            var baseName = dotIndex > 0 ? fileName[..dotIndex] : fileName;
+            return string.IsNullOrWhiteSpace(baseName) ? "import" : baseName;
         }
 
         private static string EscapeYamlString(string value)

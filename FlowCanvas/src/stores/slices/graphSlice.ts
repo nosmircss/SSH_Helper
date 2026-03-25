@@ -20,6 +20,204 @@ interface SetGraphOptions {
   markDirty?: boolean;
 }
 
+interface BranchMetadata {
+  branchPath?: string;
+  condition?: string;
+  caseValue?: string;
+}
+
+function getEdgeBranchPath(edge: Edge): string | undefined {
+  const data = (edge.data ?? {}) as Record<string, unknown>;
+  const value = data.branchPath;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function getEdgeBranchCondition(edge: Edge): string | undefined {
+  const data = (edge.data ?? {}) as Record<string, unknown>;
+  const value = data.condition;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function getEdgeCaseValue(edge: Edge): string | undefined {
+  const data = (edge.data ?? {}) as Record<string, unknown>;
+  const value = data.caseValue;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function parseIndexedBranch(branchPath: string | undefined, prefix: string): number | null {
+  if (!branchPath) return null;
+  const parts = branchPath.split('/');
+  if (parts.length < 2 || parts[0] !== prefix) return null;
+  const parsed = Number.parseInt(parts[1] ?? '', 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function inferDefaultBranchMetadata(
+  blockType: string,
+  sourceHandle: string | null | undefined,
+  existingOutgoing: Edge[],
+): BranchMetadata {
+  if (blockType === 'if') {
+    if (sourceHandle === 'false') {
+      return { branchPath: 'else' };
+    }
+
+    const existingDefaultBranches = existingOutgoing.filter((edge) => {
+      if (edge.sourceHandle === 'false') return false;
+      const branchPath = getEdgeBranchPath(edge);
+      return branchPath !== 'else';
+    });
+
+    const hasThen = existingDefaultBranches.some((edge) => getEdgeBranchPath(edge) === 'then');
+    if (!hasThen) {
+      return { branchPath: 'then' };
+    }
+
+    const existingElifIndices = existingDefaultBranches
+      .map((edge) => parseIndexedBranch(getEdgeBranchPath(edge), 'elif'))
+      .filter((value): value is number => value !== null);
+    const nextElifIndex = existingElifIndices.length === 0
+      ? 0
+      : Math.max(...existingElifIndices) + 1;
+
+    return {
+      branchPath: `elif/${nextElifIndex}/then`,
+      condition: '',
+    };
+  }
+
+  if (blockType === 'foreach' || blockType === 'while') {
+    return { branchPath: 'do' };
+  }
+
+  if (blockType === 'try') {
+    const existingPaths = new Set(existingOutgoing.map((edge) => getEdgeBranchPath(edge)));
+    if (!existingPaths.has('try') && !existingPaths.has('do')) return { branchPath: 'try' };
+    if (!existingPaths.has('catch')) return { branchPath: 'catch' };
+    if (!existingPaths.has('finally')) return { branchPath: 'finally' };
+    return { branchPath: 'catch' };
+  }
+
+  if (blockType === 'switch') {
+    const caseIndices = existingOutgoing
+      .map((edge) => parseIndexedBranch(getEdgeBranchPath(edge), 'cases'))
+      .filter((value): value is number => value !== null);
+    const nextCase = caseIndices.length === 0 ? 0 : Math.max(...caseIndices) + 1;
+    return {
+      branchPath: `cases/${nextCase}/do`,
+      caseValue: `case_${nextCase + 1}`,
+    };
+  }
+
+  if (blockType === 'parallel') {
+    const branchIndices = existingOutgoing
+      .map((edge) => parseIndexedBranch(getEdgeBranchPath(edge), 'parallel'))
+      .filter((value): value is number => value !== null);
+    const nextBranch = branchIndices.length === 0 ? 0 : Math.max(...branchIndices) + 1;
+    return { branchPath: `parallel/${nextBranch}` };
+  }
+
+  return {};
+}
+
+function getBranchVisual(
+  blockType: string | undefined,
+  metadata: BranchMetadata,
+): {
+  label?: string;
+  style: Record<string, unknown>;
+  labelStyle?: Record<string, unknown>;
+} {
+  const defaultVisual = { style: { stroke: '#666' } };
+  if (!blockType) return defaultVisual;
+
+  const branchPath = metadata.branchPath;
+  if (!branchPath) return defaultVisual;
+
+  const dashed = { strokeDasharray: '5,5' };
+
+  if (blockType === 'if') {
+    if (branchPath === 'else') {
+      return {
+        label: 'else',
+        style: { stroke: '#e74c3c', ...dashed },
+        labelStyle: { fill: '#e74c3c', fontSize: 11, fontWeight: 600 },
+      };
+    }
+    if (branchPath.startsWith('elif/')) {
+      const condition = (metadata.condition ?? '').trim();
+      return {
+        label: condition ? `elif: ${condition}` : 'elif',
+        style: { stroke: '#f0c040', ...dashed },
+        labelStyle: { fill: '#f0c040', fontSize: 11, fontWeight: 600 },
+      };
+    }
+    return {
+      label: 'then',
+      style: { stroke: '#2ecc71', ...dashed },
+      labelStyle: { fill: '#2ecc71', fontSize: 11, fontWeight: 600 },
+    };
+  }
+
+  if (blockType === 'foreach' || blockType === 'while') {
+    return {
+      label: 'do',
+      style: { stroke: '#f0c040', ...dashed },
+      labelStyle: { fill: '#f0c040', fontSize: 11, fontWeight: 600 },
+    };
+  }
+
+  if (blockType === 'try') {
+    if (branchPath === 'catch') {
+      return {
+        label: 'catch',
+        style: { stroke: '#e74c3c', ...dashed },
+        labelStyle: { fill: '#e74c3c', fontSize: 11, fontWeight: 600 },
+      };
+    }
+    if (branchPath === 'finally') {
+      return {
+        label: 'finally',
+        style: { stroke: '#4a9eff', ...dashed },
+        labelStyle: { fill: '#4a9eff', fontSize: 11, fontWeight: 600 },
+      };
+    }
+    return {
+      label: 'do',
+      style: { stroke: '#2ecc71', ...dashed },
+      labelStyle: { fill: '#2ecc71', fontSize: 11, fontWeight: 600 },
+    };
+  }
+
+  if (blockType === 'switch') {
+    if (branchPath === 'default' || branchPath === 'else') {
+      return {
+        label: 'default',
+        style: { stroke: '#e74c3c', ...dashed },
+        labelStyle: { fill: '#e74c3c', fontSize: 11, fontWeight: 600 },
+      };
+    }
+    const caseValue = (metadata.caseValue ?? '').trim();
+    return {
+      label: caseValue ? `case: ${caseValue}` : 'case',
+      style: { stroke: '#f0c040', ...dashed },
+      labelStyle: { fill: '#f0c040', fontSize: 11, fontWeight: 600 },
+    };
+  }
+
+  if (blockType === 'parallel') {
+    const index = parseIndexedBranch(branchPath, 'parallel');
+    const branchLabel = index === null ? 'branch' : `branch ${index + 1}`;
+    return {
+      label: branchLabel,
+      style: { stroke: '#1abc9c', ...dashed },
+      labelStyle: { fill: '#1abc9c', fontSize: 11, fontWeight: 600 },
+    };
+  }
+
+  return defaultVisual;
+}
+
 export interface GraphSlice {
   nodes: Node[];
   edges: Edge[];
@@ -40,6 +238,7 @@ export interface GraphSlice {
   updateNodeData: (id: string, data: Record<string, unknown>) => void;
   updateNodeLabel: (id: string, label: string) => void;
   updateNodeProp: (id: string, key: string, value: unknown) => void;
+  updateEdgeBranchMetadata: (id: string, metadata: BranchMetadata) => void;
   updateNodePosition: (id: string, position: { x: number; y: number }) => void;
   selectNode: (id: string | null) => void;
   toggleNodeSelection: (id: string) => void;
@@ -102,38 +301,26 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
       const blockType = (sourceNode?.data as Record<string, unknown>)?.blockType as string | undefined;
       const def = blockType ? blockDefMap.get(blockType) : undefined;
 
-      let edgeStyle: Record<string, unknown> = { stroke: '#666' };
-      let edgeLabel: string | undefined;
-      let labelStyle: Record<string, unknown> | undefined;
+      const isContainer = !!def?.isContainer;
+      const branchMetadata = isContainer
+        ? inferDefaultBranchMetadata(
+            blockType ?? '',
+            connection.sourceHandle,
+            state.edges.filter((edge) => edge.source === connection.source),
+          )
+        : {};
 
-      if (def?.isContainer) {
-        const handle = connection.sourceHandle;
-        if (blockType === 'if') {
-          if (handle === 'false') {
-            // Else branch (right/red handle)
-            edgeLabel = 'else';
-            edgeStyle = { stroke: '#e74c3c', strokeDasharray: '5,5' };
-            labelStyle = { fill: '#e74c3c', fontSize: 11, fontWeight: 600 };
-          } else {
-            // Then branch (bottom/default handle)
-            edgeLabel = 'then';
-            edgeStyle = { stroke: '#2ecc71', strokeDasharray: '5,5' };
-            labelStyle = { fill: '#2ecc71', fontSize: 11, fontWeight: 600 };
-          }
-        } else if (blockType === 'foreach' || blockType === 'while') {
-          // Loop body (bottom/default handle)
-          edgeLabel = 'do';
-          edgeStyle = { stroke: '#f0c040', strokeDasharray: '5,5' };
-          labelStyle = { fill: '#f0c040', fontSize: 11, fontWeight: 600 };
-        }
-      }
+      const branchVisual = isContainer
+        ? getBranchVisual(blockType, branchMetadata)
+        : { style: { stroke: '#666' } };
 
       const edgeProps: Record<string, unknown> = {
         ...connection,
-        style: edgeStyle,
+        style: branchVisual.style,
       };
-      if (edgeLabel) edgeProps.label = edgeLabel;
-      if (labelStyle) edgeProps.labelStyle = labelStyle;
+      if (branchVisual.label) edgeProps.label = branchVisual.label;
+      if (branchVisual.labelStyle) edgeProps.labelStyle = branchVisual.labelStyle;
+      if (isContainer) edgeProps.data = branchMetadata;
 
       return {
         edges: addEdge(edgeProps as Edge, state.edges),
@@ -217,6 +404,41 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
             ...currentData,
             props: { ...currentProps, [key]: value },
           },
+        };
+      }),
+      isDirty: true,
+      ...clearedExportStatusState(),
+    }));
+  },
+
+  updateEdgeBranchMetadata: (id, metadata) => {
+    get().pushSnapshot('Edit branch');
+    set((state) => ({
+      edges: state.edges.map((edge) => {
+        if (edge.id !== id) return edge;
+
+        const sourceNode = state.nodes.find((node) => node.id === edge.source);
+        const sourceBlockType = typeof (sourceNode?.data as Record<string, unknown> | undefined)?.blockType === 'string'
+          ? String((sourceNode?.data as Record<string, unknown>).blockType)
+          : undefined;
+
+        const existingData = (edge.data ?? {}) as Record<string, unknown>;
+        const nextMetadata: BranchMetadata = {
+          branchPath: metadata.branchPath ?? (typeof existingData.branchPath === 'string' ? existingData.branchPath : undefined),
+          condition: metadata.condition ?? (typeof existingData.condition === 'string' ? existingData.condition : undefined),
+          caseValue: metadata.caseValue ?? (typeof existingData.caseValue === 'string' ? existingData.caseValue : undefined),
+        };
+        const visual = getBranchVisual(sourceBlockType, nextMetadata);
+
+        return {
+          ...edge,
+          data: {
+            ...existingData,
+            ...nextMetadata,
+          },
+          style: visual.style,
+          label: visual.label,
+          labelStyle: visual.labelStyle,
         };
       }),
       isDirty: true,

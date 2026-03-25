@@ -8,8 +8,101 @@ import type { Node, Edge } from '@xyflow/react';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
 import type { BlockExecState } from './slices/executionSlice';
 
+interface FlowCanvasTestHooks {
+  onOutgoingMessage?: (msg: unknown) => void;
+  setGraphViaActions?: (graph: { nodes?: unknown[]; edges?: unknown[] }) => void;
+  clearGraphViaActions?: () => void;
+  getGraphSnapshot?: () => { nodes: unknown[]; edges: unknown[] };
+}
+
+function cloneForTest<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function ensureStartNodeExists(store: typeof useFlowStore): void {
+  const loadedNodes = store.getState().nodes;
+  const loadedEdges = store.getState().edges;
+  const hasStart = loadedNodes.some((n) => n.id === '__start__');
+  if (hasStart) return;
+
+  const preambleNode = loadedNodes.find(
+    (n) => (n.data as any)?.blockType === '_preamble',
+  );
+  const startNode: Node = {
+    id: '__start__',
+    type: 'start',
+    position: { x: 250, y: 0 },
+    data: {
+      blockType: '_start',
+      label: 'Untitled Script',
+      props: preambleNode
+        ? (preambleNode.data as any)?.props ?? {}
+        : {},
+    },
+  };
+
+  const filtered = loadedNodes.filter(
+    (n) => (n.data as any)?.blockType !== '_preamble',
+  );
+  store.getState().setNodes([startNode, ...filtered]);
+
+  const incomingTargets = new Set(loadedEdges.map((e) => e.target));
+  const firstRoot = filtered.find((n) => !incomingTargets.has(n.id));
+  if (firstRoot) {
+    store.getState().setEdges([
+      ...loadedEdges,
+      {
+        id: `edge-start-${firstRoot.id}`,
+        source: '__start__',
+        target: firstRoot.id,
+        style: { stroke: '#666' },
+      } as Edge,
+    ]);
+  }
+}
+
+function resetGraphSessionState(store: typeof useFlowStore): void {
+  store.getState().clearDirty();
+  store.getState().clearHistory();
+  store.getState().clearExecution();
+  store.getState().clearTimeline();
+  store.getState().clearExportStatus();
+}
+
+function installFlowCanvasTestHooks(store: typeof useFlowStore): void {
+  const globalWindow = window as Window & { __FLOWCANVAS_TEST_HOOKS__?: FlowCanvasTestHooks };
+  const hooks = globalWindow.__FLOWCANVAS_TEST_HOOKS__ ?? {};
+
+  hooks.setGraphViaActions = (graph) => {
+    const nodes = Array.isArray(graph?.nodes) ? cloneForTest(graph.nodes) as Node[] : [];
+    const edges = Array.isArray(graph?.edges) ? cloneForTest(graph.edges) as Edge[] : [];
+
+    store.getState().setNodes(nodes);
+    store.getState().setEdges(edges);
+    ensureStartNodeExists(store);
+    resetGraphSessionState(store);
+  };
+
+  hooks.clearGraphViaActions = () => {
+    store.getState().setNodes([]);
+    store.getState().setEdges([]);
+    resetGraphSessionState(store);
+  };
+
+  hooks.getGraphSnapshot = () => {
+    const state = store.getState();
+    return cloneForTest({
+      nodes: state.nodes,
+      edges: state.edges,
+    });
+  };
+
+  globalWindow.__FLOWCANVAS_TEST_HOOKS__ = hooks;
+}
+
 export function initMessageBridge(): () => void {
   const store = useFlowStore;
+  installFlowCanvasTestHooks(store);
 
   const unsubs = [
     // Load graph from C# (YAML → graph conversion result)
@@ -17,55 +110,8 @@ export function initMessageBridge(): () => void {
       if (msg.nodes && msg.edges) {
         store.getState().setNodes(msg.nodes as Node[]);
         store.getState().setEdges(msg.edges as Edge[]);
-
-        // Ensure Start node always exists
-        const loadedNodes = store.getState().nodes;
-        const loadedEdges = store.getState().edges;
-        const hasStart = loadedNodes.some((n) => n.id === '__start__');
-        if (!hasStart) {
-          // Migrate: check for old __preamble__ node
-          const preambleNode = loadedNodes.find(
-            (n) => (n.data as any)?.blockType === '_preamble',
-          );
-          const startNode: Node = {
-            id: '__start__',
-            type: 'start',
-            position: { x: 250, y: 0 },
-            data: {
-              blockType: '_start',
-              label: 'Untitled Script',
-              props: preambleNode
-                ? (preambleNode.data as any)?.props ?? {}
-                : {},
-            },
-          };
-          // Remove old preamble node if present, add Start node
-          const filtered = loadedNodes.filter(
-            (n) => (n.data as any)?.blockType !== '_preamble',
-          );
-          store.getState().setNodes([startNode, ...filtered]);
-
-          // Create edge from Start to the first root node (no incoming edges)
-          const incomingTargets = new Set(loadedEdges.map((e) => e.target));
-          const firstRoot = filtered.find((n) => !incomingTargets.has(n.id));
-          if (firstRoot) {
-            store.getState().setEdges([
-              ...loadedEdges,
-              {
-                id: `edge-start-${firstRoot.id}`,
-                source: '__start__',
-                target: firstRoot.id,
-                style: { stroke: '#666' },
-              } as Edge,
-            ]);
-          }
-        }
-
-        store.getState().clearDirty();
-        store.getState().clearHistory();
-        store.getState().clearExecution();
-        store.getState().clearTimeline();
-        store.getState().clearExportStatus();
+        ensureStartNodeExists(store);
+        resetGraphSessionState(store);
       }
     }),
 

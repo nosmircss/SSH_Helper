@@ -1,5 +1,26 @@
 # TODO
 
+## 152. Implement add-flow-canvas-preset-parity-process
+- [x] 152.1 Read `openspec/changes/add-flow-canvas-preset-parity-process/proposal.md`, `design.md`, and `tasks.md` to confirm scope and acceptance criteria.
+- [x] 152.2 Create and verify implementation plan/checklist in this tracker before coding.
+- [x] 152.3 Implement OpenSpec implementation tasks 1.1-1.10 sequentially with minimal scoped edits.
+- [x] 152.4 Run verification gates 2.1-2.5 with command evidence.
+- [x] 152.5 Complete rollout tasks 3.1-3.2 (manual-run only + CI-gating follow-up capture).
+- [x] 152.6 Update `openspec/changes/add-flow-canvas-preset-parity-process/tasks.md` so all items are `- [x]` only after confirmed completion.
+- [x] 152.7 Add review notes below with changes, root-cause/tradeoff context, and verification results.
+
+### 152 Review
+- Implemented the full parity process across `FlowCanvasBridge`, Flow Canvas state/UI, and Playwright harness so QA presets are reconstructed through graph actions and verified on export.
+- Root cause addressed: prior coverage relied on preset import/load paths and missed graph-native container-branch modeling (`if/elif/else`, `try/catch/finally`, `switch`, `parallel`) plus Start advanced preamble sections (`vars/imports/subroutines`), creating parity blind spots.
+- Tradeoff: added a small helper CLI (`FlowCanvas/tools/FlowCanvasParityCli`) for parser-backed semantic comparison and validation to avoid duplicating canonical YAML semantics in frontend-only test code.
+- Added action-based test hooks (`setGraphViaActions`, `clearGraphViaActions`, `getGraphSnapshot`) so parity suites do not depend on `load-graph`.
+- Added parity suites for valid QA presets + synthetic `browser_callback`, intentional-invalid presets, and gesture/property smoke coverage; added manual-run script/docs and `npm run test:e2e:parity`.
+- Updated OpenSpec checklist file `openspec/changes/add-flow-canvas-preset-parity-process/tasks.md` to all `- [x]`, including rollout item to keep this phase manual-run only and capture CI-gating as follow-up.
+- Verification:
+- `cd FlowCanvas; npm run test:e2e:parity` (passed: `6/6`).
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_IfWithElifAndElse_BranchMetadataProducesCanonicalYaml|FullyQualifiedName~ExportGraphToYaml_TryWithoutSnippet_ExportsDoCatchFinally|FullyQualifiedName~ExportGraphToYaml_SwitchWithoutSnippet_ExportsCasesAndDefault|FullyQualifiedName~ExportGraphToYaml_ParallelWithoutSnippet_ExportsBranchSteps|FullyQualifiedName~ExportGraphToYaml_StartAdvancedSectionsFromEditors_AreSerializedInPreamble" -v minimal -p:UseAppHost=false` (passed: `5/5`).
+- `openspec validate add-flow-canvas-preset-parity-process --strict --no-interactive` (passed).
+
 ## 151. Fix current `FlowCanvasBridgeTests` failures
 - [x] 151.1 Update `FlowCanvasBridgeTests` graph fixtures to include `__start__` node/edge for start-rooted export traversal.
 - [x] 151.2 Patch `FlowCanvasBridge` preamble serialization so known sections (including `subroutines:`) are preserved correctly without orphaned indented lines.
@@ -2400,3 +2421,4 @@
 - Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-test-status-green\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-green\obj\`` passed (`1` passed, `0` failed).
 - Build verification: `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\connection-test-status-build\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-build\obj\`` passed.
 - Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.
+

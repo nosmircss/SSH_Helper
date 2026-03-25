@@ -14,7 +14,7 @@ export interface StartNodeData {
     suppress_missing_column_warning?: boolean;
     library?: boolean;
     vars?: Record<string, unknown>;
-    imports?: string[];
+    imports?: Array<string | { path?: string; as?: string }>;
     _yamlSnippet?: string;
   };
   [key: string]: unknown;

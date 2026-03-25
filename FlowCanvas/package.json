@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test:e2e": "playwright test",
+    "test:e2e:parity": "playwright test --workers=1 e2e/flow-canvas-preset-parity.spec.ts e2e/flow-canvas-preset-negative.spec.ts e2e/flow-canvas-gesture-smoke.spec.ts",
     "test:e2e:dist": "npm run build && playwright test --config playwright.preview.config.ts",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
