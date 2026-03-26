@@ -59,7 +59,8 @@ namespace SSH_Helper.Services
                     .ToList();
         }
 
-        private const double NodeSpacingY = 120;
+        private const double NodeSpacingY = 85;
+        private const double SingleBranchChildOffset = 70;
         private const double NodeStartX = 250;
         private const double NodeStartY = 40;
         private const double ChildIndentX = 60;
@@ -363,14 +364,8 @@ namespace SSH_Helper.Services
                         pendingConnections.Add(new PendingEdge(nodeId));
                     }
 
-                    // For IF without else: add a skip edge from the false handle
-                    // so the user sees both "then" and "skip" paths converging
-                    if (stepType == StepType.If
-                        && (step.Else == null || step.Else.Count == 0)
-                        && (step.Elif == null || step.Elif.Count == 0))
-                    {
-                        pendingConnections.Add(new PendingEdge(nodeId, "false", ColorElse, "else", dashed: true));
-                    }
+                    // If without else: the continuation edge alone is sufficient.
+                    // A second dashed "else" skip edge to the same target is confusing.
                 }
                 else
                 {
@@ -454,7 +449,8 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
-        /// Single-branch layout: children go LEFT of the center (existing behavior).
+        /// Single-branch layout: children offset RIGHT of center so the continuation
+        /// edge from the container's left-side diamond handle has a clear corridor.
         /// Used for foreach, while, if-without-else.
         /// </summary>
         private List<string> ExpandSingleBranch(
@@ -467,10 +463,11 @@ namespace SSH_Helper.Services
             JArray nodes,
             JArray edges)
         {
-            // Children stay at the branch's own centerX — no further indentation.
-            // The indent was for the main-flow case; inside a branch column the
-            // children should just flow straight down within their allocated space.
-            var lastNodeId = PlaceBranchSteps(branch, parentNodeId, parentStepPath, ref currentY, depth, centerX, centerX, nodes, edges);
+            // Offset children to the right so the continuation edge (which exits
+            // from the container's left-side diamond handle) can route cleanly
+            // down the left side without cutting through child blocks.
+            var childX = centerX + SingleBranchChildOffset;
+            var lastNodeId = PlaceBranchSteps(branch, parentNodeId, parentStepPath, ref currentY, depth, childX, childX, nodes, edges);
             return new List<string> { lastNodeId };
         }
 
@@ -1075,7 +1072,7 @@ namespace SSH_Helper.Services
                 if (IsContainerBlockType(blockType) &&
                     (string.IsNullOrWhiteSpace(yamlSnippet) ||
                      HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap) ||
-                     HasImportedContainerBeenModified(nodeId, outgoing, nodeMap)))
+                     HasImportedContainerBeenModified(nodeId, outgoing, nodeMap, yamlSnippet)))
                 {
                     if (TryGenerateContainerFromGraph(
                             blockType, props, nodeId, outgoing, nodeMap, incomingCount,
@@ -1178,7 +1175,8 @@ namespace SSH_Helper.Services
         private static bool HasImportedContainerBeenModified(
             string nodeId,
             Dictionary<string, List<EdgeInfo>> outgoing,
-            Dictionary<string, JToken> nodeMap)
+            Dictionary<string, JToken> nodeMap,
+            string? yamlSnippet = null)
         {
             // Collect the set of node IDs directly reachable from the container
             var directTargets = new HashSet<string>(StringComparer.Ordinal);
@@ -1213,7 +1211,18 @@ namespace SSH_Helper.Services
             }
 
             if (branchFirstChildren.Count == 0)
-                return false; // Not an imported container with children
+            {
+                // No children remain at all. If the snippet originally defined branches,
+                // that means the user deleted all branch children — snippet is stale.
+                // Check the snippet for branch keywords to detect this case.
+                if (!string.IsNullOrWhiteSpace(yamlSnippet))
+                {
+                    var snippetBranches = ExtractSnippetBranchKeys(yamlSnippet);
+                    if (snippetBranches.Count > 0)
+                        return true; // Snippet had branches but no children remain
+                }
+                return false;
+            }
 
             // Check if any branch's first child is no longer directly reachable
             foreach (var firstChildId in branchFirstChildren.Values)
@@ -1222,7 +1231,46 @@ namespace SSH_Helper.Services
                     return true; // Branch edge was deleted — snippet is stale
             }
 
+            // Check if the snippet originally defined branches that no longer have
+            // any child nodes in the graph (e.g., user deleted all nodes in the else branch).
+            if (!string.IsNullOrWhiteSpace(yamlSnippet))
+            {
+                var snippetBranches = ExtractSnippetBranchKeys(yamlSnippet);
+                foreach (var branch in snippetBranches)
+                {
+                    if (!branchFirstChildren.ContainsKey(branch))
+                        return true; // Snippet defines a branch with no remaining children
+                }
+            }
+
             return false;
+        }
+
+        /// <summary>
+        /// Extracts top-level branch keys (then, else, do, catch, finally, cases, default)
+        /// from a container's YAML snippet by scanning for indented keywords followed by a colon.
+        /// </summary>
+        private static HashSet<string> ExtractSnippetBranchKeys(string snippet)
+        {
+            var branchKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // Known branch keywords that containers use
+            string[] knownBranches = { "then", "else", "elif", "do", "catch", "finally", "cases", "default" };
+
+            foreach (var line in snippet.Split('\n'))
+            {
+                var trimmed = line.TrimStart();
+                foreach (var key in knownBranches)
+                {
+                    if (trimmed.StartsWith(key + ":", StringComparison.OrdinalIgnoreCase) ||
+                        trimmed.StartsWith(key + " :", StringComparison.OrdinalIgnoreCase))
+                    {
+                        branchKeys.Add(key);
+                        break;
+                    }
+                }
+            }
+
+            return branchKeys;
         }
 
         private void BuildChain(string nodeId, Dictionary<string, List<EdgeInfo>> outgoing, List<string> ordered, HashSet<string> visited)

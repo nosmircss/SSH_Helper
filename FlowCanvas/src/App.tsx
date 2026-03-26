@@ -293,7 +293,7 @@ function FlowCanvasInner() {
               fitViewOptions={{ maxZoom: 0.85, padding: 0.15 }}
               proOptions={{ hideAttribution: true }}
               style={{ background: canvasBg }}
-              defaultEdgeOptions={{ style: { stroke: isDark ? '#555' : '#aaa' } }}
+              defaultEdgeOptions={{ type: 'smoothstep', style: { stroke: isDark ? '#555' : '#aaa' } }}
             >
               <Controls
                 style={{ background: controlsBg, borderColor: controlsBorder, borderRadius: '6px' }}

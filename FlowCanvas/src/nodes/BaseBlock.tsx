@@ -84,7 +84,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
   }
 
   const headerStyle: CSSProperties = {
-    padding: '5px 8px',
+    padding: '4px 8px',
     borderBottom: `1px solid ${colors.border}33`,
     display: 'flex',
     alignItems: 'center',
@@ -186,7 +186,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       {/* Preview content */}
       {previewText && (
         <div style={{
-          padding: '6px 8px',
+          padding: '4px 8px',
           fontFamily: 'monospace',
           fontSize: 11,
           color: isDisabled ? '#555' : colors.text,
@@ -218,11 +218,13 @@ function BaseBlock({ data, selected, id }: NodeProps) {
         />
       )}
 
-      {/* Continuation handle for container blocks (diamond, bottom-left) */}
+      {/* Continuation handle for container blocks (diamond, bottom-left).
+          Position.Left makes edges route leftward first, creating a clear
+          corridor that avoids cutting through child blocks. */}
       {def.isContainer && (
         <Handle
           type="source"
-          position={Position.Bottom}
+          position={Position.Left}
           id="continue"
           style={{
             background: '#4a9eff',
@@ -231,8 +233,9 @@ function BaseBlock({ data, selected, id }: NodeProps) {
             border: 'none',
             borderRadius: 2,
             transform: 'rotate(45deg)',
-            left: 15,
-            bottom: -5,
+            left: -5,
+            top: 'auto',
+            bottom: -2,
             boxShadow: '0 0 0 5px transparent',
           }}
         />

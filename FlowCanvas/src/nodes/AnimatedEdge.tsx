@@ -32,6 +32,7 @@ function AnimatedEdge(props: EdgeProps) {
     targetY,
     sourcePosition,
     targetPosition,
+    borderRadius: 8,
   });
 
   const sourceState = blockStates.get(source);

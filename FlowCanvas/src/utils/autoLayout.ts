@@ -14,7 +14,7 @@ export function computeAutoLayout(nodes: Node[], edges: Edge[]): Node[] {
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({
     rankdir: 'TB',
-    ranksep: 80,
+    ranksep: 55,
     nodesep: 40,
   });
 

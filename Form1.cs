@@ -6183,10 +6183,13 @@ namespace SSH_Helper
             if (_flowCanvasForm == null || _flowCanvasForm.IsDisposed) return;
 
             var scriptText = txtCommand.Text?.Trim();
-            if (string.IsNullOrEmpty(scriptText)) return;
 
-            // Only convert YAML scripts (not plain commands)
-            if (!Services.Scripting.ScriptParser.IsYamlScript(scriptText)) return;
+            // Blank or non-YAML preset: send an empty graph so the canvas creates a Start block
+            if (string.IsNullOrEmpty(scriptText) || !Services.Scripting.ScriptParser.IsYamlScript(scriptText))
+            {
+                _flowCanvasForm.LoadGraph(new JArray(), new JArray());
+                return;
+            }
 
             try
             {
