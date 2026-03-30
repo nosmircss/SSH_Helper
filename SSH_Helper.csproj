@@ -71,6 +71,19 @@
     <Exec Command="npm run build" WorkingDirectory="FlowCanvas" />
   </Target>
 
+  <!-- Embed FlowCanvas dist assets so single-file publish can extract them at runtime -->
+  <Target Name="IncludeFlowCanvasDistEmbeddedResources"
+          BeforeTargets="AssignTargetPaths"
+          DependsOnTargets="BuildFlowCanvas"
+          Condition="Exists('FlowCanvas\dist\index.html')">
+    <ItemGroup>
+      <_FlowCanvasDistFile Include="FlowCanvas\dist\**\*" />
+      <EmbeddedResource Include="@(_FlowCanvasDistFile)">
+        <LogicalName>SSH_Helper.Resources.FlowCanvasDist/%(_FlowCanvasDistFile.RecursiveDir)%(_FlowCanvasDistFile.Filename)%(_FlowCanvasDistFile.Extension)</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
+
   <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveReferences">
     <ItemGroup>
       <Reference Remove="@(Reference)"

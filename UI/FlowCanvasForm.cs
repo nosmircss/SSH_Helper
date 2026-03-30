@@ -8,6 +8,7 @@ using Microsoft.Web.WebView2.WinForms;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using SSH_Helper.Services;
+using SSH_Helper.Utilities;
 
 namespace SSH_Helper.UI
 {
@@ -159,7 +160,8 @@ namespace SSH_Helper.UI
             _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
 
             // Find the dist folder and serve via virtual host mapping
-            var distPath = GetDistPath();
+            var distResolution = FlowCanvasDistLocator.ResolveDistPath();
+            var distPath = distResolution.DistPath;
             System.Diagnostics.Debug.WriteLine($"[FlowCanvas] dist path: {distPath}");
 
             if (distPath != null)
@@ -176,18 +178,10 @@ namespace SSH_Helper.UI
             }
             else
             {
-                // Show diagnostic info directly in the status label
-                var exeDir = AppDomain.CurrentDomain.BaseDirectory;
-                var projectRoot = FindProjectRoot(exeDir);
-                var searchedPaths = new[]
-                {
-                    Path.Combine(exeDir, "FlowCanvas", "dist"),
-                    projectRoot != null ? Path.Combine(projectRoot, "FlowCanvas", "dist") : "(no project root found)"
-                };
-
                 _statusLabel.Text = "Flow Canvas build not found.\n\n" +
-                    "Run: cd FlowCanvas && npm run build\n\n" +
-                    $"Searched:\n{string.Join("\n", searchedPaths)}";
+                    "Development build: Run `cd FlowCanvas && npm run build`\n" +
+                    "Published single-file build: ensure embedded Flow Canvas assets are present.\n\n" +
+                    $"Searched:\n{string.Join("\n", distResolution.SearchedPaths)}";
                 _statusLabel.ForeColor = Color.FromArgb(231, 76, 60);
                 _statusLabel.Font = new Font("Consolas", 10F);
                 _statusLabel.TextAlign = ContentAlignment.MiddleLeft;
@@ -337,40 +331,6 @@ namespace SSH_Helper.UI
             BackColor = _darkMode ? DialogTheme.DarkBackground : SystemColors.Control;
             ForeColor = _darkMode ? Color.FromArgb(212, 212, 212) : SystemColors.ControlText;
             DialogTheme.SetDarkTitleBar(this, _darkMode);
-        }
-
-        private static string? GetDistPath()
-        {
-            var exeDir = AppDomain.CurrentDomain.BaseDirectory;
-
-            // Try relative to executable (production)
-            var fromExe = Path.Combine(exeDir, "FlowCanvas", "dist");
-            if (Directory.Exists(fromExe) && File.Exists(Path.Combine(fromExe, "index.html")))
-                return fromExe;
-
-            // Try relative to project root (development)
-            var projectRoot = FindProjectRoot(exeDir);
-            if (projectRoot != null)
-            {
-                var fromProject = Path.Combine(projectRoot, "FlowCanvas", "dist");
-                if (Directory.Exists(fromProject) && File.Exists(Path.Combine(fromProject, "index.html")))
-                    return fromProject;
-            }
-
-            return null;
-        }
-
-        private static string? FindProjectRoot(string startDir)
-        {
-            var dir = startDir;
-            while (dir != null)
-            {
-                if (File.Exists(Path.Combine(dir, "SSH_Helper.csproj")) ||
-                    File.Exists(Path.Combine(dir, "SSH_Helper.sln")))
-                    return dir;
-                dir = Path.GetDirectoryName(dir);
-            }
-            return null;
         }
 
         private void SendPersistedLayout()

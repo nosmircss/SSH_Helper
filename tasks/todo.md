@@ -1,5 +1,29 @@
 # TODO
 
+## 156. Fix single-file Flow Canvas asset resolution
+- [x] 156.1 Confirm root cause and capture failing single-file asset lookup behavior.
+- [x] 156.2 Package `FlowCanvas/dist` into the app so single-file publish carries web assets.
+- [x] 156.3 Resolve Flow Canvas runtime asset path from extracted app-owned storage under `%LocalAppData%`.
+- [x] 156.4 Run verification (`dotnet publish`/build + targeted tests) and confirm no regressions.
+- [x] 156.5 Add review notes with root cause, fix summary, and command evidence.
+
+### 156 Review
+- Root cause: `FlowCanvasForm` only searched `AppDomain.CurrentDomain.BaseDirectory\\FlowCanvas\\dist` and repo-root fallback; single-file publish output has no sidecar `FlowCanvas/dist`, so the canvas could never resolve assets outside a source checkout.
+- Added `Utilities/FlowCanvasDistLocator.cs` to centralize dist resolution:
+- `exe-relative` dist (existing behavior),
+- `project-root` dist (dev fallback),
+- embedded-resource extraction fallback to `%LocalAppData%\\SSH_Helper\\flow-canvas-dist\\<buildTimestamp>`.
+- Updated `UI/FlowCanvasForm.cs` to use `FlowCanvasDistLocator.ResolveDistPath()` and show richer diagnostics that include all searched locations.
+- Updated `SSH_Helper.csproj` with target `IncludeFlowCanvasDistEmbeddedResources` (before `AssignTargetPaths`) so `FlowCanvas/dist/**` is embedded with stable logical names (`SSH_Helper.Resources.FlowCanvasDist/...`) for single-file runtime extraction.
+- Added/updated tests in `SSH_Helper.Tests/Utilities/FlowCanvasDistLocatorTests.cs`:
+- resource embedding presence,
+- embedded extraction writes `index.html`,
+- fallback resolution behavior and precedence.
+- Verification:
+- Red (before implementation): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasDistLocatorTests" -p:UseAppHost=false` (failed with missing `FlowCanvasDistLocator`).
+- Green (targeted): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasDistLocatorTests" -p:UseAppHost=false` (passed: 5/5).
+- Publish parity (user command): `dotnet publish SSH_Helper.csproj -c Release --self-contained -r win-x64 -p:PublishSingleFile=true` (passed).
+
 ## 155. Audit stale-container-snippet branch export impact across container families
 - [x] 155.1 Inspect `FlowCanvasBridge` container export precedence to confirm whether snippet-vs-graph logic is shared beyond `if`.
 - [x] 155.2 Add focused stale-snippet regression coverage for `try`, `switch`, and `parallel` with explicit graph branch metadata.
