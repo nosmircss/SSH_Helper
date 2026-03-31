@@ -301,7 +301,7 @@ namespace SSH_Helper.UI
                         savedCommands,
                         currentCommands,
                         contextLines: 0,
-                        maxOutputLines: EstimateCommandDiffLineBudget(savedCommands, currentCommands),
+                        maxOutputLines: CalculateFullCommandDiffLineBudget(savedCommands, currentCommands),
                         includeAllLines: true));
             }
             else if (lines.Count == 0)
@@ -524,12 +524,14 @@ namespace SSH_Helper.UI
                 .Replace('\r', '\n');
         }
 
-        private static int EstimateCommandDiffLineBudget(string savedCommands, string currentCommands)
+        private static int CalculateFullCommandDiffLineBudget(string savedCommands, string currentCommands)
         {
             var savedLines = CountLines(savedCommands);
             var currentLines = CountLines(currentCommands);
-            var estimate = Math.Max(savedLines, currentLines) + 20;
-            return Math.Clamp(estimate, 200, 10_000);
+            var maxOperationCount = (long)savedLines + currentLines + 2;
+            return maxOperationCount >= int.MaxValue
+                ? int.MaxValue - 1
+                : Math.Max(1, (int)maxOperationCount);
         }
 
         private static int CountLines(string value)

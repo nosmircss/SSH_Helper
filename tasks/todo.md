@@ -1,5 +1,18 @@
 # TODO
 
+## 157. Remove save-diff truncation in preset save/discard prompt
+- [x] 157.1 Locate the preset save/discard diff rendering path and confirm the truncation source.
+- [x] 157.2 Patch the diff line-budget logic so command diffs in the save prompt are never truncated.
+- [x] 157.3 Add/update automated coverage to guard against future truncation regressions.
+- [x] 157.4 Run focused verification for the touched tests and capture results.
+- [x] 157.5 Add review notes with root cause, fix summary, and verification evidence.
+
+### 157 Review
+- Root cause: `UnsavedPresetDiffDialog` passed `maxOutputLines` from `EstimateCommandDiffLineBudget(...)`, which clamped to `10,000`, so large command diffs were forcibly replaced with `... diff truncated`.
+- Updated `UnsavedPresetDiffDialog` to compute a full diff line budget from both command texts (`saved line count + current line count + headroom`), capped only at a safe `int.MaxValue - 1` guard to avoid overflow in `InlineDiffBuilder`.
+- Added WinForms regression `SavePrompt_LongCommandDiff_DoesNotTruncateOutput` in `SSH_Helper.Tests/UI/UnsavedPresetDiffDialogTests.cs` to cover a 12,050-line diff and assert the updated final line is present with no truncation marker.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~UnsavedPresetDiffDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\unsaved-diff-no-truncate\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\unsaved-diff-no-truncate\\obj\\` (passed: `4/4`).
+
 ## 156. Fix single-file Flow Canvas asset resolution
 - [x] 156.1 Confirm root cause and capture failing single-file asset lookup behavior.
 - [x] 156.2 Package `FlowCanvas/dist` into the app so single-file publish carries web assets.

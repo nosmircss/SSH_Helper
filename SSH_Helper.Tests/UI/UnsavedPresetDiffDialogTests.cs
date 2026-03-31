@@ -124,6 +124,34 @@ public class UnsavedPresetDiffDialogTests
         dialog.SelectedAction.Should().Be(PresetSaveImpactAction.Discard);
     }
 
+    [WinFormsFact]
+    public void SavePrompt_LongCommandDiff_DoesNotTruncateOutput()
+    {
+        var savedLines = Enumerable.Range(1, 12_050)
+            .Select(index => $"echo line {index}")
+            .ToArray();
+        var currentLines = savedLines.ToArray();
+        currentLines[^1] = "echo line 12050 updated";
+
+        using var dialog = new UnsavedPresetDiffDialog(
+            savedPresetName: "Nightly",
+            currentPresetName: "Nightly",
+            savedTimeout: 30,
+            currentTimeoutText: "30",
+            savedCommands: string.Join('\n', savedLines),
+            currentCommands: string.Join('\n', currentLines),
+            darkMode: false,
+            impact: null,
+            promptMode: PresetSavePromptMode.SaveDiscardCancel);
+
+        dialog.Show();
+        Application.DoEvents();
+
+        var diffBox = GetField<RichTextBox>(dialog, "_txtDiff");
+        diffBox.Text.Should().Contain("+ echo line 12050 updated");
+        diffBox.Text.Should().NotContain("... diff truncated");
+    }
+
     private static Button FindButton(Control root, string text)
     {
         return FindControls<Button>(root).Single(control => string.Equals(control.Text, text, StringComparison.Ordinal));
