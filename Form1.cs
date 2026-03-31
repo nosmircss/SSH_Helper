@@ -6503,9 +6503,7 @@ namespace SSH_Helper
                             From = string.IsNullOrWhiteSpace(props["from"]?.ToString()) ? "_output" : props["from"]!.ToString(),
                             Into = into,
                             Match = props["match"]?.ToString() ?? "first",
-                            Required = props["required"] == null || props["required"].Type == Newtonsoft.Json.Linq.JTokenType.Null
-                                ? true
-                                : props["required"].ToObject<bool>(),
+                            Required = props["required"]?.Type != Newtonsoft.Json.Linq.JTokenType.Null && props["required"]!.ToObject<bool>(),
                         };
                         command = new Services.Scripting.Commands.ExtractCommand();
                         break;
