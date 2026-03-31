@@ -202,4 +202,28 @@ public class ExpressionEvaluatorTests
 
         evaluator.Evaluate("parts[idx] == 'beta'").Should().BeTrue();
     }
+
+    [Fact]
+    public void Evaluate_ArithmeticOperandExpression_ComputesBeforeComparison()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("count", 5);
+        context.SetVariable("offset", 2);
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("count - offset == 3").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Evaluate_ModuloOperandExpression_SupportsForeachShardingConditions()
+    {
+        var context = new ScriptContext();
+        context.SetVariable("blocked_target_index", 1);
+        context.SetVariable("worker_count", 6);
+        context.SetVariable("worker_id", 1);
+        var evaluator = new ExpressionEvaluator(context);
+
+        evaluator.Evaluate("blocked_target_index % worker_count != worker_id").Should().BeFalse();
+        evaluator.Evaluate("blocked_target_index % worker_count == worker_id").Should().BeTrue();
+    }
 }

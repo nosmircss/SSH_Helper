@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using SSH_Helper.Services.Scripting.Models;
@@ -53,6 +54,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             var options = step.Http;
             var into = options.Into;
+            var totalSw = Stopwatch.StartNew();
 
             // Clear capture variables at the start of each execution to prevent stale values.
             ClearCapture(into, context);
@@ -137,10 +139,27 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             try
             {
+                var apiSw = Stopwatch.StartNew();
                 using var response = await client.SendAsync(request, cts.Token);
+                apiSw.Stop();
                 var responseBody = await response.Content.ReadAsStringAsync(cts.Token);
+                totalSw.Stop();
 
-                CaptureHttpResponse(into, context, responseBody, (int)response.StatusCode, SerializeHeaders(response));
+                var apiMs = apiSw.ElapsedMilliseconds;
+                var totalMs = totalSw.ElapsedMilliseconds;
+
+                CaptureHttpResponse(
+                    into,
+                    context,
+                    responseBody,
+                    (int)response.StatusCode,
+                    SerializeHeaders(response),
+                    apiMs,
+                    totalMs);
+
+                context.EmitOutput(
+                    $"Http: Timing endpoint={SummarizeEndpoint(uri)} status={(int)response.StatusCode} api_ms={apiMs} total_ms={totalMs}",
+                    ScriptOutputType.Debug);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -158,14 +177,17 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                totalSw.Stop();
                 return ApplyOnError(step, $"Http timed out after {timeoutSeconds} seconds");
             }
             catch (HttpRequestException ex)
             {
+                totalSw.Stop();
                 return ApplyOnError(step, $"Http transport error: {ex.Message}");
             }
             catch (Exception ex)
             {
+                totalSw.Stop();
                 return ApplyOnError(step, $"Http error: {ex.Message}");
             }
         }
@@ -214,9 +236,18 @@ namespace SSH_Helper.Services.Scripting.Commands
             context.SetVariable(into, string.Empty);
             context.SetVariable(into + "_status", string.Empty);
             context.SetVariable(into + "_headers", string.Empty);
+            context.SetVariable(into + "_api_ms", string.Empty);
+            context.SetVariable(into + "_total_ms", string.Empty);
         }
 
-        private static void CaptureHttpResponse(string? into, ScriptContext context, string body, int status, string headersJson)
+        private static void CaptureHttpResponse(
+            string? into,
+            ScriptContext context,
+            string body,
+            int status,
+            string headersJson,
+            long apiMs,
+            long totalMs)
         {
             if (string.IsNullOrWhiteSpace(into))
                 return;
@@ -224,6 +255,14 @@ namespace SSH_Helper.Services.Scripting.Commands
             context.SetVariable(into, body);
             context.SetVariable(into + "_status", status);
             context.SetVariable(into + "_headers", headersJson);
+            context.SetVariable(into + "_api_ms", apiMs);
+            context.SetVariable(into + "_total_ms", totalMs);
+        }
+
+        private static string SummarizeEndpoint(Uri uri)
+        {
+            var path = string.IsNullOrWhiteSpace(uri.AbsolutePath) ? "/" : uri.AbsolutePath;
+            return uri.Host + path;
         }
 
         private static string SerializeHeaders(HttpResponseMessage response)

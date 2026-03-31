@@ -319,7 +319,44 @@ namespace SSH_Helper.Services.Scripting
 
         private object? ResolveValue(string expr)
         {
-            return ValueResolver.ResolveExpressionValue(expr, _context);
+            var trimmed = expr.Trim();
+            var resolved = ValueResolver.ResolveExpressionValue(trimmed, _context);
+
+            // Preserve existing semantics for plain unresolved identifiers/literals,
+            // but evaluate arithmetic/function expressions when detected.
+            if (resolved is string s &&
+                string.Equals(s, trimmed, StringComparison.Ordinal) &&
+                LooksLikeComputableExpression(trimmed))
+            {
+                try
+                {
+                    var parser = new ExpressionParser(trimmed, _context);
+                    var parsed = parser.Parse();
+                    return parsed ?? resolved;
+                }
+                catch
+                {
+                    return resolved;
+                }
+            }
+
+            return resolved;
+        }
+
+        private static bool LooksLikeComputableExpression(string expr)
+        {
+            if (string.IsNullOrWhiteSpace(expr))
+                return false;
+
+            return expr.Contains(" + ", StringComparison.Ordinal) ||
+                   expr.Contains(" - ", StringComparison.Ordinal) ||
+                   expr.Contains(" * ", StringComparison.Ordinal) ||
+                   expr.Contains(" / ", StringComparison.Ordinal) ||
+                   expr.Contains(" % ", StringComparison.Ordinal) ||
+                   expr.Contains("??", StringComparison.Ordinal) ||
+                   expr.Contains("?", StringComparison.Ordinal) ||
+                   expr.Contains("(", StringComparison.Ordinal) ||
+                   expr.Contains(")", StringComparison.Ordinal);
         }
 
         private string ResolveStringValue(string expr)

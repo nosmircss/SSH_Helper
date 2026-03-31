@@ -44,6 +44,40 @@ public class NetworkCommandTests
         result.SuppressedError.Should().BeFalse();
         context.GetVariableString("http_result").Should().Be("server-error");
         context.GetVariableString("http_result_status").Should().Be("500");
+        long.Parse(context.GetVariableString("http_result_api_ms")).Should().BeGreaterThanOrEqualTo(0);
+        long.Parse(context.GetVariableString("http_result_total_ms")).Should().BeGreaterThanOrEqualTo(0);
+    }
+
+    [Fact]
+    public async Task HttpCommand_Success_CapturesApiAndTotalTimingVariables()
+    {
+        var command = new HttpCommand(_ => new StubHttpMessageHandler(async (_, cancellationToken) =>
+        {
+            await Task.Delay(15, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("ok")
+            };
+        }));
+
+        var step = new ScriptStep
+        {
+            Http = new HttpOptions
+            {
+                Url = "https://example.test/api",
+                Into = "http_result"
+            }
+        };
+
+        var context = new ScriptContext();
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var apiMs = long.Parse(context.GetVariableString("http_result_api_ms"));
+        var totalMs = long.Parse(context.GetVariableString("http_result_total_ms"));
+        apiMs.Should().BeGreaterThanOrEqualTo(0);
+        totalMs.Should().BeGreaterThanOrEqualTo(0);
+        totalMs.Should().BeGreaterThanOrEqualTo(apiMs);
     }
 
     [Fact]
@@ -95,6 +129,8 @@ public class NetworkCommandTests
         context.SetVariable("http_result", "stale-body");
         context.SetVariable("http_result_status", 200);
         context.SetVariable("http_result_headers", "{\"stale\":true}");
+        context.SetVariable("http_result_api_ms", 999);
+        context.SetVariable("http_result_total_ms", 999);
 
         var result = await command.ExecuteAsync(step, context, CancellationToken.None);
 
@@ -103,6 +139,8 @@ public class NetworkCommandTests
         context.GetVariableString("http_result").Should().BeEmpty();
         context.GetVariableString("http_result_status").Should().BeEmpty();
         context.GetVariableString("http_result_headers").Should().BeEmpty();
+        context.GetVariableString("http_result_api_ms").Should().BeEmpty();
+        context.GetVariableString("http_result_total_ms").Should().BeEmpty();
     }
 
     [Fact]

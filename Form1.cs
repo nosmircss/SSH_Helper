@@ -12393,6 +12393,8 @@ namespace SSH_Helper
 
         private void SshService_StepStarting(object? sender, StepExecutionEventArgs e)
         {
+            SshDebugLog("SCRIPT", $"Step start: {e.StepType} path={e.StepPath ?? $"steps/{e.StepIndex}"} line={e.LineNumber}");
+
             if (_flowCanvasForm == null) return;
             if (!TryResolveCanvasNodeId(e.StepPath, e.StepIndex, out var nodeId)) return;
 
@@ -12406,6 +12408,13 @@ namespace SSH_Helper
 
         private void SshService_StepCompleted(object? sender, StepExecutionEventArgs e)
         {
+            var stepPath = e.StepPath ?? $"steps/{e.StepIndex}";
+            var state = e.Skipped ? "skipped" : (e.Success == true ? "success" : "error");
+            var duration = e.DurationMs.HasValue ? e.DurationMs.Value.ToString() : "n/a";
+            SshDebugLog(
+                "SCRIPT",
+                $"Step complete: {e.StepType} path={stepPath} line={e.LineNumber} state={state} duration_ms={duration}");
+
             if (_flowCanvasForm == null) return;
             if (!TryResolveCanvasNodeId(e.StepPath, e.StepIndex, out var nodeId)) return;
 
