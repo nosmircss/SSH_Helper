@@ -794,94 +794,8 @@ export default function Properties() {
   }
 
   const colors = categoryColors[def.category as BlockCategory];
-  const isChild = !!(blockData.props?.['_isChildOf']);
   const branchLabel = blockData.props?.['_branchLabel'] as string | undefined;
   const branchColor = blockData.props?.['_branchColor'] as string | undefined;
-
-  if (isChild) {
-    return (
-      <div
-        data-testid="properties-panel"
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: 12,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 8, borderBottom: '1px solid var(--fc-panel-border, #2a2a4a)' }}>
-          <span style={{
-            background: colors.badge,
-            color: colors.badgeText,
-            fontSize: 10,
-            fontWeight: 700,
-            padding: '2px 6px',
-            borderRadius: 3,
-            textTransform: 'uppercase',
-          }}>
-            {def.type}
-          </span>
-          <span style={{ color: 'var(--fc-text, #ccc)', fontSize: 12, fontWeight: 600 }}>
-            {def.label}
-          </span>
-        </div>
-
-        {branchLabel && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 8px',
-            background: `${branchColor || '#555'}15`,
-            borderRadius: 4,
-            borderLeft: `2px solid ${branchColor || '#555'}`,
-          }}>
-            <span style={{ fontSize: 10, color: branchColor || '#888', fontWeight: 600, textTransform: 'uppercase' }}>
-              {branchLabel}
-            </span>
-            <span style={{ fontSize: 10, color: 'var(--fc-text-muted, #666)' }}>branch (read-only)</span>
-          </div>
-        )}
-
-        {def.properties.map((propDef) => {
-          const val = blockData.props?.[propDef.key];
-          if (val === undefined || val === null || val === '') return null;
-          return (
-            <div key={`${selectedNodeId}-${propDef.key}`}>
-              <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
-                {propDef.label}
-              </label>
-              <div style={{
-                padding: '4px 6px',
-                background: 'var(--fc-input-bg, #0d1117)99',
-                borderRadius: 4,
-                color: 'var(--fc-text-secondary, #aaa)',
-                fontSize: 12,
-                fontFamily: propDef.type === 'code' ? 'monospace' : 'inherit',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-              }}>
-                {String(val)}
-              </div>
-            </div>
-          );
-        })}
-
-        <div style={{
-          marginTop: 'auto',
-          paddingTop: 12,
-          borderTop: '1px solid var(--fc-panel-border, #2a2a4a)',
-          fontSize: 11,
-          color: 'var(--fc-text-muted, #555)',
-          lineHeight: 1.5,
-        }}>
-          {def.description}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div
@@ -911,6 +825,23 @@ export default function Properties() {
           {def.label}
         </span>
       </div>
+
+      {branchLabel && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '4px 8px',
+          background: `${branchColor || '#555'}15`,
+          borderRadius: 4,
+          borderLeft: `2px solid ${branchColor || '#555'}`,
+        }}>
+          <span style={{ fontSize: 10, color: branchColor || '#888', fontWeight: 600, textTransform: 'uppercase' }}>
+            {branchLabel}
+          </span>
+          <span style={{ fontSize: 10, color: 'var(--fc-text-muted, #666)' }}>branch</span>
+        </div>
+      )}
 
       {def.properties.map((propDef) => {
         const fieldTestId = `properties-field-${propDef.key}-${propDef.type}`;

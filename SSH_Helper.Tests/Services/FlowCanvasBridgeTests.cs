@@ -597,6 +597,239 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_IfWithForceGraphExport_UsesEditedVisualChildBranchValues()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("if-1", "if", new JObject
+                {
+                    ["condition"] = "${should_run}",
+                    ["_yamlSnippet"] = "- if:\n    condition: \"${should_run}\"\n    then:\n      - print:\n          message: stale-if\n",
+                    ["_forceGraphExport"] = true,
+                }),
+                CreateVisualChildNode("then-1", "print", "if-1", "then", new JObject { ["message"] = "updated-if-then" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "if-1"),
+                CreateEdge("if-1", "then-1", branchPath: "then"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        var ifStep = Assert.Single(script.Steps);
+        Assert.Equal(StepType.If, ifStep.GetStepType());
+        Assert.Equal("updated-if-then", Assert.Single(ifStep.Then ?? new List<ScriptStep>()).Print);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ForeachWithForceGraphExport_UsesEditedVisualChildBranchValues()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("for-1", "foreach", new JObject
+                {
+                    ["iterator"] = "item in ${items}",
+                    ["_yamlSnippet"] = "- foreach:\n    iterator: \"item in ${items}\"\n    do:\n      - print:\n          message: stale-foreach\n",
+                    ["_forceGraphExport"] = true,
+                }),
+                CreateVisualChildNode("do-1", "print", "for-1", "do", new JObject { ["message"] = "updated-foreach-do" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "for-1"),
+                CreateEdge("for-1", "do-1", branchPath: "do"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        var forStep = Assert.Single(script.Steps);
+        Assert.Equal(StepType.Foreach, forStep.GetStepType());
+        Assert.Equal("updated-foreach-do", Assert.Single(forStep.Do ?? new List<ScriptStep>()).Print);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_WhileWithForceGraphExport_UsesEditedVisualChildBranchValues()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("while-1", "while", new JObject
+                {
+                    ["condition"] = "${keep_going}",
+                    ["_yamlSnippet"] = "- while:\n    condition: \"${keep_going}\"\n    do:\n      - print:\n          message: stale-while\n",
+                    ["_forceGraphExport"] = true,
+                }),
+                CreateVisualChildNode("do-1", "print", "while-1", "do", new JObject { ["message"] = "updated-while-do" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "while-1"),
+                CreateEdge("while-1", "do-1", branchPath: "do"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        var whileStep = Assert.Single(script.Steps);
+        Assert.Equal(StepType.While, whileStep.GetStepType());
+        Assert.Equal("updated-while-do", Assert.Single(whileStep.Do ?? new List<ScriptStep>()).Print);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_TryWithForceGraphExport_UsesEditedVisualChildBranchValues()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("try-1", "try", new JObject
+                {
+                    ["_yamlSnippet"] = "- try:\n    do:\n      - print:\n          message: stale-try\n",
+                    ["_forceGraphExport"] = true,
+                }),
+                CreateVisualChildNode("do-1", "print", "try-1", "do", new JObject { ["message"] = "updated-try-do" }),
+                CreateVisualChildNode("catch-1", "print", "try-1", "catch", new JObject { ["message"] = "updated-try-catch" }),
+                CreateVisualChildNode("finally-1", "print", "try-1", "finally", new JObject { ["message"] = "updated-try-finally" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "try-1"),
+                CreateEdge("try-1", "do-1", branchPath: "try"),
+                CreateEdge("try-1", "catch-1", branchPath: "catch"),
+                CreateEdge("try-1", "finally-1", branchPath: "finally"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        var tryStep = Assert.Single(script.Steps);
+        Assert.Equal(StepType.Try, tryStep.GetStepType());
+        Assert.Equal("updated-try-do", Assert.Single(tryStep.Try ?? new List<ScriptStep>()).Print);
+        Assert.Equal("updated-try-catch", Assert.Single(tryStep.Catch ?? new List<ScriptStep>()).Print);
+        Assert.Equal("updated-try-finally", Assert.Single(tryStep.Finally ?? new List<ScriptStep>()).Print);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_SwitchWithForceGraphExport_UsesEditedVisualChildBranchValues()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("switch-1", "switch", new JObject
+                {
+                    ["value"] = "${region}",
+                    ["_yamlSnippet"] = "- switch:\n    value: \"${region}\"\n    cases: []\n",
+                    ["_forceGraphExport"] = true,
+                }),
+                CreateVisualChildNode("case-1", "print", "switch-1", "case", new JObject { ["message"] = "updated-switch-case" }),
+                CreateVisualChildNode("default-1", "print", "switch-1", "default", new JObject { ["message"] = "updated-switch-default" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "switch-1"),
+                CreateEdge("switch-1", "case-1", branchPath: "cases/0/do", caseValue: "north"),
+                CreateEdge("switch-1", "default-1", branchPath: "default"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        var switchStep = Assert.Single(script.Steps);
+        Assert.Equal(StepType.Switch, switchStep.GetStepType());
+        Assert.Equal("updated-switch-case", Assert.Single(switchStep.Cases![0].Do).Print);
+        Assert.Equal("updated-switch-default", Assert.Single(switchStep.Else ?? new List<ScriptStep>()).Print);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ParallelWithForceGraphExport_UsesEditedVisualChildBranchValues()
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("parallel-1", "parallel", new JObject
+                {
+                    ["_yamlSnippet"] = "- parallel:\n    steps: []\n",
+                    ["_forceGraphExport"] = true,
+                }),
+                CreateVisualChildNode("branch-1", "print", "parallel-1", "branch 1", new JObject { ["message"] = "updated-parallel-1" }),
+                CreateVisualChildNode("branch-2", "print", "parallel-1", "branch 2", new JObject { ["message"] = "updated-parallel-2" }),
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "parallel-1"),
+                CreateEdge("parallel-1", "branch-1", branchPath: "parallel/0"),
+                CreateEdge("parallel-1", "branch-2", branchPath: "parallel/1"),
+            }
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
+
+        var parallelStep = Assert.Single(script.Steps);
+        Assert.Equal(StepType.Parallel, parallelStep.GetStepType());
+        Assert.NotNull(parallelStep.Parallel);
+        Assert.Equal("updated-parallel-1", parallelStep.Parallel!.Steps[0].Print);
+        Assert.Equal("updated-parallel-2", parallelStep.Parallel.Steps[1].Print);
+    }
+
+    [Fact]
     public void ExportGraphToYaml_StartAdvancedSectionsFromEditors_AreSerializedInPreamble()
     {
         var bridge = new FlowCanvasBridge();
@@ -1264,6 +1497,28 @@ public class FlowCanvasBridgeTests
                 ["props"] = props ?? new JObject()
             }
         };
+    }
+
+    private static JObject CreateVisualChildNode(
+        string id,
+        string blockType,
+        string parentId,
+        string branchLabel,
+        JObject? props = null)
+    {
+        var visualProps = new JObject
+        {
+            ["_isChildOf"] = parentId,
+            ["_branchLabel"] = branchLabel,
+        };
+
+        if (props != null)
+        {
+            foreach (var property in props.Properties())
+                visualProps[property.Name] = property.Value;
+        }
+
+        return CreateBlockNode(id, blockType, visualProps);
     }
 
     [Fact]

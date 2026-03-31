@@ -1064,13 +1064,15 @@ namespace SSH_Helper.Services
                     sb.AppendLine();
 
                 var yamlSnippet = props?["_yamlSnippet"]?.ToString();
+                var forceGraphExport = HasForceGraphExport(props);
 
                 // Container blocks authored visually (branch metadata -> non-child targets)
                 // should be regenerated from graph structure even when a stale snippet exists.
                 // Also regenerate when the user has modified an imported container's branches
                 // (e.g., deleted an else edge) — the stored snippet would be stale.
                 if (IsContainerBlockType(blockType) &&
-                    (string.IsNullOrWhiteSpace(yamlSnippet) ||
+                    (forceGraphExport ||
+                     string.IsNullOrWhiteSpace(yamlSnippet) ||
                      HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap) ||
                      HasImportedContainerBeenModified(nodeId, outgoing, nodeMap, yamlSnippet)))
                 {
@@ -1085,7 +1087,7 @@ namespace SSH_Helper.Services
 
                 // Round-trip path for imported containers whose branches are still represented
                 // by visual child nodes and do not require regeneration.
-                if (IsContainerBlockType(blockType) && !string.IsNullOrWhiteSpace(yamlSnippet))
+                if (IsContainerBlockType(blockType) && !forceGraphExport && !string.IsNullOrWhiteSpace(yamlSnippet))
                 {
                     var normalizedSnippet = NormalizeTopLevelSnippetIndent(yamlSnippet);
                     result.Diagnostics.Add(new FlowCanvasExportDiagnostic(
@@ -1812,10 +1814,12 @@ namespace SSH_Helper.Services
             var nodeProps = nodeData?["props"] as JObject;
             var nodeBlockType = nodeData?["blockType"]?.ToString() ?? "print";
             var snippet = nodeProps?["_yamlSnippet"]?.ToString();
+            var forceGraphExport = HasForceGraphExport(nodeProps);
 
             if (IsContainerBlockType(nodeBlockType) &&
-                (string.IsNullOrWhiteSpace(snippet) ||
-                 HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap)))
+                (forceGraphExport ||
+                 string.IsNullOrWhiteSpace(snippet) ||
+                  HasGraphAuthoredContainerBranches(nodeId, outgoing, nodeMap)))
             {
                 if (!TryGenerateContainerFromGraph(
                         nodeBlockType,
@@ -1834,7 +1838,7 @@ namespace SSH_Helper.Services
                 return true;
             }
 
-            if (IsContainerBlockType(nodeBlockType) && !string.IsNullOrWhiteSpace(snippet))
+            if (IsContainerBlockType(nodeBlockType) && !forceGraphExport && !string.IsNullOrWhiteSpace(snippet))
             {
                 nodeYaml = NormalizeTopLevelSnippetIndent(snippet).TrimEnd();
                 return true;
@@ -2522,6 +2526,27 @@ namespace SSH_Helper.Services
         private static bool IsMetadataProperty(string propertyName)
         {
             return propertyName.StartsWith("_", StringComparison.Ordinal);
+        }
+
+        private static bool HasForceGraphExport(JObject? props)
+        {
+            var token = props?["_forceGraphExport"];
+            if (token == null || token.Type == JTokenType.Null || token.Type == JTokenType.Undefined)
+                return false;
+
+            if (token.Type == JTokenType.Boolean)
+                return token.Value<bool>();
+
+            if (token.Type == JTokenType.Integer)
+                return token.Value<int>() != 0;
+
+            if (token.Type == JTokenType.String &&
+                bool.TryParse(token.ToString(), out var parsed))
+            {
+                return parsed;
+            }
+
+            return true;
         }
 
         private static string ResolveOptionKey(string blockType, string propName)

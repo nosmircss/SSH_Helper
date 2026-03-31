@@ -1,5 +1,34 @@
 # TODO
 
+## 159. Enable editable nested container blocks in Flow Canvas
+- [x] 159.1 Remove read-only properties behavior for `_isChildOf` nodes and render standard editable fields with branch context badge.
+- [x] 159.2 Update Flow store node-prop mutation to propagate `_forceGraphExport: true` up the `_isChildOf` ancestor chain (and on direct container edits).
+- [x] 159.3 Update `FlowCanvasBridge` container export precedence to force graph regeneration when `_forceGraphExport` is present (top-level and nested paths).
+- [x] 159.4 Add backend regressions proving forced container regeneration persists nested branch-child edits across container families.
+- [x] 159.5 Add frontend e2e regression coverage for editable imported branch children and `Apply YAML` parity after nested edits.
+- [x] 159.6 Run focused backend + e2e verification and capture command evidence.
+- [x] 159.7 Add review notes with root cause, fix summary, and verification outcomes.
+
+### 159 Review
+- Root cause: branch-child nodes imported from YAML carry `_isChildOf` metadata, and `Properties.tsx` hard-switched those nodes to a read-only renderer. Child edits could not be made from the canvas.
+- Secondary root cause: imported containers with `_yamlSnippet` could continue exporting from stale snippet text, so child-level graph edits were not guaranteed to persist.
+- Frontend fix:
+- `FlowCanvas/src/panels/Properties.tsx` now renders the same editable property controls for all selected executable nodes, including `_isChildOf` children, while keeping a branch context badge.
+- `FlowCanvas/src/stores/slices/graphSlice.ts` now marks `_forceGraphExport: true` on edited container nodes and on all ancestor containers of an edited child node by walking `_isChildOf` links.
+- Backend fix:
+- `Services/FlowCanvasBridge.cs` adds `HasForceGraphExport(...)` and uses it in both top-level and nested container export paths (`ExportGraphToYaml` and `TryGenerateSingleNodeYaml`) to force container regeneration from graph structure when set.
+- Snippet fallback is now gated to untouched containers (`!_forceGraphExport`), preserving prior behavior for unchanged imports.
+- Added backend regression tests in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` for forced graph export persistence on imported child edits across:
+- `if`, `foreach`, `while`, `try`, `switch`, and `parallel`.
+- Added frontend e2e fixture + coverage:
+- `FlowCanvas/e2e/fixtures/graphs.ts`: `createImportedChildEditingFixture()`.
+- `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts`: two tests validating child-node editability/reselection persistence and `Apply YAML` parity with `_forceGraphExport`.
+- Verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-force-export-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-force-export-tests\\obj\\` (failed: `1/31`, existing unrelated test `ExportGraphToYaml_IncludesChildNodeStepPathMapping`).
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_IfWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_ForeachWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_WhileWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_TryWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_SwitchWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_ParallelWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_TryWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_SwitchWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_ParallelWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_IfWithContinueEdge_ContinuationTargetNotConsumedAsBranch|FullyQualifiedName~ExportGraphToYaml_ForeachWithContinueEdge_ContinuationTargetNotConsumedAsDo" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\flowcanvas-force-export-focused\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-force-export-focused\\obj\\` (passed: `12/12`).
+- `cd FlowCanvas; npx playwright test e2e/flow-canvas-properties-typing.spec.ts --grep "imported branch child|apply yaml uses edited imported"` (passed: `2/2`).
+- `cd FlowCanvas; npm run build` (passed).
+
 ## 158. Sync open Flow Canvas when preset selection changes in main form
 - [x] 158.1 Add a focused failing WinForms regression proving that switching presets in `Form1` while `_flowCanvasForm` is open does not currently push a new `load-graph` payload.
 - [x] 158.2 Patch the preset-load path so selecting a different preset refreshes the open Flow Canvas graph with the newly selected preset script.

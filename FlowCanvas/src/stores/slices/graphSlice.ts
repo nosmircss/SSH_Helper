@@ -403,18 +403,53 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
 
   updateNodeProp: (id, key, value) => {
     set((state) => ({
-      nodes: state.nodes.map((n) => {
-        if (n.id !== id) return n;
-        const currentData = (n.data as Record<string, unknown>) ?? {};
-        const currentProps = (currentData.props as Record<string, unknown> | undefined) ?? {};
-        return {
-          ...n,
-          data: {
-            ...currentData,
-            props: { ...currentProps, [key]: value },
-          },
-        };
-      }),
+      nodes: (() => {
+        const nodeMap = new Map<string, Node>(state.nodes.map((node) => [node.id, node]));
+        const containersToForceExport = new Set<string>();
+        const visitedNodeIds = new Set<string>();
+        let currentNodeId: string | undefined = id;
+
+        while (currentNodeId && !visitedNodeIds.has(currentNodeId)) {
+          visitedNodeIds.add(currentNodeId);
+          const currentNode = nodeMap.get(currentNodeId);
+          if (!currentNode) break;
+
+          const currentData = (currentNode.data as Record<string, unknown>) ?? {};
+          const currentProps = (currentData.props as Record<string, unknown> | undefined) ?? {};
+          const currentBlockType = typeof currentData.blockType === 'string' ? currentData.blockType : '';
+          if (blockDefMap.get(currentBlockType)?.isContainer) {
+            containersToForceExport.add(currentNodeId);
+          }
+
+          const parentNodeId = currentProps['_isChildOf'];
+          currentNodeId = typeof parentNodeId === 'string' && parentNodeId.length > 0
+            ? parentNodeId
+            : undefined;
+        }
+
+        return state.nodes.map((n) => {
+          if (n.id !== id && !containersToForceExport.has(n.id)) return n;
+
+          const currentData = (n.data as Record<string, unknown>) ?? {};
+          const currentProps = (currentData.props as Record<string, unknown> | undefined) ?? {};
+          const nextProps: Record<string, unknown> = { ...currentProps };
+
+          if (n.id === id) {
+            nextProps[key] = value;
+          }
+          if (containersToForceExport.has(n.id)) {
+            nextProps['_forceGraphExport'] = true;
+          }
+
+          return {
+            ...n,
+            data: {
+              ...currentData,
+              props: nextProps,
+            },
+          };
+        });
+      })(),
       isDirty: true,
       ...clearedExportStatusState(),
     }));

@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { createPropertiesTypingFixture } from './fixtures/graphs';
+import { createImportedChildEditingFixture, createPropertiesTypingFixture } from './fixtures/graphs';
 import {
   clearOutgoingMessages,
   installHostMessageCapture,
@@ -7,6 +7,7 @@ import {
   type OutgoingHostMessage,
   waitForOutgoingMessage,
 } from './support/harness';
+import { evaluateParityCases } from './support/parityCli';
 
 test.describe('Flow Canvas Properties Typing', () => {
   test.beforeEach(async ({ page }) => {
@@ -93,6 +94,71 @@ test.describe('Flow Canvas Properties Typing', () => {
   });
 });
 
+test.describe('Flow Canvas Imported Child Editing', () => {
+  test.beforeEach(async ({ page }) => {
+    await installHostMessageCapture(page);
+    await page.goto('/');
+    await waitForOutgoingMessage(page, 'ready');
+    await clearOutgoingMessages(page);
+    await loadGraphFixture(page, createImportedChildEditingFixture());
+    await expect(nodeById(page, 'if-1')).toBeVisible();
+    await expect(nodeById(page, 'then-1')).toBeVisible();
+  });
+
+  test('imported branch child node properties are editable and persist after reselection', async ({ page }) => {
+    const ifNode = nodeById(page, 'if-1');
+    const thenNode = nodeById(page, 'then-1');
+
+    await thenNode.click({ force: true });
+    await expect(page.getByTestId('properties-panel')).toBeVisible();
+
+    const messageInput = page.getByTestId('properties-field-message-code-input');
+    await expect(messageInput).toHaveValue('imported-child-value');
+    await typePerKeystroke(messageInput, 'updated-from-canvas');
+
+    await ifNode.click({ force: true });
+    await thenNode.click({ force: true });
+    await expect(messageInput).toHaveValue('updated-from-canvas');
+  });
+
+  test('apply yaml uses edited imported branch child properties via forced graph export', async ({ page }) => {
+    const thenNode = nodeById(page, 'then-1');
+    await thenNode.click({ force: true });
+    await expect(page.getByTestId('properties-panel')).toBeVisible();
+
+    const messageInput = page.getByTestId('properties-field-message-code-input');
+    await typePerKeystroke(messageInput, 'updated-from-canvas');
+
+    await clearOutgoingMessages(page);
+    await page.getByRole('button', { name: /apply yaml/i }).click();
+    const applyMessage = await waitForOutgoingMessage(page, 'apply-yaml');
+
+    const ifProps = getNodePropsFromMessage(applyMessage, 'if-1');
+    expect(ifProps._forceGraphExport).toBe(true);
+
+    const evaluations = evaluateParityCases([{
+      name: 'imported-child-edit-forced-export',
+      sourceYaml: `
+steps:
+  - if:
+      condition: \${enabled}
+      then:
+        - print:
+            message: updated-from-canvas
+`.trim(),
+      nodes: toRecordArray(applyMessage.nodes),
+      edges: toRecordArray(applyMessage.edges),
+    }]).results;
+
+    expect(evaluations).toHaveLength(1);
+    const [result] = evaluations;
+    expect(result.exportSuccess, `${result.name} export errors: ${result.exportErrors.join(' | ')}`).toBeTruthy();
+    expect(result.exportParseError).toBeNull();
+    expect(result.exportValidationErrors).toEqual([]);
+    expect(result.semanticEquivalent, result.semanticDiff ?? undefined).toBeTruthy();
+  });
+});
+
 async function typePerKeystroke(locator: Locator, value: string): Promise<void> {
   await locator.click();
   await locator.fill('');
@@ -127,4 +193,9 @@ function getNodePropsFromMessage(
   return props && typeof props === 'object'
     ? (props as Record<string, unknown>)
     : {};
+}
+
+function toRecordArray(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
 }

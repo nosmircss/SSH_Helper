@@ -136,3 +136,63 @@ export function createPropertiesTypingFixture(): GraphFixture {
     ],
   };
 }
+
+export function createImportedChildEditingFixture(): GraphFixture {
+  return {
+    nodes: [
+      {
+        id: '__start__',
+        type: 'start',
+        position: { x: 80, y: 40 },
+        data: {
+          blockType: '_start',
+          label: 'Untitled Script',
+          props: {},
+        },
+      },
+      {
+        id: 'if-1',
+        type: 'block',
+        position: { x: 80, y: 140 },
+        data: {
+          blockType: 'if',
+          label: 'If',
+          props: {
+            condition: '${enabled}',
+            _yamlSnippet: '- if:\n    condition: "${enabled}"\n    then:\n      - print:\n          message: stale-from-snippet\n',
+          },
+        },
+      },
+      {
+        id: 'then-1',
+        type: 'block',
+        position: { x: 80, y: 280 },
+        data: {
+          blockType: 'print',
+          label: 'Print',
+          props: {
+            _isChildOf: 'if-1',
+            _branchLabel: 'then',
+            _branchColor: '#2ecc71',
+            message: 'imported-child-value',
+          },
+        },
+      },
+    ],
+    edges: [
+      {
+        id: 'edge-start-if',
+        source: '__start__',
+        target: 'if-1',
+      },
+      {
+        id: 'edge-if-then',
+        source: 'if-1',
+        target: 'then-1',
+        data: {
+          branchPath: 'then',
+        },
+      },
+    ],
+  };
+}
