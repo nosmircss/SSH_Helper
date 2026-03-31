@@ -1,5 +1,8 @@
 # Lessons
 
+## 2026-03-30
+- When a secondary editor surface (Flow Canvas) mirrors preset command text from `Form1`, I must wire synchronization into the shared preset-load path (`LoadPresetIntoEditor`) rather than only the one-time window-open path.
+
 ## 2026-03-25
 - When giving Flow Canvas YAML expectations, I must verify against actual bridge/export output before answering; `if` containers can flatten when `_yamlSnippet` takes precedence over graph branch metadata.
 

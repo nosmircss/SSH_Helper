@@ -2000,6 +2000,7 @@ namespace SSH_Helper
             _selectedFolderName = null;
             UpdateRunButtonText();
             UpdatePresetHeaderIndicator();
+            LoadCurrentScriptIntoCanvas();
 
             ApplyPresetEnvironmentOnPresetLoad(presetName, preset);
         }

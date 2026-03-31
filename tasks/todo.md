@@ -1,5 +1,20 @@
 # TODO
 
+## 158. Sync open Flow Canvas when preset selection changes in main form
+- [x] 158.1 Add a focused failing WinForms regression proving that switching presets in `Form1` while `_flowCanvasForm` is open does not currently push a new `load-graph` payload.
+- [x] 158.2 Patch the preset-load path so selecting a different preset refreshes the open Flow Canvas graph with the newly selected preset script.
+- [x] 158.3 Run focused verification for the new/related Form1 Flow Canvas tests and capture evidence.
+- [x] 158.4 Add review notes with root cause, behavior change, and verification outcomes.
+
+### 158 Review
+- Root cause: `LoadCurrentScriptIntoCanvas()` was only called when the Flow Canvas window first opened. Preset changes in `Form1` updated editor text via `LoadPresetIntoEditor(...)` but never pushed a fresh `load-graph` message to the already-open canvas.
+- Fix: `Form1.LoadPresetIntoEditor(...)` now calls `LoadCurrentScriptIntoCanvas()` immediately after loading command text/preset metadata into the editor, so any open canvas is synchronized to the newly selected preset.
+- Added regression: `SSH_Helper.Tests/UI/Form1FlowCanvasPresetSyncTests.cs` (`SelectingDifferentPreset_WithOpenFlowCanvas_QueuesUpdatedGraphForNewPreset`) proves preset A -> preset B selection while `_flowCanvasForm` is open queues an updated `load-graph` payload containing the new preset marker.
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasPresetSyncTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-preset-sync-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-preset-sync-red\\obj\\` (failed: `1/1`, empty pending message queue).
+- Green: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasPresetSyncTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-preset-sync-green\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-preset-sync-green\\obj\\` (passed: `1/1`).
+- Regression: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTabSelectionTests|FullyQualifiedName~Form1FlowCanvasBreakpointPersistenceTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-preset-sync-regression\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-preset-sync-regression\\obj\\` (passed: `2/2`).
+
 ## 157. Remove save-diff truncation in preset save/discard prompt
 - [x] 157.1 Locate the preset save/discard diff rendering path and confirm the truncation source.
 - [x] 157.2 Patch the diff line-budget logic so command diffs in the save prompt are never truncated.
