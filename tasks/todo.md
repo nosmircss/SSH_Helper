@@ -1,5 +1,19 @@
 # TODO
 
+## 160. Draft OpenSpec proposal for Flow Canvas preset snapshot persistence
+- [x] 160.1 Ground current behavior across preset persistence, Flow Canvas export, and comment/layout handling.
+- [x] 160.2 Create detailed OpenSpec proposal for preserving Flow Canvas nodes/edges/comments across preset save + export/import portability.
+- [x] 160.3 Capture decision defaults in the proposal (script-first hash policy, visual-dirty save behavior, auto-apply executable edits on save, backward compatibility).
+
+### 160 Review
+- Added `openspec/changes/add-flow-canvas-preset-snapshot-persistence/proposal.md` with detailed scope, behavior contracts, compatibility expectations, and implementation impact.
+- Proposal explicitly locks key decisions:
+- Script-first load policy with `commandHash` validation.
+- Visual edits (layout/comments) mark presets dirty and persist on `Save Preset`.
+- `Save Preset` auto-applies executable Flow Canvas edits to YAML when needed.
+- Snapshot metadata is included in both single preset and bulk export/import paths.
+- Backward compatibility for existing preset payloads is preserved.
+
 ## 159. Enable editable nested container blocks in Flow Canvas
 - [x] 159.1 Remove read-only properties behavior for `_isChildOf` nodes and render standard editable fields with branch context badge.
 - [x] 159.2 Update Flow store node-prop mutation to propagate `_forceGraphExport: true` up the `_isChildOf` ancestor chain (and on direct container edits).
