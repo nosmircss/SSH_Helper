@@ -103,6 +103,9 @@ export default function VariableInspector() {
                 }}
               >
                 <span style={{ color: '#e0c040' }}>{v.name}</span>
+                {isExpanded && (
+                  <span style={{ color: 'var(--fc-text-muted, #555)', fontSize: 9, marginLeft: 4, cursor: 'pointer' }} title="Click to collapse">▼</span>
+                )}
                 <span style={{ color: 'var(--fc-text-muted, #555)' }}> = </span>
                 {!isExpanded ? (
                   <span style={{
@@ -116,19 +119,23 @@ export default function VariableInspector() {
                     )}
                   </span>
                 ) : (
-                  <div style={{
-                    color: '#8adb8a',
-                    fontWeight: v.changed ? 700 : 400,
-                    marginTop: 2,
-                    padding: '4px 6px',
-                    background: 'rgba(0,0,0,0.25)',
-                    borderRadius: 3,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-all',
-                    lineHeight: 1.5,
-                    maxHeight: 200,
-                    overflowY: 'auto',
-                  }}>
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      color: '#8adb8a',
+                      fontWeight: v.changed ? 700 : 400,
+                      marginTop: 2,
+                      padding: '4px 6px',
+                      background: 'rgba(0,0,0,0.25)',
+                      borderRadius: 3,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                      lineHeight: 1.5,
+                      maxHeight: 200,
+                      overflowY: 'auto',
+                      userSelect: 'text',
+                      cursor: 'text',
+                    }}>
                     {fullDisplay}
                   </div>
                 )}
