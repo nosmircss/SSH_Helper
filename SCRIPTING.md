@@ -1726,6 +1726,20 @@ Reads a text file line by line into a list variable. Useful for processing IP li
 | `max_lines` | No | `10000` | Maximum lines to read (0 = unlimited) |
 | `encoding` | No | `utf-8` | File encoding: `utf-8`, `ascii`, `utf-16`, `utf-16be`, `utf-32`, `latin1` (aliases: `unicode` for utf-16, `iso-8859-1` for latin1) |
 
+**Path Placeholder Tokens (Windows):**
+
+`readfile.path` supports both script variables (for example `${config_dir}`) and Windows environment-variable expansion (`%NAME%`).
+
+Concrete `%NAME%` placeholders currently available and commonly useful:
+
+- `%LocalAppData%` (example: `%LocalAppData%\\SSH_Helper\\hosts.txt`)
+- `%AppData%` (example: `%AppData%\\Vendor\\config.txt`)
+- `%UserProfile%` (example: `%UserProfile%\\Desktop\\hosts.txt`)
+- `%TEMP%` and `%TMP%` (example: `%TEMP%\\import.txt`)
+- `%HOMEDRIVE%` and `%HOMEPATH%` (example: `%HOMEDRIVE%%HOMEPATH%\\Documents\\hosts.txt`)
+
+Additional machine/user-specific `%NAME%` variables also work if they exist in the current Windows environment.
+
 **Manual-only picker note:**
 - `select_file: true` is available only during manual main-window runs. Scheduled jobs and Job List `Run Now` executions fail cleanly instead of opening a file picker.
 - When the picker is cancelled, `into` is set to an empty list and the script stops immediately. `on_error: continue` does not suppress picker cancellation.
@@ -1801,6 +1815,20 @@ Writes content to a text file. Supports multiple formats including text, JSON, J
 | `format` | No | `text` | Output format: `text`, `json`, `jsonl`, or `csv` |
 | `pretty` | No | `true` | Pretty-print JSON with indentation |
 | `headers` | No | - | CSV column headers (list of strings) |
+
+**Path Placeholder Tokens (Windows):**
+
+`writefile.path` supports both script variables (for example `${output_dir}`) and Windows environment-variable expansion (`%NAME%`).
+
+Concrete `%NAME%` placeholders currently available and commonly useful:
+
+- `%LocalAppData%` (example: `%LocalAppData%\\SSH_Helper\\exports\\result.json`)
+- `%AppData%` (example: `%AppData%\\Vendor\\output.txt`)
+- `%UserProfile%` (example: `%UserProfile%\\Desktop\\report.txt`)
+- `%TEMP%` and `%TMP%` (example: `%TEMP%\\script-output.txt`)
+- `%HOMEDRIVE%` and `%HOMEPATH%` (example: `%HOMEDRIVE%%HOMEPATH%\\Documents\\result.csv`)
+
+Additional machine/user-specific `%NAME%` variables also work if they exist in the current Windows environment.
 
 **Security:**
 - **Blocked paths**: Cannot write to system directories or Program Files
