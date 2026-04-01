@@ -452,6 +452,19 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case StepType.Exists:
+                        if (step.Exists != null)
+                        {
+                            ExtractVarReferences(step.Exists.Path, referencedVars);
+                            if (!string.IsNullOrWhiteSpace(step.Exists.Into))
+                            {
+                                var into = step.Exists.Into.Trim();
+                                definedVars.Add(into);
+                                definedVars.Add(into + "_meta");
+                            }
+                        }
+                        break;
+
                     case StepType.Input:
                         if (step.Input != null)
                         {

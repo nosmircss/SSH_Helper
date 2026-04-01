@@ -98,6 +98,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public WritefileOptions? Writefile { get; set; }
 
         /// <summary>
+        /// Exists command - checks local file or directory existence.
+        /// </summary>
+        public ExistsOptions? Exists { get; set; }
+
+        /// <summary>
         /// Input command - prompts user for input during script execution.
         /// </summary>
         public InputOptions? Input { get; set; }
@@ -344,6 +349,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (ContinueLoop) return StepType.Continue;
             if (Readfile != null) return StepType.Readfile;
             if (Writefile != null) return StepType.Writefile;
+            if (Exists != null) return StepType.Exists;
             if (Input != null) return StepType.Input;
             if (UpdateColumn != null) return StepType.UpdateColumn;
             if (UpdateEnvironment != null) return StepType.UpdateEnvironment;
@@ -513,6 +519,27 @@ namespace SSH_Helper.Services.Scripting.Models
         /// For CSV format: optional header row. If not provided, no header is written.
         /// </summary>
         public List<string>? Headers { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the exists command.
+    /// </summary>
+    public class ExistsOptions
+    {
+        /// <summary>
+        /// Local path to evaluate after variable/environment expansion.
+        /// </summary>
+        public string Path { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Variable name to receive the boolean existence result.
+        /// </summary>
+        public string Into { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Type filter: any (default), file, or directory.
+        /// </summary>
+        public string Type { get; set; } = "any";
     }
 
     /// <summary>
@@ -1184,6 +1211,7 @@ namespace SSH_Helper.Services.Scripting.Models
         Continue,
         Readfile,
         Writefile,
+        Exists,
         Input,
         UpdateColumn,
         UpdateEnvironment,

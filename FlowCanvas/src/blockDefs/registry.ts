@@ -494,6 +494,20 @@ export const blockDefs: BlockDef[] = [
     ],
   },
   {
+    type: 'exists',
+    label: 'Exists',
+    category: 'io',
+    icon: 'exists',
+    description: 'Check whether a local path exists',
+    previewKey: 'path',
+    properties: [
+      { key: 'path', label: 'Path', type: 'text', required: true },
+      { key: 'into', label: 'Into Variable', type: 'text', required: true },
+      { key: 'type', label: 'Type', type: 'select', options: ['any', 'file', 'directory'], defaultValue: 'any' },
+      onErrorProp,
+    ],
+  },
+  {
     type: 'log',
     label: 'Log',
     category: 'io',

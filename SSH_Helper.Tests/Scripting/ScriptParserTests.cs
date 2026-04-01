@@ -1767,6 +1767,86 @@ steps:
 
     #endregion
 
+    #region Exists Parser Tests
+
+    [Fact]
+    public void Parse_ExistsStep_ParsesCorrectly()
+    {
+      var yaml = """
+        ---
+        steps:
+          - exists:
+              path: "%UserProfile%\\Documents\\hosts.txt"
+              into: hosts_file
+              type: file
+              on_error: continue
+        """;
+
+      var script = _parser.Parse(yaml);
+
+      script.Steps.Should().HaveCount(1);
+      script.Steps[0].GetStepType().Should().Be(StepType.Exists);
+      script.Steps[0].Exists.Should().NotBeNull();
+      script.Steps[0].Exists!.Path.Should().Be("%UserProfile%\\Documents\\hosts.txt");
+      script.Steps[0].Exists.Into.Should().Be("hosts_file");
+      script.Steps[0].Exists.Type.Should().Be("file");
+      script.Steps[0].OnError.Should().Be("continue");
+    }
+
+    [Fact]
+    public void Validate_ExistsWithoutPath_ReturnsError()
+    {
+      var yaml = """
+        ---
+        steps:
+          - exists:
+              into: file_present
+        """;
+
+      var script = _parser.Parse(yaml);
+      var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+      errors.Should().Contain(error => error.Contains("Exists requires 'path'"));
+    }
+
+    [Fact]
+    public void Validate_ExistsWithInvalidType_ReturnsError()
+    {
+      var yaml = """
+        ---
+        steps:
+          - exists:
+              path: "C:\\temp"
+              into: has_path
+              type: symlink
+        """;
+
+      var script = _parser.Parse(yaml);
+      var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+      errors.Should().Contain(error => error.Contains("Exists 'type' must be one of any, file, directory"));
+    }
+
+    [Fact]
+    public void Parse_ExistsUnknownKey_AddsWarning()
+    {
+      var yaml = """
+        ---
+        steps:
+          - exists:
+              path: "C:\\temp"
+              into: has_path
+              typoo: true
+        """;
+
+      _ = _parser.Parse(yaml);
+
+      _parser.Warnings.Should().ContainSingle();
+      _parser.Warnings[0].Should().Contain("Unknown exists key 'typoo'");
+    }
+
+    #endregion
+
     #region PreprocessYaml Tests
 
     [Fact]

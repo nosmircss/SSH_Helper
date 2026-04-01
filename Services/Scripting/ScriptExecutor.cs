@@ -109,6 +109,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Continue, new ContinueCommand() },
                 { StepType.Readfile, new ReadFileCommand() },
                 { StepType.Writefile, new WriteFileCommand() },
+                { StepType.Exists, new ExistsCommand() },
                 { StepType.Input, new InputCommand() },
                 { StepType.UpdateColumn, new UpdateColumnCommand() },
                 { StepType.UpdateEnvironment, new UpdateEnvironmentCommand() },

@@ -104,7 +104,7 @@ Executable scripts may also declare `imports:` and `subroutines:`. Library files
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `imports:`, `subroutines:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- exists:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
 
 Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.
 
@@ -1989,6 +1989,74 @@ CSV format with optional headers:
     format: csv
     content: "${row}"
     mode: append
+```
+
+---
+
+### exists - Check Local File/Directory Existence
+
+Checks whether a local path exists and stores the result for branching.
+
+**Syntax:**
+```yaml
+- exists:
+        path: "%UserProfile%\\Documents\\hosts.txt"
+        into: has_hosts
+        type: any                 # Optional: any (default), file, directory
+        on_error: stop            # Optional: stop (default) or continue
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `path` | Yes | - | Local path to check (supports `${var}` and `%NAME%` expansion) |
+| `into` | Yes | - | Variable name that receives `true` or `false` |
+| `type` | No | `any` | Match mode: `any`, `file`, or `directory` |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+
+**Output Variables:**
+
+- `${into}`: boolean existence result (`true`/`false`)
+- `${into}_meta`: metadata object with:
+    - `exists` (boolean)
+    - `is_file` (boolean)
+    - `is_directory` (boolean)
+    - `path` (resolved full path)
+    - `type` (effective mode)
+    - `error` (only when an operational error is suppressed)
+
+**Examples:**
+```yaml
+# Basic file check
+- exists:
+        path: "%LocalAppData%\\SSH_Helper\\hosts.txt"
+        into: hosts_file_present
+        type: file
+
+- if:
+        condition: hosts_file_present == true
+        then:
+            - readfile:
+                    path: "%LocalAppData%\\SSH_Helper\\hosts.txt"
+                    into: hosts
+
+# OneDrive vs local Documents fallback
+- exists:
+        path: "%OneDrive%\\Documents\\audit.csv"
+        into: onedrive_doc
+        type: file
+
+- if:
+        condition: onedrive_doc == true
+        then:
+            - set: source_path = "%OneDrive%\\Documents\\audit.csv"
+        else:
+            - set: source_path = "%UserProfile%\\Documents\\audit.csv"
+
+- readfile:
+        path: "${source_path}"
+        into: audit_lines
 ```
 
 ---

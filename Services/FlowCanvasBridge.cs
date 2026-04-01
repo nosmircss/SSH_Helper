@@ -213,6 +213,7 @@ namespace SSH_Helper.Services
                 ["table"] = ["data"],
                 ["readfile"] = ["path", "into"],
                 ["writefile"] = ["path", "content"],
+                ["exists"] = ["path", "into"],
                 ["input"] = ["prompt", "into"],
                 ["choose"] = ["prompt", "options", "into"],
                 ["multiselect"] = ["prompt", "options", "into"],
@@ -1194,6 +1195,7 @@ namespace SSH_Helper.Services
             // directly connected from the container. If a branch's first child is
             // missing from directTargets, the user deleted that branch edge.
             var branchFirstChildren = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var hasAnyChildNodes = false;
             foreach (var kvp in nodeMap)
             {
                 if (kvp.Key == nodeId) continue;
@@ -1203,6 +1205,8 @@ namespace SSH_Helper.Services
                 var parentId = childProps["_isChildOf"]?.ToString();
                 if (!string.Equals(parentId, nodeId, StringComparison.Ordinal))
                     continue;
+
+                hasAnyChildNodes = true;
 
                 var branchLabel = childProps["_branchLabel"]?.ToString();
                 if (string.IsNullOrWhiteSpace(branchLabel)) continue;
@@ -1215,6 +1219,11 @@ namespace SSH_Helper.Services
 
             if (branchFirstChildren.Count == 0)
             {
+                // Legacy/imported child nodes may only include _isChildOf/_stepPath metadata
+                // and omit explicit _branchLabel. In that case, keep snippet export behavior.
+                if (hasAnyChildNodes)
+                    return false;
+
                 // No children remain at all. If the snippet originally defined branches,
                 // that means the user deleted all branch children — snippet is stale.
                 // Check the snippet for branch keywords to detect this case.
@@ -2188,6 +2197,16 @@ namespace SSH_Helper.Services
                         SetIfNotNull(props, "format", step.Writefile.Format);
                         if (!step.Writefile.Pretty) props["pretty"] = false;
                         if (step.Writefile.Headers != null) props["headers"] = JToken.FromObject(step.Writefile.Headers);
+                    }
+                    break;
+
+                case StepType.Exists:
+                    if (step.Exists != null)
+                    {
+                        SetIfNotNull(props, "path", step.Exists.Path);
+                        SetIfNotNull(props, "into", step.Exists.Into);
+                        if (!string.Equals(step.Exists.Type, "any", StringComparison.OrdinalIgnoreCase))
+                            props["type"] = step.Exists.Type;
                     }
                     break;
 
@@ -3503,6 +3522,7 @@ namespace SSH_Helper.Services
                 StepType.Webhook => ("webhook", step.Webhook?.Url),
                 StepType.Readfile => ("readfile", step.Readfile?.Path),
                 StepType.Writefile => ("writefile", step.Writefile?.Path),
+                StepType.Exists => ("exists", step.Exists?.Path),
                 StepType.Log => ("log", GetLogPreview(step.Log)),
                 StepType.Input => ("input", step.Input?.Prompt),
                 StepType.Choose => ("choose", step.Choose?.Prompt),

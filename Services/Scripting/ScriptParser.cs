@@ -33,6 +33,7 @@ namespace SSH_Helper.Services.Scripting
             "updateenvironment",
             "readfile",
             "writefile",
+            "exists",
             "input",
             "log",
             "http",
@@ -106,6 +107,7 @@ namespace SSH_Helper.Services.Scripting
                 ["try"] = ["do", "catch", "finally"],
                 ["readfile"] = ["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding", "on_error"],
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
+                ["exists"] = ["path", "into", "type", "on_error"],
                 ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error"],
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
@@ -144,6 +146,7 @@ namespace SSH_Helper.Services.Scripting
                 ["updateenvironment"] = [],
                 ["readfile"] = [],
                 ["writefile"] = [],
+                ["exists"] = [],
                 ["input"] = [],
                 ["log"] = [],
                 ["http"] = [],
@@ -188,6 +191,7 @@ namespace SSH_Helper.Services.Scripting
             StepType.Send,
             StepType.Readfile,
             StepType.Writefile,
+            StepType.Exists,
             StepType.Input,
             StepType.Http,
             StepType.BrowserCallbackCapture,
@@ -891,6 +895,10 @@ namespace SSH_Helper.Services.Scripting
                     case "writefile":
                         step.DeclaredStepType = StepType.Writefile;
                         step.Writefile = ParseWritefileOptions(parser, step);
+                        break;
+                    case "exists":
+                        step.DeclaredStepType = StepType.Exists;
+                        step.Exists = ParseExistsOptions(parser, step);
                         break;
                     case "input":
                         step.DeclaredStepType = StepType.Input;
@@ -1936,6 +1944,51 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown writefile key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private ExistsOptions ParseExistsOptions(IParser parser, ScriptStep step)
+        {
+            var options = new ExistsOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "path":
+                            options.Path = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "type":
+                            options.Type = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown exists key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -3844,6 +3897,30 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Writefile requires 'path'{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Exists:
+                        if (step.Exists == null || string.IsNullOrWhiteSpace(step.Exists.Path))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Exists requires 'path'{lineContent}");
+                        }
+
+                        if (step.Exists == null || string.IsNullOrWhiteSpace(step.Exists.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Exists requires 'into' variable{lineContent}");
+                        }
+
+                        if (step.Exists != null &&
+                            !IsDynamicValue(step.Exists.Type) &&
+                            !string.Equals(step.Exists.Type, "any", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.Exists.Type, "file", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.Exists.Type, "directory", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Exists 'type' must be one of any, file, directory{lineContent}");
                         }
                         break;
 
