@@ -42,6 +42,12 @@ namespace SSH_Helper.Models
         public string? Folder { get; set; }
 
         /// <summary>
+        /// Persisted Flow Canvas layout data (positions, comments, disabled blocks).
+        /// Null when no layout has been saved for this preset.
+        /// </summary>
+        public CanvasLayoutData? CanvasLayout { get; set; }
+
+        /// <summary>
         /// Gets the type of this preset (auto-detected from content).
         /// </summary>
         [JsonIgnore]
@@ -62,7 +68,8 @@ namespace SSH_Helper.Models
                 Commands = Commands,
                 Timeout = Timeout,
                 IsFavorite = IsFavorite,
-                Folder = Folder
+                Folder = Folder,
+                CanvasLayout = CanvasLayout
             };
         }
 

@@ -28,6 +28,7 @@ import VariableInspector from './panels/VariableInspector';
 import OutputPreview from './panels/OutputPreview';
 import DebugPanel from './panels/DebugPanel';
 import SearchOverlay from './panels/SearchOverlay';
+import { sendLayoutAutosave } from './utils/layoutAutosave';
 import TimelinePanel from './panels/TimelinePanel';
 import BlockContextMenu from './panels/BlockContextMenu';
 import EdgeContextMenu from './panels/EdgeContextMenu';
@@ -115,6 +116,7 @@ function FlowCanvasInner() {
 
   const onNodeDragStop = useCallback(() => {
     dragSnapshotTaken.current = false;
+    sendLayoutAutosave();
   }, []);
 
   // Drag and drop from palette

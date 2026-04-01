@@ -204,6 +204,10 @@ namespace SSH_Helper
         private Label? _btnPresetSearchClear;
         private System.Windows.Forms.Timer? _presetSearchDebounceTimer;
 
+        // Canvas layout structure check
+        private System.Windows.Forms.Timer? _canvasLayoutCheckTimer;
+        private PresetHeaderIndicatorFormatter.CanvasLayoutState _canvasLayoutState;
+
         // Find dialog state
         private FindDialog? _findDialog;
         private string _lastFindTerm = "";
@@ -2254,9 +2258,130 @@ namespace SSH_Helper
                 _selectedFolderName,
                 currentPresetName,
                 isDirty);
-            lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty);
+
+            // Immediately determine if canvas layout exists (cheap null check).
+            // If dirty, schedule a debounced structure hash check.
+            var hasLayout = !string.IsNullOrEmpty(_activePresetName)
+                && _presetManager.Get(_activePresetName)?.CanvasLayout != null;
+
+            if (!hasLayout)
+            {
+                _canvasLayoutState = PresetHeaderIndicatorFormatter.CanvasLayoutState.None;
+                _canvasLayoutCheckTimer?.Stop();
+            }
+            else if (!isDirty)
+            {
+                _canvasLayoutState = PresetHeaderIndicatorFormatter.CanvasLayoutState.Saved;
+                _canvasLayoutCheckTimer?.Stop();
+            }
+            else
+            {
+                // Dirty + has layout → debounce the structure hash check
+                ScheduleCanvasLayoutCheck();
+            }
+
+            lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty, _canvasLayoutState);
             btnSavePreset.Text = PresetHeaderIndicatorFormatter.FormatSaveButtonLabel(isDirty);
             ReflowScriptHeader();
+        }
+
+        private void ScheduleCanvasLayoutCheck()
+        {
+            if (_canvasLayoutCheckTimer == null)
+            {
+                _canvasLayoutCheckTimer = new System.Windows.Forms.Timer { Interval = 500 };
+                _canvasLayoutCheckTimer.Tick += (_, _) =>
+                {
+                    _canvasLayoutCheckTimer.Stop();
+                    CheckCanvasLayoutStructure();
+                };
+            }
+            _canvasLayoutCheckTimer.Stop();
+            _canvasLayoutCheckTimer.Start();
+        }
+
+        private void CheckCanvasLayoutStructure()
+        {
+            if (string.IsNullOrEmpty(_activePresetName)) return;
+
+            var preset = _presetManager.Get(_activePresetName);
+            var storedHash = preset?.CanvasLayout?.StructureHash;
+            if (string.IsNullOrEmpty(storedHash)) return;
+
+            var currentHash = FlowCanvasBridge.ComputeStructureHashFromYaml(txtCommand.Text);
+            _canvasLayoutState = currentHash != null && string.Equals(currentHash, storedHash, StringComparison.Ordinal)
+                ? PresetHeaderIndicatorFormatter.CanvasLayoutState.Saved
+                : PresetHeaderIndicatorFormatter.CanvasLayoutState.WillReset;
+
+            var isDirty = IsPresetDirty();
+            lblScriptTitle.Text = PresetHeaderIndicatorFormatter.FormatCommandSectionTitle(isDirty, _canvasLayoutState);
+            ReflowScriptHeader();
+        }
+
+        private void ApplyLayoutAutosave(JObject msg)
+        {
+            if (string.IsNullOrEmpty(_activePresetName)) return;
+
+            var preset = _presetManager.Get(_activePresetName);
+            if (preset == null) return;
+
+            // Build or update the layout from the autosave payload
+            var layout = preset.CanvasLayout ?? new Models.CanvasLayoutData();
+
+            // Update positions
+            var positions = msg["positions"] as JObject;
+            if (positions != null)
+            {
+                layout.Positions.Clear();
+                foreach (var prop in positions.Properties())
+                {
+                    layout.Positions[prop.Name] = new Models.NodePosition
+                    {
+                        X = prop.Value["x"]?.Value<double>() ?? 0,
+                        Y = prop.Value["y"]?.Value<double>() ?? 0,
+                    };
+                }
+            }
+
+            // Update comments
+            var comments = msg["comments"] as JArray;
+            if (comments != null)
+            {
+                layout.Comments.Clear();
+                foreach (var c in comments)
+                {
+                    layout.Comments.Add(new Models.CanvasComment
+                    {
+                        Id = c["id"]?.ToString() ?? "",
+                        Text = c["text"]?.ToString() ?? "",
+                        Color = c["color"]?.ToString() ?? "#e0c040",
+                        X = c["x"]?.Value<double>() ?? 0,
+                        Y = c["y"]?.Value<double>() ?? 0,
+                        Width = c["width"]?.Value<double>() ?? 200,
+                        Height = c["height"]?.Value<double>() ?? 100,
+                        AttachedToNodeId = c["attachedToNodeId"]?.ToString(),
+                    });
+                }
+            }
+
+            // Update disabled blocks
+            var disabled = msg["disabledBlocks"] as JArray;
+            if (disabled != null)
+            {
+                layout.DisabledBlockIds.Clear();
+                layout.DisabledBlockIds.AddRange(
+                    disabled.Select(t => t.ToString()).Where(id => !string.IsNullOrEmpty(id)));
+            }
+
+            // Compute structure hash if not set yet (first auto-save before any Apply YAML)
+            if (string.IsNullOrEmpty(layout.StructureHash))
+            {
+                var hash = FlowCanvasBridge.ComputeStructureHashFromYaml(txtCommand.Text);
+                if (hash != null)
+                    layout.StructureHash = hash;
+            }
+
+            _presetManager.UpdateCanvasLayout(_activePresetName, layout);
         }
 
         private void UpdateHostCount()
@@ -6170,6 +6295,12 @@ namespace SSH_Helper
                 }
             };
 
+            // Auto-save layout changes (positions, comments, disabled blocks) without requiring Apply YAML
+            _flowCanvasForm.OnLayoutAutosave += (msg) =>
+            {
+                BeginInvoke(() => ApplyLayoutAutosave(msg));
+            };
+
             _flowCanvasForm.Show();
 
             // Load current script into canvas if it's a YAML script
@@ -6196,6 +6327,22 @@ namespace SSH_Helper
             {
                 var bridge = new FlowCanvasBridge();
                 var (nodes, edges) = bridge.TextToGraph(scriptText);
+
+                // Merge stored canvas layout if the script structure hasn't changed
+                if (!string.IsNullOrEmpty(_activePresetName))
+                {
+                    var preset = _presetManager.Get(_activePresetName);
+                    var layout = preset?.CanvasLayout;
+                    if (layout != null)
+                    {
+                        var currentHash = FlowCanvasBridge.ComputeStructureHash(nodes);
+                        if (string.Equals(currentHash, layout.StructureHash, StringComparison.Ordinal))
+                        {
+                            FlowCanvasBridge.MergeLayout(nodes, layout);
+                        }
+                    }
+                }
+
                 _flowCanvasForm.LoadGraph(nodes, edges);
             }
             catch
@@ -6273,6 +6420,17 @@ namespace SSH_Helper
                         nodeStepMap: _nodeToStepPathMap);
                     SshDebugLog("FLOWCANVAS", $"execute-canvas rejected: selected step '{selectedStepId}' is not in export map.");
                     return false;
+                }
+
+                // Capture canvas layout (positions, comments, disabled blocks) onto the active preset
+                if (!string.IsNullOrEmpty(_activePresetName))
+                {
+                    var commentNodes = graphMessage["comments"] as JArray;
+                    var disabledBlocks = (graphMessage["disabledBlocks"] as JArray)?
+                        .Select(t => t.ToString())
+                        .Where(id => !string.IsNullOrEmpty(id));
+                    var layout = FlowCanvasBridge.ExtractLayout(nodes, commentNodes, disabledBlocks);
+                    _presetManager.UpdateCanvasLayout(_activePresetName, layout);
                 }
 
                 SendFlowCanvasApplyResult(
@@ -14021,6 +14179,8 @@ namespace SSH_Helper
         /// </summary>
         private void CleanupSchedulerServices()
         {
+            _canvasLayoutCheckTimer?.Stop();
+            _canvasLayoutCheckTimer?.Dispose();
             _statusBarTimer?.Stop();
             _statusBarTimer?.Dispose();
             if (_jobExecutionService != null)

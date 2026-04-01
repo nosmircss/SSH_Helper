@@ -1,5 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { FlowStore } from '../useFlowStore';
+import { sendLayoutAutosave } from '../../utils/layoutAutosave';
 
 export interface CommentSlice {
   addComment: (position: { x: number; y: number }, attachedToNodeId?: string) => void;
@@ -29,6 +30,7 @@ export const createCommentSlice: StateCreator<FlowStore, [], [], CommentSlice> =
       },
     };
     set((s) => ({ nodes: [...s.nodes, commentNode] }));
+    sendLayoutAutosave();
   },
 
   updateComment: (id, updates) => {
@@ -56,6 +58,7 @@ export const createCommentSlice: StateCreator<FlowStore, [], [], CommentSlice> =
         return nextNode;
       }),
     }));
+    sendLayoutAutosave();
   },
 
   removeComment: (id) => {
@@ -64,6 +67,7 @@ export const createCommentSlice: StateCreator<FlowStore, [], [], CommentSlice> =
       nodes: s.nodes.filter((n) => n.id !== id),
       selectedNodeIds: new Set([...s.selectedNodeIds].filter((selectedId) => selectedId !== id)),
     }));
+    sendLayoutAutosave();
   },
 });
 

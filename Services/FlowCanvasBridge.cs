@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
+using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Models;
 using YamlDotNet.Serialization;
@@ -4088,6 +4089,198 @@ namespace SSH_Helper.Services
                 return false;
 
             return int.TryParse(parts[1], out stepIndex);
+        }
+
+        #endregion
+
+        #region Canvas Layout Persistence
+
+        /// <summary>
+        /// Computes a structure hash from the graph nodes' block types and step paths.
+        /// The hash is insensitive to value changes (e.g., editing a command argument)
+        /// but changes when blocks are added, removed, reordered, or change type.
+        /// </summary>
+        public static string ComputeStructureHash(JArray nodes)
+        {
+            var tuples = new List<string>();
+            foreach (var node in nodes)
+            {
+                var id = node["id"]?.ToString();
+                if (id == "__start__") continue;
+                if (node["type"]?.ToString() == "comment") continue;
+
+                var blockType = node["data"]?["blockType"]?.ToString() ?? "";
+                var stepPath = node["data"]?["props"]?["_stepPath"]?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(stepPath))
+                    tuples.Add($"{stepPath}:{blockType}");
+            }
+
+            tuples.Sort(StringComparer.Ordinal);
+            var structure = string.Join("|", tuples);
+
+            var bytes = System.Security.Cryptography.SHA256.HashData(
+                Encoding.UTF8.GetBytes(structure));
+            return Convert.ToHexString(bytes).ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Computes a structure hash directly from YAML text without generating graph nodes.
+        /// Used by the editor to detect structural changes cheaply.
+        /// Returns null if the YAML is invalid or not a script.
+        /// </summary>
+        public static string? ComputeStructureHashFromYaml(string yamlText)
+        {
+            try
+            {
+                if (!Scripting.ScriptParser.IsYamlScript(yamlText))
+                    return null;
+
+                var parser = new Scripting.ScriptParser();
+                var script = parser.Parse(yamlText);
+                if (script.Steps.Count == 0)
+                    return null;
+
+                var tuples = new List<string>();
+                CollectStructureTuples(script.Steps, "steps", tuples);
+
+                tuples.Sort(StringComparer.Ordinal);
+                var structure = string.Join("|", tuples);
+
+                var bytes = System.Security.Cryptography.SHA256.HashData(
+                    Encoding.UTF8.GetBytes(structure));
+                return Convert.ToHexString(bytes).ToLowerInvariant();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void CollectStructureTuples(List<Scripting.Models.ScriptStep> steps, string scopePath, List<string> tuples)
+        {
+            for (int i = 0; i < steps.Count; i++)
+            {
+                var step = steps[i];
+                var stepType = step.GetStepType();
+                var (blockType, _) = GetStepPreview(step, stepType);
+                var stepPath = BuildStepPath(scopePath, i);
+                tuples.Add($"{stepPath}:{blockType}");
+
+                if (IsContainerStep(stepType))
+                {
+                    var branches = GetBranches(step, stepType);
+                    foreach (var branch in branches)
+                    {
+                        var branchScope = BuildScopePath(stepPath, branch.ScopePath);
+                        CollectStructureTuples(branch.Steps, branchScope, tuples);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Merges stored layout data into algorithmically-positioned graph nodes.
+        /// Overrides positions, appends comment nodes, and marks disabled blocks.
+        /// </summary>
+        public static void MergeLayout(JArray nodes, CanvasLayoutData layout)
+        {
+            // Override positions for existing nodes
+            foreach (var node in nodes)
+            {
+                var id = node["id"]?.ToString();
+                if (id != null && layout.Positions.TryGetValue(id, out var pos))
+                {
+                    node["position"] = new JObject { ["x"] = pos.X, ["y"] = pos.Y };
+                }
+
+                // Mark disabled blocks
+                if (id != null && layout.DisabledBlockIds.Contains(id))
+                {
+                    var data = node["data"] as JObject;
+                    if (data != null)
+                        data["disabled"] = true;
+                }
+            }
+
+            // Append comment nodes
+            foreach (var comment in layout.Comments)
+            {
+                var commentNode = new JObject
+                {
+                    ["id"] = comment.Id,
+                    ["type"] = "comment",
+                    ["position"] = new JObject { ["x"] = comment.X, ["y"] = comment.Y },
+                    ["style"] = new JObject { ["width"] = comment.Width, ["height"] = comment.Height },
+                    ["data"] = new JObject
+                    {
+                        ["commentId"] = comment.Id,
+                        ["text"] = comment.Text,
+                        ["color"] = comment.Color,
+                    },
+                };
+                if (comment.AttachedToNodeId != null)
+                    ((JObject)commentNode["data"]!)["attachedToNodeId"] = comment.AttachedToNodeId;
+
+                nodes.Add(commentNode);
+            }
+        }
+
+        /// <summary>
+        /// Extracts layout data (positions, comments, disabled blocks) from a graph payload.
+        /// Used when capturing layout on "Apply YAML".
+        /// </summary>
+        public static CanvasLayoutData ExtractLayout(JArray nodes, JArray? commentNodes, IEnumerable<string>? disabledBlockIds)
+        {
+            var layout = new CanvasLayoutData
+            {
+                StructureHash = ComputeStructureHash(nodes),
+            };
+
+            // Extract positions from executable nodes
+            foreach (var node in nodes)
+            {
+                var id = node["id"]?.ToString();
+                if (id == null) continue;
+                if (node["type"]?.ToString() == "comment") continue;
+
+                var pos = node["position"];
+                if (pos != null)
+                {
+                    layout.Positions[id] = new NodePosition
+                    {
+                        X = pos["x"]?.Value<double>() ?? 0,
+                        Y = pos["y"]?.Value<double>() ?? 0,
+                    };
+                }
+            }
+
+            // Extract comments
+            if (commentNodes != null)
+            {
+                foreach (var c in commentNodes)
+                {
+                    var comment = new CanvasComment
+                    {
+                        Id = c["id"]?.ToString() ?? "",
+                        Text = c["text"]?.ToString() ?? "",
+                        Color = c["color"]?.ToString() ?? "#e0c040",
+                        X = c["x"]?.Value<double>() ?? 0,
+                        Y = c["y"]?.Value<double>() ?? 0,
+                        Width = c["width"]?.Value<double>() ?? 200,
+                        Height = c["height"]?.Value<double>() ?? 100,
+                        AttachedToNodeId = c["attachedToNodeId"]?.ToString(),
+                    };
+                    layout.Comments.Add(comment);
+                }
+            }
+
+            // Disabled blocks
+            if (disabledBlockIds != null)
+            {
+                layout.DisabledBlockIds.AddRange(disabledBlockIds);
+            }
+
+            return layout;
         }
 
         #endregion

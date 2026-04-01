@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { FlowStore } from '../useFlowStore';
 import { messageBus } from '../../MessageBus';
 import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
+import { sendLayoutAutosave } from '../../utils/layoutAutosave';
 
 export interface DebugSlice {
   paused: boolean;
@@ -15,6 +16,7 @@ export interface DebugSlice {
   toggleDisabled: (nodeId: string) => void;
   setPaused: (paused: boolean, nodeId?: string, callStack?: string[]) => void;
   debugAction: (action: 'continue' | 'step' | 'stop') => void;
+  restoreDisabledBlocks: (nodeIds: string[]) => void;
   isDisabled: (nodeId: string) => boolean;
   hasBreakpoint: (nodeId: string) => boolean;
 }
@@ -61,6 +63,7 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
       stepId: nodeId,
       disabled: nowDisabled,
     });
+    sendLayoutAutosave();
   },
 
   setPaused: (paused, nodeId, callStack) => {
@@ -83,6 +86,13 @@ export const createDebugSlice: StateCreator<FlowStore, [], [], DebugSlice> = (se
     });
     if (action === CANVAS_HOST_MESSAGES.debugAction.stop || action === CANVAS_HOST_MESSAGES.debugAction.continue) {
       set({ paused: false, pausedAtNodeId: null, callStack: [] });
+    }
+  },
+
+  restoreDisabledBlocks: (nodeIds) => {
+    set({ disabledBlocks: new Set(nodeIds) });
+    for (const id of nodeIds) {
+      get().updateNodeData(id, { execState: 'disabled' });
     }
   },
 

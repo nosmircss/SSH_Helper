@@ -26,6 +26,7 @@ export const CANVAS_HOST_MESSAGES = {
     testDataBlock: 'test-data-block',
     testStepResult: 'test-step-result',
     layoutSave: 'layout-save',
+    layoutAutosave: 'layout-autosave',
   },
   deprecatedOutgoingAliases: {
     runRequest: 'run-request',

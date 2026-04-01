@@ -112,6 +112,19 @@ export function initMessageBridge(): () => void {
         store.getState().setEdges(msg.edges as Edge[]);
         ensureStartNodeExists(store);
         resetGraphSessionState(store);
+
+        // Restore disabled block state from loaded node data
+        const state = store.getState();
+        const disabledIds: string[] = [];
+        for (const node of state.nodes) {
+          const data = node.data as Record<string, unknown> | undefined;
+          if (data?.disabled === true) {
+            disabledIds.push(node.id);
+          }
+        }
+        if (disabledIds.length > 0) {
+          state.restoreDisabledBlocks(disabledIds);
+        }
       }
     }),
 

@@ -253,6 +253,10 @@ namespace SSH_Helper.UI
                         SavePanelSizes(msg["panelSizes"] as JObject);
                         break;
 
+                    case "layout-autosave":
+                        OnLayoutAutosave?.Invoke(msg);
+                        break;
+
                     case "show-error":
                         var errorMsg = msg["message"]?.ToString() ?? "Unknown error";
                         BeginInvoke(() => DialogTheme.Show(this, errorMsg, "Flow Canvas", MessageBoxButtons.OK, MessageBoxIcon.Error));
@@ -325,6 +329,7 @@ namespace SSH_Helper.UI
         public event Action<JObject>? OnRunRequest;
         public event Action<JObject>? OnDisableBlock;
         public event Action<JObject>? OnTestDataBlock;
+        public event Action<JObject>? OnLayoutAutosave;
 
         private void ApplyTheme()
         {
