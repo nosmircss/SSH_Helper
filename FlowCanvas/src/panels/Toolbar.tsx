@@ -21,7 +21,7 @@ export default function Toolbar() {
   const toggleSearch = useFlowStore((s) => s.toggleSearch);
   const searchVisible = useFlowStore((s) => s.searchVisible);
   const theme = useFlowStore((s) => s.theme);
-  const toggleTheme = useFlowStore((s) => s.toggleTheme);
+
   const isRunning = useFlowStore((s) => s.isRunning);
   const paused = useFlowStore((s) => s.paused);
   const debugAction = useFlowStore((s) => s.debugAction);
@@ -208,10 +208,6 @@ export default function Toolbar() {
       >
         ⏱ Timeline
       </button>
-      <button onClick={toggleTheme} style={btnStyle('#888', true)} title="Toggle dark/light theme">
-        {theme === 'dark' ? '☀' : '🌙'}
-      </button>
-
       <div style={{ flex: 1 }} />
       <span style={{ color: labelColor, fontSize: 11 }}>Flow Canvas v2</span>
     </div>

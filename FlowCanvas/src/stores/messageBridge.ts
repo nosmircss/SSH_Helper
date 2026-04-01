@@ -316,11 +316,9 @@ export function initMessageBridge(): () => void {
       );
     }),
 
-    // Theme sync from WinForms
-    messageBus.on(CANVAS_HOST_MESSAGES.incoming.themeSync, (msg) => {
-      if (msg.theme === 'dark' || msg.theme === 'light') {
-        store.getState().setTheme(msg.theme);
-      }
+    // Theme sync from WinForms — Flow Canvas always uses dark mode
+    messageBus.on(CANVAS_HOST_MESSAGES.incoming.themeSync, () => {
+      // Intentionally ignored: canvas is always dark regardless of main app theme
     }),
 
     // Restore panel sizes from WinForms persisted settings
