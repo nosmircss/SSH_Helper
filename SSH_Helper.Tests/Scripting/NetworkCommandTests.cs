@@ -210,6 +210,130 @@ public class NetworkCommandTests
     }
 
     [Fact]
+    public async Task HttpCommand_DebugLogging_IncludesRequestHeadersAuthAndBody()
+    {
+        var command = new HttpCommand(_ => new StubHttpMessageHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("ok")
+            })));
+
+        var step = new ScriptStep
+        {
+            Http = new HttpOptions
+            {
+                Url = "https://example.test/api",
+                Method = "POST",
+                Auth = "bearer",
+                Token = "token-abc-123",
+                ContentType = "json",
+                Headers = new Dictionary<string, string>
+                {
+                    ["Accept"] = "application/json",
+                    ["X-Request-Id"] = "req-42"
+                },
+                Body = "{\"name\":\"alice\"}"
+            }
+        };
+
+        var context = new ScriptContext { DebugMode = true };
+        var debugMessages = new List<string>();
+        context.OutputReceived += (_, args) =>
+        {
+            if (args.Type == ScriptOutputType.Debug)
+                debugMessages.Add(args.Message);
+        };
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        debugMessages.Should().Contain(message => message.Contains("Http: Request options") && message.Contains("auth=bearer token_length=13"));
+        debugMessages.Should().Contain(message => message.Contains("Http: Request headers") && message.Contains("Authorization") && message.Contains("Bearer token-abc-123"));
+        debugMessages.Should().Contain(message => message.Contains("Http: Request headers") && message.Contains("Accept") && message.Contains("application/json"));
+        debugMessages.Should().Contain(message => message.Contains("Http: Request headers") && message.Contains("Content-Type") && message.Contains("application/json"));
+        debugMessages.Should().Contain(message => message.Contains("Http: Request body") && message.Contains("{\"name\":\"alice\"}"));
+        debugMessages.Should().Contain(message => message.Contains("Http: Response status 200 OK"));
+        debugMessages.Should().Contain(message => message.Contains("Http: Response headers") && message.Contains("Content-Type"));
+        debugMessages.Should().Contain(message => message.Contains("Http: Response body ok"));
+    }
+
+    [Fact]
+    public async Task HttpCommand_DebugLogging_BasicAuth_IncludesAuthSummary()
+    {
+        var command = new HttpCommand(_ => new StubHttpMessageHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("ok")
+            })));
+
+        var step = new ScriptStep
+        {
+            Http = new HttpOptions
+            {
+                Url = "https://example.test/auth",
+                Method = "GET",
+                Auth = "basic",
+                Username = "api-user",
+                Password = "pass1234"
+            }
+        };
+
+        var context = new ScriptContext { DebugMode = true };
+        var debugMessages = new List<string>();
+        context.OutputReceived += (_, args) =>
+        {
+            if (args.Type == ScriptOutputType.Debug)
+                debugMessages.Add(args.Message);
+        };
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        debugMessages.Should().Contain(message =>
+            message.Contains("Http: Request options") &&
+            message.Contains("auth=basic username=api-user password_length=8"));
+    }
+
+    [Fact]
+    public async Task HttpCommand_DebugLogging_AllowFailureTrue_StillLogsErrorResponseDetails()
+    {
+        var command = new HttpCommand(_ => new StubHttpMessageHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("{\"error\":\"invalid payload\"}")
+            })));
+
+        var step = new ScriptStep
+        {
+            Http = new HttpOptions
+            {
+                Url = "https://example.test/api",
+                Method = "POST",
+                AllowFailure = true,
+                Body = "{\"input\":\"bad\"}",
+                Into = "resp"
+            }
+        };
+
+        var context = new ScriptContext { DebugMode = true };
+        var debugMessages = new List<string>();
+        context.OutputReceived += (_, args) =>
+        {
+            if (args.Type == ScriptOutputType.Debug)
+                debugMessages.Add(args.Message);
+        };
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariableString("resp_status").Should().Be("400");
+        context.GetVariableString("resp").Should().Contain("invalid payload");
+        debugMessages.Should().Contain(message => message.Contains("Http: Response status 400 Bad Request"));
+        debugMessages.Should().Contain(message => message.Contains("Http: Response headers") && message.Contains("Content-Type"));
+        debugMessages.Should().Contain(message => message.Contains("Http: Response body") && message.Contains("invalid payload"));
+    }
+
+    [Fact]
     public async Task HttpCommand_VerifyTls_DefaultValidationAndOptOutBehavior()
     {
         var command = new HttpCommand(options =>

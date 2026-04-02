@@ -2746,6 +2746,18 @@ For browser-based login flows that return values to a localhost callback, use br
 - `${into}_status`: numeric status code
 - `${into}_headers`: response headers as JSON
 
+**Debug Logging:**
+- `http` now emits verbose debug lines for request troubleshooting, including:
+    - request options (`auth`, `timeout`, `follow_redirects`, `verify_tls`)
+    - resolved request headers (including `Authorization` when auth is used)
+    - full request body (when provided)
+- After completion, debug output also includes:
+    - response status line (`status code` + reason phrase)
+    - response headers (JSON)
+    - full response body
+- Timing and endpoint/status summary lines are still emitted after the request completes.
+- Sensitive values can appear in debug output when auth/body contains secrets; use caution when sharing logs.
+
 **Failure Semantics:**
 - Non-2xx responses: fail unless `allow_failure: true`
 - Transport/runtime failures: handled by `on_error` (`stop`/`continue`)
