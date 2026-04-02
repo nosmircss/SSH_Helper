@@ -290,6 +290,7 @@ namespace SSH_Helper.Services.Terminal
                         options,
                         context.CurrentHost?.ToString() ?? "Current Host",
                         captureMode: false),
+                    context: context,
                     scripting: sharedSession.SharedScripting,
                     terminal: terminal,
                     sessionMode: options.Session,
@@ -322,6 +323,7 @@ namespace SSH_Helper.Services.Terminal
                 {
                     context.AddInteractiveSession(CreateSessionDetails(
                         runSummary,
+                        context,
                         context.CurrentHost?.ToString() ?? string.Empty,
                         options,
                         startedAtUtc,
@@ -394,6 +396,7 @@ namespace SSH_Helper.Services.Terminal
 
                 runSummary = await RunWindowLoopAsync(
                     title: ResolveInteractiveWindowTitle(options, host.ToString(), captureMode: false),
+                    context: context,
                     scripting: scripting,
                     terminal: virtualTerminal,
                     sessionMode: options.Session,
@@ -427,6 +430,7 @@ namespace SSH_Helper.Services.Terminal
                 {
                     context.AddInteractiveSession(CreateSessionDetails(
                         runSummary,
+                        context,
                         host.ToString(),
                         options,
                         startedAtUtc,
@@ -573,6 +577,7 @@ namespace SSH_Helper.Services.Terminal
                 {
                     context.AddInteractiveSession(CreateSessionDetails(
                         runSummary,
+                        context,
                         host.ToString(),
                         options,
                         startedAtUtc,
@@ -621,6 +626,7 @@ namespace SSH_Helper.Services.Terminal
             var transcriptLineCount = 0;
             var transcriptPreviousChunkEndedWithCarriageReturn = false;
             var transcriptCapped = false;
+            var transcriptPendingBuffer = new StringBuilder();
             var mirrorPendingBuffer = new StringBuilder();
             var mirrorOutputLock = new object();
             var mirroredLinesEmitted = 0;
@@ -702,10 +708,12 @@ namespace SSH_Helper.Services.Terminal
                 {
                     string capturedText = string.Empty;
                     string mirroredChunk = string.Empty;
+                    string? transcriptChunkDebugMessage = null;
                     var reachedMaxLines = false;
 
                     lock (transcriptLock)
                     {
+                        var alternateBefore = inAlternateScreen;
                         var captureResult = FilterTranscriptChunkForAudit(
                             args.RawData,
                             inAlternateScreen,
@@ -714,11 +722,20 @@ namespace SSH_Helper.Services.Terminal
                         inAlternateScreen = captureResult.InAlternateScreen;
                         Volatile.Write(ref inAlternateScreenState, inAlternateScreen ? 1 : 0);
                         capturedText = captureResult.CapturedText;
-                        if (!string.IsNullOrEmpty(capturedText))
+                        var transcriptAssemblyInput = ResolveTranscriptAssemblyInput(
+                            args.RawData,
+                            capturedText,
+                            alternateBefore,
+                            inAlternateScreen);
+                        var transcriptChunk = PrepareMirroredChunkForEmission(
+                            transcriptAssemblyInput,
+                            transcriptPendingBuffer,
+                            flush: false);
+                        if (!string.IsNullOrEmpty(transcriptChunk))
                         {
                             AppendTranscriptWithCap(
                                 transcriptBuilder,
-                                capturedText,
+                                transcriptChunk,
                                 ref transcriptLineCount,
                                 ref transcriptPreviousChunkEndedWithCarriageReturn,
                                 ref transcriptCapped);
@@ -726,12 +743,26 @@ namespace SSH_Helper.Services.Terminal
                             if (maxLines.HasValue && maxLines.Value > 0)
                             {
                                 capturedLineCount += CountLinesFromCapturedChunk(
-                                    capturedText,
+                                    transcriptChunk,
                                     ref previousChunkEndedWithCarriageReturn);
                                 reachedMaxLines = capturedLineCount >= maxLines.Value;
                             }
                         }
+
+                        if (context.DebugMode &&
+                            ShouldEmitTranscriptChunkDebug(args.RawData, args.StrippedData, capturedText))
+                        {
+                            transcriptChunkDebugMessage = BuildTranscriptChunkDebugMessage(
+                                phase: "capture-window",
+                                inAlternateBefore: alternateBefore,
+                                inAlternateAfter: inAlternateScreen,
+                                rawData: args.RawData,
+                                strippedData: args.StrippedData,
+                                capturedText: capturedText);
+                        }
                     }
+
+                    EmitInteractiveTranscriptDebug(context, transcriptChunkDebugMessage);
 
                     if (ShouldMirrorCaptureChunk(mirrorOutput, capturedText))
                     {
@@ -1136,9 +1167,29 @@ namespace SSH_Helper.Services.Terminal
             string transcript;
             lock (transcriptLock)
             {
+                var pendingTranscriptTail = PrepareMirroredChunkForEmission(
+                    capturedText: null,
+                    pendingBuffer: transcriptPendingBuffer,
+                    flush: true);
+                if (!string.IsNullOrEmpty(pendingTranscriptTail))
+                {
+                    AppendTranscriptWithCap(
+                        transcriptBuilder,
+                        pendingTranscriptTail,
+                        ref transcriptLineCount,
+                        ref transcriptPreviousChunkEndedWithCarriageReturn,
+                        ref transcriptCapped);
+                }
+
                 transcript = transcriptBuilder.ToString();
             }
+            EmitInteractiveTranscriptDebug(
+                context,
+                $"[interactive-debug capture-window] transcript_before_prefix=\"{FormatInteractiveDebugText(transcript)}\"");
             transcript = PrependStartupPromptIfMissing(transcript, startupPromptLiteral);
+            EmitInteractiveTranscriptDebug(
+                context,
+                $"[interactive-debug capture-window] transcript_after_prefix=\"{FormatInteractiveDebugText(transcript)}\"");
 
             return new InteractiveWindowRunSummary
             {
@@ -1183,6 +1234,7 @@ namespace SSH_Helper.Services.Terminal
             var transcriptLineCount = 0;
             var transcriptPreviousChunkEndedWithCarriageReturn = false;
             var transcriptCapped = false;
+            var transcriptPendingBuffer = new StringBuilder();
             var mirrorPendingBuffer = new StringBuilder();
             var mirrorOutputLock = new object();
             var mirroredLinesEmitted = 0;
@@ -1246,10 +1298,12 @@ namespace SSH_Helper.Services.Terminal
                 {
                     string capturedText = string.Empty;
                     string mirroredChunk = string.Empty;
+                    string? transcriptChunkDebugMessage = null;
                     var reachedMaxLines = false;
 
                     lock (transcriptLock)
                     {
+                        var alternateBefore = inAlternateScreen;
                         var captureResult = FilterTranscriptChunkForAudit(
                             args.RawData,
                             inAlternateScreen,
@@ -1258,11 +1312,20 @@ namespace SSH_Helper.Services.Terminal
                         inAlternateScreen = captureResult.InAlternateScreen;
                         Volatile.Write(ref inAlternateScreenState, inAlternateScreen ? 1 : 0);
                         capturedText = captureResult.CapturedText;
-                        if (!string.IsNullOrEmpty(capturedText))
+                        var transcriptAssemblyInput = ResolveTranscriptAssemblyInput(
+                            args.RawData,
+                            capturedText,
+                            alternateBefore,
+                            inAlternateScreen);
+                        var transcriptChunk = PrepareMirroredChunkForEmission(
+                            transcriptAssemblyInput,
+                            transcriptPendingBuffer,
+                            flush: false);
+                        if (!string.IsNullOrEmpty(transcriptChunk))
                         {
                             AppendTranscriptWithCap(
                                 transcriptBuilder,
-                                capturedText,
+                                transcriptChunk,
                                 ref transcriptLineCount,
                                 ref transcriptPreviousChunkEndedWithCarriageReturn,
                                 ref transcriptCapped);
@@ -1270,12 +1333,26 @@ namespace SSH_Helper.Services.Terminal
                             if (maxLines.HasValue && maxLines.Value > 0)
                             {
                                 capturedLineCount += CountLinesFromCapturedChunk(
-                                    capturedText,
+                                    transcriptChunk,
                                     ref previousChunkEndedWithCarriageReturn);
                                 reachedMaxLines = capturedLineCount >= maxLines.Value;
                             }
                         }
+
+                        if (context.DebugMode &&
+                            ShouldEmitTranscriptChunkDebug(args.RawData, args.StrippedData, capturedText))
+                        {
+                            transcriptChunkDebugMessage = BuildTranscriptChunkDebugMessage(
+                                phase: "capture-headless",
+                                inAlternateBefore: alternateBefore,
+                                inAlternateAfter: inAlternateScreen,
+                                rawData: args.RawData,
+                                strippedData: args.StrippedData,
+                                capturedText: capturedText);
+                        }
                     }
+
+                    EmitInteractiveTranscriptDebug(context, transcriptChunkDebugMessage);
 
                     if (ShouldMirrorCaptureChunk(mirrorOutput, capturedText))
                     {
@@ -1515,8 +1592,25 @@ namespace SSH_Helper.Services.Terminal
             string transcript;
             lock (transcriptLock)
             {
+                var pendingTranscriptTail = PrepareMirroredChunkForEmission(
+                    capturedText: null,
+                    pendingBuffer: transcriptPendingBuffer,
+                    flush: true);
+                if (!string.IsNullOrEmpty(pendingTranscriptTail))
+                {
+                    AppendTranscriptWithCap(
+                        transcriptBuilder,
+                        pendingTranscriptTail,
+                        ref transcriptLineCount,
+                        ref transcriptPreviousChunkEndedWithCarriageReturn,
+                        ref transcriptCapped);
+                }
+
                 transcript = transcriptBuilder.ToString();
             }
+            EmitInteractiveTranscriptDebug(
+                context,
+                $"[interactive-debug capture-headless] transcript_final=\"{FormatInteractiveDebugText(transcript)}\"");
 
             return new InteractiveWindowRunSummary
             {
@@ -1529,6 +1623,7 @@ namespace SSH_Helper.Services.Terminal
 
         private async Task<InteractiveWindowRunSummary> RunWindowLoopAsync(
             string title,
+            ScriptContext context,
             RebexScripting scripting,
             ITerminal? terminal,
             InteractiveSessionMode sessionMode,
@@ -1554,6 +1649,7 @@ namespace SSH_Helper.Services.Terminal
             var transcriptLineCount = 0;
             var transcriptPreviousChunkEndedWithCarriageReturn = false;
             var transcriptCapped = false;
+            var transcriptPendingBuffer = new StringBuilder();
             var inAlternateScreen = false;
             var inAlternateScreenState = 0;
             var sharedCommandGuard = sessionMode == InteractiveSessionMode.Shared ? new SharedCommandGuardState() : null;
@@ -1609,8 +1705,10 @@ namespace SSH_Helper.Services.Terminal
 
                 dataReceivedHandler = (_, args) =>
                 {
+                    string? transcriptChunkDebugMessage = null;
                     lock (transcriptLock)
                     {
+                        var alternateBefore = inAlternateScreen;
                         var captureResult = FilterTranscriptChunkForAudit(
                             args.RawData,
                             inAlternateScreen,
@@ -1618,16 +1716,39 @@ namespace SSH_Helper.Services.Terminal
 
                         inAlternateScreen = captureResult.InAlternateScreen;
                         Volatile.Write(ref inAlternateScreenState, inAlternateScreen ? 1 : 0);
-                        if (!string.IsNullOrEmpty(captureResult.CapturedText))
+                        var transcriptAssemblyInput = ResolveTranscriptAssemblyInput(
+                            args.RawData,
+                            captureResult.CapturedText,
+                            alternateBefore,
+                            inAlternateScreen);
+                        var transcriptChunk = PrepareMirroredChunkForEmission(
+                            transcriptAssemblyInput,
+                            transcriptPendingBuffer,
+                            flush: false);
+                        if (!string.IsNullOrEmpty(transcriptChunk))
                         {
                             AppendTranscriptWithCap(
                                 transcriptBuilder,
-                                captureResult.CapturedText,
+                                transcriptChunk,
                                 ref transcriptLineCount,
                                 ref transcriptPreviousChunkEndedWithCarriageReturn,
                                 ref transcriptCapped);
                         }
+
+                        if (context.DebugMode &&
+                            ShouldEmitTranscriptChunkDebug(args.RawData, args.StrippedData, captureResult.CapturedText))
+                        {
+                            transcriptChunkDebugMessage = BuildTranscriptChunkDebugMessage(
+                                phase: "interactive-window",
+                                inAlternateBefore: alternateBefore,
+                                inAlternateAfter: inAlternateScreen,
+                                rawData: args.RawData,
+                                strippedData: args.StrippedData,
+                                capturedText: captureResult.CapturedText);
+                        }
                     }
+
+                    EmitInteractiveTranscriptDebug(context, transcriptChunkDebugMessage);
 
                     var ctrlDTick = Interlocked.Read(ref ctrlDRequestedTick);
                     if (ctrlDTick < 0)
@@ -1879,9 +2000,29 @@ namespace SSH_Helper.Services.Terminal
             string transcript;
             lock (transcriptLock)
             {
+                var pendingTranscriptTail = PrepareMirroredChunkForEmission(
+                    capturedText: null,
+                    pendingBuffer: transcriptPendingBuffer,
+                    flush: true);
+                if (!string.IsNullOrEmpty(pendingTranscriptTail))
+                {
+                    AppendTranscriptWithCap(
+                        transcriptBuilder,
+                        pendingTranscriptTail,
+                        ref transcriptLineCount,
+                        ref transcriptPreviousChunkEndedWithCarriageReturn,
+                        ref transcriptCapped);
+                }
+
                 transcript = transcriptBuilder.ToString();
             }
+            EmitInteractiveTranscriptDebug(
+                context,
+                $"[interactive-debug interactive-window] transcript_before_prefix=\"{FormatInteractiveDebugText(transcript)}\"");
             transcript = PrependStartupPromptIfMissing(transcript, startupPromptLiteral);
+            EmitInteractiveTranscriptDebug(
+                context,
+                $"[interactive-debug interactive-window] transcript_after_prefix=\"{FormatInteractiveDebugText(transcript)}\"");
 
             return new InteractiveWindowRunSummary
             {
@@ -2772,11 +2913,20 @@ namespace SSH_Helper.Services.Terminal
 
         private static InteractiveTerminalSessionDetails CreateSessionDetails(
             InteractiveWindowRunSummary summary,
+            ScriptContext context,
             string hostAddress,
             InteractiveOptions options,
             DateTime startedAtUtc,
             DateTime endedAtUtc)
         {
+            var cleanedTranscript = CleanTranscriptForAudit(summary.Transcript);
+            EmitInteractiveTranscriptDebug(
+                context,
+                $"[interactive-debug session-details] transcript_before_clean=\"{FormatInteractiveDebugText(summary.Transcript)}\"");
+            EmitInteractiveTranscriptDebug(
+                context,
+                $"[interactive-debug session-details] transcript_after_clean=\"{FormatInteractiveDebugText(cleanedTranscript)}\"");
+
             return new InteractiveTerminalSessionDetails
             {
                 HostAddress = hostAddress ?? string.Empty,
@@ -2786,7 +2936,7 @@ namespace SSH_Helper.Services.Terminal
                 EndedAtUtc = endedAtUtc,
                 CloseReason = summary.CloseReason,
                 Completed = summary.Completed,
-                Transcript = CleanTranscriptForAudit(summary.Transcript)
+                Transcript = cleanedTranscript
             };
         }
 
@@ -2817,12 +2967,155 @@ namespace SSH_Helper.Services.Terminal
             if (transcript.IndexOf('\b') < 0 && transcript.IndexOf((char)0x7F) < 0)
                 return transcript;
 
-            // Transcript audit should preserve what the user typed while removing
-            // non-printable control artifacts (for example backspace squares).
-            var cleanedTranscript = transcript
-                .Replace("\b", string.Empty, StringComparison.Ordinal)
-                .Replace("\u007F", string.Empty, StringComparison.Ordinal);
-            return cleanedTranscript;
+            // Transcript audit should reflect the final visible command line state.
+            // Some devices emit DEL (0x7F) for erase/backspace behavior, so map it
+            // to backspace before running cursor-aware normalization.
+            var normalizedInput = transcript.IndexOf((char)0x7F) >= 0
+                ? transcript.Replace((char)0x7F, '\b')
+                : transcript;
+            return TerminalOutputProcessor.Normalize(TerminalOutputProcessor.Sanitize(normalizedInput));
+        }
+
+        internal static string ResolveTranscriptAssemblyInput(
+            string? rawData,
+            string? capturedText,
+            bool inAlternateBefore,
+            bool inAlternateAfter)
+        {
+            if (!inAlternateBefore &&
+                !inAlternateAfter &&
+                !string.IsNullOrEmpty(rawData) &&
+                rawData.IndexOf("\u001B[?", StringComparison.Ordinal) < 0)
+            {
+                return rawData;
+            }
+
+            return capturedText ?? string.Empty;
+        }
+
+        internal static bool ShouldEmitTranscriptChunkDebug(
+            string? rawData,
+            string? strippedData,
+            string? capturedText)
+        {
+            if (ContainsTranscriptDebugControlCharacters(rawData) ||
+                ContainsTranscriptDebugControlCharacters(strippedData) ||
+                ContainsTranscriptDebugControlCharacters(capturedText))
+            {
+                return true;
+            }
+
+            return !string.Equals(
+                strippedData ?? string.Empty,
+                capturedText ?? string.Empty,
+                StringComparison.Ordinal);
+        }
+
+        internal static string FormatInteractiveDebugText(string? value, int maxLength = 240)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "<empty>";
+
+            var escaped = EscapeControlCharactersForDebug(value);
+            var safeLength = Math.Max(8, maxLength);
+            if (escaped.Length <= safeLength)
+                return escaped;
+
+            var remaining = escaped.Length - safeLength;
+            return $"{escaped[..safeLength]}...[+{remaining} chars]";
+        }
+
+        private static string BuildTranscriptChunkDebugMessage(
+            string phase,
+            bool inAlternateBefore,
+            bool inAlternateAfter,
+            string? rawData,
+            string? strippedData,
+            string? capturedText)
+        {
+            return
+                $"[interactive-debug {phase}] alt={inAlternateBefore}->{inAlternateAfter} " +
+                $"raw=\"{FormatInteractiveDebugText(rawData)}\" " +
+                $"stripped=\"{FormatInteractiveDebugText(strippedData)}\" " +
+                $"captured=\"{FormatInteractiveDebugText(capturedText)}\"";
+        }
+
+        private static bool ContainsTranscriptDebugControlCharacters(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return false;
+
+            for (var index = 0; index < value.Length; index++)
+            {
+                var current = value[index];
+                if (current == '\b' ||
+                    current == '\t' ||
+                    current == (char)0x7F ||
+                    current == (char)0x1B)
+                {
+                    return true;
+                }
+
+                if (current == '\r')
+                {
+                    var nextIsLineFeed = index + 1 < value.Length && value[index + 1] == '\n';
+                    if (!nextIsLineFeed)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string EscapeControlCharactersForDebug(string value)
+        {
+            var escaped = new StringBuilder(value.Length + 32);
+            foreach (var current in value)
+            {
+                switch (current)
+                {
+                    case '\r':
+                        escaped.Append("\\r");
+                        break;
+                    case '\n':
+                        escaped.Append("\\n");
+                        break;
+                    case '\t':
+                        escaped.Append("\\t");
+                        break;
+                    case '\b':
+                        escaped.Append("\\b");
+                        break;
+                    case (char)0x7F:
+                        escaped.Append("\\x7F");
+                        break;
+                    case (char)0x1B:
+                        escaped.Append("\\x1B");
+                        break;
+                    default:
+                        if (char.IsControl(current))
+                        {
+                            escaped.Append("\\x");
+                            escaped.Append(((int)current).ToString("X2"));
+                        }
+                        else
+                        {
+                            escaped.Append(current);
+                        }
+                        break;
+                }
+            }
+
+            return escaped.ToString();
+        }
+
+        private static void EmitInteractiveTranscriptDebug(ScriptContext context, string? message)
+        {
+            if (string.IsNullOrEmpty(message) || !context.DebugMode)
+                return;
+
+            context.EmitOutput(message, ScriptOutputType.Debug);
+            System.Diagnostics.Debug.WriteLine(message);
         }
 
         private static bool ShouldBlockSharedShellCommandOnEnter(

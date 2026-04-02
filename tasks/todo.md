@@ -1,5 +1,61 @@
 # TODO
 
+## 166. Fix interactive transcript assembly for cursor-rewrite chunks
+- [x] 166.1 Reproduce and confirm corruption source from debug logs (`RawData` carries ANSI cursor rewrites while transcript assembly appends stripped fragments).
+- [x] 166.2 Update interactive transcript assembly to stream raw non-alternate chunks through cursor-aware normalization before appending to transcript builder.
+- [x] 166.3 Add focused tests for transcript assembly source selection and cross-chunk cursor rewrite reconstruction.
+- [x] 166.4 Run focused interactive transcript tests and capture verification evidence.
+
+### 166 Review
+- Root cause confirmed from user debug trace: transcript corruption happened in `interactive-window` assembly before `CleanTranscriptForAudit(...)`. The terminal emitted rewrite chunks (`\x1B[15D...`, `\x1B[14D...`) but assembly used stripped fragments (`rtup-error-log`, `tus`) and appended them, producing `...standalone-clusterrtup-error-logtus`.
+- Fix in `Services/Terminal/InteractiveTerminalService.cs`:
+- added `ResolveTranscriptAssemblyInput(...)` to prefer raw chunk data when not in alternate-screen transitions so ANSI cursor edits are preserved.
+- switched all interactive transcript builders (`capture-window`, `capture-headless`, `interactive-window`) to stream through `PrepareMirroredChunkForEmission(...)` with per-loop pending buffers, then append normalized output.
+- flushes pending transcript buffer at loop end before final transcript snapshot, so incomplete final lines are still captured correctly.
+- Added tests in `SSH_Helper.Tests/Services/InteractiveTerminalServiceTranscriptFilterTests.cs`:
+- `ResolveTranscriptAssemblyInput_NonAlternateRawChunk_UsesRawData`
+- `ResolveTranscriptAssemblyInput_AlternateScreenTransition_UsesCapturedText`
+- `PrepareMirroredChunkForEmission_CursorRewriteAcrossChunks_MatchesWholeStreamNormalization`
+- Verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalServiceTranscriptFilterTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-assembly-fix\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-assembly-fix\\obj\\` (passed: `54/54`).
+
+## 165. Add interactive transcript debug tracing for autocomplete/backspace corruption
+- [x] 165.1 Add focused regression/diagnostic tests for transcript-chunk debug formatting and control-char escaping.
+- [x] 165.2 Instrument interactive terminal capture pipeline to emit debug traces for raw/stripped/captured chunks and final transcript state.
+- [x] 165.3 Run focused interactive transcript tests and confirm no regressions.
+- [x] 165.4 Add review notes with where to read traces and verification evidence.
+
+### 165 Review
+- Added diagnostic helper tests in `SSH_Helper.Tests/Services/InteractiveTerminalServiceTranscriptFilterTests.cs`:
+- `ShouldEmitTranscriptChunkDebug_BackspaceChunk_ReturnsTrue`
+- `ShouldEmitTranscriptChunkDebug_UnchangedPlainChunk_ReturnsFalse`
+- `FormatInteractiveDebugText_EscapesControlCharactersAndTruncates`
+- Added interactive debug instrumentation (gated by `context.DebugMode`) in `Services/Terminal/InteractiveTerminalService.cs`:
+- chunk-level tracing across all interactive loops (`capture-window`, `capture-headless`, and non-capture `interactive-window`) with `RawData`, `StrippedData`, `CapturedText`, and alternate-screen state transitions.
+- final transcript tracing before/after startup-prompt prepend and before/after session-audit cleaning.
+- Diagnostic logs are emitted as script debug output (`ScriptOutputType.Debug`) and mirrored to `System.Diagnostics.Debug.WriteLine`.
+- Added helper APIs for consistent trace formatting:
+- `ShouldEmitTranscriptChunkDebug(...)`
+- `FormatInteractiveDebugText(...)`
+- control-char escaping/truncation + chunk message formatting helpers.
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ShouldEmitTranscriptChunkDebug_|FullyQualifiedName~FormatInteractiveDebugText_EscapesControlCharactersAndTruncates" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-debug-helpers-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-debug-helpers-red\\obj\\` (failed as expected before helper implementation: missing method compile errors).
+- Green: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalServiceTranscriptFilterTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-debug-helpers-green2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-debug-helpers-green2\\obj\\` (passed: `51/51`).
+
+## 164. Fix interactive transcript command reconstruction for tab/autocomplete edits
+- [x] 164.1 Reproduce the corruption with a failing transcript-filter unit test that exercises backspace-heavy command rewrites.
+- [x] 164.2 Fix transcript audit cleaning to apply terminal editing semantics (not raw control-char removal) so executed commands are preserved correctly.
+- [x] 164.3 Run focused verification for interactive terminal transcript tests and record command outcomes.
+- [x] 164.4 Add review notes with root cause, fix summary, and verification evidence.
+
+### 164 Review
+- Root cause: `InteractiveTerminalService.CleanTranscriptForAudit(...)` removed `\b` and DEL bytes as plain characters instead of applying cursor-edit semantics. For tab-cycled autocomplete, this preserved every intermediate candidate token and produced concatenated command fragments in audit logs.
+- Added regression: `CleanTranscriptForAudit_TabAutocompleteBackspaces_PreservesExecutedCommand` in `SSH_Helper.Tests/Services/InteractiveTerminalServiceTranscriptFilterTests.cs` to model multiple autocomplete rewrites on one prompt line and assert the final executed command is reconstructed.
+- Fix: `CleanTranscriptForAudit(...)` now maps DEL (`0x7F`) to backspace and runs `TerminalOutputProcessor.Sanitize(...)` + `TerminalOutputProcessor.Normalize(...)`, which applies cursor/backspace behavior before persisting transcript text.
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CleanTranscriptForAudit_TabAutocompleteBackspaces_PreservesExecutedCommand" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-transcript-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-transcript-red\\obj\\` (failed as expected with concatenated command fragments).
+- Green: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalServiceTranscriptFilterTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-transcript-green2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-transcript-green2\\obj\\` (passed: `48/48`).
+
 ## 163. Implement PuTTY-style scroll-persistent terminal selection
 - [x] 163.1 Add failing tests proving selection remains anchored to text while scrollback changes and can extend across scroll.
 - [x] 163.2 Refactor terminal viewport selection state to use buffer-relative coordinates instead of viewport-relative coordinates.

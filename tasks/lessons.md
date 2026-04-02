@@ -1,7 +1,12 @@
 # Lessons
 
+## 2026-04-02
+- When interactive transcript cleanup changes do not resolve autocomplete corruption, I must instrument and compare raw terminal chunks (`RawData`), terminal-stripped chunks (`StrippedData`), and captured transcript chunks before attempting another behavior fix.
+- When terminal output can include ANSI cursor rewrite sequences, transcript assembly must process the raw chunk stream statefully; appending stripped chunk fragments will concatenate autocomplete candidates into invalid commands.
+
 ## 2026-04-01
 - When fixing interactive terminal selection rendering bugs, I must verify full selection workflow parity (including scroll-while-selecting and cross-scroll copy behavior), not just remove the immediate visual artifact.
+- When cleaning interactive terminal audit transcripts, I must apply cursor-aware terminal normalization for backspace/tab-autocomplete edits instead of stripping control characters directly.
 
 ## 2026-03-30
 - When a secondary editor surface (Flow Canvas) mirrors preset command text from `Form1`, I must wire synchronization into the shared preset-load path (`LoadPresetIntoEditor`) rather than only the one-time window-open path.
