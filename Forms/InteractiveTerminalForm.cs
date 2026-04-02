@@ -26,6 +26,7 @@ namespace SSH_Helper.Forms
         public required int Rows { get; init; }
         public required int HistoryLength { get; init; }
         public required int ScrollbackOffset { get; init; }
+        public required int EffectiveScrollOffset { get; init; }
         public required char[] Characters { get; init; }
         public required int[] ForeColors { get; init; }
         public required int[] BackColors { get; init; }
@@ -36,6 +37,13 @@ namespace SSH_Helper.Forms
         public int CursorBackColor { get; init; }
         public required int Hash { get; init; }
     }
+
+    internal readonly record struct TerminalBufferSelection(
+        int StartColumn,
+        int StartBufferRow,
+        int EndColumn,
+        int EndBufferRow,
+        int Columns);
 
     internal sealed class InteractiveTerminalForm : Form
     {
@@ -67,6 +75,12 @@ namespace SSH_Helper.Forms
         public int ScrollbackOffset => _scrollbackOffset;
 
         public Func<string?>? CopyAllTextProvider { get; set; }
+        public Func<TerminalBufferSelection, string?>? SelectionTextProvider
+        {
+            get => _terminalView.SelectionTextProvider;
+            set => _terminalView.SelectionTextProvider = value;
+        }
+
         public Action? ClearScrollbackAction { get; set; }
         public Action? ResetTerminalAction { get; set; }
 
@@ -104,6 +118,7 @@ namespace SSH_Helper.Forms
                 BackColor = Color.Black,
                 ForeColor = Color.FromArgb(187, 187, 187)
             };
+            SelectionTextProvider = BuildDetachedSelectionText;
             _historyScrollBar = new VScrollBar
             {
                 Dock = DockStyle.Right,
@@ -647,6 +662,7 @@ namespace SSH_Helper.Forms
                 Rows = rows,
                 HistoryLength = historyLength,
                 ScrollbackOffset = appliedOffset,
+                EffectiveScrollOffset = appliedOffset,
                 Characters = characters,
                 ForeColors = foreColors,
                 BackColors = backColors,
@@ -677,6 +693,47 @@ namespace SSH_Helper.Forms
                 .Replace('\r', '\n');
 
             return normalized.Split('\n');
+        }
+
+        private string? BuildDetachedSelectionText(TerminalBufferSelection selection)
+        {
+            if (_detachedHistoryLines == null || _detachedHistoryLines.Length == 0)
+                return null;
+
+            var columns = Math.Max(1, selection.Columns);
+            var maxRow = _detachedHistoryLines.Length - 1;
+            if (maxRow < 0)
+                return null;
+
+            var startRow = Math.Clamp(selection.StartBufferRow, 0, maxRow);
+            var endRow = Math.Clamp(selection.EndBufferRow, 0, maxRow);
+            if (endRow < startRow)
+                return string.Empty;
+
+            var startColumn = Math.Clamp(selection.StartColumn, 0, columns - 1);
+            var endColumn = Math.Clamp(selection.EndColumn, 0, columns - 1);
+            var lines = new List<string>(endRow - startRow + 1);
+
+            for (var row = startRow; row <= endRow; row++)
+            {
+                var rawLine = _detachedHistoryLines[row] ?? string.Empty;
+                var paddedLine = rawLine.Length >= columns
+                    ? rawLine[..columns]
+                    : rawLine.PadRight(columns, ' ');
+
+                var lineStartColumn = row == startRow ? startColumn : 0;
+                var lineEndColumn = row == endRow ? endColumn : columns - 1;
+                if (lineEndColumn < lineStartColumn)
+                {
+                    lines.Add(string.Empty);
+                    continue;
+                }
+
+                var length = lineEndColumn - lineStartColumn + 1;
+                lines.Add(paddedLine.Substring(lineStartColumn, length).TrimEnd(' '));
+            }
+
+            return string.Join(Environment.NewLine, lines);
         }
 
         private void ApplyRememberedLocation()

@@ -28,8 +28,10 @@ namespace SSH_Helper.UI
         private bool _isCursorVisible = true;
         private Size _cellSize;
         private bool _cellSizeValid;
+        // Selection points are stored in buffer coordinates (column + absolute buffer row).
         private Point _selectionAnchor = InvalidCell;
         private Point _selectionCaret = InvalidCell;
+        private int _selectionColumns = -1;
         private bool _isSelecting;
         private bool _selectionDragged;
         private readonly Dictionary<int, SolidBrush> _brushCache = new();
@@ -80,9 +82,11 @@ namespace SSH_Helper.UI
 
         public Size CellSize => EnsureCellSize();
 
-        public bool HasSelection => TryGetSelectionBounds(out _, out _);
+        public bool HasSelection => TryGetSelectionRange(out _);
 
         public bool HasSnapshot => _snapshot != null;
+
+        public Func<TerminalBufferSelection, string?>? SelectionTextProvider { get; set; }
 
         public void SetSnapshot(TerminalScreenSnapshot snapshot)
         {
@@ -147,13 +151,10 @@ namespace SSH_Helper.UI
 
         public void ClearSelection()
         {
-            if (_selectionAnchor == InvalidCell && _selectionCaret == InvalidCell && !_selectionDragged)
+            if (!HasSelectionState())
                 return;
 
-            _selectionAnchor = InvalidCell;
-            _selectionCaret = InvalidCell;
-            _selectionDragged = false;
-            _isSelecting = false;
+            ResetSelectionState();
             Invalidate();
         }
 
@@ -163,8 +164,10 @@ namespace SSH_Helper.UI
             if (snapshot == null || snapshot.Columns <= 0 || snapshot.Rows <= 0)
                 return;
 
-            _selectionAnchor = new Point(0, 0);
-            _selectionCaret = new Point(snapshot.Columns - 1, snapshot.Rows - 1);
+            var topBufferRow = GetViewportTopBufferRow(snapshot);
+            _selectionAnchor = new Point(0, topBufferRow);
+            _selectionCaret = new Point(snapshot.Columns - 1, topBufferRow + snapshot.Rows - 1);
+            _selectionColumns = snapshot.Columns;
             _selectionDragged = true;
             _isSelecting = false;
             Invalidate();
@@ -190,37 +193,24 @@ namespace SSH_Helper.UI
         public string GetSelectedText()
         {
             var snapshot = _snapshot;
-            if (snapshot == null || !TryGetSelectionBounds(out var startIndex, out var endIndex))
+            if (snapshot == null || !TryGetSelectionRange(snapshot, out var range))
                 return string.Empty;
 
-            var columns = snapshot.Columns;
-            if (columns <= 0)
-                return string.Empty;
-
-            var characters = snapshot.Characters;
-            var startRow = startIndex / columns;
-            var startColumn = startIndex % columns;
-            var endRow = endIndex / columns;
-            var endColumn = endIndex % columns;
-            var lines = new List<string>(endRow - startRow + 1);
-
-            for (var row = startRow; row <= endRow; row++)
+            if (SelectionTextProvider != null)
             {
-                var lineStartColumn = row == startRow ? startColumn : 0;
-                var lineEndColumn = row == endRow ? endColumn : columns - 1;
-                var length = lineEndColumn - lineStartColumn + 1;
-                if (length <= 0)
+                try
                 {
-                    lines.Add(string.Empty);
-                    continue;
+                    var providedText = SelectionTextProvider.Invoke(range);
+                    if (providedText != null)
+                        return providedText;
                 }
-
-                var lineStartIndex = row * columns + lineStartColumn;
-                var line = new string(characters, lineStartIndex, length).TrimEnd(' ');
-                lines.Add(line);
+                catch
+                {
+                    // Fall back to viewport-only extraction if provider fails.
+                }
             }
 
-            return string.Join(Environment.NewLine, lines);
+            return GetSelectedTextFromViewportSnapshot(snapshot, range);
         }
 
         protected override bool IsInputKey(Keys keyData)
@@ -248,12 +238,13 @@ namespace SSH_Helper.UI
             if (snapshot == null || snapshot.Columns <= 0 || snapshot.Rows <= 0)
                 return;
 
-            var cell = GetCellFromPoint(e.Location, snapshot);
-            if (cell == InvalidCell)
+            var bufferCell = GetBufferCellFromPoint(e.Location, snapshot);
+            if (bufferCell == InvalidCell)
                 return;
 
-            _selectionAnchor = cell;
-            _selectionCaret = cell;
+            _selectionAnchor = bufferCell;
+            _selectionCaret = bufferCell;
+            _selectionColumns = snapshot.Columns;
             _selectionDragged = false;
             _isSelecting = true;
             Capture = true;
@@ -270,8 +261,8 @@ namespace SSH_Helper.UI
             if (snapshot == null || snapshot.Columns <= 0 || snapshot.Rows <= 0)
                 return;
 
-            var cell = GetCellFromPoint(e.Location, snapshot);
-            if (!TrySelectWord(cell, snapshot))
+            var viewportCell = GetViewportCellFromPoint(e.Location, snapshot);
+            if (!TrySelectWord(viewportCell, snapshot))
             {
                 Capture = false;
                 ClearSelection();
@@ -294,11 +285,12 @@ namespace SSH_Helper.UI
             if (snapshot == null)
                 return;
 
-            var cell = GetCellFromPoint(e.Location, snapshot);
-            if (cell == InvalidCell || cell == _selectionCaret)
+            var bufferCell = GetBufferCellFromPoint(e.Location, snapshot);
+            if (bufferCell == InvalidCell || bufferCell == _selectionCaret)
                 return;
 
-            _selectionCaret = cell;
+            _selectionCaret = bufferCell;
+            _selectionColumns = snapshot.Columns;
             _selectionDragged = true;
             Invalidate();
         }
@@ -344,6 +336,7 @@ namespace SSH_Helper.UI
                 {
                     brush.Dispose();
                 }
+
                 _brushCache.Clear();
             }
 
@@ -359,12 +352,13 @@ namespace SSH_Helper.UI
             if (snapshot == null || snapshot.Columns <= 0 || snapshot.Rows <= 0)
                 return;
 
-            var hasSelection = TryGetSelectionBounds(out var selectedStartIndex, out var selectedEndIndex);
+            var hasSelection = TryGetSelectionBounds(snapshot, out var selectedStartIndex, out var selectedEndIndex);
             var cellSize = EnsureCellSize();
             var cellWidth = Math.Max(1, cellSize.Width);
             var cellHeight = Math.Max(1, cellSize.Height);
             var columns = snapshot.Columns;
             var rows = snapshot.Rows;
+            var viewportTopBufferRow = GetViewportTopBufferRow(snapshot);
             var characters = snapshot.Characters;
             var foreColors = snapshot.ForeColors;
             var backColors = snapshot.BackColors;
@@ -377,24 +371,31 @@ namespace SSH_Helper.UI
             for (var row = startRow; row <= endRow; row++)
             {
                 var rowOffset = row * columns;
+                var bufferRow = viewportTopBufferRow + row;
                 var y = row * cellHeight;
                 var column = startColumn;
 
                 while (column <= endColumn)
                 {
                     var runStart = column;
-                    var runIndex = rowOffset + column;
-                    var runSelected = hasSelection && runIndex >= selectedStartIndex && runIndex <= selectedEndIndex;
-                    var runFore = runSelected ? SelectionForeColorArgb : foreColors[runIndex];
-                    var runBack = runSelected ? SelectionBackColorArgb : backColors[runIndex];
+                    var runBufferIndex = ((long)bufferRow * columns) + column;
+                    var runScreenIndex = rowOffset + column;
+                    var runSelected = hasSelection &&
+                                      runBufferIndex >= selectedStartIndex &&
+                                      runBufferIndex <= selectedEndIndex;
+                    var runFore = runSelected ? SelectionForeColorArgb : foreColors[runScreenIndex];
+                    var runBack = runSelected ? SelectionBackColorArgb : backColors[runScreenIndex];
                     column++;
 
                     while (column <= endColumn)
                     {
-                        runIndex = rowOffset + column;
-                        var currentSelected = hasSelection && runIndex >= selectedStartIndex && runIndex <= selectedEndIndex;
-                        var currentFore = currentSelected ? SelectionForeColorArgb : foreColors[runIndex];
-                        var currentBack = currentSelected ? SelectionBackColorArgb : backColors[runIndex];
+                        runBufferIndex = ((long)bufferRow * columns) + column;
+                        runScreenIndex = rowOffset + column;
+                        var currentSelected = hasSelection &&
+                                              runBufferIndex >= selectedStartIndex &&
+                                              runBufferIndex <= selectedEndIndex;
+                        var currentFore = currentSelected ? SelectionForeColorArgb : foreColors[runScreenIndex];
+                        var currentBack = currentSelected ? SelectionBackColorArgb : backColors[runScreenIndex];
                         if (currentFore != runFore || currentBack != runBack)
                             break;
 
@@ -510,54 +511,93 @@ namespace SSH_Helper.UI
 
         private void NormalizeSelectionBounds(TerminalScreenSnapshot snapshot)
         {
-            if (_selectionAnchor == InvalidCell && _selectionCaret == InvalidCell)
+            if (!HasSelectionState())
                 return;
 
             if (snapshot.Columns <= 0 || snapshot.Rows <= 0)
             {
-                ClearSelection();
+                ResetSelectionState();
                 return;
             }
 
-            _selectionAnchor = ClampCellToSnapshot(_selectionAnchor, snapshot);
-            _selectionCaret = ClampCellToSnapshot(_selectionCaret, snapshot);
+            if (_selectionColumns > 0 && _selectionColumns != snapshot.Columns)
+            {
+                // Buffer index math changes with terminal width; drop stale selection.
+                ResetSelectionState();
+                return;
+            }
+
+            _selectionColumns = snapshot.Columns;
+            _selectionAnchor = ClampBufferCellToSnapshot(_selectionAnchor, snapshot);
+            _selectionCaret = ClampBufferCellToSnapshot(_selectionCaret, snapshot);
         }
 
-        private bool TryGetSelectionBounds(out int startIndex, out int endIndex)
+        private bool TryGetSelectionRange(out TerminalBufferSelection range)
         {
-            startIndex = -1;
-            endIndex = -1;
-
             var snapshot = _snapshot;
-            if (snapshot == null || snapshot.Columns <= 0 || snapshot.Rows <= 0)
+            if (snapshot == null)
+            {
+                range = default;
+                return false;
+            }
+
+            return TryGetSelectionRange(snapshot, out range);
+        }
+
+        private bool TryGetSelectionRange(TerminalScreenSnapshot snapshot, out TerminalBufferSelection range)
+        {
+            range = default;
+            if (snapshot.Columns <= 0 || snapshot.Rows <= 0)
                 return false;
 
             if (_selectionAnchor == InvalidCell || _selectionCaret == InvalidCell)
                 return false;
 
-            var anchor = ClampCellToSnapshot(_selectionAnchor, snapshot);
-            var caret = ClampCellToSnapshot(_selectionCaret, snapshot);
-            var anchorIndex = anchor.Y * snapshot.Columns + anchor.X;
-            var caretIndex = caret.Y * snapshot.Columns + caret.X;
+            if (_selectionColumns > 0 && _selectionColumns != snapshot.Columns)
+                return false;
 
+            var anchor = ClampBufferCellToSnapshot(_selectionAnchor, snapshot);
+            var caret = ClampBufferCellToSnapshot(_selectionCaret, snapshot);
+            if (anchor == InvalidCell || caret == InvalidCell)
+                return false;
+
+            var anchorIndex = ToBufferLinearIndex(anchor, snapshot.Columns);
+            var caretIndex = ToBufferLinearIndex(caret, snapshot.Columns);
             if (anchorIndex == caretIndex && !_selectionDragged)
                 return false;
 
-            if (anchorIndex <= caretIndex)
-            {
-                startIndex = anchorIndex;
-                endIndex = caretIndex;
-            }
-            else
-            {
-                startIndex = caretIndex;
-                endIndex = anchorIndex;
-            }
-
+            var startCell = anchorIndex <= caretIndex ? anchor : caret;
+            var endCell = anchorIndex <= caretIndex ? caret : anchor;
+            range = new TerminalBufferSelection(
+                startCell.X,
+                startCell.Y,
+                endCell.X,
+                endCell.Y,
+                snapshot.Columns);
             return true;
         }
 
-        private Point GetCellFromPoint(Point location, TerminalScreenSnapshot snapshot)
+        private bool TryGetSelectionBounds(
+            TerminalScreenSnapshot snapshot,
+            out long startIndex,
+            out long endIndex)
+        {
+            startIndex = -1;
+            endIndex = -1;
+            if (!TryGetSelectionRange(snapshot, out var range))
+                return false;
+
+            startIndex = ((long)range.StartBufferRow * range.Columns) + range.StartColumn;
+            endIndex = ((long)range.EndBufferRow * range.Columns) + range.EndColumn;
+            return true;
+        }
+
+        private static long ToBufferLinearIndex(Point bufferCell, int columns)
+        {
+            return ((long)bufferCell.Y * columns) + bufferCell.X;
+        }
+
+        private Point GetViewportCellFromPoint(Point location, TerminalScreenSnapshot snapshot)
         {
             var cellSize = EnsureCellSize();
             var cellWidth = Math.Max(1, cellSize.Width);
@@ -570,7 +610,17 @@ namespace SSH_Helper.UI
             return new Point(column, row);
         }
 
-        private static Point ClampCellToSnapshot(Point cell, TerminalScreenSnapshot snapshot)
+        private Point GetBufferCellFromPoint(Point location, TerminalScreenSnapshot snapshot)
+        {
+            var viewportCell = GetViewportCellFromPoint(location, snapshot);
+            if (viewportCell == InvalidCell)
+                return InvalidCell;
+
+            var topBufferRow = GetViewportTopBufferRow(snapshot);
+            return new Point(viewportCell.X, topBufferRow + viewportCell.Y);
+        }
+
+        private static Point ClampViewportCellToSnapshot(Point cell, TerminalScreenSnapshot snapshot)
         {
             if (cell == InvalidCell || snapshot.Columns <= 0 || snapshot.Rows <= 0)
                 return InvalidCell;
@@ -580,20 +630,39 @@ namespace SSH_Helper.UI
             return new Point(Math.Clamp(cell.X, 0, maxColumn), Math.Clamp(cell.Y, 0, maxRow));
         }
 
-        private bool TrySelectWord(Point cell, TerminalScreenSnapshot snapshot)
+        private static Point ClampBufferCellToSnapshot(Point cell, TerminalScreenSnapshot snapshot)
         {
-            if (cell == InvalidCell)
+            if (cell == InvalidCell || snapshot.Columns <= 0 || snapshot.Rows <= 0)
+                return InvalidCell;
+
+            var maxColumn = Math.Max(0, snapshot.Columns - 1);
+            var totalRows = Math.Max(1, snapshot.HistoryLength + snapshot.Rows);
+            var maxBufferRow = Math.Max(0, totalRows - 1);
+            return new Point(Math.Clamp(cell.X, 0, maxColumn), Math.Clamp(cell.Y, 0, maxBufferRow));
+        }
+
+        private static int GetViewportTopBufferRow(TerminalScreenSnapshot snapshot)
+        {
+            var totalRows = Math.Max(1, snapshot.HistoryLength + snapshot.Rows);
+            var effectiveOffset = Math.Clamp(snapshot.EffectiveScrollOffset, 0, snapshot.HistoryLength);
+            var topBufferRow = snapshot.HistoryLength - effectiveOffset;
+            return Math.Clamp(topBufferRow, 0, Math.Max(0, totalRows - 1));
+        }
+
+        private bool TrySelectWord(Point viewportCell, TerminalScreenSnapshot snapshot)
+        {
+            if (viewportCell == InvalidCell)
                 return false;
 
-            var clampedCell = ClampCellToSnapshot(cell, snapshot);
-            if (clampedCell == InvalidCell)
+            var clampedViewportCell = ClampViewportCellToSnapshot(viewportCell, snapshot);
+            if (clampedViewportCell == InvalidCell)
                 return false;
 
             var columns = snapshot.Columns;
-            var rowOffset = clampedCell.Y * columns;
+            var rowOffset = clampedViewportCell.Y * columns;
             var characters = snapshot.Characters;
-            var startColumn = clampedCell.X;
-            var endColumn = clampedCell.X;
+            var startColumn = clampedViewportCell.X;
+            var endColumn = clampedViewportCell.X;
 
             if (rowOffset + startColumn < 0 || rowOffset + startColumn >= characters.Length)
                 return false;
@@ -611,8 +680,10 @@ namespace SSH_Helper.UI
                 endColumn++;
             }
 
-            _selectionAnchor = new Point(startColumn, clampedCell.Y);
-            _selectionCaret = new Point(endColumn, clampedCell.Y);
+            var bufferRow = GetViewportTopBufferRow(snapshot) + clampedViewportCell.Y;
+            _selectionAnchor = new Point(startColumn, bufferRow);
+            _selectionCaret = new Point(endColumn, bufferRow);
+            _selectionColumns = snapshot.Columns;
             _selectionDragged = true;
             return true;
         }
@@ -620,6 +691,48 @@ namespace SSH_Helper.UI
         private static bool IsWordCharacter(char value)
         {
             return value != '\0' && !char.IsWhiteSpace(value);
+        }
+
+        private static string GetSelectedTextFromViewportSnapshot(
+            TerminalScreenSnapshot snapshot,
+            TerminalBufferSelection range)
+        {
+            var columns = snapshot.Columns;
+            if (columns <= 0)
+                return string.Empty;
+
+            var viewportTopBufferRow = GetViewportTopBufferRow(snapshot);
+            var viewportBottomBufferRow = viewportTopBufferRow + Math.Max(0, snapshot.Rows - 1);
+            var startBufferRow = Math.Max(range.StartBufferRow, viewportTopBufferRow);
+            var endBufferRow = Math.Min(range.EndBufferRow, viewportBottomBufferRow);
+            if (endBufferRow < startBufferRow)
+                return string.Empty;
+
+            var characters = snapshot.Characters;
+            var lines = new List<string>(endBufferRow - startBufferRow + 1);
+            for (var bufferRow = startBufferRow; bufferRow <= endBufferRow; bufferRow++)
+            {
+                var viewportRow = bufferRow - viewportTopBufferRow;
+                if (viewportRow < 0 || viewportRow >= snapshot.Rows)
+                    continue;
+
+                var lineStartColumn = bufferRow == range.StartBufferRow ? range.StartColumn : 0;
+                var lineEndColumn = bufferRow == range.EndBufferRow ? range.EndColumn : columns - 1;
+                lineStartColumn = Math.Clamp(lineStartColumn, 0, columns - 1);
+                lineEndColumn = Math.Clamp(lineEndColumn, 0, columns - 1);
+                if (lineEndColumn < lineStartColumn)
+                {
+                    lines.Add(string.Empty);
+                    continue;
+                }
+
+                var length = lineEndColumn - lineStartColumn + 1;
+                var lineStartIndex = (viewportRow * columns) + lineStartColumn;
+                var line = new string(characters, lineStartIndex, length).TrimEnd(' ');
+                lines.Add(line);
+            }
+
+            return string.Join(Environment.NewLine, lines);
         }
 
         private static bool AllSpaces(char[] characters, int start, int length)
@@ -676,6 +789,22 @@ namespace SSH_Helper.UI
                 Math.Max(1, cellSize.Width),
                 Math.Max(1, cellSize.Height));
             Invalidate(rect);
+        }
+
+        private bool HasSelectionState()
+        {
+            return _selectionAnchor != InvalidCell ||
+                   _selectionCaret != InvalidCell ||
+                   _selectionDragged;
+        }
+
+        private void ResetSelectionState()
+        {
+            _selectionAnchor = InvalidCell;
+            _selectionCaret = InvalidCell;
+            _selectionColumns = -1;
+            _selectionDragged = false;
+            _isSelecting = false;
         }
     }
 }

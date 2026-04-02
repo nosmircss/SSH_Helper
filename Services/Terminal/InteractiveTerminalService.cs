@@ -868,6 +868,16 @@ namespace SSH_Helper.Services.Terminal
                         return BuildClipboardText(terminal);
                     }
                 };
+                form.SelectionTextProvider = selection =>
+                {
+                    if (terminal == null)
+                        return string.Empty;
+
+                    lock (ioLock)
+                    {
+                        return BuildSelectionClipboardText(terminal, selection);
+                    }
+                };
 
                 form.ClearScrollbackAction = () =>
                 {
@@ -1735,6 +1745,16 @@ namespace SSH_Helper.Services.Terminal
                     lock (ioLock)
                     {
                         return BuildClipboardText(terminal);
+                    }
+                };
+                form.SelectionTextProvider = selection =>
+                {
+                    if (terminal == null)
+                        return string.Empty;
+
+                    lock (ioLock)
+                    {
+                        return BuildSelectionClipboardText(terminal, selection);
                     }
                 };
 
@@ -3142,6 +3162,7 @@ namespace SSH_Helper.Services.Terminal
                 Rows = rows,
                 HistoryLength = historyLength,
                 ScrollbackOffset = appliedOffset,
+                EffectiveScrollOffset = effectiveOffset,
                 Characters = characters,
                 ForeColors = foreColors,
                 BackColors = backColors,
@@ -3178,6 +3199,52 @@ namespace SSH_Helper.Services.Terminal
             }
 
             return builder.ToString();
+        }
+
+        private static string BuildSelectionClipboardText(ITerminal terminal, TerminalBufferSelection selection)
+        {
+            var screen = terminal.Screen;
+            var historyLength = Math.Max(0, terminal.HistoryLength);
+            var rows = Math.Max(1, screen.Rows);
+            var columns = Math.Max(1, selection.Columns);
+            var totalRows = historyLength + rows;
+            if (totalRows <= 0)
+                return string.Empty;
+
+            var startRow = Math.Clamp(selection.StartBufferRow, 0, totalRows - 1);
+            var endRow = Math.Clamp(selection.EndBufferRow, 0, totalRows - 1);
+            if (endRow < startRow)
+                return string.Empty;
+
+            var startColumn = Math.Clamp(selection.StartColumn, 0, columns - 1);
+            var endColumn = Math.Clamp(selection.EndColumn, 0, columns - 1);
+            var lines = new List<string>(endRow - startRow + 1);
+
+            for (var row = startRow; row <= endRow; row++)
+            {
+                var lineStartColumn = row == startRow ? startColumn : 0;
+                var lineEndColumn = row == endRow ? endColumn : columns - 1;
+                if (lineEndColumn < lineStartColumn)
+                {
+                    lines.Add(string.Empty);
+                    continue;
+                }
+
+                var width = lineEndColumn - lineStartColumn + 1;
+                var sourceRow = row - historyLength;
+                var region = screen.GetRegionText(lineStartColumn, sourceRow, width, 1);
+                var line = region != null && region.Length > 0
+                    ? region[0] ?? string.Empty
+                    : string.Empty;
+                if (line.Length > width)
+                {
+                    line = line[..width];
+                }
+
+                lines.Add(line.TrimEnd(' '));
+            }
+
+            return string.Join(Environment.NewLine, lines);
         }
 
         private static void ClearScrollbackPreservingScreen(ITerminal terminal)

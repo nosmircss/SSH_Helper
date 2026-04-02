@@ -1,5 +1,46 @@
 # TODO
 
+## 163. Implement PuTTY-style scroll-persistent terminal selection
+- [x] 163.1 Add failing tests proving selection remains anchored to text while scrollback changes and can extend across scroll.
+- [x] 163.2 Refactor terminal viewport selection state to use buffer-relative coordinates instead of viewport-relative coordinates.
+- [x] 163.3 Add selection text provider plumbing so copy operations can resolve off-screen selected rows from terminal history.
+- [x] 163.4 Run focused verification for new interactive terminal tests and capture outcomes.
+- [x] 163.5 Add review notes with root cause, behavior changes, and verification evidence.
+
+### 163 Review
+- Added/redesigned WinForms regressions in `SSH_Helper.Tests/UI/InteractiveTerminalFormTests.cs`:
+- `AdjustScrollbackOffset_WhenSelectionExists_PreservesSelectedText`
+- `MouseDragSelection_AcrossScrollback_CanSpanBeyondSingleViewport`
+- Root cause: viewport control stored selection in viewport row coordinates and copied text only from the current snapshot grid. Any scrollback movement either rebound selection to different text or dropped selection entirely.
+- Refactor: `InteractiveTerminalViewportControl` now stores selection in buffer coordinates (`column + absolute buffer row`) and resolves paint bounds against current viewport-to-buffer mapping.
+- Added `TerminalScreenSnapshot.EffectiveScrollOffset` so viewport controls can map visible rows to stable buffer rows even when follow-tail anchoring is active.
+- Added selection-provider plumbing:
+- `TerminalBufferSelection` record in `Forms/InteractiveTerminalForm.cs`
+- `InteractiveTerminalViewportControl.SelectionTextProvider`
+- `InteractiveTerminalForm.SelectionTextProvider` passthrough plus detached-mode provider
+- `InteractiveTerminalService` now wires terminal-backed selection copy via `BuildSelectionClipboardText(...)` so off-screen selected text copies correctly.
+- Behavior update: supersedes task `162` clear-on-scroll behavior; selection now persists and remains text-anchored while scrolling, matching PuTTY-style expectations.
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalFormTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-terminal-putty-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-terminal-putty-red\\obj\\` (failed as expected: selection cleared / drag-cross-scroll copy empty).
+- Green: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalFormTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-terminal-putty-green\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-terminal-putty-green\\obj\\` (passed: `2/2`).
+- Regression slice: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalFormTests|FullyQualifiedName~InteractiveTerminalServiceTranscriptFilterTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-terminal-putty-regression\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-terminal-putty-regression\\obj\\` (passed: `49/49`).
+
+## 162. Fix interactive terminal selection persistence while scrolling
+- [x] 162.1 Reproduce with a failing UI regression test showing selection remains after scrollback offset changes.
+- [x] 162.2 Update interactive terminal scroll handling to clear viewport selection whenever scrollback offset changes.
+- [x] 162.3 Run focused verification for the new regression and nearby interactive terminal tests.
+- [x] 162.4 Add review notes with root cause, fix summary, and command evidence.
+
+### 162 Review
+- Root cause: `InteractiveTerminalViewportControl` stores selection in viewport cell coordinates, and `InteractiveTerminalForm` changed `_scrollbackOffset` without clearing that selection; after scrolling, the highlight stayed on the same screen cells while underlying text changed.
+- Added WinForms regression `AdjustScrollbackOffset_WhenSelectionExists_ClearsTerminalSelection` in `SSH_Helper.Tests/UI/InteractiveTerminalFormTests.cs` (reflection-based internal-form coverage) to prove selection is cleared on viewport scroll movement.
+- Patched `Forms/InteractiveTerminalForm.cs` to call `_terminalView.ClearSelection()` before applying new `_scrollbackOffset` in both scrollback-change paths:
+- `HistoryScrollBar_ValueChanged(...)`
+- `AdjustScrollbackOffset(...)` (mouse-wheel path)
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalFormTests.AdjustScrollbackOffset_WhenSelectionExists_ClearsTerminalSelection" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-terminal-selection-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-terminal-selection-red\\obj\\` (failed as expected before fix: selection remained true).
+- Green: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalFormTests.AdjustScrollbackOffset_WhenSelectionExists_ClearsTerminalSelection" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-terminal-selection-green\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-terminal-selection-green\\obj\\` (passed: `1/1`).
+
 ## 160. Draft OpenSpec proposal for Flow Canvas preset snapshot persistence
 - [x] 160.1 Ground current behavior across preset persistence, Flow Canvas export, and comment/layout handling.
 - [x] 160.2 Create detailed OpenSpec proposal for preserving Flow Canvas nodes/edges/comments across preset save + export/import portability.
