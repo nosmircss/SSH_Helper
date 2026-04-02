@@ -126,6 +126,32 @@ public class ExistsCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_TypeFromVariable_HonorsResolvedType()
+    {
+        var step = new ScriptStep
+        {
+            Exists = new ExistsOptions
+            {
+                Path = _testDirectory,
+                Into = "type_from_var_exists",
+                Type = "${expected_type}"
+            }
+        };
+
+        var context = new ScriptContext();
+        context.SetVariable("expected_type", "file");
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariable("type_from_var_exists").Should().Be(false);
+
+        var meta = context.GetVariable("type_from_var_exists_meta").Should().BeAssignableTo<Dictionary<string, object?>>().Subject;
+        meta["type"].Should().Be("file");
+        meta["is_directory"].Should().Be(true);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_InvalidPathWithOnErrorContinue_SuppressesFailureAndCapturesError()
     {
         var step = new ScriptStep

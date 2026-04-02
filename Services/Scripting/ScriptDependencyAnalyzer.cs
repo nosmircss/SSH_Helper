@@ -456,6 +456,7 @@ namespace SSH_Helper.Services.Scripting
                         if (step.Exists != null)
                         {
                             ExtractVarReferences(step.Exists.Path, referencedVars);
+                            ExtractVarReferences(step.Exists.Type, referencedVars);
                             if (!string.IsNullOrWhiteSpace(step.Exists.Into))
                             {
                                 var into = step.Exists.Into.Trim();

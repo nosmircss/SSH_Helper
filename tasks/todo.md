@@ -2561,3 +2561,20 @@
 - Build verification: `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\connection-test-status-build\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-build\obj\`` passed.
 - Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.
 
+
+## 161. Fix exists dynamic type runtime + dependency analyzer tracking
+- [x] 161.1 Add failing runtime test proving `exists.type` resolves from `${var}` and is honored.
+- [x] 161.2 Add failing analyzer test proving variable references inside `exists.type` are tracked.
+- [x] 161.3 Implement runtime substitution for `exists.type` before normalization.
+- [x] 161.4 Update `ScriptDependencyAnalyzer` to extract refs from `exists.type`.
+- [x] 161.5 Run focused tests for ExistsCommand + dependency analyzer and capture results.
+- [x] 161.6 Add review notes below.
+
+### 161 Review
+- Added RED runtime regression `ExecuteAsync_TypeFromVariable_HonorsResolvedType` in `SSH_Helper.Tests/Scripting/ExistsCommandTests.cs`.
+- Added RED dependency regression `AnalyzePresets_ExistsTypeFromVariable_TracksTypeDependency` in `SSH_Helper.Tests/Scripting/ScriptDependencyAnalyzerTests.cs`.
+- Implemented runtime fix in `Services/Scripting/Commands/ExistsCommand.cs`: `exists.type` now resolves through script substitution + environment expansion before type normalization.
+- Implemented analyzer fix in `Services/Scripting/ScriptDependencyAnalyzer.cs`: `StepType.Exists` now extracts variable references from `step.Exists.Type` in addition to `Path`.
+- Verification:
+  - RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExecuteAsync_TypeFromVariable_HonorsResolvedType|FullyQualifiedName~AnalyzePresets_ExistsTypeFromVariable_TracksTypeDependency"` (failed as expected: `2/2`).
+  - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExistsCommandTests|FullyQualifiedName~ScriptDependencyAnalyzerTests"` (passed: `39/39`).

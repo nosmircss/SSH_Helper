@@ -21,7 +21,8 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             var options = step.Exists;
             var into = options.Into?.Trim() ?? string.Empty;
-            var type = NormalizeType(options.Type);
+            var rawType = Environment.ExpandEnvironmentVariables(context.SubstituteVariables(options.Type ?? string.Empty));
+            var type = NormalizeType(rawType);
             var rawPath = options.Path ?? string.Empty;
             var expandedPath = Environment.ExpandEnvironmentVariables(context.SubstituteVariables(rawPath)).Trim();
 
