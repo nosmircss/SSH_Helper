@@ -57,6 +57,29 @@ public class UpdateColumnCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_DebugOutput_DoesNotTruncateLongValue()
+    {
+        var longValue = new string('z', 130);
+        var step = new ScriptStep
+        {
+            UpdateColumn = new UpdateColumnOptions
+            {
+                Column = "notes",
+                Value = longValue
+            }
+        };
+        var context = new ScriptContext { DebugMode = true };
+        var outputs = new List<string>();
+        context.OutputReceived += (_, e) => outputs.Add(e.Message);
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        outputs.Should().Contain(o => o.Contains("UpdateColumn: notes = '") && o.Contains(longValue));
+        outputs.Should().NotContain(o => o.Contains("UpdateColumn: notes = '") && o.Contains("..."));
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WithEmptyColumn_ReturnsFailure()
     {
         // Arrange

@@ -164,10 +164,10 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (!response.IsSuccessStatusCode)
                 {
                     var error = $"Http failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
-                    context.EmitOutput(error, ScriptOutputType.Warning);
-
                     if (options.AllowFailure)
                         return CommandResult.Ok(error);
+
+                    context.EmitOutput(error, ScriptOutputType.Warning);
 
                     return ApplyOnError(step, error);
                 }

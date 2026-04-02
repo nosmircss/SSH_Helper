@@ -134,6 +134,17 @@ namespace SSH_Helper.Services.Scripting.Commands
     public static class ScriptingHelpers
     {
         /// <summary>
+        /// Normalizes a value for debug/display output without truncating content.
+        /// </summary>
+        public static string FormatForDisplay(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "";
+
+            return value.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
+        }
+
+        /// <summary>
         /// Truncates a string for debug/display output, replacing newlines with literal \n.
         /// </summary>
         public static string TruncateForDisplay(string value, int maxLength = 100)
@@ -141,7 +152,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (string.IsNullOrEmpty(value))
                 return "";
 
-            value = value.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
+            value = FormatForDisplay(value);
 
             if (value.Length <= maxLength)
                 return value;

@@ -1171,7 +1171,7 @@ Extracts data from a variable using regex patterns with capture groups.
 **Pattern Notes:**
 - Pattern delimiters (`/pattern/`, `"pattern"`, `'pattern'`) are automatically stripped
 - Patterns are matched case-insensitively and support multiline mode
-- Debug output truncates extracted values at 50 characters for readability
+- Debug output preserves full extracted values (with newline characters shown as \n)
 
 **Single vs Multiple Capture Groups:**
 

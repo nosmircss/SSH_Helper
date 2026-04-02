@@ -368,26 +368,24 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 null => "",
                 List<string> list => FormatListForDisplay(list),
-                JsonNode node => ScriptingHelpers.TruncateForDisplay(node.ToJsonString()),
-                _ => ScriptingHelpers.TruncateForDisplay(value.ToString() ?? string.Empty)
+                JsonNode node => ScriptingHelpers.FormatForDisplay(node.ToJsonString()),
+                _ => ScriptingHelpers.FormatForDisplay(value.ToString() ?? string.Empty)
             };
         }
 
-        private static string FormatListForDisplay(List<string> values, int maxItems = 10)
+        private static string FormatListForDisplay(List<string> values)
         {
             if (values.Count == 0)
                 return "[]";
 
-            var displayCount = Math.Min(values.Count, maxItems);
-            var parts = new List<string>(displayCount);
+            var parts = new List<string>(values.Count);
 
-            for (int i = 0; i < displayCount; i++)
+            for (int i = 0; i < values.Count; i++)
             {
-                parts.Add(ScriptingHelpers.TruncateForDisplay(values[i], 30));
+                parts.Add(ScriptingHelpers.FormatForDisplay(values[i]));
             }
 
-            var suffix = values.Count > maxItems ? $", ... ({values.Count} items)" : "";
-            return $"[{string.Join(", ", parts)}{suffix}]";
+            return $"[{string.Join(", ", parts)}]";
         }
 
         // ArithmeticParser removed — replaced by ExpressionParser (see Services/Scripting/ExpressionParser.cs)

@@ -28,7 +28,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             // Request the column update
             context.RequestColumnUpdate(options.Column, resolvedValue);
 
-            context.EmitOutput($"UpdateColumn: {options.Column} = '{ScriptingHelpers.TruncateForDisplay(resolvedValue, 50)}'", ScriptOutputType.Debug);
+            context.EmitOutput($"UpdateColumn: {options.Column} = '{ScriptingHelpers.FormatForDisplay(resolvedValue)}'", ScriptOutputType.Debug);
 
             return Task.FromResult(CommandResult.Ok());
         }
