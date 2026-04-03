@@ -59,6 +59,7 @@ function ensureParityCliBuilt(): void {
     'build',
     cliProjectPath,
     '-p:SkipFlowCanvasBuild=true',
+    '-p:EnableWindowsTargeting=true',
     `-p:BaseOutputPath=${parityCliBaseOutputPath}`,
     '-clp:ErrorsOnly',
   ], {
@@ -92,6 +93,7 @@ function runParityCli(args: string[], input?: string): string {
     '--project',
     cliProjectPath,
     '-p:SkipFlowCanvasBuild=true',
+    '-p:EnableWindowsTargeting=true',
     `-p:BaseOutputPath=${parityCliBaseOutputPath}`,
     '--',
     ...args,
