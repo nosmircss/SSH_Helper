@@ -1,6 +1,9 @@
 # Lessons
 
 ## 2026-04-03
+- When inserting Windows file paths into YAML from editor tooling, I must treat double-quoted insertion sites as a special case and convert them to single-quoted values so backslashes remain literal and paths stay valid.
+- When users ask about specific text-entry edge contexts (`path: ""`, `path: "`, `path: '`), I must add explicit regression coverage for each context before changing insertion logic; quote-adjacent caret behavior is easy to mis-handle without tests.
+- For quote-pair placeholders like `path: ""`, I must test both caret positions (between quotes and after closing quote); caret-index assumptions around opening/closing quotes can produce malformed leading quote artifacts.
 - When autocomplete popups rely on handle-based outside-click dismissal, I must treat native child HWNDs (like list scrollbar internals) as inside the popup via `IsChild(...)`; `Control.FromHandle(...)` alone can misclassify valid internal clicks and break mouse scrolling/selection.
 - When validating WinForms mouse interactions that mix focus transitions and `BeginInvoke` callbacks, I must run at least one regression that processes queued UI messages between mouse-down and mouse-up; direct `SendMessage` click tests can miss real dismissal races.
 

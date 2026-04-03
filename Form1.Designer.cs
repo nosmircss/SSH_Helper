@@ -111,6 +111,7 @@ namespace SSH_Helper
             ctxCopy = new ToolStripMenuItem();
             ctxPaste = new ToolStripMenuItem();
             ctxSelectAll = new ToolStripMenuItem();
+            ctxPathBrowser = new ToolStripMenuItem();
             ctxSeparator1 = new ToolStripSeparator();
             ctxValidateScript = new ToolStripMenuItem();
             scriptFooterPanel = new BufferedPanel();
@@ -828,9 +829,9 @@ namespace SSH_Helper
             //
             // contextCommandBox
             //
-            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxSeparator1, ctxValidateScript });
+            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxPathBrowser, ctxSeparator1, ctxValidateScript });
             contextCommandBox.Name = "contextCommandBox";
-            contextCommandBox.Size = new Size(201, 142);
+            contextCommandBox.Size = new Size(201, 164);
             //
             // ctxCut
             //
@@ -863,6 +864,13 @@ namespace SSH_Helper
             ctxSelectAll.Size = new Size(200, 22);
             ctxSelectAll.Text = "Select &All";
             ctxSelectAll.Click += (s, e) => txtCommand.SelectAll();
+            //
+            // ctxPathBrowser
+            //
+            ctxPathBrowser.Name = "ctxPathBrowser";
+            ctxPathBrowser.Size = new Size(200, 22);
+            ctxPathBrowser.Text = "&Path Browser...";
+            ctxPathBrowser.Click += ctxPathBrowser_Click;
             //
             // ctxSeparator1
             //
@@ -1849,6 +1857,7 @@ namespace SSH_Helper
         private ToolStripMenuItem ctxCopy;
         private ToolStripMenuItem ctxPaste;
         private ToolStripMenuItem ctxSelectAll;
+        private ToolStripMenuItem ctxPathBrowser;
         private ToolStripSeparator ctxSeparator1;
         private ToolStripMenuItem ctxValidateScript;
 

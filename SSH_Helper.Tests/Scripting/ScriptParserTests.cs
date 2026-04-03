@@ -1136,6 +1136,29 @@ steps:
         errors.Should().Contain(error => error.Contains("Playsound 'volume' must be between 0 and 100"));
     }
 
+    [Fact]
+    public void Validate_PlaySoundFractionalMaxSeconds_IsAccepted()
+    {
+        var yaml = """
+            ---
+            steps:
+              - playsound:
+                  path: C:\\temp\\alert.mp3
+                  wait: true
+                  max_seconds: 0.25
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        script.Steps.Should().ContainSingle();
+        var playSound = script.Steps[0].PlaySound;
+        playSound.Should().NotBeNull();
+        playSound!.MaxSeconds.HasValue.Should().BeTrue();
+        playSound.MaxSeconds!.Value.Should().BeApproximately(0.25, 0.0001);
+        errors.Should().NotContain(error => error.Contains("playsound.max_seconds"));
+    }
+
     #endregion
 
     #region Complex Script Tests

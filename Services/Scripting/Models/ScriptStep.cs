@@ -570,8 +570,9 @@ namespace SSH_Helper.Services.Scripting.Models
 
         /// <summary>
         /// Optional maximum wait time in seconds when Wait is true.
+        /// Supports fractional values (for example, 0.25).
         /// </summary>
-        public int? MaxSeconds { get; set; }
+        public double? MaxSeconds { get; set; }
 
         /// <summary>
         /// Optional variable name to capture success state and metadata.

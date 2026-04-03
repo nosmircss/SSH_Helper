@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -2054,10 +2055,14 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         case "max_seconds":
                         case "maxseconds":
-                            if (int.TryParse(parser.Consume<Scalar>().Value, out var maxSeconds))
+                            if (double.TryParse(
+                                parser.Consume<Scalar>().Value,
+                                NumberStyles.Float | NumberStyles.AllowThousands,
+                                CultureInfo.InvariantCulture,
+                                out var maxSeconds))
                                 options.MaxSeconds = maxSeconds;
                             else
-                                AddStepParseError(step, "playsound.max_seconds must be a positive integer");
+                                AddStepParseError(step, "playsound.max_seconds must be a positive number");
                             break;
                         case "into":
                             options.Into = parser.Consume<Scalar>().Value;

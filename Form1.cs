@@ -229,6 +229,7 @@ namespace SSH_Helper
         private PresetNodeTag? _lastPresetsTreeSelection;
         private PresetNodeTag? _lastFavoritesTreeSelection;
         private Func<string, string, string, string>? _inputBoxPromptOverrideForTests = null;
+        private Func<IWin32Window?, string?>? _filePathPickerOverrideForTests = null;
 
         // Track selected folder for Run button (TreeView selection can be unreliable on button click)
         private string? _selectedFolderName;
@@ -5595,6 +5596,170 @@ namespace SSH_Helper
                 AppendOutputText(Environment.NewLine + message + Environment.NewLine);
                 DialogTheme.ShowMessage(this, message, "Validate Script", MessageBoxIcon.Error, _isDarkMode, _dialogFont);
             }
+        }
+
+        private void ctxPathBrowser_Click(object? sender, EventArgs e)
+        {
+            InsertSelectedFilePathAtCaret();
+        }
+
+        private void InsertSelectedFilePathAtCaret()
+        {
+            var selectedPath = SelectPathForScriptEditor();
+            if (string.IsNullOrWhiteSpace(selectedPath))
+            {
+                return;
+            }
+
+            InsertTextIntoScriptEditor(selectedPath);
+        }
+
+        private string? SelectPathForScriptEditor()
+        {
+            if (_filePathPickerOverrideForTests != null)
+            {
+                return _filePathPickerOverrideForTests(this);
+            }
+
+            using var dialog = new OpenFileDialog
+            {
+                Title = "Select File Path",
+                CheckFileExists = true,
+                CheckPathExists = true,
+                Filter = "All files (*.*)|*.*"
+            };
+
+            return dialog.ShowDialog(this) == DialogResult.OK
+                ? dialog.FileName
+                : null;
+        }
+
+        private void InsertTextIntoScriptEditor(string textToInsert)
+        {
+            if (string.IsNullOrEmpty(textToInsert))
+            {
+                return;
+            }
+
+            var currentText = txtCommand.Text ?? string.Empty;
+            var safeSelectionStart = Math.Clamp(txtCommand.SelectionStart, 0, currentText.Length);
+            var safeSelectionLength = Math.Clamp(txtCommand.SelectionLength, 0, currentText.Length - safeSelectionStart);
+            var insertion = BuildPathInsertionResult(
+                currentText,
+                safeSelectionStart,
+                safeSelectionLength,
+                textToInsert);
+
+            txtCommand.Text = insertion.UpdatedText;
+            txtCommand.SelectionStart = insertion.NewCaretPosition;
+            txtCommand.SelectionLength = 0;
+            txtCommand.Focus();
+            UpdateLinePosition();
+        }
+
+        private static PathInsertionResult BuildPathInsertionResult(
+            string currentText,
+            int selectionStart,
+            int selectionLength,
+            string selectedPath)
+        {
+            if (TryBuildSingleQuotedPathInsertion(
+                currentText,
+                selectionStart,
+                selectionLength,
+                selectedPath,
+                out var quotedInsertion))
+            {
+                return quotedInsertion;
+            }
+
+            var fallbackUpdatedText = currentText.Remove(selectionStart, selectionLength)
+                .Insert(selectionStart, selectedPath);
+            return new PathInsertionResult(fallbackUpdatedText, selectionStart + selectedPath.Length);
+        }
+
+        private static bool TryBuildSingleQuotedPathInsertion(
+            string currentText,
+            int selectionStart,
+            int selectionLength,
+            string selectedPath,
+            out PathInsertionResult insertion)
+        {
+            var openingQuoteIndex = selectionStart - 1;
+            if (openingQuoteIndex < 0)
+            {
+                insertion = default;
+                return false;
+            }
+
+            var openingQuote = currentText[openingQuoteIndex];
+            if (openingQuote is not '"' and not '\'')
+            {
+                insertion = default;
+                return false;
+            }
+
+            var replaceStartIndex = openingQuoteIndex;
+            var replaceEndExclusive = selectionStart + selectionLength;
+            var hasMatchingQuoteOnRight = replaceEndExclusive < currentText.Length &&
+                currentText[replaceEndExclusive] == openingQuote;
+            if (hasMatchingQuoteOnRight)
+            {
+                replaceEndExclusive++;
+            }
+            else if (
+                selectionLength == 0 &&
+                openingQuoteIndex - 1 >= 0 &&
+                currentText[openingQuoteIndex - 1] == openingQuote)
+            {
+                // Caret after an empty quoted placeholder (e.g., path: "").
+                // Replace both placeholder quotes with the normalized single-quoted value.
+                replaceStartIndex = openingQuoteIndex - 1;
+            }
+            else if (!IsInLoneOpeningQuoteContext(currentText, selectionStart, openingQuote))
+            {
+                insertion = default;
+                return false;
+            }
+
+            var prefix = currentText.Substring(0, replaceStartIndex);
+            var suffix = currentText.Substring(replaceEndExclusive);
+            var singleQuotedPath = BuildSingleQuotedYamlScalar(selectedPath);
+            var updatedText = prefix + singleQuotedPath + suffix;
+            insertion = new PathInsertionResult(updatedText, prefix.Length + singleQuotedPath.Length);
+            return true;
+        }
+
+        private static bool IsInLoneOpeningQuoteContext(string text, int selectionStart, char quote)
+        {
+            var quoteCount = 0;
+            for (var index = 0; index < selectionStart; index++)
+            {
+                if (text[index] == quote)
+                {
+                    quoteCount++;
+                }
+            }
+
+            return quoteCount % 2 == 1;
+        }
+
+        private static string BuildSingleQuotedYamlScalar(string value)
+        {
+            return $"'{(value ?? string.Empty).Replace("'", "''", StringComparison.Ordinal)}'";
+        }
+
+        private readonly struct PathInsertionResult
+        {
+            public PathInsertionResult(string updatedText, int newCaretPosition)
+            {
+                UpdatedText = updatedText;
+                NewCaretPosition = newCaretPosition;
+            }
+
+            public string UpdatedText { get; }
+
+            public int NewCaretPosition { get; }
         }
 
 #if DEBUG

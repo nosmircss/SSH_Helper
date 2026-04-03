@@ -72,13 +72,14 @@ public class PlaySoundCommandTests : System.IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_MissingPath_FailsValidation()
+    public async Task ExecuteAsync_MissingPath_WithOnErrorStop_FailsValidation()
     {
         var command = new PlaySoundCommand((request, _) =>
             Task.FromResult(new PlaySoundCommand.PlaybackResult(true, true, 1)));
 
         var step = new ScriptStep
         {
+            OnError = "stop",
             PlaySound = new PlaySoundOptions
             {
                 Path = " ",
@@ -121,7 +122,59 @@ public class PlaySoundCommandTests : System.IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_UnsupportedExtension_ReturnsFailure()
+    public async Task ExecuteAsync_FailureWithoutOnError_DefaultsToContinueAndCapturesMeta()
+    {
+        var command = new PlaySoundCommand((request, _) => throw new System.InvalidOperationException("device unavailable"));
+        var step = new ScriptStep
+        {
+            PlaySound = new PlaySoundOptions
+            {
+                Path = _mp3Path,
+                Into = "result"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.SuppressedError.Should().BeTrue();
+        context.GetVariable("result").Should().Be(false);
+        var meta = context.GetVariable("result_meta").Should().BeAssignableTo<System.Collections.Generic.Dictionary<string, object?>>().Subject;
+        meta.Should().ContainKey("error");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ValidStep_AllowsSubSecondMaxSeconds()
+    {
+        PlaySoundCommand.PlaybackRequest? observedRequest = null;
+        var command = new PlaySoundCommand((request, _) =>
+        {
+            observedRequest = request;
+            return Task.FromResult(new PlaySoundCommand.PlaybackResult(true, true, 1));
+        });
+
+        var step = new ScriptStep
+        {
+            PlaySound = new PlaySoundOptions
+            {
+                Path = _wavPath,
+                Wait = true,
+                MaxSeconds = 0.25
+            }
+        };
+
+        var context = new ScriptContext();
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        observedRequest.Should().NotBeNull();
+        observedRequest!.MaxSeconds.Should().Be(0.25);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UnsupportedExtension_WithOnErrorStop_ReturnsFailure()
     {
         var unsupportedPath = System.IO.Path.Combine(_tempDirectory, "tone.ogg");
         System.IO.File.WriteAllBytes(unsupportedPath, [0x00]);
@@ -129,6 +182,7 @@ public class PlaySoundCommandTests : System.IDisposable
 
         var step = new ScriptStep
         {
+            OnError = "stop",
             PlaySound = new PlaySoundOptions
             {
                 Path = unsupportedPath

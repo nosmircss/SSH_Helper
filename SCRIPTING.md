@@ -2071,9 +2071,9 @@ Plays a local WAV or MP3 file using in-process playback.
     path: "C:\\alerts\\success.mp3"
     wait: true               # Optional: true (default) or false
     volume: 80               # Optional: 0-100 (default: 100)
-    max_seconds: 10          # Optional: positive timeout when wait=true
+    max_seconds: 0.5         # Optional: positive timeout in seconds (supports fractions) when wait=true
     into: sound_result       # Optional output variable
-    on_error: stop           # Optional: stop (default) or continue
+    on_error: stop           # Optional: continue (default for playsound) or stop
 ```
 
 **Parameters:**
@@ -2083,9 +2083,9 @@ Plays a local WAV or MP3 file using in-process playback.
 | `path` | Yes | - | Local path to a `.wav` or `.mp3` file |
 | `wait` | No | `true` | Wait for playback completion before moving to next step |
 | `volume` | No | `100` | Playback volume percentage (`0..100`) |
-| `max_seconds` | No | - | Timeout in seconds when `wait=true` |
+| `max_seconds` | No | - | Positive timeout in seconds (supports fractions) when `wait=true` |
 | `into` | No | - | Variable name to capture success and metadata |
-| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+| `on_error` | No | `continue` | Error handling: `continue` or `stop` |
 
 **Output Variables (when `into` is set):**
 

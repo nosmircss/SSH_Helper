@@ -2057,6 +2057,12 @@ namespace SSH_Helper.Services
                     target[key] = value.Value;
             }
 
+            static void SetIfDouble(JObject target, string key, double? value)
+            {
+                if (value.HasValue)
+                    target[key] = value.Value;
+            }
+
             static void SetIfBoolTrue(JObject target, string key, bool value)
             {
                 if (value)
@@ -2220,7 +2226,7 @@ namespace SSH_Helper.Services
                         SetIfNotNull(props, "path", step.PlaySound.Path);
                         if (!step.PlaySound.Wait) props["wait"] = false;
                         if (step.PlaySound.Volume != 100) props["volume"] = step.PlaySound.Volume;
-                        SetIfNumber(props, "max_seconds", step.PlaySound.MaxSeconds);
+                        SetIfDouble(props, "max_seconds", step.PlaySound.MaxSeconds);
                         SetIfNotNull(props, "into", step.PlaySound.Into);
                     }
                     break;

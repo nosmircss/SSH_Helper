@@ -1,5 +1,74 @@
 # TODO
 
+## 170. Fix empty-quote closing-caret path insertion regression
+- [x] 170.1 Add focused WinForms regression for `path: ""` when caret is positioned after the closing quote and `Path Browser...` is clicked.
+- [x] 170.2 Refine quote-context detection so closing-quote caret positions on empty placeholders normalize to single-quoted YAML path output.
+- [x] 170.3 Ensure non-empty closed quoted values are not misclassified as lone-opening quote contexts.
+- [x] 170.4 Run focused verification for `Form1ScriptContextMenuTests` and capture evidence.
+
+### 170 Review
+- Added regression test in `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs`:
+- `PathBrowserMenuClick_AfterClosingDoubleQuoteOfEmptyPair_ConvertsToSingleQuotedYamlPath`
+- Root cause: quote-context detection assumed `selectionStart - 1` was always the opening quote. With caret after the closing quote of `""`, that index is the closing quote, so insertion preserved the leading `"` and produced `"'<path>'`.
+- Updated `Form1.cs` quote insertion logic:
+- supports explicit empty-pair closing-caret detection (`path: ""` with caret after second quote) by shifting replacement start to the first placeholder quote.
+- adds lone-opening quote gating based on odd quote-count context so non-empty closed quoted values are not incorrectly treated as open quote contexts.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PathBrowserMenuClick_AfterClosingDoubleQuoteOfEmptyPair_ConvertsToSingleQuotedYamlPath" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-empty-pair-red\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-empty-pair-red\obj\` (failed as expected with leading extra `"`).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-empty-pair-green\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-empty-pair-green\obj\` (passed: `5/5`).
+
+## 169. Auto-complete lone quote path insertion
+- [x] 169.1 Add focused WinForms tests for `Path Browser...` behavior after lone opening `"` and `'`.
+- [x] 169.2 Update insertion logic to convert quote-triggered insertions into YAML-safe single-quoted values.
+- [x] 169.3 Preserve existing behaviors for wrapped-quote and non-quote insertion paths.
+- [x] 169.4 Run focused verification for `Form1ScriptContextMenuTests` and capture outcomes.
+
+### 169 Review
+- Added quote-completion regressions in `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs`:
+- `PathBrowserMenuClick_AfterLoneDoubleQuote_ConvertsToSingleQuotedYamlPath`
+- `PathBrowserMenuClick_AfterLoneSingleQuote_ConvertsToSingleQuotedYamlPath`
+- Updated `Form1.cs` insertion engine:
+- quote-triggered insertion now supports both wrapped-quote (`"..."` / `'...'`) and lone opening quote contexts (`path: "` / `path: '`).
+- inserted values are normalized to YAML single-quoted scalars via `BuildSingleQuotedYamlScalar(...)`.
+- single quotes inside paths are escaped (`''`) to keep YAML valid.
+- non-quote insertion remains raw text insertion behavior.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-lone-quote-red\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-lone-quote-red\obj\` (failed as expected on lone-quote assertions before code update).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-lone-quote-green\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-lone-quote-green\obj\` (passed: `4/4`).
+
+## 168. Improve path browser insertion for YAML-valid Windows paths
+- [x] 168.1 Add/adjust focused WinForms tests that reproduce quoted-path insertion behavior and enforce YAML-safe output for Windows paths.
+- [x] 168.2 Update path insertion logic so when insertion happens inside surrounding double quotes, the value is converted to single-quoted YAML path text.
+- [x] 168.3 Keep non-quoted insertion behavior unchanged and verify caret placement remains sensible after insertion.
+- [x] 168.4 Run focused verification for the updated Form1 script context-menu tests and capture evidence.
+
+### 168 Review
+- Updated `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs`:
+- `PathBrowserMenuClick_InsideDoubleQuotes_ConvertsToSingleQuotedYamlPath`
+- `PathBrowserMenuClick_OutsideDoubleQuotes_InsertsRawPathAtCaret`
+- Updated `Form1.cs` path insertion behavior:
+- added context-aware insertion result builder that detects insertion wrapped by `"` and rewrites to single-quoted YAML (`'C:\...`).
+- preserved default insertion path when not wrapped by double quotes.
+- caret placement is now based on computed insertion result for both paths.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-quote-red\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-quote-red\obj\` (failed as expected on quoted-path assertion before code change).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-quote-green\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-quote-green\obj\` (passed: `2/2`).
+
+## 167. Add script editor context-menu path browser insertion
+- [x] 167.1 Add a focused WinForms regression proving the script editor context menu exposes a `Path Browser...` action that inserts the selected full file path at the current caret position.
+- [x] 167.2 Add a test seam for file picking so UI tests can drive the path-browser behavior without launching a real `OpenFileDialog`.
+- [x] 167.3 Wire a new `Path Browser...` item into the script editor right-click menu and connect it to the insertion handler.
+- [x] 167.4 Run focused verification for the new Form1 context-menu tests and capture evidence.
+
+### 167 Review
+- Added focused WinForms regression `PathBrowserMenuClick_InsertsSelectedPathAtCaret` in `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs`.
+- Added a file-picker test seam in `Form1` (`_filePathPickerOverrideForTests`) so tests can drive path insertion without opening a native dialog.
+- Wired new script-editor context-menu item `ctxPathBrowser` (`Path Browser...`) in `Form1.Designer.cs` and connected it to `ctxPathBrowser_Click`.
+- Implemented `SelectPathForScriptEditor()`, `InsertSelectedFilePathAtCaret()`, and `InsertTextIntoScriptEditor(...)` in `Form1.cs` to insert the selected full path at caret/selection.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests.PathBrowserMenuClick_InsertsSelectedPathAtCaret" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-red\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-red\obj\` (failed as expected: missing `ctxPathBrowser`).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests.PathBrowserMenuClick_InsertsSelectedPathAtCaret" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-green\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-green\obj\` (passed: `1/1`).
+
 ## 166. Fix interactive transcript assembly for cursor-rewrite chunks
 - [x] 166.1 Reproduce and confirm corruption source from debug logs (`RawData` carries ANSI cursor rewrites while transcript assembly appends stripped fragments).
 - [x] 166.2 Update interactive transcript assembly to stream raw non-alternate chunks through cursor-aware normalization before appending to transcript builder.
@@ -2694,3 +2763,22 @@
   - Regression: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\autocomplete-mouse-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-mouse-regression\obj\` (passed: `33/33`).
   - Follow-up focused: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_MouseClickOnSuggestion_CommitsClickedItem|FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_ListFocus_DoesNotDismissSuggestions|FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_NativeChildHandleClick_IsNotTreatedAsExternal" -p:UseAppHost=false -p:BaseOutputPath=artifacts\autocomplete-click-followup\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-click-followup\obj\` (passed: `3/3`).
   - Follow-up regression: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\autocomplete-click-followup-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-click-followup-regression\obj\` (passed: `34/34`).
+
+## 163. Adjust playsound on_error default + sub-second max_seconds
+- [x] 163.1 Add focused failing tests for playsound default `on_error` behavior and fractional `max_seconds` parsing/runtime timeout.
+- [x] 163.2 Update playsound parsing/model/runtime so `on_error` defaults to `continue` and `max_seconds` supports positive sub-second values.
+- [x] 163.3 Update scripting docs and run focused verification; capture review notes below.
+
+### 163 Review
+- Added RED regressions in `SSH_Helper.Tests/Scripting/PlaySoundCommandTests.cs` and `SSH_Helper.Tests/Scripting/ScriptParserTests.cs` proving: (a) playsound failures were not suppressed when `on_error` was omitted, and (b) `playsound.max_seconds: 0.25` was rejected/not parsed.
+- Updated playsound runtime behavior in `Services/Scripting/Commands/PlaySoundCommand.cs` so omitted `on_error` now defaults to continue for playsound only, while explicit `on_error: stop` still fails.
+- Updated playsound timeout shape end-to-end:
+  - `Services/Scripting/Models/ScriptStep.cs`: `PlaySoundOptions.MaxSeconds` changed from `int?` to `double?`.
+  - `Services/Scripting/ScriptParser.cs`: `playsound.max_seconds` now parses as an invariant-culture floating-point value and reports `must be a positive number` on parse failure.
+  - `Services/FlowCanvasBridge.cs`: numeric property export helper now accepts nullable `double` so fractional `max_seconds` round-trips out of parsed steps.
+  - `Services/Scripting/Commands/PlaySoundCommand.cs`: timeout wait and timeout message formatting now use fractional seconds.
+- Updated docs in `SCRIPTING.md`: playsound `max_seconds` now documents fractional support and playsound default `on_error` is now `continue`.
+- Verification:
+  - RED: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PlaySoundCommandTests.ExecuteAsync_FailureWithoutOnError_DefaultsToContinueAndCapturesMeta|FullyQualifiedName~ScriptParserTests.Validate_PlaySoundFractionalMaxSeconds_IsAccepted" -p:UseAppHost=false -p:BaseOutputPath=artifacts\playsound-default-red\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-default-red\obj\` (failed as expected: `2/2`).
+  - GREEN (focused): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PlaySoundCommandTests|FullyQualifiedName~ScriptParserTests.Validate_PlaySound" -p:UseAppHost=false -p:BaseOutputPath=artifacts\playsound-default-green2\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-default-green2\obj\` (passed: `9/9`).
+  - Regression: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests|FullyQualifiedName~PlaySoundCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\playsound-default-regression2\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-default-regression2\obj\` (passed: `153/153`).

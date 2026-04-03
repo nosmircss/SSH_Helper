@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,7 +18,7 @@ namespace SSH_Helper.Services.Scripting.Commands
         private const string BackendName = "naudio";
         private readonly Func<PlaybackRequest, CancellationToken, Task<PlaybackResult>> _playAsync;
 
-        public record PlaybackRequest(string Path, bool Wait, int Volume, int? MaxSeconds);
+        public record PlaybackRequest(string Path, bool Wait, int Volume, double? MaxSeconds);
         public record PlaybackResult(bool Started, bool Completed, long? DurationMs);
 
         public PlaySoundCommand(Func<PlaybackRequest, CancellationToken, Task<PlaybackResult>>? playAsync = null)
@@ -120,7 +121,16 @@ namespace SSH_Helper.Services.Scripting.Commands
             string message)
         {
             Capture(into, context, path, wait, volume, message, null);
-            return CommandResult.ApplyOnError(step, message);
+            return ApplyPlaySoundOnError(step, message);
+        }
+
+        private static CommandResult ApplyPlaySoundOnError(ScriptStep step, string message)
+        {
+            // playsound defaults to continue when on_error is omitted.
+            if (string.IsNullOrWhiteSpace(step.OnError) || step.IsOnErrorContinue)
+                return CommandResult.Suppressed(message);
+
+            return CommandResult.Fail(message);
         }
 
         private static async Task<PlaybackResult> PlayWithNAudioAsync(PlaybackRequest request, CancellationToken cancellationToken)
@@ -146,7 +156,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             return new PlaybackResult(true, true, elapsed);
         }
 
-        private static Task<long> PlayBlockingInternalAsync(string path, int volume, int? maxSeconds, CancellationToken cancellationToken)
+        private static Task<long> PlayBlockingInternalAsync(string path, int volume, double? maxSeconds, CancellationToken cancellationToken)
         {
             return Task.Run(() =>
             {
@@ -172,7 +182,8 @@ namespace SSH_Helper.Services.Scripting.Commands
                         if (!playbackStopped.Wait(TimeSpan.FromSeconds(maxSeconds.Value), cancellationToken))
                         {
                             output.Stop();
-                            throw new TimeoutException($"playsound timed out after {maxSeconds.Value} second(s)");
+                            var timeoutSeconds = maxSeconds.Value.ToString("0.###", CultureInfo.InvariantCulture);
+                            throw new TimeoutException($"playsound timed out after {timeoutSeconds} second(s)");
                         }
                     }
                     else
