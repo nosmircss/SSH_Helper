@@ -1,6 +1,10 @@
 # Lessons
 
 ## 2026-04-03
+- When autocomplete displays `required` option tags, I must audit the required-key map against parser/runtime validation for every command family and add command-level regression tests; partial spot-fixes (for example only `into`) drift quickly and miss keys like `choose.options`.
+- When handling `Enter` on whitespace-only lines in step payloads, I must support a second-enter fallback that dedents to sibling command/block indentation; otherwise users get stuck at nested option indent when trying to start the next command.
+- When key-up autocomplete is enabled in the script editor, I must explicitly exclude non-text system keys (for example `Print Screen`/`Keys.Snapshot`) so screenshot/hotkey input cannot spuriously open suggestions.
+- For smart-enter YAML editing, I must not treat every trailing `key:` as a nested-block start; scalar step options (for example `from:`/`into:`/`pattern:`) should keep sibling indentation unless the key is a known block-style option.
 - When inferring script-step autocomplete context, I must handle both YAML list styles under `steps:` (indented `  - command` and indentless `- command`); assuming only indented style will hide `Ctrl+Space` suggestions on valid scripts.
 - When users trigger manual autocomplete with `Ctrl+Space`, I must test blank-line continuation contexts separately from auto-typing behavior; provider logic needs explicit manual-request context to avoid suppressing valid `steps` suggestions.
 - When step-command autocomplete applies inside `steps:` list items, I must support command suggestions even if the user has not typed `- ` yet, and completion commit should inject the missing list marker automatically.

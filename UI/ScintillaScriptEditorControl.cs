@@ -922,6 +922,7 @@ namespace SSH_Helper.UI
                 Keys.Right or
                 Keys.Up or
                 Keys.Down or
+                Keys.Snapshot or
                 Keys.Escape or
                 Keys.Enter or
                 Keys.Tab or

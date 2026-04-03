@@ -165,6 +165,20 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
+    public void CompletionPopup_PrintScreenKeyUp_DoesNotTriggerSuggestions()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "steps:\n  - dns:\n      ";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "Editor_KeyUp", null, new KeyEventArgs(Keys.Snapshot));
+
+        GetCompletionPopup(control).Visible.Should().BeFalse();
+    }
+
+    [WinFormsFact]
     public void CompletionPopup_UpdateUISelection_HidesRootSuggestionsWhenCaretMovesBelowSteps()
     {
         using var control = new ScintillaScriptEditorControl();
@@ -658,6 +672,34 @@ public class ScintillaScriptEditorControlTests
 
         handled.Should().BeTrue();
         NormalizeLineEndings(control.Text).Should().EndWith("\n  - ");
+    }
+
+    [WinFormsFact]
+    public void SmartEnter_OnScalarStepOptionKey_DoesNotOverIndentNextLine()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "steps:\n  - extract:\n      from:";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        var handled = (bool)InvokeNonPublic(control, "HandleSmartEnter", new KeyEventArgs(Keys.Enter))!;
+
+        handled.Should().BeTrue();
+        NormalizeLineEndings(control.Text).Should().EndWith("\n      ");
+    }
+
+    [WinFormsFact]
+    public void SmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "- dns:\n    host: 1.2.3.4\n    into:\n    ";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        var handled = (bool)InvokeNonPublic(control, "HandleSmartEnter", new KeyEventArgs(Keys.Enter))!;
+
+        handled.Should().BeTrue();
+        NormalizeLineEndings(control.Text).Should().EndWith("\n    \n");
     }
 
     [WinFormsFact]

@@ -285,6 +285,8 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
         completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "options", "default"]);
+        completion.Items.Should().Contain(item => item.Label == "into" && item.Detail == "required");
+        completion.Items.Should().Contain(item => item.Label == "options" && item.Detail == "required");
     }
 
     [Fact]
@@ -297,6 +299,8 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
         completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "options", "min", "max"]);
+        completion.Items.Should().Contain(item => item.Label == "into" && item.Detail == "required");
+        completion.Items.Should().Contain(item => item.Label == "options" && item.Detail == "required");
     }
 
     [Fact]
@@ -321,6 +325,29 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
         completion.Items.Select(item => item.Label).Should().Contain(["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"]);
+        completion.Items.Should().Contain(item => item.Label == "path" && item.Detail == "required");
+        completion.Items.Should().Contain(item => item.Label == "into" && item.Detail == "required");
+    }
+
+    [Theory]
+    [MemberData(nameof(GetRequiredOptionTagCases))]
+    public void GetCompletion_CommandStepOptionKey_MarksAuditedRequiredOptions(
+        string command,
+        string[] expectedRequiredKeys)
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = $"steps:\n  - {command}:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+
+        foreach (var requiredKey in expectedRequiredKeys)
+        {
+            completion.Items.Should().Contain(item =>
+                string.Equals(item.Label, requiredKey, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(item.Detail, "required", StringComparison.Ordinal));
+        }
     }
 
     [Fact]
@@ -470,5 +497,20 @@ public class ScriptAutocompleteProviderTests
         symbols.Should().Contain("_output");
         symbols.Should().Contain("hostname");
         symbols.Should().Contain("port");
+    }
+
+    public static IEnumerable<object[]> GetRequiredOptionTagCases()
+    {
+        yield return new object[] { "send", new[] { "command" } };
+        yield return new object[] { "if", new[] { "condition", "then" } };
+        yield return new object[] { "foreach", new[] { "iterator", "do" } };
+        yield return new object[] { "while", new[] { "condition", "do" } };
+        yield return new object[] { "exists", new[] { "path", "into" } };
+        yield return new object[] { "choose", new[] { "into", "options" } };
+        yield return new object[] { "multiselect", new[] { "into", "options" } };
+        yield return new object[] { "confirm", new[] { "into" } };
+        yield return new object[] { "assert", new[] { "condition" } };
+        yield return new object[] { "switch", new[] { "value", "cases" } };
+        yield return new object[] { "browser_callback_capture", new[] { "start_url", "callback_path", "into" } };
     }
 }

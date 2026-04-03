@@ -1,5 +1,80 @@
 # TODO
 
+## 177. Align autocomplete required-option tags with command requirements
+- [x] 177.1 Audit required option keys across step commands and identify mismatches between parser/runtime validation and autocomplete required-tag metadata.
+- [x] 177.2 Update autocomplete required-key metadata to mark missing required options (including choose/multiselect options and other audited gaps).
+- [x] 177.3 Add focused regression tests that assert required-tag details on command option suggestions.
+- [x] 177.4 Run focused autocomplete verification and record outcomes.
+
+### 177 Review
+- Root cause: `ScriptAutocompleteProvider` used a static `RequiredOptionKeysByCommand` map that had drifted from command validation/runtime requirements. Example: `choose.options` (and `multiselect.options`) were not tagged required even though those commands fail without options.
+- Audited and corrected required-key metadata in `Services/Editor/ScriptAutocompleteProvider.cs`:
+- added missing required tags for `choose.options`, `multiselect.options`, and `exists.into`.
+- added block-required tags for control-flow commands: `if.then`, `foreach.do`, `while.do`.
+- aligned `readfile` required tags to include both `path` and `into`.
+- Added focused regression coverage in `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`:
+- updated choose/multiselect/readfile option tests to assert `Detail == "required"` on the required keys.
+- added theory `GetCompletion_CommandStepOptionKey_MarksAuditedRequiredOptions` to enforce required tags across a command set (`send`, `if`, `foreach`, `while`, `exists`, `choose`, `multiselect`, `confirm`, `assert`, `switch`, `browser_callback_capture`).
+- Verification:
+- Focused: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-required-tags-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-required-tags-green\obj\` (passed: `45/45`).
+- Regression: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-required-tags-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-required-tags-regression\obj\` (passed: `84/84`).
+
+## 176. Smart Enter fallback indentation on empty payload lines
+- [x] 176.1 Add failing utility/UI regressions for pressing `Enter` on an empty indented line inside a step payload and expecting fallback to sibling command indentation.
+- [x] 176.2 Update smart-enter logic so empty payload lines dedent to the next command/block indentation level.
+- [x] 176.3 Run focused editor utility/UI verification and record outcomes.
+
+### 176 Review
+- Added regressions:
+- `SSH_Helper.Tests/Editor/EditorTextUtilitiesTests.cs`: `ApplySmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent`
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`: `SmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent`
+- Root cause: `EditorTextUtilities.ApplySmartEnter(...)` always reused current line indentation when `Enter` was pressed on a whitespace-only line, so an empty payload line stayed nested instead of falling back to the sibling command/block level.
+- Updated `Services/Editor/EditorTextUtilities.cs`:
+- added `TryResolveEmptyStepPayloadFallbackIndent(...)` and `TryGetPreviousSignificantLine(...)`.
+- on empty lines under direct step payload options, smart-enter now inserts the next line at the sibling step indentation (where the next command block belongs).
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ApplySmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent|FullyQualifiedName~SmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-empty-line-fallback-red\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-empty-line-fallback-red\obj\` (failed as expected: `2/2`).
+- Green (focused): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ApplySmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent|FullyQualifiedName~SmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-empty-line-fallback-green\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-empty-line-fallback-green\obj\` (passed: `2/2`).
+- Green (regression): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~EditorTextUtilitiesTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-empty-line-fallback-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-empty-line-fallback-regression\obj\` (passed: `52/52`).
+
+## 175. Prevent autocomplete on non-text keyup (Print Screen)
+- [x] 175.1 Add failing UI regression proving `Print Screen` keyup does not open autocomplete popup.
+- [x] 175.2 Tighten keyup autocomplete trigger filtering to ignore non-text keys like `Print Screen`.
+- [x] 175.3 Run focused `ScintillaScriptEditorControl` verification and record outcomes.
+
+### 175 Review
+- Added focused regression in `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`:
+- `CompletionPopup_PrintScreenKeyUp_DoesNotTriggerSuggestions`
+- Root cause: `ScintillaScriptEditorControl.ShouldTriggerAutocompleteOnKeyUp(...)` treated `Keys.Snapshot` (`Print Screen`) as a valid key-up trigger, so taking a screenshot could open the autocomplete popup unexpectedly.
+- Updated `UI/ScintillaScriptEditorControl.cs`:
+- added `Keys.Snapshot` to the excluded key list in `ShouldTriggerAutocompleteOnKeyUp(...)`.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CompletionPopup_PrintScreenKeyUp_DoesNotTriggerSuggestions" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-printscreen-red\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-printscreen-red\obj\` (failed as expected before fix).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CompletionPopup_PrintScreenKeyUp_DoesNotTriggerSuggestions|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-printscreen-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-printscreen-green\obj\` (passed: `38/38`).
+- Green (verification rerun): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CompletionPopup_PrintScreenKeyUp_DoesNotTriggerSuggestions" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-printscreen-verify\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-printscreen-verify\obj\` (passed: `1/1`).
+
+## 174. Smart Enter indentation for step option keys
+- [x] 174.1 Add failing smart-enter tests for scalar step option keys ending with `:` to ensure sibling-option indentation is preserved.
+- [x] 174.2 Update smart-enter indentation logic so step option keys default to same-indent continuation while nested block keys still indent deeper.
+- [x] 174.3 Run focused editor utility/UI autocomplete verification and record outcomes.
+
+### 174 Review
+- Added regressions:
+- `SSH_Helper.Tests/Editor/EditorTextUtilitiesTests.cs`
+- `ApplySmartEnter_OnScalarStepOptionKeyWithoutValue_KeepsSameIndent`
+- `ApplySmartEnter_OnNestedStepOptionKeyWithoutValue_IndentsDeeper`
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`
+- `SmartEnter_OnScalarStepOptionKey_DoesNotOverIndentNextLine`
+- Root cause: `EditorTextUtilities.ApplySmartEnter(...)` always deepened indentation for any line ending with `:`, which incorrectly treated scalar step options (`from:`, `into:`, `pattern:`) like nested mapping roots.
+- Updated `Services/Editor/EditorTextUtilities.cs`:
+- added step-option-aware mapping-key indentation logic.
+- scalar step option keys now continue at the same indentation level.
+- known nested block step keys (for example `respond`, `cases`, `then`, `do`, `catch`, `finally`, `headers`, `options`, `columns`) still indent one level deeper.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ApplySmartEnter_OnScalarStepOptionKeyWithoutValue_KeepsSameIndent|FullyQualifiedName~ApplySmartEnter_OnNestedStepOptionKeyWithoutValue_IndentsDeeper|FullyQualifiedName~SmartEnter_OnScalarStepOptionKey_DoesNotOverIndentNextLine" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-step-option-red\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-step-option-red\obj\` (failed as expected on scalar option indent behavior).
+- Green (focused): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ApplySmartEnter_OnScalarStepOptionKeyWithoutValue_KeepsSameIndent|FullyQualifiedName~ApplySmartEnter_OnNestedStepOptionKeyWithoutValue_IndentsDeeper|FullyQualifiedName~SmartEnter_OnScalarStepOptionKey_DoesNotOverIndentNextLine" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-step-option-green\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-step-option-green\obj\` (passed: `3/3`).
+- Green (regression): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~EditorTextUtilitiesTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-step-option-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-step-option-regression\obj\` (passed: `49/49`).
+
 ## 173. Ctrl+Space on root-level command-list blank lines
 - [x] 173.1 Add failing provider/UI tests for manual autocomplete on blank lines after root-level `- <command>` blocks (no `steps:` key).
 - [x] 173.2 Extend manual autocomplete context inference to detect root-level command-list continuation and show step suggestions there.
