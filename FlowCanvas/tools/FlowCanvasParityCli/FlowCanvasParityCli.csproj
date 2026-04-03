@@ -9,4 +9,12 @@
   <ItemGroup>
     <ProjectReference Include="../../../SSH_Helper.csproj" />
   </ItemGroup>
+
+  <!-- Strip WindowsDesktop framework from runtimeconfig so the CLI can run on Linux CI runners.
+       The CLI only uses scripting/bridge logic, never WinForms types at runtime. -->
+  <Target Name="StripWindowsDesktopRuntime" BeforeTargets="GenerateBuildRuntimeConfigurationFiles">
+    <ItemGroup>
+      <RuntimeFramework Remove="Microsoft.WindowsDesktop.App" />
+    </ItemGroup>
+  </Target>
 </Project>
