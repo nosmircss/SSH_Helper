@@ -130,7 +130,7 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
-    public void CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceStaysHidden()
+    public void CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceShowsStepCommands()
     {
         using var control = new ScintillaScriptEditorControl();
         control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
@@ -141,7 +141,27 @@ public class ScintillaScriptEditorControlTests
         InvokeNonPublic(control, "Editor_KeyDown", null, new KeyEventArgs(Keys.Control | Keys.Space));
 
         var popup = GetCompletionPopup(control);
-        popup.Visible.Should().BeFalse();
+        var list = GetCompletionList(control);
+        popup.Visible.Should().BeTrue();
+        list.Items.OfType<CompletionItem>().Select(item => item.Label).Should().Contain("send");
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_BlankLine_AfterIndentlessStepsSequence_CtrlSpaceShowsStepCommands()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "steps:\n- send:\n    command: df\n\n- extract:\n    from: ${Host_IP}\n    into: foo\n    pattern: .*\n\n";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "Editor_KeyDown", null, new KeyEventArgs(Keys.Control | Keys.Space));
+
+        var popup = GetCompletionPopup(control);
+        var list = GetCompletionList(control);
+        popup.Visible.Should().BeTrue();
+        list.Items.OfType<CompletionItem>().Select(item => item.Label).Should().Contain("send");
+        list.Items.OfType<CompletionItem>().Should().OnlyContain(item => item.InsertText.StartsWith("- ", StringComparison.Ordinal));
     }
 
     [WinFormsFact]
@@ -344,7 +364,7 @@ public class ScintillaScriptEditorControlTests
         var enterHandled = (bool)InvokeNonPublic(control, "HandleCompletionNavigation", new KeyEventArgs(Keys.Enter))!;
         enterHandled.Should().BeTrue();
         control.Text.Should().NotBe("st");
-        control.Text.Should().NotContain("\n");
+        NormalizeLineEndings(control.Text).Should().StartWith("steps: ");
 
         control.Text = "st";
         control.SelectionStart = control.Text.Length;
@@ -456,7 +476,7 @@ public class ScintillaScriptEditorControlTests
         var handled = (bool)InvokeNonPublic(control, "HandleCompletionNavigation", new KeyEventArgs(Keys.Enter))!;
 
         handled.Should().BeTrue();
-        control.Text.Should().Be("name: ");
+        NormalizeLineEndings(control.Text).Should().StartWith("name: ");
     }
 
     [WinFormsFact]
@@ -472,7 +492,23 @@ public class ScintillaScriptEditorControlTests
         var handled = (bool)InvokeNonPublic(control, "HandleCompletionNavigation", new KeyEventArgs(Keys.Enter))!;
 
         handled.Should().BeTrue();
-        NormalizeLineEndings(control.Text).Should().EndWith("\n  - send: ");
+        NormalizeLineEndings(control.Text).Should().Contain("  - send: ");
+    }
+
+    [WinFormsFact]
+    public void CompletionCommit_StepCommandWithoutDash_PrependsDashAndAppendsColonAndSpace()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "steps:\n  sen";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+        var handled = (bool)InvokeNonPublic(control, "HandleCompletionNavigation", new KeyEventArgs(Keys.Enter))!;
+
+        handled.Should().BeTrue();
+        NormalizeLineEndings(control.Text).Should().Contain("  - send: ");
     }
 
     [WinFormsFact]

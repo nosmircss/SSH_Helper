@@ -105,7 +105,7 @@ namespace SSH_Helper.Services.Editor
                 {
                     if (trimmedBeforeCaret.Contains(':'))
                     {
-                        insertion += new string(' ', safeIndentSize);
+                        insertion += new string(' ', 2 + safeIndentSize);
                     }
                     else
                     {

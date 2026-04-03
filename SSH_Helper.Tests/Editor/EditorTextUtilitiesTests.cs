@@ -56,7 +56,7 @@ public class EditorTextUtilitiesTests
             indentSize: 2,
             preserveBlankLineBetweenSteps: true);
 
-        NormalizeLineEndings(edit.Text).Should().EndWith("\n    ");
+        NormalizeLineEndings(edit.Text).Should().EndWith("\n      ");
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class EditorTextUtilitiesTests
             indentSize: 2,
             preserveBlankLineBetweenSteps: true);
 
-        NormalizeLineEndings(edit.Text).Should().EndWith("\n    ");
+        NormalizeLineEndings(edit.Text).Should().EndWith("\n      ");
     }
 
     [Fact]

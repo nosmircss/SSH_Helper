@@ -1,5 +1,57 @@
 # TODO
 
+## 173. Ctrl+Space on root-level command-list blank lines
+- [x] 173.1 Add failing provider/UI tests for manual autocomplete on blank lines after root-level `- <command>` blocks (no `steps:` key).
+- [x] 173.2 Extend manual autocomplete context inference to detect root-level command-list continuation and show step suggestions there.
+- [x] 173.3 Run focused verification for autocomplete provider/editor tests and record outcomes.
+
+### 173 Review
+- Added regressions:
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`: `GetCompletion_BlankLine_AfterIndentlessStepsSequence_ManualRequest_SuggestsStepCommands`
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`: `CompletionPopup_BlankLine_AfterIndentlessStepsSequence_CtrlSpaceShowsStepCommands`
+- Root cause: step context inference assumed `steps` children were always indented (`steps:` then `  - ...`). Your script uses valid YAML indentless sequence style (`steps:` then `- ...`), so `Ctrl+Space` on the trailing blank line resolved to no context and returned no items.
+- Updated `Services/Editor/ScriptAutocompleteProvider.cs`:
+- step-sequence inference now recognizes both direct/ancestor step command lines (including indentless style) when resolving continuation context.
+- no-dash step-command completion now only activates at true step-item indent, plus the explicit manual blank-line bridge case at column 0; this prevents overriding option-key autocomplete contexts.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~GetCompletion_BlankLine_AfterIndentlessStepsSequence_ManualRequest_SuggestsStepCommands|FullyQualifiedName~CompletionPopup_BlankLine_AfterIndentlessStepsSequence_CtrlSpaceShowsStepCommands" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-indentless-steps-red\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-indentless-steps-red\obj\` (failed as expected: `2/2`).
+- Green (focused): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~GetCompletion_BlankLine_AfterIndentlessStepsSequence_ManualRequest_SuggestsStepCommands|FullyQualifiedName~CompletionPopup_BlankLine_AfterIndentlessStepsSequence_CtrlSpaceShowsStepCommands|FullyQualifiedName~GetCompletion_StepPrefixWithoutDash_WithinSteps_SuggestsStepCommandsAndPrependsListMarker|FullyQualifiedName~CompletionCommit_StepCommandWithoutDash_PrependsDashAndAppendsColonAndSpace" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-indentless-steps-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-indentless-steps-green\obj\` (passed: `4/4`).
+- Green (regression): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-indentless-steps-regression2\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-indentless-steps-regression2\obj\` (passed: `70/70`).
+
+## 172. Ctrl+Space autocomplete on blank line after steps
+- [x] 172.1 Add failing provider/UI tests for manual (`Ctrl+Space`) autocomplete on blank lines following a `steps` block.
+- [x] 172.2 Implement manual-request autocomplete context so blank lines after `steps` suggest step commands and commit inserts proper list marker/indent.
+- [x] 172.3 Run focused verification for autocomplete provider and editor control tests; record outcomes.
+
+### 172 Review
+- Added/updated regressions:
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`: `GetCompletion_BlankTopLevelLine_AfterVarsAndSteps_ManualRequest_SuggestsStepCommands`
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`: `CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceShowsStepCommands`
+- Root cause: blank-line completion after `steps:` used the same provider path as auto typing and had no manual-request context, so it resolved as top-level blank line and returned no suggestions.
+- Updated runtime behavior:
+- `UI/ScintillaScriptEditorControl.cs` now routes `Ctrl+Space` through a manual completion request flag and preserves that mode while popup content refreshes/commits.
+- `Services/Editor/ScriptAutocompleteProvider.cs` now accepts a manual-request mode and, for blank or unindented lines immediately after a `steps` block, infers step-item context and returns step command completions with proper `  - ` insertion text.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~GetCompletion_BlankTopLevelLine_AfterVarsAndSteps_ManualRequest_SuggestsStepCommands|FullyQualifiedName~CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceShowsStepCommands" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-blankline-manual-red\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-blankline-manual-red\obj\` (failed as expected before implementation: provider API/manual context missing).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-blankline-manual-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-blankline-manual-green\obj\` (passed: `68/68`).
+
+## 171. Root step autocomplete without manual dash prefix
+- [x] 171.1 Add failing coverage for step-root autocomplete on blank `steps` list lines without a leading `- ` marker.
+- [x] 171.2 Update autocomplete completion logic so root step commands are suggested without `- ` and selecting a suggestion injects `- ` when missing.
+- [x] 171.3 Run focused verification for provider/UI autocomplete tests and capture results.
+
+### 171 Review
+- Added regressions:
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`: `GetCompletion_StepPrefixWithoutDash_WithinSteps_SuggestsStepCommandsAndPrependsListMarker`
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`: `CompletionCommit_StepCommandWithoutDash_PrependsDashAndAppendsColonAndSpace`
+- Root cause: step-command autocomplete only matched `^\s*-\s+...$`, so `steps` list lines without the manual `- ` prefix were not treated as command context.
+- Updated `Services/Editor/ScriptAutocompleteProvider.cs`:
+- added step-root detection for lines inside `steps:` blocks at the item indent even when no leading list marker is present.
+- for that context, completion items keep command labels but insert text is emitted as `- <command>`, so commit adds the missing YAML list marker automatically.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~GetCompletion_StepPrefixWithoutDash_WithinSteps_SuggestsStepCommandsAndPrependsListMarker|FullyQualifiedName~CompletionCommit_StepCommandWithoutDash_PrependsDashAndAppendsColonAndSpace" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-step-root-red\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-step-root-red\obj\` (failed as expected: `2/2`).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-step-root-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-step-root-green\obj\` (passed: `68/68`).
+
 ## 170. Fix empty-quote closing-caret path insertion regression
 - [x] 170.1 Add focused WinForms regression for `path: ""` when caret is positioned after the closing quote and `Path Browser...` is clicked.
 - [x] 170.2 Refine quote-context detection so closing-quote caret positions on empty placeholders normalize to single-quoted YAML path output.

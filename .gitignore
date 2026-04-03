@@ -372,5 +372,6 @@ RebexPOC/
 rebex.key
 .claude/napkin.md
 .worktrees/
+.superpowers/
 
 tools/

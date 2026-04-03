@@ -44,6 +44,21 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_StepPrefixWithoutDash_WithinSteps_SuggestsStepCommandsAndPrependsListMarker()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  se";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        var sendItem = completion.Items.Single(item => item.Label == "send");
+        sendItem.InsertText.Should().Be("- send");
+        completion.ReplaceStart.Should().Be("steps:\n  ".Length);
+        completion.ReplaceLength.Should().Be(2);
+    }
+
+    [Fact]
     public void GetCompletion_TopLevelPrefix_SuggestsTopLevelKeys()
     {
         var provider = new ScriptAutocompleteProvider();
@@ -93,15 +108,29 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
-    public void GetCompletion_BlankTopLevelLine_AfterVarsAndSteps_ManualRequest_DoesNotSuggestRootKeys()
+    public void GetCompletion_BlankTopLevelLine_AfterVarsAndSteps_ManualRequest_SuggestsStepCommands()
     {
         var provider = new ScriptAutocompleteProvider();
         var text = "name: demo\nvars:\n  token: abc\nsteps:\n  - send: ok\n";
 
-        var completion = provider.GetCompletion(text, text.Length);
+        var completion = provider.GetCompletion(text, text.Length, manualRequest: true);
 
-        completion.Context.Should().Be(CompletionContextKind.None);
-        completion.Items.Should().BeEmpty();
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Select(item => item.Label).Should().Contain("send");
+        completion.Items.Should().OnlyContain(item => item.InsertText.StartsWith("  - ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetCompletion_BlankLine_AfterIndentlessStepsSequence_ManualRequest_SuggestsStepCommands()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n- send:\n    command: df\n\n- extract:\n    from: ${Host_IP}\n    into: foo\n    pattern: .*\n\n";
+
+        var completion = provider.GetCompletion(text, text.Length, manualRequest: true);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Select(item => item.Label).Should().Contain("send");
+        completion.Items.Should().OnlyContain(item => item.InsertText.StartsWith("- ", StringComparison.Ordinal));
     }
 
     [Fact]

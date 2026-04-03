@@ -1,6 +1,9 @@
 # Lessons
 
 ## 2026-04-03
+- When inferring script-step autocomplete context, I must handle both YAML list styles under `steps:` (indented `  - command` and indentless `- command`); assuming only indented style will hide `Ctrl+Space` suggestions on valid scripts.
+- When users trigger manual autocomplete with `Ctrl+Space`, I must test blank-line continuation contexts separately from auto-typing behavior; provider logic needs explicit manual-request context to avoid suppressing valid `steps` suggestions.
+- When step-command autocomplete applies inside `steps:` list items, I must support command suggestions even if the user has not typed `- ` yet, and completion commit should inject the missing list marker automatically.
 - When inserting Windows file paths into YAML from editor tooling, I must treat double-quoted insertion sites as a special case and convert them to single-quoted values so backslashes remain literal and paths stay valid.
 - When users ask about specific text-entry edge contexts (`path: ""`, `path: "`, `path: '`), I must add explicit regression coverage for each context before changing insertion logic; quote-adjacent caret behavior is easy to mis-handle without tests.
 - For quote-pair placeholders like `path: ""`, I must test both caret positions (between quotes and after closing quote); caret-index assumptions around opening/closing quotes can produce malformed leading quote artifacts.
