@@ -137,6 +137,171 @@ export function createPropertiesTypingFixture(): GraphFixture {
   };
 }
 
+export function createPathPropertyFixture(): GraphFixture {
+  return {
+    nodes: [
+      {
+        id: 'node-playsound',
+        type: 'block',
+        position: { x: 160, y: 120 },
+        data: {
+          blockType: 'playsound',
+          label: 'Play Sound',
+          props: {
+            path: '',
+          },
+        },
+      },
+    ],
+    edges: [],
+  };
+}
+
+export function createRequiredMarkersFixture(): GraphFixture {
+  return {
+    nodes: [
+      {
+        id: 'node-extract',
+        type: 'block',
+        position: { x: 80, y: 80 },
+        data: {
+          blockType: 'extract',
+          label: 'Extract',
+          props: {
+            pattern: 'Version (.+)',
+            into: 'version',
+          },
+        },
+      },
+      {
+        id: 'node-browser-callback',
+        type: 'block',
+        position: { x: 280, y: 80 },
+        data: {
+          blockType: 'browser_callback',
+          label: 'Browser Callback',
+          props: {
+            start_url: 'https://idp.example.com/start',
+          },
+        },
+      },
+      {
+        id: 'node-input',
+        type: 'block',
+        position: { x: 480, y: 80 },
+        data: {
+          blockType: 'input',
+          label: 'Input',
+          props: {
+            into: 'answer',
+          },
+        },
+      },
+      {
+        id: 'node-choose',
+        type: 'block',
+        position: { x: 680, y: 80 },
+        data: {
+          blockType: 'choose',
+          label: 'Choose',
+          props: {
+            into: 'choice',
+            options: ['a', 'b'],
+          },
+        },
+      },
+      {
+        id: 'node-multiselect',
+        type: 'block',
+        position: { x: 880, y: 80 },
+        data: {
+          blockType: 'multiselect',
+          label: 'Multiselect',
+          props: {
+            into: 'choices',
+            options: ['a', 'b'],
+          },
+        },
+      },
+      {
+        id: 'node-confirm',
+        type: 'block',
+        position: { x: 80, y: 300 },
+        data: {
+          blockType: 'confirm',
+          label: 'Confirm',
+          props: {
+            into: 'confirmed',
+          },
+        },
+      },
+      {
+        id: 'node-portcheck',
+        type: 'block',
+        position: { x: 280, y: 300 },
+        data: {
+          blockType: 'portcheck',
+          label: 'Portcheck',
+          props: {
+            host: '127.0.0.1',
+          },
+        },
+      },
+      {
+        id: 'node-writefile',
+        type: 'block',
+        position: { x: 480, y: 300 },
+        data: {
+          blockType: 'writefile',
+          label: 'Writefile',
+          props: {
+            path: 'C:\\temp\\out.txt',
+          },
+        },
+      },
+      {
+        id: 'node-readfile',
+        type: 'block',
+        position: { x: 680, y: 300 },
+        data: {
+          blockType: 'readfile',
+          label: 'Readfile',
+          props: {
+            into: 'lines',
+            select_file: false,
+          },
+        },
+      },
+      {
+        id: 'node-http-required',
+        type: 'block',
+        position: { x: 880, y: 300 },
+        data: {
+          blockType: 'http',
+          label: 'HTTP',
+          props: {
+            url: 'https://example.com',
+            auth: 'none',
+          },
+        },
+      },
+      {
+        id: 'node-interactive-required',
+        type: 'block',
+        position: { x: 80, y: 520 },
+        data: {
+          blockType: 'interactive',
+          label: 'Interactive',
+          props: {
+            show_window: true,
+          },
+        },
+      },
+    ],
+    edges: [],
+  };
+}
+
 export function createImportedChildEditingFixture(): GraphFixture {
   return {
     nodes: [

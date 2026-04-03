@@ -1414,6 +1414,106 @@ steps:
         step.Multiselect.OptionsFrom.Should().Be("${interface_list}");
     }
 
+    [Fact]
+    public void Validate_ChooseWithoutInto_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      options:
+        - a";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Choose requires 'into'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_ChooseWithoutOptions_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      into: selected";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Choose requires 'options'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_MultiselectWithoutInto_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - multiselect:
+      options:
+        - a";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Multiselect requires 'into'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_MultiselectWithoutOptions_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - multiselect:
+      into: selected";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Multiselect requires 'options'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_ConfirmWithoutInto_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - confirm:
+      prompt: Are you sure?";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Confirm requires 'into'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_WebhookWithoutUrl_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - webhook:
+      method: POST";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Webhook requires 'url'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_LogMapWithoutMessage_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - log:
+      level: info";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Log requires 'message'", StringComparison.OrdinalIgnoreCase));
+    }
+
     #endregion
 
     #region Interactive Terminal Parser Tests

@@ -1,6 +1,8 @@
 # Lessons
 
 ## 2026-04-03
+- When a user adds a documentation-follow-through correction, I must update both behavior docs and QA docs in the same implementation pass (`README`, `SCRIPTING`, harness docs, changelog), not treat docs as optional cleanup.
+- When opening dialogs from Flow Canvas-hosted actions, I must set the dialog owner to the Flow Canvas window (`FlowCanvasForm`) rather than `Form1`; otherwise Windows can activate the main form and steal focus.
 - When autocomplete displays `required` option tags, I must audit the required-key map against parser/runtime validation for every command family and add command-level regression tests; partial spot-fixes (for example only `into`) drift quickly and miss keys like `choose.options`.
 - When handling `Enter` on whitespace-only lines in step payloads, I must support a second-enter fallback that dedents to sibling command/block indentation; otherwise users get stuck at nested option indent when trying to start the next command.
 - When key-up autocomplete is enabled in the script editor, I must explicitly exclude non-text system keys (for example `Print Screen`/`Keys.Snapshot`) so screenshot/hotkey input cannot spuriously open suggestions.

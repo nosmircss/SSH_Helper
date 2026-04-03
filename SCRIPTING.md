@@ -2883,7 +2883,7 @@ Starts a localhost callback listener and captures values returned from browser-d
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `start_url` | Yes | - | Initial URL to open in browser |
-| `callback_path` | Yes | `/oauth_callback` | Local callback path starting with `/` |
+| `callback_path` | No | `/oauth_callback` | Local callback path starting with `/` |
 | `local_port` | No | `8086` | Loopback listener port |
 | `capture_mode` | No | `auto` | `auto`, `fragment`, `query`, `post_body` |
 | `browser_mode` | No | `external` | `external` or `webview2` when `open_browser: true` |
@@ -3045,6 +3045,7 @@ Checks TCP reachability for a host/port.
 **Defaults:**
 - `port: 22`
 - `timeout: 5` (seconds)
+- Required field: `host` (port is optional and defaults to `22`).
 
 **Capture Variables:**
 - `${into}`: `open`, `closed`, or `timeout`

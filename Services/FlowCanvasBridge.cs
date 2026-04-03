@@ -205,7 +205,7 @@ namespace SSH_Helper.Services
                 ["print"] = ["message"],
                 ["wait"] = ["seconds"],
                 ["set"] = ["expression"],
-                ["extract"] = ["pattern", "into"],
+                ["extract"] = ["pattern", "from", "into"],
                 ["if"] = ["condition"],
                 ["foreach"] = ["iterator"],
                 ["while"] = ["condition"],
@@ -215,19 +215,19 @@ namespace SSH_Helper.Services
                 ["parse"] = ["format", "from", "into"],
                 ["table"] = ["data"],
                 ["readfile"] = ["path", "into"],
-                ["writefile"] = ["path", "content"],
+                ["writefile"] = ["path"],
                 ["exists"] = ["path", "into"],
                 ["playsound"] = ["path"],
-                ["input"] = ["prompt", "into"],
-                ["choose"] = ["prompt", "options", "into"],
-                ["multiselect"] = ["prompt", "options", "into"],
-                ["confirm"] = ["prompt", "into"],
+                ["input"] = ["into"],
+                ["choose"] = ["options", "into"],
+                ["multiselect"] = ["options", "into"],
+                ["confirm"] = ["into"],
                 ["ping"] = ["host"],
                 ["dns"] = ["host"],
-                ["portcheck"] = ["host", "port"],
+                ["portcheck"] = ["host"],
                 ["http"] = ["url"],
                 ["webhook"] = ["url"],
-                ["browser_callback_capture"] = ["start_url"],
+                ["browser_callback_capture"] = ["start_url", "into"],
                 ["sftp"] = ["action", "local_path", "remote_path"],
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
@@ -3286,9 +3286,15 @@ namespace SSH_Helper.Services
         {
             error = null;
             if (!RequiredOptionKeysByCommand.TryGetValue(commandKey, out var requiredKeys))
-                return true;
+                requiredKeys = [];
 
             var missing = new List<string>();
+            bool HasPresentOption(string optionKey)
+            {
+                return options.TryGetValue(optionKey, StringComparison.OrdinalIgnoreCase, out var optionToken)
+                       && !IsMissingRequiredOptionToken(commandKey, optionKey, optionToken);
+            }
+
             foreach (var key in requiredKeys)
             {
                 if (string.Equals(commandKey, "readfile", StringComparison.OrdinalIgnoreCase) &&
@@ -3307,11 +3313,64 @@ namespace SSH_Helper.Services
                 }
             }
 
+            if (string.Equals(commandKey, "http", StringComparison.OrdinalIgnoreCase) &&
+                options.TryGetValue("auth", StringComparison.OrdinalIgnoreCase, out var authToken))
+            {
+                var auth = authToken.ToString().Trim();
+                if (!IsDynamicRuntimeValue(auth))
+                {
+                    if (string.Equals(auth, "basic", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!HasPresentOption("username"))
+                            missing.Add("username");
+                        if (!HasPresentOption("password"))
+                            missing.Add("password");
+                    }
+                    else if (string.Equals(auth, "bearer", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!HasPresentOption("token"))
+                            missing.Add("token");
+                    }
+                }
+            }
+
+            if (string.Equals(commandKey, "interactive", StringComparison.OrdinalIgnoreCase))
+            {
+                var showWindow = true;
+                if (options.TryGetValue("show_window", StringComparison.OrdinalIgnoreCase, out var showWindowToken) &&
+                    TryNormalizeBoolean(showWindowToken, out var normalizedShowWindow))
+                {
+                    showWindow = normalizedShowWindow;
+                }
+
+                if (!showWindow)
+                {
+                    if (!HasPresentOption("command"))
+                        missing.Add("command");
+
+                    var hasMaxSeconds = HasPresentOption("max_seconds");
+                    var hasMaxLines = HasPresentOption("max_lines");
+                    if (!hasMaxSeconds && !hasMaxLines)
+                    {
+                        missing.Add("max_seconds|max_lines");
+                    }
+                }
+            }
+
             if (missing.Count == 0)
                 return true;
 
             error = $"Block '{commandKey}' is missing required option(s): {string.Join(", ", missing)}.";
             return false;
+        }
+
+        private static bool IsDynamicRuntimeValue(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            var trimmed = value.Trim();
+            return trimmed.Contains("${", StringComparison.Ordinal) && trimmed.Contains("}", StringComparison.Ordinal);
         }
 
         private static bool IsMissingRequiredOptionToken(string commandKey, string optionKey, JToken token)

@@ -1,9 +1,15 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { createImportedChildEditingFixture, createPropertiesTypingFixture } from './fixtures/graphs';
+import {
+  createImportedChildEditingFixture,
+  createPathPropertyFixture,
+  createPropertiesTypingFixture,
+  createRequiredMarkersFixture,
+} from './fixtures/graphs';
 import {
   clearOutgoingMessages,
   installHostMessageCapture,
   loadGraphFixture,
+  postHostMessage,
   type OutgoingHostMessage,
   waitForOutgoingMessage,
 } from './support/harness';
@@ -159,6 +165,136 @@ steps:
   });
 });
 
+test.describe('Flow Canvas Path Browsing', () => {
+  test.beforeEach(async ({ page }) => {
+    await installHostMessageCapture(page);
+    await page.goto('/');
+    await waitForOutgoingMessage(page, 'ready');
+    await clearOutgoingMessages(page);
+    await loadGraphFixture(page, createPathPropertyFixture());
+
+    await expect(nodeById(page, 'node-playsound')).toBeVisible();
+  });
+
+  test('path fields can request host browse and apply selected path', async ({ page }) => {
+    const playsoundNode = nodeById(page, 'node-playsound');
+    await playsoundNode.click();
+    await expect(page.getByTestId('properties-panel')).toBeVisible();
+
+    const pathInput = page.getByTestId('properties-field-path-text-input');
+    const browseButton = page.getByTestId('properties-field-path-text-browse');
+
+    await expect(pathInput).toHaveValue('');
+    await expect(browseButton).toBeVisible();
+
+    await clearOutgoingMessages(page);
+    await browseButton.click();
+
+    const browseRequest = await waitForOutgoingMessage(page, 'browse-path');
+    const requestId = String(browseRequest.requestId ?? '');
+    expect(requestId.length).toBeGreaterThan(0);
+
+    const selectedPath = 'C:\\\\Windows\\\\Media\\\\Alarm02.wav';
+    await postHostMessage(page, {
+      type: 'browse-path-result',
+      requestId,
+      canceled: false,
+      path: selectedPath,
+    });
+
+    await expect(pathInput).toHaveValue(selectedPath);
+  });
+});
+
+test.describe('Flow Canvas Required Markers', () => {
+  test.beforeEach(async ({ page }) => {
+    await installHostMessageCapture(page);
+    await page.goto('/');
+    await waitForOutgoingMessage(page, 'ready');
+    await clearOutgoingMessages(page);
+    await loadGraphFixture(page, createRequiredMarkersFixture());
+
+    await expect(nodeById(page, 'node-extract')).toBeVisible();
+  });
+
+  test('static required stars match parser/runtime required fields', async ({ page }) => {
+    await nodeById(page, 'node-extract').click({ force: true });
+    await expect(page.getByTestId('properties-panel')).toBeVisible();
+    await expectFieldRequired(page, 'properties-field-from-text', true);
+
+    await nodeById(page, 'node-browser-callback').click({ force: true });
+    await expectFieldRequired(page, 'properties-field-into-text', true);
+
+    await nodeById(page, 'node-input').click({ force: true });
+    await expectFieldRequired(page, 'properties-field-prompt-text', false);
+    await expectFieldRequired(page, 'properties-field-into-text', true);
+
+    await nodeById(page, 'node-choose').click({ force: true });
+    await expectFieldRequired(page, 'properties-field-prompt-text', false);
+    await expectFieldRequired(page, 'properties-field-options-text', true);
+    await expectFieldRequired(page, 'properties-field-into-text', true);
+
+    await nodeById(page, 'node-multiselect').click({ force: true });
+    await expectFieldRequired(page, 'properties-field-prompt-text', false);
+    await expectFieldRequired(page, 'properties-field-options-text', true);
+    await expectFieldRequired(page, 'properties-field-into-text', true);
+
+    await nodeById(page, 'node-confirm').click({ force: true });
+    await expectFieldRequired(page, 'properties-field-prompt-text', false);
+    await expectFieldRequired(page, 'properties-field-into-text', true);
+
+    await nodeById(page, 'node-portcheck').click({ force: true });
+    await expectFieldRequired(page, 'properties-field-port-number', false);
+
+    await nodeById(page, 'node-writefile').click({ force: true });
+    await expectFieldRequired(page, 'properties-field-content-textarea', false);
+  });
+
+  test('conditional required stars update from current property state', async ({ page }) => {
+    await nodeById(page, 'node-readfile').click({ force: true });
+    await expectFieldRequired(page, 'properties-field-path-text', true);
+    const selectFile = page.getByTestId('properties-field-select_file-boolean-input');
+    await selectFile.check();
+    await expectFieldRequired(page, 'properties-field-path-text', false);
+
+    await nodeById(page, 'node-http-required').click({ force: true });
+    const authSelect = page.getByTestId('properties-field-auth-select-input');
+    await expectFieldRequired(page, 'properties-field-username-text', false);
+    await expectFieldRequired(page, 'properties-field-password-text', false);
+    await expectFieldRequired(page, 'properties-field-token-text', false);
+
+    await authSelect.selectOption('basic');
+    await expectFieldRequired(page, 'properties-field-username-text', true);
+    await expectFieldRequired(page, 'properties-field-password-text', true);
+    await expectFieldRequired(page, 'properties-field-token-text', false);
+
+    await authSelect.selectOption('bearer');
+    await expectFieldRequired(page, 'properties-field-username-text', false);
+    await expectFieldRequired(page, 'properties-field-password-text', false);
+    await expectFieldRequired(page, 'properties-field-token-text', true);
+
+    await authSelect.selectOption('none');
+    await expectFieldRequired(page, 'properties-field-token-text', false);
+
+    await nodeById(page, 'node-interactive-required').click({ force: true });
+    await expectFieldRequired(page, 'properties-field-command-code', false);
+    await expectFieldRequired(page, 'properties-field-max_seconds-number', false);
+    await expectFieldRequired(page, 'properties-field-max_lines-number', false);
+
+    const showWindow = page.getByTestId('properties-field-show_window-boolean-input');
+    await showWindow.uncheck();
+    await expectFieldRequired(page, 'properties-field-command-code', true);
+    await expectFieldRequired(page, 'properties-field-max_seconds-number', true);
+    await expectFieldRequired(page, 'properties-field-max_lines-number', true);
+
+    const maxSeconds = page.getByTestId('properties-field-max_seconds-number-input');
+    await maxSeconds.fill('30');
+    await expectFieldRequired(page, 'properties-field-command-code', true);
+    await expectFieldRequired(page, 'properties-field-max_seconds-number', false);
+    await expectFieldRequired(page, 'properties-field-max_lines-number', false);
+  });
+});
+
 async function typePerKeystroke(locator: Locator, value: string): Promise<void> {
   await locator.click();
   await locator.fill('');
@@ -170,6 +306,16 @@ async function typePerKeystroke(locator: Locator, value: string): Promise<void> 
     await locator.type(ch);
     await expect(locator).toHaveValue(current);
   }
+}
+
+async function expectFieldRequired(page: Page, fieldTestId: string, required: boolean): Promise<void> {
+  const label = page.getByTestId(fieldTestId).locator('label').first();
+  if (required) {
+    await expect(label).toContainText('*');
+    return;
+  }
+
+  await expect(label).not.toContainText('*');
 }
 
 function nodeById(page: Page, nodeId: string): Locator {

@@ -1346,6 +1346,186 @@ public class FlowCanvasBridgeTests
         Assert.Equal(StepType.Print, afterStep.GetStepType());
     }
 
+    [Fact]
+    public void ExportGraphToYaml_ExtractMissingFrom_ReturnsRequiredOptionError()
+    {
+        var result = ExportSingleBlock("extract", new JObject
+        {
+            ["pattern"] = "Version (.+)",
+            ["into"] = "version"
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("missing required option(s)", StringComparison.OrdinalIgnoreCase) &&
+            error.Contains("from", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_BrowserCallbackCaptureMissingInto_ReturnsRequiredOptionError()
+    {
+        var result = ExportSingleBlock("browser_callback", new JObject
+        {
+            ["start_url"] = "https://idp.example.com/start"
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("missing required option(s)", StringComparison.OrdinalIgnoreCase) &&
+            error.Contains("into", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_InputWithoutPrompt_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("input", new JObject
+        {
+            ["into"] = "answer"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ChooseWithoutPrompt_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("choose", new JObject
+        {
+            ["into"] = "choice",
+            ["options"] = new JArray("a", "b")
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_MultiselectWithoutPrompt_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("multiselect", new JObject
+        {
+            ["into"] = "choices",
+            ["options"] = new JArray("a", "b")
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ConfirmWithoutPrompt_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("confirm", new JObject
+        {
+            ["into"] = "confirmed"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_PortcheckWithoutPort_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("portcheck", new JObject
+        {
+            ["host"] = "127.0.0.1"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_WritefileWithoutContent_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("writefile", new JObject
+        {
+            ["path"] = "C:\\temp\\output.txt"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ReadfileSelectFileWithoutPath_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("readfile", new JObject
+        {
+            ["select_file"] = true,
+            ["into"] = "lines"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_HttpBasicAuthWithoutUsername_ReturnsRequiredOptionError()
+    {
+        var result = ExportSingleBlock("http", new JObject
+        {
+            ["url"] = "https://api.example.com",
+            ["auth"] = "basic",
+            ["password"] = "secret"
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("username", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_HttpBearerAuthWithoutToken_ReturnsRequiredOptionError()
+    {
+        var result = ExportSingleBlock("http", new JObject
+        {
+            ["url"] = "https://api.example.com",
+            ["auth"] = "bearer"
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("token", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_InteractiveHeadlessWithoutCommand_ReturnsRequiredOptionError()
+    {
+        var result = ExportSingleBlock("interactive", new JObject
+        {
+            ["show_window"] = false,
+            ["max_seconds"] = 30
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("command", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_InteractiveHeadlessWithoutLimiter_ReturnsRequiredOptionError()
+    {
+        var result = ExportSingleBlock("interactive", new JObject
+        {
+            ["show_window"] = false,
+            ["command"] = "show version"
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("max_seconds", StringComparison.OrdinalIgnoreCase) ||
+            error.Contains("max_lines", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_InteractiveHeadlessWithCommandAndLimiter_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("interactive", new JObject
+        {
+            ["show_window"] = false,
+            ["command"] = "show version",
+            ["max_seconds"] = 30
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+    }
+
     private static FlowCanvasBridge.FlowCanvasExportResult RoundTripThroughBridge(string yaml)
     {
         var bridge = new FlowCanvasBridge();
@@ -1357,6 +1537,36 @@ public class FlowCanvasBridgeTests
         };
 
         return bridge.ExportGraphToYaml(graph);
+    }
+
+    private static FlowCanvasBridge.FlowCanvasExportResult ExportSingleBlock(string blockType, JObject? props = null)
+    {
+        var bridge = new FlowCanvasBridge();
+        var graph = new JObject
+        {
+            ["nodes"] = new JArray
+            {
+                CreateStartNode(),
+                CreateBlockNode("node-1", blockType, props ?? new JObject())
+            },
+            ["edges"] = new JArray
+            {
+                CreateEdge("__start__", "node-1")
+            }
+        };
+
+        return bridge.ExportGraphToYaml(graph);
+    }
+
+    private static void AssertExportSuccessWithCanonicalValidation(FlowCanvasBridge.FlowCanvasExportResult result)
+    {
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.False(string.IsNullOrWhiteSpace(result.Yaml));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
+        Assert.Empty(errors);
     }
 
     private static IReadOnlyList<(string Name, string Commands)> LoadQaYamlPresets()

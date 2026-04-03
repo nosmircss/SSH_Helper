@@ -2,6 +2,15 @@
 
 ## Changes Since `f7d3ac5` (0.51.10)
 
+### Required Field Alignment (Parser, Export, and Flow Canvas)
+
+- Parser validation now enforces missing required checks for `choose.into/options`, `multiselect.into/options`, `confirm.into`, `webhook.url`, and `log.message`.
+- Flow Canvas export required-option checks are now parser-led:
+  - Added enforcement for `extract.from` and `browser_callback_capture.into`.
+  - Removed incorrect hard requirements for `input.prompt`, `choose.prompt`, `multiselect.prompt`, `confirm.prompt`, `portcheck.port`, and `writefile.content`.
+  - Added conditional required enforcement for `readfile.path` (`select_file` aware), HTTP auth credentials (`basic`/`bearer`), and headless interactive constraints (`show_window=false`).
+- Flow Canvas Properties `*` markers now evaluate requiredness dynamically for conditional fields while preserving existing visual styling.
+
 ### Flow Canvas Correctness Recovery (Partial Rollout)
 
 Flow Canvas execution/export/debug contracts were hardened for correctness and loss prevention across the WinForms host and ReactFlow surface:

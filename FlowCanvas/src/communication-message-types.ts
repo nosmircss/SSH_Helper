@@ -13,6 +13,7 @@ export const CANVAS_HOST_MESSAGES = {
     themeSync: 'theme-sync',
     setTargetHost: 'set-target-host',
     layoutRestore: 'layout-restore',
+    browsePathResult: 'browse-path-result',
   },
   outgoing: {
     ready: 'ready',
@@ -27,6 +28,7 @@ export const CANVAS_HOST_MESSAGES = {
     testStepResult: 'test-step-result',
     layoutSave: 'layout-save',
     layoutAutosave: 'layout-autosave',
+    browsePath: 'browse-path',
   },
   deprecatedOutgoingAliases: {
     runRequest: 'run-request',

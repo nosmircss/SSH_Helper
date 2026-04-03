@@ -5616,22 +5616,75 @@ namespace SSH_Helper
 
         private string? SelectPathForScriptEditor()
         {
+            return SelectFilePath(this, "Select File Path");
+        }
+
+        private string? SelectPathForFlowCanvas(string? title, string? currentPath)
+        {
+            var resolvedTitle = string.IsNullOrWhiteSpace(title)
+                ? "Select File Path"
+                : title.Trim();
+
+            var owner = _flowCanvasForm != null && !_flowCanvasForm.IsDisposed
+                ? (IWin32Window)_flowCanvasForm
+                : this;
+
+            return SelectFilePath(owner, resolvedTitle, currentPath);
+        }
+
+        private string? SelectFilePath(IWin32Window? owner, string title, string? currentPath = null)
+        {
             if (_filePathPickerOverrideForTests != null)
             {
-                return _filePathPickerOverrideForTests(this);
+                return _filePathPickerOverrideForTests(owner);
             }
 
             using var dialog = new OpenFileDialog
             {
-                Title = "Select File Path",
+                Title = title,
                 CheckFileExists = true,
                 CheckPathExists = true,
                 Filter = "All files (*.*)|*.*"
             };
 
-            return dialog.ShowDialog(this) == DialogResult.OK
+            ConfigureInitialFileDialogPath(dialog, currentPath);
+
+            return dialog.ShowDialog(owner ?? this) == DialogResult.OK
                 ? dialog.FileName
                 : null;
+        }
+
+        private static void ConfigureInitialFileDialogPath(OpenFileDialog dialog, string? currentPath)
+        {
+            if (dialog == null || string.IsNullOrWhiteSpace(currentPath))
+            {
+                return;
+            }
+
+            try
+            {
+                var trimmedPath = currentPath.Trim();
+                if (Directory.Exists(trimmedPath))
+                {
+                    dialog.InitialDirectory = trimmedPath;
+                    return;
+                }
+
+                var directory = Path.GetDirectoryName(trimmedPath);
+                if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+                {
+                    dialog.InitialDirectory = directory;
+                    var fileName = Path.GetFileName(trimmedPath);
+                    if (!string.IsNullOrWhiteSpace(fileName))
+                    {
+                        dialog.FileName = fileName;
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore invalid paths and keep default dialog location.
+            }
         }
 
         private void InsertTextIntoScriptEditor(string textToInsert)
@@ -6466,6 +6519,11 @@ namespace SSH_Helper
                 BeginInvoke(() => ApplyLayoutAutosave(msg));
             };
 
+            _flowCanvasForm.OnBrowsePath += (msg) =>
+            {
+                BeginInvoke(() => HandleFlowCanvasBrowsePathRequest(msg));
+            };
+
             _flowCanvasForm.Show();
 
             // Load current script into canvas if it's a YAML script
@@ -6514,6 +6572,28 @@ namespace SSH_Helper
             {
                 // Silently fail — canvas will show empty state
             }
+        }
+
+        private void HandleFlowCanvasBrowsePathRequest(JObject message)
+        {
+            var requestId = message["requestId"]?.ToString();
+            if (string.IsNullOrWhiteSpace(requestId))
+            {
+                SshDebugLog("FLOWCANVAS", "browse-path request missing requestId; ignored.");
+                return;
+            }
+
+            var title = message["title"]?.ToString();
+            var currentPath = message["currentPath"]?.ToString();
+            var selectedPath = SelectPathForFlowCanvas(title, currentPath);
+
+            _flowCanvasForm?.SendMessage(new
+            {
+                type = "browse-path-result",
+                requestId,
+                canceled = string.IsNullOrWhiteSpace(selectedPath),
+                path = selectedPath ?? string.Empty
+            });
         }
 
         private bool ApplyFlowCanvasGraph(JObject graphMessage, string? selectedStepId = null)

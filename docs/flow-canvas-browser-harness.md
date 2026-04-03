@@ -54,6 +54,17 @@ npm run test:e2e:parity
 - Parity suites rebuild graph state through test hooks (`setGraphViaActions`) so reconstruction does not depend on `load-graph`.
 - Assertions validate emitted host contracts (`execute-canvas` payload shape and parity behavior).
 
+## Required Marker QA Expectations
+- Required `*` markers in Flow Canvas Properties must match runtime/parser requiredness, not legacy static UI assumptions.
+- Static alignment checks should include:
+  - `extract.from` and `browser_callback_capture.into` show `*`.
+  - `input.prompt`, `choose.prompt`, `multiselect.prompt`, `confirm.prompt`, `portcheck.port`, and `writefile.content` do not show `*`.
+- Conditional alignment checks should include:
+  - `readfile.path` shows `*` only when `select_file` is false.
+  - HTTP auth credentials: `username`/`password` show `*` only for `auth: basic`; `token` shows `*` only for `auth: bearer`.
+  - Interactive headless constraints: when `show_window=false`, `command` is required and at least one limiter (`max_seconds` or `max_lines`) is required.
+- Marker tests should validate requiredness logic only; no visual style assertions beyond star presence/absence.
+
 ## Artifacts
 - HTML report: `FlowCanvas/playwright-report/`
 - Failure videos/screenshots/traces: `FlowCanvas/test-results/`

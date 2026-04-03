@@ -4036,6 +4036,78 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case StepType.Choose:
+                        if (step.Choose == null || string.IsNullOrWhiteSpace(step.Choose.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Choose requires 'into' variable{lineContent}");
+                        }
+
+                        if (step.Choose == null ||
+                            ((step.Choose.Options == null || step.Choose.Options.Count == 0) &&
+                             string.IsNullOrWhiteSpace(step.Choose.OptionsFrom)))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Choose requires 'options'{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Multiselect:
+                        if (step.Multiselect == null || string.IsNullOrWhiteSpace(step.Multiselect.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Multiselect requires 'into' variable{lineContent}");
+                        }
+
+                        if (step.Multiselect == null ||
+                            ((step.Multiselect.Options == null || step.Multiselect.Options.Count == 0) &&
+                             string.IsNullOrWhiteSpace(step.Multiselect.OptionsFrom)))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Multiselect requires 'options'{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Confirm:
+                        if (step.Confirm == null || string.IsNullOrWhiteSpace(step.Confirm.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Confirm requires 'into' variable{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Webhook:
+                        if (step.Webhook == null || string.IsNullOrWhiteSpace(step.Webhook.Url))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Webhook requires 'url'{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Log:
+                        switch (step.Log)
+                        {
+                            case LogOptions logOptions when string.IsNullOrWhiteSpace(logOptions.Message):
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: Log requires 'message'{lineContent}");
+                                break;
+                            }
+                            case string message when string.IsNullOrWhiteSpace(message):
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: Log requires 'message'{lineContent}");
+                                break;
+                            }
+                            case null:
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: Log requires 'message'{lineContent}");
+                                break;
+                            }
+                        }
+                        break;
+
                     case StepType.Http:
                         if (step.Http == null || string.IsNullOrWhiteSpace(step.Http.Url))
                         {

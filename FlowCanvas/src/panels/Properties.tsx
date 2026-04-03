@@ -58,6 +58,14 @@ function useBufferedInput(externalValue: string, inputIdentity: string, onCommit
   };
 }
 
+function createBrowseRequestId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `browse-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 function PropertyField({
   def,
   value,
@@ -102,6 +110,40 @@ function PropertyField({
     `${nodeId}:${def.key}:${def.type}`,
     commitTextLikeValue,
   );
+  const pendingBrowseRequestIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (def.browse !== 'file') return;
+
+    return messageBus.on(CANVAS_HOST_MESSAGES.incoming.browsePathResult, (msg) => {
+      const requestId = typeof msg.requestId === 'string' ? msg.requestId : '';
+      if (!requestId || pendingBrowseRequestIdRef.current !== requestId) return;
+
+      pendingBrowseRequestIdRef.current = null;
+
+      if (msg.canceled === true) return;
+      const selectedPath = typeof msg.path === 'string' ? msg.path : '';
+      if (!selectedPath) return;
+
+      textInput.onChange(selectedPath);
+    });
+  }, [def.browse, textInput]);
+
+  const requestPathBrowse = useCallback(() => {
+    if (def.browse !== 'file') return;
+
+    const requestId = createBrowseRequestId();
+    pendingBrowseRequestIdRef.current = requestId;
+
+    messageBus.send({
+      type: CANVAS_HOST_MESSAGES.outgoing.browsePath,
+      requestId,
+      nodeId,
+      propertyKey: def.key,
+      currentPath: textInput.value,
+      title: `Select ${def.label}`,
+    });
+  }, [def.browse, def.key, def.label, nodeId, textInput.value]);
 
   const selectTouchedRef = useRef(false);
   const commitSelectIfNeeded = useCallback(
@@ -186,8 +228,55 @@ function PropertyField({
         />
       );
 
-    case 'code':
     case 'text':
+      if (def.browse === 'file') {
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              data-testid={`${fieldTestId}-input`}
+              type="text"
+              value={textInput.value}
+              placeholder={def.placeholder}
+              onChange={(e) => textInput.onChange(e.target.value)}
+              onFocus={textInput.onFocus}
+              onBlur={textInput.onBlur}
+              style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+            />
+            <button
+              data-testid={`${fieldTestId}-browse`}
+              type="button"
+              onClick={requestPathBrowse}
+              style={{
+                padding: '4px 8px',
+                background: 'var(--fc-button-bg, #1f2937)',
+                border: `1px solid ${colors.border}66`,
+                borderRadius: 4,
+                color: 'var(--fc-text, #ccc)',
+                fontSize: 11,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Browse...
+            </button>
+          </div>
+        );
+      }
+
+      return (
+        <input
+          data-testid={`${fieldTestId}-input`}
+          type="text"
+          value={textInput.value}
+          placeholder={def.placeholder}
+          onChange={(e) => textInput.onChange(e.target.value)}
+          onFocus={textInput.onFocus}
+          onBlur={textInput.onBlur}
+          style={inputStyle}
+        />
+      );
+
+    case 'code':
     default:
       return (
         <input
@@ -205,6 +294,75 @@ function PropertyField({
 }
 
 const DATA_BLOCK_TYPES = new Set(['extract', 'parse', 'set', 'table', 'assert']);
+
+function toBoolean(value: unknown, defaultValue: boolean): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === 'yes' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === 'no' || normalized === '0') return false;
+  }
+
+  return defaultValue;
+}
+
+function hasAnyValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === 'number') return !Number.isNaN(value);
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+function isDynamicRuntimeValue(value: string): boolean {
+  return value.includes('${') && value.includes('}');
+}
+
+function isPropertyRequired(
+  blockType: string,
+  propDef: PropertyDef,
+  props: Record<string, unknown> | undefined,
+): boolean {
+  const staticRequired = !!propDef.required;
+
+  if (blockType === 'readfile' && propDef.key === 'path') {
+    const selectFile = toBoolean(props?.select_file, false);
+    return !selectFile;
+  }
+
+  if (blockType === 'http') {
+    const auth = String(props?.auth ?? 'none').trim().toLowerCase();
+    if (isDynamicRuntimeValue(auth)) return staticRequired;
+
+    if (propDef.key === 'username' || propDef.key === 'password') {
+      return auth === 'basic';
+    }
+
+    if (propDef.key === 'token') {
+      return auth === 'bearer';
+    }
+
+    return staticRequired;
+  }
+
+  if (blockType === 'interactive') {
+    const showWindow = toBoolean(props?.show_window, true);
+    if (showWindow) return staticRequired;
+
+    if (propDef.key === 'command') {
+      return true;
+    }
+
+    if (propDef.key === 'max_seconds' || propDef.key === 'max_lines') {
+      const hasMaxSeconds = hasAnyValue(props?.max_seconds);
+      const hasMaxLines = hasAnyValue(props?.max_lines);
+      return !hasMaxSeconds && !hasMaxLines;
+    }
+  }
+
+  return staticRequired;
+}
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -845,12 +1003,13 @@ export default function Properties() {
 
       {def.properties.map((propDef) => {
         const fieldTestId = `properties-field-${propDef.key}-${propDef.type}`;
+        const required = isPropertyRequired(blockData.blockType, propDef, blockData.props);
         return (
           <div key={`${selectedNodeId}-${propDef.key}`} data-testid={fieldTestId}>
             {propDef.type !== 'boolean' && (
               <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
                 {propDef.label}
-                {propDef.required && <span style={{ color: '#e74c3c', marginLeft: 2 }}>*</span>}
+                {required && <span style={{ color: '#e74c3c', marginLeft: 2 }}>*</span>}
               </label>
             )}
             <PropertyField

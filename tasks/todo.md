@@ -1,5 +1,83 @@
 # TODO
 
+## 180. Align Flow Canvas required markers with parser/runtime validation
+- [x] 180.1 Add failing parser validation tests for missing required checks (`choose.into/options`, `multiselect.into/options`, `confirm.into`, `webhook.url`, `log.message`).
+- [x] 180.2 Add/extend FlowCanvas bridge export tests so required-option enforcement matches parser-required behavior (including `extract.from`, `browser_callback_capture.into`, and conditional `readfile.path`).
+- [x] 180.3 Add failing FlowCanvas e2e coverage for static + conditional required `*` markers in the Properties panel.
+- [x] 180.4 Patch parser validation, FlowCanvas export required checks, block registry required flags, and dynamic Properties required evaluation.
+- [x] 180.5 Update docs (`SCRIPTING.md`, `README.md`, `docs/flow-canvas-browser-harness.md`, `CHANGELOG.md`) and run focused verification (`dotnet test`, Playwright, `npm run build`).
+- [x] 180.6 Record implementation + verification outcomes in the review section.
+
+### 180 Review
+- Added parser validation coverage and implementation for missing required fields:
+- `choose.into/options`, `multiselect.into/options`, `confirm.into`, `webhook.url`, and `log.message`.
+- Added/updated FlowCanvas export coverage to enforce parser-led required behavior:
+- added missing required checks (`extract.from`, `browser_callback_capture.into`),
+- removed incorrect hard requirements (`input.prompt`, `choose.prompt`, `multiselect.prompt`, `confirm.prompt`, `portcheck.port`, `writefile.content`),
+- preserved/validated conditional requirements (`readfile.path` with `select_file`, HTTP auth credentials, interactive headless constraints).
+- Added dedicated FlowCanvas required-marker e2e fixture + tests in `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts` and `FlowCanvas/e2e/fixtures/graphs.ts`:
+- static required stars (`extract.from`, `browser_callback_capture.into`, prompt/port/content optional fields),
+- conditional required stars (`readfile.path`, HTTP auth credentials by mode, interactive headless command/limiter behavior).
+- Updated runtime/UI alignment code:
+- `Services/Scripting/ScriptParser.cs`: required validation cases added.
+- `Services/FlowCanvasBridge.cs`: required-option map aligned + conditional required checks.
+- `FlowCanvas/src/blockDefs/registry.ts`: static required flags corrected.
+- `FlowCanvas/src/panels/Properties.tsx`: dynamic required-evaluation logic for conditional fields.
+- Documentation updates completed:
+- `SCRIPTING.md`, `README.md`, `docs/flow-canvas-browser-harness.md`, `CHANGELOG.md`.
+- Red verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Validate_ChooseWithoutInto_ReturnsError|FullyQualifiedName~Validate_ChooseWithoutOptions_ReturnsError|FullyQualifiedName~Validate_MultiselectWithoutInto_ReturnsError|FullyQualifiedName~Validate_MultiselectWithoutOptions_ReturnsError|FullyQualifiedName~Validate_ConfirmWithoutInto_ReturnsError|FullyQualifiedName~Validate_WebhookWithoutUrl_ReturnsError|FullyQualifiedName~Validate_LogMapWithoutMessage_ReturnsError|FullyQualifiedName~ExportGraphToYaml_ExtractMissingFrom_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_BrowserCallbackCaptureMissingInto_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InputWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ChooseWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_MultiselectWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ConfirmWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_PortcheckWithoutPort_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_WritefileWithoutContent_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ReadfileSelectFileWithoutPath_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_HttpBasicAuthWithoutUsername_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_HttpBearerAuthWithoutToken_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithoutCommand_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithoutLimiter_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithCommandAndLimiter_ExportsSuccessfully" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\required-markers-red\bin\ -p:BaseIntermediateOutputPath=artifacts\required-markers-red\obj\` (failed as expected: 19 failures before fixes).
+- `npx playwright test e2e/flow-canvas-properties-typing.spec.ts --grep "Flow Canvas Required Markers"` (failed as expected on missing required stars before fixes).
+- Green verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Validate_ChooseWithoutInto_ReturnsError|FullyQualifiedName~Validate_ChooseWithoutOptions_ReturnsError|FullyQualifiedName~Validate_MultiselectWithoutInto_ReturnsError|FullyQualifiedName~Validate_MultiselectWithoutOptions_ReturnsError|FullyQualifiedName~Validate_ConfirmWithoutInto_ReturnsError|FullyQualifiedName~Validate_WebhookWithoutUrl_ReturnsError|FullyQualifiedName~Validate_LogMapWithoutMessage_ReturnsError|FullyQualifiedName~ExportGraphToYaml_ExtractMissingFrom_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_BrowserCallbackCaptureMissingInto_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InputWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ChooseWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_MultiselectWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ConfirmWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_PortcheckWithoutPort_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_WritefileWithoutContent_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ReadfileSelectFileWithoutPath_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_HttpBasicAuthWithoutUsername_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_HttpBearerAuthWithoutToken_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithoutCommand_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithoutLimiter_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithCommandAndLimiter_ExportsSuccessfully" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\required-markers-green3\bin\ -p:BaseIntermediateOutputPath=artifacts\required-markers-green3\obj\` (passed: 21/21).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests|FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\required-markers-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\required-markers-regression\obj\` (passed: 199/199).
+- `npx playwright test e2e/flow-canvas-properties-typing.spec.ts` (passed: 8/8).
+- `npm run build` in `FlowCanvas` (passed; refreshed `FlowCanvas/dist` assets).
+
+## 178. Flow Canvas path property file browser support
+- [x] 178.1 Add focused FlowCanvas e2e coverage that path property fields expose a Browse action and apply the host-selected file path.
+- [x] 178.2 Add a canvas host message contract for browse-path request/response and wire the Properties panel to request and consume browse results.
+- [x] 178.3 Handle browse-path requests in WinForms (`FlowCanvasForm` + `Form1`) using the existing file picker flow with test override support.
+- [x] 178.4 Run focused FlowCanvas e2e and .NET UI tests, then record outcomes in the review section.
+
+### 178 Review
+- Added focused FlowCanvas e2e coverage in `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts` plus `createPathPropertyFixture()` in `FlowCanvas/e2e/fixtures/graphs.ts` to prove path fields can request browse and consume host-selected file paths.
+- Red verification confirmed missing browse UI before implementation:
+- `npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts -g "path fields can request host browse and apply selected path"` (failed as expected on missing `properties-field-path-text-browse`).
+- Added explicit path-browse metadata (`browse: 'file'`) for local-path fields in `FlowCanvas/src/blockDefs/registry.ts`.
+- Added canvas browse request/response contract in `FlowCanvas/src/communication-message-types.ts`:
+- outgoing: `browse-path`
+- incoming: `browse-path-result`
+- Updated `FlowCanvas/src/panels/Properties.tsx`:
+- path text fields with `browse: 'file'` now render a `Browse...` button (`*-browse` test id).
+- click sends `browse-path` with `requestId`, node/field context, current path, and title.
+- incoming `browse-path-result` matched by `requestId` updates the input value when not canceled.
+- Updated host wiring:
+- `UI/FlowCanvasForm.cs` now forwards `browse-path` messages via new `OnBrowsePath` event.
+- `Form1.cs` now handles browse requests, reuses shared file-picker logic (with existing `_filePathPickerOverrideForTests` support), and sends `browse-path-result` back to canvas.
+- Added focused WinForms coverage: `SSH_Helper.Tests/UI/Form1FlowCanvasBrowsePathTests.cs`.
+- Green verification:
+- `npx playwright test e2e/flow-canvas-properties-typing.spec.ts --grep "Flow Canvas Path Browsing"` (passed: `1/1`).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasBrowsePathTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\flow-canvas-browse-path-green\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-canvas-browse-path-green\obj\` (passed: `2/2`).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests|FullyQualifiedName~Form1FlowCanvasBrowsePathTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\flow-canvas-browse-path-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-canvas-browse-path-regression\obj\` (passed: `7/7`).
+- `npm run build` in `FlowCanvas` succeeded and refreshed `FlowCanvas/dist` assets.
+
+## 179. Flow Canvas browse dialog owner focus regression
+- [x] 179.1 Add a focused WinForms regression proving Flow Canvas browse requests pass the Flow Canvas window as dialog owner.
+- [x] 179.2 Patch Flow Canvas browse path selection to use the canvas form (not main `Form1`) as the picker owner.
+- [x] 179.3 Run focused WinForms verification and capture outcomes.
+
+### 179 Review
+- Root cause: `Form1.SelectPathForFlowCanvas(...)` was still calling `SelectFilePath(this, ...)`, making the main form (`Form1`) the dialog owner, so Windows activated the main window when Browse opened.
+- Added focused regression in `SSH_Helper.Tests/UI/Form1FlowCanvasBrowsePathTests.cs`:
+- `HandleFlowCanvasBrowsePathRequest_UsesFlowCanvasAsDialogOwner`
+- Red verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasBrowsePathTests.HandleFlowCanvasBrowsePathRequest_UsesFlowCanvasAsDialogOwner" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\flow-canvas-browse-owner-red\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-canvas-browse-owner-red\obj\` (failed as expected: owner was `Form1` instead of `FlowCanvasForm`).
+- Fix in `Form1.cs`:
+- `SelectPathForFlowCanvas(...)` now uses `_flowCanvasForm` as dialog owner when available (falls back to `Form1` only if the canvas form is missing/disposed).
+- Green verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasBrowsePathTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\flow-canvas-browse-owner-green\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-canvas-browse-owner-green\obj\` (passed: `3/3`).
+
 ## 177. Align autocomplete required-option tags with command requirements
 - [x] 177.1 Audit required option keys across step commands and identify mismatches between parser/runtime validation and autocomplete required-tag metadata.
 - [x] 177.2 Update autocomplete required-key metadata to mark missing required options (including choose/multiselect options and other audited gaps).

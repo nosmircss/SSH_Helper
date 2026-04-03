@@ -106,6 +106,8 @@ For complex automation, use YAML scripts. Scripts support:
 - Logging with levels (debug, info, warning, error, success)
 - Built-in variables: `${_output}`, `${_timestamp}`, `${_iteration}`, `${_last_error}`
 
+Flow Canvas required markers (`*`) are tied to runtime/parser validation rules, including conditional requirements (for example `readfile.path` vs `select_file`, HTTP auth credentials by `auth` mode, and headless `interactive` capture constraints).
+
 See [Scripting Documentation](SCRIPTING.md) for full details.
 
 **Example Script:**

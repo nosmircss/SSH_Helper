@@ -16,6 +16,7 @@ export interface PropertyDef {
   key: string;
   label: string;
   type: 'text' | 'number' | 'boolean' | 'select' | 'code' | 'textarea';
+  browse?: 'file';
   required?: boolean;
   placeholder?: string;
   options?: string[];
@@ -110,7 +111,7 @@ export const blockDefs: BlockDef[] = [
     previewKey: 'action',
     properties: [
       { key: 'action', label: 'Action', type: 'select', options: ['upload', 'download'], required: true },
-      { key: 'local_path', label: 'Local Path', type: 'text', required: true },
+      { key: 'local_path', label: 'Local Path', type: 'text', required: true, browse: 'file' },
       { key: 'remote_path', label: 'Remote Path', type: 'text', required: true },
       { key: 'host', label: 'Host Override', type: 'text' },
       { key: 'port', label: 'Port Override', type: 'number' },
@@ -209,7 +210,7 @@ export const blockDefs: BlockDef[] = [
     properties: [
       { key: 'pattern', label: 'Pattern (regex)', type: 'code', required: true },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
-      { key: 'from', label: 'From', type: 'text' },
+      { key: 'from', label: 'From', type: 'text', required: true },
       { key: 'match', label: 'Match', type: 'select', options: ['first', 'all', 'last'], defaultValue: 'first' },
       { key: 'required', label: 'Required (fail on no match)', type: 'boolean', defaultValue: true },
     ],
@@ -306,7 +307,7 @@ export const blockDefs: BlockDef[] = [
     previewKey: 'host',
     properties: [
       { key: 'host', label: 'Host', type: 'text', required: true },
-      { key: 'port', label: 'Port', type: 'number', required: true, defaultValue: 22 },
+      { key: 'port', label: 'Port', type: 'number', defaultValue: 22 },
       timeoutProp,
       { key: 'into', label: 'Into Variable', type: 'text' },
       onErrorProp,
@@ -368,7 +369,7 @@ export const blockDefs: BlockDef[] = [
       { key: 'capture_mode', label: 'Capture Mode', type: 'select', options: ['auto', 'fragment', 'query', 'post_body'], defaultValue: 'auto' },
       { key: 'browser_mode', label: 'Browser Mode', type: 'select', options: ['external', 'webview2'], defaultValue: 'external' },
       { key: 'show_after_seconds', label: 'Show After (s)', type: 'number', defaultValue: 0 },
-      { key: 'into', label: 'Into Variable', type: 'text' },
+      { key: 'into', label: 'Into Variable', type: 'text', required: true },
       { key: 'required_fields', label: 'Required Fields', type: 'text', placeholder: 'comma-separated' },
       timeoutProp,
       { key: 'open_browser', label: 'Open Browser', type: 'boolean', defaultValue: true },
@@ -399,7 +400,7 @@ export const blockDefs: BlockDef[] = [
     previewKey: 'prompt',
     properties: [
       { key: 'title', label: 'Title', type: 'text' },
-      { key: 'prompt', label: 'Prompt', type: 'text', required: true },
+      { key: 'prompt', label: 'Prompt', type: 'text' },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
       { key: 'default', label: 'Default Value', type: 'text' },
       { key: 'password', label: 'Password Mode', type: 'boolean', defaultValue: false },
@@ -417,7 +418,7 @@ export const blockDefs: BlockDef[] = [
     previewKey: 'prompt',
     properties: [
       { key: 'title', label: 'Title', type: 'text' },
-      { key: 'prompt', label: 'Prompt', type: 'text', required: true },
+      { key: 'prompt', label: 'Prompt', type: 'text' },
       { key: 'options', label: 'Options (comma-separated or ${var})', type: 'text', required: true },
       { key: 'default', label: 'Default Value', type: 'text' },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
@@ -433,7 +434,7 @@ export const blockDefs: BlockDef[] = [
     previewKey: 'prompt',
     properties: [
       { key: 'title', label: 'Title', type: 'text' },
-      { key: 'prompt', label: 'Prompt', type: 'text', required: true },
+      { key: 'prompt', label: 'Prompt', type: 'text' },
       { key: 'options', label: 'Options (comma-separated or ${var})', type: 'text', required: true },
       { key: 'min', label: 'Min', type: 'number' },
       { key: 'max', label: 'Max', type: 'number' },
@@ -450,7 +451,7 @@ export const blockDefs: BlockDef[] = [
     previewKey: 'prompt',
     properties: [
       { key: 'title', label: 'Title', type: 'text' },
-      { key: 'prompt', label: 'Prompt', type: 'text', required: true },
+      { key: 'prompt', label: 'Prompt', type: 'text' },
       { key: 'default', label: 'Default Yes', type: 'boolean', defaultValue: false },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
       onErrorProp,
@@ -464,7 +465,7 @@ export const blockDefs: BlockDef[] = [
     description: 'Read a local file',
     previewKey: 'path',
     properties: [
-      { key: 'path', label: 'File Path', type: 'text' },
+      { key: 'path', label: 'File Path', type: 'text', required: true, browse: 'file' },
       { key: 'select_file', label: 'Pick File At Runtime', type: 'boolean', defaultValue: false },
       { key: 'message', label: 'Picker Message', type: 'text' },
       { key: 'fileext', label: 'Allowed Extensions', type: 'text' },
@@ -484,8 +485,8 @@ export const blockDefs: BlockDef[] = [
     description: 'Write to a local file',
     previewKey: 'path',
     properties: [
-      { key: 'path', label: 'File Path', type: 'text', required: true },
-      { key: 'content', label: 'Content', type: 'textarea', required: true },
+      { key: 'path', label: 'File Path', type: 'text', required: true, browse: 'file' },
+      { key: 'content', label: 'Content', type: 'textarea' },
       { key: 'mode', label: 'Mode', type: 'select', options: ['overwrite', 'append'], defaultValue: 'overwrite' },
       { key: 'format', label: 'Format', type: 'select', options: ['text', 'json', 'jsonl', 'csv'], defaultValue: 'text' },
       { key: 'pretty', label: 'Pretty JSON', type: 'boolean', defaultValue: true },
@@ -501,7 +502,7 @@ export const blockDefs: BlockDef[] = [
     description: 'Check whether a local path exists',
     previewKey: 'path',
     properties: [
-      { key: 'path', label: 'Path', type: 'text', required: true },
+      { key: 'path', label: 'Path', type: 'text', required: true, browse: 'file' },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
       { key: 'type', label: 'Type', type: 'select', options: ['any', 'file', 'directory'], defaultValue: 'any' },
       onErrorProp,
@@ -515,7 +516,7 @@ export const blockDefs: BlockDef[] = [
     description: 'Play a local WAV or MP3 file',
     previewKey: 'path',
     properties: [
-      { key: 'path', label: 'File Path', type: 'text', required: true },
+      { key: 'path', label: 'File Path', type: 'text', required: true, browse: 'file' },
       { key: 'wait', label: 'Wait For Completion', type: 'boolean', defaultValue: true },
       { key: 'volume', label: 'Volume (0-100)', type: 'number', defaultValue: 100 },
       { key: 'max_seconds', label: 'Max Seconds', type: 'number' },
