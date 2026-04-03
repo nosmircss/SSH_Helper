@@ -103,6 +103,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public ExistsOptions? Exists { get; set; }
 
         /// <summary>
+        /// Playsound command - plays a local audio file.
+        /// </summary>
+        public PlaySoundOptions? PlaySound { get; set; }
+
+        /// <summary>
         /// Input command - prompts user for input during script execution.
         /// </summary>
         public InputOptions? Input { get; set; }
@@ -350,6 +355,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Readfile != null) return StepType.Readfile;
             if (Writefile != null) return StepType.Writefile;
             if (Exists != null) return StepType.Exists;
+            if (PlaySound != null) return StepType.PlaySound;
             if (Input != null) return StepType.Input;
             if (UpdateColumn != null) return StepType.UpdateColumn;
             if (UpdateEnvironment != null) return StepType.UpdateEnvironment;
@@ -540,6 +546,37 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Type filter: any (default), file, or directory.
         /// </summary>
         public string Type { get; set; } = "any";
+    }
+
+    /// <summary>
+    /// Options for the playsound command.
+    /// </summary>
+    public class PlaySoundOptions
+    {
+        /// <summary>
+        /// Local audio file path to play after variable/environment expansion.
+        /// </summary>
+        public string Path { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Whether to block until playback completes (default: true).
+        /// </summary>
+        public bool Wait { get; set; } = true;
+
+        /// <summary>
+        /// Playback volume as a percentage from 0 to 100 (default: 100).
+        /// </summary>
+        public int Volume { get; set; } = 100;
+
+        /// <summary>
+        /// Optional maximum wait time in seconds when Wait is true.
+        /// </summary>
+        public int? MaxSeconds { get; set; }
+
+        /// <summary>
+        /// Optional variable name to capture success state and metadata.
+        /// </summary>
+        public string? Into { get; set; }
     }
 
     /// <summary>
@@ -1212,6 +1249,7 @@ namespace SSH_Helper.Services.Scripting.Models
         Readfile,
         Writefile,
         Exists,
+        PlaySound,
         Input,
         UpdateColumn,
         UpdateEnvironment,

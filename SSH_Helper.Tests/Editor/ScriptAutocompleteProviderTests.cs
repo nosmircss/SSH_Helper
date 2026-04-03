@@ -120,12 +120,12 @@ public class ScriptAutocompleteProviderTests
     public void GetCompletion_StepPrefix_IncludesNewCommandKeywords()
     {
         var provider = new ScriptAutocompleteProvider();
-        var text = "steps:\n  - pa";
+        var text = "steps:\n  - pl";
 
         var completion = provider.GetCompletion(text, text.Length);
 
         completion.Context.Should().Be(CompletionContextKind.StepCommand);
-        completion.Items.Select(item => item.Label).Should().Contain("parallel");
+        completion.Items.Select(item => item.Label).Should().Contain("playsound");
     }
 
     [Fact]

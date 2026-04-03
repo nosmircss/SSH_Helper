@@ -2061,6 +2061,61 @@ Checks whether a local path exists and stores the result for branching.
 
 ---
 
+### playsound - Play Local Audio File
+
+Plays a local WAV or MP3 file using in-process playback.
+
+**Syntax:**
+```yaml
+- playsound:
+    path: "C:\\alerts\\success.mp3"
+    wait: true               # Optional: true (default) or false
+    volume: 80               # Optional: 0-100 (default: 100)
+    max_seconds: 10          # Optional: positive timeout when wait=true
+    into: sound_result       # Optional output variable
+    on_error: stop           # Optional: stop (default) or continue
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `path` | Yes | - | Local path to a `.wav` or `.mp3` file |
+| `wait` | No | `true` | Wait for playback completion before moving to next step |
+| `volume` | No | `100` | Playback volume percentage (`0..100`) |
+| `max_seconds` | No | - | Timeout in seconds when `wait=true` |
+| `into` | No | - | Variable name to capture success and metadata |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+
+**Output Variables (when `into` is set):**
+
+- `${into}`: boolean playback success (`true`/`false`)
+- `${into}_meta`: metadata object with:
+    - `path` (resolved path)
+    - `wait` (effective wait mode)
+    - `volume` (effective volume)
+    - `backend` (`naudio`)
+    - `duration_ms` (when available)
+    - `error` (when playback fails)
+
+**Examples:**
+```yaml
+# Wait for completion before continuing
+- playsound:
+    path: "%LocalAppData%\\SSH_Helper\\sounds\\ready.wav"
+    wait: true
+    volume: 65
+
+# Fire-and-forget notification tone
+- playsound:
+    path: "C:\\alerts\\notify.mp3"
+    wait: false
+    into: notification_status
+    on_error: continue
+```
+
+---
+
 ### input - Prompt for User Input
 
 Prompts the user for input during script execution with optional validation.

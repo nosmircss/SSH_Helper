@@ -508,6 +508,22 @@ export const blockDefs: BlockDef[] = [
     ],
   },
   {
+    type: 'playsound',
+    label: 'Play Sound',
+    category: 'io',
+    icon: 'audio',
+    description: 'Play a local WAV or MP3 file',
+    previewKey: 'path',
+    properties: [
+      { key: 'path', label: 'File Path', type: 'text', required: true },
+      { key: 'wait', label: 'Wait For Completion', type: 'boolean', defaultValue: true },
+      { key: 'volume', label: 'Volume (0-100)', type: 'number', defaultValue: 100 },
+      { key: 'max_seconds', label: 'Max Seconds', type: 'number' },
+      { key: 'into', label: 'Into Variable', type: 'text' },
+      onErrorProp,
+    ],
+  },
+  {
     type: 'log',
     label: 'Log',
     category: 'io',

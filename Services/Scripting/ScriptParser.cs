@@ -34,6 +34,7 @@ namespace SSH_Helper.Services.Scripting
             "readfile",
             "writefile",
             "exists",
+            "playsound",
             "input",
             "log",
             "http",
@@ -108,6 +109,7 @@ namespace SSH_Helper.Services.Scripting
                 ["readfile"] = ["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding", "on_error"],
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
                 ["exists"] = ["path", "into", "type", "on_error"],
+                ["playsound"] = ["path", "wait", "volume", "max_seconds", "into", "on_error"],
                 ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error"],
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
@@ -147,6 +149,7 @@ namespace SSH_Helper.Services.Scripting
                 ["readfile"] = [],
                 ["writefile"] = [],
                 ["exists"] = [],
+                ["playsound"] = [],
                 ["input"] = [],
                 ["log"] = [],
                 ["http"] = [],
@@ -192,6 +195,7 @@ namespace SSH_Helper.Services.Scripting
             StepType.Readfile,
             StepType.Writefile,
             StepType.Exists,
+            StepType.PlaySound,
             StepType.Input,
             StepType.Http,
             StepType.BrowserCallbackCapture,
@@ -245,6 +249,7 @@ namespace SSH_Helper.Services.Scripting
                 ["session"] = ["separate", "shared"],
                 ["mirror_output"] = ["true", "false"],
                 ["show_window"] = ["true", "false"],
+                ["wait"] = ["true", "false"],
                 ["severity"] = ["error", "warning"],
                 ["align"] = ["left", "right", "center"],
                 ["show_header"] = ["true", "false"]
@@ -899,6 +904,10 @@ namespace SSH_Helper.Services.Scripting
                     case "exists":
                         step.DeclaredStepType = StepType.Exists;
                         step.Exists = ParseExistsOptions(parser, step);
+                        break;
+                    case "playsound":
+                        step.DeclaredStepType = StepType.PlaySound;
+                        step.PlaySound = ParsePlaySoundOptions(parser, step);
                         break;
                     case "input":
                         step.DeclaredStepType = StepType.Input;
@@ -1989,6 +1998,76 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown exists key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private PlaySoundOptions ParsePlaySoundOptions(IParser parser, ScriptStep step)
+        {
+            var options = new PlaySoundOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "path":
+                            options.Path = parser.Consume<Scalar>().Value;
+                            break;
+                        case "wait":
+                            var waitValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                            if (waitValue == "true" || waitValue == "yes" || waitValue == "1")
+                            {
+                                options.Wait = true;
+                            }
+                            else if (waitValue == "false" || waitValue == "no" || waitValue == "0")
+                            {
+                                options.Wait = false;
+                            }
+                            else
+                            {
+                                AddStepParseError(step, "playsound.wait must be true/false");
+                            }
+                            break;
+                        case "volume":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var volume))
+                                options.Volume = volume;
+                            else
+                                AddStepParseError(step, "playsound.volume must be an integer between 0 and 100");
+                            break;
+                        case "max_seconds":
+                        case "maxseconds":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var maxSeconds))
+                                options.MaxSeconds = maxSeconds;
+                            else
+                                AddStepParseError(step, "playsound.max_seconds must be a positive integer");
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown playsound key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -3921,6 +4000,26 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Exists 'type' must be one of any, file, directory{lineContent}");
+                        }
+                        break;
+
+                    case StepType.PlaySound:
+                        if (step.PlaySound == null || string.IsNullOrWhiteSpace(step.PlaySound.Path))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Playsound requires 'path'{lineContent}");
+                        }
+
+                        if (step.PlaySound != null && (step.PlaySound.Volume < 0 || step.PlaySound.Volume > 100))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Playsound 'volume' must be between 0 and 100{lineContent}");
+                        }
+
+                        if (step.PlaySound?.MaxSeconds.HasValue == true && step.PlaySound.MaxSeconds.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: playsound.max_seconds must be greater than 0{lineContent}");
                         }
                         break;
 

@@ -110,6 +110,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Readfile, new ReadFileCommand() },
                 { StepType.Writefile, new WriteFileCommand() },
                 { StepType.Exists, new ExistsCommand() },
+                { StepType.PlaySound, new PlaySoundCommand() },
                 { StepType.Input, new InputCommand() },
                 { StepType.UpdateColumn, new UpdateColumnCommand() },
                 { StepType.UpdateEnvironment, new UpdateEnvironmentCommand() },

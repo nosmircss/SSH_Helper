@@ -102,6 +102,7 @@ show interface status";
     [InlineData("- try:\n  - print: test")]
     [InlineData("- updatecolumn:\n    column: test")]
     [InlineData("- updateenvironment:\n    variable: token")]
+    [InlineData("- playsound:\n    path: C:\\temp\\alert.mp3")]
     [InlineData("- interactive:\n    session: separate")]
     public void IsYamlScript_StepSyntax_ReturnsTrue(string input)
     {
@@ -1104,6 +1105,35 @@ steps:
         var errors = _parser.Validate(script, yaml);
 
         errors.Should().ContainSingle(error => error.Contains("Readfile requires 'into'"));
+    }
+
+    [Fact]
+    public void Validate_PlaySoundWithoutPath_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - playsound:
+      wait: true";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(error => error.Contains("Playsound requires 'path'"));
+    }
+
+    [Fact]
+    public void Validate_PlaySoundInvalidVolume_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - playsound:
+      path: C:\\temp\\alert.mp3
+      volume: 101";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(error => error.Contains("Playsound 'volume' must be between 0 and 100"));
     }
 
     #endregion

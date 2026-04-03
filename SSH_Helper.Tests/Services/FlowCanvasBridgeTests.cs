@@ -1255,6 +1255,7 @@ public class FlowCanvasBridgeTests
         Assert.Contains(registryBlocks["table"], key => string.Equals(key, "data", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(registryBlocks["sftp"], key => string.Equals(key, "local_path", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(registryBlocks["sftp"], key => string.Equals(key, "remote_path", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(registryBlocks["playsound"], key => string.Equals(key, "path", StringComparison.OrdinalIgnoreCase));
 
         var logLevelOptionsMatch = Regex.Match(
             registryText,

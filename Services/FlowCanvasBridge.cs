@@ -152,6 +152,7 @@ namespace SSH_Helper.Services
             "skip_empty_lines",
             "trim_lines",
             "required",
+            "wait",
         };
 
         private static readonly HashSet<string> IntegerOptionKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -172,6 +173,8 @@ namespace SSH_Helper.Services
             "rows",
             "min",
             "max",
+            "volume",
+            "max_seconds",
         };
 
         private static readonly HashSet<string> ListOptionKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -214,6 +217,7 @@ namespace SSH_Helper.Services
                 ["readfile"] = ["path", "into"],
                 ["writefile"] = ["path", "content"],
                 ["exists"] = ["path", "into"],
+                ["playsound"] = ["path"],
                 ["input"] = ["prompt", "into"],
                 ["choose"] = ["prompt", "options", "into"],
                 ["multiselect"] = ["prompt", "options", "into"],
@@ -2210,6 +2214,17 @@ namespace SSH_Helper.Services
                     }
                     break;
 
+                case StepType.PlaySound:
+                    if (step.PlaySound != null)
+                    {
+                        SetIfNotNull(props, "path", step.PlaySound.Path);
+                        if (!step.PlaySound.Wait) props["wait"] = false;
+                        if (step.PlaySound.Volume != 100) props["volume"] = step.PlaySound.Volume;
+                        SetIfNumber(props, "max_seconds", step.PlaySound.MaxSeconds);
+                        SetIfNotNull(props, "into", step.PlaySound.Into);
+                    }
+                    break;
+
                 case StepType.Input:
                     if (step.Input != null)
                     {
@@ -3523,6 +3538,7 @@ namespace SSH_Helper.Services
                 StepType.Readfile => ("readfile", step.Readfile?.Path),
                 StepType.Writefile => ("writefile", step.Writefile?.Path),
                 StepType.Exists => ("exists", step.Exists?.Path),
+                StepType.PlaySound => ("playsound", step.PlaySound?.Path),
                 StepType.Log => ("log", GetLogPreview(step.Log)),
                 StepType.Input => ("input", step.Input?.Prompt),
                 StepType.Choose => ("choose", step.Choose?.Prompt),
