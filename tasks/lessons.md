@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-04-03
+- When autocomplete popups rely on handle-based outside-click dismissal, I must treat native child HWNDs (like list scrollbar internals) as inside the popup via `IsChild(...)`; `Control.FromHandle(...)` alone can misclassify valid internal clicks and break mouse scrolling/selection.
+- When validating WinForms mouse interactions that mix focus transitions and `BeginInvoke` callbacks, I must run at least one regression that processes queued UI messages between mouse-down and mouse-up; direct `SendMessage` click tests can miss real dismissal races.
+
 ## 2026-04-02
 - When interactive transcript cleanup changes do not resolve autocomplete corruption, I must instrument and compare raw terminal chunks (`RawData`), terminal-stripped chunks (`StrippedData`), and captured transcript chunks before attempting another behavior fix.
 - When terminal output can include ANSI cursor rewrite sequences, transcript assembly must process the raw chunk stream statefully; appending stripped chunk fragments will concatenate autocomplete candidates into invalid commands.

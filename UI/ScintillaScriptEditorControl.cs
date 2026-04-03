@@ -125,7 +125,7 @@ namespace SSH_Helper.UI
             _editor.MouseUp += Editor_MouseUp;
             _editor.MarginClick += Editor_MarginClick;
             _editor.MouseLeave += (_, _) => HideTooltip();
-            _editor.LostFocus += (_, _) => HideCompletionPopup();
+            _editor.LostFocus += Editor_LostFocus;
             _editor.DwellStart += Editor_DwellStart;
             _editor.DwellEnd += (_, _) => HideTooltip();
             _editor.Click += (_, _) => OnClick(EventArgs.Empty);
@@ -148,12 +148,9 @@ namespace SSH_Helper.UI
                 TabStop = false
             };
             _completionList.DrawItem += CompletionList_DrawItem;
+            _completionList.MouseDown += CompletionList_MouseDown;
+            _completionList.MouseUp += CompletionList_MouseUp;
             _completionList.DoubleClick += (_, _) => AcceptCurrentCompletion();
-            _completionList.MouseClick += (_, _) => AcceptCurrentCompletion();
-            _completionList.GotFocus += (_, _) =>
-            {
-                BeginInvoke(new Action(EnsureEditorFocus));
-            };
             _completionList.HandleCreated += (_, _) => ApplyScrollbarTheme(_completionList, _isDarkMode);
 
             _completionPopup = new Panel
@@ -166,10 +163,6 @@ namespace SSH_Helper.UI
             };
             _completionPopup.Controls.Add(_completionList);
             _completionList.Dock = DockStyle.Fill;
-            _completionPopup.MouseDown += (_, _) =>
-            {
-                BeginInvoke(new Action(EnsureEditorFocus));
-            };
             _completionPopup.HandleCreated += (_, _) => ApplyScrollbarTheme(_completionPopup, _isDarkMode);
 
             Controls.Add(_editor);
@@ -667,6 +660,36 @@ namespace SSH_Helper.UI
             OnMouseUp(e);
         }
 
+        private void Editor_LostFocus(object? sender, EventArgs e)
+        {
+            if (!_completionPopup.Visible || IsDisposed)
+            {
+                return;
+            }
+
+            if (!IsHandleCreated)
+            {
+                HideCompletionPopup();
+                return;
+            }
+
+            BeginInvoke(new Action(() =>
+            {
+                if (IsDisposed || !_completionPopup.Visible)
+                {
+                    return;
+                }
+
+                var focusedHandle = ScrollbarThemeNative.GetFocus();
+                if (focusedHandle != IntPtr.Zero && IsHandleInEditorHierarchy(focusedHandle))
+                {
+                    return;
+                }
+
+                HideCompletionPopup();
+            }));
+        }
+
         private void Editor_MarginClick(object? sender, MarginClickEventArgs e)
         {
             if (!_settings.EnableCodeFolding || e.Margin != FoldMarginIndex)
@@ -964,14 +987,40 @@ namespace SSH_Helper.UI
                 return;
             }
 
-            if (targetHandle != IntPtr.Zero &&
-                Control.FromHandle(targetHandle) is Control targetControl &&
-                IsControlInEditorHierarchy(targetControl))
+            if (targetHandle != IntPtr.Zero && IsHandleInEditorHierarchy(targetHandle))
             {
                 return;
             }
 
             HideCompletionPopup();
+        }
+
+        private bool IsHandleInEditorHierarchy(IntPtr handle)
+        {
+            if (handle == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (Control.FromHandle(handle) is Control targetControl && IsControlInEditorHierarchy(targetControl))
+            {
+                return true;
+            }
+
+            return IsChildHandle(_editor, handle) ||
+                   IsChildHandle(_completionPopup, handle) ||
+                   IsChildHandle(_completionList, handle) ||
+                   IsChildHandle(this, handle);
+        }
+
+        private static bool IsChildHandle(Control potentialParent, IntPtr handle)
+        {
+            if (!potentialParent.IsHandleCreated)
+            {
+                return false;
+            }
+
+            return handle == potentialParent.Handle || ScrollbarThemeNative.IsChild(potentialParent.Handle, handle);
         }
 
         private bool IsControlInEditorHierarchy(Control control)
@@ -1105,6 +1154,7 @@ namespace SSH_Helper.UI
 
             HideCompletionPopup();
             Editor_TextChanged(this, EventArgs.Empty);
+            EnsureEditorFocus();
         }
 
         private string BuildCompletionInsertText(CompletionItem completion, int replaceStart, int replaceLength)
@@ -1122,6 +1172,37 @@ namespace SSH_Helper.UI
             }
 
             return baseInsertText + ": ";
+        }
+
+        private void CompletionList_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (!_completionPopup.Visible || e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            var index = _completionList.IndexFromPoint(e.Location);
+            if (index >= 0 && index < _completionList.Items.Count)
+            {
+                _completionList.SelectedIndex = index;
+            }
+        }
+
+        private void CompletionList_MouseUp(object? sender, MouseEventArgs e)
+        {
+            if (!_completionPopup.Visible || e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            var index = _completionList.IndexFromPoint(e.Location);
+            if (index < 0 || index >= _completionList.Items.Count)
+            {
+                return;
+            }
+
+            _completionList.SelectedIndex = index;
+            AcceptCurrentCompletion();
         }
 
         private static bool ShouldAppendYamlKeySuffix(CompletionContextKind context)
@@ -1982,14 +2063,10 @@ namespace SSH_Helper.UI
         {
             public NonFocusableCompletionListBox()
             {
-                SetStyle(ControlStyles.Selectable, false);
                 TabStop = false;
             }
 
-            protected override void OnEnter(EventArgs e)
-            {
-                // Keep focus with the editor host so typing continues uninterrupted.
-            }
+            protected override bool ShowFocusCues => false;
         }
 
         private sealed class CompletionDismissMessageFilter : IMessageFilter
@@ -2041,8 +2118,14 @@ namespace SSH_Helper.UI
             [DllImport("user32.dll")]
             public static extern bool EnumChildWindows(IntPtr hwndParent, EnumChildProc lpEnumFunc, IntPtr lParam);
 
+            [DllImport("user32.dll")]
+            public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
+
             [DllImport("user32.dll", CharSet = CharSet.Auto)]
             public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+            [DllImport("user32.dll")]
+            public static extern IntPtr GetFocus();
 
             [DllImport("user32.dll")]
             public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
