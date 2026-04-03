@@ -123,6 +123,7 @@ namespace SSH_Helper
         private const int SmallHistoryPayloadCharThreshold = 500_000;
         private const int OutputTextRecreateThresholdChars = 500_000;
         private const int OutputTextRecreateTargetChars = 100_000;
+        private const int HostGridRowHeaderGlyphReservationWidth = 18;
         private const int HiddenPresetsTabHeaderFallbackHeight = 24;
         private static readonly TimeSpan AutomaticHistoryCompactionCooldown = TimeSpan.FromSeconds(2);
         private static readonly string FolderSummarySeparator = new string('=', 60);
@@ -3945,25 +3946,16 @@ namespace SSH_Helper
                 LineAlignment = StringAlignment.Center
             };
             var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
-            var headerBackColor = row.HeaderCell.Style.BackColor.IsEmpty
-                ? grid.RowHeadersDefaultCellStyle.BackColor
-                : row.HeaderCell.Style.BackColor;
-            using (var backgroundBrush = new SolidBrush(headerBackColor))
-            {
-                e.Graphics.FillRectangle(backgroundBrush, headerBounds);
-            }
-
-            using (var borderPen = new Pen(grid.GridColor))
-            {
-                e.Graphics.DrawLine(borderPen, headerBounds.Right - 1, headerBounds.Top, headerBounds.Right - 1, headerBounds.Bottom - 1);
-                e.Graphics.DrawLine(borderPen, headerBounds.Left, headerBounds.Bottom - 1, headerBounds.Right - 1, headerBounds.Bottom - 1);
-            }
+            var textBounds = Rectangle.Inflate(headerBounds, -2, 0);
+            textBounds.X += HostGridRowHeaderGlyphReservationWidth;
+            textBounds.Width = Math.Max(0, textBounds.Width - HostGridRowHeaderGlyphReservationWidth);
+            if (textBounds.Width <= 0) return;
 
             var headerForeColor = row.HeaderCell.Style.ForeColor.IsEmpty
                 ? grid.RowHeadersDefaultCellStyle.ForeColor
                 : row.HeaderCell.Style.ForeColor;
             using var brush = new SolidBrush(headerForeColor);
-            SafeDrawString(e.Graphics, rowIdx, grid.Font, brush, headerBounds, centerFormat);
+            SafeDrawString(e.Graphics, rowIdx, grid.Font, brush, textBounds, centerFormat);
         }
 
         private void Dgv_Variables_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -11663,6 +11655,7 @@ namespace SSH_Helper
                 _stepPathToNodeIdMap = BuildStepPathToNodeMap(nodeToStepPathMap);
                 _nodeToStepIndexMap = BuildNodeToStepIndexMap(nodeToStepPathMap);
                 _stepIndexToNodeIdMap = BuildStepIndexToNodeMap(_nodeToStepIndexMap);
+                LogFlowCanvasExecutionMap(nodeToStepPathMap);
                 _flowCanvasForm.SendMessage(new { type = "execution-started" });
 
                 if (preset.IsScript && nodeToStepPathMap.Count > 0)
@@ -12800,6 +12793,9 @@ namespace SSH_Helper
 
             if (_flowCanvasForm == null) return;
             if (!TryResolveCanvasNodeId(e.StepPath, e.StepIndex, out var nodeId)) return;
+            SshDebugLog(
+                "FLOWCANVAS",
+                $"Dispatch execution-update running: stepPath={e.StepPath ?? $"steps/{e.StepIndex}"} stepIndex={e.StepIndex} nodeId={nodeId}");
 
             _flowCanvasForm.SendMessage(new
             {
@@ -12820,6 +12816,9 @@ namespace SSH_Helper
 
             if (_flowCanvasForm == null) return;
             if (!TryResolveCanvasNodeId(e.StepPath, e.StepIndex, out var nodeId)) return;
+            SshDebugLog(
+                "FLOWCANVAS",
+                $"Dispatch execution-update {state}: stepPath={stepPath} stepIndex={e.StepIndex} nodeId={nodeId}");
 
             var activeContext = _sshService.ActiveScriptContext;
             var variables = activeContext?.GetAllVariables();
@@ -12920,6 +12919,23 @@ namespace SSH_Helper
             return map;
         }
 
+        private void LogFlowCanvasExecutionMap(Dictionary<string, string> nodeToStepPathMap)
+        {
+            if (nodeToStepPathMap.Count == 0)
+            {
+                SshDebugLog("FLOWCANVAS", "Execution map is empty.");
+                return;
+            }
+
+            SshDebugLog("FLOWCANVAS", $"Execution map contains {nodeToStepPathMap.Count} node(s).");
+            foreach (var pair in nodeToStepPathMap
+                .OrderBy(kvp => kvp.Value, StringComparer.Ordinal)
+                .ThenBy(kvp => kvp.Key, StringComparer.Ordinal))
+            {
+                SshDebugLog("FLOWCANVAS", $"Map: {pair.Value} -> {pair.Key}");
+            }
+        }
+
         private bool TryResolveCanvasNodeId(string? stepPath, int stepIndex, out string? nodeId)
         {
             nodeId = null;
@@ -12969,6 +12985,7 @@ namespace SSH_Helper
                 return false;
             }
 
+            SshDebugLog("FLOWCANVAS", $"Resolved by index fallback: stepIndex={stepIndex}, stepPath={stepPath ?? "<none>"} -> nodeId={resolvedNodeId}.");
             nodeId = resolvedNodeId;
             return true;
         }

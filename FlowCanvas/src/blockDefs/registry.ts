@@ -12,6 +12,9 @@ export type BlockCategory =
   | 'grid'
   | 'timing';
 
+export type PropertyGroup = 'core' | 'advanced' | 'on_error';
+export type PropertyEditor = 'default' | 'choice-options';
+
 export interface PropertyDef {
   key: string;
   label: string;
@@ -21,6 +24,9 @@ export interface PropertyDef {
   placeholder?: string;
   options?: string[];
   defaultValue?: unknown;
+  helpText?: string;
+  group?: PropertyGroup;
+  editor?: PropertyEditor;
 }
 
 export interface BlockDef {
@@ -51,6 +57,7 @@ const onErrorProp: PropertyDef = {
   type: 'select',
   options: ['stop', 'continue'],
   defaultValue: 'stop',
+  group: 'on_error',
 };
 
 const timeoutProp: PropertyDef = {
@@ -419,7 +426,14 @@ export const blockDefs: BlockDef[] = [
     properties: [
       { key: 'title', label: 'Title', type: 'text' },
       { key: 'prompt', label: 'Prompt', type: 'text' },
-      { key: 'options', label: 'Options (comma-separated or ${var})', type: 'text', required: true },
+      {
+        key: 'options',
+        label: 'Options',
+        type: 'text',
+        required: true,
+        editor: 'choice-options',
+        helpText: 'Select source mode: use a runtime variable (${var} or var_name), or define static option rows.',
+      },
       { key: 'default', label: 'Default Value', type: 'text' },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
       onErrorProp,
@@ -435,7 +449,14 @@ export const blockDefs: BlockDef[] = [
     properties: [
       { key: 'title', label: 'Title', type: 'text' },
       { key: 'prompt', label: 'Prompt', type: 'text' },
-      { key: 'options', label: 'Options (comma-separated or ${var})', type: 'text', required: true },
+      {
+        key: 'options',
+        label: 'Options',
+        type: 'text',
+        required: true,
+        editor: 'choice-options',
+        helpText: 'Select source mode: use a runtime variable (${var} or var_name), or define static option rows.',
+      },
       { key: 'min', label: 'Min', type: 'number' },
       { key: 'max', label: 'Max', type: 'number' },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },

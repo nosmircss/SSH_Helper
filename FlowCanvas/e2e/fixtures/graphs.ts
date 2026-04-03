@@ -157,6 +157,41 @@ export function createPathPropertyFixture(): GraphFixture {
   };
 }
 
+export function createChoiceOptionsUxFixture(): GraphFixture {
+  return {
+    nodes: [
+      {
+        id: 'node-choose-ux',
+        type: 'block',
+        position: { x: 140, y: 120 },
+        data: {
+          blockType: 'choose',
+          label: 'Choose UX',
+          props: {
+            into: 'selected_choice',
+            options: 'alpha,beta',
+            default: 'missing-default',
+          },
+        },
+      },
+      {
+        id: 'node-multiselect-ux',
+        type: 'block',
+        position: { x: 420, y: 120 },
+        data: {
+          blockType: 'multiselect',
+          label: 'Multi UX',
+          props: {
+            into: 'selected_choices',
+            options: ['one', { label: 'Two Label', value: 'two_value' }],
+          },
+        },
+      },
+    ],
+    edges: [],
+  };
+}
+
 export function createRequiredMarkersFixture(): GraphFixture {
   return {
     nodes: [

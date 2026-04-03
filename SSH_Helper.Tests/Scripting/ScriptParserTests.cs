@@ -1356,6 +1356,25 @@ steps:
     }
 
     [Fact]
+    public void Parse_InputOnErrorInsideMap_ParsesOnError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - input:
+                  prompt: "Enter value:"
+                  into: answer
+                  on_error: continue
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.Input);
+        script.Steps[0].OnError.Should().Be("continue");
+    }
+
+    [Fact]
     public void Parse_ChooseStep_MixedOptions_ParsesCorrectly()
     {
         var yaml = @"---

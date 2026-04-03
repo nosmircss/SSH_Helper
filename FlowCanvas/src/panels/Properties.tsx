@@ -66,6 +66,446 @@ function createBrowseRequestId(): string {
   return `browse-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+type ChoiceEditorMode = 'source' | 'static';
+
+interface ChoiceOptionRow {
+  label: string;
+  value: string;
+}
+
+interface ChoiceEditorState {
+  mode: ChoiceEditorMode;
+  source: string;
+  rows: ChoiceOptionRow[];
+}
+
+const SIMPLE_VARIABLE_NAME_REGEX = /^[A-Za-z_]\w*$/;
+const WHOLE_TOKEN_VARIABLE_REGEX = /^\$\{[^{}]+\}$/;
+const WHOLE_TOKEN_HANDLEBARS_VARIABLE_REGEX = /^\{\{[^{}]+\}\}$/;
+
+function normalizeChoiceOptionRow(row: ChoiceOptionRow): ChoiceOptionRow | null {
+  const label = row.label.trim();
+  const value = row.value.trim();
+  if (!label && !value) return null;
+  if (label && value) return { label, value };
+  return label
+    ? { label, value: label }
+    : { label: value, value };
+}
+
+function parseDelimitedChoiceRows(raw: string): ChoiceOptionRow[] {
+  return raw
+    .split(/[,\r\n]+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .map((item) => ({ label: item, value: item }));
+}
+
+function toChoiceOptionRow(value: unknown): ChoiceOptionRow | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return { label: trimmed, value: trimmed };
+  }
+
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const rawLabel = typeof row.label === 'string' ? row.label : '';
+  const rawValue = typeof row.value === 'string' ? row.value : '';
+  return normalizeChoiceOptionRow({
+    label: rawLabel,
+    value: rawValue,
+  });
+}
+
+function parseJsonChoiceRows(raw: string): ChoiceOptionRow[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(toChoiceOptionRow)
+      .filter((row): row is ChoiceOptionRow => row !== null);
+  } catch {
+    return [];
+  }
+}
+
+function inferChoiceEditorState(value: unknown): ChoiceEditorState {
+  if (Array.isArray(value)) {
+    const rows = value
+      .map(toChoiceOptionRow)
+      .filter((row): row is ChoiceOptionRow => row !== null);
+    return {
+      mode: 'static',
+      source: '',
+      rows: rows.length > 0 ? rows : [{ label: '', value: '' }],
+    };
+  }
+
+  const scalar = typeof value === 'string' ? value : '';
+  const trimmed = scalar.trim();
+  if (!trimmed) {
+    return { mode: 'source', source: '', rows: [{ label: '', value: '' }] };
+  }
+
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    const jsonRows = parseJsonChoiceRows(trimmed);
+    if (jsonRows.length > 0) {
+      return {
+        mode: 'static',
+        source: '',
+        rows: jsonRows,
+      };
+    }
+  }
+
+  if (trimmed.includes(',') || trimmed.includes('\n') || trimmed.includes('\r')) {
+    const rows = parseDelimitedChoiceRows(trimmed);
+    return {
+      mode: 'static',
+      source: '',
+      rows: rows.length > 0 ? rows : [{ label: '', value: '' }],
+    };
+  }
+
+  return {
+    mode: 'source',
+    source: scalar,
+    rows: [{ label: '', value: '' }],
+  };
+}
+
+function serializeStaticChoiceRows(rows: ChoiceOptionRow[]): unknown[] {
+  const normalized = rows
+    .map(normalizeChoiceOptionRow)
+    .filter((row): row is ChoiceOptionRow => row !== null);
+
+  return normalized.map((row) => {
+    if (row.label === row.value) {
+      return row.value;
+    }
+
+    return {
+      label: row.label,
+      value: row.value,
+    };
+  });
+}
+
+function isValidChoiceSourceToken(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return SIMPLE_VARIABLE_NAME_REGEX.test(trimmed)
+    || WHOLE_TOKEN_VARIABLE_REGEX.test(trimmed)
+    || WHOLE_TOKEN_HANDLEBARS_VARIABLE_REGEX.test(trimmed);
+}
+
+function buildTokenInsertion(current: string, variableName: string): string {
+  const token = `\${${variableName}}`;
+  const trimmed = current.trim();
+  if (!trimmed || trimmed === '${var}' || trimmed === '${') {
+    return token;
+  }
+
+  if (trimmed === '{{var}}' || trimmed === '{{') {
+    return `{{${variableName}}}`;
+  }
+
+  const separator = current.endsWith(' ') || current.length === 0 ? '' : ' ';
+  return `${current}${separator}${token}`;
+}
+
+function ChoiceOptionsEditor({
+  value,
+  onChange,
+  fieldTestId,
+  colors,
+  required,
+}: {
+  value: unknown;
+  onChange: (val: unknown) => void;
+  fieldTestId: string;
+  colors: { border: string };
+  required: boolean;
+}) {
+  const variables = useFlowStore((s) => s.variables);
+  const variableNames = variables
+    .map((entry) => entry.name)
+    .filter((name) => name.trim().length > 0);
+  const state = inferChoiceEditorState(value);
+  const [sourceInsertChoice, setSourceInsertChoice] = useState('');
+
+  useEffect(() => {
+    setSourceInsertChoice('');
+  }, [fieldTestId, state.mode]);
+
+  const sourceInput = useBufferedInput(
+    state.mode === 'source' ? state.source : '',
+    `${fieldTestId}:source`,
+    (next) => onChange(next),
+  );
+
+  const setMode = useCallback((mode: ChoiceEditorMode) => {
+    if (mode === state.mode) return;
+
+    if (mode === 'source') {
+      onChange('${var}');
+      return;
+    }
+
+    onChange([{ label: '', value: '' }]);
+  }, [onChange, state.mode]);
+
+  const commitRows = useCallback((nextRows: ChoiceOptionRow[]) => {
+    onChange(serializeStaticChoiceRows(nextRows));
+  }, [onChange]);
+
+  const updateRow = useCallback((index: number, key: keyof ChoiceOptionRow, nextValue: string) => {
+    const nextRows = state.rows.map((row, rowIndex) => (
+      rowIndex === index
+        ? { ...row, [key]: nextValue }
+        : row
+    ));
+    commitRows(nextRows);
+  }, [commitRows, state.rows]);
+
+  const removeRow = useCallback((index: number) => {
+    const nextRows = state.rows.filter((_, rowIndex) => rowIndex !== index);
+    commitRows(nextRows.length > 0 ? nextRows : [{ label: '', value: '' }]);
+  }, [commitRows, state.rows]);
+
+  const addRow = useCallback(() => {
+    const nextIndex = state.rows.length + 1;
+    commitRows([
+      ...state.rows,
+      {
+        label: `Option ${nextIndex}`,
+        value: `option_${nextIndex}`,
+      },
+    ]);
+  }, [commitRows, state.rows]);
+
+  const moveRow = useCallback((index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= state.rows.length) return;
+    const nextRows = [...state.rows];
+    const tmp = nextRows[target];
+    nextRows[target] = nextRows[index];
+    nextRows[index] = tmp;
+    commitRows(nextRows);
+  }, [commitRows, state.rows]);
+
+  const staticOptions = serializeStaticChoiceRows(state.rows);
+  const sourceError = state.mode === 'source'
+    ? (!sourceInput.value.trim()
+      ? (required ? 'Options source is required.' : null)
+      : (!isValidChoiceSourceToken(sourceInput.value) ? 'Use var_name, ${var}, or {{var}}.' : null))
+    : null;
+  const staticError = state.mode === 'static' && required && staticOptions.length === 0
+    ? 'Add at least one option.'
+    : null;
+  const error = sourceError ?? staticError;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          data-testid={`${fieldTestId}-mode-source`}
+          type="button"
+          data-active={state.mode === 'source' ? 'true' : 'false'}
+          onClick={() => setMode('source')}
+          style={{
+            padding: '3px 8px',
+            borderRadius: 4,
+            border: `1px solid ${state.mode === 'source' ? colors.border : '#2a2a4a'}`,
+            background: state.mode === 'source' ? '#1d2f4a' : '#141b2c',
+            color: state.mode === 'source' ? '#d4e6ff' : 'var(--fc-text-secondary, #888)',
+            fontSize: 11,
+            cursor: 'pointer',
+          }}
+        >
+          From Variable
+        </button>
+        <button
+          data-testid={`${fieldTestId}-mode-static`}
+          type="button"
+          data-active={state.mode === 'static' ? 'true' : 'false'}
+          onClick={() => setMode('static')}
+          style={{
+            padding: '3px 8px',
+            borderRadius: 4,
+            border: `1px solid ${state.mode === 'static' ? colors.border : '#2a2a4a'}`,
+            background: state.mode === 'static' ? '#1d2f4a' : '#141b2c',
+            color: state.mode === 'static' ? '#d4e6ff' : 'var(--fc-text-secondary, #888)',
+            fontSize: 11,
+            cursor: 'pointer',
+          }}
+        >
+          Static Options
+        </button>
+      </div>
+
+      {state.mode === 'source' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <input
+            data-testid={`${fieldTestId}-source-input`}
+            type="text"
+            value={sourceInput.value}
+            placeholder="${var}"
+            onChange={(e) => sourceInput.onChange(e.target.value)}
+            onFocus={sourceInput.onFocus}
+            onBlur={sourceInput.onBlur}
+            style={{
+              width: '100%',
+              padding: '4px 6px',
+              background: 'var(--fc-input-bg, #0d1117)',
+              border: `1px solid ${(error ? '#e74c3c' : `${colors.border}44`)}`,
+              borderRadius: 4,
+              color: 'var(--fc-text, #ccc)',
+              fontSize: 12,
+              outline: 'none',
+              fontFamily: 'monospace',
+            }}
+          />
+          {variableNames.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <select
+                data-testid={`${fieldTestId}-source-insert-var`}
+                value={sourceInsertChoice}
+                onChange={(e) => {
+                  const variableName = e.target.value;
+                  setSourceInsertChoice('');
+                  if (!variableName) return;
+                  sourceInput.onChange(buildTokenInsertion(sourceInput.value, variableName));
+                }}
+                style={{
+                  minWidth: 160,
+                  padding: '2px 6px',
+                  background: 'var(--fc-input-bg, #0d1117)',
+                  border: '1px solid #2a2a4a',
+                  borderRadius: 4,
+                  color: 'var(--fc-text-secondary, #aaa)',
+                  fontSize: 11,
+                  outline: 'none',
+                }}
+              >
+                <option value="">Insert variable...</option>
+                {variableNames.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
+      {state.mode === 'static' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {state.rows.map((row, index) => (
+            <div
+              key={`${fieldTestId}-row-${index}`}
+              data-testid={`${fieldTestId}-row-${index}`}
+              style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, alignItems: 'center' }}
+            >
+              <input
+                data-testid={`${fieldTestId}-row-${index}-label`}
+                type="text"
+                value={row.label}
+                placeholder="Label"
+                onChange={(e) => updateRow(index, 'label', e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '4px 6px',
+                  background: 'var(--fc-input-bg, #0d1117)',
+                  border: `1px solid ${(error ? '#e74c3c' : `${colors.border}44`)}`,
+                  borderRadius: 4,
+                  color: 'var(--fc-text, #ccc)',
+                  fontSize: 12,
+                  outline: 'none',
+                }}
+              />
+              <input
+                data-testid={`${fieldTestId}-row-${index}-value`}
+                type="text"
+                value={row.value}
+                placeholder="Value"
+                onChange={(e) => updateRow(index, 'value', e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '4px 6px',
+                  background: 'var(--fc-input-bg, #0d1117)',
+                  border: `1px solid ${(error ? '#e74c3c' : `${colors.border}44`)}`,
+                  borderRadius: 4,
+                  color: 'var(--fc-text, #ccc)',
+                  fontSize: 12,
+                  outline: 'none',
+                }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button
+                  data-testid={`${fieldTestId}-row-${index}-up`}
+                  type="button"
+                  onClick={() => moveRow(index, -1)}
+                  disabled={index === 0}
+                  style={{ padding: '3px 6px', fontSize: 11, cursor: index === 0 ? 'default' : 'pointer' }}
+                  title="Move up"
+                >
+                  Up
+                </button>
+                <button
+                  data-testid={`${fieldTestId}-row-${index}-down`}
+                  type="button"
+                  onClick={() => moveRow(index, 1)}
+                  disabled={index === state.rows.length - 1}
+                  style={{ padding: '3px 6px', fontSize: 11, cursor: index === state.rows.length - 1 ? 'default' : 'pointer' }}
+                  title="Move down"
+                >
+                  Down
+                </button>
+                <button
+                  data-testid={`${fieldTestId}-row-${index}-remove`}
+                  type="button"
+                  onClick={() => removeRow(index)}
+                  style={{ padding: '3px 6px', fontSize: 11, cursor: 'pointer' }}
+                  title="Remove row"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+          <button
+            data-testid={`${fieldTestId}-add-row`}
+            type="button"
+            onClick={addRow}
+            style={{
+              alignSelf: 'flex-start',
+              padding: '4px 8px',
+              border: `1px solid ${colors.border}66`,
+              borderRadius: 4,
+              background: '#1f2937',
+              color: 'var(--fc-text, #ccc)',
+              fontSize: 11,
+              cursor: 'pointer',
+            }}
+          >
+            + Add Option
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div
+          data-testid={`${fieldTestId}-error`}
+          style={{ color: '#e74c3c', fontSize: 11 }}
+        >
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PropertyField({
   def,
   value,
@@ -73,6 +513,9 @@ function PropertyField({
   colors,
   fieldTestId,
   nodeId,
+  blockType,
+  required,
+  invalid,
 }: {
   def: PropertyDef;
   value: unknown;
@@ -80,12 +523,25 @@ function PropertyField({
   colors: { text: string; border: string; bg: string };
   fieldTestId: string;
   nodeId: string;
+  blockType: string;
+  required: boolean;
+  invalid: boolean;
 }) {
+  const variables = useFlowStore((s) => s.variables);
+  const variableNames = variables
+    .map((entry) => entry.name)
+    .filter((name) => name.trim().length > 0);
+  const [insertChoice, setInsertChoice] = useState('');
+
+  useEffect(() => {
+    setInsertChoice('');
+  }, [nodeId, def.key]);
+
   const inputStyle: React.CSSProperties = {
     width: '100%',
     padding: '4px 6px',
     background: 'var(--fc-input-bg, #0d1117)',
-    border: `1px solid ${colors.border}44`,
+    border: `1px solid ${invalid ? '#e74c3c' : `${colors.border}44`}`,
     borderRadius: 4,
     color: 'var(--fc-text, #ccc)',
     fontSize: 12,
@@ -155,6 +611,51 @@ function PropertyField({
     [onChange, value],
   );
 
+  const renderInsertVariable = (onInsert: (variableName: string) => void) => {
+    if (variableNames.length === 0) return null;
+    return (
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+        <select
+          data-testid={`${fieldTestId}-insert-var`}
+          value={insertChoice}
+          onChange={(e) => {
+            const variableName = e.target.value;
+            setInsertChoice('');
+            if (!variableName) return;
+            onInsert(variableName);
+          }}
+          style={{
+            minWidth: 160,
+            padding: '2px 6px',
+            background: 'var(--fc-input-bg, #0d1117)',
+            border: '1px solid #2a2a4a',
+            borderRadius: 4,
+            color: 'var(--fc-text-secondary, #aaa)',
+            fontSize: 11,
+            outline: 'none',
+          }}
+        >
+          <option value="">Insert variable...</option>
+          {variableNames.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+        </select>
+      </div>
+    );
+  };
+
+  if (def.editor === 'choice-options' && (blockType === 'choose' || blockType === 'multiselect')) {
+    return (
+      <ChoiceOptionsEditor
+        value={value}
+        onChange={onChange}
+        fieldTestId={fieldTestId}
+        colors={{ border: colors.border }}
+        required={required}
+      />
+    );
+  }
+
   switch (def.type) {
     case 'boolean':
       return (
@@ -174,6 +675,7 @@ function PropertyField({
       const resolvedValue = value === undefined || value === null
         ? String(def.defaultValue ?? '')
         : String(value);
+      const placeholderText = `Select ${def.label.toLowerCase()}...`;
 
       return (
         <select
@@ -192,7 +694,7 @@ function PropertyField({
           }}
           style={{ ...inputStyle, cursor: 'pointer' }}
         >
-          <option value="">-</option>
+          <option value="" disabled={required}>{placeholderText}</option>
           {def.options?.map((opt) => (
             <option key={opt} value={opt}>{opt}</option>
           ))}
@@ -216,79 +718,99 @@ function PropertyField({
 
     case 'textarea':
       return (
-        <textarea
-          data-testid={`${fieldTestId}-input`}
-          value={textInput.value}
-          placeholder={def.placeholder}
-          onChange={(e) => textInput.onChange(e.target.value)}
-          onFocus={textInput.onFocus}
-          onBlur={textInput.onBlur}
-          rows={3}
-          style={{ ...inputStyle, resize: 'vertical' }}
-        />
+        <div>
+          <textarea
+            data-testid={`${fieldTestId}-input`}
+            value={textInput.value}
+            placeholder={def.placeholder}
+            onChange={(e) => textInput.onChange(e.target.value)}
+            onFocus={textInput.onFocus}
+            onBlur={textInput.onBlur}
+            rows={3}
+            style={{ ...inputStyle, resize: 'vertical' }}
+          />
+          {renderInsertVariable((variableName) => {
+            textInput.onChange(buildTokenInsertion(textInput.value, variableName));
+          })}
+        </div>
       );
 
     case 'text':
       if (def.browse === 'file') {
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input
-              data-testid={`${fieldTestId}-input`}
-              type="text"
-              value={textInput.value}
-              placeholder={def.placeholder}
-              onChange={(e) => textInput.onChange(e.target.value)}
-              onFocus={textInput.onFocus}
-              onBlur={textInput.onBlur}
-              style={{ ...inputStyle, flex: 1, minWidth: 0 }}
-            />
-            <button
-              data-testid={`${fieldTestId}-browse`}
-              type="button"
-              onClick={requestPathBrowse}
-              style={{
-                padding: '4px 8px',
-                background: 'var(--fc-button-bg, #1f2937)',
-                border: `1px solid ${colors.border}66`,
-                borderRadius: 4,
-                color: 'var(--fc-text, #ccc)',
-                fontSize: 11,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Browse...
-            </button>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                data-testid={`${fieldTestId}-input`}
+                type="text"
+                value={textInput.value}
+                placeholder={def.placeholder}
+                onChange={(e) => textInput.onChange(e.target.value)}
+                onFocus={textInput.onFocus}
+                onBlur={textInput.onBlur}
+                style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+              />
+              <button
+                data-testid={`${fieldTestId}-browse`}
+                type="button"
+                onClick={requestPathBrowse}
+                style={{
+                  padding: '4px 8px',
+                  background: 'var(--fc-button-bg, #1f2937)',
+                  border: `1px solid ${colors.border}66`,
+                  borderRadius: 4,
+                  color: 'var(--fc-text, #ccc)',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Browse...
+              </button>
+            </div>
+            {renderInsertVariable((variableName) => {
+              textInput.onChange(buildTokenInsertion(textInput.value, variableName));
+            })}
           </div>
         );
       }
 
       return (
-        <input
-          data-testid={`${fieldTestId}-input`}
-          type="text"
-          value={textInput.value}
-          placeholder={def.placeholder}
-          onChange={(e) => textInput.onChange(e.target.value)}
-          onFocus={textInput.onFocus}
-          onBlur={textInput.onBlur}
-          style={inputStyle}
-        />
+        <div>
+          <input
+            data-testid={`${fieldTestId}-input`}
+            type="text"
+            value={textInput.value}
+            placeholder={def.placeholder}
+            onChange={(e) => textInput.onChange(e.target.value)}
+            onFocus={textInput.onFocus}
+            onBlur={textInput.onBlur}
+            style={inputStyle}
+          />
+          {renderInsertVariable((variableName) => {
+            textInput.onChange(buildTokenInsertion(textInput.value, variableName));
+          })}
+        </div>
       );
 
     case 'code':
     default:
       return (
-        <input
-          data-testid={`${fieldTestId}-input`}
-          type="text"
-          value={textInput.value}
-          placeholder={def.placeholder}
-          onChange={(e) => textInput.onChange(e.target.value)}
-          onFocus={textInput.onFocus}
-          onBlur={textInput.onBlur}
-          style={inputStyle}
-        />
+        <div>
+          <input
+            data-testid={`${fieldTestId}-input`}
+            type="text"
+            value={textInput.value}
+            placeholder={def.placeholder}
+            onChange={(e) => textInput.onChange(e.target.value)}
+            onFocus={textInput.onFocus}
+            onBlur={textInput.onBlur}
+            style={inputStyle}
+          />
+          {renderInsertVariable((variableName) => {
+            textInput.onChange(buildTokenInsertion(textInput.value, variableName));
+          })}
+        </div>
       );
   }
 }
@@ -362,6 +884,120 @@ function isPropertyRequired(
   }
 
   return staticRequired;
+}
+
+type PropertyPaneGroup = 'core' | 'advanced' | 'on_error';
+
+const ADVANCED_PROPERTY_KEYS = new Set([
+  'default',
+  'validate',
+  'validation_error',
+  'min',
+  'max',
+  'timeout',
+  'retry',
+  'retry_delay',
+  'fail_on_nonzero',
+  'suppress',
+  'expect',
+  'capture',
+  'headers',
+  'follow_redirects',
+  'allow_failure',
+  'verify_tls',
+  'auth',
+  'username',
+  'password',
+  'token',
+  'content_type',
+  'encoding',
+  'max_lines',
+  'trim_lines',
+  'skip_empty_lines',
+  'pretty',
+  'format',
+  'volume',
+  'wait',
+]);
+
+function resolvePropertyGroup(propDef: PropertyDef): PropertyPaneGroup {
+  if (propDef.group) return propDef.group;
+  if (propDef.key === 'on_error') return 'on_error';
+  if (ADVANCED_PROPERTY_KEYS.has(propDef.key)) return 'advanced';
+  return 'core';
+}
+
+function getChoiceStaticOptionValues(value: unknown): Set<string> {
+  const editorState = inferChoiceEditorState(value);
+  if (editorState.mode !== 'static') return new Set<string>();
+
+  const values = new Set<string>();
+  const normalizedRows = serializeStaticChoiceRows(editorState.rows);
+  for (const option of normalizedRows) {
+    if (typeof option === 'string') {
+      const trimmed = option.trim();
+      if (trimmed.length > 0) values.add(trimmed);
+      continue;
+    }
+
+    if (!option || typeof option !== 'object') continue;
+    const optionRecord = option as Record<string, unknown>;
+    const valueText = typeof optionRecord.value === 'string'
+      ? optionRecord.value
+      : '';
+    const trimmed = valueText.trim();
+    if (trimmed.length > 0) values.add(trimmed);
+  }
+
+  return values;
+}
+
+function getPropertyValidationMessage(
+  blockType: string,
+  propDef: PropertyDef,
+  value: unknown,
+  required: boolean,
+): string | null {
+  if (propDef.editor === 'choice-options' && (blockType === 'choose' || blockType === 'multiselect')) {
+    const editorState = inferChoiceEditorState(value);
+    if (editorState.mode === 'source') {
+      const source = editorState.source.trim();
+      if (required && source.length === 0) return 'Options source is required.';
+      if (source.length > 0 && !isValidChoiceSourceToken(source)) return 'Use var_name, ${var}, or {{var}}.';
+      return null;
+    }
+
+    if (required) {
+      const staticOptions = serializeStaticChoiceRows(editorState.rows);
+      if (staticOptions.length === 0) return 'Add at least one option.';
+    }
+
+    return null;
+  }
+
+  if (!required) return null;
+
+  if (propDef.type === 'select') {
+    const resolved = value === undefined || value === null
+      ? propDef.defaultValue
+      : value;
+    return hasAnyValue(resolved) ? null : 'Please choose an option.';
+  }
+
+  return hasAnyValue(value) ? null : `${propDef.label} is required.`;
+}
+
+function getChooseDefaultWarning(defaultValue: unknown, optionsValue: unknown): string | null {
+  const defaultText = typeof defaultValue === 'string' ? defaultValue.trim() : '';
+  if (defaultText.length === 0) return null;
+
+  const optionState = inferChoiceEditorState(optionsValue);
+  if (optionState.mode !== 'static') return null;
+
+  const allowedValues = getChoiceStaticOptionValues(optionsValue);
+  return allowedValues.has(defaultText)
+    ? null
+    : 'Default value is not in the static options list.';
 }
 
 function timeAgo(timestamp: number): string {
@@ -490,7 +1126,7 @@ function TestResultDisplay({ result, onDismiss }: { result: DataBlockTestResult;
               lineHeight: 1,
             }}
           >
-            ×
+            x
           </button>
         </div>
       </div>
@@ -954,6 +1590,77 @@ export default function Properties() {
   const colors = categoryColors[def.category as BlockCategory];
   const branchLabel = blockData.props?.['_branchLabel'] as string | undefined;
   const branchColor = blockData.props?.['_branchColor'] as string | undefined;
+  const groupedProperties: Record<PropertyPaneGroup, PropertyDef[]> = {
+    core: [],
+    advanced: [],
+    on_error: [],
+  };
+
+  for (const propDef of def.properties) {
+    groupedProperties[resolvePropertyGroup(propDef)].push(propDef);
+  }
+
+  const propertySections: Array<{ key: PropertyPaneGroup; label: string }> = [
+    { key: 'core', label: 'Core' },
+    { key: 'advanced', label: 'Advanced' },
+    { key: 'on_error', label: 'On Error' },
+  ];
+  const visibleSections = propertySections.filter((section) => groupedProperties[section.key].length > 0);
+
+  const renderProperty = (propDef: PropertyDef) => {
+    const fieldTestId = `properties-field-${propDef.key}-${propDef.type}`;
+    const fieldValue = blockData.props?.[propDef.key];
+    const required = isPropertyRequired(blockData.blockType, propDef, blockData.props);
+    const validationMessage = getPropertyValidationMessage(blockData.blockType, propDef, fieldValue, required);
+    const invalid = validationMessage !== null;
+    const warningMessage = blockData.blockType === 'choose' && propDef.key === 'default'
+      ? getChooseDefaultWarning(fieldValue, blockData.props?.options)
+      : null;
+    const showInlineError = validationMessage !== null && propDef.editor !== 'choice-options';
+
+    return (
+      <div key={`${selectedNodeId}-${propDef.key}`} data-testid={fieldTestId}>
+        {propDef.type !== 'boolean' && (
+          <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
+            {propDef.label}
+            {required && <span style={{ color: '#e74c3c', marginLeft: 2 }}>*</span>}
+          </label>
+        )}
+        <PropertyField
+          def={propDef}
+          value={fieldValue}
+          onChange={(val) => updateProp(propDef.key, val)}
+          colors={colors}
+          fieldTestId={fieldTestId}
+          nodeId={selectedNodeId}
+          blockType={blockData.blockType}
+          required={required}
+          invalid={invalid}
+        />
+        {propDef.helpText && (
+          <div style={{ marginTop: 4, fontSize: 10, color: 'var(--fc-text-muted, #666)' }}>
+            {propDef.helpText}
+          </div>
+        )}
+        {showInlineError && (
+          <div
+            data-testid={`${fieldTestId}-error`}
+            style={{ marginTop: 4, color: '#e74c3c', fontSize: 11 }}
+          >
+            {validationMessage}
+          </div>
+        )}
+        {warningMessage && (
+          <div
+            data-testid={`${fieldTestId}-warning`}
+            style={{ marginTop: 4, color: '#f1c40f', fontSize: 11 }}
+          >
+            {warningMessage}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -1001,26 +1708,33 @@ export default function Properties() {
         </div>
       )}
 
-      {def.properties.map((propDef) => {
-        const fieldTestId = `properties-field-${propDef.key}-${propDef.type}`;
-        const required = isPropertyRequired(blockData.blockType, propDef, blockData.props);
+      {visibleSections.map((section, sectionIndex) => {
+        const properties = groupedProperties[section.key];
+        const isFirstVisibleSection = sectionIndex === 0;
         return (
-          <div key={`${selectedNodeId}-${propDef.key}`} data-testid={fieldTestId}>
-            {propDef.type !== 'boolean' && (
-              <label style={{ fontSize: 11, color: 'var(--fc-text-muted, #666)', display: 'block', marginBottom: 3 }}>
-                {propDef.label}
-                {required && <span style={{ color: '#e74c3c', marginLeft: 2 }}>*</span>}
-              </label>
-            )}
-            <PropertyField
-              def={propDef}
-              value={blockData.props?.[propDef.key]}
-              onChange={(val) => updateProp(propDef.key, val)}
-              colors={colors}
-              fieldTestId={fieldTestId}
-              nodeId={selectedNodeId}
-            />
-          </div>
+          <section
+            key={section.key}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              paddingTop: isFirstVisibleSection ? 0 : 8,
+              borderTop: isFirstVisibleSection ? undefined : '1px solid var(--fc-panel-border, #2a2a4a)',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                color: 'var(--fc-text-muted, #666)',
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+              }}
+            >
+              {section.label}
+            </div>
+            {properties.map((propDef) => renderProperty(propDef))}
+          </section>
         );
       })}
 
@@ -1046,3 +1760,4 @@ export default function Properties() {
     </div>
   );
 }
+

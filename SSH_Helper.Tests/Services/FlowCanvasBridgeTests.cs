@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,6 +10,7 @@ using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Models;
 using Xunit;
+using YamlDotNet.Serialization;
 
 namespace SSH_Helper.Tests.Services;
 
@@ -1269,6 +1271,47 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void DriftGuard_RegistryPanelOrder_MatchesBridgePreferredExportOrder_ForAllBlocks()
+    {
+        var aliases = FlowCanvasBridge.GetBlockTypeCommandKeyAliases();
+        var preferredOrderByCommand = FlowCanvasBridge.GetPreferredExportOptionOrderByCommand();
+        var registryOrderByBlock = LoadRegistryBlockPropertyOrder(out _);
+        var advancedKeys = LoadPropertiesPanelAdvancedKeys(out _);
+
+        var errors = new List<string>();
+        foreach (var entry in registryOrderByBlock)
+        {
+            if (entry.Value.Count == 0)
+                continue;
+
+            var blockType = entry.Key;
+            var command = aliases.TryGetValue(blockType, out var mappedCommand)
+                ? mappedCommand
+                : blockType;
+
+            if (!preferredOrderByCommand.TryGetValue(command, out var commandPreferredOrder))
+            {
+                errors.Add($"{blockType}: missing preferred export order for command '{command}'.");
+                continue;
+            }
+
+            var expectedPanelOrder = ToPropertiesPanelDisplayOrder(entry.Value, advancedKeys);
+            var actualExportOrder = commandPreferredOrder
+                .Where(key => expectedPanelOrder.Contains(key, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+
+            if (!expectedPanelOrder.SequenceEqual(actualExportOrder, StringComparer.OrdinalIgnoreCase))
+            {
+                errors.Add(
+                    $"{blockType} ({command}): expected [{string.Join(", ", expectedPanelOrder)}] " +
+                    $"but bridge resolves [{string.Join(", ", actualExportOrder)}].");
+            }
+        }
+
+        Assert.True(errors.Count == 0, string.Join(Environment.NewLine, errors));
+    }
+
+    [Fact]
     public void ExportGraphToYaml_IfWithContinueEdge_ContinuationTargetNotConsumedAsBranch()
     {
         var bridge = new FlowCanvasBridge();
@@ -1384,6 +1427,151 @@ public class FlowCanvasBridgeTests
         });
 
         AssertExportSuccessWithCanonicalValidation(result);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_InputWithOnError_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("input", new JObject
+        {
+            ["into"] = "answer",
+            ["on_error"] = "continue"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        Assert.Single(script.Steps);
+        Assert.Equal(StepType.Input, script.Steps[0].GetStepType());
+        Assert.Equal("continue", script.Steps[0].OnError);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_SendOptions_AreSerializedInPropertiesPanelOrder()
+    {
+        var result = ExportSingleBlock("send", new JObject
+        {
+            ["on_error"] = "continue",
+            ["retry_delay"] = 3,
+            ["fail_on_nonzero"] = false,
+            ["command"] = "show version",
+            ["expect"] = "Version",
+            ["retry"] = 2,
+            ["capture"] = "out",
+            ["timeout"] = 30,
+            ["suppress"] = true
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var optionOrder = GetSingleStepOptionOrder(result.Yaml, "send");
+        Assert.Equal(
+            new[] { "command", "capture", "suppress", "expect", "timeout", "retry", "retry_delay", "fail_on_nonzero", "on_error" },
+            optionOrder);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ChooseOptions_AreSerializedInPropertiesPanelOrder()
+    {
+        var result = ExportSingleBlock("choose", new JObject
+        {
+            ["on_error"] = "continue",
+            ["default"] = "core",
+            ["into"] = "selected",
+            ["options"] = new JArray("core", "edge"),
+            ["prompt"] = "Pick one",
+            ["title"] = "Select interface role"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var optionOrder = GetSingleStepOptionOrder(result.Yaml, "choose");
+        Assert.Equal(
+            new[] { "title", "prompt", "options", "into", "default", "on_error" },
+            optionOrder);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_PlaySoundOptions_AreSerializedInPropertiesPanelOrder()
+    {
+        var result = ExportSingleBlock("playsound", new JObject
+        {
+            ["into"] = "${fdsaf}",
+            ["max_seconds"] = 1,
+            ["path"] = @"C:\Windows\Media\Alarm02.wav",
+            ["volume"] = 5,
+            ["on_error"] = "continue"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var optionOrder = GetSingleStepOptionOrder(result.Yaml, "playsound");
+        Assert.Equal(
+            new[] { "path", "max_seconds", "into", "volume", "on_error" },
+            optionOrder);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_MultiselectOptions_AreSerializedInPropertiesPanelOrder()
+    {
+        var result = ExportSingleBlock("multiselect", new JObject
+        {
+            ["on_error"] = "continue",
+            ["max"] = 2,
+            ["min"] = 1,
+            ["into"] = "selected_list",
+            ["options"] = new JArray("core", "edge"),
+            ["prompt"] = "Pick interfaces",
+            ["title"] = "Select interfaces"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var optionOrder = GetSingleStepOptionOrder(result.Yaml, "multiselect");
+        Assert.Equal(
+            new[] { "title", "prompt", "options", "into", "min", "max", "on_error" },
+            optionOrder);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ConfirmOptions_AreSerializedInPropertiesPanelOrder()
+    {
+        var result = ExportSingleBlock("confirm", new JObject
+        {
+            ["on_error"] = "continue",
+            ["default"] = true,
+            ["into"] = "confirmed",
+            ["prompt"] = "Proceed?",
+            ["title"] = "Confirm"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var optionOrder = GetSingleStepOptionOrder(result.Yaml, "confirm");
+        Assert.Equal(
+            new[] { "title", "prompt", "into", "default", "on_error" },
+            optionOrder);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ExtractOptions_AreSerializedInPropertiesPanelOrder()
+    {
+        var result = ExportSingleBlock("extract", new JObject
+        {
+            ["required"] = true,
+            ["match"] = "all",
+            ["from"] = "raw",
+            ["into"] = "matches",
+            ["pattern"] = @"\\d+"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var optionOrder = GetSingleStepOptionOrder(result.Yaml, "extract");
+        Assert.Equal(
+            new[] { "pattern", "into", "from", "match", "required" },
+            optionOrder);
     }
 
     [Fact]
@@ -1526,6 +1714,91 @@ public class FlowCanvasBridgeTests
         AssertExportSuccessWithCanonicalValidation(result);
     }
 
+    [Fact]
+    public void ImportExportRoundTrip_ChooseLabelValueOptions_PreservesLabelValuePairs()
+    {
+        var result = RoundTripThroughBridge(
+            """
+            steps:
+              - choose:
+                  prompt: "Pick one"
+                  into: selected
+                  options:
+                    - label: "WAN 1"
+                      value: "wan1"
+                    - label: "WAN 2"
+                      value: "wan2"
+            """);
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var choose = script.Steps[0].Choose;
+
+        Assert.NotNull(choose);
+        Assert.Equal(2, choose!.Options.Count);
+        Assert.Equal("WAN 1", choose.Options[0].Label);
+        Assert.Equal("wan1", choose.Options[0].Value);
+        Assert.Equal("WAN 2", choose.Options[1].Label);
+        Assert.Equal("wan2", choose.Options[1].Value);
+        Assert.True(string.IsNullOrWhiteSpace(choose.OptionsFrom));
+    }
+
+    [Fact]
+    public void ImportExportRoundTrip_MultiselectLabelValueOptions_PreservesLabelValuePairs()
+    {
+        var result = RoundTripThroughBridge(
+            """
+            steps:
+              - multiselect:
+                  prompt: "Pick many"
+                  into: selected
+                  options:
+                    - label: "Core"
+                      value: "core"
+                    - label: "Edge"
+                      value: "edge"
+            """);
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var options = script.Steps[0].Multiselect;
+
+        Assert.NotNull(options);
+        Assert.Equal(2, options!.Options.Count);
+        Assert.Equal("Core", options.Options[0].Label);
+        Assert.Equal("core", options.Options[0].Value);
+        Assert.Equal("Edge", options.Options[1].Label);
+        Assert.Equal("edge", options.Options[1].Value);
+        Assert.True(string.IsNullOrWhiteSpace(options.OptionsFrom));
+    }
+
+    [Fact]
+    public void ImportExportRoundTrip_ChooseOptionsSourceScalar_PreservesSource()
+    {
+        var result = RoundTripThroughBridge(
+            """
+            steps:
+              - choose:
+                  prompt: "Pick one"
+                  into: selected
+                  options: ${interface_list}
+            """);
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var choose = script.Steps[0].Choose;
+
+        Assert.NotNull(choose);
+        Assert.Empty(choose!.Options);
+        Assert.Equal("${interface_list}", choose.OptionsFrom);
+    }
+
     private static FlowCanvasBridge.FlowCanvasExportResult RoundTripThroughBridge(string yaml)
     {
         var bridge = new FlowCanvasBridge();
@@ -1567,6 +1840,59 @@ public class FlowCanvasBridgeTests
         var script = parser.Parse(result.Yaml);
         var errors = parser.Validate(script, result.Yaml, enforceCanonicalSyntax: true);
         Assert.Empty(errors);
+    }
+
+    private static IReadOnlyList<string> GetSingleStepOptionOrder(string yaml, string commandKey)
+    {
+        var deserializer = new DeserializerBuilder().Build();
+        var root = deserializer.Deserialize<Dictionary<object, object?>>(yaml);
+
+        Assert.True(
+            TryGetCaseInsensitiveDictionaryValue(root, "steps", out var stepsObj),
+            "YAML does not contain a steps section.");
+        var steps = Assert.IsAssignableFrom<IList>(stepsObj);
+        Assert.NotEmpty(steps);
+
+        var stepMap = Assert.IsAssignableFrom<IDictionary>(steps[0]);
+        object? commandValue = null;
+        foreach (DictionaryEntry entry in stepMap)
+        {
+            if (string.Equals(entry.Key?.ToString(), commandKey, StringComparison.OrdinalIgnoreCase))
+            {
+                commandValue = entry.Value;
+                break;
+            }
+        }
+
+        Assert.NotNull(commandValue);
+        var optionMap = Assert.IsAssignableFrom<IDictionary>(commandValue);
+        var keys = new List<string>();
+        foreach (DictionaryEntry entry in optionMap)
+        {
+            if (entry.Key is string key && !string.IsNullOrWhiteSpace(key))
+                keys.Add(key);
+        }
+
+        return keys;
+    }
+
+    private static bool TryGetCaseInsensitiveDictionaryValue(
+        IDictionary<object, object?> dictionary,
+        string key,
+        out object? value)
+    {
+        foreach (var pair in dictionary)
+        {
+            if (pair.Key is string pairKey &&
+                string.Equals(pairKey, key, StringComparison.OrdinalIgnoreCase))
+            {
+                value = pair.Value;
+                return true;
+            }
+        }
+
+        value = null;
+        return false;
     }
 
     private static IReadOnlyList<(string Name, string Commands)> LoadQaYamlPresets()
@@ -1611,12 +1937,21 @@ public class FlowCanvasBridgeTests
 
     private static IReadOnlyDictionary<string, HashSet<string>> LoadRegistryBlockPropertyKeys(out string registryText)
     {
+        var orderedProperties = LoadRegistryBlockPropertyOrder(out registryText);
+        return orderedProperties.ToDictionary(
+            pair => pair.Key,
+            pair => new HashSet<string>(pair.Value, StringComparer.OrdinalIgnoreCase),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> LoadRegistryBlockPropertyOrder(out string registryText)
+    {
         var repoRoot = FindRepositoryRoot();
         var registryPath = Path.Combine(repoRoot, "FlowCanvas", "src", "blockDefs", "registry.ts");
         registryText = File.ReadAllText(registryPath);
         var lines = registryText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
 
-        var blockProperties = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var blockProperties = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         string? currentBlockType = null;
         var inProperties = false;
         var bracketDepth = 0;
@@ -1634,36 +1969,110 @@ public class FlowCanvasBridgeTests
             if (line.Trim() == "];")
                 break;
 
-            var typeMatch = Regex.Match(line, @"^\s*(?:\{\s*)?type:\s*'(?<type>[^']+)'\s*,");
-            if (typeMatch.Success)
-            {
-                currentBlockType = typeMatch.Groups["type"].Value;
-                if (!blockProperties.ContainsKey(currentBlockType))
-                    blockProperties[currentBlockType] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            }
-
             if (!inProperties)
             {
+                var typeMatch = Regex.Match(line, @"^\s*(?:\{\s*)?type:\s*'(?<type>[^']+)'\s*,");
+                if (typeMatch.Success)
+                {
+                    currentBlockType = typeMatch.Groups["type"].Value;
+                    if (!blockProperties.ContainsKey(currentBlockType))
+                        blockProperties[currentBlockType] = new List<string>();
+                }
+
                 if (currentBlockType != null && line.Contains("properties:", StringComparison.Ordinal))
                 {
                     inProperties = true;
                     bracketDepth = CountChar(line, '[') - CountChar(line, ']');
+                    AppendRegistryPropertyKeysFromLine(line, blockProperties[currentBlockType]);
+                    if (bracketDepth <= 0)
+                        inProperties = false;
                 }
 
                 continue;
             }
 
-            foreach (Match keyMatch in Regex.Matches(line, @"key:\s*'(?<key>[^']+)'"))
-            {
-                blockProperties[currentBlockType!].Add(keyMatch.Groups["key"].Value);
-            }
+            AppendRegistryPropertyKeysFromLine(line, blockProperties[currentBlockType!]);
 
             bracketDepth += CountChar(line, '[') - CountChar(line, ']');
             if (bracketDepth <= 0)
                 inProperties = false;
         }
 
-        return blockProperties;
+        return blockProperties.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<string>)pair.Value,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void AppendRegistryPropertyKeysFromLine(string line, List<string> keys)
+    {
+        foreach (Match keyMatch in Regex.Matches(line, @"key:\s*'(?<key>[^']+)'"))
+        {
+            AddPropertyKeyIfMissing(keys, keyMatch.Groups["key"].Value);
+        }
+
+        if (line.Contains("timeoutProp", StringComparison.Ordinal))
+            AddPropertyKeyIfMissing(keys, "timeout");
+
+        if (line.Contains("onErrorProp", StringComparison.Ordinal))
+            AddPropertyKeyIfMissing(keys, "on_error");
+    }
+
+    private static void AddPropertyKeyIfMissing(List<string> keys, string key)
+    {
+        if (!keys.Contains(key, StringComparer.OrdinalIgnoreCase))
+            keys.Add(key);
+    }
+
+    private static HashSet<string> LoadPropertiesPanelAdvancedKeys(out string propertiesText)
+    {
+        var repoRoot = FindRepositoryRoot();
+        var propertiesPath = Path.Combine(repoRoot, "FlowCanvas", "src", "panels", "Properties.tsx");
+        propertiesText = File.ReadAllText(propertiesPath);
+
+        var advancedSetMatch = Regex.Match(
+            propertiesText,
+            @"const\s+ADVANCED_PROPERTY_KEYS\s*=\s*new Set\(\[(?<values>[\s\S]*?)\]\);",
+            RegexOptions.Multiline);
+        Assert.True(advancedSetMatch.Success, "Unable to find ADVANCED_PROPERTY_KEYS in Properties.tsx.");
+
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match keyMatch in Regex.Matches(advancedSetMatch.Groups["values"].Value, @"'([^']+)'"))
+            keys.Add(keyMatch.Groups[1].Value);
+
+        return keys;
+    }
+
+    private static IReadOnlyList<string> ToPropertiesPanelDisplayOrder(
+        IReadOnlyList<string> propertyOrder,
+        ISet<string> advancedKeys)
+    {
+        var core = new List<string>();
+        var advanced = new List<string>();
+        var onError = new List<string>();
+
+        foreach (var key in propertyOrder)
+        {
+            if (string.Equals(key, "on_error", StringComparison.OrdinalIgnoreCase))
+            {
+                onError.Add(key);
+                continue;
+            }
+
+            if (advancedKeys.Contains(key))
+            {
+                advanced.Add(key);
+                continue;
+            }
+
+            core.Add(key);
+        }
+
+        var ordered = new List<string>(core.Count + advanced.Count + onError.Count);
+        ordered.AddRange(core);
+        ordered.AddRange(advanced);
+        ordered.AddRange(onError);
+        return ordered;
     }
 
     private static int CountChar(string value, char ch)

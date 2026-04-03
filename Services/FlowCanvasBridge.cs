@@ -234,9 +234,62 @@ namespace SSH_Helper.Services
                 ["log"] = ["message"],
             };
 
+        private static readonly IReadOnlyDictionary<string, string[]> PreferredOptionOrderOverridesByCommand =
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                // Properties panel order differs from parser option-key catalog for these blocks.
+                ["send"] = ["command", "capture", "suppress", "expect", "timeout", "retry", "retry_delay", "fail_on_nonzero", "on_error"],
+                ["extract"] = ["pattern", "into", "from", "match", "required"],
+                ["choose"] = ["title", "prompt", "options", "into", "default", "on_error"],
+                ["multiselect"] = ["title", "prompt", "options", "into", "min", "max", "on_error"],
+                ["playsound"] = ["path", "max_seconds", "into", "wait", "volume", "on_error"],
+            };
+
+        private static readonly HashSet<string> AdvancedPanelOptionKeys = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "default",
+            "validate",
+            "validation_error",
+            "min",
+            "max",
+            "timeout",
+            "retry",
+            "retry_delay",
+            "fail_on_nonzero",
+            "suppress",
+            "expect",
+            "capture",
+            "headers",
+            "follow_redirects",
+            "allow_failure",
+            "verify_tls",
+            "auth",
+            "username",
+            "password",
+            "token",
+            "content_type",
+            "encoding",
+            "max_lines",
+            "trim_lines",
+            "skip_empty_lines",
+            "pretty",
+            "format",
+            "volume",
+            "wait",
+        };
+
         internal static IReadOnlyDictionary<string, IReadOnlyList<string>> GetExportOptionKeysByCommand()
         {
             return ScriptParser.GetKnownStepOptionKeysByCommand();
+        }
+
+        internal static IReadOnlyDictionary<string, IReadOnlyList<string>> GetPreferredExportOptionOrderByCommand()
+        {
+            var declaredOptions = ScriptParser.GetDeclaredStepOptionKeysByCommand();
+            return declaredOptions.ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyList<string>)ResolvePreferredOptionOrder(pair.Key).ToList(),
+                StringComparer.OrdinalIgnoreCase);
         }
 
         internal static IReadOnlyDictionary<string, string> GetBlockTypeCommandKeyAliases()
@@ -2069,6 +2122,40 @@ namespace SSH_Helper.Services
                     target[key] = true;
             }
 
+            static JArray SerializeChoiceOptions(IEnumerable<ChoiceOption> options)
+            {
+                var serialized = new JArray();
+
+                foreach (var option in options)
+                {
+                    var label = option.Label?.Trim() ?? string.Empty;
+                    var value = option.Value?.Trim() ?? string.Empty;
+
+                    if (string.IsNullOrWhiteSpace(label) && string.IsNullOrWhiteSpace(value))
+                        continue;
+
+                    if (string.IsNullOrWhiteSpace(label))
+                        label = value;
+                    if (string.IsNullOrWhiteSpace(value))
+                        value = label;
+
+                    if (string.Equals(label, value, StringComparison.Ordinal))
+                    {
+                        serialized.Add(value);
+                    }
+                    else
+                    {
+                        serialized.Add(new JObject
+                        {
+                            ["label"] = label,
+                            ["value"] = value
+                        });
+                    }
+                }
+
+                return serialized;
+            }
+
             // Common options shared across multiple commands.
             SetIfNumber(props, "timeout", step.Timeout);
             SetIfNotNull(props, "on_error", step.OnError);
@@ -2257,7 +2344,7 @@ namespace SSH_Helper.Services
                         }
                         else if (step.Choose.Options.Count > 0)
                         {
-                            props["options"] = JArray.FromObject(step.Choose.Options.Select(option => option.Value));
+                            props["options"] = SerializeChoiceOptions(step.Choose.Options);
                         }
                     }
                     break;
@@ -2276,7 +2363,7 @@ namespace SSH_Helper.Services
                         }
                         else if (step.Multiselect.Options.Count > 0)
                         {
-                            props["options"] = JArray.FromObject(step.Multiselect.Options.Select(option => option.Value));
+                            props["options"] = SerializeChoiceOptions(step.Multiselect.Options);
                         }
                     }
                     break;
@@ -2542,7 +2629,8 @@ namespace SSH_Helper.Services
             if (!TryEnsureRequiredOptions(commandKey, options, out error))
                 return false;
 
-            var commandValue = BuildCommandValueToken(commandKey, options);
+            var orderedOptions = ReorderOptionsForSerialization(commandKey, options);
+            var commandValue = BuildCommandValueToken(commandKey, orderedOptions);
             return TrySerializeStepYaml(commandKey, commandValue, out yaml, out error);
         }
 
@@ -3389,6 +3477,79 @@ namespace SSH_Helper.Services
                 return string.IsNullOrEmpty(value);
 
             return string.IsNullOrWhiteSpace(value);
+        }
+
+        private static JObject ReorderOptionsForSerialization(string commandKey, JObject options)
+        {
+            if (options.Count <= 1)
+                return options;
+
+            var preferredOrder = ResolvePreferredOptionOrder(commandKey);
+            if (preferredOrder.Count == 0)
+                return options;
+
+            var ordered = new JObject();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var key in preferredOrder)
+            {
+                if (seen.Contains(key))
+                    continue;
+
+                if (!options.TryGetValue(key, StringComparison.OrdinalIgnoreCase, out var value))
+                    continue;
+
+                ordered[key] = value.DeepClone();
+                seen.Add(key);
+            }
+
+            // Preserve any non-panel/unknown keys by appending them in their current order.
+            foreach (var property in options.Properties())
+            {
+                if (seen.Contains(property.Name))
+                    continue;
+
+                ordered[property.Name] = property.Value.DeepClone();
+                seen.Add(property.Name);
+            }
+
+            return ordered;
+        }
+
+        private static IReadOnlyList<string> ResolvePreferredOptionOrder(string commandKey)
+        {
+            if (PreferredOptionOrderOverridesByCommand.TryGetValue(commandKey, out var overrideOrder))
+                return overrideOrder;
+
+            if (!ScriptParser.GetDeclaredStepOptionKeysByCommand().TryGetValue(commandKey, out var parserOrder))
+                return Array.Empty<string>();
+
+            // Mirror Properties panel grouping and order: Core -> Advanced -> On Error.
+            var core = new List<string>();
+            var advanced = new List<string>();
+            var onError = new List<string>();
+            foreach (var optionKey in parserOrder)
+            {
+                if (string.Equals(optionKey, "on_error", StringComparison.OrdinalIgnoreCase))
+                {
+                    onError.Add(optionKey);
+                }
+                else if (AdvancedPanelOptionKeys.Contains(optionKey))
+                {
+                    advanced.Add(optionKey);
+                }
+                else
+                {
+                    core.Add(optionKey);
+                }
+            }
+
+            var ordered = new List<string>(core.Count + advanced.Count + onError.Count);
+            ordered.AddRange(core);
+            ordered.AddRange(advanced);
+            ordered.AddRange(onError);
+
+            return ordered;
         }
 
         private static bool AllowsWhitespaceOnlyRequiredValue(string commandKey, string optionKey)

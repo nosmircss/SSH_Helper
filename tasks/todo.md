@@ -1,5 +1,109 @@
 # TODO
 
+## 186. Restore host-grid row-header current-row indicator glyph visibility
+- [x] 186.1 Confirm root cause in row-header paint path and define minimal fix scope.
+- [x] 186.2 Patch row-header number rendering to preserve the built-in indicator glyph area.
+- [x] 186.3 Run focused host-grid UI verification and capture evidence.
+- [x] 186.4 Document review notes (root cause, fix, verification).
+
+### 186 Review
+- Root cause: `Dgv_Variables_RowPostPaint` repainted the full row-header rectangle (`FillRectangle` + custom border) after default `DataGridView` painting, which erased the built-in current-row triangle glyph.
+- Fix in `Form1.cs`:
+- added `HostGridRowHeaderGlyphReservationWidth` constant.
+- removed full row-header background/border repaint from `Dgv_Variables_RowPostPaint`.
+- row index text now renders only in a right-side text rectangle that reserves the left glyph lane so the indicator remains visible.
+- Verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\row-header-indicator-fix\bin\ -p:BaseIntermediateOutputPath=artifacts\row-header-indicator-fix\obj\` (passed: `6/6`).
+- `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\row-header-indicator-fix-build\bin\ -p:BaseIntermediateOutputPath=artifacts\row-header-indicator-fix-build\obj\` (passed; existing warnings unchanged: `MSB3277`, `CS8602`, `xUnit1031`).
+
+## 185. Enforce panel-order YAML export for all Flow Canvas blocks
+- [x] 185.1 Audit panel order vs bridge preferred export order across all block commands.
+- [x] 185.2 Patch remaining command-order mismatch(es) so export key order matches Properties panel order.
+- [x] 185.3 Add drift-guard coverage that validates all block property orders against bridge export ordering.
+- [x] 185.4 Run focused + regression verification and capture outcomes.
+- [x] 185.5 Document review notes (root cause, implementation, evidence).
+
+### 185 Review
+- Root cause: after moving fallback ordering to parser declared keys, one command still diverged from panel display order: `extract` parser order (`from, pattern, into, ...`) did not match Properties panel order (`pattern, into, from, ...`).
+- Fix in `Services/FlowCanvasBridge.cs`:
+- extended `PreferredOptionOrderOverridesByCommand` with `extract` panel order: `pattern`, `into`, `from`, `match`, `required`.
+- added `GetPreferredExportOptionOrderByCommand()` to expose resolved command ordering for drift-guard verification.
+- Added/updated tests in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`:
+- `ExportGraphToYaml_ExtractOptions_AreSerializedInPropertiesPanelOrder`
+- `DriftGuard_RegistryPanelOrder_MatchesBridgePreferredExportOrder_ForAllBlocks`
+- Enhanced registry helper parsing to preserve property order and include `timeoutProp`/`onErrorProp` references so drift checks compare real panel order.
+- Verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_ExtractOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~DriftGuard_RegistryPanelOrder_MatchesBridgePreferredExportOrder_ForAllBlocks" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\all-block-order-focused\bin\ -p:BaseIntermediateOutputPath=artifacts\all-block-order-focused\obj\` (passed: `2/2`).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\all-block-order-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\all-block-order-regression\obj\` (passed: `56/56`).
+
+## 184. Align playsound YAML key order with Properties panel
+- [x] 184.1 Add a failing FlowCanvasBridge regression for `playsound` option order using the reported key set.
+- [x] 184.2 Extend export preferred-order overrides so `playsound` emits panel-order keys (`path`, `max_seconds`, `into`, `wait`, `volume`, `on_error`).
+- [x] 184.3 Run focused + bridge-regression verification and capture outcomes.
+- [x] 184.4 Document review notes with root cause and verification evidence.
+
+### 184 Review
+- Root cause: export fallback ordering for non-overridden commands used `ScriptParser.GetKnownStepOptionKeysByCommand()`, which returns alphabetically sorted keys; for `playsound` that produced `into, max_seconds, path, volume, ...` instead of panel order.
+- Added RED regression in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`:
+- `ExportGraphToYaml_PlaySoundOptions_AreSerializedInPropertiesPanelOrder`
+- RED verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_PlaySoundOptions_AreSerializedInPropertiesPanelOrder" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\playsound-order-red\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-order-red\obj\` (failed as expected: actual `into, max_seconds, path, volume, on_error`).
+- Fix in `Services/FlowCanvasBridge.cs`:
+- extended `PreferredOptionOrderOverridesByCommand` with `playsound` panel order:
+- `path`, `max_seconds`, `into`, `wait`, `volume`, `on_error`.
+- GREEN verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_PlaySoundOptions_AreSerializedInPropertiesPanelOrder" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\playsound-order-green\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-order-green\obj\` (passed: `1/1`).
+- Regression verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\playsound-order-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-order-regression\obj\` (passed: `52/52`).
+
+## 183. Align Flow Canvas YAML option order with Properties panel order
+- [x] 183.1 Confirm current export ordering behavior and identify panel-order mismatches (e.g., `send`, `choose`, `multiselect`, `confirm`).
+- [x] 183.2 Add failing FlowCanvasBridge regressions that assert canonical export option ordering matches Properties panel order.
+- [x] 183.3 Patch export serialization to emit options in panel-aligned order while preserving unknown keys.
+- [x] 183.4 Run focused + regression verification and capture outcomes.
+- [x] 183.5 Add review notes with root cause, implementation details, and test evidence.
+
+### 183 Review
+- Root cause: non-container step export builds options from mutable `JObject` insertion order (snippet parse + prop-write sequence), so emitted YAML key order reflected property-write timing, not Properties panel ordering.
+- Added RED regressions in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`:
+- `ExportGraphToYaml_SendOptions_AreSerializedInPropertiesPanelOrder`
+- `ExportGraphToYaml_ChooseOptions_AreSerializedInPropertiesPanelOrder`
+- RED verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_SendOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~ExportGraphToYaml_ChooseOptions_AreSerializedInPropertiesPanelOrder" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\panel-order-red\bin\ -p:BaseIntermediateOutputPath=artifacts\panel-order-red\obj\` (failed as expected with non-panel option order).
+- Fix in `Services/FlowCanvasBridge.cs`:
+- added panel-order overrides for `send`, `choose`, `multiselect`, and `confirm` (`PreferredOptionOrderOverridesByCommand`).
+- added `ReorderOptionsForSerialization(...)` and `ResolvePreferredOptionOrder(...)`.
+- serialization now reorders keys to panel-aligned sequence before YAML emission and appends unknown/non-panel keys afterward in stable order.
+- default ordering for other commands uses parser option order with `on_error` forced to trailing position to match panel section layout.
+- GREEN verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_SendOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~ExportGraphToYaml_ChooseOptions_AreSerializedInPropertiesPanelOrder" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\panel-order-green\bin\ -p:BaseIntermediateOutputPath=artifacts\panel-order-green\obj\` (passed: `2/2`).
+- Regression verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\panel-order-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\panel-order-regression\obj\` (passed: `51/51`).
+
+## 182. Fix Flow Canvas input `on_error` export rejection
+- [x] 182.1 Confirm root cause across registry, export option catalogs, and parser input-map handling.
+- [x] 182.2 Add focused failing regression coverage proving `input.on_error` exports and parses as canonical runtime syntax.
+- [x] 182.3 Patch parser option catalog + input-map parsing so `input.on_error` is treated as a supported nested alias.
+- [x] 182.4 Run focused verification (`FlowCanvasBridgeTests` + parser tests) and record outcomes.
+- [x] 182.5 Add review notes with root cause, fix summary, and verification evidence.
+
+### 182 Review
+- Root cause: Flow Canvas registry exposes `input.on_error`, but the parser/export option catalog (`ScriptParser.CommandOptionKeys["input"]`) omitted `on_error`, and `ParseInputOptions(...)` did not map nested `on_error` into `step.OnError`.
+- This mismatch caused bridge export rejection with: `Block 'input' contains unsupported or invalid properties: on_error`.
+- Added RED regressions:
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`: `ExportGraphToYaml_InputWithOnError_ExportsSuccessfully`
+- `SSH_Helper.Tests/Scripting/ScriptParserTests.cs`: `Parse_InputOnErrorInsideMap_ParsesOnError`
+- RED verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Parse_InputOnErrorInsideMap_ParsesOnError|FullyQualifiedName~ExportGraphToYaml_InputWithOnError_ExportsSuccessfully" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\input-onerror-red\bin\ -p:BaseIntermediateOutputPath=artifacts\input-onerror-red\obj\` (failed as expected: export rejected `on_error`; parser left `OnError` null).
+- Fix in `Services/Scripting/ScriptParser.cs`:
+- added `on_error` to known input option keys.
+- updated input parse dispatch to pass `ScriptStep` into `ParseInputOptions(...)`.
+- added `on_error`/`onerror` handling in `ParseInputOptions(...)` via `ApplyNestedOnErrorAlias(step, parser)`.
+- GREEN verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Parse_InputOnErrorInsideMap_ParsesOnError|FullyQualifiedName~ExportGraphToYaml_InputWithOnError_ExportsSuccessfully" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\input-onerror-green\bin\ -p:BaseIntermediateOutputPath=artifacts\input-onerror-green\obj\` (passed: `2/2`).
+- Regression verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~ScriptParserTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\input-onerror-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\input-onerror-regression\obj\` (passed: `204/204`).
+
 ## 180. Align Flow Canvas required markers with parser/runtime validation
 - [x] 180.1 Add failing parser validation tests for missing required checks (`choose.into/options`, `multiselect.into/options`, `confirm.into`, `webhook.url`, `log.message`).
 - [x] 180.2 Add/extend FlowCanvas bridge export tests so required-option enforcement matches parser-required behavior (including `extract.from`, `browser_callback_capture.into`, and conditional `readfile.path`).
@@ -2987,3 +3091,39 @@
   - RED: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PlaySoundCommandTests.ExecuteAsync_FailureWithoutOnError_DefaultsToContinueAndCapturesMeta|FullyQualifiedName~ScriptParserTests.Validate_PlaySoundFractionalMaxSeconds_IsAccepted" -p:UseAppHost=false -p:BaseOutputPath=artifacts\playsound-default-red\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-default-red\obj\` (failed as expected: `2/2`).
   - GREEN (focused): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PlaySoundCommandTests|FullyQualifiedName~ScriptParserTests.Validate_PlaySound" -p:UseAppHost=false -p:BaseOutputPath=artifacts\playsound-default-green2\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-default-green2\obj\` (passed: `9/9`).
   - Regression: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests|FullyQualifiedName~PlaySoundCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\playsound-default-regression2\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-default-regression2\obj\` (passed: `153/153`).
+
+## 181. Flow Canvas properties UX upgrade (choose-focused + quick wins)
+- [x] 181.1 Add failing coverage for choose/multiselect dual-mode options editor (mode switch, row edits, legacy hydration, and default mismatch validation).
+- [x] 181.2 Add failing FlowCanvasBridge coverage for choose/multiselect label/value round-trip and scalar source preservation.
+- [x] 181.3 Extend FlowCanvas property metadata/schema (`helpText`, `group`, `editor`) and update choose/multiselect definitions.
+- [x] 181.4 Implement specialized choose/multiselect options editor with source/static modes, variable insertion assist, validation, and compatibility-safe storage.
+- [x] 181.5 Improve pane UX: section grouping (`Core`/`Advanced`/`On Error`), inline required/error states, select placeholders, helper text, and variable insertion affordance for text-like fields.
+- [x] 181.6 Preserve choose/multiselect label/value fidelity in `FlowCanvasBridge` import/export.
+- [x] 181.7 Run focused verification (`Playwright`, `.NET tests`, `npm run build`) and record outcomes.
+
+### 181 Review
+- Added new Flow Canvas e2e coverage in `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts` with `createChoiceOptionsUxFixture()` in `FlowCanvas/e2e/fixtures/graphs.ts` for:
+  - legacy hydration to static rows (`"alpha,beta"`),
+  - source-mode variable insertion and scalar options persistence,
+  - static row add/edit/reorder behavior with mixed string/object export payloads,
+  - inline choose-default mismatch warning.
+- Extended property metadata in `FlowCanvas/src/blockDefs/registry.ts` (`helpText`, `group`, `editor`) and marked choose/multiselect `options` with `editor: 'choice-options'` plus helper text.
+- Updated `FlowCanvas/src/panels/Properties.tsx`:
+  - dual-mode options editor for choose/multiselect (`From Variable` vs `Static Options`),
+  - compatibility-safe hydration/serialization across scalar, comma/newline legacy text, array strings, and array `{label,value}` objects,
+  - inline option/source validation and choose `default` mismatch warning,
+  - grouped properties sections (`Core`, `Advanced`, trailing `On Error`),
+  - inline required/error rendering and helper-text rendering,
+  - required-select placeholder/invalid behavior and variable insertion affordances for text/code/textarea fields.
+- Updated FlowCanvas bridge fidelity in `Services/FlowCanvasBridge.cs` so choose/multiselect options now round-trip as:
+  - string items when `label == value`,
+  - `{ label, value }` objects when they differ,
+  - scalar `OptionsFrom` preserved for source mode.
+- Hardened drift-guard test parsing in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` so multiline property `type:` lines in registry definitions are not misread as block definitions.
+- Verification:
+  - RED (pre-existing run before implementation): targeted new choose UX Playwright tests and new bridge round-trip tests failed as expected.
+  - GREEN: `npm run build` (FlowCanvas).
+  - GREEN: `npx playwright test e2e/flow-canvas-properties-typing.spec.ts --grep "Flow Canvas Choice Options UX"` (passed `3/3`).
+  - GREEN: `npx playwright test e2e/flow-canvas-properties-typing.spec.ts` (passed `11/11`).
+  - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ImportExportRoundTrip_ChooseLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_MultiselectLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_ChooseOptionsSourceScalar_PreservesSource"` (passed `3/3`).
+  - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests"` (passed `48/48`).

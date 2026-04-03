@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
+  createChoiceOptionsUxFixture,
   createImportedChildEditingFixture,
   createPathPropertyFixture,
   createPropertiesTypingFixture,
@@ -292,6 +293,81 @@ test.describe('Flow Canvas Required Markers', () => {
     await expectFieldRequired(page, 'properties-field-command-code', true);
     await expectFieldRequired(page, 'properties-field-max_seconds-number', false);
     await expectFieldRequired(page, 'properties-field-max_lines-number', false);
+  });
+});
+
+test.describe('Flow Canvas Choice Options UX', () => {
+  test.beforeEach(async ({ page }) => {
+    await installHostMessageCapture(page);
+    await page.goto('/');
+    await waitForOutgoingMessage(page, 'ready');
+    await clearOutgoingMessages(page);
+    await loadGraphFixture(page, createChoiceOptionsUxFixture());
+
+    await expect(nodeById(page, 'node-choose-ux')).toBeVisible();
+  });
+
+  test('legacy options hydrate to static rows and choose default mismatch is shown', async ({ page }) => {
+    await nodeById(page, 'node-choose-ux').click({ force: true });
+    await expect(page.getByTestId('properties-panel')).toBeVisible();
+
+    await expect(page.getByTestId('properties-field-options-text-mode-static')).toHaveAttribute('data-active', 'true');
+    await expect(page.getByTestId('properties-field-options-text-row-0-label')).toHaveValue('alpha');
+    await expect(page.getByTestId('properties-field-options-text-row-0-value')).toHaveValue('alpha');
+    await expect(page.getByTestId('properties-field-options-text-row-1-label')).toHaveValue('beta');
+    await expect(page.getByTestId('properties-field-options-text-row-1-value')).toHaveValue('beta');
+    await expect(page.getByTestId('properties-field-default-text-warning')).toContainText('Default value is not in the static options list');
+  });
+
+  test('source mode persists scalar options and variable insertion assist', async ({ page }) => {
+    await postHostMessage(page, {
+      type: 'variables-snapshot',
+      variables: {
+        interface_list: ['wan1', 'wan2'],
+      },
+      changedKeys: ['interface_list'],
+    });
+
+    await nodeById(page, 'node-choose-ux').click({ force: true });
+    await expect(page.getByTestId('properties-panel')).toBeVisible();
+
+    await page.getByTestId('properties-field-options-text-mode-source').click();
+    await expect(page.getByTestId('properties-field-options-text-mode-source')).toHaveAttribute('data-active', 'true');
+
+    const sourceInput = page.getByTestId('properties-field-options-text-source-input');
+    await sourceInput.fill('${');
+    await page.getByTestId('properties-field-options-text-source-insert-var').selectOption('interface_list');
+    await expect(sourceInput).toHaveValue('${interface_list}');
+
+    await clearOutgoingMessages(page);
+    await page.getByRole('button', { name: /apply yaml/i }).click();
+    const applyMessage = await waitForOutgoingMessage(page, 'apply-yaml');
+    const chooseProps = getNodePropsFromMessage(applyMessage, 'node-choose-ux');
+    expect(chooseProps.options).toBe('${interface_list}');
+  });
+
+  test('static rows support add/remove/reorder and persist mixed string+object arrays', async ({ page }) => {
+    await nodeById(page, 'node-multiselect-ux').click({ force: true });
+    await expect(page.getByTestId('properties-panel')).toBeVisible();
+
+    await expect(page.getByTestId('properties-field-options-text-row-0-label')).toHaveValue('one');
+    await expect(page.getByTestId('properties-field-options-text-row-1-label')).toHaveValue('Two Label');
+    await expect(page.getByTestId('properties-field-options-text-row-1-value')).toHaveValue('two_value');
+
+    await page.getByTestId('properties-field-options-text-add-row').click();
+    await page.getByTestId('properties-field-options-text-row-2-label').fill('Three Label');
+    await page.getByTestId('properties-field-options-text-row-2-value').fill('three_value');
+    await page.getByTestId('properties-field-options-text-row-2-up').click();
+
+    await clearOutgoingMessages(page);
+    await page.getByRole('button', { name: /apply yaml/i }).click();
+    const applyMessage = await waitForOutgoingMessage(page, 'apply-yaml');
+    const multiProps = getNodePropsFromMessage(applyMessage, 'node-multiselect-ux');
+    expect(multiProps.options).toEqual([
+      'one',
+      { label: 'Three Label', value: 'three_value' },
+      { label: 'Two Label', value: 'two_value' },
+    ]);
   });
 });
 

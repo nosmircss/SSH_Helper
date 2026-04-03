@@ -44,6 +44,11 @@ export const createExecutionSlice: StateCreator<FlowStore, [], [], ExecutionSlic
   setRunning: (running) => set({ isRunning: running }),
 
   setBlockState: (id, state) => {
+    const hasNode = get().nodes.some((node) => node.id === id);
+    if (!hasNode) {
+      console.warn(`[FlowCanvas] execution update targeted unknown node id '${id}' (state='${state}').`);
+    }
+
     set((s) => {
       const next = new Map(s.blockStates);
       next.set(id, state);

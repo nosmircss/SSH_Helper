@@ -111,7 +111,7 @@ namespace SSH_Helper.Services.Scripting
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
                 ["exists"] = ["path", "into", "type", "on_error"],
                 ["playsound"] = ["path", "wait", "volume", "max_seconds", "into", "on_error"],
-                ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error"],
+                ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error", "on_error"],
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
                 ["log"] = ["message", "level"],
@@ -280,6 +280,16 @@ namespace SSH_Helper.Services.Scripting
                 pair => (IReadOnlyList<string>)pair.Value
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        public static IReadOnlyDictionary<string, IReadOnlyList<string>> GetDeclaredStepOptionKeysByCommand()
+        {
+            return CommandOptionKeys.ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyList<string>)pair.Value
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList(),
                 StringComparer.OrdinalIgnoreCase);
         }
@@ -912,7 +922,7 @@ namespace SSH_Helper.Services.Scripting
                         break;
                     case "input":
                         step.DeclaredStepType = StepType.Input;
-                        step.Input = ParseInputOptions(parser);
+                        step.Input = ParseInputOptions(parser, step);
                         break;
                     case "updatecolumn":
                         step.DeclaredStepType = StepType.UpdateColumn;
@@ -2088,7 +2098,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private InputOptions ParseInputOptions(IParser parser)
+        private InputOptions ParseInputOptions(IParser parser, ScriptStep step)
         {
             var options = new InputOptions();
 
@@ -2125,6 +2135,10 @@ namespace SSH_Helper.Services.Scripting
                         case "validation_error":
                         case "validationerror":
                             options.ValidationError = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown input key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
