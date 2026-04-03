@@ -1,5 +1,19 @@
 # TODO
 
+## 187. Harden GitHub build-release workflow before next tag build
+- [x] 187.1 Re-confirm workflow risks and define minimal safe fix scope.
+- [x] 187.2 Patch `build-release.yml` to ensure build job has Node/FlowCanvas dependencies available.
+- [x] 187.3 Add explicit workflow token permissions needed for release publishing.
+- [x] 187.4 Verify final workflow diff and capture review notes.
+
+### 187 Review
+- Root cause: `dotnet publish` in the Windows `build` job implicitly runs the `BuildFlowCanvas` target from `SSH_Helper.csproj`, but that job had no Node setup or `FlowCanvas` dependency install on a clean runner.
+- Fix in `.github/workflows/build-release.yml`:
+- added top-level `permissions: contents: write` so release creation does not depend on repository default workflow token permissions.
+- added `actions/setup-node@v4` (`node-version: 20`) and `npm ci` in `build` before restore/publish so `npm run build` invoked by MSBuild has local dependencies.
+- Verification:
+- `git diff -- .github/workflows/build-release.yml` shows only the intended permission + build-job Node/npm additions.
+
 ## 186. Restore host-grid row-header current-row indicator glyph visibility
 - [x] 186.1 Confirm root cause in row-header paint path and define minimal fix scope.
 - [x] 186.2 Patch row-header number rendering to preserve the built-in indicator glyph area.
