@@ -28,6 +28,11 @@ public class ScriptPromptDialogRunnerTests
 
         try
         {
+            // Ensure GetMainForm() returns our test form, not a stale form from another
+            // test collection's STA thread (which would cause InvokeRequired=true and
+            // route BeginInvoke to the wrong message pump).
+            ScriptPromptDialogRunner.AnchorFormOverride = owner;
+
             TestPromptDialog? capturedDialog = null;
             var resultTask = ScriptPromptDialogRunner.ShowAsync<TestPromptDialog, DialogResult>(
                 () =>
@@ -65,6 +70,7 @@ public class ScriptPromptDialogRunnerTests
         }
         finally
         {
+            ScriptPromptDialogRunner.AnchorFormOverride = null;
             ScriptPromptDialogRunner.RestoreMainFormActivationOverrideForTests = null;
         }
     }
