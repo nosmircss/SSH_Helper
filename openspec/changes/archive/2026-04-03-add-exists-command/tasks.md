@@ -16,5 +16,5 @@
 
 ## 5. Verification
 - [x] 5.1 Add/extend automated tests for parser validation and runtime behavior.
-- [ ] 5.2 Run `dotnet build SSH_Helper.sln`.
+- [x] 5.2 Run `dotnet build SSH_Helper.sln`.
 - [x] 5.3 Run targeted non-interactive tests for scripting/runtime parser coverage.

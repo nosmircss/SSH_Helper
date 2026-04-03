@@ -120,3 +120,56 @@ Script validation SHALL treat `readfile.path` as conditionally required based on
 - **WHEN** a `readfile` step includes `message` and `fileext`
 - **THEN** validation accepts those keys as part of the supported `readfile` contract
 
+### Requirement: Playsound command validation
+Script validation SHALL support `playsound` as a command-map step with required keys and constrained option values.
+
+Validation rules:
+- `playsound` MUST be authored as a mapping.
+- `playsound.path` is required and must be non-empty.
+- Allowed keys under `playsound` are `path`, `wait`, `volume`, `max_seconds`, `into`, and `on_error`.
+- `playsound.wait`, when provided, MUST be a boolean-like token (`true|false|yes|no|1|0`).
+- `playsound.volume`, when provided, MUST parse to an integer in range `0..100`.
+- `playsound.max_seconds`, when provided, MUST parse to a positive integer (`> 0`).
+
+#### Scenario: Missing path is rejected
+- **WHEN** a `playsound` step omits `path`
+- **THEN** validation reports a required-key error for `playsound.path`
+
+#### Scenario: Invalid volume is rejected
+- **WHEN** a `playsound` step sets `volume` outside `0..100`
+- **THEN** validation reports a range error for `playsound.volume`
+
+#### Scenario: Invalid max_seconds is rejected
+- **WHEN** a `playsound` step sets `max_seconds` to `0`, negative, or non-numeric text
+- **THEN** validation reports that `playsound.max_seconds` must be a positive integer
+
+#### Scenario: Unknown key under playsound is rejected
+- **WHEN** a `playsound` step contains an unsupported key
+- **THEN** validation reports an unsupported-key error for that key
+
+### Requirement: Exists command validation
+Script validation SHALL support `exists` as a command-map step with required keys and constrained enum values.
+
+Validation rules:
+- `exists` MUST be authored as a mapping.
+- `exists.path` is required and must be non-empty.
+- `exists.into` is required and must be a valid variable name.
+- `exists.type`, when provided, MUST be one of `any`, `file`, `directory`.
+- Allowed keys under `exists` are `path`, `into`, `type`, and `on_error`.
+
+#### Scenario: Missing path is rejected
+- **WHEN** an `exists` step omits `path`
+- **THEN** validation reports a required-key error for `exists.path`
+
+#### Scenario: Missing into is rejected
+- **WHEN** an `exists` step omits `into`
+- **THEN** validation reports a required-key error for `exists.into`
+
+#### Scenario: Invalid type is rejected
+- **WHEN** an `exists` step sets `type` to a value outside `any|file|directory`
+- **THEN** validation reports explicit allowed values
+
+#### Scenario: Unknown key under exists is rejected
+- **WHEN** an `exists` step contains an unsupported key
+- **THEN** validation reports an unsupported-key error for that key
+
