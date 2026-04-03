@@ -20,7 +20,6 @@ export default function TimelinePanel() {
   const stopScrubbing = useFlowStore((s) => s.stopScrubbing);
 
   const tooltipRef = useRef<HTMLDivElement>(null);
-  const tooltipDataRef = useRef<{ label: string; duration: string } | null>(null);
 
   const maxDuration = timelineEntries.reduce(
     (max, e) => Math.max(max, e.duration ?? 0),
@@ -41,7 +40,6 @@ export default function TimelinePanel() {
       const tooltip = tooltipRef.current;
       if (!tooltip) return;
       const durationStr = duration !== undefined ? `${duration}ms` : 'running...';
-      tooltipDataRef.current = { label, duration: durationStr };
       tooltip.textContent = `${label} \u2014 ${durationStr}`;
       tooltip.style.display = 'block';
       const rect = (e.target as HTMLElement).getBoundingClientRect();

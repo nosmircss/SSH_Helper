@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 namespace SSH_Helper.Models
 {
@@ -30,6 +31,29 @@ namespace SSH_Helper.Models
         /// Node IDs of blocks that are disabled (skipped during execution).
         /// </summary>
         public List<string> DisabledBlockIds { get; set; } = new();
+
+        public CanvasLayoutData Clone()
+        {
+            return new CanvasLayoutData
+            {
+                StructureHash = StructureHash,
+                Positions = Positions.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => new NodePosition { X = kvp.Value.X, Y = kvp.Value.Y }),
+                Comments = Comments.Select(c => new CanvasComment
+                {
+                    Id = c.Id,
+                    Text = c.Text,
+                    Color = c.Color,
+                    X = c.X,
+                    Y = c.Y,
+                    Width = c.Width,
+                    Height = c.Height,
+                    AttachedToNodeId = c.AttachedToNodeId,
+                }).ToList(),
+                DisabledBlockIds = new List<string>(DisabledBlockIds),
+            };
+        }
     }
 
     public class NodePosition

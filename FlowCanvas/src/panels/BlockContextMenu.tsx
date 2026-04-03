@@ -19,10 +19,10 @@ export default function BlockContextMenu() {
   const contextMenu = useFlowStore((s) => s.contextMenu);
   const hideContextMenu = useFlowStore((s) => s.hideContextMenu);
   const toggleBreakpoint = useFlowStore((s) => s.toggleBreakpoint);
-  const toggleDisabled = useFlowStore((s) => s.toggleDisabled);
+
   const addComment = useFlowStore((s) => s.addComment);
   const removeNodes = useFlowStore((s) => s.removeNodes);
-  const isDisabled = useFlowStore((s) => s.isDisabled);
+
   const nodes = useFlowStore((s) => s.nodes);
 
   const handleClickOutside = useCallback(() => {
@@ -60,7 +60,6 @@ export default function BlockContextMenu() {
 
   const { x, y, nodeId } = contextMenu;
   const isStartNode = nodeId === START_NODE_ID;
-  const disabled = isDisabled(nodeId);
 
   // Find node position for comment placement
   const node = nodes.find((n) => n.id === nodeId);
@@ -75,14 +74,6 @@ export default function BlockContextMenu() {
         icon: '\uD83D\uDD34',
         action: () => {
           toggleBreakpoint(nodeId);
-          hideContextMenu();
-        },
-      } as MenuItem,
-      {
-        label: disabled ? 'Enable Block' : 'Disable Block',
-        icon: disabled ? '\u25B6' : '\u23ED',
-        action: () => {
-          toggleDisabled(nodeId);
           hideContextMenu();
         },
       } as MenuItem,

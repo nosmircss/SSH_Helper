@@ -69,7 +69,7 @@ namespace SSH_Helper.Models
                 Timeout = Timeout,
                 IsFavorite = IsFavorite,
                 Folder = Folder,
-                CanvasLayout = CanvasLayout
+                CanvasLayout = CanvasLayout?.Clone()
             };
         }
 

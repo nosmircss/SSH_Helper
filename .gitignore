@@ -371,7 +371,11 @@ RebexPOC/
 # Rebex license key file (local development)
 rebex.key
 .claude/napkin.md
+.claude/settings.local.json
 .worktrees/
 .superpowers/
 
 tools/
+!FlowCanvas/tools/
+FlowCanvas/tools/*
+!FlowCanvas/tools/FlowCanvasParityCli/
