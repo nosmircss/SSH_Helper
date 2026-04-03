@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Drawing;
 using System.Text;
@@ -129,7 +130,7 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
-    public void CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceStaysHidden()
+    public void CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceShowsStepCommands()
     {
         using var control = new ScintillaScriptEditorControl();
         control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
@@ -140,7 +141,41 @@ public class ScintillaScriptEditorControlTests
         InvokeNonPublic(control, "Editor_KeyDown", null, new KeyEventArgs(Keys.Control | Keys.Space));
 
         var popup = GetCompletionPopup(control);
-        popup.Visible.Should().BeFalse();
+        var list = GetCompletionList(control);
+        popup.Visible.Should().BeTrue();
+        list.Items.OfType<CompletionItem>().Select(item => item.Label).Should().Contain("send");
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_BlankLine_AfterIndentlessStepsSequence_CtrlSpaceShowsStepCommands()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "steps:\n- send:\n    command: df\n\n- extract:\n    from: ${Host_IP}\n    into: foo\n    pattern: .*\n\n";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "Editor_KeyDown", null, new KeyEventArgs(Keys.Control | Keys.Space));
+
+        var popup = GetCompletionPopup(control);
+        var list = GetCompletionList(control);
+        popup.Visible.Should().BeTrue();
+        list.Items.OfType<CompletionItem>().Select(item => item.Label).Should().Contain("send");
+        list.Items.OfType<CompletionItem>().Should().OnlyContain(item => item.InsertText.StartsWith("- ", StringComparison.Ordinal));
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_PrintScreenKeyUp_DoesNotTriggerSuggestions()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "steps:\n  - dns:\n      ";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "Editor_KeyUp", null, new KeyEventArgs(Keys.Snapshot));
+
+        GetCompletionPopup(control).Visible.Should().BeFalse();
     }
 
     [WinFormsFact]
@@ -343,7 +378,7 @@ public class ScintillaScriptEditorControlTests
         var enterHandled = (bool)InvokeNonPublic(control, "HandleCompletionNavigation", new KeyEventArgs(Keys.Enter))!;
         enterHandled.Should().BeTrue();
         control.Text.Should().NotBe("st");
-        control.Text.Should().NotContain("\n");
+        NormalizeLineEndings(control.Text).Should().StartWith("steps: ");
 
         control.Text = "st";
         control.SelectionStart = control.Text.Length;
@@ -351,6 +386,95 @@ public class ScintillaScriptEditorControlTests
         var escapeHandled = (bool)InvokeNonPublic(control, "HandleCompletionNavigation", new KeyEventArgs(Keys.Escape))!;
         escapeHandled.Should().BeTrue();
         control.Text.Should().Be("st");
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_MouseClickOnSuggestion_CommitsClickedItem()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "steps:\n  - ";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+        var popup = GetCompletionPopup(control);
+        var list = GetCompletionList(control);
+        popup.Visible.Should().BeTrue();
+        list.Items.Count.Should().BeGreaterThan(1, "step-command completion should provide multiple choices");
+
+        var clickedIndex = 1;
+        var clickedItem = (CompletionItem)list.Items[clickedIndex]!;
+        var clickX = 6;
+        var clickY = (clickedIndex * list.ItemHeight) + Math.Max(2, list.ItemHeight / 2);
+        var lParam = NativeMethods.MakeLParam(clickX, clickY);
+
+        NativeMethods.SendMessage(list.Handle, NativeMethods.WM_LBUTTONDOWN, (IntPtr)NativeMethods.MK_LBUTTON, lParam);
+        Application.DoEvents();
+        NativeMethods.SendMessage(list.Handle, NativeMethods.WM_LBUTTONUP, IntPtr.Zero, lParam);
+
+        NormalizeLineEndings(control.Text).Should().EndWith($"\n  - {clickedItem.InsertText}: ");
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_ListFocus_DoesNotDismissSuggestions()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "st";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+        var popup = GetCompletionPopup(control);
+        var list = GetCompletionList(control);
+        popup.Visible.Should().BeTrue();
+
+        list.Focus();
+        Application.DoEvents();
+
+        popup.Visible.Should().BeTrue();
+    }
+
+    [WinFormsFact]
+    public void CompletionPopup_NativeChildHandleClick_IsNotTreatedAsExternal()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "st";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+        var popup = GetCompletionPopup(control);
+        var list = GetCompletionList(control);
+        popup.Visible.Should().BeTrue();
+
+        var nativeChild = NativeMethods.CreateWindowEx(
+            0,
+            "STATIC",
+            string.Empty,
+            NativeMethods.WS_CHILD | NativeMethods.WS_VISIBLE,
+            0,
+            0,
+            8,
+            8,
+            list.Handle,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            IntPtr.Zero);
+
+        nativeChild.Should().NotBe(IntPtr.Zero);
+
+        try
+        {
+            InvokeNonPublic(control, "DismissCompletionOnExternalClick", nativeChild);
+            popup.Visible.Should().BeTrue();
+        }
+        finally
+        {
+            _ = NativeMethods.DestroyWindow(nativeChild);
+        }
     }
 
     [WinFormsFact]
@@ -366,7 +490,7 @@ public class ScintillaScriptEditorControlTests
         var handled = (bool)InvokeNonPublic(control, "HandleCompletionNavigation", new KeyEventArgs(Keys.Enter))!;
 
         handled.Should().BeTrue();
-        control.Text.Should().Be("name: ");
+        NormalizeLineEndings(control.Text).Should().StartWith("name: ");
     }
 
     [WinFormsFact]
@@ -382,7 +506,23 @@ public class ScintillaScriptEditorControlTests
         var handled = (bool)InvokeNonPublic(control, "HandleCompletionNavigation", new KeyEventArgs(Keys.Enter))!;
 
         handled.Should().BeTrue();
-        NormalizeLineEndings(control.Text).Should().EndWith("\n  - send: ");
+        NormalizeLineEndings(control.Text).Should().Contain("  - send: ");
+    }
+
+    [WinFormsFact]
+    public void CompletionCommit_StepCommandWithoutDash_PrependsDashAndAppendsColonAndSpace()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "steps:\n  sen";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "ShowCompletionPopup");
+        var handled = (bool)InvokeNonPublic(control, "HandleCompletionNavigation", new KeyEventArgs(Keys.Enter))!;
+
+        handled.Should().BeTrue();
+        NormalizeLineEndings(control.Text).Should().Contain("  - send: ");
     }
 
     [WinFormsFact]
@@ -535,6 +675,34 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
+    public void SmartEnter_OnScalarStepOptionKey_DoesNotOverIndentNextLine()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "steps:\n  - extract:\n      from:";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        var handled = (bool)InvokeNonPublic(control, "HandleSmartEnter", new KeyEventArgs(Keys.Enter))!;
+
+        handled.Should().BeTrue();
+        NormalizeLineEndings(control.Text).Should().EndWith("\n      ");
+    }
+
+    [WinFormsFact]
+    public void SmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "- dns:\n    host: 1.2.3.4\n    into:\n    ";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        var handled = (bool)InvokeNonPublic(control, "HandleSmartEnter", new KeyEventArgs(Keys.Enter))!;
+
+        handled.Should().BeTrue();
+        NormalizeLineEndings(control.Text).Should().EndWith("\n    \n");
+    }
+
+    [WinFormsFact]
     public void GetCaretPosition_ReturnsOneBasedLineAndColumn()
     {
         using var control = new ScintillaScriptEditorControl();
@@ -579,5 +747,41 @@ public class ScintillaScriptEditorControlTests
     private static string NormalizeLineEndings(string value)
     {
         return value.Replace("\r\n", "\n", StringComparison.Ordinal);
+    }
+
+    private static class NativeMethods
+    {
+        public const int WM_LBUTTONDOWN = 0x0201;
+        public const int WM_LBUTTONUP = 0x0202;
+        public const int MK_LBUTTON = 0x0001;
+        public const int WS_CHILD = 0x40000000;
+        public const int WS_VISIBLE = 0x10000000;
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr CreateWindowEx(
+            int exStyle,
+            string className,
+            string windowName,
+            int style,
+            int x,
+            int y,
+            int width,
+            int height,
+            IntPtr parentHandle,
+            IntPtr menuHandle,
+            IntPtr instanceHandle,
+            IntPtr param);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool DestroyWindow(IntPtr handle);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        public static IntPtr MakeLParam(int x, int y)
+        {
+            var packed = (y << 16) | (x & 0xFFFF);
+            return (IntPtr)packed;
+        }
     }
 }

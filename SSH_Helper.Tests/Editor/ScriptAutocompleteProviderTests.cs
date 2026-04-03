@@ -44,6 +44,21 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_StepPrefixWithoutDash_WithinSteps_SuggestsStepCommandsAndPrependsListMarker()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  se";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        var sendItem = completion.Items.Single(item => item.Label == "send");
+        sendItem.InsertText.Should().Be("- send");
+        completion.ReplaceStart.Should().Be("steps:\n  ".Length);
+        completion.ReplaceLength.Should().Be(2);
+    }
+
+    [Fact]
     public void GetCompletion_TopLevelPrefix_SuggestsTopLevelKeys()
     {
         var provider = new ScriptAutocompleteProvider();
@@ -93,15 +108,29 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
-    public void GetCompletion_BlankTopLevelLine_AfterVarsAndSteps_ManualRequest_DoesNotSuggestRootKeys()
+    public void GetCompletion_BlankTopLevelLine_AfterVarsAndSteps_ManualRequest_SuggestsStepCommands()
     {
         var provider = new ScriptAutocompleteProvider();
         var text = "name: demo\nvars:\n  token: abc\nsteps:\n  - send: ok\n";
 
-        var completion = provider.GetCompletion(text, text.Length);
+        var completion = provider.GetCompletion(text, text.Length, manualRequest: true);
 
-        completion.Context.Should().Be(CompletionContextKind.None);
-        completion.Items.Should().BeEmpty();
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Select(item => item.Label).Should().Contain("send");
+        completion.Items.Should().OnlyContain(item => item.InsertText.StartsWith("  - ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetCompletion_BlankLine_AfterIndentlessStepsSequence_ManualRequest_SuggestsStepCommands()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n- send:\n    command: df\n\n- extract:\n    from: ${Host_IP}\n    into: foo\n    pattern: .*\n\n";
+
+        var completion = provider.GetCompletion(text, text.Length, manualRequest: true);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Select(item => item.Label).Should().Contain("send");
+        completion.Items.Should().OnlyContain(item => item.InsertText.StartsWith("- ", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -120,12 +149,12 @@ public class ScriptAutocompleteProviderTests
     public void GetCompletion_StepPrefix_IncludesNewCommandKeywords()
     {
         var provider = new ScriptAutocompleteProvider();
-        var text = "steps:\n  - pa";
+        var text = "steps:\n  - pl";
 
         var completion = provider.GetCompletion(text, text.Length);
 
         completion.Context.Should().Be(CompletionContextKind.StepCommand);
-        completion.Items.Select(item => item.Label).Should().Contain("parallel");
+        completion.Items.Select(item => item.Label).Should().Contain("playsound");
     }
 
     [Fact]
@@ -256,6 +285,8 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
         completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "options", "default"]);
+        completion.Items.Should().Contain(item => item.Label == "into" && item.Detail == "required");
+        completion.Items.Should().Contain(item => item.Label == "options" && item.Detail == "required");
     }
 
     [Fact]
@@ -268,6 +299,8 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
         completion.Items.Select(item => item.Label).Should().Contain(["title", "prompt", "into", "options", "min", "max"]);
+        completion.Items.Should().Contain(item => item.Label == "into" && item.Detail == "required");
+        completion.Items.Should().Contain(item => item.Label == "options" && item.Detail == "required");
     }
 
     [Fact]
@@ -292,6 +325,29 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
         completion.Items.Select(item => item.Label).Should().Contain(["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"]);
+        completion.Items.Should().Contain(item => item.Label == "path" && item.Detail == "required");
+        completion.Items.Should().Contain(item => item.Label == "into" && item.Detail == "required");
+    }
+
+    [Theory]
+    [MemberData(nameof(GetRequiredOptionTagCases))]
+    public void GetCompletion_CommandStepOptionKey_MarksAuditedRequiredOptions(
+        string command,
+        string[] expectedRequiredKeys)
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = $"steps:\n  - {command}:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+
+        foreach (var requiredKey in expectedRequiredKeys)
+        {
+            completion.Items.Should().Contain(item =>
+                string.Equals(item.Label, requiredKey, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(item.Detail, "required", StringComparison.Ordinal));
+        }
     }
 
     [Fact]
@@ -441,5 +497,20 @@ public class ScriptAutocompleteProviderTests
         symbols.Should().Contain("_output");
         symbols.Should().Contain("hostname");
         symbols.Should().Contain("port");
+    }
+
+    public static IEnumerable<object[]> GetRequiredOptionTagCases()
+    {
+        yield return new object[] { "send", new[] { "command" } };
+        yield return new object[] { "if", new[] { "condition", "then" } };
+        yield return new object[] { "foreach", new[] { "iterator", "do" } };
+        yield return new object[] { "while", new[] { "condition", "do" } };
+        yield return new object[] { "exists", new[] { "path", "into" } };
+        yield return new object[] { "choose", new[] { "into", "options" } };
+        yield return new object[] { "multiselect", new[] { "into", "options" } };
+        yield return new object[] { "confirm", new[] { "into" } };
+        yield return new object[] { "assert", new[] { "condition" } };
+        yield return new object[] { "switch", new[] { "value", "cases" } };
+        yield return new object[] { "browser_callback_capture", new[] { "start_url", "callback_path", "into" } };
     }
 }

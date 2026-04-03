@@ -1,0 +1,178 @@
+import type { StateCreator } from 'zustand';
+import type { FlowStore } from '../useFlowStore';
+import { blockDefMap } from '../../blockDefs/registry';
+import { messageBus } from '../../MessageBus';
+import { CANVAS_HOST_MESSAGES } from '../../communication-message-types';
+
+export interface PanelSizes {
+  rightPanelWidth: number;
+  outputHeight: number;
+}
+
+export const DEFAULT_PANEL_SIZES: PanelSizes = {
+  rightPanelWidth: 600,
+  outputHeight: 200,
+};
+
+export interface UISlice {
+  theme: 'dark' | 'light';
+  snapToGrid: boolean;
+  gridSize: number;
+  searchQuery: string;
+  searchResults: string[];
+  searchIndex: number;
+  searchVisible: boolean;
+  contextMenu: { x: number; y: number; nodeId: string } | null;
+  edgeContextMenu: { x: number; y: number; edgeId: string } | null;
+  panelsVisible: {
+    variables: boolean;
+    debug: boolean;
+    output: boolean;
+    timeline: boolean;
+  };
+  panelSizes: PanelSizes;
+  exportStatus: {
+    hasErrors: boolean;
+    errors: string[];
+    warnings: string[];
+  };
+
+  setTheme: (theme: 'dark' | 'light') => void;
+  toggleTheme: () => void;
+  toggleSnapToGrid: () => void;
+  setSearchQuery: (query: string) => void;
+  nextSearchResult: () => void;
+  prevSearchResult: () => void;
+  toggleSearch: () => void;
+  closeSearch: () => void;
+  showContextMenu: (x: number, y: number, nodeId: string) => void;
+  hideContextMenu: () => void;
+  showEdgeContextMenu: (x: number, y: number, edgeId: string) => void;
+  hideEdgeContextMenu: () => void;
+  togglePanel: (panel: keyof UISlice['panelsVisible']) => void;
+  setPanelSize: (key: keyof PanelSizes, value: number) => void;
+  restorePanelSizes: (sizes: Partial<PanelSizes>) => void;
+  setExportStatus: (status: UISlice['exportStatus']) => void;
+  clearExportStatus: () => void;
+}
+
+export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get) => ({
+  theme: 'dark',
+  snapToGrid: false,
+  gridSize: 20,
+  searchQuery: '',
+  searchResults: [],
+  searchIndex: 0,
+  searchVisible: false,
+  contextMenu: null,
+  edgeContextMenu: null,
+  panelsVisible: {
+    variables: true,
+    debug: false,
+    output: true,
+    timeline: false,
+  },
+  panelSizes: { ...DEFAULT_PANEL_SIZES },
+  exportStatus: {
+    hasErrors: false,
+    errors: [],
+    warnings: [],
+  },
+
+  setTheme: (theme) => set({ theme }),
+  toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+
+  toggleSnapToGrid: () => set((s) => ({ snapToGrid: !s.snapToGrid })),
+
+  setSearchQuery: (query) => {
+    const nodes = get().nodes;
+    const q = query.toLowerCase();
+    const results = q
+      ? nodes
+          .filter((n) => {
+            const data = n.data as Record<string, unknown>;
+            const label = String(data.label || '').toLowerCase();
+            const blockType = String(data.blockType || '').toLowerCase();
+            const props = data.props as Record<string, unknown> | undefined;
+            const propsStr = props ? JSON.stringify(props).toLowerCase() : '';
+            const def = blockDefMap.get(String(data.blockType));
+            const defLabel = def ? def.label.toLowerCase() : '';
+            return label.includes(q) || blockType.includes(q) || propsStr.includes(q) || defLabel.includes(q);
+          })
+          .map((n) => n.id)
+      : [];
+    set({ searchQuery: query, searchResults: results, searchIndex: 0 });
+  },
+
+  nextSearchResult: () => {
+    set((s) => ({
+      searchIndex: s.searchResults.length > 0
+        ? (s.searchIndex + 1) % s.searchResults.length
+        : 0,
+    }));
+  },
+
+  prevSearchResult: () => {
+    set((s) => ({
+      searchIndex: s.searchResults.length > 0
+        ? (s.searchIndex - 1 + s.searchResults.length) % s.searchResults.length
+        : 0,
+    }));
+  },
+
+  toggleSearch: () => {
+    set((s) => {
+      if (s.searchVisible) {
+        return { searchVisible: false, searchQuery: '', searchResults: [], searchIndex: 0 };
+      }
+      return { searchVisible: true };
+    });
+  },
+
+  closeSearch: () => {
+    set({ searchVisible: false, searchQuery: '', searchResults: [], searchIndex: 0 });
+  },
+
+  showContextMenu: (x, y, nodeId) => set({ contextMenu: { x, y, nodeId }, edgeContextMenu: null }),
+  hideContextMenu: () => set({ contextMenu: null }),
+  showEdgeContextMenu: (x, y, edgeId) => set({ edgeContextMenu: { x, y, edgeId }, contextMenu: null }),
+  hideEdgeContextMenu: () => set({ edgeContextMenu: null }),
+
+  togglePanel: (panel) => {
+    set((s) => ({
+      panelsVisible: {
+        ...s.panelsVisible,
+        [panel]: !s.panelsVisible[panel],
+      },
+    }));
+  },
+
+  setPanelSize: (key, value) => {
+    set((s) => {
+      const panelSizes = { ...s.panelSizes, [key]: value };
+      // Notify WinForms so it can persist the sizes
+      messageBus.send({ type: CANVAS_HOST_MESSAGES.outgoing.layoutSave, panelSizes });
+      return { panelSizes };
+    });
+  },
+
+  restorePanelSizes: (sizes) => {
+    set((s) => ({
+      panelSizes: { ...s.panelSizes, ...sizes },
+    }));
+  },
+
+  setExportStatus: (status) => {
+    set({ exportStatus: status });
+  },
+
+  clearExportStatus: () => {
+    set({
+      exportStatus: {
+        hasErrors: false,
+        errors: [],
+        warnings: [],
+      },
+    });
+  },
+});

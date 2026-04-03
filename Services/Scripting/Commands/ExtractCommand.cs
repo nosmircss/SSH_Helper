@@ -32,6 +32,10 @@ namespace SSH_Helper.Services.Scripting.Commands
             var sourceText = context.GetVariableString(options.From);
             if (string.IsNullOrEmpty(sourceText))
             {
+                if (options.Required)
+                {
+                    return Task.FromResult(CommandResult.Fail($"Extract: source variable '{options.From}' is empty"));
+                }
                 SetEmptyResults(options.Into, context);
                 context.EmitOutput($"Extract: source variable '{options.From}' is empty", ScriptOutputType.Warning);
                 return Task.FromResult(CommandResult.Ok());
@@ -58,9 +62,12 @@ namespace SSH_Helper.Services.Scripting.Commands
 
                 if (matches.Count == 0)
                 {
-                    context.EmitOutput($"Extract: no matches found for pattern '{pattern}'", ScriptOutputType.Debug);
-                    // Set empty value(s)
+                    if (options.Required)
+                    {
+                        return Task.FromResult(CommandResult.Fail($"Extract: no matches found for pattern '{pattern}'"));
+                    }
                     SetEmptyResults(options.Into, context);
+                    context.EmitOutput($"Extract: no matches found for pattern '{pattern}'", ScriptOutputType.Debug);
                     return Task.FromResult(CommandResult.Ok());
                 }
 
@@ -119,7 +126,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 // Single variable - capture first group (or full match if no groups)
                 var value = (match.Groups.Count > 1 ? match.Groups[1].Value : match.Value).Trim();
                 context.SetVariable(varName, value);
-                context.EmitOutput($"Extract: {varName} = '{ScriptingHelpers.TruncateForDisplay(value, 50)}'", ScriptOutputType.Debug);
+                context.EmitOutput($"Extract: {varName} = '{ScriptingHelpers.FormatForDisplay(value)}'", ScriptOutputType.Debug);
             }
             else if (into is System.Collections.IList varList)
             {
@@ -130,7 +137,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     var value = groupIndex < match.Groups.Count ? match.Groups[groupIndex].Value.Trim() : "";
                     var name = varList[i]?.ToString() ?? $"group{i}";
                     context.SetVariable(name, value);
-                    context.EmitOutput($"Extract: {name} = '{ScriptingHelpers.TruncateForDisplay(value, 50)}'", ScriptOutputType.Debug);
+                    context.EmitOutput($"Extract: {name} = '{ScriptingHelpers.FormatForDisplay(value)}'", ScriptOutputType.Debug);
                 }
             }
         }

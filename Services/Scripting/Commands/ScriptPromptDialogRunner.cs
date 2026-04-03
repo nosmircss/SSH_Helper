@@ -12,6 +12,12 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     internal static class ScriptPromptDialogRunner
     {
+        /// <summary>
+        /// When set, dialogs are owned by and centered over this form instead of Application.OpenForms[0].
+        /// Set this to FlowCanvasForm during canvas-triggered execution so prompts appear over the canvas.
+        /// </summary>
+        internal static Form? AnchorFormOverride { get; set; }
+
         internal static Action<Form>? RestoreMainFormActivationOverrideForTests { get; set; }
 
         public static Task<TResult> ShowAsync<TDialog, TResult>(
@@ -116,6 +122,9 @@ namespace SSH_Helper.Services.Scripting.Commands
 
         private static Form? GetMainForm()
         {
+            if (AnchorFormOverride is { IsDisposed: false })
+                return AnchorFormOverride;
+
             if (Application.OpenForms.Count <= 0)
                 return null;
 

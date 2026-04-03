@@ -1,6 +1,47 @@
 # Lessons
 
+## 2026-04-03
+- When users ask for YAML key order to match the Flow Canvas Properties panel, I must not rely on parser key catalogs that are alphabetically normalized; I need explicit panel-order mappings (especially for grouped Core/Advanced/On Error layouts like `playsound`).
+- When a user broadens a key-order request to "all blocks," I must run an exhaustive drift check across every registry block/command pair, not stop at the one block that was just reported.
+- When a user adds a documentation-follow-through correction, I must update both behavior docs and QA docs in the same implementation pass (`README`, `SCRIPTING`, harness docs, changelog), not treat docs as optional cleanup.
+- When opening dialogs from Flow Canvas-hosted actions, I must set the dialog owner to the Flow Canvas window (`FlowCanvasForm`) rather than `Form1`; otherwise Windows can activate the main form and steal focus.
+- When autocomplete displays `required` option tags, I must audit the required-key map against parser/runtime validation for every command family and add command-level regression tests; partial spot-fixes (for example only `into`) drift quickly and miss keys like `choose.options`.
+- When handling `Enter` on whitespace-only lines in step payloads, I must support a second-enter fallback that dedents to sibling command/block indentation; otherwise users get stuck at nested option indent when trying to start the next command.
+- When key-up autocomplete is enabled in the script editor, I must explicitly exclude non-text system keys (for example `Print Screen`/`Keys.Snapshot`) so screenshot/hotkey input cannot spuriously open suggestions.
+- For smart-enter YAML editing, I must not treat every trailing `key:` as a nested-block start; scalar step options (for example `from:`/`into:`/`pattern:`) should keep sibling indentation unless the key is a known block-style option.
+- When inferring script-step autocomplete context, I must handle both YAML list styles under `steps:` (indented `  - command` and indentless `- command`); assuming only indented style will hide `Ctrl+Space` suggestions on valid scripts.
+- When users trigger manual autocomplete with `Ctrl+Space`, I must test blank-line continuation contexts separately from auto-typing behavior; provider logic needs explicit manual-request context to avoid suppressing valid `steps` suggestions.
+- When step-command autocomplete applies inside `steps:` list items, I must support command suggestions even if the user has not typed `- ` yet, and completion commit should inject the missing list marker automatically.
+- When inserting Windows file paths into YAML from editor tooling, I must treat double-quoted insertion sites as a special case and convert them to single-quoted values so backslashes remain literal and paths stay valid.
+- When users ask about specific text-entry edge contexts (`path: ""`, `path: "`, `path: '`), I must add explicit regression coverage for each context before changing insertion logic; quote-adjacent caret behavior is easy to mis-handle without tests.
+- For quote-pair placeholders like `path: ""`, I must test both caret positions (between quotes and after closing quote); caret-index assumptions around opening/closing quotes can produce malformed leading quote artifacts.
+- When autocomplete popups rely on handle-based outside-click dismissal, I must treat native child HWNDs (like list scrollbar internals) as inside the popup via `IsChild(...)`; `Control.FromHandle(...)` alone can misclassify valid internal clicks and break mouse scrolling/selection.
+- When validating WinForms mouse interactions that mix focus transitions and `BeginInvoke` callbacks, I must run at least one regression that processes queued UI messages between mouse-down and mouse-up; direct `SendMessage` click tests can miss real dismissal races.
+
+## 2026-04-02
+- When interactive transcript cleanup changes do not resolve autocomplete corruption, I must instrument and compare raw terminal chunks (`RawData`), terminal-stripped chunks (`StrippedData`), and captured transcript chunks before attempting another behavior fix.
+- When terminal output can include ANSI cursor rewrite sequences, transcript assembly must process the raw chunk stream statefully; appending stripped chunk fragments will concatenate autocomplete candidates into invalid commands.
+
+## 2026-04-01
+- When fixing interactive terminal selection rendering bugs, I must verify full selection workflow parity (including scroll-while-selecting and cross-scroll copy behavior), not just remove the immediate visual artifact.
+- When cleaning interactive terminal audit transcripts, I must apply cursor-aware terminal normalization for backspace/tab-autocomplete edits instead of stripping control characters directly.
+
+## 2026-03-30
+- When a secondary editor surface (Flow Canvas) mirrors preset command text from `Form1`, I must wire synchronization into the shared preset-load path (`LoadPresetIntoEditor`) rather than only the one-time window-open path.
+
+## 2026-03-25
+- When giving Flow Canvas YAML expectations, I must verify against actual bridge/export output before answering; `if` containers can flatten when `_yamlSnippet` takes precedence over graph branch metadata.
+
+## 2026-03-23
+- When handling debug resume actions in `ScriptExecutor`, `Step` must explicitly enable `DebugState.StepMode`; otherwise stepping from a breakpoint degenerates into full-run continue behavior.
+- When rendering Flow Canvas Vars inspector entries, any password/secret/token/key-named variable must be masked at display time so raw credential values are never shown in the UI.
+- When debug pauses can happen concurrently (for example parallel branches), `DebugState.WaitForResumeAsync` must not replace the active resume signal per waiter; all current waiters must share the same signal or one branch can remain blocked forever.
+- When auditing Flow Canvas properties-panel reliability, I must explicitly include `select`/dropdown controls in the same root-cause pass as text inputs; first-interaction persistence can fail independently from typing behavior.
+- When rendering Flow Canvas node previews, I must treat `props._preview` as import metadata only; live block text must come from canonical editable props (`previewKey`) to avoid stale on-canvas text after property edits.
+
 ## 2026-03-20
+- When a Flow Canvas breakpoint must pause on the first block, I must apply node-map and breakpoint state synchronously before `ScriptExecutor.ExecuteAsync` starts; async polling bootstrap can miss step `steps/0`.
+- When Flow Canvas export mixes regenerated simple steps with stored container `_yamlSnippet` blocks, I must normalize top-level indentation before run/test so a no-edit canvas run cannot rewrite valid YAML into an invalid mixed-indent `steps` list.
 - When a user points out that a cell-level WinForms status cue disappears under selection, I must look for a non-selected-owned surface such as the row header instead of continuing to fight the selected-cell paint path.
 - When I smooth a WinForms add-preset tree mutation, I must verify the new selection is fully visible in the actual viewport instead of only preserving `TopNode`; a preserved anchor is not enough if the inserted row ends up clipped below the fold.
 - When I create a new preset in `Form1`, I must route the post-create load through the same preset-loading path as ordinary selection changes; hand-populating the editor can skip required environment-restore logic.

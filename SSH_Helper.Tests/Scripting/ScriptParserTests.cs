@@ -102,6 +102,7 @@ show interface status";
     [InlineData("- try:\n  - print: test")]
     [InlineData("- updatecolumn:\n    column: test")]
     [InlineData("- updateenvironment:\n    variable: token")]
+    [InlineData("- playsound:\n    path: C:\\temp\\alert.mp3")]
     [InlineData("- interactive:\n    session: separate")]
     public void IsYamlScript_StepSyntax_ReturnsTrue(string input)
     {
@@ -1106,6 +1107,58 @@ steps:
         errors.Should().ContainSingle(error => error.Contains("Readfile requires 'into'"));
     }
 
+    [Fact]
+    public void Validate_PlaySoundWithoutPath_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - playsound:
+      wait: true";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(error => error.Contains("Playsound requires 'path'"));
+    }
+
+    [Fact]
+    public void Validate_PlaySoundInvalidVolume_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - playsound:
+      path: C:\\temp\\alert.mp3
+      volume: 101";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(error => error.Contains("Playsound 'volume' must be between 0 and 100"));
+    }
+
+    [Fact]
+    public void Validate_PlaySoundFractionalMaxSeconds_IsAccepted()
+    {
+        var yaml = """
+            ---
+            steps:
+              - playsound:
+                  path: C:\\temp\\alert.mp3
+                  wait: true
+                  max_seconds: 0.25
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        script.Steps.Should().ContainSingle();
+        var playSound = script.Steps[0].PlaySound;
+        playSound.Should().NotBeNull();
+        playSound!.MaxSeconds.HasValue.Should().BeTrue();
+        playSound.MaxSeconds!.Value.Should().BeApproximately(0.25, 0.0001);
+        errors.Should().NotContain(error => error.Contains("playsound.max_seconds"));
+    }
+
     #endregion
 
     #region Complex Script Tests
@@ -1303,6 +1356,25 @@ steps:
     }
 
     [Fact]
+    public void Parse_InputOnErrorInsideMap_ParsesOnError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - input:
+                  prompt: "Enter value:"
+                  into: answer
+                  on_error: continue
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.Input);
+        script.Steps[0].OnError.Should().Be("continue");
+    }
+
+    [Fact]
     public void Parse_ChooseStep_MixedOptions_ParsesCorrectly()
     {
         var yaml = @"---
@@ -1359,6 +1431,106 @@ steps:
         step.Multiselect.Should().NotBeNull();
         step.Multiselect!.Options.Should().BeEmpty();
         step.Multiselect.OptionsFrom.Should().Be("${interface_list}");
+    }
+
+    [Fact]
+    public void Validate_ChooseWithoutInto_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      options:
+        - a";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Choose requires 'into'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_ChooseWithoutOptions_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      into: selected";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Choose requires 'options'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_MultiselectWithoutInto_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - multiselect:
+      options:
+        - a";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Multiselect requires 'into'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_MultiselectWithoutOptions_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - multiselect:
+      into: selected";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Multiselect requires 'options'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_ConfirmWithoutInto_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - confirm:
+      prompt: Are you sure?";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Confirm requires 'into'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_WebhookWithoutUrl_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - webhook:
+      method: POST";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Webhook requires 'url'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_LogMapWithoutMessage_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - log:
+      level: info";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("Log requires 'message'", StringComparison.OrdinalIgnoreCase));
     }
 
     #endregion
@@ -1763,6 +1935,86 @@ steps:
         var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
 
         errors.Should().NotContain(error => error.Contains("fail_on_nonzero"));
+    }
+
+    #endregion
+
+    #region Exists Parser Tests
+
+    [Fact]
+    public void Parse_ExistsStep_ParsesCorrectly()
+    {
+      var yaml = """
+        ---
+        steps:
+          - exists:
+              path: "%UserProfile%\\Documents\\hosts.txt"
+              into: hosts_file
+              type: file
+              on_error: continue
+        """;
+
+      var script = _parser.Parse(yaml);
+
+      script.Steps.Should().HaveCount(1);
+      script.Steps[0].GetStepType().Should().Be(StepType.Exists);
+      script.Steps[0].Exists.Should().NotBeNull();
+      script.Steps[0].Exists!.Path.Should().Be("%UserProfile%\\Documents\\hosts.txt");
+      script.Steps[0].Exists.Into.Should().Be("hosts_file");
+      script.Steps[0].Exists.Type.Should().Be("file");
+      script.Steps[0].OnError.Should().Be("continue");
+    }
+
+    [Fact]
+    public void Validate_ExistsWithoutPath_ReturnsError()
+    {
+      var yaml = """
+        ---
+        steps:
+          - exists:
+              into: file_present
+        """;
+
+      var script = _parser.Parse(yaml);
+      var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+      errors.Should().Contain(error => error.Contains("Exists requires 'path'"));
+    }
+
+    [Fact]
+    public void Validate_ExistsWithInvalidType_ReturnsError()
+    {
+      var yaml = """
+        ---
+        steps:
+          - exists:
+              path: "C:\\temp"
+              into: has_path
+              type: symlink
+        """;
+
+      var script = _parser.Parse(yaml);
+      var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+      errors.Should().Contain(error => error.Contains("Exists 'type' must be one of any, file, directory"));
+    }
+
+    [Fact]
+    public void Parse_ExistsUnknownKey_AddsWarning()
+    {
+      var yaml = """
+        ---
+        steps:
+          - exists:
+              path: "C:\\temp"
+              into: has_path
+              typoo: true
+        """;
+
+      _ = _parser.Parse(yaml);
+
+      _parser.Warnings.Should().ContainSingle();
+      _parser.Warnings[0].Should().Contain("Unknown exists key 'typoo'");
     }
 
     #endregion

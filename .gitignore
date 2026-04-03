@@ -284,6 +284,10 @@ FakesAssemblies/
 # Node.js Tools for Visual Studio
 .ntvs_analysis.dat
 node_modules/
+playwright-report/
+test-results/
+FlowCanvas/playwright-report/
+FlowCanvas/test-results/
 
 # Visual Studio 6 build log
 *.plg
@@ -368,5 +372,6 @@ RebexPOC/
 rebex.key
 .claude/napkin.md
 .worktrees/
+.superpowers/
 
 tools/

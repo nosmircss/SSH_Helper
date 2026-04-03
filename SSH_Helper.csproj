@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**;bin/**;obj/**;SSH_Helper.Tests/**;RebexPOC/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**;bin/**;obj/**;SSH_Helper.Tests/**;RebexPOC/**;FlowCanvas/tools/**</DefaultItemExcludes>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
@@ -27,7 +27,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="artifacts/**/*.cs;bin/**/*.cs;obj/**/*.cs;SSH_Helper.Tests/**/*.cs;RebexPOC/**/*.cs" />
+    <Compile Remove="artifacts/**/*.cs;bin/**/*.cs;obj/**/*.cs;SSH_Helper.Tests/**/*.cs;RebexPOC/**/*.cs;FlowCanvas/tools/**/*.cs" />
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>BuildTimestamp</_Parameter1>
       <_Parameter2>$(BuildTimestamp)</_Parameter2>
@@ -48,12 +48,14 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SSH_Helper.Tests" />
+    <InternalsVisibleTo Include="FlowCanvasParityCli" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CronExpressionDescriptor" Version="2.45.0" />
     <PackageReference Include="Cronos" Version="0.11.1" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3124.44" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Rebex.SshShell" Version="7.0.9448" />
     <PackageReference Include="Scintilla5.NET" Version="6.1.1" GeneratePathProperty="true" />
@@ -64,6 +66,24 @@
   <ItemGroup>
     <Reference Remove="$(NuGetPackageRoot)microsoft.web.webview2\1.0.3124.44\lib_manual\net5.0-windows10.0.17763.0\Microsoft.Web.WebView2.Wpf.dll" />
   </ItemGroup>
+
+  <!-- Build FlowCanvas Vite app before .NET build -->
+  <Target Name="BuildFlowCanvas" BeforeTargets="BeforeBuild" Condition="Exists('FlowCanvas\package.json') and '$(SkipFlowCanvasBuild)' != 'true'">
+    <Exec Command="npm run build" WorkingDirectory="FlowCanvas" />
+  </Target>
+
+  <!-- Embed FlowCanvas dist assets so single-file publish can extract them at runtime -->
+  <Target Name="IncludeFlowCanvasDistEmbeddedResources"
+          BeforeTargets="AssignTargetPaths"
+          DependsOnTargets="BuildFlowCanvas"
+          Condition="Exists('FlowCanvas\dist\index.html')">
+    <ItemGroup>
+      <_FlowCanvasDistFile Include="FlowCanvas\dist\**\*" />
+      <EmbeddedResource Include="@(_FlowCanvasDistFile)">
+        <LogicalName>SSH_Helper.Resources.FlowCanvasDist/%(_FlowCanvasDistFile.RecursiveDir)%(_FlowCanvasDistFile.Filename)%(_FlowCanvasDistFile.Extension)</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
 
   <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveReferences">
     <ItemGroup>

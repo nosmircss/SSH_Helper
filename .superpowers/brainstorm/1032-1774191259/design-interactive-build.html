@@ -1,0 +1,174 @@
+<h2>Flow Canvas — Interactive Build Mode</h2>
+<p class="subtitle">The killer workflow: execute steps, see output, build the next step from real data</p>
+
+<div class="mockup">
+  <div class="mockup-header">Interactive Build — "Test Step" on a SEND Block</div>
+  <div class="mockup-body" style="padding:20px; background:#1a1a2e; position:relative; min-height:380px;">
+
+    <!-- SEND block with output panel -->
+    <div style="position:absolute; left:30px; top:10px; width:420px;">
+
+      <!-- The block itself -->
+      <div style="background:#1a2744; border:2px solid #2ecc71; border-radius:8px; overflow:hidden; box-shadow:0 0 15px rgba(46,204,113,0.2);">
+        <div style="padding:6px 10px; background:#1e3050; border-bottom:1px solid #2a3a5a; display:flex; align-items:center; gap:6px;">
+          <span style="background:#4a9eff; color:#000; font-size:0.6em; font-weight:700; padding:2px 6px; border-radius:3px;">SEND</span>
+          <span style="color:#ccc; font-size:0.78em;">Get Interfaces</span>
+          <span style="margin-left:auto; background:#2ecc71; color:#000; font-size:0.55em; font-weight:700; padding:2px 6px; border-radius:3px;">✓ EXECUTED</span>
+        </div>
+        <div style="padding:8px 10px; font-family:monospace; font-size:0.72em; color:#8aafdb;">
+          show ip interface brief
+        </div>
+        <div style="padding:4px 10px 6px; border-top:1px solid #2a3a5a; display:flex; align-items:center; gap:6px;">
+          <span style="font-size:0.6em; color:#2ecc71;">Executed in 1.2s on 10.1.1.5</span>
+          <span style="margin-left:auto; font-size:0.6em; color:#4a9eff; cursor:pointer; text-decoration:underline;">▼ Show Output</span>
+        </div>
+      </div>
+
+      <!-- Inline output panel (expanded) -->
+      <div style="margin-top:4px; background:#0d1117; border:1px solid #2a3a5a; border-radius:6px; overflow:hidden;">
+        <div style="padding:4px 8px; background:#161b22; border-bottom:1px solid #21262d; display:flex; align-items:center;">
+          <span style="font-size:0.65em; color:#666;">Output Preview</span>
+          <span style="margin-left:auto; font-size:0.6em; color:#666; cursor:pointer;">📋 Copy</span>
+          <span style="margin-left:8px; font-size:0.6em; color:#666; cursor:pointer;">✕</span>
+        </div>
+        <pre style="margin:0; padding:8px; font-size:0.68em; color:#c9d1d9; line-height:1.5; max-height:120px; overflow-y:auto;">Interface              IP-Address      OK? Method Status Protocol
+GigabitEthernet0/0     10.1.1.5        YES manual up     up
+GigabitEthernet0/1     192.168.1.1     YES manual up     up
+GigabitEthernet0/2     unassigned      YES unset  down   down
+Loopback0              172.16.0.1      YES manual up     up
+Vlan1                  unassigned      YES unset  down   down</pre>
+      </div>
+    </div>
+
+    <!-- Arrow down to EXTRACT being built -->
+    <svg style="position:absolute; left:240px; top:240px; width:2px; height:25px;"><line x1="0" y1="0" x2="0" y2="25" stroke="#666" stroke-width="2"/></svg>
+
+    <!-- EXTRACT block being configured with live preview -->
+    <div style="position:absolute; left:30px; top:265px; width:420px;">
+      <div style="background:#1a1a2a; border:2px solid #9b59b6; border-radius:8px; overflow:hidden; box-shadow:0 0 15px rgba(155,89,182,0.3);">
+        <div style="padding:6px 10px; background:#2a1a3a; border-bottom:1px solid #3a2a4a; display:flex; align-items:center; gap:6px;">
+          <span style="background:#9b59b6; color:#fff; font-size:0.6em; font-weight:700; padding:2px 6px; border-radius:3px;">EXTRACT</span>
+          <span style="color:#ccc; font-size:0.78em;">Parse Interfaces</span>
+          <span style="margin-left:auto; background:#f0c040; color:#000; font-size:0.55em; font-weight:700; padding:2px 6px; border-radius:3px;">EDITING</span>
+        </div>
+        <div style="padding:8px 10px;">
+          <div style="font-size:0.65em; color:#666; margin-bottom:3px;">Pattern (regex):</div>
+          <div style="font-family:monospace; font-size:0.72em; color:#c9a0dc; background:#12122a; padding:4px 8px; border-radius:4px; border:1px solid #3a2a4a;">
+            (\S+)\s+(\d+\.\d+\.\d+\.\d+)\s+YES\s+\S+\s+(\w+)\s+(\w+)
+          </div>
+
+          <!-- Live match preview -->
+          <div style="margin-top:8px; font-size:0.65em; color:#666; margin-bottom:3px;">Live Matches (from output above):</div>
+          <div style="background:#12122a; border:1px solid #2a3a2a; border-radius:4px; padding:6px 8px; font-family:monospace; font-size:0.65em; line-height:1.8;">
+            <div style="color:#2ecc71;">✓ Match 1: <span style="color:#c9a0dc;">GigabitEthernet0/0</span> | <span style="color:#c9a0dc;">10.1.1.5</span> | <span style="color:#c9a0dc;">up</span> | <span style="color:#c9a0dc;">up</span></div>
+            <div style="color:#2ecc71;">✓ Match 2: <span style="color:#c9a0dc;">GigabitEthernet0/1</span> | <span style="color:#c9a0dc;">192.168.1.1</span> | <span style="color:#c9a0dc;">up</span> | <span style="color:#c9a0dc;">up</span></div>
+            <div style="color:#2ecc71;">✓ Match 3: <span style="color:#c9a0dc;">Loopback0</span> | <span style="color:#c9a0dc;">172.16.0.1</span> | <span style="color:#c9a0dc;">up</span> | <span style="color:#c9a0dc;">up</span></div>
+          </div>
+          <div style="margin-top:4px; font-size:0.6em; color:#2ecc71;">3 matches found — pattern looks good!</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div style="height:16px;"></div>
+
+<div class="section">
+  <h3>Interactive Build Features</h3>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; font-size:0.85em;">
+
+    <div style="padding:12px; background:rgba(74,158,255,0.05); border:1px solid rgba(74,158,255,0.12); border-radius:8px;">
+      <div style="color:#4a9eff; font-weight:600; margin-bottom:6px;">▶ Test Step</div>
+      <div style="color:#aaa;">
+        Right-click any block → "Test Step" (or Ctrl+Enter).<br/>
+        Executes that block <em>and all prerequisite blocks above it</em> on a single host.<br/>
+        Output appears inline on the block. Variables are set for downstream use.
+      </div>
+    </div>
+
+    <div style="padding:12px; background:rgba(155,89,182,0.05); border:1px solid rgba(155,89,182,0.12); border-radius:8px;">
+      <div style="color:#9b59b6; font-weight:600; margin-bottom:6px;">🔍 Live Pattern Tester</div>
+      <div style="color:#aaa;">
+        For EXTRACT blocks: as you type a regex pattern, it runs against the <em>actual output</em> from the previous SEND block. Shows matches in real-time with capture group highlighting. No more guess-and-check.
+      </div>
+    </div>
+
+    <div style="padding:12px; background:rgba(240,192,64,0.05); border:1px solid rgba(240,192,64,0.12); border-radius:8px;">
+      <div style="color:#f0c040; font-weight:600; margin-bottom:6px;">🔀 Condition Preview</div>
+      <div style="color:#aaa;">
+        For IF/WHILE/SWITCH blocks: shows which branch <em>would be taken</em> based on current variable values from executed steps. The taken branch glows, the other dims.
+      </div>
+    </div>
+
+    <div style="padding:12px; background:rgba(46,204,113,0.05); border:1px solid rgba(46,204,113,0.12); border-radius:8px;">
+      <div style="color:#2ecc71; font-weight:600; margin-bottom:6px;">📊 Variable Trail</div>
+      <div style="color:#aaa;">
+        As you execute steps, the Variable Inspector shows a <em>timeline</em> of how each variable changed. Click any variable to see which block set it and what it was before/after.
+      </div>
+    </div>
+
+    <div style="padding:12px; background:rgba(231,76,60,0.05); border:1px solid rgba(231,76,60,0.12); border-radius:8px;">
+      <div style="color:#e74c3c; font-weight:600; margin-bottom:6px;">🎯 Smart Suggestions</div>
+      <div style="color:#aaa;">
+        After executing a SEND, the output is analyzed. If it looks tabular, suggest an EXTRACT with a pre-built pattern. If it contains an error, suggest a TRY/CATCH wrapper. Contextual "Add next step" recommendations.
+      </div>
+    </div>
+
+    <div style="padding:12px; background:rgba(52,152,219,0.05); border:1px solid rgba(52,152,219,0.12); border-radius:8px;">
+      <div style="color:#3498db; font-weight:600; margin-bottom:6px;">🔄 Re-execute from Here</div>
+      <div style="color:#aaa;">
+        Changed a block in the middle of the flow? Right-click → "Re-execute from here" runs from that point forward, using cached variables from blocks above. Faster iteration without re-running the whole script.
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div style="height:16px;"></div>
+
+<div class="mockup">
+  <div class="mockup-header">Interactive Build Workflow — The Loop</div>
+  <div class="mockup-body" style="padding:16px; background:#0d1117;">
+    <div style="font-size:0.82em; color:#aaa; line-height:2.2;">
+      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        <div style="padding:6px 12px; background:#1a2744; border:1px solid #4a9eff; border-radius:20px;">
+          1. Drag <strong style="color:#4a9eff;">SEND</strong> block
+        </div>
+        <span style="color:#f0c040;">→</span>
+        <div style="padding:6px 12px; background:#1a2744; border:1px solid #4a9eff; border-radius:20px;">
+          2. Type command
+        </div>
+        <span style="color:#f0c040;">→</span>
+        <div style="padding:6px 12px; background:#1a2a1a; border:1px solid #2ecc71; border-radius:20px;">
+          3. <strong style="color:#2ecc71;">Test Step</strong> ▶
+        </div>
+        <span style="color:#f0c040;">→</span>
+        <div style="padding:6px 12px; background:#0d1117; border:1px solid #666; border-radius:20px;">
+          4. See real output
+        </div>
+        <span style="color:#f0c040;">→</span>
+        <div style="padding:6px 12px; background:#1a1a2a; border:1px solid #9b59b6; border-radius:20px;">
+          5. Drag <strong style="color:#9b59b6;">EXTRACT</strong>
+        </div>
+        <span style="color:#f0c040;">→</span>
+        <div style="padding:6px 12px; background:#1a1a2a; border:1px solid #9b59b6; border-radius:20px;">
+          6. Build pattern with <strong style="color:#9b59b6;">live matches</strong>
+        </div>
+        <span style="color:#f0c040;">→</span>
+        <div style="padding:6px 12px; background:#2a2a1a; border:1px solid #f0c040; border-radius:20px;">
+          7. Add <strong style="color:#f0c040;">IF</strong> (see which branch)
+        </div>
+        <span style="color:#f0c040;">→</span>
+        <div style="padding:6px 12px; background:#1a2a1a; border:1px solid #2ecc71; border-radius:20px;">
+          8. <strong style="color:#2ecc71;">Repeat</strong> 🔄
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p style="color:#666; font-size:0.85em; text-align:center; margin-top:16px;">
+  This transforms Flow Canvas from a "draw it then run it" tool into a <strong style="color:#ccc;">live development environment</strong> — you build scripts by interacting with real devices, seeing real output, and iterating in real-time.
+</p>

@@ -56,7 +56,7 @@ public class EditorTextUtilitiesTests
             indentSize: 2,
             preserveBlankLineBetweenSteps: true);
 
-        NormalizeLineEndings(edit.Text).Should().EndWith("\n    ");
+        NormalizeLineEndings(edit.Text).Should().EndWith("\n      ");
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class EditorTextUtilitiesTests
             indentSize: 2,
             preserveBlankLineBetweenSteps: true);
 
-        NormalizeLineEndings(edit.Text).Should().EndWith("\n    ");
+        NormalizeLineEndings(edit.Text).Should().EndWith("\n      ");
     }
 
     [Fact]
@@ -132,6 +132,51 @@ public class EditorTextUtilitiesTests
 
         var afterCaret = edit.Text.Substring(edit.SelectionStart);
         NormalizeLineEndings(afterCaret).Should().StartWith("\n  - print: done");
+    }
+
+    [Fact]
+    public void ApplySmartEnter_OnScalarStepOptionKeyWithoutValue_KeepsSameIndent()
+    {
+        var text = "steps:\n  - extract:\n      from:";
+
+        var edit = EditorTextUtilities.ApplySmartEnter(
+            text,
+            text.Length,
+            selectionLength: 0,
+            indentSize: 2,
+            preserveBlankLineBetweenSteps: true);
+
+        NormalizeLineEndings(edit.Text).Should().EndWith("\n      ");
+    }
+
+    [Fact]
+    public void ApplySmartEnter_OnNestedStepOptionKeyWithoutValue_IndentsDeeper()
+    {
+        var text = "steps:\n  - send:\n      respond:";
+
+        var edit = EditorTextUtilities.ApplySmartEnter(
+            text,
+            text.Length,
+            selectionLength: 0,
+            indentSize: 2,
+            preserveBlankLineBetweenSteps: true);
+
+        NormalizeLineEndings(edit.Text).Should().EndWith("\n        ");
+    }
+
+    [Fact]
+    public void ApplySmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent()
+    {
+        var text = "- dns:\n    host: 1.2.3.4\n    into:\n    ";
+
+        var edit = EditorTextUtilities.ApplySmartEnter(
+            text,
+            text.Length,
+            selectionLength: 0,
+            indentSize: 2,
+            preserveBlankLineBetweenSteps: true);
+
+        NormalizeLineEndings(edit.Text).Should().EndWith("\n    \n");
     }
 
     [Fact]

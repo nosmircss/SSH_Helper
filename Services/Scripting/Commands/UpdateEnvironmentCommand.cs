@@ -28,7 +28,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             // Keep the current script context in sync with the persisted environment value.
             context.SetVariable(variable, resolvedValue);
             context.RequestEnvironmentUpdate(variable, resolvedValue);
-            context.EmitOutput($"UpdateEnvironment: {variable} = '{ScriptingHelpers.TruncateForDisplay(resolvedValue, 50)}'", ScriptOutputType.Debug);
+            context.EmitOutput($"UpdateEnvironment: {variable} = '{ScriptingHelpers.FormatForDisplay(resolvedValue)}'", ScriptOutputType.Debug);
 
             return Task.FromResult(CommandResult.Ok());
         }

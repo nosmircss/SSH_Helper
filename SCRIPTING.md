@@ -104,7 +104,7 @@ Executable scripts may also declare `imports:` and `subroutines:`. Library files
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `imports:`, `subroutines:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- exists:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
 
 Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.
 
@@ -1171,7 +1171,7 @@ Extracts data from a variable using regex patterns with capture groups.
 **Pattern Notes:**
 - Pattern delimiters (`/pattern/`, `"pattern"`, `'pattern'`) are automatically stripped
 - Patterns are matched case-insensitively and support multiline mode
-- Debug output truncates extracted values at 50 characters for readability
+- Debug output preserves full extracted values (with newline characters shown as \n)
 
 **Single vs Multiple Capture Groups:**
 
@@ -1726,6 +1726,20 @@ Reads a text file line by line into a list variable. Useful for processing IP li
 | `max_lines` | No | `10000` | Maximum lines to read (0 = unlimited) |
 | `encoding` | No | `utf-8` | File encoding: `utf-8`, `ascii`, `utf-16`, `utf-16be`, `utf-32`, `latin1` (aliases: `unicode` for utf-16, `iso-8859-1` for latin1) |
 
+**Path Placeholder Tokens (Windows):**
+
+`readfile.path` supports both script variables (for example `${config_dir}`) and Windows environment-variable expansion (`%NAME%`).
+
+Concrete `%NAME%` placeholders currently available and commonly useful:
+
+- `%LocalAppData%` (example: `%LocalAppData%\\SSH_Helper\\hosts.txt`)
+- `%AppData%` (example: `%AppData%\\Vendor\\config.txt`)
+- `%UserProfile%` (example: `%UserProfile%\\Desktop\\hosts.txt`)
+- `%TEMP%` and `%TMP%` (example: `%TEMP%\\import.txt`)
+- `%HOMEDRIVE%` and `%HOMEPATH%` (example: `%HOMEDRIVE%%HOMEPATH%\\Documents\\hosts.txt`)
+
+Additional machine/user-specific `%NAME%` variables also work if they exist in the current Windows environment.
+
 **Manual-only picker note:**
 - `select_file: true` is available only during manual main-window runs. Scheduled jobs and Job List `Run Now` executions fail cleanly instead of opening a file picker.
 - When the picker is cancelled, `into` is set to an empty list and the script stops immediately. `on_error: continue` does not suppress picker cancellation.
@@ -1801,6 +1815,20 @@ Writes content to a text file. Supports multiple formats including text, JSON, J
 | `format` | No | `text` | Output format: `text`, `json`, `jsonl`, or `csv` |
 | `pretty` | No | `true` | Pretty-print JSON with indentation |
 | `headers` | No | - | CSV column headers (list of strings) |
+
+**Path Placeholder Tokens (Windows):**
+
+`writefile.path` supports both script variables (for example `${output_dir}`) and Windows environment-variable expansion (`%NAME%`).
+
+Concrete `%NAME%` placeholders currently available and commonly useful:
+
+- `%LocalAppData%` (example: `%LocalAppData%\\SSH_Helper\\exports\\result.json`)
+- `%AppData%` (example: `%AppData%\\Vendor\\output.txt`)
+- `%UserProfile%` (example: `%UserProfile%\\Desktop\\report.txt`)
+- `%TEMP%` and `%TMP%` (example: `%TEMP%\\script-output.txt`)
+- `%HOMEDRIVE%` and `%HOMEPATH%` (example: `%HOMEDRIVE%%HOMEPATH%\\Documents\\result.csv`)
+
+Additional machine/user-specific `%NAME%` variables also work if they exist in the current Windows environment.
 
 **Security:**
 - **Blocked paths**: Cannot write to system directories or Program Files
@@ -1961,6 +1989,129 @@ CSV format with optional headers:
     format: csv
     content: "${row}"
     mode: append
+```
+
+---
+
+### exists - Check Local File/Directory Existence
+
+Checks whether a local path exists and stores the result for branching.
+
+**Syntax:**
+```yaml
+- exists:
+        path: "%UserProfile%\\Documents\\hosts.txt"
+        into: has_hosts
+        type: any                 # Optional: any (default), file, directory
+        on_error: stop            # Optional: stop (default) or continue
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `path` | Yes | - | Local path to check (supports `${var}` and `%NAME%` expansion) |
+| `into` | Yes | - | Variable name that receives `true` or `false` |
+| `type` | No | `any` | Match mode: `any`, `file`, or `directory` |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+
+**Output Variables:**
+
+- `${into}`: boolean existence result (`true`/`false`)
+- `${into}_meta`: metadata object with:
+    - `exists` (boolean)
+    - `is_file` (boolean)
+    - `is_directory` (boolean)
+    - `path` (resolved full path)
+    - `type` (effective mode)
+    - `error` (only when an operational error is suppressed)
+
+**Examples:**
+```yaml
+# Basic file check
+- exists:
+        path: "%LocalAppData%\\SSH_Helper\\hosts.txt"
+        into: hosts_file_present
+        type: file
+
+- if:
+        condition: hosts_file_present == true
+        then:
+            - readfile:
+                    path: "%LocalAppData%\\SSH_Helper\\hosts.txt"
+                    into: hosts
+
+# OneDrive vs local Documents fallback
+- exists:
+        path: "%OneDrive%\\Documents\\audit.csv"
+        into: onedrive_doc
+        type: file
+
+- if:
+        condition: onedrive_doc == true
+        then:
+            - set: source_path = "%OneDrive%\\Documents\\audit.csv"
+        else:
+            - set: source_path = "%UserProfile%\\Documents\\audit.csv"
+
+- readfile:
+        path: "${source_path}"
+        into: audit_lines
+```
+
+---
+
+### playsound - Play Local Audio File
+
+Plays a local WAV or MP3 file using in-process playback.
+
+**Syntax:**
+```yaml
+- playsound:
+    path: "C:\\alerts\\success.mp3"
+    wait: true               # Optional: true (default) or false
+    volume: 80               # Optional: 0-100 (default: 100)
+    max_seconds: 0.5         # Optional: positive timeout in seconds (supports fractions) when wait=true
+    into: sound_result       # Optional output variable
+    on_error: stop           # Optional: continue (default for playsound) or stop
+```
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `path` | Yes | - | Local path to a `.wav` or `.mp3` file |
+| `wait` | No | `true` | Wait for playback completion before moving to next step |
+| `volume` | No | `100` | Playback volume percentage (`0..100`) |
+| `max_seconds` | No | - | Positive timeout in seconds (supports fractions) when `wait=true` |
+| `into` | No | - | Variable name to capture success and metadata |
+| `on_error` | No | `continue` | Error handling: `continue` or `stop` |
+
+**Output Variables (when `into` is set):**
+
+- `${into}`: boolean playback success (`true`/`false`)
+- `${into}_meta`: metadata object with:
+    - `path` (resolved path)
+    - `wait` (effective wait mode)
+    - `volume` (effective volume)
+    - `backend` (`naudio`)
+    - `duration_ms` (when available)
+    - `error` (when playback fails)
+
+**Examples:**
+```yaml
+# Wait for completion before continuing
+- playsound:
+    path: "%LocalAppData%\\SSH_Helper\\sounds\\ready.wav"
+    wait: true
+    volume: 65
+
+# Fire-and-forget notification tone
+- playsound:
+    path: "C:\\alerts\\notify.mp3"
+    wait: false
+    into: notification_status
+    on_error: continue
 ```
 
 ---
@@ -2650,6 +2801,18 @@ For browser-based login flows that return values to a localhost callback, use br
 - `${into}_status`: numeric status code
 - `${into}_headers`: response headers as JSON
 
+**Debug Logging:**
+- `http` now emits verbose debug lines for request troubleshooting, including:
+    - request options (`auth`, `timeout`, `follow_redirects`, `verify_tls`)
+    - resolved request headers (including `Authorization` when auth is used)
+    - full request body (when provided)
+- After completion, debug output also includes:
+    - response status line (`status code` + reason phrase)
+    - response headers (JSON)
+    - full response body
+- Timing and endpoint/status summary lines are still emitted after the request completes.
+- Sensitive values can appear in debug output when auth/body contains secrets; use caution when sharing logs.
+
 **Failure Semantics:**
 - Non-2xx responses: fail unless `allow_failure: true`
 - Transport/runtime failures: handled by `on_error` (`stop`/`continue`)
@@ -2720,7 +2883,7 @@ Starts a localhost callback listener and captures values returned from browser-d
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `start_url` | Yes | - | Initial URL to open in browser |
-| `callback_path` | Yes | `/oauth_callback` | Local callback path starting with `/` |
+| `callback_path` | No | `/oauth_callback` | Local callback path starting with `/` |
 | `local_port` | No | `8086` | Loopback listener port |
 | `capture_mode` | No | `auto` | `auto`, `fragment`, `query`, `post_body` |
 | `browser_mode` | No | `external` | `external` or `webview2` when `open_browser: true` |
@@ -2882,6 +3045,7 @@ Checks TCP reachability for a host/port.
 **Defaults:**
 - `port: 22`
 - `timeout: 5` (seconds)
+- Required field: `host` (port is optional and defaults to `22`).
 
 **Capture Variables:**
 - `${into}`: `open`, `closed`, or `timeout`

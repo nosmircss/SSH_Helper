@@ -30,7 +30,7 @@ namespace SSH_Helper.UI
         private const int FoldLevelBase = 1024;
         private const int ErrorIndicatorIndex = 8;
         private const int WarningIndicatorIndex = 9;
-        private const int CompletionPopupWidth = 262;
+        private const int CompletionPopupWidth = 350;
         private const int WmLButtonDown = 0x0201;
         private const int WmRButtonDown = 0x0204;
         private const int WmMButtonDown = 0x0207;
@@ -78,6 +78,7 @@ namespace SSH_Helper.UI
         private int _completionReplaceStart;
         private int _completionReplaceLength;
         private CompletionContextKind _activeCompletionContext;
+        private bool _activeCompletionManualRequest;
         private string _lastTooltipMessage = string.Empty;
         private Func<string, string?>? _variableResolver;
         private Func<string, string?>? _columnResolver;
@@ -125,7 +126,8 @@ namespace SSH_Helper.UI
             _editor.MouseUp += Editor_MouseUp;
             _editor.MarginClick += Editor_MarginClick;
             _editor.MouseLeave += (_, _) => HideTooltip();
-            _editor.LostFocus += (_, _) => HideCompletionPopup();
+            _editor.LostFocus += Editor_LostFocus;
+            _editor.KeyPress += Editor_KeyPress;
             _editor.DwellStart += Editor_DwellStart;
             _editor.DwellEnd += (_, _) => HideTooltip();
             _editor.Click += (_, _) => OnClick(EventArgs.Empty);
@@ -148,12 +150,9 @@ namespace SSH_Helper.UI
                 TabStop = false
             };
             _completionList.DrawItem += CompletionList_DrawItem;
+            _completionList.MouseDown += CompletionList_MouseDown;
+            _completionList.MouseUp += CompletionList_MouseUp;
             _completionList.DoubleClick += (_, _) => AcceptCurrentCompletion();
-            _completionList.MouseClick += (_, _) => AcceptCurrentCompletion();
-            _completionList.GotFocus += (_, _) =>
-            {
-                BeginInvoke(new Action(EnsureEditorFocus));
-            };
             _completionList.HandleCreated += (_, _) => ApplyScrollbarTheme(_completionList, _isDarkMode);
 
             _completionPopup = new Panel
@@ -166,10 +165,6 @@ namespace SSH_Helper.UI
             };
             _completionPopup.Controls.Add(_completionList);
             _completionList.Dock = DockStyle.Fill;
-            _completionPopup.MouseDown += (_, _) =>
-            {
-                BeginInvoke(new Action(EnsureEditorFocus));
-            };
             _completionPopup.HandleCreated += (_, _) => ApplyScrollbarTheme(_completionPopup, _isDarkMode);
 
             Controls.Add(_editor);
@@ -607,7 +602,7 @@ namespace SSH_Helper.UI
 
             if (_settings.EnableAutocomplete && e.Control && e.KeyCode == Keys.Space)
             {
-                ShowCompletionPopup();
+                ShowCompletionPopupForManualRequest();
                 e.Handled = true;
                 e.SuppressKeyPress = true;
                 return;
@@ -624,6 +619,11 @@ namespace SSH_Helper.UI
         {
             OnKeyUp(e);
             if (!_settings.EnableAutocomplete || !_settings.AutocompleteShowOnTyping)
+            {
+                return;
+            }
+
+            if (_completionPopup.Visible)
             {
                 return;
             }
@@ -665,6 +665,48 @@ namespace SSH_Helper.UI
         {
             HideCompletionPopup();
             OnMouseUp(e);
+        }
+
+        private void Editor_KeyPress(object? sender, KeyPressEventArgs e)
+        {
+            if (_completionPopup.Visible && e.KeyChar == ':' &&
+                ShouldAppendYamlKeySuffix(_activeCompletionContext) &&
+                _completionList.SelectedIndex >= 0 &&
+                _completionList.SelectedIndex < _activeCompletionItems.Count)
+            {
+                e.Handled = true;
+                AcceptCurrentCompletion();
+            }
+        }
+
+        private void Editor_LostFocus(object? sender, EventArgs e)
+        {
+            if (!_completionPopup.Visible || IsDisposed)
+            {
+                return;
+            }
+
+            if (!IsHandleCreated)
+            {
+                HideCompletionPopup();
+                return;
+            }
+
+            BeginInvoke(new Action(() =>
+            {
+                if (IsDisposed || !_completionPopup.Visible)
+                {
+                    return;
+                }
+
+                var focusedHandle = ScrollbarThemeNative.GetFocus();
+                if (focusedHandle != IntPtr.Zero && IsHandleInEditorHierarchy(focusedHandle))
+                {
+                    return;
+                }
+
+                HideCompletionPopup();
+            }));
         }
 
         private void Editor_MarginClick(object? sender, MarginClickEventArgs e)
@@ -760,9 +802,51 @@ namespace SSH_Helper.UI
                 return true;
             }
 
+            if (e.KeyCode == Keys.PageDown)
+            {
+                if (_completionList.Items.Count > 0)
+                {
+                    var pageSize = Math.Max(1, _completionPopup.Height / Math.Max(18, _completionList.ItemHeight));
+                    _completionList.SelectedIndex = Math.Min(
+                        _completionList.Items.Count - 1,
+                        _completionList.SelectedIndex + pageSize);
+                }
+
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return true;
+            }
+
+            if (e.KeyCode == Keys.PageUp)
+            {
+                if (_completionList.Items.Count > 0)
+                {
+                    var pageSize = Math.Max(1, _completionPopup.Height / Math.Max(18, _completionList.ItemHeight));
+                    _completionList.SelectedIndex = Math.Max(0, _completionList.SelectedIndex - pageSize);
+                }
+
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return true;
+            }
+
             if (e.KeyCode == Keys.Enter || (e.KeyCode == Keys.Tab && !e.Shift))
             {
+                var contextBeforeAccept = _activeCompletionContext;
                 AcceptCurrentCompletion();
+                if (e.KeyCode == Keys.Enter && _settings.EnableSmartEnter &&
+                    contextBeforeAccept is CompletionContextKind.StepCommand
+                                        or CompletionContextKind.TopLevelKey)
+                {
+                    var smartResult = EditorTextUtilities.ApplySmartEnter(
+                        _editor.Text,
+                        SelectionStart,
+                        SelectionLength,
+                        _settings.IndentSize,
+                        _settings.PreserveBlankLineBetweenSteps);
+                    ApplyTextEdit(smartResult);
+                }
+
                 e.Handled = true;
                 e.SuppressKeyPress = true;
                 return true;
@@ -838,6 +922,7 @@ namespace SSH_Helper.UI
                 Keys.Right or
                 Keys.Up or
                 Keys.Down or
+                Keys.Snapshot or
                 Keys.Escape or
                 Keys.Enter or
                 Keys.Tab or
@@ -853,10 +938,15 @@ namespace SSH_Helper.UI
 
         private void ShowCompletionPopup()
         {
-            ShowCompletionPopupCore();
+            ShowCompletionPopupCore(manualRequest: false);
         }
 
-        private void ShowCompletionPopupCore()
+        private void ShowCompletionPopupForManualRequest()
+        {
+            ShowCompletionPopupCore(manualRequest: true);
+        }
+
+        private void ShowCompletionPopupCore(bool manualRequest)
         {
             if (!_settings.EnableAutocomplete || _autocompleteProvider == null)
             {
@@ -864,7 +954,10 @@ namespace SSH_Helper.UI
                 return;
             }
 
-            var completion = _autocompleteProvider.GetCompletion(_editor.Text, _editor.CurrentPosition);
+            var completion = _autocompleteProvider.GetCompletion(
+                _editor.Text,
+                _editor.CurrentPosition,
+                manualRequest);
             if (completion.Items.Count == 0)
             {
                 HideCompletionPopup();
@@ -875,7 +968,8 @@ namespace SSH_Helper.UI
             _completionReplaceStart = completion.ReplaceStart;
             _completionReplaceLength = completion.ReplaceLength;
             _activeCompletionContext = completion.Context;
-            _activeCompletionItems = new List<CompletionItem>();
+            _activeCompletionManualRequest = manualRequest;
+            var newItems = new List<CompletionItem>();
             var seenEntries = new HashSet<string>(StringComparer.Ordinal);
             foreach (var item in completion.Items)
             {
@@ -887,26 +981,52 @@ namespace SSH_Helper.UI
 
                 if (seenEntries.Add(entry))
                 {
-                    _activeCompletionItems.Add(item);
+                    newItems.Add(item);
                 }
             }
 
-            if (_activeCompletionItems.Count == 0)
+            if (newItems.Count == 0)
             {
                 HideCompletionPopup();
                 EnsureEditorFocus();
                 return;
             }
 
-            UpdateCompletionPopupSize(_activeCompletionItems.Count);
-            _completionList.BeginUpdate();
-            _completionList.Items.Clear();
-            foreach (var item in _activeCompletionItems)
+            if (!AreCompletionItemsEqual(_activeCompletionItems, newItems))
             {
-                _completionList.Items.Add(item);
+                string? previousSelection = null;
+                if (_completionList.SelectedIndex >= 0 &&
+                    _completionList.SelectedIndex < _activeCompletionItems.Count)
+                {
+                    previousSelection = _activeCompletionItems[_completionList.SelectedIndex].InsertText;
+                }
+
+                _activeCompletionItems = newItems;
+                UpdateCompletionPopupSize(_activeCompletionItems.Count);
+                _completionList.BeginUpdate();
+                _completionList.Items.Clear();
+                foreach (var item in _activeCompletionItems)
+                {
+                    _completionList.Items.Add(item);
+                }
+
+                var newIndex = 0;
+                if (previousSelection != null)
+                {
+                    for (var i = 0; i < _activeCompletionItems.Count; i++)
+                    {
+                        if (string.Equals(_activeCompletionItems[i].InsertText, previousSelection,
+                            StringComparison.Ordinal))
+                        {
+                            newIndex = i;
+                            break;
+                        }
+                    }
+                }
+
+                _completionList.SelectedIndex = newIndex;
+                _completionList.EndUpdate();
             }
-            _completionList.SelectedIndex = 0;
-            _completionList.EndUpdate();
 
             if (!TryGetCaretViewportPoint(out var caretPoint))
             {
@@ -937,6 +1057,24 @@ namespace SSH_Helper.UI
             }
         }
 
+        private static bool AreCompletionItemsEqual(List<CompletionItem> oldItems, List<CompletionItem> newItems)
+        {
+            if (oldItems.Count != newItems.Count)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < newItems.Count; i++)
+            {
+                if (!string.Equals(oldItems[i].InsertText, newItems[i].InsertText, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private void HideCompletionPopup()
         {
             if (_completionPopup.Visible)
@@ -945,6 +1083,7 @@ namespace SSH_Helper.UI
             }
 
             _activeCompletionContext = CompletionContextKind.None;
+            _activeCompletionManualRequest = false;
         }
 
         private void RefreshVisibleCompletionPopup()
@@ -954,7 +1093,7 @@ namespace SSH_Helper.UI
                 return;
             }
 
-            ShowCompletionPopupCore();
+            ShowCompletionPopupCore(_activeCompletionManualRequest);
         }
 
         private void DismissCompletionOnExternalClick(IntPtr targetHandle)
@@ -964,14 +1103,40 @@ namespace SSH_Helper.UI
                 return;
             }
 
-            if (targetHandle != IntPtr.Zero &&
-                Control.FromHandle(targetHandle) is Control targetControl &&
-                IsControlInEditorHierarchy(targetControl))
+            if (targetHandle != IntPtr.Zero && IsHandleInEditorHierarchy(targetHandle))
             {
                 return;
             }
 
             HideCompletionPopup();
+        }
+
+        private bool IsHandleInEditorHierarchy(IntPtr handle)
+        {
+            if (handle == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (Control.FromHandle(handle) is Control targetControl && IsControlInEditorHierarchy(targetControl))
+            {
+                return true;
+            }
+
+            return IsChildHandle(_editor, handle) ||
+                   IsChildHandle(_completionPopup, handle) ||
+                   IsChildHandle(_completionList, handle) ||
+                   IsChildHandle(this, handle);
+        }
+
+        private static bool IsChildHandle(Control potentialParent, IntPtr handle)
+        {
+            if (!potentialParent.IsHandleCreated)
+            {
+                return false;
+            }
+
+            return handle == potentialParent.Handle || ScrollbarThemeNative.IsChild(potentialParent.Handle, handle);
         }
 
         private bool IsControlInEditorHierarchy(Control control)
@@ -1082,8 +1247,18 @@ namespace SSH_Helper.UI
             }
 
             var completion = _activeCompletionItems[_completionList.SelectedIndex];
-            var safeStart = Math.Clamp(_completionReplaceStart, 0, _editor.TextLength);
-            var safeLength = Math.Clamp(_completionReplaceLength, 0, _editor.TextLength - safeStart);
+            var freshResult = _autocompleteProvider?.GetCompletion(
+                _editor.Text,
+                _editor.CurrentPosition,
+                _activeCompletionManualRequest);
+            var replaceStart = freshResult is { Items.Count: > 0 }
+                ? freshResult.ReplaceStart
+                : _completionReplaceStart;
+            var replaceLength = freshResult is { Items.Count: > 0 }
+                ? freshResult.ReplaceLength
+                : _completionReplaceLength;
+            var safeStart = Math.Clamp(replaceStart, 0, _editor.TextLength);
+            var safeLength = Math.Clamp(replaceLength, 0, _editor.TextLength - safeStart);
             var insertText = BuildCompletionInsertText(completion, safeStart, safeLength);
 
             _suppressTextProcessing = true;
@@ -1105,11 +1280,18 @@ namespace SSH_Helper.UI
 
             HideCompletionPopup();
             Editor_TextChanged(this, EventArgs.Empty);
+            EnsureEditorFocus();
         }
 
         private string BuildCompletionInsertText(CompletionItem completion, int replaceStart, int replaceLength)
         {
             var baseInsertText = string.IsNullOrWhiteSpace(completion.InsertText) ? completion.Label : completion.InsertText;
+
+            if (_activeCompletionContext == CompletionContextKind.Interpolation)
+            {
+                return BuildInterpolationInsertText(baseInsertText, replaceStart, replaceLength);
+            }
+
             if (!ShouldAppendYamlKeySuffix(_activeCompletionContext))
             {
                 return baseInsertText;
@@ -1122,6 +1304,57 @@ namespace SSH_Helper.UI
             }
 
             return baseInsertText + ": ";
+        }
+
+        private string BuildInterpolationInsertText(string baseText, int replaceStart, int replaceLength)
+        {
+            var triggerStart = Math.Max(0, replaceStart - 2);
+            var triggerText = _editor.Text.Substring(triggerStart, replaceStart - triggerStart);
+            var closingBracket = triggerText == "{{" ? "}}" : "}";
+
+            var nextIndex = Math.Clamp(replaceStart + replaceLength, 0, _editor.TextLength);
+            var checkLength = Math.Min(closingBracket.Length, _editor.TextLength - nextIndex);
+            if (checkLength > 0)
+            {
+                var afterToken = _editor.Text.Substring(nextIndex, checkLength);
+                if (afterToken.StartsWith(closingBracket, StringComparison.Ordinal))
+                {
+                    return baseText;
+                }
+            }
+
+            return baseText + closingBracket;
+        }
+
+        private void CompletionList_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (!_completionPopup.Visible || e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            var index = _completionList.IndexFromPoint(e.Location);
+            if (index >= 0 && index < _completionList.Items.Count)
+            {
+                _completionList.SelectedIndex = index;
+            }
+        }
+
+        private void CompletionList_MouseUp(object? sender, MouseEventArgs e)
+        {
+            if (!_completionPopup.Visible || e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            var index = _completionList.IndexFromPoint(e.Location);
+            if (index < 0 || index >= _completionList.Items.Count)
+            {
+                return;
+            }
+
+            _completionList.SelectedIndex = index;
+            AcceptCurrentCompletion();
         }
 
         private static bool ShouldAppendYamlKeySuffix(CompletionContextKind context)
@@ -1139,6 +1372,7 @@ namespace SSH_Helper.UI
                 return;
             }
 
+            var item = _completionList.Items[e.Index] as CompletionItem;
             var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
             var background = selected
                 ? (_isDarkMode ? Color.FromArgb(14, 99, 156) : Color.FromArgb(13, 110, 253))
@@ -1150,15 +1384,68 @@ namespace SSH_Helper.UI
             using var bgBrush = new SolidBrush(background);
             e.Graphics.FillRectangle(bgBrush, e.Bounds);
 
-            var itemText = _completionList.Items[e.Index]?.ToString() ?? string.Empty;
-            var textBounds = Rectangle.Inflate(e.Bounds, -4, 0);
+            var kindColor = GetCompletionKindColor(item?.Kind);
+            const int indicatorSize = 8;
+            var indicatorX = e.Bounds.X + 6;
+            var indicatorY = e.Bounds.Y + (e.Bounds.Height - indicatorSize) / 2;
+            using var kindBrush = new SolidBrush(kindColor);
+            e.Graphics.FillRectangle(kindBrush, indicatorX, indicatorY, indicatorSize, indicatorSize);
+
+            var labelText = item?.Label ?? _completionList.Items[e.Index]?.ToString() ?? string.Empty;
+            var detailText = item?.Detail;
+            var textLeft = indicatorX + indicatorSize + 6;
+            var availableWidth = e.Bounds.Right - textLeft - 4;
+
+            var showDetail = false;
+            var detailWidth = 0;
+            if (!string.IsNullOrEmpty(detailText))
+            {
+                var labelMeasure = TextRenderer.MeasureText(
+                    e.Graphics, labelText, _completionList.Font,
+                    new Size(availableWidth, e.Bounds.Height), TextFormatFlags.NoPadding);
+                var detailMeasure = TextRenderer.MeasureText(
+                    e.Graphics, detailText, _completionList.Font,
+                    new Size(availableWidth, e.Bounds.Height), TextFormatFlags.NoPadding);
+                var spaceAfterLabel = availableWidth - labelMeasure.Width - 12;
+                if (spaceAfterLabel >= detailMeasure.Width)
+                {
+                    showDetail = true;
+                    detailWidth = detailMeasure.Width;
+                }
+            }
+
+            var labelBounds = new Rectangle(textLeft, e.Bounds.Y,
+                showDetail ? availableWidth - detailWidth - 12 : availableWidth,
+                e.Bounds.Height);
             TextRenderer.DrawText(
-                e.Graphics,
-                itemText,
-                _completionList.Font,
-                textBounds,
-                foreground,
+                e.Graphics, labelText, _completionList.Font, labelBounds, foreground,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+            if (showDetail)
+            {
+                var detailColor = selected
+                    ? Color.FromArgb(200, 200, 200)
+                    : (_isDarkMode ? Color.FromArgb(128, 128, 128) : Color.FromArgb(160, 160, 160));
+                var detailX = e.Bounds.Right - detailWidth - 8;
+                var detailBounds = new Rectangle(
+                    detailX, e.Bounds.Y, e.Bounds.Right - detailX, e.Bounds.Height);
+                TextRenderer.DrawText(
+                    e.Graphics, detailText, _completionList.Font, detailBounds, detailColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+        }
+
+        private Color GetCompletionKindColor(string? kind)
+        {
+            return kind switch
+            {
+                "command" => _isDarkMode ? Color.FromArgb(86, 156, 214) : Color.FromArgb(4, 81, 165),
+                "top-level" => _isDarkMode ? Color.FromArgb(197, 134, 192) : Color.FromArgb(175, 0, 219),
+                "option" => _isDarkMode ? Color.FromArgb(78, 201, 176) : Color.FromArgb(38, 127, 153),
+                "value" => _isDarkMode ? Color.FromArgb(206, 145, 120) : Color.FromArgb(163, 21, 21),
+                "symbol" => _isDarkMode ? Color.FromArgb(220, 220, 170) : Color.FromArgb(121, 94, 38),
+                _ => _isDarkMode ? Color.FromArgb(128, 128, 128) : Color.FromArgb(160, 160, 160)
+            };
         }
 
         private void EnsureEditorFocus()
@@ -1982,14 +2269,10 @@ namespace SSH_Helper.UI
         {
             public NonFocusableCompletionListBox()
             {
-                SetStyle(ControlStyles.Selectable, false);
                 TabStop = false;
             }
 
-            protected override void OnEnter(EventArgs e)
-            {
-                // Keep focus with the editor host so typing continues uninterrupted.
-            }
+            protected override bool ShowFocusCues => false;
         }
 
         private sealed class CompletionDismissMessageFilter : IMessageFilter
@@ -2041,8 +2324,14 @@ namespace SSH_Helper.UI
             [DllImport("user32.dll")]
             public static extern bool EnumChildWindows(IntPtr hwndParent, EnumChildProc lpEnumFunc, IntPtr lParam);
 
+            [DllImport("user32.dll")]
+            public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
+
             [DllImport("user32.dll", CharSet = CharSet.Auto)]
             public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+            [DllImport("user32.dll")]
+            public static extern IntPtr GetFocus();
 
             [DllImport("user32.dll")]
             public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);

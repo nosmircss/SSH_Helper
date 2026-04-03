@@ -115,6 +115,27 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_ExistsTypeFromVariable_TracksTypeDependency()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - exists:
+                      path: "C:\\temp"
+                      into: path_exists
+                      type: "${expected_type}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().Contain("expected_type");
+    }
+
+    [Fact]
     public void AnalyzePresets_ForeachCollectionExpression_DoesNotReportFunctionCallAsMissingColumn()
     {
         var analyzer = new ScriptDependencyAnalyzer();

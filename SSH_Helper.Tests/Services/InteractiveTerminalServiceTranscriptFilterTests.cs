@@ -155,6 +155,100 @@ public class InteractiveTerminalServiceTranscriptFilterTests
     }
 
     [Fact]
+    public void CleanTranscriptForAudit_TabAutocompleteBackspaces_PreservesExecutedCommand()
+    {
+        var raw =
+            "FortiGate-VM64-KVM # get system status" +
+            "\b\b\b\b\b\bstandalone-cluster" +
+            "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\bstartup-error-log" +
+            "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\bstandalone-cluster\r\n";
+
+        var cleaned = InteractiveTerminalService.CleanTranscriptForAudit(raw);
+
+        cleaned.Should().Be("FortiGate-VM64-KVM # get system standalone-cluster\r\n");
+    }
+
+    [Fact]
+    public void ShouldEmitTranscriptChunkDebug_BackspaceChunk_ReturnsTrue()
+    {
+        var shouldEmit = InteractiveTerminalService.ShouldEmitTranscriptChunkDebug(
+            rawData: "status\b\b\b",
+            strippedData: "status",
+            capturedText: "sta");
+
+        shouldEmit.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ShouldEmitTranscriptChunkDebug_UnchangedPlainChunk_ReturnsFalse()
+    {
+        var shouldEmit = InteractiveTerminalService.ShouldEmitTranscriptChunkDebug(
+            rawData: "hostname\r\n",
+            strippedData: "hostname\r\n",
+            capturedText: "hostname\r\n");
+
+        shouldEmit.Should().BeFalse();
+    }
+
+    [Fact]
+    public void FormatInteractiveDebugText_EscapesControlCharactersAndTruncates()
+    {
+        const string value = "AB\tCD\r\nE\bF\u007F\u001B12345";
+
+        var formatted = InteractiveTerminalService.FormatInteractiveDebugText(value, maxLength: 10);
+
+        formatted.Should().Be("AB\\tCD\\r\\n...[+17 chars]");
+    }
+
+    [Fact]
+    public void ResolveTranscriptAssemblyInput_NonAlternateRawChunk_UsesRawData()
+    {
+        const string raw = "\u001B[15Drtup-error-log\u001B[K";
+        const string captured = "rtup-error-log";
+
+        var result = InteractiveTerminalService.ResolveTranscriptAssemblyInput(
+            rawData: raw,
+            capturedText: captured,
+            inAlternateBefore: false,
+            inAlternateAfter: false);
+
+        result.Should().Be(raw);
+    }
+
+    [Fact]
+    public void ResolveTranscriptAssemblyInput_AlternateScreenTransition_UsesCapturedText()
+    {
+        const string raw = "\u001B[?1049hFULLSCREEN";
+        const string captured = "vi test.txt\r\n";
+
+        var result = InteractiveTerminalService.ResolveTranscriptAssemblyInput(
+            rawData: raw,
+            capturedText: captured,
+            inAlternateBefore: false,
+            inAlternateAfter: true);
+
+        result.Should().Be(captured);
+    }
+
+    [Fact]
+    public void PrepareMirroredChunkForEmission_CursorRewriteAcrossChunks_MatchesWholeStreamNormalization()
+    {
+        const string chunk1 = "FortiGate-VM64-KVM # get system standalone-cluster";
+        const string chunk2 = "\u001B[15Drtup-error-log\u001B[K";
+        const string chunk3 = "\u001B[14Dtus\u001B[K\r\n";
+        var expected = InteractiveTerminalService.NormalizeMirroredTranscript(chunk1 + chunk2 + chunk3);
+
+        var pending = new StringBuilder();
+        var first = InteractiveTerminalService.PrepareMirroredChunkForEmission(chunk1, pending, flush: false);
+        var second = InteractiveTerminalService.PrepareMirroredChunkForEmission(chunk2, pending, flush: false);
+        var third = InteractiveTerminalService.PrepareMirroredChunkForEmission(chunk3, pending, flush: false);
+
+        first.Should().BeEmpty();
+        second.Should().BeEmpty();
+        third.Should().Be(expected);
+    }
+
+    [Fact]
     public void IsDetachedCaptureCompletionReason_CtrlCAndTimeout_ReturnTrue()
     {
         InteractiveTerminalService.IsDetachedCaptureCompletionReason("ctrl_c_continue").Should().BeTrue();

@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using SSH_Helper.Services.Scripting.Models;
@@ -53,6 +54,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
             var options = step.Http;
             var into = options.Into;
+            var totalSw = Stopwatch.StartNew();
 
             // Clear capture variables at the start of each execution to prevent stale values.
             ClearCapture(into, context);
@@ -93,6 +95,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
             var request = new HttpRequestMessage(new HttpMethod(method), uri);
+            var authSummary = "none";
 
             if (string.Equals(authMode, "basic", StringComparison.OrdinalIgnoreCase))
             {
@@ -103,6 +106,7 @@ namespace SSH_Helper.Services.Scripting.Commands
 
                 var token = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
                 request.Headers.Authorization = new AuthenticationHeaderValue("Basic", token);
+                authSummary = $"basic username={username} password_length={password.Length}";
             }
             else if (string.Equals(authMode, "bearer", StringComparison.OrdinalIgnoreCase))
             {
@@ -111,6 +115,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     return ApplyOnError(step, "Http auth 'bearer' requires non-empty token");
 
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                authSummary = $"bearer token_length={token.Length}";
             }
 
             var headers = BuildResolvedHeaders(options.Headers, context);
@@ -134,21 +139,49 @@ namespace SSH_Helper.Services.Scripting.Commands
             ApplyHeaders(request, headers);
 
             context.EmitOutput($"Http: {method} {url}", ScriptOutputType.Debug);
+            context.EmitOutput(
+                $"Http: Request options auth={authSummary} timeout={timeoutSeconds}s follow_redirects={options.FollowRedirects} verify_tls={options.VerifyTls}",
+                ScriptOutputType.Debug);
+            context.EmitOutput($"Http: Request headers {SerializeHeaders(request)}", ScriptOutputType.Debug);
+            if (body != null)
+            {
+                context.EmitOutput($"Http: Request body {ScriptingHelpers.FormatForDisplay(body)}", ScriptOutputType.Debug);
+            }
 
             try
             {
+                var apiSw = Stopwatch.StartNew();
                 using var response = await client.SendAsync(request, cts.Token);
+                apiSw.Stop();
                 var responseBody = await response.Content.ReadAsStringAsync(cts.Token);
+                totalSw.Stop();
 
-                CaptureHttpResponse(into, context, responseBody, (int)response.StatusCode, SerializeHeaders(response));
+                var apiMs = apiSw.ElapsedMilliseconds;
+                var totalMs = totalSw.ElapsedMilliseconds;
+
+                CaptureHttpResponse(
+                    into,
+                    context,
+                    responseBody,
+                    (int)response.StatusCode,
+                    SerializeHeaders(response),
+                    apiMs,
+                    totalMs);
+
+                context.EmitOutput(
+                    $"Http: Timing endpoint={SummarizeEndpoint(uri)} status={(int)response.StatusCode} api_ms={apiMs} total_ms={totalMs}",
+                    ScriptOutputType.Debug);
+                context.EmitOutput($"Http: Response status {(int)response.StatusCode} {response.ReasonPhrase}", ScriptOutputType.Debug);
+                context.EmitOutput($"Http: Response headers {SerializeHeaders(response)}", ScriptOutputType.Debug);
+                context.EmitOutput($"Http: Response body {ScriptingHelpers.FormatForDisplay(responseBody)}", ScriptOutputType.Debug);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     var error = $"Http failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
-                    context.EmitOutput(error, ScriptOutputType.Warning);
-
                     if (options.AllowFailure)
                         return CommandResult.Ok(error);
+
+                    context.EmitOutput(error, ScriptOutputType.Warning);
 
                     return ApplyOnError(step, error);
                 }
@@ -158,14 +191,17 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                totalSw.Stop();
                 return ApplyOnError(step, $"Http timed out after {timeoutSeconds} seconds");
             }
             catch (HttpRequestException ex)
             {
+                totalSw.Stop();
                 return ApplyOnError(step, $"Http transport error: {ex.Message}");
             }
             catch (Exception ex)
             {
+                totalSw.Stop();
                 return ApplyOnError(step, $"Http error: {ex.Message}");
             }
         }
@@ -214,9 +250,18 @@ namespace SSH_Helper.Services.Scripting.Commands
             context.SetVariable(into, string.Empty);
             context.SetVariable(into + "_status", string.Empty);
             context.SetVariable(into + "_headers", string.Empty);
+            context.SetVariable(into + "_api_ms", string.Empty);
+            context.SetVariable(into + "_total_ms", string.Empty);
         }
 
-        private static void CaptureHttpResponse(string? into, ScriptContext context, string body, int status, string headersJson)
+        private static void CaptureHttpResponse(
+            string? into,
+            ScriptContext context,
+            string body,
+            int status,
+            string headersJson,
+            long apiMs,
+            long totalMs)
         {
             if (string.IsNullOrWhiteSpace(into))
                 return;
@@ -224,6 +269,14 @@ namespace SSH_Helper.Services.Scripting.Commands
             context.SetVariable(into, body);
             context.SetVariable(into + "_status", status);
             context.SetVariable(into + "_headers", headersJson);
+            context.SetVariable(into + "_api_ms", apiMs);
+            context.SetVariable(into + "_total_ms", totalMs);
+        }
+
+        private static string SummarizeEndpoint(Uri uri)
+        {
+            var path = string.IsNullOrWhiteSpace(uri.AbsolutePath) ? "/" : uri.AbsolutePath;
+            return uri.Host + path;
         }
 
         private static string SerializeHeaders(HttpResponseMessage response)
@@ -237,6 +290,25 @@ namespace SSH_Helper.Services.Scripting.Commands
             foreach (var header in response.Content.Headers)
             {
                 headers[header.Key] = string.Join(", ", header.Value);
+            }
+
+            return JsonSerializer.Serialize(headers);
+        }
+
+        private static string SerializeHeaders(HttpRequestMessage request)
+        {
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var header in request.Headers)
+            {
+                headers[header.Key] = string.Join(", ", header.Value);
+            }
+
+            if (request.Content != null)
+            {
+                foreach (var header in request.Content.Headers)
+                {
+                    headers[header.Key] = string.Join(", ", header.Value);
+                }
             }
 
             return JsonSerializer.Serialize(headers);

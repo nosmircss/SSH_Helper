@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -33,6 +34,8 @@ namespace SSH_Helper.Services.Scripting
             "updateenvironment",
             "readfile",
             "writefile",
+            "exists",
+            "playsound",
             "input",
             "log",
             "http",
@@ -99,14 +102,16 @@ namespace SSH_Helper.Services.Scripting
                 ["wait"] = ["seconds"],
                 ["set"] = ["expression"],
                 ["exit"] = ["status", "message"],
-                ["extract"] = ["from", "pattern", "into", "match"],
+                ["extract"] = ["from", "pattern", "into", "match", "required"],
                 ["if"] = ["condition", "then", "elif", "else"],
                 ["foreach"] = ["iterator", "when", "do"],
                 ["while"] = ["condition", "max_iterations", "do"],
                 ["try"] = ["do", "catch", "finally"],
                 ["readfile"] = ["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding", "on_error"],
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
-                ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error"],
+                ["exists"] = ["path", "into", "type", "on_error"],
+                ["playsound"] = ["path", "wait", "volume", "max_seconds", "into", "on_error"],
+                ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error", "on_error"],
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
                 ["log"] = ["message", "level"],
@@ -118,9 +123,9 @@ namespace SSH_Helper.Services.Scripting
                 ["sftp"] = ["action", "local_path", "remote_path", "host", "port", "username", "password", "overwrite", "timeout", "into", "on_error"],
                 ["webhook"] = ["url", "method", "body", "headers", "into", "timeout", "on_error"],
                 ["parse"] = ["format", "from", "into", "sections"],
-                ["choose"] = ["title", "prompt", "into", "options", "default"],
-                ["multiselect"] = ["title", "prompt", "into", "options", "min", "max"],
-                ["confirm"] = ["title", "prompt", "into", "default"],
+                ["choose"] = ["title", "prompt", "into", "options", "default", "on_error"],
+                ["multiselect"] = ["title", "prompt", "into", "options", "min", "max", "on_error"],
+                ["confirm"] = ["title", "prompt", "into", "default", "on_error"],
                 ["interactive"] = ["session", "title", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"],
                 ["assert"] = ["condition", "message", "severity"],
                 ["switch"] = ["value", "cases", "default"],
@@ -144,6 +149,8 @@ namespace SSH_Helper.Services.Scripting
                 ["updateenvironment"] = [],
                 ["readfile"] = [],
                 ["writefile"] = [],
+                ["exists"] = [],
+                ["playsound"] = [],
                 ["input"] = [],
                 ["log"] = [],
                 ["http"] = [],
@@ -188,6 +195,8 @@ namespace SSH_Helper.Services.Scripting
             StepType.Send,
             StepType.Readfile,
             StepType.Writefile,
+            StepType.Exists,
+            StepType.PlaySound,
             StepType.Input,
             StepType.Http,
             StepType.BrowserCallbackCapture,
@@ -241,6 +250,7 @@ namespace SSH_Helper.Services.Scripting
                 ["session"] = ["separate", "shared"],
                 ["mirror_output"] = ["true", "false"],
                 ["show_window"] = ["true", "false"],
+                ["wait"] = ["true", "false"],
                 ["severity"] = ["error", "warning"],
                 ["align"] = ["left", "right", "center"],
                 ["show_header"] = ["true", "false"]
@@ -270,6 +280,16 @@ namespace SSH_Helper.Services.Scripting
                 pair => (IReadOnlyList<string>)pair.Value
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        public static IReadOnlyDictionary<string, IReadOnlyList<string>> GetDeclaredStepOptionKeysByCommand()
+        {
+            return CommandOptionKeys.ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyList<string>)pair.Value
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList(),
                 StringComparer.OrdinalIgnoreCase);
         }
@@ -892,9 +912,17 @@ namespace SSH_Helper.Services.Scripting
                         step.DeclaredStepType = StepType.Writefile;
                         step.Writefile = ParseWritefileOptions(parser, step);
                         break;
+                    case "exists":
+                        step.DeclaredStepType = StepType.Exists;
+                        step.Exists = ParseExistsOptions(parser, step);
+                        break;
+                    case "playsound":
+                        step.DeclaredStepType = StepType.PlaySound;
+                        step.PlaySound = ParsePlaySoundOptions(parser, step);
+                        break;
                     case "input":
                         step.DeclaredStepType = StepType.Input;
-                        step.Input = ParseInputOptions(parser);
+                        step.Input = ParseInputOptions(parser, step);
                         break;
                     case "updatecolumn":
                         step.DeclaredStepType = StepType.UpdateColumn;
@@ -942,15 +970,15 @@ namespace SSH_Helper.Services.Scripting
                         break;
                     case "choose":
                         step.DeclaredStepType = StepType.Choose;
-                        step.Choose = ParseChooseOptions(parser);
+                        step.Choose = ParseChooseOptions(parser, step);
                         break;
                     case "multiselect":
                         step.DeclaredStepType = StepType.Multiselect;
-                        step.Multiselect = ParseMultiselectOptions(parser);
+                        step.Multiselect = ParseMultiselectOptions(parser, step);
                         break;
                     case "confirm":
                         step.DeclaredStepType = StepType.Confirm;
-                        step.Confirm = ParseConfirmOptions(parser);
+                        step.Confirm = ParseConfirmOptions(parser, step);
                         break;
                     case "interactive":
                         step.DeclaredStepType = StepType.Interactive;
@@ -1722,6 +1750,10 @@ namespace SSH_Helper.Services.Scripting
                         case "match":
                             options.Match = parser.Consume<Scalar>().Value;
                             break;
+                        case "required":
+                            var requiredVal = parser.Consume<Scalar>().Value;
+                            options.Required = !string.Equals(requiredVal, "false", StringComparison.OrdinalIgnoreCase);
+                            break;
                         default:
                             AddUnknownKeyWarning($"Unknown extract key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
@@ -1947,7 +1979,126 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private InputOptions ParseInputOptions(IParser parser)
+        private ExistsOptions ParseExistsOptions(IParser parser, ScriptStep step)
+        {
+            var options = new ExistsOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "path":
+                            options.Path = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "type":
+                            options.Type = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown exists key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private PlaySoundOptions ParsePlaySoundOptions(IParser parser, ScriptStep step)
+        {
+            var options = new PlaySoundOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "path":
+                            options.Path = parser.Consume<Scalar>().Value;
+                            break;
+                        case "wait":
+                            var waitValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                            if (waitValue == "true" || waitValue == "yes" || waitValue == "1")
+                            {
+                                options.Wait = true;
+                            }
+                            else if (waitValue == "false" || waitValue == "no" || waitValue == "0")
+                            {
+                                options.Wait = false;
+                            }
+                            else
+                            {
+                                AddStepParseError(step, "playsound.wait must be true/false");
+                            }
+                            break;
+                        case "volume":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var volume))
+                                options.Volume = volume;
+                            else
+                                AddStepParseError(step, "playsound.volume must be an integer between 0 and 100");
+                            break;
+                        case "max_seconds":
+                        case "maxseconds":
+                            if (double.TryParse(
+                                parser.Consume<Scalar>().Value,
+                                NumberStyles.Float | NumberStyles.AllowThousands,
+                                CultureInfo.InvariantCulture,
+                                out var maxSeconds))
+                                options.MaxSeconds = maxSeconds;
+                            else
+                                AddStepParseError(step, "playsound.max_seconds must be a positive number");
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown playsound key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private InputOptions ParseInputOptions(IParser parser, ScriptStep step)
         {
             var options = new InputOptions();
 
@@ -1985,6 +2136,10 @@ namespace SSH_Helper.Services.Scripting
                         case "validationerror":
                             options.ValidationError = parser.Consume<Scalar>().Value;
                             break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
                         default:
                             AddUnknownKeyWarning($"Unknown input key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
@@ -2002,7 +2157,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private ChooseOptions ParseChooseOptions(IParser parser)
+        private ChooseOptions ParseChooseOptions(IParser parser, ScriptStep step)
         {
             var options = new ChooseOptions();
 
@@ -2032,6 +2187,10 @@ namespace SSH_Helper.Services.Scripting
                         case "default":
                             options.Default = parser.Consume<Scalar>().Value;
                             break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
                         default:
                             AddUnknownKeyWarning($"Unknown choose key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
@@ -2049,7 +2208,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private MultiselectOptions ParseMultiselectOptions(IParser parser)
+        private MultiselectOptions ParseMultiselectOptions(IParser parser, ScriptStep step)
         {
             var options = new MultiselectOptions();
 
@@ -2084,6 +2243,10 @@ namespace SSH_Helper.Services.Scripting
                             if (int.TryParse(parser.Consume<Scalar>().Value, out var max))
                                 options.Max = max;
                             break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
                         default:
                             AddUnknownKeyWarning($"Unknown multiselect key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
@@ -2101,7 +2264,7 @@ namespace SSH_Helper.Services.Scripting
             return options;
         }
 
-        private ConfirmOptions ParseConfirmOptions(IParser parser)
+        private ConfirmOptions ParseConfirmOptions(IParser parser, ScriptStep step)
         {
             var options = new ConfirmOptions();
 
@@ -2128,6 +2291,10 @@ namespace SSH_Helper.Services.Scripting
                         case "default":
                             var defVal = parser.Consume<Scalar>().Value.ToLowerInvariant();
                             options.Default = defVal == "true" || defVal == "yes" || defVal == "1";
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown confirm key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
@@ -3831,11 +3998,127 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case StepType.Exists:
+                        if (step.Exists == null || string.IsNullOrWhiteSpace(step.Exists.Path))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Exists requires 'path'{lineContent}");
+                        }
+
+                        if (step.Exists == null || string.IsNullOrWhiteSpace(step.Exists.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Exists requires 'into' variable{lineContent}");
+                        }
+
+                        if (step.Exists != null &&
+                            !IsDynamicValue(step.Exists.Type) &&
+                            !string.Equals(step.Exists.Type, "any", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.Exists.Type, "file", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(step.Exists.Type, "directory", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Exists 'type' must be one of any, file, directory{lineContent}");
+                        }
+                        break;
+
+                    case StepType.PlaySound:
+                        if (step.PlaySound == null || string.IsNullOrWhiteSpace(step.PlaySound.Path))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Playsound requires 'path'{lineContent}");
+                        }
+
+                        if (step.PlaySound != null && (step.PlaySound.Volume < 0 || step.PlaySound.Volume > 100))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Playsound 'volume' must be between 0 and 100{lineContent}");
+                        }
+
+                        if (step.PlaySound?.MaxSeconds.HasValue == true && step.PlaySound.MaxSeconds.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: playsound.max_seconds must be greater than 0{lineContent}");
+                        }
+                        break;
+
                     case StepType.Input:
                         if (step.Input == null || string.IsNullOrEmpty(step.Input.Into))
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Input requires 'into' variable{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Choose:
+                        if (step.Choose == null || string.IsNullOrWhiteSpace(step.Choose.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Choose requires 'into' variable{lineContent}");
+                        }
+
+                        if (step.Choose == null ||
+                            ((step.Choose.Options == null || step.Choose.Options.Count == 0) &&
+                             string.IsNullOrWhiteSpace(step.Choose.OptionsFrom)))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Choose requires 'options'{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Multiselect:
+                        if (step.Multiselect == null || string.IsNullOrWhiteSpace(step.Multiselect.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Multiselect requires 'into' variable{lineContent}");
+                        }
+
+                        if (step.Multiselect == null ||
+                            ((step.Multiselect.Options == null || step.Multiselect.Options.Count == 0) &&
+                             string.IsNullOrWhiteSpace(step.Multiselect.OptionsFrom)))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Multiselect requires 'options'{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Confirm:
+                        if (step.Confirm == null || string.IsNullOrWhiteSpace(step.Confirm.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Confirm requires 'into' variable{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Webhook:
+                        if (step.Webhook == null || string.IsNullOrWhiteSpace(step.Webhook.Url))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Webhook requires 'url'{lineContent}");
+                        }
+                        break;
+
+                    case StepType.Log:
+                        switch (step.Log)
+                        {
+                            case LogOptions logOptions when string.IsNullOrWhiteSpace(logOptions.Message):
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: Log requires 'message'{lineContent}");
+                                break;
+                            }
+                            case string message when string.IsNullOrWhiteSpace(message):
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: Log requires 'message'{lineContent}");
+                                break;
+                            }
+                            case null:
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: Log requires 'message'{lineContent}");
+                                break;
+                            }
                         }
                         break;
 

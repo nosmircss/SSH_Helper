@@ -1,5 +1,929 @@
 # TODO
 
+## 186. Restore host-grid row-header current-row indicator glyph visibility
+- [x] 186.1 Confirm root cause in row-header paint path and define minimal fix scope.
+- [x] 186.2 Patch row-header number rendering to preserve the built-in indicator glyph area.
+- [x] 186.3 Run focused host-grid UI verification and capture evidence.
+- [x] 186.4 Document review notes (root cause, fix, verification).
+
+### 186 Review
+- Root cause: `Dgv_Variables_RowPostPaint` repainted the full row-header rectangle (`FillRectangle` + custom border) after default `DataGridView` painting, which erased the built-in current-row triangle glyph.
+- Fix in `Form1.cs`:
+- added `HostGridRowHeaderGlyphReservationWidth` constant.
+- removed full row-header background/border repaint from `Dgv_Variables_RowPostPaint`.
+- row index text now renders only in a right-side text rectangle that reserves the left glyph lane so the indicator remains visible.
+- Verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\row-header-indicator-fix\bin\ -p:BaseIntermediateOutputPath=artifacts\row-header-indicator-fix\obj\` (passed: `6/6`).
+- `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\row-header-indicator-fix-build\bin\ -p:BaseIntermediateOutputPath=artifacts\row-header-indicator-fix-build\obj\` (passed; existing warnings unchanged: `MSB3277`, `CS8602`, `xUnit1031`).
+
+## 185. Enforce panel-order YAML export for all Flow Canvas blocks
+- [x] 185.1 Audit panel order vs bridge preferred export order across all block commands.
+- [x] 185.2 Patch remaining command-order mismatch(es) so export key order matches Properties panel order.
+- [x] 185.3 Add drift-guard coverage that validates all block property orders against bridge export ordering.
+- [x] 185.4 Run focused + regression verification and capture outcomes.
+- [x] 185.5 Document review notes (root cause, implementation, evidence).
+
+### 185 Review
+- Root cause: after moving fallback ordering to parser declared keys, one command still diverged from panel display order: `extract` parser order (`from, pattern, into, ...`) did not match Properties panel order (`pattern, into, from, ...`).
+- Fix in `Services/FlowCanvasBridge.cs`:
+- extended `PreferredOptionOrderOverridesByCommand` with `extract` panel order: `pattern`, `into`, `from`, `match`, `required`.
+- added `GetPreferredExportOptionOrderByCommand()` to expose resolved command ordering for drift-guard verification.
+- Added/updated tests in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`:
+- `ExportGraphToYaml_ExtractOptions_AreSerializedInPropertiesPanelOrder`
+- `DriftGuard_RegistryPanelOrder_MatchesBridgePreferredExportOrder_ForAllBlocks`
+- Enhanced registry helper parsing to preserve property order and include `timeoutProp`/`onErrorProp` references so drift checks compare real panel order.
+- Verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_ExtractOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~DriftGuard_RegistryPanelOrder_MatchesBridgePreferredExportOrder_ForAllBlocks" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\all-block-order-focused\bin\ -p:BaseIntermediateOutputPath=artifacts\all-block-order-focused\obj\` (passed: `2/2`).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\all-block-order-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\all-block-order-regression\obj\` (passed: `56/56`).
+
+## 184. Align playsound YAML key order with Properties panel
+- [x] 184.1 Add a failing FlowCanvasBridge regression for `playsound` option order using the reported key set.
+- [x] 184.2 Extend export preferred-order overrides so `playsound` emits panel-order keys (`path`, `max_seconds`, `into`, `wait`, `volume`, `on_error`).
+- [x] 184.3 Run focused + bridge-regression verification and capture outcomes.
+- [x] 184.4 Document review notes with root cause and verification evidence.
+
+### 184 Review
+- Root cause: export fallback ordering for non-overridden commands used `ScriptParser.GetKnownStepOptionKeysByCommand()`, which returns alphabetically sorted keys; for `playsound` that produced `into, max_seconds, path, volume, ...` instead of panel order.
+- Added RED regression in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`:
+- `ExportGraphToYaml_PlaySoundOptions_AreSerializedInPropertiesPanelOrder`
+- RED verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_PlaySoundOptions_AreSerializedInPropertiesPanelOrder" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\playsound-order-red\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-order-red\obj\` (failed as expected: actual `into, max_seconds, path, volume, on_error`).
+- Fix in `Services/FlowCanvasBridge.cs`:
+- extended `PreferredOptionOrderOverridesByCommand` with `playsound` panel order:
+- `path`, `max_seconds`, `into`, `wait`, `volume`, `on_error`.
+- GREEN verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_PlaySoundOptions_AreSerializedInPropertiesPanelOrder" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\playsound-order-green\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-order-green\obj\` (passed: `1/1`).
+- Regression verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\playsound-order-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-order-regression\obj\` (passed: `52/52`).
+
+## 183. Align Flow Canvas YAML option order with Properties panel order
+- [x] 183.1 Confirm current export ordering behavior and identify panel-order mismatches (e.g., `send`, `choose`, `multiselect`, `confirm`).
+- [x] 183.2 Add failing FlowCanvasBridge regressions that assert canonical export option ordering matches Properties panel order.
+- [x] 183.3 Patch export serialization to emit options in panel-aligned order while preserving unknown keys.
+- [x] 183.4 Run focused + regression verification and capture outcomes.
+- [x] 183.5 Add review notes with root cause, implementation details, and test evidence.
+
+### 183 Review
+- Root cause: non-container step export builds options from mutable `JObject` insertion order (snippet parse + prop-write sequence), so emitted YAML key order reflected property-write timing, not Properties panel ordering.
+- Added RED regressions in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`:
+- `ExportGraphToYaml_SendOptions_AreSerializedInPropertiesPanelOrder`
+- `ExportGraphToYaml_ChooseOptions_AreSerializedInPropertiesPanelOrder`
+- RED verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_SendOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~ExportGraphToYaml_ChooseOptions_AreSerializedInPropertiesPanelOrder" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\panel-order-red\bin\ -p:BaseIntermediateOutputPath=artifacts\panel-order-red\obj\` (failed as expected with non-panel option order).
+- Fix in `Services/FlowCanvasBridge.cs`:
+- added panel-order overrides for `send`, `choose`, `multiselect`, and `confirm` (`PreferredOptionOrderOverridesByCommand`).
+- added `ReorderOptionsForSerialization(...)` and `ResolvePreferredOptionOrder(...)`.
+- serialization now reorders keys to panel-aligned sequence before YAML emission and appends unknown/non-panel keys afterward in stable order.
+- default ordering for other commands uses parser option order with `on_error` forced to trailing position to match panel section layout.
+- GREEN verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_SendOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~ExportGraphToYaml_ChooseOptions_AreSerializedInPropertiesPanelOrder" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\panel-order-green\bin\ -p:BaseIntermediateOutputPath=artifacts\panel-order-green\obj\` (passed: `2/2`).
+- Regression verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\panel-order-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\panel-order-regression\obj\` (passed: `51/51`).
+
+## 182. Fix Flow Canvas input `on_error` export rejection
+- [x] 182.1 Confirm root cause across registry, export option catalogs, and parser input-map handling.
+- [x] 182.2 Add focused failing regression coverage proving `input.on_error` exports and parses as canonical runtime syntax.
+- [x] 182.3 Patch parser option catalog + input-map parsing so `input.on_error` is treated as a supported nested alias.
+- [x] 182.4 Run focused verification (`FlowCanvasBridgeTests` + parser tests) and record outcomes.
+- [x] 182.5 Add review notes with root cause, fix summary, and verification evidence.
+
+### 182 Review
+- Root cause: Flow Canvas registry exposes `input.on_error`, but the parser/export option catalog (`ScriptParser.CommandOptionKeys["input"]`) omitted `on_error`, and `ParseInputOptions(...)` did not map nested `on_error` into `step.OnError`.
+- This mismatch caused bridge export rejection with: `Block 'input' contains unsupported or invalid properties: on_error`.
+- Added RED regressions:
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`: `ExportGraphToYaml_InputWithOnError_ExportsSuccessfully`
+- `SSH_Helper.Tests/Scripting/ScriptParserTests.cs`: `Parse_InputOnErrorInsideMap_ParsesOnError`
+- RED verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Parse_InputOnErrorInsideMap_ParsesOnError|FullyQualifiedName~ExportGraphToYaml_InputWithOnError_ExportsSuccessfully" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\input-onerror-red\bin\ -p:BaseIntermediateOutputPath=artifacts\input-onerror-red\obj\` (failed as expected: export rejected `on_error`; parser left `OnError` null).
+- Fix in `Services/Scripting/ScriptParser.cs`:
+- added `on_error` to known input option keys.
+- updated input parse dispatch to pass `ScriptStep` into `ParseInputOptions(...)`.
+- added `on_error`/`onerror` handling in `ParseInputOptions(...)` via `ApplyNestedOnErrorAlias(step, parser)`.
+- GREEN verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Parse_InputOnErrorInsideMap_ParsesOnError|FullyQualifiedName~ExportGraphToYaml_InputWithOnError_ExportsSuccessfully" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\input-onerror-green\bin\ -p:BaseIntermediateOutputPath=artifacts\input-onerror-green\obj\` (passed: `2/2`).
+- Regression verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~ScriptParserTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\input-onerror-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\input-onerror-regression\obj\` (passed: `204/204`).
+
+## 180. Align Flow Canvas required markers with parser/runtime validation
+- [x] 180.1 Add failing parser validation tests for missing required checks (`choose.into/options`, `multiselect.into/options`, `confirm.into`, `webhook.url`, `log.message`).
+- [x] 180.2 Add/extend FlowCanvas bridge export tests so required-option enforcement matches parser-required behavior (including `extract.from`, `browser_callback_capture.into`, and conditional `readfile.path`).
+- [x] 180.3 Add failing FlowCanvas e2e coverage for static + conditional required `*` markers in the Properties panel.
+- [x] 180.4 Patch parser validation, FlowCanvas export required checks, block registry required flags, and dynamic Properties required evaluation.
+- [x] 180.5 Update docs (`SCRIPTING.md`, `README.md`, `docs/flow-canvas-browser-harness.md`, `CHANGELOG.md`) and run focused verification (`dotnet test`, Playwright, `npm run build`).
+- [x] 180.6 Record implementation + verification outcomes in the review section.
+
+### 180 Review
+- Added parser validation coverage and implementation for missing required fields:
+- `choose.into/options`, `multiselect.into/options`, `confirm.into`, `webhook.url`, and `log.message`.
+- Added/updated FlowCanvas export coverage to enforce parser-led required behavior:
+- added missing required checks (`extract.from`, `browser_callback_capture.into`),
+- removed incorrect hard requirements (`input.prompt`, `choose.prompt`, `multiselect.prompt`, `confirm.prompt`, `portcheck.port`, `writefile.content`),
+- preserved/validated conditional requirements (`readfile.path` with `select_file`, HTTP auth credentials, interactive headless constraints).
+- Added dedicated FlowCanvas required-marker e2e fixture + tests in `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts` and `FlowCanvas/e2e/fixtures/graphs.ts`:
+- static required stars (`extract.from`, `browser_callback_capture.into`, prompt/port/content optional fields),
+- conditional required stars (`readfile.path`, HTTP auth credentials by mode, interactive headless command/limiter behavior).
+- Updated runtime/UI alignment code:
+- `Services/Scripting/ScriptParser.cs`: required validation cases added.
+- `Services/FlowCanvasBridge.cs`: required-option map aligned + conditional required checks.
+- `FlowCanvas/src/blockDefs/registry.ts`: static required flags corrected.
+- `FlowCanvas/src/panels/Properties.tsx`: dynamic required-evaluation logic for conditional fields.
+- Documentation updates completed:
+- `SCRIPTING.md`, `README.md`, `docs/flow-canvas-browser-harness.md`, `CHANGELOG.md`.
+- Red verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Validate_ChooseWithoutInto_ReturnsError|FullyQualifiedName~Validate_ChooseWithoutOptions_ReturnsError|FullyQualifiedName~Validate_MultiselectWithoutInto_ReturnsError|FullyQualifiedName~Validate_MultiselectWithoutOptions_ReturnsError|FullyQualifiedName~Validate_ConfirmWithoutInto_ReturnsError|FullyQualifiedName~Validate_WebhookWithoutUrl_ReturnsError|FullyQualifiedName~Validate_LogMapWithoutMessage_ReturnsError|FullyQualifiedName~ExportGraphToYaml_ExtractMissingFrom_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_BrowserCallbackCaptureMissingInto_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InputWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ChooseWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_MultiselectWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ConfirmWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_PortcheckWithoutPort_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_WritefileWithoutContent_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ReadfileSelectFileWithoutPath_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_HttpBasicAuthWithoutUsername_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_HttpBearerAuthWithoutToken_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithoutCommand_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithoutLimiter_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithCommandAndLimiter_ExportsSuccessfully" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\required-markers-red\bin\ -p:BaseIntermediateOutputPath=artifacts\required-markers-red\obj\` (failed as expected: 19 failures before fixes).
+- `npx playwright test e2e/flow-canvas-properties-typing.spec.ts --grep "Flow Canvas Required Markers"` (failed as expected on missing required stars before fixes).
+- Green verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Validate_ChooseWithoutInto_ReturnsError|FullyQualifiedName~Validate_ChooseWithoutOptions_ReturnsError|FullyQualifiedName~Validate_MultiselectWithoutInto_ReturnsError|FullyQualifiedName~Validate_MultiselectWithoutOptions_ReturnsError|FullyQualifiedName~Validate_ConfirmWithoutInto_ReturnsError|FullyQualifiedName~Validate_WebhookWithoutUrl_ReturnsError|FullyQualifiedName~Validate_LogMapWithoutMessage_ReturnsError|FullyQualifiedName~ExportGraphToYaml_ExtractMissingFrom_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_BrowserCallbackCaptureMissingInto_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InputWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ChooseWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_MultiselectWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ConfirmWithoutPrompt_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_PortcheckWithoutPort_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_WritefileWithoutContent_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_ReadfileSelectFileWithoutPath_ExportsSuccessfully|FullyQualifiedName~ExportGraphToYaml_HttpBasicAuthWithoutUsername_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_HttpBearerAuthWithoutToken_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithoutCommand_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithoutLimiter_ReturnsRequiredOptionError|FullyQualifiedName~ExportGraphToYaml_InteractiveHeadlessWithCommandAndLimiter_ExportsSuccessfully" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\required-markers-green3\bin\ -p:BaseIntermediateOutputPath=artifacts\required-markers-green3\obj\` (passed: 21/21).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests|FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\required-markers-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\required-markers-regression\obj\` (passed: 199/199).
+- `npx playwright test e2e/flow-canvas-properties-typing.spec.ts` (passed: 8/8).
+- `npm run build` in `FlowCanvas` (passed; refreshed `FlowCanvas/dist` assets).
+
+## 178. Flow Canvas path property file browser support
+- [x] 178.1 Add focused FlowCanvas e2e coverage that path property fields expose a Browse action and apply the host-selected file path.
+- [x] 178.2 Add a canvas host message contract for browse-path request/response and wire the Properties panel to request and consume browse results.
+- [x] 178.3 Handle browse-path requests in WinForms (`FlowCanvasForm` + `Form1`) using the existing file picker flow with test override support.
+- [x] 178.4 Run focused FlowCanvas e2e and .NET UI tests, then record outcomes in the review section.
+
+### 178 Review
+- Added focused FlowCanvas e2e coverage in `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts` plus `createPathPropertyFixture()` in `FlowCanvas/e2e/fixtures/graphs.ts` to prove path fields can request browse and consume host-selected file paths.
+- Red verification confirmed missing browse UI before implementation:
+- `npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts -g "path fields can request host browse and apply selected path"` (failed as expected on missing `properties-field-path-text-browse`).
+- Added explicit path-browse metadata (`browse: 'file'`) for local-path fields in `FlowCanvas/src/blockDefs/registry.ts`.
+- Added canvas browse request/response contract in `FlowCanvas/src/communication-message-types.ts`:
+- outgoing: `browse-path`
+- incoming: `browse-path-result`
+- Updated `FlowCanvas/src/panels/Properties.tsx`:
+- path text fields with `browse: 'file'` now render a `Browse...` button (`*-browse` test id).
+- click sends `browse-path` with `requestId`, node/field context, current path, and title.
+- incoming `browse-path-result` matched by `requestId` updates the input value when not canceled.
+- Updated host wiring:
+- `UI/FlowCanvasForm.cs` now forwards `browse-path` messages via new `OnBrowsePath` event.
+- `Form1.cs` now handles browse requests, reuses shared file-picker logic (with existing `_filePathPickerOverrideForTests` support), and sends `browse-path-result` back to canvas.
+- Added focused WinForms coverage: `SSH_Helper.Tests/UI/Form1FlowCanvasBrowsePathTests.cs`.
+- Green verification:
+- `npx playwright test e2e/flow-canvas-properties-typing.spec.ts --grep "Flow Canvas Path Browsing"` (passed: `1/1`).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasBrowsePathTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\flow-canvas-browse-path-green\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-canvas-browse-path-green\obj\` (passed: `2/2`).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests|FullyQualifiedName~Form1FlowCanvasBrowsePathTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\flow-canvas-browse-path-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-canvas-browse-path-regression\obj\` (passed: `7/7`).
+- `npm run build` in `FlowCanvas` succeeded and refreshed `FlowCanvas/dist` assets.
+
+## 179. Flow Canvas browse dialog owner focus regression
+- [x] 179.1 Add a focused WinForms regression proving Flow Canvas browse requests pass the Flow Canvas window as dialog owner.
+- [x] 179.2 Patch Flow Canvas browse path selection to use the canvas form (not main `Form1`) as the picker owner.
+- [x] 179.3 Run focused WinForms verification and capture outcomes.
+
+### 179 Review
+- Root cause: `Form1.SelectPathForFlowCanvas(...)` was still calling `SelectFilePath(this, ...)`, making the main form (`Form1`) the dialog owner, so Windows activated the main window when Browse opened.
+- Added focused regression in `SSH_Helper.Tests/UI/Form1FlowCanvasBrowsePathTests.cs`:
+- `HandleFlowCanvasBrowsePathRequest_UsesFlowCanvasAsDialogOwner`
+- Red verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasBrowsePathTests.HandleFlowCanvasBrowsePathRequest_UsesFlowCanvasAsDialogOwner" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\flow-canvas-browse-owner-red\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-canvas-browse-owner-red\obj\` (failed as expected: owner was `Form1` instead of `FlowCanvasForm`).
+- Fix in `Form1.cs`:
+- `SelectPathForFlowCanvas(...)` now uses `_flowCanvasForm` as dialog owner when available (falls back to `Form1` only if the canvas form is missing/disposed).
+- Green verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasBrowsePathTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\flow-canvas-browse-owner-green\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-canvas-browse-owner-green\obj\` (passed: `3/3`).
+
+## 177. Align autocomplete required-option tags with command requirements
+- [x] 177.1 Audit required option keys across step commands and identify mismatches between parser/runtime validation and autocomplete required-tag metadata.
+- [x] 177.2 Update autocomplete required-key metadata to mark missing required options (including choose/multiselect options and other audited gaps).
+- [x] 177.3 Add focused regression tests that assert required-tag details on command option suggestions.
+- [x] 177.4 Run focused autocomplete verification and record outcomes.
+
+### 177 Review
+- Root cause: `ScriptAutocompleteProvider` used a static `RequiredOptionKeysByCommand` map that had drifted from command validation/runtime requirements. Example: `choose.options` (and `multiselect.options`) were not tagged required even though those commands fail without options.
+- Audited and corrected required-key metadata in `Services/Editor/ScriptAutocompleteProvider.cs`:
+- added missing required tags for `choose.options`, `multiselect.options`, and `exists.into`.
+- added block-required tags for control-flow commands: `if.then`, `foreach.do`, `while.do`.
+- aligned `readfile` required tags to include both `path` and `into`.
+- Added focused regression coverage in `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`:
+- updated choose/multiselect/readfile option tests to assert `Detail == "required"` on the required keys.
+- added theory `GetCompletion_CommandStepOptionKey_MarksAuditedRequiredOptions` to enforce required tags across a command set (`send`, `if`, `foreach`, `while`, `exists`, `choose`, `multiselect`, `confirm`, `assert`, `switch`, `browser_callback_capture`).
+- Verification:
+- Focused: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-required-tags-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-required-tags-green\obj\` (passed: `45/45`).
+- Regression: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-required-tags-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-required-tags-regression\obj\` (passed: `84/84`).
+
+## 176. Smart Enter fallback indentation on empty payload lines
+- [x] 176.1 Add failing utility/UI regressions for pressing `Enter` on an empty indented line inside a step payload and expecting fallback to sibling command indentation.
+- [x] 176.2 Update smart-enter logic so empty payload lines dedent to the next command/block indentation level.
+- [x] 176.3 Run focused editor utility/UI verification and record outcomes.
+
+### 176 Review
+- Added regressions:
+- `SSH_Helper.Tests/Editor/EditorTextUtilitiesTests.cs`: `ApplySmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent`
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`: `SmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent`
+- Root cause: `EditorTextUtilities.ApplySmartEnter(...)` always reused current line indentation when `Enter` was pressed on a whitespace-only line, so an empty payload line stayed nested instead of falling back to the sibling command/block level.
+- Updated `Services/Editor/EditorTextUtilities.cs`:
+- added `TryResolveEmptyStepPayloadFallbackIndent(...)` and `TryGetPreviousSignificantLine(...)`.
+- on empty lines under direct step payload options, smart-enter now inserts the next line at the sibling step indentation (where the next command block belongs).
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ApplySmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent|FullyQualifiedName~SmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-empty-line-fallback-red\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-empty-line-fallback-red\obj\` (failed as expected: `2/2`).
+- Green (focused): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ApplySmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent|FullyQualifiedName~SmartEnter_OnEmptyIndentedRootCommandPayloadLine_DedentsToCommandIndent" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-empty-line-fallback-green\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-empty-line-fallback-green\obj\` (passed: `2/2`).
+- Green (regression): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~EditorTextUtilitiesTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-empty-line-fallback-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-empty-line-fallback-regression\obj\` (passed: `52/52`).
+
+## 175. Prevent autocomplete on non-text keyup (Print Screen)
+- [x] 175.1 Add failing UI regression proving `Print Screen` keyup does not open autocomplete popup.
+- [x] 175.2 Tighten keyup autocomplete trigger filtering to ignore non-text keys like `Print Screen`.
+- [x] 175.3 Run focused `ScintillaScriptEditorControl` verification and record outcomes.
+
+### 175 Review
+- Added focused regression in `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`:
+- `CompletionPopup_PrintScreenKeyUp_DoesNotTriggerSuggestions`
+- Root cause: `ScintillaScriptEditorControl.ShouldTriggerAutocompleteOnKeyUp(...)` treated `Keys.Snapshot` (`Print Screen`) as a valid key-up trigger, so taking a screenshot could open the autocomplete popup unexpectedly.
+- Updated `UI/ScintillaScriptEditorControl.cs`:
+- added `Keys.Snapshot` to the excluded key list in `ShouldTriggerAutocompleteOnKeyUp(...)`.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CompletionPopup_PrintScreenKeyUp_DoesNotTriggerSuggestions" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-printscreen-red\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-printscreen-red\obj\` (failed as expected before fix).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CompletionPopup_PrintScreenKeyUp_DoesNotTriggerSuggestions|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-printscreen-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-printscreen-green\obj\` (passed: `38/38`).
+- Green (verification rerun): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CompletionPopup_PrintScreenKeyUp_DoesNotTriggerSuggestions" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-printscreen-verify\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-printscreen-verify\obj\` (passed: `1/1`).
+
+## 174. Smart Enter indentation for step option keys
+- [x] 174.1 Add failing smart-enter tests for scalar step option keys ending with `:` to ensure sibling-option indentation is preserved.
+- [x] 174.2 Update smart-enter indentation logic so step option keys default to same-indent continuation while nested block keys still indent deeper.
+- [x] 174.3 Run focused editor utility/UI autocomplete verification and record outcomes.
+
+### 174 Review
+- Added regressions:
+- `SSH_Helper.Tests/Editor/EditorTextUtilitiesTests.cs`
+- `ApplySmartEnter_OnScalarStepOptionKeyWithoutValue_KeepsSameIndent`
+- `ApplySmartEnter_OnNestedStepOptionKeyWithoutValue_IndentsDeeper`
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`
+- `SmartEnter_OnScalarStepOptionKey_DoesNotOverIndentNextLine`
+- Root cause: `EditorTextUtilities.ApplySmartEnter(...)` always deepened indentation for any line ending with `:`, which incorrectly treated scalar step options (`from:`, `into:`, `pattern:`) like nested mapping roots.
+- Updated `Services/Editor/EditorTextUtilities.cs`:
+- added step-option-aware mapping-key indentation logic.
+- scalar step option keys now continue at the same indentation level.
+- known nested block step keys (for example `respond`, `cases`, `then`, `do`, `catch`, `finally`, `headers`, `options`, `columns`) still indent one level deeper.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ApplySmartEnter_OnScalarStepOptionKeyWithoutValue_KeepsSameIndent|FullyQualifiedName~ApplySmartEnter_OnNestedStepOptionKeyWithoutValue_IndentsDeeper|FullyQualifiedName~SmartEnter_OnScalarStepOptionKey_DoesNotOverIndentNextLine" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-step-option-red\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-step-option-red\obj\` (failed as expected on scalar option indent behavior).
+- Green (focused): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ApplySmartEnter_OnScalarStepOptionKeyWithoutValue_KeepsSameIndent|FullyQualifiedName~ApplySmartEnter_OnNestedStepOptionKeyWithoutValue_IndentsDeeper|FullyQualifiedName~SmartEnter_OnScalarStepOptionKey_DoesNotOverIndentNextLine" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-step-option-green\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-step-option-green\obj\` (passed: `3/3`).
+- Green (regression): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~EditorTextUtilitiesTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\smart-enter-step-option-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\smart-enter-step-option-regression\obj\` (passed: `49/49`).
+
+## 173. Ctrl+Space on root-level command-list blank lines
+- [x] 173.1 Add failing provider/UI tests for manual autocomplete on blank lines after root-level `- <command>` blocks (no `steps:` key).
+- [x] 173.2 Extend manual autocomplete context inference to detect root-level command-list continuation and show step suggestions there.
+- [x] 173.3 Run focused verification for autocomplete provider/editor tests and record outcomes.
+
+### 173 Review
+- Added regressions:
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`: `GetCompletion_BlankLine_AfterIndentlessStepsSequence_ManualRequest_SuggestsStepCommands`
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`: `CompletionPopup_BlankLine_AfterIndentlessStepsSequence_CtrlSpaceShowsStepCommands`
+- Root cause: step context inference assumed `steps` children were always indented (`steps:` then `  - ...`). Your script uses valid YAML indentless sequence style (`steps:` then `- ...`), so `Ctrl+Space` on the trailing blank line resolved to no context and returned no items.
+- Updated `Services/Editor/ScriptAutocompleteProvider.cs`:
+- step-sequence inference now recognizes both direct/ancestor step command lines (including indentless style) when resolving continuation context.
+- no-dash step-command completion now only activates at true step-item indent, plus the explicit manual blank-line bridge case at column 0; this prevents overriding option-key autocomplete contexts.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~GetCompletion_BlankLine_AfterIndentlessStepsSequence_ManualRequest_SuggestsStepCommands|FullyQualifiedName~CompletionPopup_BlankLine_AfterIndentlessStepsSequence_CtrlSpaceShowsStepCommands" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-indentless-steps-red\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-indentless-steps-red\obj\` (failed as expected: `2/2`).
+- Green (focused): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~GetCompletion_BlankLine_AfterIndentlessStepsSequence_ManualRequest_SuggestsStepCommands|FullyQualifiedName~CompletionPopup_BlankLine_AfterIndentlessStepsSequence_CtrlSpaceShowsStepCommands|FullyQualifiedName~GetCompletion_StepPrefixWithoutDash_WithinSteps_SuggestsStepCommandsAndPrependsListMarker|FullyQualifiedName~CompletionCommit_StepCommandWithoutDash_PrependsDashAndAppendsColonAndSpace" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-indentless-steps-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-indentless-steps-green\obj\` (passed: `4/4`).
+- Green (regression): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-indentless-steps-regression2\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-indentless-steps-regression2\obj\` (passed: `70/70`).
+
+## 172. Ctrl+Space autocomplete on blank line after steps
+- [x] 172.1 Add failing provider/UI tests for manual (`Ctrl+Space`) autocomplete on blank lines following a `steps` block.
+- [x] 172.2 Implement manual-request autocomplete context so blank lines after `steps` suggest step commands and commit inserts proper list marker/indent.
+- [x] 172.3 Run focused verification for autocomplete provider and editor control tests; record outcomes.
+
+### 172 Review
+- Added/updated regressions:
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`: `GetCompletion_BlankTopLevelLine_AfterVarsAndSteps_ManualRequest_SuggestsStepCommands`
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`: `CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceShowsStepCommands`
+- Root cause: blank-line completion after `steps:` used the same provider path as auto typing and had no manual-request context, so it resolved as top-level blank line and returned no suggestions.
+- Updated runtime behavior:
+- `UI/ScintillaScriptEditorControl.cs` now routes `Ctrl+Space` through a manual completion request flag and preserves that mode while popup content refreshes/commits.
+- `Services/Editor/ScriptAutocompleteProvider.cs` now accepts a manual-request mode and, for blank or unindented lines immediately after a `steps` block, infers step-item context and returns step command completions with proper `  - ` insertion text.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~GetCompletion_BlankTopLevelLine_AfterVarsAndSteps_ManualRequest_SuggestsStepCommands|FullyQualifiedName~CompletionPopup_BlankTopLevelLine_AfterSteps_CtrlSpaceShowsStepCommands" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-blankline-manual-red\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-blankline-manual-red\obj\` (failed as expected before implementation: provider API/manual context missing).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-blankline-manual-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-blankline-manual-green\obj\` (passed: `68/68`).
+
+## 171. Root step autocomplete without manual dash prefix
+- [x] 171.1 Add failing coverage for step-root autocomplete on blank `steps` list lines without a leading `- ` marker.
+- [x] 171.2 Update autocomplete completion logic so root step commands are suggested without `- ` and selecting a suggestion injects `- ` when missing.
+- [x] 171.3 Run focused verification for provider/UI autocomplete tests and capture results.
+
+### 171 Review
+- Added regressions:
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`: `GetCompletion_StepPrefixWithoutDash_WithinSteps_SuggestsStepCommandsAndPrependsListMarker`
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`: `CompletionCommit_StepCommandWithoutDash_PrependsDashAndAppendsColonAndSpace`
+- Root cause: step-command autocomplete only matched `^\s*-\s+...$`, so `steps` list lines without the manual `- ` prefix were not treated as command context.
+- Updated `Services/Editor/ScriptAutocompleteProvider.cs`:
+- added step-root detection for lines inside `steps:` blocks at the item indent even when no leading list marker is present.
+- for that context, completion items keep command labels but insert text is emitted as `- <command>`, so commit adds the missing YAML list marker automatically.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~GetCompletion_StepPrefixWithoutDash_WithinSteps_SuggestsStepCommandsAndPrependsListMarker|FullyQualifiedName~CompletionCommit_StepCommandWithoutDash_PrependsDashAndAppendsColonAndSpace" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-step-root-red\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-step-root-red\obj\` (failed as expected: `2/2`).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\autocomplete-step-root-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-step-root-green\obj\` (passed: `68/68`).
+
+## 170. Fix empty-quote closing-caret path insertion regression
+- [x] 170.1 Add focused WinForms regression for `path: ""` when caret is positioned after the closing quote and `Path Browser...` is clicked.
+- [x] 170.2 Refine quote-context detection so closing-quote caret positions on empty placeholders normalize to single-quoted YAML path output.
+- [x] 170.3 Ensure non-empty closed quoted values are not misclassified as lone-opening quote contexts.
+- [x] 170.4 Run focused verification for `Form1ScriptContextMenuTests` and capture evidence.
+
+### 170 Review
+- Added regression test in `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs`:
+- `PathBrowserMenuClick_AfterClosingDoubleQuoteOfEmptyPair_ConvertsToSingleQuotedYamlPath`
+- Root cause: quote-context detection assumed `selectionStart - 1` was always the opening quote. With caret after the closing quote of `""`, that index is the closing quote, so insertion preserved the leading `"` and produced `"'<path>'`.
+- Updated `Form1.cs` quote insertion logic:
+- supports explicit empty-pair closing-caret detection (`path: ""` with caret after second quote) by shifting replacement start to the first placeholder quote.
+- adds lone-opening quote gating based on odd quote-count context so non-empty closed quoted values are not incorrectly treated as open quote contexts.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PathBrowserMenuClick_AfterClosingDoubleQuoteOfEmptyPair_ConvertsToSingleQuotedYamlPath" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-empty-pair-red\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-empty-pair-red\obj\` (failed as expected with leading extra `"`).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-empty-pair-green\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-empty-pair-green\obj\` (passed: `5/5`).
+
+## 169. Auto-complete lone quote path insertion
+- [x] 169.1 Add focused WinForms tests for `Path Browser...` behavior after lone opening `"` and `'`.
+- [x] 169.2 Update insertion logic to convert quote-triggered insertions into YAML-safe single-quoted values.
+- [x] 169.3 Preserve existing behaviors for wrapped-quote and non-quote insertion paths.
+- [x] 169.4 Run focused verification for `Form1ScriptContextMenuTests` and capture outcomes.
+
+### 169 Review
+- Added quote-completion regressions in `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs`:
+- `PathBrowserMenuClick_AfterLoneDoubleQuote_ConvertsToSingleQuotedYamlPath`
+- `PathBrowserMenuClick_AfterLoneSingleQuote_ConvertsToSingleQuotedYamlPath`
+- Updated `Form1.cs` insertion engine:
+- quote-triggered insertion now supports both wrapped-quote (`"..."` / `'...'`) and lone opening quote contexts (`path: "` / `path: '`).
+- inserted values are normalized to YAML single-quoted scalars via `BuildSingleQuotedYamlScalar(...)`.
+- single quotes inside paths are escaped (`''`) to keep YAML valid.
+- non-quote insertion remains raw text insertion behavior.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-lone-quote-red\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-lone-quote-red\obj\` (failed as expected on lone-quote assertions before code update).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-lone-quote-green\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-lone-quote-green\obj\` (passed: `4/4`).
+
+## 168. Improve path browser insertion for YAML-valid Windows paths
+- [x] 168.1 Add/adjust focused WinForms tests that reproduce quoted-path insertion behavior and enforce YAML-safe output for Windows paths.
+- [x] 168.2 Update path insertion logic so when insertion happens inside surrounding double quotes, the value is converted to single-quoted YAML path text.
+- [x] 168.3 Keep non-quoted insertion behavior unchanged and verify caret placement remains sensible after insertion.
+- [x] 168.4 Run focused verification for the updated Form1 script context-menu tests and capture evidence.
+
+### 168 Review
+- Updated `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs`:
+- `PathBrowserMenuClick_InsideDoubleQuotes_ConvertsToSingleQuotedYamlPath`
+- `PathBrowserMenuClick_OutsideDoubleQuotes_InsertsRawPathAtCaret`
+- Updated `Form1.cs` path insertion behavior:
+- added context-aware insertion result builder that detects insertion wrapped by `"` and rewrites to single-quoted YAML (`'C:\...`).
+- preserved default insertion path when not wrapped by double quotes.
+- caret placement is now based on computed insertion result for both paths.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-quote-red\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-quote-red\obj\` (failed as expected on quoted-path assertion before code change).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-quote-green\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-quote-green\obj\` (passed: `2/2`).
+
+## 167. Add script editor context-menu path browser insertion
+- [x] 167.1 Add a focused WinForms regression proving the script editor context menu exposes a `Path Browser...` action that inserts the selected full file path at the current caret position.
+- [x] 167.2 Add a test seam for file picking so UI tests can drive the path-browser behavior without launching a real `OpenFileDialog`.
+- [x] 167.3 Wire a new `Path Browser...` item into the script editor right-click menu and connect it to the insertion handler.
+- [x] 167.4 Run focused verification for the new Form1 context-menu tests and capture evidence.
+
+### 167 Review
+- Added focused WinForms regression `PathBrowserMenuClick_InsertsSelectedPathAtCaret` in `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs`.
+- Added a file-picker test seam in `Form1` (`_filePathPickerOverrideForTests`) so tests can drive path insertion without opening a native dialog.
+- Wired new script-editor context-menu item `ctxPathBrowser` (`Path Browser...`) in `Form1.Designer.cs` and connected it to `ctxPathBrowser_Click`.
+- Implemented `SelectPathForScriptEditor()`, `InsertSelectedFilePathAtCaret()`, and `InsertTextIntoScriptEditor(...)` in `Form1.cs` to insert the selected full path at caret/selection.
+- Verification:
+- Red: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests.PathBrowserMenuClick_InsertsSelectedPathAtCaret" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-red\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-red\obj\` (failed as expected: missing `ctxPathBrowser`).
+- Green: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests.PathBrowserMenuClick_InsertsSelectedPathAtCaret" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\path-browser-green\bin\ -p:BaseIntermediateOutputPath=artifacts\path-browser-green\obj\` (passed: `1/1`).
+
+## 166. Fix interactive transcript assembly for cursor-rewrite chunks
+- [x] 166.1 Reproduce and confirm corruption source from debug logs (`RawData` carries ANSI cursor rewrites while transcript assembly appends stripped fragments).
+- [x] 166.2 Update interactive transcript assembly to stream raw non-alternate chunks through cursor-aware normalization before appending to transcript builder.
+- [x] 166.3 Add focused tests for transcript assembly source selection and cross-chunk cursor rewrite reconstruction.
+- [x] 166.4 Run focused interactive transcript tests and capture verification evidence.
+
+### 166 Review
+- Root cause confirmed from user debug trace: transcript corruption happened in `interactive-window` assembly before `CleanTranscriptForAudit(...)`. The terminal emitted rewrite chunks (`\x1B[15D...`, `\x1B[14D...`) but assembly used stripped fragments (`rtup-error-log`, `tus`) and appended them, producing `...standalone-clusterrtup-error-logtus`.
+- Fix in `Services/Terminal/InteractiveTerminalService.cs`:
+- added `ResolveTranscriptAssemblyInput(...)` to prefer raw chunk data when not in alternate-screen transitions so ANSI cursor edits are preserved.
+- switched all interactive transcript builders (`capture-window`, `capture-headless`, `interactive-window`) to stream through `PrepareMirroredChunkForEmission(...)` with per-loop pending buffers, then append normalized output.
+- flushes pending transcript buffer at loop end before final transcript snapshot, so incomplete final lines are still captured correctly.
+- Added tests in `SSH_Helper.Tests/Services/InteractiveTerminalServiceTranscriptFilterTests.cs`:
+- `ResolveTranscriptAssemblyInput_NonAlternateRawChunk_UsesRawData`
+- `ResolveTranscriptAssemblyInput_AlternateScreenTransition_UsesCapturedText`
+- `PrepareMirroredChunkForEmission_CursorRewriteAcrossChunks_MatchesWholeStreamNormalization`
+- Verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalServiceTranscriptFilterTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-assembly-fix\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-assembly-fix\\obj\\` (passed: `54/54`).
+
+## 165. Add interactive transcript debug tracing for autocomplete/backspace corruption
+- [x] 165.1 Add focused regression/diagnostic tests for transcript-chunk debug formatting and control-char escaping.
+- [x] 165.2 Instrument interactive terminal capture pipeline to emit debug traces for raw/stripped/captured chunks and final transcript state.
+- [x] 165.3 Run focused interactive transcript tests and confirm no regressions.
+- [x] 165.4 Add review notes with where to read traces and verification evidence.
+
+### 165 Review
+- Added diagnostic helper tests in `SSH_Helper.Tests/Services/InteractiveTerminalServiceTranscriptFilterTests.cs`:
+- `ShouldEmitTranscriptChunkDebug_BackspaceChunk_ReturnsTrue`
+- `ShouldEmitTranscriptChunkDebug_UnchangedPlainChunk_ReturnsFalse`
+- `FormatInteractiveDebugText_EscapesControlCharactersAndTruncates`
+- Added interactive debug instrumentation (gated by `context.DebugMode`) in `Services/Terminal/InteractiveTerminalService.cs`:
+- chunk-level tracing across all interactive loops (`capture-window`, `capture-headless`, and non-capture `interactive-window`) with `RawData`, `StrippedData`, `CapturedText`, and alternate-screen state transitions.
+- final transcript tracing before/after startup-prompt prepend and before/after session-audit cleaning.
+- Diagnostic logs are emitted as script debug output (`ScriptOutputType.Debug`) and mirrored to `System.Diagnostics.Debug.WriteLine`.
+- Added helper APIs for consistent trace formatting:
+- `ShouldEmitTranscriptChunkDebug(...)`
+- `FormatInteractiveDebugText(...)`
+- control-char escaping/truncation + chunk message formatting helpers.
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ShouldEmitTranscriptChunkDebug_|FullyQualifiedName~FormatInteractiveDebugText_EscapesControlCharactersAndTruncates" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-debug-helpers-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-debug-helpers-red\\obj\\` (failed as expected before helper implementation: missing method compile errors).
+- Green: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalServiceTranscriptFilterTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-debug-helpers-green2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-debug-helpers-green2\\obj\\` (passed: `51/51`).
+
+## 164. Fix interactive transcript command reconstruction for tab/autocomplete edits
+- [x] 164.1 Reproduce the corruption with a failing transcript-filter unit test that exercises backspace-heavy command rewrites.
+- [x] 164.2 Fix transcript audit cleaning to apply terminal editing semantics (not raw control-char removal) so executed commands are preserved correctly.
+- [x] 164.3 Run focused verification for interactive terminal transcript tests and record command outcomes.
+- [x] 164.4 Add review notes with root cause, fix summary, and verification evidence.
+
+### 164 Review
+- Root cause: `InteractiveTerminalService.CleanTranscriptForAudit(...)` removed `\b` and DEL bytes as plain characters instead of applying cursor-edit semantics. For tab-cycled autocomplete, this preserved every intermediate candidate token and produced concatenated command fragments in audit logs.
+- Added regression: `CleanTranscriptForAudit_TabAutocompleteBackspaces_PreservesExecutedCommand` in `SSH_Helper.Tests/Services/InteractiveTerminalServiceTranscriptFilterTests.cs` to model multiple autocomplete rewrites on one prompt line and assert the final executed command is reconstructed.
+- Fix: `CleanTranscriptForAudit(...)` now maps DEL (`0x7F`) to backspace and runs `TerminalOutputProcessor.Sanitize(...)` + `TerminalOutputProcessor.Normalize(...)`, which applies cursor/backspace behavior before persisting transcript text.
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~CleanTranscriptForAudit_TabAutocompleteBackspaces_PreservesExecutedCommand" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-transcript-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-transcript-red\\obj\\` (failed as expected with concatenated command fragments).
+- Green: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalServiceTranscriptFilterTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-transcript-green2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-transcript-green2\\obj\\` (passed: `48/48`).
+
+## 163. Implement PuTTY-style scroll-persistent terminal selection
+- [x] 163.1 Add failing tests proving selection remains anchored to text while scrollback changes and can extend across scroll.
+- [x] 163.2 Refactor terminal viewport selection state to use buffer-relative coordinates instead of viewport-relative coordinates.
+- [x] 163.3 Add selection text provider plumbing so copy operations can resolve off-screen selected rows from terminal history.
+- [x] 163.4 Run focused verification for new interactive terminal tests and capture outcomes.
+- [x] 163.5 Add review notes with root cause, behavior changes, and verification evidence.
+
+### 163 Review
+- Added/redesigned WinForms regressions in `SSH_Helper.Tests/UI/InteractiveTerminalFormTests.cs`:
+- `AdjustScrollbackOffset_WhenSelectionExists_PreservesSelectedText`
+- `MouseDragSelection_AcrossScrollback_CanSpanBeyondSingleViewport`
+- Root cause: viewport control stored selection in viewport row coordinates and copied text only from the current snapshot grid. Any scrollback movement either rebound selection to different text or dropped selection entirely.
+- Refactor: `InteractiveTerminalViewportControl` now stores selection in buffer coordinates (`column + absolute buffer row`) and resolves paint bounds against current viewport-to-buffer mapping.
+- Added `TerminalScreenSnapshot.EffectiveScrollOffset` so viewport controls can map visible rows to stable buffer rows even when follow-tail anchoring is active.
+- Added selection-provider plumbing:
+- `TerminalBufferSelection` record in `Forms/InteractiveTerminalForm.cs`
+- `InteractiveTerminalViewportControl.SelectionTextProvider`
+- `InteractiveTerminalForm.SelectionTextProvider` passthrough plus detached-mode provider
+- `InteractiveTerminalService` now wires terminal-backed selection copy via `BuildSelectionClipboardText(...)` so off-screen selected text copies correctly.
+- Behavior update: supersedes task `162` clear-on-scroll behavior; selection now persists and remains text-anchored while scrolling, matching PuTTY-style expectations.
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalFormTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-terminal-putty-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-terminal-putty-red\\obj\\` (failed as expected: selection cleared / drag-cross-scroll copy empty).
+- Green: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalFormTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-terminal-putty-green\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-terminal-putty-green\\obj\\` (passed: `2/2`).
+- Regression slice: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalFormTests|FullyQualifiedName~InteractiveTerminalServiceTranscriptFilterTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-terminal-putty-regression\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-terminal-putty-regression\\obj\\` (passed: `49/49`).
+
+## 162. Fix interactive terminal selection persistence while scrolling
+- [x] 162.1 Reproduce with a failing UI regression test showing selection remains after scrollback offset changes.
+- [x] 162.2 Update interactive terminal scroll handling to clear viewport selection whenever scrollback offset changes.
+- [x] 162.3 Run focused verification for the new regression and nearby interactive terminal tests.
+- [x] 162.4 Add review notes with root cause, fix summary, and command evidence.
+
+### 162 Review
+- Root cause: `InteractiveTerminalViewportControl` stores selection in viewport cell coordinates, and `InteractiveTerminalForm` changed `_scrollbackOffset` without clearing that selection; after scrolling, the highlight stayed on the same screen cells while underlying text changed.
+- Added WinForms regression `AdjustScrollbackOffset_WhenSelectionExists_ClearsTerminalSelection` in `SSH_Helper.Tests/UI/InteractiveTerminalFormTests.cs` (reflection-based internal-form coverage) to prove selection is cleared on viewport scroll movement.
+- Patched `Forms/InteractiveTerminalForm.cs` to call `_terminalView.ClearSelection()` before applying new `_scrollbackOffset` in both scrollback-change paths:
+- `HistoryScrollBar_ValueChanged(...)`
+- `AdjustScrollbackOffset(...)` (mouse-wheel path)
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalFormTests.AdjustScrollbackOffset_WhenSelectionExists_ClearsTerminalSelection" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-terminal-selection-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-terminal-selection-red\\obj\\` (failed as expected before fix: selection remained true).
+- Green: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~InteractiveTerminalFormTests.AdjustScrollbackOffset_WhenSelectionExists_ClearsTerminalSelection" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\interactive-terminal-selection-green\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\interactive-terminal-selection-green\\obj\\` (passed: `1/1`).
+
+## 160. Draft OpenSpec proposal for Flow Canvas preset snapshot persistence
+- [x] 160.1 Ground current behavior across preset persistence, Flow Canvas export, and comment/layout handling.
+- [x] 160.2 Create detailed OpenSpec proposal for preserving Flow Canvas nodes/edges/comments across preset save + export/import portability.
+- [x] 160.3 Capture decision defaults in the proposal (script-first hash policy, visual-dirty save behavior, auto-apply executable edits on save, backward compatibility).
+
+### 160 Review
+- Added `openspec/changes/add-flow-canvas-preset-snapshot-persistence/proposal.md` with detailed scope, behavior contracts, compatibility expectations, and implementation impact.
+- Proposal explicitly locks key decisions:
+- Script-first load policy with `commandHash` validation.
+- Visual edits (layout/comments) mark presets dirty and persist on `Save Preset`.
+- `Save Preset` auto-applies executable Flow Canvas edits to YAML when needed.
+- Snapshot metadata is included in both single preset and bulk export/import paths.
+- Backward compatibility for existing preset payloads is preserved.
+
+## 159. Enable editable nested container blocks in Flow Canvas
+- [x] 159.1 Remove read-only properties behavior for `_isChildOf` nodes and render standard editable fields with branch context badge.
+- [x] 159.2 Update Flow store node-prop mutation to propagate `_forceGraphExport: true` up the `_isChildOf` ancestor chain (and on direct container edits).
+- [x] 159.3 Update `FlowCanvasBridge` container export precedence to force graph regeneration when `_forceGraphExport` is present (top-level and nested paths).
+- [x] 159.4 Add backend regressions proving forced container regeneration persists nested branch-child edits across container families.
+- [x] 159.5 Add frontend e2e regression coverage for editable imported branch children and `Apply YAML` parity after nested edits.
+- [x] 159.6 Run focused backend + e2e verification and capture command evidence.
+- [x] 159.7 Add review notes with root cause, fix summary, and verification outcomes.
+
+### 159 Review
+- Root cause: branch-child nodes imported from YAML carry `_isChildOf` metadata, and `Properties.tsx` hard-switched those nodes to a read-only renderer. Child edits could not be made from the canvas.
+- Secondary root cause: imported containers with `_yamlSnippet` could continue exporting from stale snippet text, so child-level graph edits were not guaranteed to persist.
+- Frontend fix:
+- `FlowCanvas/src/panels/Properties.tsx` now renders the same editable property controls for all selected executable nodes, including `_isChildOf` children, while keeping a branch context badge.
+- `FlowCanvas/src/stores/slices/graphSlice.ts` now marks `_forceGraphExport: true` on edited container nodes and on all ancestor containers of an edited child node by walking `_isChildOf` links.
+- Backend fix:
+- `Services/FlowCanvasBridge.cs` adds `HasForceGraphExport(...)` and uses it in both top-level and nested container export paths (`ExportGraphToYaml` and `TryGenerateSingleNodeYaml`) to force container regeneration from graph structure when set.
+- Snippet fallback is now gated to untouched containers (`!_forceGraphExport`), preserving prior behavior for unchanged imports.
+- Added backend regression tests in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` for forced graph export persistence on imported child edits across:
+- `if`, `foreach`, `while`, `try`, `switch`, and `parallel`.
+- Added frontend e2e fixture + coverage:
+- `FlowCanvas/e2e/fixtures/graphs.ts`: `createImportedChildEditingFixture()`.
+- `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts`: two tests validating child-node editability/reselection persistence and `Apply YAML` parity with `_forceGraphExport`.
+- Verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-force-export-tests\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-force-export-tests\\obj\\` (failed: `1/31`, existing unrelated test `ExportGraphToYaml_IncludesChildNodeStepPathMapping`).
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_IfWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_ForeachWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_WhileWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_TryWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_SwitchWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_ParallelWithForceGraphExport_UsesEditedVisualChildBranchValues|FullyQualifiedName~ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_TryWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_SwitchWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_ParallelWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_IfWithContinueEdge_ContinuationTargetNotConsumedAsBranch|FullyQualifiedName~ExportGraphToYaml_ForeachWithContinueEdge_ContinuationTargetNotConsumedAsDo" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts\\flowcanvas-force-export-focused\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-force-export-focused\\obj\\` (passed: `12/12`).
+- `cd FlowCanvas; npx playwright test e2e/flow-canvas-properties-typing.spec.ts --grep "imported branch child|apply yaml uses edited imported"` (passed: `2/2`).
+- `cd FlowCanvas; npm run build` (passed).
+
+## 158. Sync open Flow Canvas when preset selection changes in main form
+- [x] 158.1 Add a focused failing WinForms regression proving that switching presets in `Form1` while `_flowCanvasForm` is open does not currently push a new `load-graph` payload.
+- [x] 158.2 Patch the preset-load path so selecting a different preset refreshes the open Flow Canvas graph with the newly selected preset script.
+- [x] 158.3 Run focused verification for the new/related Form1 Flow Canvas tests and capture evidence.
+- [x] 158.4 Add review notes with root cause, behavior change, and verification outcomes.
+
+### 158 Review
+- Root cause: `LoadCurrentScriptIntoCanvas()` was only called when the Flow Canvas window first opened. Preset changes in `Form1` updated editor text via `LoadPresetIntoEditor(...)` but never pushed a fresh `load-graph` message to the already-open canvas.
+- Fix: `Form1.LoadPresetIntoEditor(...)` now calls `LoadCurrentScriptIntoCanvas()` immediately after loading command text/preset metadata into the editor, so any open canvas is synchronized to the newly selected preset.
+- Added regression: `SSH_Helper.Tests/UI/Form1FlowCanvasPresetSyncTests.cs` (`SelectingDifferentPreset_WithOpenFlowCanvas_QueuesUpdatedGraphForNewPreset`) proves preset A -> preset B selection while `_flowCanvasForm` is open queues an updated `load-graph` payload containing the new preset marker.
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasPresetSyncTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-preset-sync-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-preset-sync-red\\obj\\` (failed: `1/1`, empty pending message queue).
+- Green: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasPresetSyncTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-preset-sync-green\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-preset-sync-green\\obj\\` (passed: `1/1`).
+- Regression: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTabSelectionTests|FullyQualifiedName~Form1FlowCanvasBreakpointPersistenceTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-preset-sync-regression\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-preset-sync-regression\\obj\\` (passed: `2/2`).
+
+## 157. Remove save-diff truncation in preset save/discard prompt
+- [x] 157.1 Locate the preset save/discard diff rendering path and confirm the truncation source.
+- [x] 157.2 Patch the diff line-budget logic so command diffs in the save prompt are never truncated.
+- [x] 157.3 Add/update automated coverage to guard against future truncation regressions.
+- [x] 157.4 Run focused verification for the touched tests and capture results.
+- [x] 157.5 Add review notes with root cause, fix summary, and verification evidence.
+
+### 157 Review
+- Root cause: `UnsavedPresetDiffDialog` passed `maxOutputLines` from `EstimateCommandDiffLineBudget(...)`, which clamped to `10,000`, so large command diffs were forcibly replaced with `... diff truncated`.
+- Updated `UnsavedPresetDiffDialog` to compute a full diff line budget from both command texts (`saved line count + current line count + headroom`), capped only at a safe `int.MaxValue - 1` guard to avoid overflow in `InlineDiffBuilder`.
+- Added WinForms regression `SavePrompt_LongCommandDiff_DoesNotTruncateOutput` in `SSH_Helper.Tests/UI/UnsavedPresetDiffDialogTests.cs` to cover a 12,050-line diff and assert the updated final line is present with no truncation marker.
+- Verification: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~UnsavedPresetDiffDialogTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\\unsaved-diff-no-truncate\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\unsaved-diff-no-truncate\\obj\\` (passed: `4/4`).
+
+## 156. Fix single-file Flow Canvas asset resolution
+- [x] 156.1 Confirm root cause and capture failing single-file asset lookup behavior.
+- [x] 156.2 Package `FlowCanvas/dist` into the app so single-file publish carries web assets.
+- [x] 156.3 Resolve Flow Canvas runtime asset path from extracted app-owned storage under `%LocalAppData%`.
+- [x] 156.4 Run verification (`dotnet publish`/build + targeted tests) and confirm no regressions.
+- [x] 156.5 Add review notes with root cause, fix summary, and command evidence.
+
+### 156 Review
+- Root cause: `FlowCanvasForm` only searched `AppDomain.CurrentDomain.BaseDirectory\\FlowCanvas\\dist` and repo-root fallback; single-file publish output has no sidecar `FlowCanvas/dist`, so the canvas could never resolve assets outside a source checkout.
+- Added `Utilities/FlowCanvasDistLocator.cs` to centralize dist resolution:
+- `exe-relative` dist (existing behavior),
+- `project-root` dist (dev fallback),
+- embedded-resource extraction fallback to `%LocalAppData%\\SSH_Helper\\flow-canvas-dist\\<buildTimestamp>`.
+- Updated `UI/FlowCanvasForm.cs` to use `FlowCanvasDistLocator.ResolveDistPath()` and show richer diagnostics that include all searched locations.
+- Updated `SSH_Helper.csproj` with target `IncludeFlowCanvasDistEmbeddedResources` (before `AssignTargetPaths`) so `FlowCanvas/dist/**` is embedded with stable logical names (`SSH_Helper.Resources.FlowCanvasDist/...`) for single-file runtime extraction.
+- Added/updated tests in `SSH_Helper.Tests/Utilities/FlowCanvasDistLocatorTests.cs`:
+- resource embedding presence,
+- embedded extraction writes `index.html`,
+- fallback resolution behavior and precedence.
+- Verification:
+- Red (before implementation): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasDistLocatorTests" -p:UseAppHost=false` (failed with missing `FlowCanvasDistLocator`).
+- Green (targeted): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasDistLocatorTests" -p:UseAppHost=false` (passed: 5/5).
+- Publish parity (user command): `dotnet publish SSH_Helper.csproj -c Release --self-contained -r win-x64 -p:PublishSingleFile=true` (passed).
+
+## 155. Audit stale-container-snippet branch export impact across container families
+- [x] 155.1 Inspect `FlowCanvasBridge` container export precedence to confirm whether snippet-vs-graph logic is shared beyond `if`.
+- [x] 155.2 Add focused stale-snippet regression coverage for `try`, `switch`, and `parallel` with explicit graph branch metadata.
+- [x] 155.3 Run focused verification for stale-snippet branch-shape tests (`if`, `try`, `switch`, `parallel`).
+- [x] 155.4 Add review notes with findings and verification evidence.
+
+### 155 Review
+- `FlowCanvasBridge` uses shared container precedence (`IsContainerBlockType` + `HasGraphAuthoredContainerBranches`) for `if`, `foreach`, `while`, `switch`, `parallel`, and `try` in both top-level and nested export paths.
+- Added stale-snippet regression tests in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`:
+- `ExportGraphToYaml_TryWithStoredSnippetAndBranchEdges_UsesGraphBranchShape`
+- `ExportGraphToYaml_SwitchWithStoredSnippetAndBranchEdges_UsesGraphBranchShape`
+- `ExportGraphToYaml_ParallelWithStoredSnippetAndBranchEdges_UsesGraphBranchShape`
+- Verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_TryWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_SwitchWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_ParallelWithStoredSnippetAndBranchEdges_UsesGraphBranchShape" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\if-branch-impact-check2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\if-branch-impact-check2\\obj\\` (passed: `4/4`).
+
+## 154. Add focused FlowCanvas e2e coverage for `if` Apply-to-YAML branch nesting
+- [x] 154.1 Add a Playwright test that builds the `send -> extract -> print -> confirm -> if(then ping / else ping)` graph (with stale `if._yamlSnippet`) and clicks `Apply YAML`.
+- [x] 154.2 Assert exported graph semantics include nested `if.then` and `if.else` ping branches (not flattened top-level pings).
+- [x] 154.3 Run focused Playwright verification for the new test and capture command evidence.
+- [x] 154.4 Add review notes below with scope, assertions, and verification result.
+
+### 154 Review
+- Added Playwright regression `apply yaml preserves nested if branch shape when if node has stale snippet` in `FlowCanvas/e2e/flow-canvas-preset-parity.spec.ts`.
+- The test builds an action-based graph fixture with `send -> extract -> print -> confirm -> if`, attaches explicit `then`/`else` branch edges to two ping nodes, and seeds stale `if._yamlSnippet` to match the reported Apply/Run scenario.
+- Assertion path uses `evaluateParityCases(...)` against canonical source YAML that includes nested `if.then`/`if.else` blocks; test fails if export flattens branch pings to top-level.
+- Hardened parity CLI build helper in `FlowCanvas/e2e/support/parityCli.ts` to emit to an isolated output path and avoid local app-output locks during Playwright parity runs.
+- Verification:
+- `cd FlowCanvas; npx playwright test e2e/flow-canvas-preset-parity.spec.ts --grep "apply yaml preserves nested if branch shape when if node has stale snippet"` (passed: `1/1`).
+
+## 153. Fix Flow Canvas `if` export flattening on Apply-to-YAML/Run
+- [x] 153.1 Reproduce with a focused failing `FlowCanvasBridgeTests` case that includes an `if` node with stored `_yamlSnippet` plus branch edges (`then`/`else`) and assert nested branch export.
+- [x] 153.2 Patch `FlowCanvasBridge.ExportGraphToYaml` so container blocks prefer graph-derived branch export when branch topology exists, even if `_yamlSnippet` is present.
+- [x] 153.3 Run focused verification for the new regression and existing `if` container export tests.
+- [x] 153.4 Add review notes with root cause, behavior delta, and command evidence.
+
+### 153 Review
+- Root cause: `FlowCanvasBridge.ExportGraphToYaml` always prioritized container `_yamlSnippet` when present, so edited/authored `if` branch edges were ignored and branch nodes emitted as top-level sequential steps.
+- Fix: added branch-topology detection (`HasGraphAuthoredContainerBranches`) and changed container export precedence to regenerate from graph when explicit branch metadata (`data.branchPath`) points to non-child authored nodes; preserved snippet round-trip behavior for imported visual-child container graphs.
+- Added regression test: `ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape`.
+- Verification:
+- Red: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\if-branch-shape-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\if-branch-shape-red\\obj\\` (failed as expected before patch).
+- Green (focused): `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_IfWithStoredSnippetAndBranchEdges_UsesGraphBranchShape|FullyQualifiedName~ExportGraphToYaml_IfWithElifAndElse_BranchMetadataProducesCanonicalYaml" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\if-branch-shape-green\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\if-branch-shape-green\\obj\\` (passed: 2/2).
+- Green (regression): `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\if-branch-shape-regression2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\if-branch-shape-regression2\\obj\\` (passed: 17/17).
+
+## 152. Implement add-flow-canvas-preset-parity-process
+- [x] 152.1 Read `openspec/changes/add-flow-canvas-preset-parity-process/proposal.md`, `design.md`, and `tasks.md` to confirm scope and acceptance criteria.
+- [x] 152.2 Create and verify implementation plan/checklist in this tracker before coding.
+- [x] 152.3 Implement OpenSpec implementation tasks 1.1-1.10 sequentially with minimal scoped edits.
+- [x] 152.4 Run verification gates 2.1-2.5 with command evidence.
+- [x] 152.5 Complete rollout tasks 3.1-3.2 (manual-run only + CI-gating follow-up capture).
+- [x] 152.6 Update `openspec/changes/add-flow-canvas-preset-parity-process/tasks.md` so all items are `- [x]` only after confirmed completion.
+- [x] 152.7 Add review notes below with changes, root-cause/tradeoff context, and verification results.
+
+### 152 Review
+- Implemented the full parity process across `FlowCanvasBridge`, Flow Canvas state/UI, and Playwright harness so QA presets are reconstructed through graph actions and verified on export.
+- Root cause addressed: prior coverage relied on preset import/load paths and missed graph-native container-branch modeling (`if/elif/else`, `try/catch/finally`, `switch`, `parallel`) plus Start advanced preamble sections (`vars/imports/subroutines`), creating parity blind spots.
+- Tradeoff: added a small helper CLI (`FlowCanvas/tools/FlowCanvasParityCli`) for parser-backed semantic comparison and validation to avoid duplicating canonical YAML semantics in frontend-only test code.
+- Added action-based test hooks (`setGraphViaActions`, `clearGraphViaActions`, `getGraphSnapshot`) so parity suites do not depend on `load-graph`.
+- Added parity suites for valid QA presets + synthetic `browser_callback`, intentional-invalid presets, and gesture/property smoke coverage; added manual-run script/docs and `npm run test:e2e:parity`.
+- Updated OpenSpec checklist file `openspec/changes/add-flow-canvas-preset-parity-process/tasks.md` to all `- [x]`, including rollout item to keep this phase manual-run only and capture CI-gating as follow-up.
+- Verification:
+- `cd FlowCanvas; npm run test:e2e:parity` (passed: `6/6`).
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_IfWithElifAndElse_BranchMetadataProducesCanonicalYaml|FullyQualifiedName~ExportGraphToYaml_TryWithoutSnippet_ExportsDoCatchFinally|FullyQualifiedName~ExportGraphToYaml_SwitchWithoutSnippet_ExportsCasesAndDefault|FullyQualifiedName~ExportGraphToYaml_ParallelWithoutSnippet_ExportsBranchSteps|FullyQualifiedName~ExportGraphToYaml_StartAdvancedSectionsFromEditors_AreSerializedInPreamble" -v minimal -p:UseAppHost=false` (passed: `5/5`).
+- `openspec validate add-flow-canvas-preset-parity-process --strict --no-interactive` (passed).
+
+## 151. Fix current `FlowCanvasBridgeTests` failures
+- [x] 151.1 Update `FlowCanvasBridgeTests` graph fixtures to include `__start__` node/edge for start-rooted export traversal.
+- [x] 151.2 Patch `FlowCanvasBridge` preamble serialization so known sections (including `subroutines:`) are preserved correctly without orphaned indented lines.
+- [x] 151.3 Run focused verification for `FlowCanvasBridgeTests` and capture results.
+- [x] 151.4 Add review notes with root-cause and fix summary.
+
+### 151 Review
+- Updated three fixture-only tests in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` to include the required `__start__` node and start-linked edges:
+- `ExportGraphToYaml_UnsupportedBlockType_ReturnsErrorDiagnostic`
+- `ExportGraphToYaml_IncludesChildNodeStepPathMapping`
+- `ExportGraphToYaml_CommentNodes_AreIgnoredWithWarning`
+- Patched preamble serialization in `Services/FlowCanvasBridge.cs` to preserve `subroutines:` as a first-class section and prevent indented child lines under known sections from being misclassified as unrecognized top-level content.
+- Patched top-level `steps:` header detection to check for an actual top-level key (`HasTopLevelStepsHeader`) instead of substring search, avoiding false positives from nested `subroutines.*.steps`.
+- Verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvasbridge-fix2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvasbridge-fix2\\obj\\` (passed: `11/11`).
+
+## 150. Review failing `FlowCanvasBridgeTests` and classify root cause
+- [x] 150.1 Reproduce current `FlowCanvasBridgeTests` failures with a focused `dotnet test` run and capture failing test names plus error messages.
+- [x] 150.2 Trace each failure to the responsible code path (`FlowCanvasBridge` logic vs test fixture/assertion assumptions) and compare against nearby working tests.
+- [x] 150.3 Classify each failure as either runtime regression or test issue, with concrete evidence references.
+- [x] 150.4 Add a short review section below with findings and recommended next action.
+
+### 150 Review
+- Reproduced on current workspace and on a clean `HEAD` worktree: `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false` fails `4/11` in both places, so none of these are newly introduced by current uncommitted edits.
+- `ExportGraphToYaml_UnsupportedBlockType_ReturnsErrorDiagnostic`, `ExportGraphToYaml_IncludesChildNodeStepPathMapping`, and `ExportGraphToYaml_CommentNodes_AreIgnoredWithWarning` are test-fixture contract mismatches: those tests build graphs without the mandatory `__start__` node/edge, while current Flow Canvas/bridge contract traverses from `__start__` and excludes disconnected nodes with warnings (`Services/FlowCanvasBridge.cs` export traversal; `FlowCanvas/src/stores/slices/graphSlice.ts` protects `__start__`; `FlowCanvas/src/stores/messageBridge.ts` auto-injects `__start__` on load).
+- `RoundTrip_AllQaPresetYamlScripts_MaintainValidationContract` failure for `QA Local Subroutines` is a real bridge bug, not a test issue: preamble serialization currently appends nested `subroutines` children without the `subroutines:` header (via `ExtractUnrecognizedSections`), which yields invalid YAML parse at line 4.
+- Recommended next action: update the three graph-construction tests to include `__start__` linkage, and patch preamble serialization so `subroutines` is preserved as a full section (or excluded from `ExtractUnrecognizedSections` child-line capture).
+
+## 149. Fix verified FlowCanvas bugfix batch (debug side effects, dirty tracking, variable timer, BaseBlock style dedupe)
+- [x] 149.1 Refactor `toggleDisabled` in `FlowCanvas/src/stores/slices/debugSlice.ts` so updater remains side-effect free and side effects run after `set()`.
+- [x] 149.2 Fix variable highlight timer overlap in `FlowCanvas/src/stores/slices/variableSlice.ts` by tracking and resetting a single timeout.
+- [x] 149.3 Implement dirty-tracking hardening for direct `setNodes`/`setEdges` callers:
+- [x] 149.3a Add optional `markDirty` options to `GraphSlice.setNodes`/`setEdges` in `FlowCanvas/src/stores/slices/graphSlice.ts`.
+- [x] 149.3b Update Ctrl+V paste path in `FlowCanvas/src/hooks/useKeyboardShortcuts.ts` to pass `markDirty: true`.
+- [x] 149.3c Update auto-layout path in `FlowCanvas/src/hooks/useAutoLayout.ts` to pass `markDirty: true`.
+- [x] 149.4 Remove duplicate per-node inline `<style>` from `FlowCanvas/src/nodes/BaseBlock.tsx`, move styles into a shared CSS file loaded once.
+- [x] 149.5 Run verification (`npm run build`, targeted Playwright coverage) and record outcomes.
+
+### 149 Review
+- Refactored `toggleDisabled` in `debugSlice` so the Zustand updater is pure and side effects (`updateNodeData`, `disableBlock` message) run after `set()`.
+- Added a module-scoped timer guard in `variableSlice` to cancel/reset prior highlight-clear timers and prevent early `changed=false` clearing during rapid variable updates.
+- Extended `GraphSlice.setNodes`/`setEdges` with optional `markDirty` options and routed paste (`useKeyboardShortcuts`) + auto-layout (`useAutoLayout`) through `markDirty: true` so run/test payloads correctly report `graphChanged`.
+- Extracted BaseBlock keyframes/search highlight CSS into `FlowCanvas/src/nodes/baseblock.css` and removed per-node inline `<style>` injection from `BaseBlock.tsx`.
+- Added two Playwright regressions in `FlowCanvas/e2e/flow-canvas-parity.spec.ts`:
+- `run payload sets graphChanged after Ctrl+V paste`
+- `run payload sets graphChanged after auto-layout`
+- Hardened existing parity tests in the same file to match current harness behavior:
+- normalize edge payloads by dropping runtime-only `selected`/`style` fields before parity comparison
+- replace brittle browser `dialog` wait with `show-error` outgoing-message assertion
+- Verification:
+- `cd FlowCanvas; npm run build` (pass)
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-parity.spec.ts e2e/flow-canvas-interactions.spec.ts` (9 passed)
+
+## 148. Fix Flow Canvas print-space export validation and stale Run disable
+- [x] 148.1 Add failing `FlowCanvasBridgeTests` coverage proving `print.message` accepts whitespace-only payloads (for blank-line separators).
+- [x] 148.2 Add failing FlowCanvas Playwright coverage proving Run/Test re-enable after editing any graph property following an export validation error.
+- [x] 148.3 Patch `FlowCanvasBridge` required-option validation so `print.message` allows whitespace-only strings while still rejecting empty/`null` values.
+- [x] 148.4 Patch FlowCanvas graph mutation state handling to clear stale export errors after user edits so Run/Test can be retried.
+- [x] 148.5 Run focused verification (`dotnet` + Playwright + FlowCanvas build) and capture results in the review section below.
+
+### 148 Review
+- Added `FlowCanvasBridgeTests.ExportGraphToYaml_PrintWithSingleSpaceMessage_IsAccepted` to reproduce the whitespace-only `print.message` export failure.
+- Added Playwright regression `run re-enables after editing graph following export error` in `FlowCanvas/e2e/flow-canvas-parity.spec.ts` to reproduce sticky Run disable after `apply-result` validation error.
+- Patched `Services/FlowCanvasBridge.cs` so required-option validation and string normalization preserve non-empty whitespace for `print.message` (still rejects empty string/`null`).
+- Patched `FlowCanvas/src/stores/slices/graphSlice.ts` and `FlowCanvas/src/stores/slices/undoSlice.ts` to clear stale export-error state on graph mutations and undo/redo, re-enabling Run/Test once user edits.
+- Red verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests.ExportGraphToYaml_PrintWithSingleSpaceMessage_IsAccepted" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-print-space-red\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-print-space-red\\obj\\` (failed with `Block 'print' is missing required option(s): message.`).
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-parity.spec.ts --grep "run re-enables after editing graph following export error"` (failed with Run button still disabled).
+- Green verification:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests.ExportGraphToYaml_PrintWithSingleSpaceMessage_IsAccepted" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-print-space-green2\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-print-space-green2\\obj\\` (passed).
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\\flowcanvas-print-space-regression\\bin\\ -p:BaseIntermediateOutputPath=artifacts\\flowcanvas-print-space-regression\\obj\\` (11 passed).
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-parity.spec.ts` (3 passed).
+- `cd FlowCanvas; npm run build` (passed).
+
+## 147. Implement Flow Canvas preset rewrite correctness plan
+- [x] 147.1 Add Flow Canvas bridge regression coverage for full `qa_presets.json` rewrite parity and targeted option-preservation cases.
+- [x] 147.2 Refactor `FlowCanvasBridge` non-container export to schema-driven map emission with hard diagnostics for unsupported props.
+- [x] 147.3 Expand `FlowCanvasBridge` property extraction/export support for high-risk command options (`send`, `log`, `sftp`, `table`, `portcheck`, `http`, `readfile`, `interactive`, `browser_callback_capture`).
+- [x] 147.4 Align Flow Canvas block property schema in `FlowCanvas/src/blockDefs/registry.ts` (add missing send capture/options, remove invalid drifted fields, fix enum options).
+- [x] 147.5 Add drift-guard tests comparing parser-known command options vs bridge extraction/export support and Flow Canvas block definitions.
+- [x] 147.6 Run focused verification (`FlowCanvasBridgeTests`, QA catalog/execution tests, and FlowCanvas Playwright parity/properties tests where applicable) and record review notes.
+
+### 147 Review
+- Added new Flow Canvas rewrite regression tests covering targeted option preservation (`send`, `log`, `sftp`, `portcheck`, `table`) plus full YAML QA catalog rewrite/validation contract checks.
+- Replaced `FlowCanvasBridge` non-container export from hardcoded string templates with schema-driven map emission: parse existing snippet, preserve untouched options, apply canonical property aliases, normalize value types, enforce required keys, and serialize YAML with command-key fidelity.
+- Added hard export diagnostics for unsupported/invalid drifted properties (`send.delay`, `interactive.timeout`, `return.value`) and legacy-to-canonical normalization (`sftp local/remote -> local_path/remote_path`, `table source -> data`, `portcheck target -> host/port`, `writefile append -> mode`).
+- Expanded property extraction for high-risk commands/options including `send.capture/retry/retry_delay/fail_on_nonzero/respond`, `log.message/level`, full `http` options, `readfile` options, `interactive` options, `browser_callback_capture` options, canonical `sftp`, canonical `table`, and canonical `portcheck`.
+- Replaced `FlowCanvas/src/blockDefs/registry.ts` with a runtime-aligned canonical property schema: added missing send capture/options, removed drifted invalid fields, aligned key names and enums (including `log.level=success`), and updated preview keys to canonical fields.
+- Added drift guards:
+- parser-vs-bridge export option catalog parity test,
+- registry property key mapping test against parser-known runtime options plus bridge alias map,
+- explicit assertions for high-risk schema points (`send.capture` present, `send.delay` absent, `interactive.timeout` absent, `return.value` absent, canonical `sftp`/`table`/`portcheck` fields present, `log.level` includes `success`).
+- Verification passed:
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:UseAppHost=false`
+- `dotnet test .\\SSH_Helper.Tests\\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~QaPresetsSyntaxTests|FullyQualifiedName~QaPresetCatalogTests|FullyQualifiedName~QaPresetExecutionTests" -v minimal -p:UseAppHost=false`
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts e2e/flow-canvas-parity.spec.ts`
+- `cd FlowCanvas; npm run build`
+
+## 146. Fix stale block command preview after properties edit
+- [x] 146.1 Trace block preview render data flow and confirm why display-name updates but command preview stays stale.
+- [x] 146.2 Patch block preview rendering to prefer live `props[previewKey]` over importer metadata (`_preview`) for editable block types.
+- [x] 146.3 Add a focused Playwright regression fixture/spec that includes stale imported `_preview` and verifies command preview updates after edit.
+- [x] 146.4 Run focused verification and capture results below.
+
+### 146 Review
+- Root cause: `FlowCanvas/src/nodes/BaseBlock.tsx` rendered preview text from `props._preview` first, while `props._preview` is import-time metadata set by `FlowCanvasBridge`. Editing `props.command` in the Properties panel did not update `_preview`, so node preview text remained stale.
+- Patched `BaseBlock` so when a block definition has `previewKey`, preview comes from the live property value (`props[previewKey]`) and no longer falls back to stale `_preview` for that block type.
+- Kept `_preview` fallback only for block types without a `previewKey`.
+- Updated `FlowCanvas/e2e/fixtures/graphs.ts` to seed `node-send` with stale imported `_preview` + matching old `command`.
+- Extended `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts` to assert the node shows the new command and not the stale imported preview after editing.
+- Verification passed:
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts`
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-interactions.spec.ts e2e/flow-canvas-parity.spec.ts`
+- `cd FlowCanvas; npm run build`
+
+## 145. Fix Flow Canvas properties canonical state path + dropdown first-select persistence
+- [x] 145.1 Add/route properties edits through Zustand graph-slice actions (`updateNodeLabel`, `updateNodeProp`) and remove `Properties.tsx` dependence on ReactFlow `getNode/setNodes`.
+- [x] 145.2 Fix buffered input commit race (`onBlur` stale closure) and add node+field identity resets to prevent cross-field/node state bleed.
+- [x] 145.3 Harden select/dropdown behavior so first interaction persists explicit value, including default-backed selects.
+- [x] 145.4 Extend Playwright properties coverage for dropdown persistence and mixed text/code/textarea/select focus-switch regressions.
+- [x] 145.5 Stabilize parity harness preconditions (`set-target-host`) and add shipped-bundle (`dist`) e2e script/config.
+- [x] 145.6 Run verification commands and record results in the review section.
+
+### 145 Review
+- Moved properties-panel editing to a single canonical state path in Zustand: `Properties.tsx` now reads selected nodes from `useFlowStore.nodes` and writes through new `graphSlice` actions `updateNodeLabel(...)` and `updateNodeProp(...)`.
+- Removed `Properties.tsx` usage of ReactFlow `getNode/setNodes`, eliminating split-brain state between ReactFlow internals and the app store/undo snapshots.
+- Replaced the old local input hook with `useBufferedInput(...)` that tracks the latest typed value in a ref and commits only when changed, preventing stale `onBlur` closure commits.
+- Added node+field identity-scoped buffering (`${nodeId}:${fieldKey}:${fieldType}` plus display-name identity) to prevent cross-node/cross-field local state bleed during rapid reselection.
+- Hardened dropdown/select behavior: first user interaction now persists explicit selection even when the displayed value comes from `defaultValue` fallback and the user re-confirms that same option.
+- Extended Playwright coverage in `flow-canvas-properties-typing.spec.ts` with three select-focused regressions:
+- mixed text/code/textarea/select persistence across reselection,
+- default-backed select first-interaction persistence,
+- immediate select-change payload persistence via `apply-yaml`.
+- Stabilized parity harness precondition by setting `set-target-host` in `flow-canvas-parity.spec.ts` before asserting toolbar Run behavior.
+- Added shipped-bundle E2E path:
+- `FlowCanvas/playwright.preview.config.ts`,
+- `FlowCanvas/package.json` script `test:e2e:dist`.
+- Verification passed:
+- `cd FlowCanvas; npm run build`
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts e2e/flow-canvas-interactions.spec.ts e2e/flow-canvas-parity.spec.ts`
+- `cd FlowCanvas; npm run test:e2e:dist -- e2e/flow-canvas-properties-typing.spec.ts e2e/flow-canvas-parity.spec.ts`
+
+## 144. Fix Flow Canvas properties-panel keypress swallowing and add Playwright regression coverage
+- [x] 144.1 Add focused Playwright regression fixture/spec covering per-keystroke typing for `Display Name`, one `text`, one `code`, and one `textarea` property.
+- [x] 144.2 Run focused properties regression to capture red failure prior to fix.
+- [x] 144.3 Implement minimal `Properties.tsx` fix (local buffered `Display Name`, safer blur sync) and add stable `data-testid` hooks.
+- [x] 144.4 Re-run focused Playwright verification (new properties spec + nearby interaction sanity) and document results below.
+
+### 144 Review
+- Root cause in `FlowCanvas/src/panels/Properties.tsx` was twofold: `Display Name` was still a directly controlled input (unlike other text-like property fields), and `useLocalInput.onBlur` reset local value from external state, which could overwrite in-flight typed characters during rapid render churn.
+- Added deterministic fixture `createPropertiesTypingFixture()` in `FlowCanvas/e2e/fixtures/graphs.ts` with `send` (`code` + `text`) and `http` (`textarea`) blocks to cover representative text-like input types.
+- Added focused regression `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts` with per-keystroke assertions for:
+- `Display Name` (`properties-display-name-input`)
+- `command` code input (`properties-field-command-code-input`)
+- `expect` text input (`properties-field-expect-text-input`)
+- `body` textarea (`properties-field-body-textarea-input`)
+- Updated `FlowCanvas/src/panels/Properties.tsx` to:
+- apply local buffered input behavior to `Display Name`,
+- commit current local value on blur instead of resetting from external state,
+- expose stable `data-testid` hooks for panel root and per-property controls.
+- Red verification (before fix): `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts` failed as expected (`getByTestId('properties-panel')` not found).
+- Green verification (after fix): same focused command passed (`1` passed).
+- Focused sanity suite passed:
+- `cd FlowCanvas; npm run test:e2e -- e2e/flow-canvas-properties-typing.spec.ts e2e/flow-canvas-interactions.spec.ts e2e/flow-canvas-variable-inspector.spec.ts` (`6` passed).
+
+## 143. Obscure `password` in Flow Canvas Variables panel
+- [x] 143.1 Confirm Variables panel render path masks `password`-named variables.
+- [x] 143.2 Rebuild Flow Canvas dist bundle so runtime WebView uses the masking code.
+- [x] 143.3 Run focused masking verification and capture review notes below.
+
+### 143 Review
+- Root cause was deployment drift: `FlowCanvas/src/panels/VariableInspector.tsx` already masks `password`/secret-style names, but the checked-in `FlowCanvas/dist` bundle was stale and still rendered raw string values.
+- Rebuilt Flow Canvas (`npm run build`) so `dist/assets/index-gKmJIjpA.js` includes the `formatVariableDisplay` masking path and `"********"` output for sensitive variable names.
+- Focused verification passed: `npm run test:e2e -- e2e/flow-canvas-variable-inspector.spec.ts` (`1` passed).
+
+## 142. Fix Flow Canvas breakpoint rerun persistence
+- [x] 142.1 Add a focused failing regression that reproduces: breakpoint hit on run 1, ignored on run 2 with no toggle changes.
+- [x] 142.2 Fix Flow Canvas debug-state lifecycle so user breakpoint/disabled toggles persist across runs while run-local maps still reset safely.
+- [x] 142.3 Run focused verification and capture review notes below.
+
+### 142 Review
+- Root cause was lifecycle mismatch in `Form1`: `_pendingBreakpoints`/`_pendingDisabledBlocks` were treated as run-prep state and cleared during `CleanupFlowCanvasExecutionStateAfterRun()`, so reruns lost breakpoint/disabled toggles even though Flow Canvas still showed them enabled.
+- Added focused regression `Form1FlowCanvasBreakpointPersistenceTests.CleanupFlowCanvasExecutionStateAfterRun_PreservesPendingDebugTogglesForRerun` to prove pending debug toggles survive cleanup and remain available for the next run-start bootstrap.
+- Updated Flow Canvas toggle handlers in `Form1` so pending sets are always updated (even during active debug sessions), then active `DebugState` is synchronized to the desired pending state without double-toggling.
+- Moved pending-set clearing back to run-start preparation (`PrepareFlowCanvasExecutionStateForRunStart`) and removed it from run cleanup, preserving rerun persistence while still allowing per-run node-map filtering.
+- Focused red verification (before fix): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasBreakpointPersistenceTests.CleanupFlowCanvasExecutionStateAfterRun_PreservesPendingDebugTogglesForRerun" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flowcanvas-breakpoint-rerun-red\bin\ -p:BaseIntermediateOutputPath=artifacts\flowcanvas-breakpoint-rerun-red\obj\` failed as expected (`pendingBreakpoints {empty} to contain "node-breakpoint"`).
+- Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasBreakpointPersistenceTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-newtest\bin\ -p:BaseIntermediateOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-newtest\obj\` passed (`1` passed).
+- Adjacent verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasTestStepScopingTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-scoping\bin\ -p:BaseIntermediateOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-scoping\obj\` passed (`4` passed).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceFlowCanvasDebugBootstrapTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-bootstrap\bin\ -p:BaseIntermediateOutputPath=artifacts\flowcanvas-breakpoint-rerun-green-bootstrap\obj\` passed (`1` passed).
+
+## 141. Fix debug step-into hang inside parallel branches
+- [x] 141.1 Reproduce and capture a focused failing regression for stepping into a `parallel` block under debug mode.
+- [x] 141.2 Implement a minimal runtime fix so stepping through parallel branches does not deadlock/stall in `running`.
+- [x] 141.3 Run focused + adjacent debug regressions and document review findings below.
+
+### 141 Review
+- Root cause was `DebugState` resume signaling not being multi-waiter-safe: each paused branch in `parallel` called `WaitForResumeAsync(...)` and overwrote `_resumeSignal`, so only the most recent waiter resumed; earlier paused branches stayed blocked forever and the parent `parallel` step remained `running`.
+- Added focused regression `ScriptExecutorDebugStepTests.ExecuteAsync_StepIntoParallel_ContinueReleasesAllPausedBranches`.
+- Focused red verification (before fix): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptExecutorDebugStepTests.ExecuteAsync_StepIntoParallel_ContinueReleasesAllPausedBranches" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\parallel-step-red\bin\ -p:BaseIntermediateOutputPath=artifacts\parallel-step-red\obj\` failed as expected (`continue should release all paused parallel branches` timeout).
+- Implemented fix in `DebugState.WaitForResumeAsync(...)`: concurrent pause waiters now share one active `TaskCompletionSource<DebugResumeAction>` until it completes, instead of replacing the signal per waiter.
+- Focused green verification: same command with `parallel-step-green` paths passed (`1` passed).
+- Adjacent regression verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptExecutorDebugStepTests|FullyQualifiedName~ScriptExecutorControlFlowTests.ExecuteAsync_ParallelPropagatesBreak_OutOfWhileLoop|FullyQualifiedName~ScriptExecutorControlFlowTests.ExecuteAsync_ParallelPropagatesContinue_SkipsRemainingWhileBody|FullyQualifiedName~SshExecutionServiceFlowCanvasDebugBootstrapTests|FullyQualifiedName~DebugStateStepPathTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\parallel-step-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\parallel-step-regression\obj\` passed (`7` passed).
+
+## 140. Fix Flow Canvas debug-step semantics and secret-variable masking
+- [x] 140.1 Add failing regression coverage for breakpoint `Step` so it pauses on the next executable block instead of continuing to completion.
+- [x] 140.2 Implement the minimal runtime fix for debug resume handling and verify step-by-step pause behavior.
+- [x] 140.3 Add focused Flow Canvas UI coverage for masking password/secret variables in the Vars panel and implement masking.
+- [x] 140.4 Run focused verification and capture review notes below.
+
+### 140 Review
+- Root cause for `Step` behavior was in `ScriptExecutor.HandleDebugPauseAsync(...)`: `Continue` explicitly disabled `StepMode`, but `Step` did not enable `StepMode`, so a step-resume from breakpoint behaved like continue and execution ran to completion.
+- Added focused regression `ScriptExecutorDebugStepTests.ExecuteAsync_StepResumeFromBreakpoint_PausesAtNextStep` to require pause-at-next-step semantics.
+- Runtime fix: when resume action is `DebugResumeAction.Step`, executor now sets `context.DebugState.StepMode = true`; `Continue` still disables step mode.
+- Added focused browser regression `FlowCanvas/e2e/flow-canvas-variable-inspector.spec.ts` requiring password-like variable names to be masked in the Vars panel.
+- Flow Canvas fix: `VariableInspector` now masks values for sensitive names (`password`, `secret`, `token`, key variants) with `"********"` while preserving existing rendering for non-sensitive variables.
+- Focused red verification (step semantics): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptExecutorDebugStepTests.ExecuteAsync_StepResumeFromBreakpoint_PausesAtNextStep" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flow-step-red\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-step-red\obj\` failed as expected (`second debug pause after step should be observed within 2000ms`).
+- Focused green verification (step semantics): same command with `flow-step-green` paths passed (`1` passed).
+- Focused red verification (vars masking): `npm run test:e2e -- e2e/flow-canvas-variable-inspector.spec.ts` failed as expected (`password = "super-secret-password"` visible).
+- Focused green verification (vars masking): same command passed (`1` passed).
+- Broader verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptExecutorDebugStepTests|FullyQualifiedName~ScriptExecutorStepPathTests|FullyQualifiedName~DebugStateStepPathTests|FullyQualifiedName~SshExecutionServiceFlowCanvasDebugBootstrapTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts\flow-step-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\flow-step-regression\obj\` passed (`6` passed).
+- `npm run test:e2e -- e2e/flow-canvas-parity.spec.ts e2e/flow-canvas-interactions.spec.ts e2e/flow-canvas-variable-inspector.spec.ts` passed (`7` passed).
+
+## 139. Fix Flow Canvas first-breakpoint run-start race
+- [x] 139.1 Add a focused failing regression that proves Flow Canvas-configured breakpoints pause before first script step.
+- [x] 139.2 Add deterministic run-start debug bootstrap in `SshExecutionService` and wire Flow Canvas run path to use it.
+- [x] 139.3 Run focused and broader debug/flow-canvas verification and record review findings.
+
+### 139 Review
+- Root cause was a race in run-start debug bootstrap: Flow Canvas breakpoints were applied via async polling (`WaitForActiveDebugStateAsync`), which could attach after step `steps/0` had already executed. This made first-block breakpoints unreliable and the run appeared to ignore pause/debug controls.
+- Added focused regression `SshExecutionServiceFlowCanvasDebugBootstrapTests.ExecutePresetAsync_WithConfiguredFlowCanvasBreakpoint_PausesBeforeFirstStep` to require deterministic run-start breakpoint pause behavior.
+- Added deterministic bootstrap API in `SshExecutionService`: `ConfigureFlowCanvasDebugStateForRun(...)` and `ClearFlowCanvasDebugStateForRun()`, with synchronous application to each new `ScriptContext` before `ScriptExecutor.ExecuteAsync(...)`.
+- Updated `Form1` Flow Canvas run wiring to use `_sshService.ConfigureFlowCanvasDebugStateForRun(...)` instead of async bootstrap polling for initial run-state attach, and clear pending run bootstrap state on both run start prep and cleanup.
+- Focused red verification (before service API): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceFlowCanvasDebugBootstrapTests.ExecutePresetAsync_WithConfiguredFlowCanvasBreakpoint_PausesBeforeFirstStep" -v minimal` failed as expected.
+- Focused green verification: same command passed (`1` passed).
+- Broader regression verification:
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-build --filter "FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~DebugStateStepPathTests|FullyQualifiedName~Form1FlowCanvasTestStepScopingTests|FullyQualifiedName~ScriptExecutorStepPathTests" -v minimal` passed (`12` passed).
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-build --filter "FullyQualifiedName~SshExecutionServiceFlowCanvasDebugBootstrapTests" -v minimal` passed (`1` passed).
+
+## 138. Fix Flow Canvas run export rewriting valid scripts into invalid YAML
+- [x] 138.1 Add a focused failing regression test that reproduces `set + while + parallel` round-trip export and parser failure risk.
+- [x] 138.2 Normalize container `_yamlSnippet` indentation during export so mixed generated/snippet top-level steps stay YAML-valid.
+- [x] 138.3 Run focused bridge/parsing verification and record findings in a review section.
+
+### 138 Review
+- Root cause was mixed top-level sequence indentation during Flow Canvas export: simple blocks were regenerated at column 0 while container blocks (`while/if/parallel/...`) were appended from stored `_yamlSnippet` with original leading indentation, producing invalid YAML when both appeared in the same `steps` list.
+- Added focused regression `ExportGraphToYaml_MixedGeneratedAndContainerSteps_ProducesParsableYaml` in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` using a `set + while + parallel` script shape matching the user repro. Red run failed with `ScriptParseException` (`While parsing a block mapping, did not find expected key.`).
+- Implemented fix in `Services/FlowCanvasBridge.cs` by normalizing (dedenting) stored container snippets to top-level step indentation before appending.
+- Focused red verification (before fix): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests.ExportGraphToYaml_MixedGeneratedAndContainerSteps_ProducesParsableYaml" -v minimal` failed with the expected YAML parse error.
+- Focused green verification (after fix): same command passed (`1` passed).
+- Broader regression verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~Form1FlowCanvasTestStepScopingTests|FullyQualifiedName~DebugStateStepPathTests" -v minimal` passed (`10` passed).
+
+## 135. Implement Flow Canvas correctness recovery plan
+- [x] 135.1 Phase 0: Scaffold OpenSpec change `refactor-flow-canvas-correctness` with proposal/tasks/spec deltas and define acceptance gates.
+- [x] 135.2 Phase 0: Add temporary Flow Canvas safety guardrails to prevent silent export loss and block unsafe run/test actions.
+- [x] 135.3 Phase 1: Replace fragile snippet-first export path with canonical graph export behavior and structured diagnostics.
+- [x] 135.4 Phase 1: Ensure all palette block types are export-supported or explicitly rejected with actionable diagnostics.
+- [x] 135.5 Phase 2: Introduce scope-aware step identity (`StepPath`) in execution/debug events and remove flat step-index-only mapping assumptions.
+- [x] 135.6 Phase 2: Update host-side Flow Canvas mapping and event routing to resolve by `StepPath -> nodeId` for nested flow correctness.
+- [x] 135.7 Phase 3: Implement unified canvas execution message flow (`execute-canvas`) and route toolbar + keyboard run/test through it.
+- [x] 135.8 Phase 3: Implement true `Test Step` semantics (single-host prerequisite chain + target step) and remove button-proxy behavior.
+- [x] 135.9 Phase 4: Fix interaction regressions (move undo timing, breakpoint visual parity, context-menu separation, comment rendering, box-selection sync).
+- [x] 135.10 Phase 5: Add focused tests for bridge/export diagnostics, nested mapping, run/test parity, and interaction correctness.
+- [x] 135.11 Phase 5: Run focused + broader verification and document rollout notes in changelog/operator-facing docs.
+- [x] 135.12 Phase 6 (Follow-up): Add a browser test harness for Flow Canvas (`FlowCanvas` app boot + host bridge stubs + deterministic fixture loading).
+- [x] 135.13 Phase 6 (Follow-up): Add browser-driven parity/interaction specs (run vs test-step entry parity, context-menu/breakpoint gesture separation, comment persistence, box-select sync, drag undo behavior).
+- [x] 135.14 Phase 6 (Follow-up): Wire browser harness into CI and document local/operator usage (`npm` scripts, artifact capture, troubleshooting notes).
+
+### 135 Review
+- Added OpenSpec change set under `openspec/changes/refactor-flow-canvas-correctness/` (`proposal.md`, `tasks.md`, `design.md`, and spec deltas for flow-canvas + scripting-runtime) and validated with `openspec validate refactor-flow-canvas-correctness --strict --no-interactive`.
+- Added host/bridge safety gate: `apply-result` diagnostics now return structured `success/errors/warnings/nodeStepMap`; run/test requests are rejected when export is invalid or selected step is not executable.
+- Implemented `execute-canvas` unified path end-to-end (toolbar + keyboard) and removed legacy step-into UI usage while preserving compatibility handlers for deprecated host message aliases.
+- Implemented test-step execution scoping: host now truncates script to the selected top-level boundary and applies path-aware disable filters so only prerequisite-chain nodes + target scope execute for nested targets.
+- Implemented runtime StepPath propagation: `ScriptStep.StepPath`, executor-assigned canonical nested paths, debug pause/start/complete payloads with `StepPath`, and host-side `StepPath -> nodeId` resolution.
+- Updated debug bootstrap to configure `DebugState` with node-to-step-path mapping, keeping line breakpoints compatibility while removing index-only assumptions from the main event path.
+- Added focused regression tests: `FlowCanvasBridgeTests` (unsupported blocks, comment diagnostics, child-node step-path mapping), `DebugStateStepPathTests` (step-path breakpoint resolution + index-map compatibility), `Form1FlowCanvasTestStepScopingTests` (YAML truncation + prerequisite chain scoping), and `ScriptExecutorStepPathTests` (nested canonical paths + step lifecycle event payload paths).
+- Added follow-up Phase 6 plan for browser-harness automation to cover browser-level Flow Canvas parity and interaction behavior beyond host/runtime unit coverage.
+- Scaffolded browser harness in `FlowCanvas` with Playwright (`playwright.config.ts`, `e2e/support/harness.ts`, deterministic graph fixtures, and first parity suite in `e2e/flow-canvas-parity.spec.ts`), plus local run/operator notes in `docs/flow-canvas-browser-harness.md`.
+- Added interaction browser specs in `e2e/flow-canvas-interactions.spec.ts` for drag-undo restoration, context-menu/breakpoint gesture separation, comment undo/redo persistence, and box-select -> delete sync.
+- Wired browser harness into CI in `.github/workflows/build-release.yml` (`flowcanvas-browser-tests` with Playwright artifact upload) and extended troubleshooting/operator notes.
+- Verification executed:
+- `dotnet build -v minimal`
+- `npm run build` in `FlowCanvas/`
+- `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~DebugStateStepPathTests|FullyQualifiedName~Form1FlowCanvasTestStepScopingTests|FullyQualifiedName~ScriptExecutorStepPathTests" -v minimal`
+- `dotnet test -v minimal` (`1724` passed)
+- `npm run test:e2e` in `FlowCanvas/` (`6` passed)
+
 ## 134. Archive completed OpenSpec changes
 - [x] 134.1 Confirm which active OpenSpec changes are complete and archive-ready.
 - [x] 134.2 Archive each completed change with `openspec archive <id> --yes` and review the CLI output for spec updates/archive placement.
@@ -2111,3 +3035,95 @@
 - Focused green verification: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ConnectionTestStatusTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\connection-test-status-green\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-green\obj\`` passed (`1` passed, `0` failed).
 - Build verification: `dotnet build .\SSH_Helper.sln -nologo -p:BaseOutputPath=artifacts\connection-test-status-build\bin\ -p:BaseIntermediateOutputPath=artifacts\connection-test-status-build\obj\`` passed.
 - Build/test warnings were unchanged existing warnings: `MSB3277` `WindowsBase`/WebView2 conflicts and `xUnit1031` warnings in `ExpressionParserTests`.
+
+
+## 161. Fix exists dynamic type runtime + dependency analyzer tracking
+- [x] 161.1 Add failing runtime test proving `exists.type` resolves from `${var}` and is honored.
+- [x] 161.2 Add failing analyzer test proving variable references inside `exists.type` are tracked.
+- [x] 161.3 Implement runtime substitution for `exists.type` before normalization.
+- [x] 161.4 Update `ScriptDependencyAnalyzer` to extract refs from `exists.type`.
+- [x] 161.5 Run focused tests for ExistsCommand + dependency analyzer and capture results.
+- [x] 161.6 Add review notes below.
+
+### 161 Review
+- Added RED runtime regression `ExecuteAsync_TypeFromVariable_HonorsResolvedType` in `SSH_Helper.Tests/Scripting/ExistsCommandTests.cs`.
+- Added RED dependency regression `AnalyzePresets_ExistsTypeFromVariable_TracksTypeDependency` in `SSH_Helper.Tests/Scripting/ScriptDependencyAnalyzerTests.cs`.
+- Implemented runtime fix in `Services/Scripting/Commands/ExistsCommand.cs`: `exists.type` now resolves through script substitution + environment expansion before type normalization.
+- Implemented analyzer fix in `Services/Scripting/ScriptDependencyAnalyzer.cs`: `StepType.Exists` now extracts variable references from `step.Exists.Type` in addition to `Path`.
+- Verification:
+  - RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExecuteAsync_TypeFromVariable_HonorsResolvedType|FullyQualifiedName~AnalyzePresets_ExistsTypeFromVariable_TracksTypeDependency"` (failed as expected: `2/2`).
+  - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExistsCommandTests|FullyQualifiedName~ScriptDependencyAnalyzerTests"` (passed: `39/39`).
+
+## 162. Fix preset-editor autocomplete mouse interaction
+- [x] 162.1 Add focused failing UI regressions for autocomplete mouse selection and native child-handle click behavior while the completion popup is open.
+- [x] 162.2 Patch `ScintillaScriptEditorControl` completion popup/list interaction so operators can click suggestions and use popup scroll affordances without premature dismissal.
+- [x] 162.3 Run focused verification for `ScintillaScriptEditorControl` UI tests and capture the review outcome below.
+
+### 162 Review
+- Added two focused WinForms regressions in `ScintillaScriptEditorControlTests`: one proving a mouse click on a non-default autocomplete item commits the clicked item, and one proving clicks on native child handles inside the completion popup are not treated as external dismiss clicks.
+- Root causes were twofold: list click interaction was too brittle in the non-focusable completion list path, and the external-click dismissal path only trusted `Control.FromHandle(...)`, which fails for native child handles such as scrollbar internals.
+- Patched `ScintillaScriptEditorControl` to set/commit selection explicitly on completion-list mouse down/up, keep completion-list interaction focus-safe, and treat HWND descendants of editor/popup/list as internal via `IsChild(...)` before dismissing suggestions.
+- Follow-up root cause from manual repro: the editor’s unconditional `LostFocus` dismissal plus queued `BeginInvoke(EnsureEditorFocus)` from completion-list focus created a click race where the popup dismissed between mouse-down and mouse-up, so no suggestion was committed.
+- Follow-up patch: replaced unconditional editor `LostFocus` handling with a deferred handle-aware check (`GetFocus` + `IsHandleInEditorHierarchy`), removed aggressive completion-list/popup auto-refocus hooks, and restored editor focus only after completion commit.
+- Added a follow-up regression `CompletionPopup_ListFocus_DoesNotDismissSuggestions` and tightened the click-commit test to process queued UI work between mouse-down and mouse-up (`Application.DoEvents()`), matching real interaction timing.
+- Verification:
+  - RED: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_MouseClickOnSuggestion_CommitsClickedItem|FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_NativeChildHandleClick_IsNotTreatedAsExternal" -p:UseAppHost=false -p:BaseOutputPath=artifacts\autocomplete-mouse-red\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-mouse-red\obj\` (failed as expected: `2/2`).
+  - GREEN: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_MouseClickOnSuggestion_CommitsClickedItem|FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_NativeChildHandleClick_IsNotTreatedAsExternal" -p:UseAppHost=false -p:BaseOutputPath=artifacts\autocomplete-mouse-green\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-mouse-green\obj\` (passed: `2/2`).
+  - Regression: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\autocomplete-mouse-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-mouse-regression\obj\` (passed: `33/33`).
+  - Follow-up focused: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_MouseClickOnSuggestion_CommitsClickedItem|FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_ListFocus_DoesNotDismissSuggestions|FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_NativeChildHandleClick_IsNotTreatedAsExternal" -p:UseAppHost=false -p:BaseOutputPath=artifacts\autocomplete-click-followup\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-click-followup\obj\` (passed: `3/3`).
+  - Follow-up regression: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\autocomplete-click-followup-regression\bin\ -p:BaseIntermediateOutputPath=artifacts\autocomplete-click-followup-regression\obj\` (passed: `34/34`).
+
+## 163. Adjust playsound on_error default + sub-second max_seconds
+- [x] 163.1 Add focused failing tests for playsound default `on_error` behavior and fractional `max_seconds` parsing/runtime timeout.
+- [x] 163.2 Update playsound parsing/model/runtime so `on_error` defaults to `continue` and `max_seconds` supports positive sub-second values.
+- [x] 163.3 Update scripting docs and run focused verification; capture review notes below.
+
+### 163 Review
+- Added RED regressions in `SSH_Helper.Tests/Scripting/PlaySoundCommandTests.cs` and `SSH_Helper.Tests/Scripting/ScriptParserTests.cs` proving: (a) playsound failures were not suppressed when `on_error` was omitted, and (b) `playsound.max_seconds: 0.25` was rejected/not parsed.
+- Updated playsound runtime behavior in `Services/Scripting/Commands/PlaySoundCommand.cs` so omitted `on_error` now defaults to continue for playsound only, while explicit `on_error: stop` still fails.
+- Updated playsound timeout shape end-to-end:
+  - `Services/Scripting/Models/ScriptStep.cs`: `PlaySoundOptions.MaxSeconds` changed from `int?` to `double?`.
+  - `Services/Scripting/ScriptParser.cs`: `playsound.max_seconds` now parses as an invariant-culture floating-point value and reports `must be a positive number` on parse failure.
+  - `Services/FlowCanvasBridge.cs`: numeric property export helper now accepts nullable `double` so fractional `max_seconds` round-trips out of parsed steps.
+  - `Services/Scripting/Commands/PlaySoundCommand.cs`: timeout wait and timeout message formatting now use fractional seconds.
+- Updated docs in `SCRIPTING.md`: playsound `max_seconds` now documents fractional support and playsound default `on_error` is now `continue`.
+- Verification:
+  - RED: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PlaySoundCommandTests.ExecuteAsync_FailureWithoutOnError_DefaultsToContinueAndCapturesMeta|FullyQualifiedName~ScriptParserTests.Validate_PlaySoundFractionalMaxSeconds_IsAccepted" -p:UseAppHost=false -p:BaseOutputPath=artifacts\playsound-default-red\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-default-red\obj\` (failed as expected: `2/2`).
+  - GREEN (focused): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~PlaySoundCommandTests|FullyQualifiedName~ScriptParserTests.Validate_PlaySound" -p:UseAppHost=false -p:BaseOutputPath=artifacts\playsound-default-green2\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-default-green2\obj\` (passed: `9/9`).
+  - Regression: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests|FullyQualifiedName~PlaySoundCommandTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts\playsound-default-regression2\bin\ -p:BaseIntermediateOutputPath=artifacts\playsound-default-regression2\obj\` (passed: `153/153`).
+
+## 181. Flow Canvas properties UX upgrade (choose-focused + quick wins)
+- [x] 181.1 Add failing coverage for choose/multiselect dual-mode options editor (mode switch, row edits, legacy hydration, and default mismatch validation).
+- [x] 181.2 Add failing FlowCanvasBridge coverage for choose/multiselect label/value round-trip and scalar source preservation.
+- [x] 181.3 Extend FlowCanvas property metadata/schema (`helpText`, `group`, `editor`) and update choose/multiselect definitions.
+- [x] 181.4 Implement specialized choose/multiselect options editor with source/static modes, variable insertion assist, validation, and compatibility-safe storage.
+- [x] 181.5 Improve pane UX: section grouping (`Core`/`Advanced`/`On Error`), inline required/error states, select placeholders, helper text, and variable insertion affordance for text-like fields.
+- [x] 181.6 Preserve choose/multiselect label/value fidelity in `FlowCanvasBridge` import/export.
+- [x] 181.7 Run focused verification (`Playwright`, `.NET tests`, `npm run build`) and record outcomes.
+
+### 181 Review
+- Added new Flow Canvas e2e coverage in `FlowCanvas/e2e/flow-canvas-properties-typing.spec.ts` with `createChoiceOptionsUxFixture()` in `FlowCanvas/e2e/fixtures/graphs.ts` for:
+  - legacy hydration to static rows (`"alpha,beta"`),
+  - source-mode variable insertion and scalar options persistence,
+  - static row add/edit/reorder behavior with mixed string/object export payloads,
+  - inline choose-default mismatch warning.
+- Extended property metadata in `FlowCanvas/src/blockDefs/registry.ts` (`helpText`, `group`, `editor`) and marked choose/multiselect `options` with `editor: 'choice-options'` plus helper text.
+- Updated `FlowCanvas/src/panels/Properties.tsx`:
+  - dual-mode options editor for choose/multiselect (`From Variable` vs `Static Options`),
+  - compatibility-safe hydration/serialization across scalar, comma/newline legacy text, array strings, and array `{label,value}` objects,
+  - inline option/source validation and choose `default` mismatch warning,
+  - grouped properties sections (`Core`, `Advanced`, trailing `On Error`),
+  - inline required/error rendering and helper-text rendering,
+  - required-select placeholder/invalid behavior and variable insertion affordances for text/code/textarea fields.
+- Updated FlowCanvas bridge fidelity in `Services/FlowCanvasBridge.cs` so choose/multiselect options now round-trip as:
+  - string items when `label == value`,
+  - `{ label, value }` objects when they differ,
+  - scalar `OptionsFrom` preserved for source mode.
+- Hardened drift-guard test parsing in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` so multiline property `type:` lines in registry definitions are not misread as block definitions.
+- Verification:
+  - RED (pre-existing run before implementation): targeted new choose UX Playwright tests and new bridge round-trip tests failed as expected.
+  - GREEN: `npm run build` (FlowCanvas).
+  - GREEN: `npx playwright test e2e/flow-canvas-properties-typing.spec.ts --grep "Flow Canvas Choice Options UX"` (passed `3/3`).
+  - GREEN: `npx playwright test e2e/flow-canvas-properties-typing.spec.ts` (passed `11/11`).
+  - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ImportExportRoundTrip_ChooseLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_MultiselectLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_ChooseOptionsSourceScalar_PreservesSource"` (passed `3/3`).
+  - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests"` (passed `48/48`).

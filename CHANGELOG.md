@@ -1,6 +1,250 @@
 # Changelog
 
+## Changes Since `a5e5905` (0.51.11)
+
+### Flow Canvas Visual Script Editor
+
+A complete visual script editor is introduced as a React/TypeScript application built with Vite and @xyflow/react (React Flow), hosted in a WebView2 window alongside the existing Scintilla text editor. Scripts are edited as node-based graphs with bidirectional YAML round-tripping.
+
+**Architecture** — The editor is split across three layers:
+
+- **React frontend** (`FlowCanvas/src/`) — Canvas with drag-and-drop block creation, property editing, debug visualization, and keyboard shortcuts. State is managed via a single Zustand store composed from 9 slices: `GraphSlice`, `ExecutionSlice`, `DebugSlice`, `VariableSlice`, `UndoSlice`, `TimelineSlice`, `UISlice`, `CommentSlice`, and `HostSlice`.
+- **WinForms host** (`UI/FlowCanvasForm.cs`) — Modeless window embedding WebView2 with virtual host mapping (`flowcanvas.local`) for proper ES module support. Window size and position persist across open/close within the session and to `AppConfiguration.WindowState`.
+- **Bridge** (`Services/FlowCanvasBridge.cs`) — Bidirectional converter between YAML `Script`/`ScriptStep` models and React Flow graph JSON. Each graph node stores the verbatim YAML snippet for its step, preserving comments and formatting through round-trips. Auto-layout positions nodes with configurable spacing, branch coloring (green for `then`, red for `else`/`catch`, yellow for `elif`/`case`/`loop`, blue for `finally`/`continue`), and nesting up to 5 levels deep. Export returns `FlowCanvasExportResult` with diagnostics, node-to-step-path mappings, and computed success/error/warning counts.
+
+**Block system** — 35 block types across 7 categories (`ssh`, `control-flow`, `data`, `network`, `io`, `grid`, `timing`), each with category-driven color theming. `BaseBlock` renders execution state (running/success/error/skipped/disabled) with animated glows, duration badges, breakpoint toggles, and preview text from the block's key property. Block definitions in `blockDefs/registry.ts` declare typed properties (`text`, `number`, `boolean`, `select`, `code`, `textarea`) with groups (`core`, `advanced`, `on_error`), file browse support, and shared templates for `on_error` and `timeout`.
+
+**Panels:**
+
+- **Palette** — Fixed 180px sidebar with draggable category-grouped block pills. Drag sets `application/flowcanvas-block` for canvas drop handling.
+- **Properties** — Right-side inspector with buffered input management to prevent stale-closure bugs during fast focus/blur. Supports variable name validation, choice option editors (source/static modes), and file browsing via MessageBus.
+- **Debug Panel** — Floating overlay at bottom-left during execution. Shows running/paused state indicator, Continue/Step/Stop controls, and a monospace call stack trace with the current frame highlighted.
+- **Output Preview** — Walks backward through the graph (BFS) from the selected node to find the nearest ancestor `send` or `interactive` block with captured SSH output.
+- **Variable Inspector** — Live runtime variable display during execution.
+- **Timeline** — Execution event history.
+- **Search Overlay** — Node search with CSS-highlighted matches and keyboard navigation.
+- **Toolbar** — Run (F5), Test Step, Apply YAML, undo/redo, snap-to-grid toggle, auto-layout, panel visibility toggles, and theme switch. Run is disabled when export has validation errors or no target host is selected.
+
+**Start Block** — A mandatory `StartNode` at the top of every graph representing script-level metadata (`name`, `description`, `vars`, `imports`, `debug`, `nobanner`, `no-warn`, `library`). Renders with a dark green gradient and bright green border, displays active flag badges and variable/import counts. Protected from deletion, copy/paste, and irrelevant context menu actions. On import, preamble YAML keys are extracted into Start node properties; on export, they are emitted back as the YAML preamble.
+
+**Container continuation handle** — Container blocks (`if`, `foreach`, `while`, `try`, `switch`, `parallel`) gain a diamond-shaped continuation handle at their bottom edge. Continuation edges are rendered as blue solid lines and are excluded from YAML export (they represent visual flow, not script structure). `onConnect` applies continuation styling automatically. Export guards prevent continuation edges from corrupting child node step-path mappings.
+
+**Edge context menu** — Right-clicking an edge opens a context menu for deletion. Edge and block context menus are positioned at cursor coordinates and dismissed on canvas click.
+
+**C#-to-React communication** — `MessageBus.ts` detects WebView2 (`window.chrome.webview`) for production or falls back to `window.postMessage` for development. Typed publish/subscribe API with `sendReady()` handshake. `FlowCanvasForm` queues messages in a `ConcurrentQueue` until React signals ready, then flushes. Test hook support via `window.__FLOWCANVAS_TEST_HOOKS__` for Playwright interception.
+
+**Asset resolution** — `FlowCanvasDistLocator` resolves the React build via a three-tier strategy: `<exe>/FlowCanvas/dist` (development), project root (walking up for `.csproj`/`.sln`), or embedded assembly resources (single-file publish). Embedded extraction writes to `%LocalAppData%/SSH_Helper/flow-canvas-dist/<version>/` with incremental file skipping and `BuildTimestamp` versioning.
+
+**Build integration** — A `BuildFlowCanvas` MSBuild target runs `npm run build` in `FlowCanvas/` before .NET compilation. The `IncludeFlowCanvasDistEmbeddedResources` target embeds all `dist/**` files as assembly resources with `SSH_Helper.Resources.FlowCanvasDist/` prefixed logical names. `.gitattributes` enforces LF line endings on `FlowCanvas/dist/**` to prevent Windows checkout churn.
+
+### Flow Canvas Layout Persistence
+
+Canvas node positions, comment annotations, and disabled block state persist with the preset via `CanvasLayoutData` on `PresetInfo.CanvasLayout`.
+
+- **Structure hash gating** — `CanvasLayoutData.StructureHash` stores a SHA-256 hash of the script's block types and step paths. Saved positions are only applied when the hash matches the current script, preventing stale layouts from misaligning after structural edits. `FlowCanvasBridge.ComputeStructureHashFromYaml` computes the hash from YAML text.
+- **Autosave** — Layout is autosaved to the preset after every node drag-stop. `ApplyLayoutAutosave` in `Form1` deserializes the `layout-autosave` message from React and updates `CanvasLayoutData.Positions`, `Comments`, and `DisabledBlockIds`.
+- **Canvas layout state indicator** — The preset header shows layout state via `PresetHeaderIndicatorFormatter.CanvasLayoutState` (`None`, `Saved`, `WillReset`). A debounced 500ms timer checks whether the current script's structure hash still matches the stored layout.
+- **Persisted model** — `CanvasLayoutData` contains `Positions` (dictionary of `NodePosition` with X/Y), `Comments` (list of `CanvasComment` with text, color, dimensions, and optional `AttachedToNodeId`), and `DisabledBlockIds` (list of node IDs skipped during execution).
+
+### Flow Canvas Preset Sync
+
+The main form and Flow Canvas stay synchronized as the user edits:
+
+- **Preset load** — `LoadCurrentScriptIntoCanvas` sends the active preset's YAML to the canvas when a preset is selected.
+- **Breakpoint persistence** — `_pendingBreakpoints` and `_pendingDisabledBlocks` in `Form1` carry node-level breakpoints and disabled states across preset loads and execution cycles.
+- **Debug bootstrap** — `SshExecutionService` step lifecycle events (`StepStarting`, `StepCompleted`, `DebugPauseStateChanged`) are wired to `Form1` handlers that forward execution state to the canvas via `FlowCanvasForm.PostMessage`.
+- **Node-to-step mapping** — Bidirectional `_nodeToStepPathMap`/`_stepPathToNodeIdMap` dictionaries enable the host to resolve canvas highlights from `StepPath` identifiers emitted by `ScriptExecutor`, with legacy integer-index fallback via `_nodeToStepIndexMap`/`_stepIndexToNodeIdMap`.
+
+### `exists` Command
+
+`ExistsCommand` (`Services/Scripting/Commands/ExistsCommand.cs`) checks whether a local filesystem path exists as a file, directory, or either:
+
+```yaml
+- exists:
+    path: "%UserProfile%\\Documents\\hosts.txt"
+    into: has_hosts
+    type: file
+```
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `path` | Yes | - | Local path (supports `${var}` and `%NAME%` expansion) |
+| `into` | Yes | - | Variable receiving `true`/`false` |
+| `type` | No | `any` | Match mode: `any`, `file`, or `directory` |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+
+The `path` is resolved through variable substitution, `Environment.ExpandEnvironmentVariables`, and `Path.GetFullPath`. When `into` is specified, the command also populates `${into}_meta` with `exists`, `is_file`, `is_directory`, `path`, `type`, and optionally `error`. Dynamic type resolution in `ScriptDependencyAnalyzer` detects `exists` steps as not requiring an SSH session.
+
+### `playsound` Command
+
+`PlaySoundCommand` (`Services/Scripting/Commands/PlaySoundCommand.cs`) plays local WAV or MP3 audio files using the NAudio library:
+
+```yaml
+- playsound:
+    path: "%LocalAppData%\\SSH_Helper\\sounds\\ready.wav"
+    wait: true
+    volume: 65
+    max_seconds: 5.0
+```
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `path` | Yes | - | Local path to `.wav` or `.mp3` file |
+| `wait` | No | `true` | Block until playback completes |
+| `volume` | No | `100` | Playback volume 0-100 |
+| `max_seconds` | No | - | Timeout in seconds (supports fractions) |
+| `into` | No | - | Variable for success bool and `_meta` dict |
+| `on_error` | No | `continue` | Error handling (defaults to continue, not stop) |
+
+Playback uses `AudioFileReader` + `WaveOutEvent` with a `ManualResetEventSlim` for completion signaling. In fire-and-forget mode (`wait: false`), playback runs on a background `Task.Run` and the step returns immediately. `max_seconds` uses a timed wait with `TimeoutException` on expiry. The `${into}_meta` dictionary includes `path`, `wait`, `volume`, `backend` (`naudio`), `duration_ms`, and `error`.
+
+### Script Editor Autocomplete
+
+`ScriptAutocompleteProvider` (`Services/Editor/ScriptAutocompleteProvider.cs`) provides context-aware completion for YAML script editing in the Scintilla editor.
+
+**Context detection** — Regex-based classification of cursor position into 6 `CompletionContextKind` values: `TopLevelKey`, `StepCommand`, `StepOptionKey`, `OptionValue`, `Interpolation`, and `None`. Each context produces different completion candidates.
+
+**Built-in knowledge:**
+
+- Command descriptions for all 33 script command types
+- Top-level key descriptions (`name`, `description`, `vars`, `imports`, `subroutines`, `steps`, `debug`, etc.)
+- Required option keys per command, prioritized in completion order
+- Built-in symbols (`_output`, `_timestamp`, `_iteration`, `_last_error`, `_host`, `_port`, `_username`, `_password`) for `${}` and `{{}}` interpolation contexts
+- Derived suffixes (`_status`, `_headers`, `_count`, `_avg`, `_min`, `_max`) for `into:`-derived variables
+
+**Editor integration** — `ScintillaScriptEditorControl.SetAutocompleteProvider` wires the provider. Ctrl+Space triggers manual popup; auto-popup triggers on typing when `AutocompleteShowOnTyping` is enabled. Theme-aware autocomplete list colors: dark mode uses dark background with blue selection; light mode uses white with bootstrap-blue selection. Accepting a completion in `StepCommand` or `TopLevelKey` context immediately applies smart-enter indentation.
+
+### Smart Enter Indentation
+
+`EditorTextUtilities.ApplySmartEnter` (`Services/Editor/EditorTextUtilities.cs`) provides context-aware Enter key behavior in the script editor:
+
+- After `- command:` lines: adds extra indentation of `2 + indentSize` spaces for the first option
+- After plain `- item` lines: continues the list with `- ` prefix
+- After mapping keys ending in `:`: increases indent for nested step option keys (`respond`, `headers`, `cases`, `then`, `elif`, `else`, `do`, `catch`, `finally`, `options`, `required_fields`, `columns`, `data`, `steps`, `args`, `out`); otherwise stays at current indent
+- Empty lines between steps: preserves blank-line spacing when `preserveBlankLineBetweenSteps` is set
+- Payload-indent heuristic for empty step bodies
+
+`ApplyIndentation` provides block indent/outdent for multi-line selections. Both methods return `EditorTextEdit` structs with adjusted selection ranges.
+
+### Step-Level Events and Duration Tracking
+
+`ScriptExecutor` now fires fine-grained step lifecycle events used by both the main form and Flow Canvas:
+
+- **`StepStarting`** — Fired before each step begins. `StepExecutionEventArgs` carries `StepIndex`, `StepPath` (scope-aware, e.g., `steps/2/then/0`), `StepType`, `LineNumber`, and `StepName`.
+- **`StepCompleted`** — Fired after each step finishes. Adds `DurationMs` (wall-clock milliseconds from `Stopwatch`), `Success`, `Output`, and `Skipped`.
+- **`DebugPauseStateChanged`** — Fired on pause/resume transitions. `DebugPauseStateChangedEventArgs` includes `IsPaused`, `StepPath`, `LineNumber`, and `ResumeAction`.
+
+Disabled nodes (via `DebugState.IsNodeDisabled`) now fire `StepCompleted` with `Skipped = true` rather than being silently bypassed.
+
+`DebugState` is upgraded with async resume signaling via `WaitForResumeAsync(CancellationToken)` using a shared `TaskCompletionSource<DebugResumeAction>`, replacing the previous 100ms polling loop. Node-ID breakpoints (`ToggleNodeBreakpoint`, `HasNodeBreakpoint`) and node disable/enable (`ToggleNodeDisabled`, `IsNodeDisabled`) are supported alongside traditional line-number breakpoints. `SetNodeToStepPathMap` populates bidirectional node-ID/step-path dictionaries for Flow Canvas integration.
+
+### HTTP Command Debug Logging
+
+The `http` command (`Services/Scripting/Commands/HttpCommand.cs`) now emits verbose request/response traces when `ScriptOutputType.Debug` output is enabled:
+
+- **Pre-request**: method, URL, auth/timeout/redirect/TLS options, resolved request headers (including `Authorization`), and request body
+- **Post-response**: timing details (endpoint, status, `api_ms`, `total_ms`), response status + reason phrase, response headers (JSON), and full response body
+
+Debug output is invisible during normal execution and only appears when the script's `debug` flag is active.
+
+### Interactive Terminal Transcript System
+
+`InteractiveTerminalService` (`Services/Terminal/InteractiveTerminalService.cs`) gains a structured transcript system:
+
+- **Line-capped transcript** — `AppendTranscriptWithCap` enforces a 500,000-line hard cap on transcript accumulation. Once the cap is reached, a `[... interactive transcript capped ...]` notice is inserted and further text is discarded.
+- **Input resolution** — `ResolveTranscriptAssemblyInput` chooses between raw terminal data and escape-stripped captured text based on alternate-screen mode and private-mode escape sequence detection.
+- **Debug tracing** — When debug mode is active, `BuildTranscriptChunkDebugMessage` emits per-chunk diagnostics tagged with phase (`capture-window`, `capture-headless`, `interactive-window`), alternate-screen transitions, and truncated representations of raw, stripped, and captured data. `ShouldEmitTranscriptChunkDebug` triggers only when the chunk contains cursor-movement, backspace, tab, or escape characters, or when stripped and captured text diverge.
+- **Buffer-relative selection** — `InteractiveTerminalViewportControl` selection coordinates are computed relative to the terminal buffer, with clipboard support for copying selected text.
+
+### Script Dependency Analyzer Enhancements
+
+`ScriptDependencyAnalyzer` (`Services/Scripting/ScriptDependencyAnalyzer.cs`) gains two new analysis capabilities:
+
+- **SSH requirement analysis** — `AnalyzeSshRequirements(Script)` walks all steps including nested scopes and subroutines, returning `SshRequirementResult` with `RequiresSshSession`, `UsesSftp`, `UsesInteractive`, `UsesBrowserCallbackCapture`, `SftpUsesDefaultHost`, and `SftpUsesDefaultCredentials`. Scripts that only use local commands (`exists`, `playsound`, `set`, `print`, etc.) are detected as not requiring an SSH session.
+- **Preset details** — `AnalyzePresetDetails(PresetInfo)` returns `PresetColumnDependencyResult` which extends `ColumnDependencyResult` with `SuppressMissingColumnWarning`, surfacing whether a script explicitly opts out of the missing-column warning dialog.
+
+### Extract Command Debug Output
+
+`ExtractCommand` debug output now preserves full extracted values with newline characters shown as `\n`, replacing the previous behavior of truncating values at 50 characters.
+
+### Path Browser Context Menu
+
+A **Browse Path** context menu item is added to `ScintillaScriptEditorControl` for inserting file paths directly into the script editor. The path browser is also available in Flow Canvas Properties panel for fields with `browse: 'file'` type, communicating via MessageBus to the WinForms host.
+
+### Flow Canvas E2E Test Suite
+
+Playwright-based end-to-end tests for the Flow Canvas are added under `FlowCanvas/e2e/`:
+
+- **Gesture smoke tests** — Canvas interaction basics (drag, drop, selection)
+- **Preset parity tests** — Round-trip validation that YAML-to-canvas-to-YAML preserves script semantics
+- **Properties typing tests** — Property editor input validation and persistence
+- **Variable inspector tests** — Runtime variable display during execution
+- **Interaction tests** — Block context menu, edge operations, undo/redo
+- **Negative tests** — Error handling for invalid presets and malformed graphs
+
+Test infrastructure includes `FlowCanvas/e2e/support/harness.ts` for WebView2 message interception, `qaPresetLoader.ts` for loading QA fixtures, and `parityCli.ts` for round-trip comparison via `FlowCanvasParityCli` (`InternalsVisibleTo` granted in `SSH_Helper.csproj`).
+
+### Dependency Changes
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `NAudio` | 2.2.1 | In-process WAV/MP3 audio playback for `playsound` command |
+
+### Documentation
+
+`SCRIPTING.md` updated with:
+- `exists` command with full parameter table, output variables, and file/directory/OneDrive fallback examples
+- `playsound` command with parameter table, fire-and-forget vs. blocking examples, and `on_error: continue` default
+- `http` debug logging section documenting verbose request/response trace output
+- Path placeholder tokens (`%LocalAppData%`, `%UserProfile%`, `%TEMP%`, etc.) documented for `readfile.path` and `writefile.path`
+- `extract` debug output behavior change (full values preserved, newlines shown as `\n`)
+- `portcheck.host` marked as required field
+- `browser_callback_capture.callback_path` changed from required to optional (defaults to `/oauth_callback`)
+
+### Test Coverage
+
+New test suites added:
+
+- **Scripting** — `ExistsCommandTests` (path resolution, type filtering, metadata output, error handling), `PlaySoundCommandTests` (playback lifecycle, volume, timeout, fire-and-forget mode), `DebugStateStepPathTests` (node-ID breakpoints, step-path mapping, async resume), `ScriptExecutorDebugStepTests` (debug step-through with StepPath events), `ScriptExecutorStepPathTests` (scope-aware step-path identity across nested blocks)
+- **Services** — `FlowCanvasBridgeTests` (YAML-to-graph round-tripping, auto-layout, export diagnostics, structure hash), `SshExecutionServiceFlowCanvasDebugBootstrapTests` (debug bootstrap with node-to-step-path mapping)
+- **UI** — `Form1FlowCanvasBreakpointPersistenceTests` (breakpoint state across preset loads), `Form1FlowCanvasBrowsePathTests` (path browser integration), `Form1FlowCanvasPresetSyncTests` (canvas-preset synchronization), `Form1FlowCanvasTestStepScopingTests` (test-step prerequisite slicing), `Form1ScriptContextMenuTests` (context menu wiring), `InteractiveTerminalFormTests` (terminal form lifecycle), `ScintillaScriptEditorControlTests` (autocomplete integration, smart enter, context menu passthrough)
+- **Utilities** — `FlowCanvasDistLocatorTests` (three-tier resolution, embedded extraction, project root detection)
+- **Editor** — `ScriptAutocompleteProviderTests` (context detection, completion candidates), `EditorTextUtilitiesTests` (smart enter indentation, block indent/outdent)
+
+---
+
 ## Changes Since `f7d3ac5` (0.51.10)
+
+### Required Field Alignment (Parser, Export, and Flow Canvas)
+
+- Parser validation now enforces missing required checks for `choose.into/options`, `multiselect.into/options`, `confirm.into`, `webhook.url`, and `log.message`.
+- Flow Canvas export required-option checks are now parser-led:
+  - Added enforcement for `extract.from` and `browser_callback_capture.into`.
+  - Removed incorrect hard requirements for `input.prompt`, `choose.prompt`, `multiselect.prompt`, `confirm.prompt`, `portcheck.port`, and `writefile.content`.
+  - Added conditional required enforcement for `readfile.path` (`select_file` aware), HTTP auth credentials (`basic`/`bearer`), and headless interactive constraints (`show_window=false`).
+- Flow Canvas Properties `*` markers now evaluate requiredness dynamically for conditional fields while preserving existing visual styling.
+
+### Flow Canvas Correctness Recovery (Partial Rollout)
+
+Flow Canvas execution/export/debug contracts were hardened for correctness and loss prevention across the WinForms host and ReactFlow surface:
+
+- **Unified execution trigger**: Run/Test now route through `execute-canvas` with graph payload, replacing split trigger paths and eliminating keyboard/toolbar drift.
+- **Structured export diagnostics**: Host now returns `apply-result` with `success`, `errors`, `warnings`, and `nodeStepMap`; invalid exports block run/test instead of silently proceeding.
+- **StepPath runtime identity**: Executor now emits scope-aware `StepPath` on step lifecycle and debug pause/resume events, and host resolves canvas highlights via `StepPath -> nodeId` (with legacy index fallback).
+- **Debug bootstrap mapping update**: Active debug state now receives node-to-step-path mapping instead of index-only mapping.
+- **Interaction fixes in FlowCanvas UI**:
+  - Move undo snapshots captured at drag start
+  - Breakpoint visual toggle parity fixed
+  - Right-click context menu separated from breakpoint toggle gesture
+  - Comments promoted to persistent ReactFlow nodes
+  - Store selection synchronized with ReactFlow multi/box selection changes
+- **Bridge/export hardening**:
+  - Export now surfaces explicit diagnostics for unsupported nodes
+  - Comment nodes are explicitly ignored with warnings
+  - Child node step-path mappings are preserved for nested debug correlation
+
+Known follow-up scope (not included in this pass):
+- Deeply nested test-step prerequisite slicing still needs strict branch-level pruning.
 
 ### Comprehensive Scripting Function Library (55+ Built-in Functions)
 

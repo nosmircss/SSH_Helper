@@ -14,6 +14,12 @@ namespace SSH_Helper.Services.Scripting.Models
         public int LineNumber { get; set; }
 
         /// <summary>
+        /// Canonical scope-aware step identity (for example: steps/2/then/0).
+        /// Assigned by the executor before runtime to correlate debug/runtime events with Flow Canvas nodes.
+        /// </summary>
+        public string? StepPath { get; set; }
+
+        /// <summary>
         /// Step command key discovered during parse, even when required payload fields are missing.
         /// Enables precise validation errors instead of generic "unknown step" diagnostics.
         /// </summary>
@@ -90,6 +96,16 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Writefile command - writes content to a text file.
         /// </summary>
         public WritefileOptions? Writefile { get; set; }
+
+        /// <summary>
+        /// Exists command - checks local file or directory existence.
+        /// </summary>
+        public ExistsOptions? Exists { get; set; }
+
+        /// <summary>
+        /// Playsound command - plays a local audio file.
+        /// </summary>
+        public PlaySoundOptions? PlaySound { get; set; }
 
         /// <summary>
         /// Input command - prompts user for input during script execution.
@@ -338,6 +354,8 @@ namespace SSH_Helper.Services.Scripting.Models
             if (ContinueLoop) return StepType.Continue;
             if (Readfile != null) return StepType.Readfile;
             if (Writefile != null) return StepType.Writefile;
+            if (Exists != null) return StepType.Exists;
+            if (PlaySound != null) return StepType.PlaySound;
             if (Input != null) return StepType.Input;
             if (UpdateColumn != null) return StepType.UpdateColumn;
             if (UpdateEnvironment != null) return StepType.UpdateEnvironment;
@@ -411,6 +429,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Which match to capture: "first" (default), "last", "all", or a number.
         /// </summary>
         public string Match { get; set; } = "first";
+
+        /// <summary>
+        /// When true (default), the step fails if the regex produces zero matches.
+        /// When false, zero matches silently set the target variable(s) to empty strings.
+        /// </summary>
+        public bool Required { get; set; } = true;
     }
 
     /// <summary>
@@ -501,6 +525,59 @@ namespace SSH_Helper.Services.Scripting.Models
         /// For CSV format: optional header row. If not provided, no header is written.
         /// </summary>
         public List<string>? Headers { get; set; }
+    }
+
+    /// <summary>
+    /// Options for the exists command.
+    /// </summary>
+    public class ExistsOptions
+    {
+        /// <summary>
+        /// Local path to evaluate after variable/environment expansion.
+        /// </summary>
+        public string Path { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Variable name to receive the boolean existence result.
+        /// </summary>
+        public string Into { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Type filter: any (default), file, or directory.
+        /// </summary>
+        public string Type { get; set; } = "any";
+    }
+
+    /// <summary>
+    /// Options for the playsound command.
+    /// </summary>
+    public class PlaySoundOptions
+    {
+        /// <summary>
+        /// Local audio file path to play after variable/environment expansion.
+        /// </summary>
+        public string Path { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Whether to block until playback completes (default: true).
+        /// </summary>
+        public bool Wait { get; set; } = true;
+
+        /// <summary>
+        /// Playback volume as a percentage from 0 to 100 (default: 100).
+        /// </summary>
+        public int Volume { get; set; } = 100;
+
+        /// <summary>
+        /// Optional maximum wait time in seconds when Wait is true.
+        /// Supports fractional values (for example, 0.25).
+        /// </summary>
+        public double? MaxSeconds { get; set; }
+
+        /// <summary>
+        /// Optional variable name to capture success state and metadata.
+        /// </summary>
+        public string? Into { get; set; }
     }
 
     /// <summary>
@@ -1172,6 +1249,8 @@ namespace SSH_Helper.Services.Scripting.Models
         Continue,
         Readfile,
         Writefile,
+        Exists,
+        PlaySound,
         Input,
         UpdateColumn,
         UpdateEnvironment,

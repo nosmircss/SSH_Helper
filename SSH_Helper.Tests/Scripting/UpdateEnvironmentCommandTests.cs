@@ -131,4 +131,32 @@ public class UpdateEnvironmentCommandTests
 
         outputs.Should().Contain(o => o.Contains("UpdateEnvironment") && o.Contains("api_token"));
     }
+
+    [Fact]
+    public async Task ExecuteAsync_InDebugMode_DoesNotTruncateLongValue()
+    {
+        var longValue = new string('q', 140);
+        var step = new ScriptStep
+        {
+            UpdateEnvironment = new UpdateEnvironmentOptions
+            {
+                Variable = "api_token",
+                Value = longValue
+            }
+        };
+        var context = new ScriptContext { DebugMode = true };
+        string? debugOutput = null;
+        context.OutputReceived += (_, e) =>
+        {
+            if (e.Type == ScriptOutputType.Debug)
+                debugOutput = e.Message;
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        debugOutput.Should().NotBeNull();
+        debugOutput.Should().Contain(longValue);
+        debugOutput.Should().NotContain("...");
+    }
 }

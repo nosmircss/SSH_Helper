@@ -109,6 +109,35 @@ public class SetCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_LongJsonValue_DebugOutputIsNotTruncated()
+    {
+        var longDomain = new string('x', 120) + ".example.com";
+        var step = new ScriptStep
+        {
+            Set = $"block_payload = json('blocked_site', '{longDomain}', 'customer_id', 'MC000012', 'duration', 604800, 'notes', '')"
+        };
+
+        var context = new ScriptContext
+        {
+            DebugMode = true
+        };
+
+        string? debugMessage = null;
+        context.OutputReceived += (_, args) =>
+        {
+            if (args.Type == ScriptOutputType.Debug)
+                debugMessage = args.Message;
+        };
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        debugMessage.Should().NotBeNull();
+        debugMessage.Should().NotContain("...");
+        debugMessage.Should().Contain(longDomain);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_Unshift_PrependsToList()
     {
         var context = new ScriptContext();

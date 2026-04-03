@@ -79,14 +79,26 @@ namespace SSH_Helper.Services
         public event EventHandler<SshEnvironmentVariableUpdateEventArgs>? EnvironmentVariableUpdateRequested;
         public event EventHandler<SshCommandCompletedEventArgs>? CommandCompleted;
         public event EventHandler? ExecutionCompleted;
+        public event EventHandler<StepExecutionEventArgs>? StepStarting;
+        public event EventHandler<StepExecutionEventArgs>? StepCompleted;
+        public event EventHandler<DebugPauseStateChangedEventArgs>? DebugPauseStateChanged;
 
         private volatile bool _isRunning;
         private CancellationTokenSource? _cts;
         private volatile bool _stopOnFirstErrorCancellationRequested;
         private bool _disposed;
         private readonly object _executionLock = new();
+        private volatile ScriptContext? _activeScriptContext;
+        private readonly object _flowCanvasDebugBootstrapLock = new();
+        private FlowCanvasDebugBootstrapState? _pendingFlowCanvasDebugBootstrapState;
 
         public bool IsRunning => _isRunning;
+
+        /// <summary>
+        /// The script context for the currently executing script, if any.
+        /// Used by FlowCanvas to access DebugState for breakpoint/step control.
+        /// </summary>
+        public ScriptContext? ActiveScriptContext => _activeScriptContext;
 
         private CancellationToken BeginExecution()
         {
@@ -107,10 +119,13 @@ namespace SSH_Helper.Services
             {
                 _isRunning = false;
                 _stopOnFirstErrorCancellationRequested = false;
+                _activeScriptContext = null;
                 var cts = _cts;
                 _cts = null;
                 cts?.Dispose();
             }
+
+            ClearFlowCanvasDebugStateForRun();
             OnExecutionCompleted();
         }
 
@@ -130,6 +145,51 @@ namespace SSH_Helper.Services
         /// Debug output is sent via the OutputReceived event with [DEBUG] prefix.
         /// </summary>
         public bool DebugMode { get; set; }
+
+        /// <summary>
+        /// Configures Flow Canvas step-path mapping and debug flags to apply synchronously
+        /// to each script context before its first step executes.
+        /// </summary>
+        public void ConfigureFlowCanvasDebugStateForRun(
+            IReadOnlyDictionary<string, string> nodeToStepPathMap,
+            IReadOnlyCollection<string> breakpointNodeIds,
+            IReadOnlyCollection<string> disabledNodeIds)
+        {
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var pair in nodeToStepPathMap)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value))
+                    continue;
+
+                map[pair.Key] = pair.Value;
+            }
+
+            var breakpoints = new HashSet<string>(
+                breakpointNodeIds.Where(id => !string.IsNullOrWhiteSpace(id)),
+                StringComparer.Ordinal);
+            var disabled = new HashSet<string>(
+                disabledNodeIds.Where(id => !string.IsNullOrWhiteSpace(id)),
+                StringComparer.Ordinal);
+
+            lock (_flowCanvasDebugBootstrapLock)
+            {
+                _pendingFlowCanvasDebugBootstrapState = new FlowCanvasDebugBootstrapState(
+                    map,
+                    breakpoints,
+                    disabled);
+            }
+        }
+
+        /// <summary>
+        /// Clears any pending Flow Canvas run-start debug bootstrap state.
+        /// </summary>
+        public void ClearFlowCanvasDebugStateForRun()
+        {
+            lock (_flowCanvasDebugBootstrapLock)
+            {
+                _pendingFlowCanvasDebugBootstrapState = null;
+            }
+        }
 
 
         /// <summary>
@@ -1105,6 +1165,8 @@ namespace SSH_Helper.Services
                 context.Session = session;
                 context.DebugMode = DebugMode;
                 context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
+                _activeScriptContext = context;
+                ApplyConfiguredFlowCanvasDebugState(context);
                 SeedConnectionVariables(context, host, username, password, timeouts);
                 var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
@@ -1138,6 +1200,9 @@ namespace SSH_Helper.Services
 
                 // Execute the script
                 var executor = new ScriptExecutor(_browserCallbackUiHost);
+                executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
+                executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
+                executor.DebugPauseStateChanged += (s, e) => DebugPauseStateChanged?.Invoke(this, e);
                 var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                     .GetAwaiter().GetResult();
                 EnsureScriptSucceeded(scriptResult, cancellationToken);
@@ -1260,6 +1325,8 @@ namespace SSH_Helper.Services
             context.Session = session;
             context.DebugMode = DebugMode;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
+            _activeScriptContext = context;
+            ApplyConfiguredFlowCanvasDebugState(context);
             SeedConnectionVariables(context, host, username, password, timeouts);
             var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
@@ -1293,6 +1360,9 @@ namespace SSH_Helper.Services
 
             // Execute the script
             var executor = new ScriptExecutor(_browserCallbackUiHost);
+            executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
+            executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
+            executor.DebugPauseStateChanged += (s, e) => DebugPauseStateChanged?.Invoke(this, e);
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
             EnsureScriptSucceeded(scriptResult, cancellationToken);
@@ -1330,6 +1400,8 @@ namespace SSH_Helper.Services
             context.Session = null;
             context.DebugMode = DebugMode;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
+            _activeScriptContext = context;
+            ApplyConfiguredFlowCanvasDebugState(context);
             SeedConnectionVariables(context, host, username, password, SshTimeoutOptions.Default);
             var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
 
@@ -1360,6 +1432,9 @@ namespace SSH_Helper.Services
             };
 
             var executor = new ScriptExecutor(_browserCallbackUiHost);
+            executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
+            executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
+            executor.DebugPauseStateChanged += (s, e) => DebugPauseStateChanged?.Invoke(this, e);
             var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
                 .GetAwaiter().GetResult();
             EnsureScriptSucceeded(scriptResult, cancellationToken);
@@ -1410,6 +1485,52 @@ namespace SSH_Helper.Services
 
             if (!string.IsNullOrWhiteSpace(password))
                 context.SetVariable("password", password);
+        }
+
+        private void ApplyConfiguredFlowCanvasDebugState(ScriptContext context)
+        {
+            FlowCanvasDebugBootstrapState? bootstrapState;
+            lock (_flowCanvasDebugBootstrapLock)
+            {
+                bootstrapState = _pendingFlowCanvasDebugBootstrapState;
+            }
+
+            if (bootstrapState == null)
+                return;
+
+            var debugState = context.DebugState;
+            debugState.SetNodeToStepPathMap(new Dictionary<string, string>(
+                bootstrapState.NodeToStepPathMap,
+                StringComparer.Ordinal));
+
+            foreach (var nodeId in bootstrapState.BreakpointNodeIds)
+            {
+                if (!debugState.HasNodeBreakpoint(nodeId))
+                    debugState.ToggleNodeBreakpoint(nodeId);
+            }
+
+            foreach (var nodeId in bootstrapState.DisabledNodeIds)
+            {
+                if (!debugState.IsNodeDisabled(nodeId))
+                    debugState.ToggleNodeDisabled(nodeId);
+            }
+        }
+
+        private sealed class FlowCanvasDebugBootstrapState
+        {
+            public IReadOnlyDictionary<string, string> NodeToStepPathMap { get; }
+            public IReadOnlyCollection<string> BreakpointNodeIds { get; }
+            public IReadOnlyCollection<string> DisabledNodeIds { get; }
+
+            public FlowCanvasDebugBootstrapState(
+                IReadOnlyDictionary<string, string> nodeToStepPathMap,
+                IReadOnlyCollection<string> breakpointNodeIds,
+                IReadOnlyCollection<string> disabledNodeIds)
+            {
+                NodeToStepPathMap = nodeToStepPathMap;
+                BreakpointNodeIds = breakpointNodeIds;
+                DisabledNodeIds = disabledNodeIds;
+            }
         }
 
         /// <summary>

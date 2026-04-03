@@ -18,6 +18,26 @@ namespace SSH_Helper.Services.Editor
 
     internal static class EditorTextUtilities
     {
+        private static readonly HashSet<string> NestedStepOptionKeys = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "respond",
+            "headers",
+            "cases",
+            "then",
+            "elif",
+            "else",
+            "do",
+            "catch",
+            "finally",
+            "options",
+            "required_fields",
+            "columns",
+            "data",
+            "steps",
+            "args",
+            "out"
+        };
+
         public static EditorTextEdit ApplyIndentation(
             string text,
             int selectionStart,
@@ -105,7 +125,7 @@ namespace SSH_Helper.Services.Editor
                 {
                     if (trimmedBeforeCaret.Contains(':'))
                     {
-                        insertion += new string(' ', safeIndentSize);
+                        insertion += new string(' ', 2 + safeIndentSize);
                     }
                     else
                     {
@@ -114,17 +134,206 @@ namespace SSH_Helper.Services.Editor
                 }
                 else if (trimmedBeforeCaret.EndsWith(":", StringComparison.Ordinal))
                 {
-                    insertion += new string(' ', safeIndentSize);
+                    if (ShouldIncreaseIndentAfterMappingKey(baseText, currentLineStart, currentLine, trimmedBeforeCaret))
+                    {
+                        insertion += new string(' ', safeIndentSize);
+                    }
                 }
             }
             else if (preserveBlankLineBetweenSteps && IsLineBetweenStepItems(baseText, currentLineStart, currentLineEnd))
             {
                 insertion = lineEnding + lineIndent;
             }
+            else if (TryResolveEmptyStepPayloadFallbackIndent(baseText, currentLineStart, currentLine, safeIndentSize, out var fallbackIndent))
+            {
+                insertion = lineEnding + new string(' ', fallbackIndent);
+            }
 
             var newText = baseText.Insert(caretIndex, insertion);
             var newCaret = caretIndex + insertion.Length;
             return new EditorTextEdit(newText, newCaret, 0);
+        }
+
+        private static bool ShouldIncreaseIndentAfterMappingKey(
+            string text,
+            int currentLineStart,
+            string currentLine,
+            string trimmedBeforeCaret)
+        {
+            if (!TryReadMappingKey(trimmedBeforeCaret, out var key))
+            {
+                return true;
+            }
+
+            if (!IsStepOptionLine(text, currentLineStart, currentLine))
+            {
+                return true;
+            }
+
+            return NestedStepOptionKeys.Contains(key);
+        }
+
+        private static bool TryReadMappingKey(string trimmedLine, out string key)
+        {
+            key = string.Empty;
+            if (string.IsNullOrWhiteSpace(trimmedLine) ||
+                !trimmedLine.EndsWith(':'))
+            {
+                return false;
+            }
+
+            var candidate = trimmedLine[..^1].Trim();
+            if (candidate.Length == 0 || !IsIdentifier(candidate))
+            {
+                return false;
+            }
+
+            key = candidate;
+            return true;
+        }
+
+        private static bool IsIdentifier(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return false;
+            }
+
+            var first = value[0];
+            if (!(char.IsLetter(first) || first == '_'))
+            {
+                return false;
+            }
+
+            for (var i = 1; i < value.Length; i++)
+            {
+                var ch = value[i];
+                if (!(char.IsLetterOrDigit(ch) || ch == '_' || ch == '-'))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool IsStepOptionLine(string text, int currentLineStart, string currentLine)
+        {
+            var currentIndent = CountIndent(currentLine);
+            if (currentIndent <= 0)
+            {
+                return false;
+            }
+
+            var index = Math.Max(0, currentLineStart - 1);
+            while (index >= 0)
+            {
+                var lineStart = FindLineStart(text, index);
+                var lineEnd = FindLineEnd(text, lineStart);
+                var line = text.Substring(lineStart, lineEnd - lineStart).TrimEnd('\r');
+                var trimmed = line.Trim();
+                if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("#", StringComparison.Ordinal))
+                {
+                    if (lineStart == 0)
+                    {
+                        break;
+                    }
+
+                    index = lineStart - 1;
+                    continue;
+                }
+
+                var indent = CountIndent(line);
+                if (indent >= currentIndent)
+                {
+                    if (lineStart == 0)
+                    {
+                        break;
+                    }
+
+                    index = lineStart - 1;
+                    continue;
+                }
+
+                return TryGetStepLineIndent(line, out var stepIndent) &&
+                       stepIndent < currentIndent;
+            }
+
+            return false;
+        }
+
+        private static bool TryResolveEmptyStepPayloadFallbackIndent(
+            string text,
+            int currentLineStart,
+            string currentLine,
+            int indentSize,
+            out int fallbackIndent)
+        {
+            fallbackIndent = 0;
+            if (!string.IsNullOrWhiteSpace(currentLine))
+            {
+                return false;
+            }
+
+            var currentIndent = CountIndent(currentLine);
+            if (currentIndent <= 0)
+            {
+                return false;
+            }
+
+            if (!TryGetPreviousSignificantLine(text, currentLineStart - 1, out var previousLineStart, out var previousLine) ||
+                !IsStepOptionLine(text, previousLineStart, previousLine))
+            {
+                return false;
+            }
+
+            var siblingStepIndent = ResolveSiblingStepIndent(text, currentLineStart, currentLine, indentSize);
+            if (currentIndent <= siblingStepIndent)
+            {
+                return false;
+            }
+
+            var directStepOptionIndent = siblingStepIndent + indentSize + 2;
+            if (CountIndent(previousLine) != directStepOptionIndent)
+            {
+                return false;
+            }
+
+            fallbackIndent = siblingStepIndent;
+            return true;
+        }
+
+        private static bool TryGetPreviousSignificantLine(
+            string text,
+            int startIndex,
+            out int lineStart,
+            out string line)
+        {
+            lineStart = -1;
+            line = string.Empty;
+            var index = Math.Max(0, startIndex);
+            while (index >= 0)
+            {
+                var candidateStart = FindLineStart(text, index);
+                var candidateEnd = FindLineEnd(text, candidateStart);
+                var candidate = text.Substring(candidateStart, candidateEnd - candidateStart).TrimEnd('\r');
+                var trimmed = candidate.Trim();
+                if (!string.IsNullOrEmpty(trimmed) && !trimmed.StartsWith("#", StringComparison.Ordinal))
+                {
+                    lineStart = candidateStart;
+                    line = candidate;
+                    return true;
+                }
+
+                if (candidateStart == 0)
+                {
+                    break;
+                }
+
+                index = candidateStart - 1;
+            }
+
+            return false;
         }
 
         public static EditorTextEdit ApplySiblingStepEnter(

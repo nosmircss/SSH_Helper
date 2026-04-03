@@ -218,6 +218,18 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Updates the canvas layout data for a preset without triggering PresetsChanged.
+        /// </summary>
+        public void UpdateCanvasLayout(string name, CanvasLayoutData? layout)
+        {
+            if (_presets.TryGetValue(name, out var preset))
+            {
+                preset.CanvasLayout = layout;
+                PersistToConfig();
+            }
+        }
+
+        /// <summary>
         /// Duplicates a preset with a new name.
         /// </summary>
         public string Duplicate(string sourceName, string? suggestedName = null)
@@ -259,11 +271,12 @@ namespace SSH_Helper.Services
 
             var payload = new
             {
-                v = 2,  // Version 2 includes folder
+                v = 3,  // Version 3 includes canvasLayout
                 commands = preset.Commands ?? "",
                 timeout = preset.Timeout,
                 folder = preset.Folder,
-                isFavorite = preset.IsFavorite
+                isFavorite = preset.IsFavorite,
+                canvasLayout = preset.CanvasLayout
             };
 
             string json = JsonConvert.SerializeObject(payload);
@@ -903,12 +916,21 @@ namespace SSH_Helper.Services
                         }
                     }
 
+                    // Parse canvas layout if present (v3+)
+                    CanvasLayoutData? canvasLayout = null;
+                    var layoutToken = obj["canvasLayout"];
+                    if (layoutToken != null && layoutToken.Type != JTokenType.Null)
+                    {
+                        canvasLayout = layoutToken.ToObject<CanvasLayoutData>();
+                    }
+
                     return new PresetInfo
                     {
                         Commands = commands,
                         Timeout = timeout,
                         Folder = string.IsNullOrEmpty(folder) ? null : folder,
-                        IsFavorite = isFavorite
+                        IsFavorite = isFavorite,
+                        CanvasLayout = canvasLayout
                     };
                 }
                 catch

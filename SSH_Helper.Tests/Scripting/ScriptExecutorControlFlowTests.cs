@@ -13,6 +13,32 @@ namespace SSH_Helper.Tests.Scripting;
 public class ScriptExecutorControlFlowTests
 {
     [Fact]
+    public async Task ExecuteAsync_StepCompletedEvents_IncludeDurationForAllCompletedSteps()
+    {
+        var executor = new ScriptExecutor();
+        var context = new ScriptContext();
+        var completedSteps = new List<StepExecutionEventArgs>();
+        executor.StepCompleted += (_, e) => completedSteps.Add(e);
+
+        var script = new Script
+        {
+            Steps = new List<ScriptStep>
+            {
+                new() { Set = "a = 1" },
+                new() { Set = "b = a + 1" },
+                new() { Set = "c = b + 1" }
+            }
+        };
+
+        var result = await executor.ExecuteAsync(script, context);
+
+        result.Status.Should().Be(ScriptExitStatus.Success);
+        completedSteps.Should().HaveCount(3);
+        completedSteps.Should().OnlyContain(e => e.DurationMs.HasValue);
+        completedSteps.Should().OnlyContain(e => e.DurationMs!.Value >= 0);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_OnErrorContinue_SetsAndClearsLastError()
     {
         var executor = new ScriptExecutor();

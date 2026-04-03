@@ -47,6 +47,9 @@ namespace SSH_Helper.Services.Editor
         private static readonly Regex StepCommandRegex =
             new(@"^\s*-\s+(?<token>[A-Za-z0-9_-]*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+        private static readonly Regex StepCommandWithoutListMarkerRegex =
+            new(@"^\s*(?<token>[A-Za-z0-9_-]*)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
         private static readonly Regex StepCommandLineRegex =
             new(@"^\s*-\s*(?<command>[A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(?<value>.*)$",
                 RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -107,6 +110,112 @@ namespace SSH_Helper.Services.Editor
             "_min",
             "_max"
         ];
+
+        private static readonly Dictionary<string, string> CommandDescriptions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["send"] = "SSH command",
+            ["print"] = "Output text",
+            ["wait"] = "Delay/wait",
+            ["set"] = "Set variable",
+            ["exit"] = "Exit script",
+            ["extract"] = "Regex extract",
+            ["if"] = "Conditional",
+            ["foreach"] = "Iterate",
+            ["while"] = "Loop",
+            ["updatecolumn"] = "Modify column",
+            ["updateenvironment"] = "Modify env",
+            ["readfile"] = "Read file",
+            ["writefile"] = "Write file",
+            ["exists"] = "File check",
+            ["playsound"] = "Play audio",
+            ["input"] = "User input",
+            ["log"] = "Log message",
+            ["http"] = "HTTP request",
+            ["browser_callback_capture"] = "OAuth capture",
+            ["ping"] = "Ping host",
+            ["dns"] = "DNS lookup",
+            ["portcheck"] = "Port check",
+            ["sftp"] = "SFTP transfer",
+            ["webhook"] = "Webhook",
+            ["parse"] = "Parse output",
+            ["choose"] = "Selection",
+            ["multiselect"] = "Multi-select",
+            ["confirm"] = "Yes/no",
+            ["interactive"] = "Terminal",
+            ["break"] = "Exit loop",
+            ["continue"] = "Next iteration",
+            ["try"] = "Error handling",
+            ["assert"] = "Assert",
+            ["switch"] = "Case match",
+            ["parallel"] = "Concurrent",
+            ["call"] = "Call sub",
+            ["return"] = "Return value",
+            ["table"] = "Data table"
+        };
+
+        private static readonly Dictionary<string, string> TopLevelKeyDescriptions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["name"] = "Script name",
+            ["description"] = "Description",
+            ["version"] = "Version",
+            ["environment"] = "Target env",
+            ["debug"] = "Debug mode",
+            ["nobanner"] = "Hide banner",
+            ["suppress_missing_column_warning"] = "Suppress warns",
+            ["library"] = "Library import",
+            ["vars"] = "Variables",
+            ["imports"] = "Imports",
+            ["subroutines"] = "Procedures",
+            ["steps"] = "Script body"
+        };
+
+        private static readonly Dictionary<string, string[]> RequiredOptionKeysByCommand = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["send"] = ["command"],
+            ["print"] = ["message"],
+            ["wait"] = ["seconds"],
+            ["set"] = ["expression"],
+            ["if"] = ["condition", "then"],
+            ["foreach"] = ["iterator", "do"],
+            ["while"] = ["condition", "do"],
+            ["try"] = ["do"],
+            ["call"] = ["subroutine"],
+            ["parallel"] = ["steps"],
+            ["table"] = ["data"],
+            ["switch"] = ["value", "cases"],
+            ["extract"] = ["from", "pattern", "into"],
+            ["readfile"] = ["path", "into"],
+            ["writefile"] = ["path"],
+            ["exists"] = ["path", "into"],
+            ["playsound"] = ["path"],
+            ["input"] = ["into"],
+            ["updatecolumn"] = ["column", "value"],
+            ["updateenvironment"] = ["variable", "value"],
+            ["http"] = ["url"],
+            ["ping"] = ["host"],
+            ["dns"] = ["host"],
+            ["portcheck"] = ["host"],
+            ["sftp"] = ["action", "local_path", "remote_path"],
+            ["webhook"] = ["url"],
+            ["parse"] = ["format", "from", "into"],
+            ["choose"] = ["into", "options"],
+            ["multiselect"] = ["into", "options"],
+            ["confirm"] = ["into"],
+            ["assert"] = ["condition"],
+            ["browser_callback_capture"] = ["start_url", "callback_path", "into"]
+        };
+
+        private static readonly Dictionary<string, string> BuiltInSymbolDescriptions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["_output"] = "Last output",
+            ["_timestamp"] = "Timestamp",
+            ["_iteration"] = "Loop counter",
+            ["_last_error"] = "Last error",
+            ["_host"] = "Host address",
+            ["_port"] = "Port number",
+            ["_username"] = "Username",
+            ["_password"] = "Password"
+        };
 
         private readonly Func<IReadOnlyCollection<string>> _getHostColumns;
         private readonly IReadOnlyList<string> _topLevelKeys;
@@ -172,7 +281,7 @@ namespace SSH_Helper.Services.Editor
 
         public IReadOnlyDictionary<string, IReadOnlyList<string>> GetEnumLikeOptionValues() => _enumLikeOptionValues;
 
-        public CompletionResult GetCompletion(string text, int caretIndex)
+        public CompletionResult GetCompletion(string text, int caretIndex, bool manualRequest = false)
         {
             text ??= string.Empty;
             var safeCaret = Math.Clamp(caretIndex, 0, text.Length);
@@ -192,7 +301,19 @@ namespace SSH_Helper.Services.Editor
                     CompletionContextKind.StepCommand,
                     safeCaret - token.Length,
                     token.Length,
-                    FilterValues(_stepCommands, token, kind: "command"));
+                    FilterValues(_stepCommands, token, kind: "command", CommandDescriptions));
+            }
+
+            var commandWithoutListMarker = BuildStepCommandCompletionWithoutListMarker(
+                text,
+                safeCaret,
+                lineStart,
+                linePrefix,
+                currentIndent,
+                manualRequest);
+            if (commandWithoutListMarker != null)
+            {
+                return commandWithoutListMarker;
             }
 
             var optionValueMatch = OptionValueRegex.Match(linePrefix);
@@ -211,15 +332,17 @@ namespace SSH_Helper.Services.Editor
             }
 
             var optionKeyMatch = OptionKeyRegex.Match(linePrefix);
-            if (optionKeyMatch.Success && currentIndent > 0)
+            if (optionKeyMatch.Success && currentIndent > 0 &&
+                !HasBlankLineSeparator(text, lineStart))
             {
                 var token = optionKeyMatch.Groups["token"].Value;
                 var optionCandidates = ResolveOptionKeyCandidates(text, lineStart, currentIndent);
+                var parentCommand = FindEnclosingCommandName(text, lineStart, currentIndent);
                 return BuildCompletion(
                     CompletionContextKind.StepOptionKey,
                     safeCaret - token.Length,
                     token.Length,
-                    FilterValues(optionCandidates, token, kind: "option"));
+                    FilterOptionKeys(optionCandidates, token, parentCommand));
             }
 
             if (currentIndent == 0)
@@ -237,7 +360,7 @@ namespace SSH_Helper.Services.Editor
                         CompletionContextKind.TopLevelKey,
                         safeCaret - topLevelToken.Length,
                         topLevelToken.Length,
-                        FilterValues(_topLevelKeys, topLevelToken, kind: "top-level"));
+                        FilterValues(_topLevelKeys, topLevelToken, kind: "top-level", TopLevelKeyDescriptions));
                 }
             }
 
@@ -303,6 +426,176 @@ namespace SSH_Helper.Services.Editor
             }
 
             return symbols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        private CompletionResult? BuildStepCommandCompletionWithoutListMarker(
+            string text,
+            int safeCaret,
+            int lineStart,
+            string linePrefix,
+            int currentIndent,
+            bool manualRequest)
+        {
+            var commandMatch = StepCommandWithoutListMarkerRegex.Match(linePrefix);
+            if (!commandMatch.Success)
+            {
+                return null;
+            }
+
+            var token = commandMatch.Groups["token"].Value;
+            if (!TryResolveStepSequenceContext(
+                    text,
+                    lineStart,
+                    currentIndent,
+                    manualRequest,
+                    out var stepIndent,
+                    out var inferredFromPreviousLine))
+            {
+                return null;
+            }
+
+            var canBridgeIndentForManualBlank = manualRequest &&
+                                                token.Length == 0 &&
+                                                currentIndent == 0;
+            if (currentIndent != stepIndent && !canBridgeIndentForManualBlank)
+            {
+                return null;
+            }
+
+            var indentationPrefix = inferredFromPreviousLine
+                ? new string(' ', stepIndent)
+                : string.Empty;
+            var replaceStart = inferredFromPreviousLine
+                ? lineStart
+                : safeCaret - token.Length;
+            var replaceLength = inferredFromPreviousLine
+                ? linePrefix.Length
+                : token.Length;
+
+            var items = FilterValues(_stepCommands, token, kind: "command", CommandDescriptions)
+                .Select(item => new CompletionItem(
+                    item.Label,
+                    indentationPrefix + "- " + item.InsertText,
+                    item.Kind,
+                    item.Detail))
+                .ToList();
+
+            if (items.Count == 0)
+            {
+                return null;
+            }
+
+            return BuildCompletion(
+                CompletionContextKind.StepCommand,
+                replaceStart,
+                replaceLength,
+                items);
+        }
+
+        private bool TryResolveStepSequenceContext(
+            string text,
+            int currentLineStart,
+            int currentIndent,
+            bool manualRequest,
+            out int stepIndent,
+            out bool inferredFromPreviousLine)
+        {
+            stepIndent = 0;
+            inferredFromPreviousLine = false;
+            if (currentIndent > 0 &&
+                IsStepSequenceCommandIndent(text, currentLineStart, currentIndent))
+            {
+                stepIndent = currentIndent;
+                return true;
+            }
+
+            if (TryResolveStepSequenceIndentFromPreviousLine(text, currentLineStart, out var inferredIndent))
+            {
+                stepIndent = inferredIndent;
+                inferredFromPreviousLine = currentIndent != inferredIndent;
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryResolveStepSequenceIndentFromPreviousLine(string text, int currentLineStart, out int stepIndent)
+        {
+            stepIndent = 0;
+            var searchEnd = Math.Clamp(currentLineStart, 0, text.Length);
+            while (TryReadPreviousLine(text, searchEnd, out var previousLineStart, out var previousLineEnd))
+            {
+                searchEnd = previousLineStart;
+                var candidate = text.Substring(previousLineStart, previousLineEnd - previousLineStart).TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    continue;
+                }
+
+                var trimmedStart = candidate.TrimStart();
+                if (trimmedStart.StartsWith('#'))
+                {
+                    continue;
+                }
+
+                var candidateIndent = CountIndent(candidate);
+                if (TryParseStepCommandLine(candidate, out var directStepCommand, out _) &&
+                    IsKnownStepCommand(directStepCommand))
+                {
+                    stepIndent = candidateIndent;
+                    return true;
+                }
+
+                if (TryFindAncestorStepCommand(
+                        text,
+                        previousLineStart,
+                        candidateIndent,
+                        out var ancestorStepCommand,
+                        out var ancestorStepIndent) &&
+                    IsKnownStepCommand(ancestorStepCommand))
+                {
+                    stepIndent = ancestorStepIndent;
+                    return true;
+                }
+
+                if (TryParseMappingKeyLine(candidate, out var mappingKey) &&
+                    string.Equals(CanonicalizeKey(mappingKey), "steps", StringComparison.OrdinalIgnoreCase))
+                {
+                    stepIndent = candidateIndent + 2;
+                    return true;
+                }
+
+                if (TryFindAncestorMappingKey(text, previousLineStart, candidateIndent, out var ancestorKey, out var ancestorIndent) &&
+                    string.Equals(CanonicalizeKey(ancestorKey), "steps", StringComparison.OrdinalIgnoreCase) &&
+                    candidateIndent >= ancestorIndent + 2)
+                {
+                    stepIndent = ancestorIndent + 2;
+                    return true;
+                }
+
+                return false;
+            }
+
+            return false;
+        }
+
+        private bool IsKnownStepCommand(string command)
+        {
+            return _stepCommands.Contains(command, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool IsStepSequenceCommandIndent(string text, int currentLineStart, int currentIndent)
+        {
+            if (!TryFindAncestorMappingKey(text, currentLineStart, currentIndent, out var ancestorKey, out var ancestorIndent))
+            {
+                return false;
+            }
+
+            return string.Equals(
+                    CanonicalizeKey(ancestorKey),
+                    "steps",
+                    StringComparison.OrdinalIgnoreCase) &&
+                currentIndent == ancestorIndent + 2;
         }
 
         public IReadOnlyList<string> ExtractDynamicSymbols(string text)
@@ -508,7 +801,7 @@ namespace SSH_Helper.Services.Editor
                 CompletionContextKind.Interpolation,
                 safeCaret - token.Length,
                 token.Length,
-                FilterValues(GetInterpolationSymbols(text), token, kind: "symbol"));
+                FilterValues(GetInterpolationSymbols(text), token, kind: "symbol", BuiltInSymbolDescriptions));
         }
 
         private IReadOnlyList<string> ResolveOptionKeyCandidates(string text, int currentLineStart, int currentIndent)
@@ -636,7 +929,23 @@ namespace SSH_Helper.Services.Editor
             int startIndent,
             out string command)
         {
+            return TryFindAncestorStepCommand(
+                text,
+                currentLineStart,
+                startIndent,
+                out command,
+                out _);
+        }
+
+        private static bool TryFindAncestorStepCommand(
+            string text,
+            int currentLineStart,
+            int startIndent,
+            out string command,
+            out int commandIndent)
+        {
             command = string.Empty;
+            commandIndent = 0;
 
             var threshold = startIndent;
             var searchEnd = Math.Clamp(currentLineStart, 0, text.Length);
@@ -658,6 +967,7 @@ namespace SSH_Helper.Services.Editor
                 if (TryParseStepCommandLine(candidate, out var parsedCommand, out _))
                 {
                     command = parsedCommand;
+                    commandIndent = indent;
                     return true;
                 }
 
@@ -744,13 +1054,66 @@ namespace SSH_Helper.Services.Editor
         private static IReadOnlyList<CompletionItem> FilterValues(
             IEnumerable<string> values,
             string token,
-            string kind)
+            string kind,
+            IReadOnlyDictionary<string, string>? descriptions = null)
         {
             var safeToken = token ?? string.Empty;
             return values
                 .Where(value => value.StartsWith(safeToken, StringComparison.OrdinalIgnoreCase))
-                .Select(value => new CompletionItem(value, value, kind))
+                .Select(value => new CompletionItem(value, value, kind,
+                    descriptions != null && descriptions.TryGetValue(value, out var desc) ? desc : null))
                 .ToList();
+        }
+
+        private static IReadOnlyList<CompletionItem> FilterOptionKeys(
+            IReadOnlyList<string> values,
+            string token,
+            string? parentCommand)
+        {
+            var safeToken = token ?? string.Empty;
+            HashSet<string>? requiredKeys = null;
+            if (parentCommand != null &&
+                RequiredOptionKeysByCommand.TryGetValue(parentCommand, out var required))
+            {
+                requiredKeys = new HashSet<string>(required, StringComparer.OrdinalIgnoreCase);
+            }
+
+            var items = values
+                .Where(value => value.StartsWith(safeToken, StringComparison.OrdinalIgnoreCase))
+                .Select(value => new CompletionItem(value, value, "option",
+                    requiredKeys?.Contains(value) == true ? "required" : null))
+                .OrderBy(item => item.Detail == null ? 1 : 0)
+                .ThenBy(item => item.Label, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return items;
+        }
+
+        private static string? FindEnclosingCommandName(string text, int currentLineStart, int currentIndent)
+        {
+            var threshold = currentIndent;
+            var searchEnd = Math.Clamp(currentLineStart, 0, text.Length);
+            while (TryReadPreviousLine(text, searchEnd, out var previousLineStart, out var previousLineEnd))
+            {
+                searchEnd = previousLineStart;
+                var candidate = text.Substring(previousLineStart, previousLineEnd - previousLineStart).TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(candidate))
+                    continue;
+
+                var trimmedStart = candidate.TrimStart();
+                if (trimmedStart.StartsWith('#'))
+                    continue;
+
+                var indent = CountIndent(candidate);
+                if (indent >= threshold)
+                    continue;
+
+                threshold = indent;
+                if (TryParseStepCommandLine(candidate, out var command, out _))
+                    return CanonicalizeKey(command);
+            }
+
+            return null;
         }
 
         private static IEnumerable<string> ParseIntoTargets(string value)
@@ -780,6 +1143,15 @@ namespace SSH_Helper.Services.Editor
                 return trimmed;
 
             return string.Empty;
+        }
+
+        private static bool HasBlankLineSeparator(string text, int currentLineStart)
+        {
+            if (!TryReadPreviousLine(text, currentLineStart, out var prevLineStart, out var prevLineEnd))
+                return false;
+
+            var prevLine = text.Substring(prevLineStart, prevLineEnd - prevLineStart);
+            return string.IsNullOrWhiteSpace(prevLine);
         }
 
         private static bool IsIdentifierLike(string token)
