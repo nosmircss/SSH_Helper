@@ -2274,6 +2274,74 @@ public class FlowCanvasBridgeTests
         Assert.Null(ifStep.Else);
     }
 
+    [Fact]
+    public void ExportGraphToYaml_ImportedIfWithTwoDigitThenIndex_UsesStoredSnippetWhenFirstChildEdgeExists()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            steps:
+              - if:
+                  condition: "true"
+                  then:
+                    - print: "first"
+                    - print: "second"
+              - print: "after"
+            """;
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+
+        var ifNode = nodes.Cast<JObject>().First(n => n["data"]?["blockType"]?.ToString() == "if");
+        var ifId = ifNode["id"]!.ToString();
+
+        var thenChildren = nodes.Cast<JObject>()
+            .Where(n =>
+            {
+                var props = n["data"]?["props"] as JObject;
+                return props?["_isChildOf"]?.ToString() == ifId &&
+                       string.Equals(props?["_branchLabel"]?.ToString(), "then", StringComparison.OrdinalIgnoreCase);
+            })
+            .ToList();
+
+        Assert.Equal(2, thenChildren.Count);
+
+        var directThenChildIds = edges.Cast<JObject>()
+            .Where(e => e["source"]?.ToString() == ifId &&
+                        thenChildren.Any(c => c["id"]?.ToString() == e["target"]?.ToString()))
+            .Select(e => e["target"]!.ToString())
+            .ToList();
+
+        Assert.Single(directThenChildIds);
+        var directThenChildId = directThenChildIds[0];
+
+        foreach (var child in thenChildren)
+        {
+            var childId = child["id"]!.ToString();
+            var props = (JObject)child["data"]!["props"]!;
+            props["_stepPath"] = childId == directThenChildId ? "steps/0/then/2" : "steps/0/then/10";
+        }
+
+        var ifProps = (JObject)ifNode["data"]!["props"]!;
+        ifProps["_stepPath"] = "steps/0";
+        ifProps["_yamlSnippet"] = """
+            - if:
+                condition: "true"
+                then:
+                  # keep-imported-snippet
+                  - print: "first"
+                  - print: "second"
+            """;
+
+        var graph = new JObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# keep-imported-snippet", result.Yaml);
+    }
+
     private static JObject CreateEdge(
         string source,
         string target,

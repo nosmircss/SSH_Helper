@@ -1,6 +1,7 @@
 # Lessons
 
 ## 2026-04-03
+- When a user reports "build fails now" after my change, I must validate with the same build command/profile they are using (including warning-as-error settings and IDE file-lock conditions) before assuming a code regression.
 - When portable/self-update runs from synced folders (for example OneDrive Desktop), I must treat copy/relaunch as transiently lock-prone and add retry logic in updater scripts instead of assuming immediate file availability.
 - When introducing parallel standard/portable editions, I must audit all shared OS-level namespaces in one pass (credential targets, updater temp staging paths, and scheduler ownership) instead of stopping after the first collision point.
 - When users ask for YAML key order to match the Flow Canvas Properties panel, I must not rely on parser key catalogs that are alphabetically normalized; I need explicit panel-order mappings (especially for grouped Core/Advanced/On Error layouts like `playsound`).

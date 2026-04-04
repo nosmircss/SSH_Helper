@@ -1286,9 +1286,10 @@ namespace SSH_Helper.Services
                 if (string.IsNullOrWhiteSpace(branchKey)) continue;
 
                 // Only the first child in each branch (lowest _stepPath index) is directly
-                // connected from the container. Compare step paths to find the true first child.
+                // connected from the container. Compare step paths using numeric segment
+                // ordering so ".../10" is treated as later than ".../2".
                 if (!branchFirstChildren.ContainsKey(branchKey) ||
-                    string.Compare(stepPath, branchFirstPaths[branchKey], StringComparison.OrdinalIgnoreCase) < 0)
+                    CompareStepPathSegments(stepPath, branchFirstPaths[branchKey]) < 0)
                 {
                     branchFirstChildren[branchKey] = kvp.Key;
                     branchFirstPaths[branchKey] = stepPath;
@@ -1368,6 +1369,35 @@ namespace SSH_Helper.Services
             // First segment is the branch key (e.g., "do/0" → "do", "cases/0/do/0" → "cases")
             var slashIndex = relative.IndexOf('/');
             return slashIndex >= 0 ? relative.Substring(0, slashIndex) : relative;
+        }
+
+        private static int CompareStepPathSegments(string leftPath, string rightPath)
+        {
+            var leftSegments = (leftPath ?? string.Empty).Split('/', StringSplitOptions.None);
+            var rightSegments = (rightPath ?? string.Empty).Split('/', StringSplitOptions.None);
+            var compareCount = Math.Min(leftSegments.Length, rightSegments.Length);
+
+            for (int i = 0; i < compareCount; i++)
+            {
+                var leftSegment = leftSegments[i];
+                var rightSegment = rightSegments[i];
+
+                if (int.TryParse(leftSegment, out var leftIndex) &&
+                    int.TryParse(rightSegment, out var rightIndex))
+                {
+                    var numericCompare = leftIndex.CompareTo(rightIndex);
+                    if (numericCompare != 0)
+                        return numericCompare;
+
+                    continue;
+                }
+
+                var segmentCompare = string.Compare(leftSegment, rightSegment, StringComparison.OrdinalIgnoreCase);
+                if (segmentCompare != 0)
+                    return segmentCompare;
+            }
+
+            return leftSegments.Length.CompareTo(rightSegments.Length);
         }
 
         private static HashSet<string> ExtractSnippetBranchKeys(string snippet)

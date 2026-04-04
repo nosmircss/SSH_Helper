@@ -3255,3 +3255,22 @@
   - GREEN: `npx playwright test e2e/flow-canvas-properties-typing.spec.ts` (passed `11/11`).
   - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ImportExportRoundTrip_ChooseLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_MultiselectLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_ChooseOptionsSourceScalar_PreservesSource"` (passed `3/3`).
   - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests"` (passed `48/48`).
+
+## 192. Fix review findings #2 and #3 (JSON exception type + branch first-child ordering)
+- [x] 192.1 Add failing regression coverage for imported-container branch ordering when `_stepPath` includes two-digit indices.
+- [x] 192.2 Patch FlowCanvas bridge branch-first-child selection to use numeric-aware step-path comparison.
+- [x] 192.3 Patch FlowCanvasParityCli invalid-JSON handling to catch Newtonsoft parse exceptions.
+- [x] 192.4 Run focused verification (new regression + related bridge test) and solution build; document outcomes.
+
+### 192 Review
+- Added RED regression in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`:
+  - `ExportGraphToYaml_ImportedIfWithTwoDigitThenIndex_UsesStoredSnippetWhenFirstChildEdgeExists`
+- RED evidence (before fix): targeted test failed because export regenerated YAML and dropped snippet marker comment (`# keep-imported-snippet`).
+- Patched branch-first-child selection in `Services/FlowCanvasBridge.cs`:
+  - replaced lexicographic `_stepPath` comparison with `CompareStepPathSegments(...)`, which compares numeric segments numerically (`.../10` > `.../2`).
+- Patched CLI invalid-JSON handling in `FlowCanvas/tools/FlowCanvasParityCli/Program.cs`:
+  - changed catch from `System.Text.Json.JsonException` to `Newtonsoft.Json.JsonReaderException` for `JObject.Parse(...)`.
+- Verification:
+  - `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_ImportedIfWithTwoDigitThenIndex_UsesStoredSnippetWhenFirstChildEdgeExists|FullyQualifiedName~ExportGraphToYaml_ImportedIfWithDeletedElseEdge_RegeneratesWithoutElse" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true` (passed `2/2`).
+  - `dotnet run --project FlowCanvas/tools/FlowCanvasParityCli/FlowCanvasParityCli.csproj -- evaluate-cases` with malformed stdin payload now prints `Invalid input JSON: ...` and exits with code `1`.
+  - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` (passed; existing warnings unchanged: `MSB3277`, `CS8602`, `xUnit1031`).
