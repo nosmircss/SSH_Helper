@@ -19,7 +19,7 @@ namespace SSH_Helper.Services
         /// </summary>
         /// <param name="credentialProvider">Credential provider for cleaning up stored credentials on delete.</param>
         /// <param name="jobsFilePath">
-        /// Optional path to the jobs.json file. If null, uses %LocalAppData%\SSH_Helper\jobs.json.
+        /// Optional path to the jobs.json file. If null, uses the app storage folder.
         /// </param>
         public JobStorageService(ICredentialProvider credentialProvider, string? jobsFilePath = null)
         {

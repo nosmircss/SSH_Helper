@@ -1,5 +1,119 @@
 # TODO
 
+## 191. Harden updater against transient file locks on relaunch
+- [x] 191.1 Add updater-script retry behavior for package copy and updated executable relaunch.
+- [x] 191.2 Isolate updater temp folder by executable path identity to avoid cross-copy collisions.
+- [x] 191.3 Extend focused updater temp-path tests for hashed path suffix and same-name/different-path isolation.
+- [x] 191.4 Run focused/regression verification and document outcomes.
+
+### 191 Review
+- Root-cause hypothesis: portable installs under synced folders (for example OneDrive Desktop) can introduce transient file locks around self-update copy/relaunch, surfacing as Windows shell error “Another program is currently using this file.”
+- Updated updater script in `Services/UpdateService.cs`:
+- Added `Invoke-WithRetry` helper in embedded PowerShell.
+- Wrapped `Copy-Item` update-package replace with retry.
+- Wrapped `Start-Process` relaunch with retry.
+- Updated temp staging isolation in `BuildUpdateTempDirectory(...)`:
+- Temp path now includes executable-name stem + short hash token from normalized executable path (`SSH_Helper_Update_<name>_<hash8>`).
+- This preserves standard vs portable separation and also isolates same exe names in different folders.
+- Extended tests in `SSH_Helper.Tests/Services/UpdateServiceTempPathTests.cs`:
+- existing tests now assert hashed suffix format.
+- added `BuildUpdateTempDirectory_SameExeNameDifferentPaths_UsesDifferentDirectories`.
+- Verification:
+- Focused: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~UpdateServiceTempPathTests|FullyQualifiedName~SchedulerInstanceLockTests" ...` passed (`5/5`).
+- Regression slice: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~JobStorageServiceTests|FullyQualifiedName~SchedulingServiceTests|FullyQualifiedName~UpdateServiceTempPathTests|FullyQualifiedName~SchedulerInstanceLockTests" ...` passed (`127/127`).
+
+## 190. Prevent cross-edition update/scheduler runtime collisions
+- [x] 190.1 Isolate updater temp working directory by executable/build flavor.
+- [x] 190.2 Add a cross-instance scheduler lock so only one SSH Helper instance runs timed scheduler evaluations at once.
+- [x] 190.3 Add focused tests for updater temp-path derivation and scheduler lock behavior.
+- [x] 190.4 Run focused regression verification and document outcomes.
+
+### 190 Review
+- Updater temp path isolation:
+- `Services/UpdateService.cs` now derives update temp working folders from the running exe name via `BuildUpdateTempDirectory(processPath, tempRoot)`.
+- Both download staging (`DownloadUpdateAsync`) and updater script launch (`LaunchUpdaterAndExit`) now use this helper, so standard and portable builds use distinct temp directories (for example: `SSH_Helper_Update_SSH_Helper` vs `SSH_Helper_Update_SSH_Helper_Portable`).
+- Added focused tests in `SSH_Helper.Tests/Services/UpdateServiceTempPathTests.cs`:
+- `BuildUpdateTempDirectory_UsesExecutableFileNameStem`
+- `BuildUpdateTempDirectory_EmptyProcessPath_UsesFallbackToken`
+- Scheduler collision prevention:
+- Added `Utilities/SchedulerInstanceLock.cs` (named mutex lock) and wired it into `Form1` scheduler bootstrap/cleanup flow so timed scheduler evaluation starts only when lock ownership is acquired.
+- Strengthened `SchedulerInstanceLock` with in-process ownership tracking to prevent same-process re-entrant ownership through multiple lock objects.
+- Added focused tests in `SSH_Helper.Tests/Utilities/SchedulerInstanceLockTests.cs`:
+- `TryAcquire_SameNameSecondLock_FailsWhileFirstHeld`
+- `TryAcquire_AfterFirstDisposed_SecondCanAcquire`
+- Verification:
+- RED (before scheduler-lock ownership guard): `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SchedulerInstanceLockTests|FullyQualifiedName~UpdateServiceTempPathTests" ...` failed as expected (`1` failing test).
+- GREEN focused: same filter passed (`4/4`).
+- Regression slice: `dotnet test .\SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~JobStorageServiceTests|FullyQualifiedName~SchedulingServiceTests|FullyQualifiedName~SchedulerInstanceLockTests|FullyQualifiedName~UpdateServiceTempPathTests" ...` passed (`126/126`).
+
+## 189. Isolate Credential Manager targets between standard and portable builds
+- [x] 189.1 Add build-flavor-aware credential target generation in `CredentialTargets`.
+- [x] 189.2 Add focused tests proving portable targets use a separate prefix.
+- [x] 189.3 Run credential regression tests and document results.
+- [x] 189.4 Update docs to mention credential target isolation behavior.
+
+### 189 Review
+- Implemented build-flavor credential target scoping in `Services/Credentials/CredentialTargets.cs`.
+- Public target APIs now resolve prefix from `AppDataPaths.IsPortableBuild`.
+- Added internal helpers for deterministic testing:
+- `BuildDefaultPasswordTarget(bool portableBuild)`
+- `BuildHostPasswordTarget(bool portableBuild, ...)`
+- `BuildJobPasswordTarget(bool portableBuild, ...)`
+- Prefix behavior:
+- Standard build: `SSH_Helper:*`
+- Portable build: `SSH_Helper_Portable:*`
+- Added tests in `SSH_Helper.Tests/Services/CredentialTargetsTests.cs`:
+- `BuildDefaultPasswordTarget_PortableBuild_UsesPortablePrefix`
+- `BuildHostPasswordTarget_PortableBuild_UsesPortablePrefix`
+- `BuildJobPasswordTarget_PortableBuild_UsesPortablePrefix`
+- Verification:
+- RED: `dotnet test ... --filter "FullyQualifiedName~CredentialTargetsTests"` failed before implementation with missing helper APIs.
+- GREEN: same filter passed (`9/9`).
+- Regression: `CredentialTargetsTests|JobExecutionServiceTests|JobStorageServiceTests` passed (`100/100`).
+- Docs:
+- Updated `README.md` release flavor section with credential isolation note.
+- Updated `CHANGELOG.md` portable-release section with credential target scoping note.
+
+## 188. Add portable release build with exe-local storage
+- [x] 188.1 Create OpenSpec change (`proposal.md`, `tasks.md`, and spec delta) for portable release/storage behavior.
+- [x] 188.2 Add portable-aware storage root resolution + writable validation in `AppDataPaths` and enforce startup failure in portable mode when unwritable.
+- [x] 188.3 Replace direct `%LocalAppData%` runtime storage paths (`FlowCanvasForm`, `ScintillaNativeBootstrap`) with portable-aware app storage paths.
+- [x] 188.4 Add build/publish support for `PortableBuild=true` (`SSH_Helper_Portable.exe`) and update GitHub release workflow to publish both standard + portable assets with checksums.
+- [x] 188.5 Add/adjust automated tests for portable storage resolution and publish workflow assumptions; run focused verification commands.
+- [x] 188.6 Update docs (`README.md`, `CHANGELOG.md`) for standard vs portable storage semantics and artifact names.
+
+### 188 Review
+- OpenSpec:
+- Added `openspec/changes/add-portable-release-build/` with `proposal.md`, `tasks.md`, and `specs/scripting-runtime/spec.md` delta.
+- Validation: `openspec validate add-portable-release-build --strict --no-interactive` passed.
+- Runtime/storage implementation:
+- `Utilities/AppDataPaths.cs` now supports compile-time portable mode via `PORTABLE_BUILD`, with:
+- `IsPortableBuild`
+- `ResolveAppFolder(...)` (portable => exe dir; standard => `%LocalAppData%\\SSH_Helper`)
+- `TryEnsureFolderWritable(...)`
+- `ValidateStartupStorageWritable(...)` for portable startup guard
+- `Program.cs` now fails fast in portable mode with a clear message when storage is not writable.
+- Path consumer updates:
+- `UI/FlowCanvasForm.cs` WebView2 user data now resolves from `AppDataPaths.GetAppFolder()`.
+- `Utilities/ScintillaNativeBootstrap.cs` extraction roots now prioritize app storage folder (portable-aware) before temp fallback.
+- Build + release:
+- `SSH_Helper.csproj` now supports `PortableBuild` property and conditionally defines `PORTABLE_BUILD` + `AssemblyName=SSH_Helper_Portable`.
+- `.github/workflows/build-release.yml` now publishes standard + portable builds and releases:
+- `SSH_Helper.exe`
+- `SSH_Helper.exe.sha256`
+- `SSH_Helper_Portable.exe`
+- `SSH_Helper_Portable.exe.sha256`
+- Documentation:
+- Updated `README.md` install/config sections to document standard vs portable behavior.
+- Added `CHANGELOG.md` entry describing portable artifact and storage semantics.
+- Verification:
+- RED: `dotnet test ... --filter "FullyQualifiedName~AppDataPathsTests"` failed initially with missing `AppDataPaths` APIs (expected).
+- GREEN: same test filter passed (`4/4`).
+- Focused regression: `AppDataPathsTests|FlowCanvasDistLocatorTests|BrowserCallbackWebViewProfileManagerTests|JobStorageServiceTests` passed (`49/49`).
+- Publish verification:
+- `dotnet publish ... -o artifacts/publish-standard` produced `SSH_Helper.exe`.
+- `dotnet publish ... -p:PortableBuild=true -o artifacts/publish-portable` produced `SSH_Helper_Portable.exe`.
+
 ## 187. Harden GitHub build-release workflow before next tag build
 - [x] 187.1 Re-confirm workflow risks and define minimal safe fix scope.
 - [x] 187.2 Patch `build-release.yml` to ensure build job has Node/FlowCanvas dependencies available.

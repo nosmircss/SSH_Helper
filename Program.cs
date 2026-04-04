@@ -38,11 +38,21 @@ namespace SSH_Helper
                 Rebex.Licensing.Key = rebexKey;
             }
 
-            ScintillaNativeBootstrap.ConfigureSatelliteDirectory();
-
             // To customize application configuration such as set high DPI settings or default font,
             // see https://aka.ms/applicationconfiguration.
             ApplicationConfiguration.Initialize();
+
+            if (!AppDataPaths.ValidateStartupStorageWritable(out var storageError))
+            {
+                MessageBox.Show(
+                    storageError ?? "Portable storage path is not writable.",
+                    "Portable Storage Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            ScintillaNativeBootstrap.ConfigureSatelliteDirectory();
             Application.Run(new Form1());
         }
     }

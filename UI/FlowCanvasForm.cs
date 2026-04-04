@@ -115,8 +115,9 @@ namespace SSH_Helper.UI
 
             // Use a dedicated user data folder
             var userDataDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "SSH_Helper", "WebView2", "FlowCanvas");
+                AppDataPaths.GetAppFolder(),
+                "WebView2",
+                "FlowCanvas");
             Directory.CreateDirectory(userDataDir);
 
             var environment = await CoreWebView2Environment.CreateAsync(

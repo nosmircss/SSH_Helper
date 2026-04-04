@@ -19,7 +19,7 @@ namespace SSH_Helper.Services
         /// </summary>
         /// <param name="basePath">
         /// Optional base directory for history storage.
-        /// Defaults to %LocalAppData%\SSH_Helper\job-history.
+        /// Defaults to app storage folder + "job-history".
         /// </param>
         public JobHistoryService(string? basePath = null)
         {

@@ -32,7 +32,18 @@ A Windows Forms application for executing SSH commands across multiple hosts wit
 
 1. Download the latest release from the [Releases](https://github.com/nosmircss/SSH_Helper/releases) page
 2. Extract to your preferred location
-3. Run `SSH_Helper.exe`
+3. Run your preferred build:
+   - `SSH_Helper.exe` (standard)
+   - `SSH_Helper_Portable.exe` (portable)
+
+### Release Flavors
+
+- **Standard (`SSH_Helper.exe`)**: Stores app-managed data under `%LocalAppData%\SSH_Helper`.
+- **Portable (`SSH_Helper_Portable.exe`)**: Stores app-managed data beside the executable.
+  - Portable mode requires write access to the folder containing `SSH_Helper_Portable.exe`.
+- **Credential isolation**: Windows Credential Manager entries are build-flavor scoped.
+  - Standard build uses `SSH_Helper:*` targets.
+  - Portable build uses `SSH_Helper_Portable:*` targets.
 
 ## Usage
 
@@ -241,7 +252,11 @@ Access via **Edit > Settings**:
 
 ## Configuration
 
-Settings are stored in `config.json` in the application directory (`%LocalAppData%\SSH_Helper\`):
+Settings are stored in `config.json` in the application storage directory:
+- **Standard build**: `%LocalAppData%\SSH_Helper\`
+- **Portable build**: the executable directory (same folder as `SSH_Helper_Portable.exe`)
+
+This storage location also contains runtime files such as:
 - Window position, size, and splitter positions
 - Presets, folders, favorites, and manual sort order
 - Folder expand/collapse states

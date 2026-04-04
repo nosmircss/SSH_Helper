@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Serialization;
 
 namespace SSH_Helper.Services
@@ -199,7 +200,7 @@ namespace SSH_Helper.Services
             int maxRetries = 3,
             IProgress<DownloadRetryEventArgs>? retryProgress = null)
         {
-            var tempDir = Path.Combine(Path.GetTempPath(), "SSH_Helper_Update");
+            var tempDir = BuildUpdateTempDirectory(Environment.ProcessPath, Path.GetTempPath());
             Directory.CreateDirectory(tempDir);
 
             var fileName = Path.GetFileName(new Uri(downloadUrl).LocalPath);
@@ -391,7 +392,7 @@ namespace SSH_Helper.Services
                 throw new InvalidOperationException("Could not determine current executable path.");
 
             var appDir = Path.GetDirectoryName(currentExePath)!;
-            var tempDir = Path.Combine(Path.GetTempPath(), "SSH_Helper_Update");
+            var tempDir = BuildUpdateTempDirectory(currentExePath, Path.GetTempPath());
             Directory.CreateDirectory(tempDir);
 
             // Create the PowerShell updater script
@@ -421,6 +422,44 @@ namespace SSH_Helper.Services
 
             Process.Start(startInfo);
             Environment.Exit(0);
+        }
+
+        internal static string BuildUpdateTempDirectory(string? processPath, string? tempRoot)
+        {
+            var root = string.IsNullOrWhiteSpace(tempRoot) ? Path.GetTempPath() : tempRoot;
+
+            var processName = Path.GetFileNameWithoutExtension(processPath ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(processName))
+                processName = "unknown";
+
+            var invalid = Path.GetInvalidFileNameChars();
+            var sanitized = new string(processName
+                .Select(ch => invalid.Contains(ch) ? '_' : ch)
+                .ToArray())
+                .Trim();
+
+            if (string.IsNullOrWhiteSpace(sanitized))
+                sanitized = "unknown";
+
+            var pathIdentity = "unknown";
+            if (!string.IsNullOrWhiteSpace(processPath))
+            {
+                try
+                {
+                    pathIdentity = Path.GetFullPath(processPath).Trim();
+                }
+                catch
+                {
+                    pathIdentity = processPath.Trim();
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(pathIdentity))
+                pathIdentity = "unknown";
+
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(pathIdentity));
+            var token = Convert.ToHexString(hash).ToLowerInvariant()[..8];
+            return Path.Combine(root, $"SSH_Helper_Update_{sanitized}_{token}");
         }
 
         /// <summary>
@@ -460,6 +499,29 @@ function Pause-IfInteractive {
             $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
         }
     } catch { }
+}
+
+function Invoke-WithRetry {
+    param(
+        [Parameter(Mandatory=$true)][scriptblock]$Action,
+        [int]$MaxAttempts = 20,
+        [int]$DelayMs = 500,
+        [string]$Operation = 'operation'
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            & $Action
+            return
+        } catch {
+            if ($attempt -ge $MaxAttempts) {
+                throw
+            }
+
+            Write-Log ""$Operation failed (attempt $attempt/$MaxAttempts): $($_.Exception.Message). Retrying..."" 'Yellow'
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
 }
 
 try {
@@ -503,7 +565,9 @@ try {
             $destPath = Join-Path $TargetDir (Split-Path $UpdatePackage -Leaf)
         }
 
-        Copy-Item -Path $UpdatePackage -Destination $destPath -Force -ErrorAction Stop
+        Invoke-WithRetry -Operation 'Copy update package' -Action {
+            Copy-Item -Path $UpdatePackage -Destination $destPath -Force -ErrorAction Stop
+        }
         if (-not (Test-Path $destPath)) {
             throw ""Update copy failed: $destPath not found.""
         }
@@ -540,7 +604,9 @@ try {
             throw ""Executable not found after update: $ExeToLaunch""
         }
     }
-    Start-Process -FilePath $exePath -WorkingDirectory $TargetDir -ErrorAction Stop
+    Invoke-WithRetry -Operation 'Launch updated executable' -Action {
+        Start-Process -FilePath $exePath -WorkingDirectory $TargetDir -ErrorAction Stop
+    }
 
     # Clean up temp directory (delayed)
     if (-not $EnableLog) {
