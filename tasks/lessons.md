@@ -1,6 +1,8 @@
 # Lessons
 
 ## 2026-04-03
+- When portable/self-update runs from synced folders (for example OneDrive Desktop), I must treat copy/relaunch as transiently lock-prone and add retry logic in updater scripts instead of assuming immediate file availability.
+- When introducing parallel standard/portable editions, I must audit all shared OS-level namespaces in one pass (credential targets, updater temp staging paths, and scheduler ownership) instead of stopping after the first collision point.
 - When users ask for YAML key order to match the Flow Canvas Properties panel, I must not rely on parser key catalogs that are alphabetically normalized; I need explicit panel-order mappings (especially for grouped Core/Advanced/On Error layouts like `playsound`).
 - When a user broadens a key-order request to "all blocks," I must run an exhaustive drift check across every registry block/command pair, not stop at the one block that was just reported.
 - When a user adds a documentation-follow-through correction, I must update both behavior docs and QA docs in the same implementation pass (`README`, `SCRIPTING`, harness docs, changelog), not treat docs as optional cleanup.

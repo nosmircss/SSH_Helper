@@ -1247,11 +1247,19 @@ namespace SSH_Helper.Services
                     directTargets.Add(edge.TargetId);
             }
 
-            // Collect the distinct branch labels among this container's children.
+            // Collect the distinct YAML branch keys among this container's children.
             // Each branch (then, else, do, catch, etc.) should have its first child
             // directly connected from the container. If a branch's first child is
             // missing from directTargets, the user deleted that branch edge.
+            //
+            // We derive the branch key from _stepPath (e.g., "steps/3/do/0" → "do")
+            // rather than _branchLabel, because _branchLabel is the visual display name
+            // ("loop", "case: value") which may not match the YAML keyword ("do", "cases").
+            var containerStepPath = nodeMap.TryGetValue(nodeId, out var containerNode)
+                ? (containerNode["data"]?["props"] as JObject)?["_stepPath"]?.ToString() ?? ""
+                : "";
             var branchFirstChildren = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var branchFirstPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var hasAnyChildNodes = false;
             foreach (var kvp in nodeMap)
             {
@@ -1265,13 +1273,26 @@ namespace SSH_Helper.Services
 
                 hasAnyChildNodes = true;
 
-                var branchLabel = childProps["_branchLabel"]?.ToString();
-                if (string.IsNullOrWhiteSpace(branchLabel)) continue;
+                // Extract the YAML branch key from the child's step path.
+                // E.g., container="steps/3", child="steps/3/do/0" → key="do"
+                //        container="steps/1", child="steps/1/cases/0/do/0" → key="cases"
+                var stepPath = childProps["_stepPath"]?.ToString() ?? "";
+                var branchKey = ExtractBranchKeyFromStepPath(stepPath, containerStepPath);
+                if (string.IsNullOrWhiteSpace(branchKey))
+                {
+                    // Fallback to _branchLabel if step path doesn't yield a key
+                    branchKey = childProps["_branchLabel"]?.ToString();
+                }
+                if (string.IsNullOrWhiteSpace(branchKey)) continue;
 
-                // Only the first child in each branch is directly connected from the container.
-                // Track the first child we find per branch label (by step path order).
-                if (!branchFirstChildren.ContainsKey(branchLabel))
-                    branchFirstChildren[branchLabel] = kvp.Key;
+                // Only the first child in each branch (lowest _stepPath index) is directly
+                // connected from the container. Compare step paths to find the true first child.
+                if (!branchFirstChildren.ContainsKey(branchKey) ||
+                    string.Compare(stepPath, branchFirstPaths[branchKey], StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    branchFirstChildren[branchKey] = kvp.Key;
+                    branchFirstPaths[branchKey] = stepPath;
+                }
             }
 
             if (branchFirstChildren.Count == 0)
@@ -1302,13 +1323,22 @@ namespace SSH_Helper.Services
 
             // Check if the snippet originally defined branches that no longer have
             // any child nodes in the graph (e.g., user deleted all nodes in the else branch).
+            // The YAML keyword and the internal scope path may differ (e.g., YAML "else:" maps
+            // to scope path "default" for switch, or "else" for if). Check both.
             if (!string.IsNullOrWhiteSpace(yamlSnippet))
             {
                 var snippetBranches = ExtractSnippetBranchKeys(yamlSnippet);
                 foreach (var branch in snippetBranches)
                 {
                     if (!branchFirstChildren.ContainsKey(branch))
-                        return true; // Snippet defines a branch with no remaining children
+                    {
+                        // Check alias: YAML "else" ↔ scope "default" (switch containers)
+                        var alias = string.Equals(branch, "else", StringComparison.OrdinalIgnoreCase) ? "default"
+                                  : string.Equals(branch, "default", StringComparison.OrdinalIgnoreCase) ? "else"
+                                  : null;
+                        if (alias == null || !branchFirstChildren.ContainsKey(alias))
+                            return true; // Snippet defines a branch with no remaining children
+                    }
                 }
             }
 
@@ -1319,15 +1349,61 @@ namespace SSH_Helper.Services
         /// Extracts top-level branch keys (then, else, do, catch, finally, cases, default)
         /// from a container's YAML snippet by scanning for indented keywords followed by a colon.
         /// </summary>
+        /// <summary>
+        /// Extracts the YAML branch key from a child's step path relative to its container.
+        /// E.g., container="steps/3", child="steps/3/do/0" → "do"
+        ///        container="steps/1", child="steps/1/cases/0/do/0" → "cases"
+        /// </summary>
+        private static string? ExtractBranchKeyFromStepPath(string childStepPath, string containerStepPath)
+        {
+            if (string.IsNullOrEmpty(containerStepPath) || string.IsNullOrEmpty(childStepPath))
+                return null;
+
+            // Strip the container prefix (e.g., "steps/3/") to get the relative path
+            var prefix = containerStepPath.EndsWith("/") ? containerStepPath : containerStepPath + "/";
+            if (!childStepPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            var relative = childStepPath.Substring(prefix.Length);
+            // First segment is the branch key (e.g., "do/0" → "do", "cases/0/do/0" → "cases")
+            var slashIndex = relative.IndexOf('/');
+            return slashIndex >= 0 ? relative.Substring(0, slashIndex) : relative;
+        }
+
         private static HashSet<string> ExtractSnippetBranchKeys(string snippet)
         {
             var branchKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            // Known branch keywords that containers use
             string[] knownBranches = { "then", "else", "elif", "do", "catch", "finally", "cases", "default" };
 
-            foreach (var line in snippet.Split('\n'))
+            // Determine the indent level of the container's direct properties.
+            // The snippet starts with "- while:" (or similar). The direct property lines
+            // (condition:, do:, then:, etc.) are at the FIRST non-list-item indent level.
+            // Only match branch keywords at that exact indent to avoid picking up
+            // keywords from nested containers (e.g., "then:" inside a nested "if").
+            int propertyIndent = -1;
+            var lines = snippet.Split('\n');
+            for (int i = 1; i < lines.Length; i++) // skip line 0 (the "- while:" line)
             {
-                var trimmed = line.TrimStart();
+                var line = lines[i].TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                var indent = line.Length - line.TrimStart().Length;
+                if (indent > 0)
+                {
+                    propertyIndent = indent;
+                    break;
+                }
+            }
+
+            if (propertyIndent < 0) return branchKeys;
+
+            foreach (var line in lines)
+            {
+                var raw = line.TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var indent = raw.Length - raw.TrimStart().Length;
+                if (indent != propertyIndent) continue;
+
+                var trimmed = raw.TrimStart();
                 foreach (var key in knownBranches)
                 {
                     if (trimmed.StartsWith(key + ":", StringComparison.OrdinalIgnoreCase) ||

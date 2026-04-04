@@ -2,6 +2,22 @@
 
 ## Changes Since `a5e5905` (0.51.11)
 
+### Portable Release Build
+
+A second release artifact is now supported for portable distribution:
+
+- **Portable executable** — `SSH_Helper_Portable.exe` is published alongside `SSH_Helper.exe`.
+- **Compile-time build flavor** — `PortableBuild=true` enables portable storage behavior via `PORTABLE_BUILD`.
+- **Storage root behavior**
+  - Standard build: `%LocalAppData%\\SSH_Helper`
+  - Portable build: executable directory
+- **Credential Manager scope isolation** — Credential targets are now build-flavor specific:
+  - Standard build: `SSH_Helper:*`
+  - Portable build: `SSH_Helper_Portable:*`
+- **Portable startup guard** — Portable mode validates executable-folder write access at startup and shows a clear error if the location is not writable.
+- **Portable-aware runtime paths** — Flow Canvas WebView2 user data and Scintilla native extraction now resolve from the app storage root, so they follow the selected build flavor.
+- **Release workflow** — GitHub Actions now publishes both standard and portable executables and emits separate SHA256 checksum files for each.
+
 ### Flow Canvas Visual Script Editor
 
 A complete visual script editor is introduced as a React/TypeScript application built with Vite and @xyflow/react (React Flow), hosted in a WebView2 window alongside the existing Scintilla text editor. Scripts are edited as node-based graphs with bidirectional YAML round-tripping.

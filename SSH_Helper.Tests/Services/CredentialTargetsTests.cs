@@ -7,6 +7,30 @@ namespace SSH_Helper.Tests.Services;
 public class CredentialTargetsTests
 {
     [Fact]
+    public void BuildDefaultPasswordTarget_PortableBuild_UsesPortablePrefix()
+    {
+        var target = CredentialTargets.BuildDefaultPasswordTarget(portableBuild: true);
+
+        target.Should().Be("SSH_Helper_Portable:default");
+    }
+
+    [Fact]
+    public void BuildHostPasswordTarget_PortableBuild_UsesPortablePrefix()
+    {
+        var target = CredentialTargets.BuildHostPasswordTarget(portableBuild: true, " host1 ", " admin ");
+
+        target.Should().Be("SSH_Helper_Portable:host:host1|user:admin");
+    }
+
+    [Fact]
+    public void BuildJobPasswordTarget_PortableBuild_UsesPortablePrefix()
+    {
+        var target = CredentialTargets.BuildJobPasswordTarget(portableBuild: true, "abc123def456");
+
+        target.Should().Be("SSH_Helper_Portable:job:abc123def456");
+    }
+
+    [Fact]
     public void DefaultPasswordTarget_UsesExpectedPrefix()
     {
         CredentialTargets.DefaultPasswordTarget.Should().Be("SSH_Helper:default");

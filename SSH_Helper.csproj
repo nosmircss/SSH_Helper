@@ -10,6 +10,13 @@
     <UseAppHost>true</UseAppHost>
     <WebView2LoaderPreference>Static</WebView2LoaderPreference>
     <RebexLicenseKey Condition="'$(REBEX_LICENSE_KEY)' != ''">$(REBEX_LICENSE_KEY)</RebexLicenseKey>
+    <PortableBuild Condition="'$(PortableBuild)' == ''">false</PortableBuild>
+  </PropertyGroup>
+
+  <!-- Portable build flavor -->
+  <PropertyGroup Condition="'$(PortableBuild)' == 'true'">
+    <DefineConstants>$(DefineConstants);PORTABLE_BUILD</DefineConstants>
+    <AssemblyName>SSH_Helper_Portable</AssemblyName>
   </PropertyGroup>
 
   <!-- Single-file publish configuration -->

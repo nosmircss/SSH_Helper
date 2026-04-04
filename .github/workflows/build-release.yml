@@ -9,6 +9,9 @@ on:
     #branches: [ "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   flowcanvas-browser-tests:
     runs-on: ubuntu-latest
@@ -16,6 +19,11 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -28,7 +36,7 @@ jobs:
 
     - name: Install Playwright Chromium
       working-directory: ./FlowCanvas
-      run: npm run test:e2e:install
+      run: npx playwright install --with-deps chromium
 
     - name: Run FlowCanvas browser harness
       working-directory: ./FlowCanvas
@@ -60,16 +68,28 @@ jobs:
       with:
         dotnet-version: 8.0.x
 
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install FlowCanvas dependencies
+      working-directory: ./FlowCanvas
+      run: npm ci
+
     - name: Restore dependencies
       run: dotnet restore ./SSH_Helper.csproj -r win-x64 /p:Configuration=Release
 
-    - name: Publish
-      run: dotnet publish ./SSH_Helper.csproj -c Release -o ./publish --no-restore
+    - name: Publish standard build
+      run: dotnet publish ./SSH_Helper.csproj -c Release -o ./publish/standard --no-restore
+
+    - name: Publish portable build
+      run: dotnet publish ./SSH_Helper.csproj -c Release -o ./publish/portable --no-restore -p:PortableBuild=true
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
-        name: SSH_Helper
+        name: SSH_Helper_Builds
         path: ./publish/
 
   release:
@@ -84,18 +104,24 @@ jobs:
     - name: Download artifact
       uses: actions/download-artifact@v4
       with:
-        name: SSH_Helper
+        name: SSH_Helper_Builds
         path: ./release
+
+    - name: Stage release binaries
+      run: |
+        cp release/standard/SSH_Helper.exe release/SSH_Helper.exe
+        cp release/portable/SSH_Helper_Portable.exe release/SSH_Helper_Portable.exe
 
     - name: Copy documentation to release
       run: |
         cp README.md release/
         cp SCRIPTING.md release/
 
-    - name: Generate SHA256 checksum
+    - name: Generate SHA256 checksums
       run: |
         cd release
         sha256sum SSH_Helper.exe > SSH_Helper.exe.sha256
+        sha256sum SSH_Helper_Portable.exe > SSH_Helper_Portable.exe.sha256
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
@@ -103,6 +129,8 @@ jobs:
         files: |
           release/SSH_Helper.exe
           release/SSH_Helper.exe.sha256
+          release/SSH_Helper_Portable.exe
+          release/SSH_Helper_Portable.exe.sha256
           release/README.md
           release/SCRIPTING.md
         generate_release_notes: true

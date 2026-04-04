@@ -60,7 +60,6 @@ namespace SSH_Helper.Utilities
             {
                 var extractionDirectory = Path.Combine(
                     rootDirectory,
-                    "SSH_Helper",
                     "scintilla-native",
                     ScintillaPackageVersion,
                     SupportedRuntime);
@@ -89,16 +88,25 @@ namespace SSH_Helper.Utilities
 
         private static IEnumerable<string> EnumerateExtractionRoots()
         {
-            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (!string.IsNullOrWhiteSpace(localAppData))
+            string? appFolder = null;
+            try
             {
-                yield return localAppData;
+                appFolder = AppDataPaths.GetAppFolder();
+            }
+            catch
+            {
+                // Fall back to temp-only extraction when app storage is unavailable.
+            }
+
+            if (!string.IsNullOrWhiteSpace(appFolder))
+            {
+                yield return appFolder;
             }
 
             var tempDirectory = Path.GetTempPath();
             if (!string.IsNullOrWhiteSpace(tempDirectory))
             {
-                yield return tempDirectory;
+                yield return Path.Combine(tempDirectory, "SSH_Helper");
             }
         }
 

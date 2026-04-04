@@ -110,7 +110,7 @@ namespace SSH_Helper
 
         #region Constants
 
-        private const string ApplicationVersion = "0.51.11";
+        private const string ApplicationVersion = "0.51.12";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -125,6 +125,7 @@ namespace SSH_Helper
         private const int OutputTextRecreateTargetChars = 100_000;
         private const int HostGridRowHeaderGlyphReservationWidth = 18;
         private const int HiddenPresetsTabHeaderFallbackHeight = 24;
+        private const string SchedulerPausedByLockStatusText = "Scheduler paused (another SSH Helper instance is running scheduled jobs)";
         private static readonly TimeSpan AutomaticHistoryCompactionCooldown = TimeSpan.FromSeconds(2);
         private static readonly string FolderSummarySeparator = new string('=', 60);
         private static readonly string FolderSummarySubSeparator = new string('=', 9);
@@ -154,6 +155,8 @@ namespace SSH_Helper
         private System.Windows.Forms.Timer? _statusBarTimer;
         private readonly ModelessDialogManager<JobListDialog> _jobListDialogManager = new();
         private readonly HashSet<string> _runNowJobIds = new();
+        private SchedulerInstanceLock? _schedulerInstanceLock;
+        private bool _schedulerTimerEnabled = true;
 
         #endregion
 
@@ -14214,10 +14217,21 @@ namespace SSH_Helper
             // Register cleanup on form close
             FormClosed += (_, __) => CleanupSchedulerServices();
 
-            // Crash recovery and start timer
-            _jobExecutionService.Initialize();
-            RecordMissedSchedulerRunsOnStartup();
-            _jobExecutionService.Start();
+            _schedulerInstanceLock?.Dispose();
+            _schedulerInstanceLock = new SchedulerInstanceLock();
+            _schedulerTimerEnabled = _schedulerInstanceLock.TryAcquire();
+
+            if (_schedulerTimerEnabled)
+            {
+                // Crash recovery and start timer
+                _jobExecutionService.Initialize();
+                RecordMissedSchedulerRunsOnStartup();
+                _jobExecutionService.Start();
+            }
+            else
+            {
+                Debug.WriteLine("Scheduler timer not started: another SSH Helper instance owns the scheduler lock.");
+            }
         }
 
         /// <summary>
@@ -14324,6 +14338,12 @@ namespace SSH_Helper
 
             if (!showStatusBar)
             {
+                return;
+            }
+
+            if (!_schedulerTimerEnabled)
+            {
+                _statusScheduler.Text = $"{SchedulerNotificationFormatter.FormatStatusBar(activeCount, null, null)} -- {SchedulerPausedByLockStatusText}";
                 return;
             }
 
@@ -14452,6 +14472,10 @@ namespace SSH_Helper
                 _jobExecutionService.Stop();
                 _jobExecutionService.Dispose();
             }
+
+            _schedulerInstanceLock?.Dispose();
+            _schedulerInstanceLock = null;
+            _schedulerTimerEnabled = true;
         }
 
         #endregion

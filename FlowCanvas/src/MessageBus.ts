@@ -97,7 +97,7 @@ class MessageBusImpl {
 
     const handlers = this.handlers.get(msg.type);
     if (!handlers || handlers.size === 0) {
-      console.warn(`[MessageBus] Unknown inbound message type '${msg.type}'`);
+      console.debug(`[MessageBus] Ignoring unhandled inbound message type '${msg.type}'`);
       return;
     }
 
