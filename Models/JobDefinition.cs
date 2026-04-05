@@ -20,7 +20,12 @@ namespace SSH_Helper.Models
         /// <summary>
         /// Each host row carries its own credentials via a designated column.
         /// </summary>
-        PerHostColumn = 2
+        PerHostColumn = 2,
+
+        /// <summary>
+        /// Credentials are retrieved from HashiCorp Vault at runtime.
+        /// </summary>
+        Vault = 3
     }
 
     /// <summary>
@@ -162,6 +167,12 @@ namespace SSH_Helper.Models
         /// How the job resolves SSH credentials.
         /// </summary>
         public CredentialMode CredentialMode { get; set; } = CredentialMode.InheritFromApp;
+
+        /// <summary>
+        /// Vault secret path used to retrieve SSH credentials when <see cref="CredentialMode"/> is <see cref="CredentialMode.Vault"/>.
+        /// Example: "ssh/creds/my-host". Empty for non-Vault credential modes.
+        /// </summary>
+        public string VaultCredentialPath { get; set; } = "";
 
         /// <summary>
         /// Optional cron expression for recurring schedule (placeholder for Phase 3).

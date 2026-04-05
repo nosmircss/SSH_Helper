@@ -17,6 +17,12 @@ namespace SSH_Helper.Models
         public CsvFileFingerprint? LastCsvFingerprint { get; set; }
         public Dictionary<string, string> Variables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Optional Vault profile name to use when resolving secrets in this environment.
+        /// Null means use the application default Vault profile.
+        /// </summary>
+        public string? VaultProfileName { get; set; }
+
         public static EnvironmentConfig FromApplicationState(string name, ApplicationState? state)
         {
             var environment = new EnvironmentConfig
@@ -57,7 +63,8 @@ namespace SSH_Helper.Models
                 LastCsvFingerprint = LastCsvFingerprint?.Clone(),
                 Variables = Variables != null
                     ? new Dictionary<string, string>(Variables, StringComparer.OrdinalIgnoreCase)
-                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                VaultProfileName = VaultProfileName
             };
         }
 

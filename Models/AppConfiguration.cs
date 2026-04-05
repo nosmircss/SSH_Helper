@@ -106,6 +106,11 @@ namespace SSH_Helper.Models
         /// </summary>
         public CredentialSettings Credentials { get; set; } = new();
 
+        /// <summary>
+        /// HashiCorp Vault integration settings.
+        /// </summary>
+        public VaultSettings Vault { get; set; } = new();
+
         // Recent files
         /// <summary>
         /// Most recently opened CSV file paths, newest first.
