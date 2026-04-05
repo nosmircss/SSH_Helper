@@ -45,6 +45,7 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [parallel](#parallel---concurrent-execution)
    - [table](#table---formatted-table-output)
    - [parse](#parse---configuration-parsing)
+   - [vault](#vault---hashicorp-vault-integration)
 3. [Variables](#variables)
 4. [Expressions and Conditions](#expressions-and-conditions)
 5. [Error Handling](#error-handling)
@@ -109,7 +110,7 @@ Executable scripts may also declare `imports:` and `subroutines:`. Library files
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `imports:`, `subroutines:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- exists:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- localcmd:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- exists:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- localcmd:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`, `- vault:`
 
 Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.
 
@@ -1141,6 +1142,41 @@ These functions accept lambda expressions in the form `x => expression` (single 
 # Result: "414243"
 - set: text = hex_decode(hex)
 # Result: "ABC"
+```
+
+---
+
+**Vault Functions:**
+
+Read secrets from HashiCorp Vault directly inside expressions. These functions are the expression-level counterpart to the `vault` step command.
+
+**`vault(path, key [, profile])`** — Read a single secret value. Returns the value string, or `null` on error.
+
+```yaml
+- set:
+    expression: secret = vault("ssh/server", "password")
+- set:
+    expression: secret = vault("ssh/server", "password", "network")
+```
+
+**`vault_list(prefix [, profile])`** — List secret paths under a prefix. Returns a list of path strings.
+
+```yaml
+- set:
+    expression: paths = vault_list("ssh/")
+- set:
+    expression: paths = vault_list("ssh/", "network")
+- foreach:
+    iterator: p in paths
+    do:
+      - print: "Found secret path: ${p}"
+```
+
+**`vault_clear_cache()`** — Clears the in-memory vault secret cache. Returns `true`. Useful before rotation scripts to ensure stale cached values are not used.
+
+```yaml
+- set:
+    expression: dummy = vault_clear_cache()
 ```
 
 ---
@@ -3324,6 +3360,82 @@ When using the `into` parameter, two variables are created:
 
 ---
 
+### vault - HashiCorp Vault Integration
+
+Reads and writes secrets from a HashiCorp Vault KV store. Supports KV v1 and KV v2, multiple profiles, version pinning, full-replace writes, and patch (merge) updates.
+
+**Read a single key:**
+```yaml
+- vault:
+    profile: network           # optional, uses default if omitted
+    path: "ssh/prod-switches"
+    key: "password"
+    into: switch_password
+```
+
+**Read multiple keys:**
+```yaml
+- vault:
+    path: "ssh/prod-switches"
+    keys:
+      password: switch_pass
+      username: switch_user
+      enable_secret: enable_pass
+```
+
+**Version pinning (KV v2 only):**
+```yaml
+- vault:
+    path: "ssh/prod-switches"
+    version: 3
+    key: "password"
+    into: switch_password
+```
+
+**Write (full replace):**
+```yaml
+- vault:
+    path: "ssh/prod-switches"
+    write:
+      password: "{{new_pass}}"
+      rotated_by: "ssh_helper"
+```
+
+> **Warning:** `write:` replaces **all** keys at the path. Any key not included in the map is deleted. Use `patch:` to preserve existing keys.
+
+**Patch (merge update):**
+```yaml
+- vault:
+    path: "ssh/prod-switches"
+    patch:
+      password: "{{new_pass}}"
+```
+
+Only the specified keys are updated. All other keys at the path are preserved. Uses the native PATCH method for KV v2; falls back to read-modify-write for KV v1.
+
+**Options:**
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `path` | Yes | Secret path relative to the mount (e.g., `ssh/prod-switches`) |
+| `profile` | No | Vault profile name. Uses default or environment profile if omitted |
+| `key` | No* | Single key to read from the secret |
+| `keys` | No* | Map of secret keys to variable names (key: variable) |
+| `into` | Yes (with `key`) | Variable name to store the read value |
+| `version` | No | Pin to a specific secret version (KV v2 only) |
+| `write` | No* | Map of key-value pairs to write — full replace |
+| `patch` | No* | Map of key-value pairs to patch — merge update |
+| `on_error` | No | `continue` to suppress errors, `fail` (default) to stop execution |
+
+\* One of `key`, `keys`, `write`, or `patch` is required. They are mutually exclusive.
+
+**Error handling and audit logging:**
+- Sets `_last_error` on failure (when `on_error: continue` is used)
+- Logs `[vault] READ/WRITE/PATCH profile@path → ok/FAIL` to debug output
+- Secret values are never written to logs or output
+
+---
+
 ### assert - Validate Conditions
 
 Validates that a condition is true. Useful for adding guardrails and sanity checks to scripts.
@@ -3912,6 +4024,24 @@ These are accessible via nested paths:
 
 **Note:** Any column in the host grid becomes available as a variable. For example, if you have a column named `location`, you can use `${location}` in your scripts.
 
+### Special Grid Columns
+
+The host grid recognizes several columns with built-in meaning in addition to `Host_IP` and `port`:
+
+| Column | Description |
+|--------|-------------|
+| `Host_IP` | Required. The host address used for SSH connections. Cannot be deleted. |
+| `port` | SSH port override for this host. Defaults to `22`. |
+| `delay` | Per-host delay (seconds) between command sends. Overrides the global setting. |
+| `timeout` | Per-host command timeout (seconds). Overrides the global setting. |
+| `transport` | Connection transport protocol (e.g., `ssh`). |
+| `username` | Per-host SSH username. Overrides global credentials. |
+| `password` | Per-host SSH password. Overrides global credentials. |
+| `personality` | Device personality hint (e.g., `fortigate`, `cisco`). |
+| `vault_path` | Optional. Vault path for per-host credential resolution. Format: `[profile@]path[#usernameKey,passwordKey]`. Defaults to `username` and `password` as the key names. Examples: `ssh/switches`, `network@ssh/switches`, `ssh/switches#admin_user,admin_pass`. |
+
+All other column names become script variables accessible via `${column_name}`.
+
 ### Variable Substitution Syntax
 
 Variables are substituted using `${variable_name}`. Function expressions are also supported inline using `${function(args)}`, including nested calls:
@@ -3945,6 +4075,36 @@ Variables are substituted using `${variable_name}`. Function expressions are als
 ```
 
 Inline expressions work everywhere `${...}` is supported — `print`, `writefile` content, `send` commands, URLs, headers, and any other string field that performs variable substitution. All scripting functions (`json.*`, `upper`, `lower`, `trim`, `replace`, `split`, `join`, `length`, etc.) are available inline.
+
+### Vault Inline Syntax
+
+`{{vault:[profile@]path#key}}` resolves a secret from HashiCorp Vault inline, without a separate `vault` step.
+
+```yaml
+# Uses default vault profile
+- send:
+    command: "enable"
+    respond:
+      - expect: "Password:"
+        reply: "{{vault:ssh/prod-switches#enable_secret}}"
+
+# Uses a named profile
+- http:
+    url: "https://api.example.com/data"
+    headers:
+      Authorization: "Bearer {{vault:network@tokens/api#token}}"
+    into: response
+```
+
+**Format:** `{{vault:path#key}}` or `{{vault:profile@path#key}}`
+
+| Part | Required | Description |
+|------|----------|-------------|
+| `profile` | No | Vault profile name. Uses default or environment profile if omitted |
+| `path` | Yes | Secret path relative to the mount |
+| `key` | Yes | Key name within the secret |
+
+On error, the token resolves to an empty string and `_last_error` is set.
 
 ### Quoting and Escaping
 
@@ -5803,3 +5963,82 @@ steps:
 29. **Filter sections for large configs**: Use the `sections` parameter to only parse what you need
 30. **Access parsed data with `json.get()`**: Use default values to handle missing keys gracefully
 31. **Iterate with `json.keys()`**: Get all interface names, policy IDs, etc. for processing in loops
+
+### Working with Vault
+32. **Use `vault` steps for bulk reads**: Read multiple keys in one step with `keys:` instead of separate steps per key
+33. **Use `patch:` not `write:` for rotation**: `patch:` preserves all other keys; `write:` deletes them
+34. **Clear the cache before rotation**: Call `vault_clear_cache()` at the start of rotation scripts so no stale values are used
+35. **Verify after rotation**: Read back the secret with a `vault` step and `assert:` that the stored value matches the one just written
+36. **Use `on_error: continue` sparingly**: Only when a missing secret has a safe fallback; always check `_last_error` afterward
+37. **Inline syntax for one-off reads**: `{{vault:path#key}}` avoids a separate step when a secret is used in a single field
+
+---
+
+## Secret Rotation Recipe
+
+This recipe changes a device password, updates the credential in Vault, then verifies the rotation succeeded.
+
+```yaml
+---
+name: "Rotate Switch Password"
+description: "Rotates the enable/admin password and writes the new value to Vault"
+
+steps:
+  # 1. Generate a new password
+  - set:
+      expression: new_pass = random_string(24)
+
+  # 2. Apply the new password on the device
+  - send: "configure terminal"
+  - send: "username admin secret {{new_pass}}"
+  - send: "end"
+  - send: "write memory"
+
+  # 3. Persist the new password in Vault (patch preserves all other keys)
+  - vault:
+      profile: network
+      path: "ssh/prod-switches"
+      patch:
+        password: "{{new_pass}}"
+        rotated_at: "{{now()}}"
+
+  # 4. Verify the stored value matches what we set
+  - vault:
+      path: "ssh/prod-switches"
+      key: "password"
+      into: verify_pass
+
+  - assert:
+      condition: verify_pass == new_pass
+      message: "Vault rotation verification failed — stored password does not match"
+```
+
+---
+
+## Vault Policy Reference
+
+Minimum Vault policies required for SSH Helper to read and rotate credentials.
+
+**Read-only (inventory and connection):**
+```hcl
+path "secret/data/ssh/*" {
+  capabilities = ["read"]
+}
+
+path "secret/metadata/ssh/*" {
+  capabilities = ["list"]
+}
+```
+
+**Read-write (credential rotation):**
+```hcl
+path "secret/data/ssh/*" {
+  capabilities = ["read", "create", "update", "patch"]
+}
+
+path "secret/metadata/ssh/*" {
+  capabilities = ["list"]
+}
+```
+
+Adjust the mount prefix (`secret/`) to match your Vault KV mount name. For KV v1, replace `secret/data/` with `secret/`.
