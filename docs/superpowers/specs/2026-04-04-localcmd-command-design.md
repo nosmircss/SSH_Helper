@@ -21,13 +21,14 @@ Users need to run local commands as part of hybrid workflows: generate configs l
 ```yaml
 - localcmd:
     command: "dotnet build"
-    shell: powershell              # powershell (default), cmd, or custom
+    shell: powershell              # powershell (default) or custom
     shell_path: "python"          # path to custom executable (only when shell: custom)
     args: ["-NoProfile"]          # preferred list form; scalar string also accepted
     env:
       CONFIGURATION: Release       # optional per-process environment variables
     working_dir: "C:\\Scripts"
     interactive: false             # true = launch external terminal window
+    keep_open: false               # interactive only: keeps terminal open after command exits
     run_mode: foreground           # foreground (default) or background
     lifetime: detached             # background only: detached (default), script, app
     kill_on_cancel: false          # background only, applies when lifetime != detached
@@ -73,7 +74,6 @@ Commands are always executed through a shell to support pipes, redirects, and sh
 | `shell` value | Process spawned | Arguments constructed |
 |---|---|---|
 | `powershell` (default) | `powershell.exe` | `-NoLogo -NonInteractive -Command "<command>"` + user `args` |
-| `cmd` | `cmd.exe` | `/c "<command>"` |
 | `custom` | `shell_path` executable | user `args` + command as final argument |
 
 `args` is normalized to `List<string>` internally:
@@ -227,7 +227,7 @@ A new block definition in the `'io'` category in `FlowCanvas/src/blockDefs/regis
       placeholder: 'Get-Process | Select-Object -First 5',
       helpText: 'The command to execute locally', group: 'core' },
     { key: 'shell', label: 'Shell', type: 'select',
-      options: ['powershell', 'cmd', 'custom'], defaultValue: 'powershell',
+      options: ['powershell', 'custom'], defaultValue: 'powershell',
       helpText: 'Shell to execute the command in. "custom" enables Shell Path.', group: 'core' },
     { key: 'shell_path', label: 'Shell Path', type: 'text',
       placeholder: 'python',
@@ -243,6 +243,8 @@ A new block definition in the `'io'` category in `FlowCanvas/src/blockDefs/regis
       helpText: 'Directory to run the command in', group: 'core' },
     { key: 'interactive', label: 'Interactive', type: 'boolean', defaultValue: false,
       helpText: 'Open in an external terminal window (foreground only)', group: 'core' },
+    { key: 'keep_open', label: 'Keep Open', type: 'boolean', defaultValue: false,
+      helpText: 'Keep terminal open after command completion (interactive only)', group: 'core' },
     { key: 'run_mode', label: 'Run Mode', type: 'select',
       options: ['foreground', 'background'], defaultValue: 'foreground',
       helpText: 'Foreground waits for completion; background returns after spawn', group: 'core' },
@@ -276,12 +278,13 @@ A new block definition in the `'io'` category in `FlowCanvas/src/blockDefs/regis
 public class LocalCmdOptions
 {
     public string? Command { get; set; }
-    public string Shell { get; set; } = "powershell";   // powershell | cmd | custom
+    public string Shell { get; set; } = "powershell";   // powershell | custom
     public string? ShellPath { get; set; }               // required when Shell = custom
     public List<string> Args { get; set; } = new();      // scalar YAML normalized to one item
     public Dictionary<string, string>? Env { get; set; }
     public string? WorkingDir { get; set; }
     public bool Interactive { get; set; }
+    public bool KeepOpen { get; set; }                // interactive only
     public string RunMode { get; set; } = "foreground"; // foreground | background
     public string Lifetime { get; set; } = "detached";  // detached | script | app
     public bool KillOnCancel { get; set; }

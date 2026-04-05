@@ -221,6 +221,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public TableOptions? Table { get; set; }
 
         /// <summary>
+        /// Local command - executes a command on the local machine.
+        /// </summary>
+        public LocalCmdOptions? LocalCmd { get; set; }
+
+        /// <summary>
         /// Break command - exits the current loop.
         /// </summary>
         public bool BreakLoop { get; set; }
@@ -377,6 +382,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Parallel != null) return StepType.Parallel;
             if (Call != null) return StepType.Call;
             if (Table != null) return StepType.Table;
+            if (LocalCmd != null) return StepType.LocalCmd;
             if (ReturnFromSubroutine) return StepType.Return;
             if (DeclaredStepType != StepType.Unknown) return DeclaredStepType;
             return StepType.Unknown;
@@ -1272,7 +1278,8 @@ namespace SSH_Helper.Services.Scripting.Models
         Parallel,
         Call,
         Return,
-        Table
+        Table,
+        LocalCmd
     }
 
     /// <summary>
@@ -1425,5 +1432,46 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Fixed column width (null = auto-size to content).
         /// </summary>
         public int? Width { get; set; }
+    }
+
+    public class LocalCmdOptions
+    {
+        public string? Command { get; set; }
+
+        public string Shell { get; set; } = "powershell";
+
+        public string? ShellPath { get; set; }
+
+        public List<string> Args { get; set; } = new();
+
+        public Dictionary<string, string>? Env { get; set; }
+
+        public string? WorkingDir { get; set; }
+
+        public bool Interactive { get; set; }
+
+        public bool KeepOpen { get; set; }
+
+        public string RunMode { get; set; } = "foreground";
+
+        public string Lifetime { get; set; } = "detached";
+
+        public bool KillOnCancel { get; set; }
+
+        public bool FailOnNonZero { get; set; } = true;
+
+        public List<int> SuccessCodes { get; set; } = new() { 0 };
+
+        public int MaxOutputBytes { get; set; } = 1024 * 1024;
+
+        public string Confirm { get; set; } = "always";
+
+        public bool Quiet { get; set; }
+
+        public bool Suppress { get; set; }
+
+        public string? Title { get; set; }
+
+        public string? Into { get; set; }
     }
 }

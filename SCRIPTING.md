@@ -104,7 +104,7 @@ Executable scripts may also declare `imports:` and `subroutines:`. Library files
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `imports:`, `subroutines:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- exists:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- exists:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- localcmd:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
 
 Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.
 
@@ -2559,6 +2559,104 @@ When `show_window: false`, set `max_seconds` and/or `max_lines`.
     mirror_output: true
 - print:
     message: "Captured output length: ${sniffer_output.length}"
+```
+
+---
+
+### localcmd - Run Local Command
+
+Runs a command on the local machine (not over SSH).
+
+**Syntax:**
+```yaml
+# Shorthand (defaults to powershell + foreground)
+- localcmd: Get-Date
+
+# Full form
+- localcmd:
+    command: "dotnet build"
+    shell: powershell          # powershell | custom
+    shell_path: "python"       # required only when shell: custom
+    args: ["-NoProfile"]
+    env:
+      CONFIGURATION: Release
+    working_dir: "C:\\Scripts"
+    interactive: false
+    keep_open: false
+    run_mode: foreground       # foreground | background
+    lifetime: detached         # detached | script | app (background only)
+    kill_on_cancel: false      # background + non-detached only
+    fail_on_nonzero: true
+    success_codes: [0]
+    max_output_bytes: 1048576
+    confirm: once              # always | once | never
+    quiet: false
+    suppress: false
+    title: "Local Command"
+    into: result
+    timeout: 30
+    on_error: stop
+```
+
+**Important behavior:**
+- `interactive: true` and `run_mode: background` are mutually exclusive.
+- `keep_open: true` requires `interactive: true`.
+- Foreground (non-interactive) captures `<into>_stdout`, `<into>_stderr`, `<into>_exit_code`.
+- Interactive captures only `<into>_exit_code`.
+- Interactive runs are also recorded in history execution details under Interactive Sessions.
+- `shell: powershell` uses session transcripts for interactive audit capture, so `keep_open: true` includes follow-up user-entered commands until the shell closes.
+- Background captures startup metadata: `<into>_pid`, `<into>_started`, `<into>_start_error`.
+- `fail_on_nonzero` + `success_codes` apply to both foreground and interactive close exit code evaluation.
+- `quiet: true` hides command banner lines only; `suppress: true` hides command banner + live output streaming.
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `command` | Yes | - | Command text after variable substitution |
+| `shell` | No | `powershell` | `powershell` or `custom` |
+| `shell_path` | Conditionally | - | Required when `shell: custom` |
+| `args` | No | `[]` | Shell arguments (sequence preferred; scalar accepted) |
+| `env` | No | - | Environment variables for launched process |
+| `working_dir` | No | current process dir | Working directory |
+| `interactive` | No | `false` | Launch in external terminal |
+| `keep_open` | No | `false` | Keep interactive shell open after command |
+| `run_mode` | No | `foreground` | `foreground` waits; `background` returns after spawn |
+| `lifetime` | No | `detached` | Background lifetime: `detached`, `script`, `app` |
+| `kill_on_cancel` | No | `false` | Background cancel cleanup for tracked processes |
+| `fail_on_nonzero` | No | `true` | Fail when exit code not in `success_codes` |
+| `success_codes` | No | `[0]` | Allowed exit codes |
+| `max_output_bytes` | No | `1048576` | Per-stream capture cap (foreground) |
+| `confirm` | No | `always` | Confirmation policy: `always`, `once`, `never` |
+| `quiet` | No | `false` | Hide localcmd command banner lines |
+| `suppress` | No | `false` | Hide banner and live stdout/stderr output |
+| `title` | No | `Local Command` | Interactive terminal title |
+| `into` | No | - | Output variable prefix |
+| `timeout` | No | - | Step timeout in seconds (ignored for background) |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+
+**Examples:**
+```yaml
+# Foreground capture
+- localcmd:
+    command: "git status --short"
+    into: git
+
+# Interactive troubleshooting terminal that stays open
+- localcmd:
+    command: "date"
+    interactive: true
+    keep_open: true
+    run_mode: foreground
+    into: date2
+    quiet: true
+
+# Background launch
+- localcmd:
+    command: "notepad.exe"
+    run_mode: background
+    lifetime: script
+    into: np
 ```
 
 ---

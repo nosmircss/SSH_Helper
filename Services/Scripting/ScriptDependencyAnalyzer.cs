@@ -682,6 +682,39 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case StepType.LocalCmd:
+                        if (step.LocalCmd != null)
+                        {
+                            ExtractVarReferences(step.LocalCmd.Command, referencedVars);
+                            ExtractVarReferences(step.LocalCmd.WorkingDir, referencedVars);
+                            if (step.LocalCmd.Env != null)
+                            {
+                                foreach (var envValue in step.LocalCmd.Env.Values)
+                                    ExtractVarReferences(envValue, referencedVars);
+                            }
+                            if (!string.IsNullOrEmpty(step.LocalCmd.Into))
+                            {
+                                var into = step.LocalCmd.Into;
+                                if (string.Equals(step.LocalCmd.RunMode, "background", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    definedVars.Add(into + "_pid");
+                                    definedVars.Add(into + "_started");
+                                    definedVars.Add(into + "_start_error");
+                                }
+                                else if (step.LocalCmd.Interactive)
+                                {
+                                    definedVars.Add(into + "_exit_code");
+                                }
+                                else
+                                {
+                                    definedVars.Add(into + "_stdout");
+                                    definedVars.Add(into + "_stderr");
+                                    definedVars.Add(into + "_exit_code");
+                                }
+                            }
+                        }
+                        break;
+
                     case StepType.Parse:
                         if (step.Parse != null)
                         {

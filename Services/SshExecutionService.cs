@@ -3,7 +3,9 @@ using System.Text;
 using Rebex.Net;
 using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
+using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.UI;
 using SSH_Helper.Utilities;
 
 // Alias to avoid conflict with SSH_Helper.Services.Scripting namespace
@@ -72,6 +74,7 @@ namespace SSH_Helper.Services
         private readonly SshConnectionPool? _connectionPool;
         private readonly bool _ownsPool;
         private readonly IBrowserCallbackUiHost? _browserCallbackUiHost;
+        private ILocalCmdConfirmation? _localCmdConfirmation;
 
         public event EventHandler<SshProgressEventArgs>? ProgressChanged;
         public event EventHandler<SshOutputEventArgs>? OutputReceived;
@@ -218,6 +221,7 @@ namespace SSH_Helper.Services
             _connectionPool = null;
             _ownsPool = false;
             UseConnectionPooling = false;
+            _localCmdConfirmation = new LocalCmdConfirmationDialog();
         }
 
         /// <summary>
@@ -239,6 +243,8 @@ namespace SSH_Helper.Services
                 _ownsPool = false;
                 UseConnectionPooling = false;
             }
+
+            _localCmdConfirmation = new LocalCmdConfirmationDialog();
         }
 
         /// <summary>
@@ -250,6 +256,12 @@ namespace SSH_Helper.Services
             _connectionPool = sharedPool ?? throw new ArgumentNullException(nameof(sharedPool));
             _ownsPool = false;
             UseConnectionPooling = true;
+            _localCmdConfirmation = new LocalCmdConfirmationDialog();
+        }
+
+        public void SetLocalCmdConfirmation(ILocalCmdConfirmation? confirmation)
+        {
+            _localCmdConfirmation = confirmation;
         }
 
         internal SshExecutionService(IBrowserCallbackUiHost browserCallbackUiHost)
@@ -1199,7 +1211,7 @@ namespace SSH_Helper.Services
                 };
 
                 // Execute the script
-                var executor = new ScriptExecutor(_browserCallbackUiHost);
+                var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
                 executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
                 executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
                 executor.DebugPauseStateChanged += (s, e) => DebugPauseStateChanged?.Invoke(this, e);
@@ -1359,7 +1371,7 @@ namespace SSH_Helper.Services
             };
 
             // Execute the script
-            var executor = new ScriptExecutor(_browserCallbackUiHost);
+            var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
             executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
             executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
             executor.DebugPauseStateChanged += (s, e) => DebugPauseStateChanged?.Invoke(this, e);
@@ -1431,7 +1443,7 @@ namespace SSH_Helper.Services
                 OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
             };
 
-            var executor = new ScriptExecutor(_browserCallbackUiHost);
+            var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
             executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
             executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
             executor.DebugPauseStateChanged += (s, e) => DebugPauseStateChanged?.Invoke(this, e);

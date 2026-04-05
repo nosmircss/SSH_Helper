@@ -1,5 +1,327 @@
 # TODO
 
+## 206. Remove `cmd` shell option from `localcmd`
+- [x] 206.1 Remove `cmd` from Flow Canvas `localcmd.shell` selectable options.
+- [x] 206.2 Align `localcmd` shell validation/docs to `powershell` + `custom`.
+- [x] 206.3 Update parser coverage and run focused verification.
+
+### 206 Review
+- Updated `FlowCanvas/src/blockDefs/registry.ts` localcmd shell selector options to `['powershell', 'custom']`.
+- Updated `Services/Scripting/ScriptParser.cs` shell validation error text and allowed shell set to remove `cmd`.
+- Updated parser tests in `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs`:
+- Full-form parse fixture now uses `shell: powershell`.
+- Added validation regression `Validate_CmdShell_ReturnsShellValidationError`.
+- Updated docs in `SCRIPTING.md` and `docs/superpowers/specs/2026-04-04-localcmd-command-design.md` to remove `cmd` as a documented localcmd shell option.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdParserTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/localcmd-shell-removal/ -p:BaseIntermediateOutputPath=artifacts/testobj/localcmd-shell-removal/` (passed `18/18`).
+
+## 205. Fix localcmd command-banner formatting for folded multiline commands
+- [x] 205.1 Add failing parser/runtime regression(s) that reproduce folded multiline `localcmd.command` collapsing into `utf8notepad` in emitted command banners.
+- [x] 205.2 Patch localcmd command formatting so displayed banner text preserves readable command boundaries (at minimum, no token concatenation across folded lines).
+- [x] 205.3 Run focused localcmd/parser/output-format tests and capture RED/GREEN evidence.
+- [x] 205.4 Document review notes and update `tasks/lessons.md` with this correction pattern.
+
+### 205 Review
+- Root-cause isolation:
+- Added parser regression `Parse_FoldedMultilineCommand_DoesNotConcatenateAdjacentTokens` in `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs`.
+- Result: parser already preserved command boundaries (no `utf8notepad` concatenation), so the improvement target was command-banner rendering.
+- Added RED runtime regression `Background_CommandBanner_MultilineCommand_UsesVisibleLineBreakMarkers` in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`.
+- RED evidence (pre-fix): banner emitted raw multiline text and did not contain visible `\n` markers.
+- Runtime patch in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- Command-banner output for foreground/background/interactive localcmd now formats the displayed command through `ScriptingHelpers.FormatForDisplay(...)`.
+- This preserves execution behavior while making line boundaries explicit in output (`\n` markers), avoiding ambiguous merged tokens in one-line render surfaces.
+- Verification:
+- RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Background_CommandBanner_MultilineCommand_UsesVisibleLineBreakMarkers" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/205-red-banner/ -p:BaseIntermediateOutputPath=artifacts/testobj/205-red-banner/` (failed as expected).
+- GREEN (focused): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Background_CommandBanner_MultilineCommand_UsesVisibleLineBreakMarkers|FullyQualifiedName~Parse_FoldedMultilineCommand_DoesNotConcatenateAdjacentTokens" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/205-green/ -p:BaseIntermediateOutputPath=artifacts/testobj/205-green/` (passed `2/2`).
+- GREEN (regression slice): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/205-regression/ -p:BaseIntermediateOutputPath=artifacts/testobj/205-regression/` (passed `55/55`).
+
+## 204. Fix keep_open immediate-close when shell aliases are used
+- [x] 204.1 Add a failing regression test proving `shell: powershell.exe` + `keep_open: true` must still launch keep-open mode (`-NoExit`).
+- [x] 204.2 Patch localcmd shell normalization/alias handling so keep-open and direct-capture logic recognizes `powershell.exe`/`cmd.exe` (and path variants).
+- [x] 204.3 Keep parser validation aligned so shell aliases do not get rejected as invalid.
+- [x] 204.4 Run focused localcmd tests and capture verification evidence.
+- [x] 204.5 Update lessons with the correction pattern.
+
+### 204 Review
+- Added RED regression in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `BuildInteractiveArgs_KeepOpen_PowerShellExeAlias_UsesNoExit`
+- RED evidence (pre-fix): keep-open alias case launched via `wt.exe` (non-keep-open path), causing immediate close behavior instead of `-NoExit`.
+- Patched `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- Added shell normalization (`NormalizeShell`) at runtime entry.
+- Added shell alias/path detection helpers:
+- `IsPowerShellShell(...)`
+- `IsCmdShell(...)`
+- `ResolvePowerShellExecutable(...)`
+- `ResolveCmdExecutable(...)`
+- Updated keep-open decision points and process-arg builders to use alias-aware shell checks.
+- Updated interactive reliable-capture and audit-wrapper shell checks to use alias-aware detection.
+- Patched parser shell validation in `Services/Scripting/ScriptParser.cs`:
+- `IsValidLocalCmdShell(...)` now accepts `powershell.exe`/`cmd.exe` and path variants in addition to canonical tokens.
+- Added parser validation regression in `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs`:
+- `Validate_PowerShellExeShellAlias_DoesNotReturnShellValidationError`
+- Verification:
+- RED:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BuildInteractiveArgs_KeepOpen_PowerShellExeAlias_UsesNoExit" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` failed before patch.
+- GREEN:
+- same alias keep-open test passed (`1/1`) after patch.
+- focused slice: `BuildInteractiveArgs_KeepOpen_PowerShellExeAlias_UsesNoExit|Validate_PowerShellExeShellAlias_DoesNotReturnShellValidationError|Interactive_WindowCloseExitCode_DoesNotFail_WhenFailOnNonZeroTrue` passed (`3/3`).
+- broader localcmd slice: `LocalCmdCommandTests|LocalCmdParserTests|AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable` passed (`54/54`).
+
+## 203. Treat interactive window close (X) as graceful localcmd completion
+- [x] 203.1 Add a failing regression test for `interactive: true` where process exit code `-1073741510` (window closed) does not fail the step.
+- [x] 203.2 Patch `LocalCmdCommand.ExecuteInteractive(...)` to classify window-close exit code as user-initiated close and bypass `fail_on_nonzero` failure.
+- [x] 203.3 Preserve `into` exit-code capture and interactive-session audit details while marking close reason explicitly.
+- [x] 203.4 Run focused localcmd regression tests and record verification output.
+- [x] 203.5 Document review notes in `tasks/todo.md` and update `tasks/lessons.md` for this correction pattern.
+
+### 203 Review
+- Added RED regression in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `Interactive_WindowCloseExitCode_DoesNotFail_WhenFailOnNonZeroTrue`
+- RED evidence (pre-fix): interactive step failed when process exit code was `-1073741510` (`0xC000013A`) even though this is a user-closed terminal window case.
+- Patched `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- Added `UserClosedInteractiveWindowExitCode` constant (`0xC000013A`).
+- Added `IsInteractiveWindowCloseExitCode(...)` helper.
+- In `ExecuteInteractive(...)`, window-close exit is now mapped to close reason `user_closed_window` and excluded from `fail_on_nonzero` failure evaluation.
+- `into` behavior is preserved: `<into>_exit_code` still records the raw exit code for audit/logic.
+- Interactive session audit remains preserved via `CaptureInteractiveAuditSession(...)`.
+- Updated `tasks/lessons.md` with this correction pattern.
+- Verification:
+- RED:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Interactive_WindowCloseExitCode_DoesNotFail_WhenFailOnNonZeroTrue" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` (failed before patch).
+- GREEN:
+- Same focused test passed (`1/1`) after patch.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`52/52`).
+
+## 202. Capture full PowerShell interactive session history in execution details
+- [x] 202.1 Add a failing test that proves `localcmd` PowerShell `interactive: true` + `keep_open: true` uses session-level transcript capture (not one-shot `Tee-Object` capture).
+- [x] 202.2 Patch interactive localcmd audit wrapping so PowerShell starts a session transcript before running the initial command, allowing follow-up user-entered commands to be captured until shell close.
+- [x] 202.3 Keep existing interactive history plumbing (`ScriptContext.AddInteractiveSession`) and transcript cleanup behavior intact.
+- [x] 202.4 Run focused localcmd tests and record verification output.
+- [x] 202.5 Document review notes and behavior change in `tasks/todo.md` and `SCRIPTING.md`.
+
+### 202 Review
+- Added RED regression in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `Interactive_KeepOpen_PowerShell_UsesSessionTranscriptCapture`
+- RED evidence (pre-fix): keep-open PowerShell interactive launch arguments used one-shot `Tee-Object` wrapping and did not contain `Start-Transcript`.
+- Patched `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- `ExecuteInteractive(...)` now passes `keep_open` into interactive audit preparation.
+- PowerShell interactive audit wrapping now uses session-level `Start-Transcript` capture:
+- keep-open mode starts transcript and leaves it active until shell close (captures follow-up user-entered commands).
+- non-keep-open mode starts transcript and best-effort stops it in a `finally` block.
+- Existing interactive history storage path remains unchanged (`CaptureInteractiveAuditSession(...)` -> `context.AddInteractiveSession(...)`).
+- Updated test helper `TryExtractInteractiveAuditTranscriptPath(...)` in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs` to parse both `-FilePath` and `-Path` transcript markers.
+- Updated `SCRIPTING.md` localcmd behavior notes:
+- PowerShell interactive capture now documents session transcript behavior for `keep_open: true`.
+- cmd shell remains best-effort launched-command capture.
+- Verification:
+- RED:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Interactive_KeepOpen_PowerShell_UsesSessionTranscriptCapture" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` (failed as expected before patch).
+- GREEN:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`35/35`).
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`51/51`).
+
+## 201. Make localcmd interactive transcript capture reliable for non-keep-open runs
+- [x] 201.1 Add a failing regression test that demonstrates non-keep-open interactive PowerShell launch must use a directly tracked shell process (not `wt.exe` launcher).
+- [x] 201.2 Patch `LocalCmdCommand` interactive argument selection to bypass `wt.exe` launcher for powershell/cmd when transcript reliability is required.
+- [x] 201.3 Run focused localcmd tests to verify the regression and surrounding behavior.
+- [x] 201.4 Add review notes and verification evidence.
+
+### 201 Review
+- Added RED regression in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `BuildInteractiveArgs_NonKeepOpen_Powershell_UsesDirectShellProcessForReliableCapture`
+- RED evidence (pre-fix): test failed because interactive arg selection returned `...\\WindowsApps\\wt.exe` instead of `powershell.exe`.
+- Patched `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- `BuildInteractiveArgs(...)` now bypasses Windows Terminal launcher for non-keep-open `powershell`/`cmd` interactive runs and returns a directly tracked shell process via `BuildProcessArgs(...)`.
+- Added helper `RequiresDirectInteractiveShellForReliableCapture(...)` to centralize this rule.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BuildInteractiveArgs_NonKeepOpen_Powershell_UsesDirectShellProcessForReliableCapture" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/`
+- RED run failed as expected (`0/1` pass), then GREEN rerun passed (`1/1`).
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`34/34`).
+
+## 200. Add localcmd interactive audit transcript capture to execution details
+- [x] 200.1 Design always-on interactive localcmd audit capture behavior and confirm always-on mode.
+- [x] 200.2 Implement interactive launch wrapping for powershell/cmd to tee output into a transient transcript file.
+- [x] 200.3 Persist captured transcript into execution history via `ScriptContext.AddInteractiveSession(...)`.
+- [x] 200.4 Ensure timeout/cancel paths still record partial audit sessions and always clean up temp transcript files.
+- [x] 200.5 Add focused tests for transcript capture/session persistence and cmd wrapper coverage.
+- [x] 200.6 Update scripting docs to clarify localcmd interactive audit behavior and run focused verification.
+
+### 200 Review
+- Added always-on localcmd interactive audit capture in `Services/Scripting/Commands/LocalCmdCommand.cs`.
+- Interactive command launch now uses an audit wrapper for:
+- `shell: powershell` -> `Tee-Object` transcript capture.
+- `shell: cmd` -> pipeline to PowerShell `Tee-Object` transcript capture.
+- Captured transcript is cleaned and size-limited (using `max_output_bytes`), then stored as an interactive session via `context.AddInteractiveSession(...)` with:
+- `SessionMode = localcmd-interactive`
+- `EmulationMode = <shell>`
+- close reason (`exit_code:<n>`, `timeout`, `cancelled`)
+- `Completed` status and transcript text for history details.
+- Timeout/cancel/success paths all capture audit session metadata, and temp transcript files are cleaned up in a `finally` path.
+- Added tests in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `Interactive_PowerShell_CapturesAuditTranscriptIntoInteractiveSessions`
+- `Interactive_Cmd_WrapsCommandForAuditCapture`
+- Updated docs in `SCRIPTING.md` localcmd section to state that interactive runs are recorded in history interactive sessions and that transcript capture is best-effort for powershell/cmd.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable|FullyQualifiedName~ExportGraphToYaml_LocalCmdCustomShellMissingShellPath_ReturnsRequiredOptionError" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`50/50`).
+
+## 199. Address localcmd option-review findings (runtime, analyzer, validation, docs)
+- [x] 199.1 Align interactive localcmd exit handling with `fail_on_nonzero` + `success_codes`.
+- [x] 199.2 Ensure cmd-shell `args` are honored across foreground/interactive/keep-open argument builders.
+- [x] 199.3 Fix dependency analyzer localcmd `into` definitions for interactive mode (`*_exit_code` only).
+- [x] 199.4 Add parser/FlowCanvas validation for localcmd conditional requirements and invalid combinations.
+- [x] 199.5 Document localcmd in `SCRIPTING.md` and clarify option semantics in Flow Canvas help text.
+- [x] 199.6 Add focused regression tests and run verification.
+
+### 199 Review
+- Runtime updates in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- Interactive mode now applies `fail_on_nonzero` + `success_codes` against the interactive close exit code (with normal `on_error` handling).
+- `cmd` shell now honors `args` in both `/c` and `/K` paths.
+- Analyzer update in `Services/Scripting/ScriptDependencyAnalyzer.cs`:
+- `localcmd` interactive `into` now defines only `<into>_exit_code`; stdout/stderr are no longer treated as defined for interactive mode.
+- Parser validation updates in `Services/Scripting/ScriptParser.cs`:
+- Added localcmd validation for `command`, shell enum, conditional `shell_path` requirement, `run_mode`, `lifetime`, `confirm`, `max_output_bytes`, interactive/background mutual exclusion, and `keep_open` requiring `interactive: true`.
+- Flow Canvas bridge update in `Services/FlowCanvasBridge.cs`:
+- Added conditional required-option enforcement so `shell: custom` requires `shell_path`.
+- UX/docs updates:
+- `FlowCanvas/src/blockDefs/registry.ts` localcmd help text now clarifies interactive `into` behavior and success-code scope.
+- `SCRIPTING.md` now includes `localcmd` in the command list plus a dedicated command section with syntax, mode matrix, and examples.
+- Added/updated focused tests:
+- `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs` for interactive exit policy and cmd-args forwarding.
+- `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs` for new localcmd parser validation rules.
+- `SSH_Helper.Tests/Scripting/ScriptDependencyAnalyzerTests.cs` for interactive-into variable definition semantics.
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` for conditional `shell_path` required validation.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable|FullyQualifiedName~ExportGraphToYaml_LocalCmdCustomShellMissingShellPath_ReturnsRequiredOptionError" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`48/48`).
+
+## 198. Fix localcmd interactive keep_open working_dir propagation
+- [x] 198.1 Reproduce and isolate why `working_dir` was ignored for `interactive: true` + `keep_open: true`.
+- [x] 198.2 Patch interactive startup to set `ProcessStartInfo.WorkingDirectory` for interactive runs.
+- [x] 198.3 Add focused regression coverage for keep-open interactive working directory behavior.
+- [x] 198.4 Run focused runtime verification and capture results.
+
+### 198 Review
+- Root cause: `ExecuteInteractive(...)` did not set `ProcessStartInfo.WorkingDirectory`; non-keep-open paths could still work via Windows Terminal `-d`, but keep-open direct-shell launches ignored `working_dir`.
+- Runtime patch in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- interactive start now applies `startInfo.WorkingDirectory = Environment.ExpandEnvironmentVariables(workingDir)` when provided.
+- Added test in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `Interactive_KeepOpen_HonorsWorkingDirectory`
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`27/27`).
+
+## 197. Fix localcmd interactive keep_open capture regression
+- [x] 197.1 Reproduce and isolate why `interactive: true` + `keep_open: true` failed to preserve expected capture behavior.
+- [x] 197.2 Patch interactive launch path to avoid waiting on transient Windows Terminal launcher processes when keep-open is enabled.
+- [x] 197.3 Ensure non-keep-open fallback shells auto-close (`powershell -Command` / `cmd /c`) instead of always holding windows open.
+- [x] 197.4 Add focused command tests for keep-open interactive execution/capture and argument construction.
+- [x] 197.5 Run focused parser/runtime/bridge verification and document outcomes.
+
+### 197 Review
+- Root cause: with `keep_open: true`, interactive localcmd could run through `wt.exe`; waiting on that launcher process is not a reliable proxy for the real shell lifetime, so `into` capture expectations were inconsistent.
+- Runtime patch in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- `BuildInteractiveArgs(...)` now bypasses Windows Terminal for keep-open PowerShell/cmd runs and launches a directly tracked shell process (`powershell.exe -NoExit` / `cmd.exe /K`).
+- Non-keep-open fallback interactive args now auto-close correctly (`powershell.exe -Command` / `cmd.exe /c`).
+- Added focused regression coverage in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `Interactive_KeepOpen_CapturesExitCodeAndUsesDirectShellProcess`
+- `BuildInteractiveArgs_KeepOpen_Powershell_BypassesWindowsTerminalLauncher`
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`98/98`).
+
+## 196. Add localcmd interactive keep-open option
+- [x] 196.1 Add `keep_open` to localcmd model/parser and command option catalogs.
+- [x] 196.2 Implement Windows Terminal keep-open behavior for interactive localcmd runs.
+- [x] 196.3 Expose `keep_open` in Flow Canvas localcmd properties and bridge round-trip/export ordering.
+- [x] 196.4 Add focused parser/runtime/bridge tests and run verification.
+
+### 196 Review
+- Added `localcmd.keep_open` (interactive-only behavior).
+- Runtime behavior:
+- When `interactive: true` and `keep_open: true` with Windows Terminal available, localcmd now launches PowerShell with `-NoExit` (or cmd with `/K`) so the terminal does not auto-close when the command exits.
+- Existing non-Windows-Terminal fallback behavior remains unchanged.
+- Added parser/model support:
+- `Services/Scripting/Models/ScriptStep.cs` (`LocalCmdOptions.KeepOpen`)
+- `Services/Scripting/ScriptParser.cs` (`keep_open` parse + option catalog)
+- Added Flow Canvas support:
+- `FlowCanvas/src/blockDefs/registry.ts` localcmd property `keep_open`
+- `Services/FlowCanvasBridge.cs` boolean normalization + localcmd export/order mapping for `keep_open`
+- Added/updated tests:
+- `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs` for keep-open shell arg construction (`-NoExit`/`/K`).
+- `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs` for `keep_open` parse coverage.
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` for `keep_open` export round-trip.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~FlowCanvasBridgeTests" -v minimal` passed (`96/96`).
+
+## 195. Add autocomplete required-tag coverage for localcmd
+- [x] 195.1 Add `localcmd.command` to autocomplete required-option metadata.
+- [x] 195.2 Extend autocomplete required-tag test matrix to include `localcmd`.
+- [x] 195.3 Run focused autocomplete verification and capture result.
+
+### 195 Review
+- Root cause: `ScriptAutocompleteProvider` required-option map did not include `localcmd`, so option completions did not show `command` as `required`.
+- Implementation:
+- `Services/Editor/ScriptAutocompleteProvider.cs` now includes `["localcmd"] = ["command"]` in `RequiredOptionKeysByCommand`.
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs` now validates `localcmd` in `GetRequiredOptionTagCases`.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests" -v minimal` passed (`46/46`).
+
+## 194. Add localcmd quiet + suppress output controls
+- [x] 194.1 Add `quiet` and `suppress` options to localcmd runtime model/parser support.
+- [x] 194.2 Apply send-style suppression behavior in `LocalCmdCommand` (banner + live stream suppression).
+- [x] 194.3 Expose and round-trip localcmd `quiet`/`suppress` in Flow Canvas registry/bridge.
+- [x] 194.4 Add focused parser/runtime/bridge tests and run verification.
+
+### 194 Review
+- Added localcmd options:
+- `quiet`: suppresses only localcmd command-banner lines (`[localcmd] ...`, `[localcmd:background] ...`, `[localcmd:interactive] ...`).
+- `suppress`: send-style suppression for localcmd, hiding both command-banner lines and live stdout/stderr panel streaming while preserving capture/`into_*` values.
+- Runtime implementation (`LocalCmdCommand`) now resolves suppression as:
+- `suppressOutput = localcmd.suppress || step.suppress`
+- `suppressCommandEcho = suppressOutput || localcmd.quiet`
+- Flow Canvas:
+- `FlowCanvas/src/blockDefs/registry.ts` localcmd block now includes `quiet` and `suppress`.
+- `Services/FlowCanvasBridge.cs` now exports/imports these booleans and includes localcmd preferred export ordering for drift-guard parity.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~FlowCanvasBridgeTests" -v minimal` passed (`93/93`).
+
+## 193. Harden detached localcmd background startup against process-handle metadata faults
+- [x] 193.1 Patch detached background cleanup to ignore post-spawn process handle disposal failures.
+- [x] 193.2 Add regression coverage for detached background startup when PID access and handle disposal throw `InvalidOperationException`.
+- [x] 193.3 Run focused localcmd command tests and capture verification evidence.
+
+### 193 Review
+- Root cause: detached background mode can encounter process-handle metadata failures (`No process is associated with this object.`) after successful spawn, but background semantics require success unless spawn itself fails.
+- Implementation:
+- `Services/Scripting/Commands/LocalCmdCommand.cs` now uses best-effort dispose (`TryDispose`) in detached mode so non-spawn metadata/disposal failures do not fail the step.
+- `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs` adds `Background_Detached_IgnoresPidAndDisposeMetadataErrors`, forcing both PID access and dispose to throw while asserting startup still succeeds and `into_*` metadata degrades gracefully (`pid = -1`).
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -v minimal` passed (`20/20`).
+
+## 192. Close localcmd implementation gaps from spec review
+- [x] 192.1 Enforce confirmation provider behavior and wire default localcmd confirmation for all script execution paths.
+- [x] 192.2 Implement foreground `timeout` enforcement for localcmd (including interactive foreground behavior).
+- [x] 192.3 Implement background lifetime management (`detached|script|app`) and `kill_on_cancel` cleanup behavior.
+- [x] 192.4 Add captured-output truncation marker behavior for `max_output_bytes`.
+- [x] 192.5 Fix Flow Canvas localcmd option normalization (`args` list/scalar and `env` object JSON handling).
+- [x] 192.6 Add/extend focused tests for the above behavior and run verification.
+
+### 192 Review
+- Local command confirmation is now enforced when `confirm != never`; if no provider is configured, `localcmd` fails with `on_error` semantics instead of auto-running.
+- `SshExecutionService` now defaults to a concrete localcmd confirmation provider (`LocalCmdConfirmationDialog`) in all constructor paths, covering manual, Flow Canvas, and scheduler script execution.
+- Foreground localcmd now enforces step timeout (`step.Timeout`) for both normal and interactive foreground runs, returning `ApplyOnError(...)` with a timeout message when exceeded.
+- Background localcmd now implements lifetime tracking:
+- `lifetime: detached` disposes process handles immediately and leaves process running.
+- `lifetime: script` kills/disposes tracked background processes when the script run ends.
+- `lifetime: app` keeps processes alive until app shutdown (`ProcessExit` best-effort kill/dispose).
+- `kill_on_cancel` now applies during cancelled script cleanup for non-detached tracked background processes.
+- Captured foreground stdout/stderr now append a truncation marker when `max_output_bytes` is exceeded per stream.
+- Flow Canvas export normalization now handles localcmd options correctly:
+- `args` accepts JSON array text or scalar string and serializes to valid runtime YAML.
+- `env` accepts JSON object text and serializes as a mapping.
+- Added/updated focused tests:
+- `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs` for confirmation-required behavior, timeout, truncation marker, and background lifetime cleanup.
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` for localcmd `args` and `env` export normalization.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~FlowCanvasBridgeTests"` passed (`89/89`).
+
 ## 191. Harden updater against transient file locks on relaunch
 - [x] 191.1 Add updater-script retry behavior for package copy and updated executable relaunch.
 - [x] 191.2 Isolate updater temp folder by executable path identity to avoid cross-copy collisions.

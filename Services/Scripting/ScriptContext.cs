@@ -116,6 +116,9 @@ namespace SSH_Helper.Services.Scripting
             public DebugState DebugState { get; } = new();
             public bool AllowFileSelectionDialogs { get; set; } = true;
             public bool DebugMode { get; set; }
+            public bool LocalCmdRunAllApproved { get; set; }
+            public string? LocalCmdApprovedHost { get; set; }
+            public HashSet<string> LocalCmdApprovedCommands { get; } = new();
             public EventHandler<ScriptOutputEventArgs>? OutputReceived { get; set; }
             public EventHandler<ColumnUpdateEventArgs>? ColumnUpdateRequested { get; set; }
             public EventHandler<EnvironmentUpdateEventArgs>? EnvironmentUpdateRequested { get; set; }
@@ -188,6 +191,29 @@ namespace SSH_Helper.Services.Scripting
         {
             get => _sharedState.DebugMode;
             set => _sharedState.DebugMode = value;
+        }
+
+        public bool LocalCmdRunAllApproved
+        {
+            get => _sharedState.LocalCmdRunAllApproved;
+            set => _sharedState.LocalCmdRunAllApproved = value;
+        }
+
+        public string? LocalCmdApprovedHost
+        {
+            get => _sharedState.LocalCmdApprovedHost;
+            set => _sharedState.LocalCmdApprovedHost = value;
+        }
+
+        public HashSet<string> LocalCmdApprovedCommands => _sharedState.LocalCmdApprovedCommands;
+
+        internal object LocalCmdTrackingKey => _sharedState;
+
+        public void ResetLocalCmdApproval()
+        {
+            _sharedState.LocalCmdRunAllApproved = false;
+            _sharedState.LocalCmdApprovedHost = null;
+            _sharedState.LocalCmdApprovedCommands.Clear();
         }
 
         /// <summary>

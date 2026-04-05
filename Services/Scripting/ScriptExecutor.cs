@@ -84,11 +84,13 @@ namespace SSH_Helper.Services.Scripting
         public event EventHandler<DebugPauseStateChangedEventArgs>? DebugPauseStateChanged;
 
         public ScriptExecutor()
-            : this(null)
+            : this(null, null)
         {
         }
 
-        internal ScriptExecutor(IBrowserCallbackUiHost? browserCallbackUiHost)
+        internal ScriptExecutor(
+            IBrowserCallbackUiHost? browserCallbackUiHost,
+            ILocalCmdConfirmation? localCmdConfirmation = null)
         {
             browserCallbackUiHost ??= new BrowserCallbackUiHost(BrowserCallbackWebViewProfileManager.Shared);
 
@@ -133,6 +135,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Call, new CallCommand(this) },
                 { StepType.Return, new ReturnCommand() },
                 { StepType.Table, new TableCommand() },
+                { StepType.LocalCmd, new LocalCmdCommand(localCmdConfirmation) },
             };
         }
 
@@ -148,6 +151,7 @@ namespace SSH_Helper.Services.Scripting
             ScriptContext context,
             CancellationToken cancellationToken = default)
         {
+            var wasCancelled = false;
             try
             {
                 context.ActiveScript = script;
@@ -213,6 +217,7 @@ namespace SSH_Helper.Services.Scripting
             }
             catch (OperationCanceledException)
             {
+                wasCancelled = true;
                 return new ScriptResult
                 {
                     Status = ScriptExitStatus.Cancelled,
@@ -229,6 +234,10 @@ namespace SSH_Helper.Services.Scripting
                     Exception = ex,
                     FullOutput = context.FullOutput
                 };
+            }
+            finally
+            {
+                LocalCmdCommand.CleanupTrackedBackgroundProcesses(context, wasCancelled);
             }
         }
 

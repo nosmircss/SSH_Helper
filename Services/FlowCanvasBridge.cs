@@ -147,6 +147,7 @@ namespace SSH_Helper.Services
             "show_header",
             "mirror_output",
             "show_window",
+            "keep_open",
             "pretty",
             "select_file",
             "skip_empty_lines",
@@ -175,18 +176,21 @@ namespace SSH_Helper.Services
             "max",
             "volume",
             "max_seconds",
+            "max_output_bytes",
         };
 
         private static readonly HashSet<string> ListOptionKeys = new(StringComparer.OrdinalIgnoreCase)
         {
             "required_fields",
             "sections",
+            "success_codes",
         };
 
         private static readonly HashSet<string> DictionaryOptionKeys = new(StringComparer.OrdinalIgnoreCase)
         {
             "headers",
             "args",
+            "env",
             "out",
         };
 
@@ -232,6 +236,7 @@ namespace SSH_Helper.Services
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
                 ["log"] = ["message"],
+                ["localcmd"] = ["command"],
             };
 
         private static readonly IReadOnlyDictionary<string, string[]> PreferredOptionOrderOverridesByCommand =
@@ -243,6 +248,7 @@ namespace SSH_Helper.Services
                 ["choose"] = ["title", "prompt", "options", "into", "default", "on_error"],
                 ["multiselect"] = ["title", "prompt", "options", "into", "min", "max", "on_error"],
                 ["playsound"] = ["path", "max_seconds", "into", "wait", "volume", "on_error"],
+                ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "success_codes", "max_output_bytes", "confirm", "quiet", "into", "fail_on_nonzero", "suppress", "title", "timeout", "on_error"],
             };
 
         private static readonly HashSet<string> AdvancedPanelOptionKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -2644,6 +2650,39 @@ namespace SSH_Helper.Services
                     }
                     break;
 
+                case StepType.LocalCmd:
+                    if (step.LocalCmd != null)
+                    {
+                        SetIfNotNull(props, "command", step.LocalCmd.Command);
+                        if (!string.Equals(step.LocalCmd.Shell, "powershell", StringComparison.OrdinalIgnoreCase))
+                            props["shell"] = step.LocalCmd.Shell;
+                        SetIfNotNull(props, "shell_path", step.LocalCmd.ShellPath);
+                        if (step.LocalCmd.Args.Count > 0)
+                            props["args"] = JArray.FromObject(step.LocalCmd.Args);
+                        if (step.LocalCmd.Env?.Count > 0)
+                            props["env"] = JObject.FromObject(step.LocalCmd.Env);
+                        SetIfNotNull(props, "working_dir", step.LocalCmd.WorkingDir);
+                        if (step.LocalCmd.Interactive) props["interactive"] = true;
+                        if (step.LocalCmd.KeepOpen) props["keep_open"] = true;
+                        if (!string.Equals(step.LocalCmd.RunMode, "foreground", StringComparison.OrdinalIgnoreCase))
+                            props["run_mode"] = step.LocalCmd.RunMode;
+                        if (!string.Equals(step.LocalCmd.Lifetime, "detached", StringComparison.OrdinalIgnoreCase))
+                            props["lifetime"] = step.LocalCmd.Lifetime;
+                        if (step.LocalCmd.KillOnCancel) props["kill_on_cancel"] = true;
+                        if (!step.LocalCmd.FailOnNonZero) props["fail_on_nonzero"] = false;
+                        if (step.LocalCmd.SuccessCodes.Count != 1 || step.LocalCmd.SuccessCodes[0] != 0)
+                            props["success_codes"] = JArray.FromObject(step.LocalCmd.SuccessCodes);
+                        if (step.LocalCmd.MaxOutputBytes != 1024 * 1024)
+                            props["max_output_bytes"] = step.LocalCmd.MaxOutputBytes;
+                        if (!string.Equals(step.LocalCmd.Confirm, "always", StringComparison.OrdinalIgnoreCase))
+                            props["confirm"] = step.LocalCmd.Confirm;
+                        if (step.LocalCmd.Quiet) props["quiet"] = true;
+                        if (step.LocalCmd.Suppress) props["suppress"] = true;
+                        SetIfNotNull(props, "title", step.LocalCmd.Title);
+                        SetIfNotNull(props, "into", step.LocalCmd.Into);
+                    }
+                    break;
+
                 case StepType.Log:
                     switch (step.Log)
                     {
@@ -2978,6 +3017,80 @@ namespace SSH_Helper.Services
 
                 normalized = new JArray(SplitCommaSeparated(headerText).Select(s => (JToken)new JValue(s)));
                 return true;
+            }
+
+            if (string.Equals(commandKey, "localcmd", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(optionKey, "args", StringComparison.OrdinalIgnoreCase))
+            {
+                if (value.Type == JTokenType.Array)
+                {
+                    normalized = value.DeepClone();
+                    return true;
+                }
+
+                if (value.Type == JTokenType.String)
+                {
+                    var raw = value.ToString();
+                    if (string.IsNullOrWhiteSpace(raw))
+                    {
+                        normalized = JValue.CreateNull();
+                        return true;
+                    }
+
+                    try
+                    {
+                        var parsed = JToken.Parse(raw);
+                        if (parsed.Type == JTokenType.Array)
+                        {
+                            normalized = parsed;
+                            return true;
+                        }
+                    }
+                    catch
+                    {
+                        // Scalar string form is valid for localcmd.args.
+                    }
+
+                    normalized = new JValue(raw);
+                    return true;
+                }
+
+                normalized = value.DeepClone();
+                return true;
+            }
+
+            if (string.Equals(commandKey, "localcmd", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(optionKey, "env", StringComparison.OrdinalIgnoreCase))
+            {
+                if (value.Type == JTokenType.Object)
+                {
+                    normalized = value.DeepClone();
+                    return true;
+                }
+
+                var raw = value.ToString();
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    normalized = JValue.CreateNull();
+                    return true;
+                }
+
+                try
+                {
+                    var parsed = JToken.Parse(raw);
+                    if (parsed.Type == JTokenType.Object)
+                    {
+                        normalized = parsed;
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // fall through
+                }
+
+                error = "must be a JSON object mapping";
+                return false;
             }
 
             if (DictionaryOptionKeys.Contains(optionKey))
@@ -3432,6 +3545,9 @@ namespace SSH_Helper.Services
                     }
                     return true;
                 }
+                case "localcmd":
+                    options["command"] = commandValue;
+                    return true;
                 case "break":
                 case "continue":
                 case "return":
@@ -3548,6 +3664,18 @@ namespace SSH_Helper.Services
                     {
                         missing.Add("max_seconds|max_lines");
                     }
+                }
+            }
+
+            if (string.Equals(commandKey, "localcmd", StringComparison.OrdinalIgnoreCase) &&
+                options.TryGetValue("shell", StringComparison.OrdinalIgnoreCase, out var shellToken))
+            {
+                var shell = shellToken.ToString().Trim();
+                if (!IsDynamicRuntimeValue(shell) &&
+                    string.Equals(shell, "custom", StringComparison.OrdinalIgnoreCase) &&
+                    !HasPresentOption("shell_path"))
+                {
+                    missing.Add("shell_path");
                 }
             }
 
@@ -3884,6 +4012,7 @@ namespace SSH_Helper.Services
                 StepType.BrowserCallbackCapture => ("browser_callback", step.BrowserCallbackCapture?.StartUrl),
                 StepType.UpdateColumn => ("updatecolumn", step.UpdateColumn?.Column),
                 StepType.UpdateEnvironment => ("updateenvironment", step.UpdateEnvironment?.Variable),
+                StepType.LocalCmd => ("localcmd", step.LocalCmd?.Command),
                 _ => ("unknown", null),
             };
         }

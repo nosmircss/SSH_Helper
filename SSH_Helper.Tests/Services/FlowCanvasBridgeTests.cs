@@ -1419,6 +1419,21 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_LocalCmdCustomShellMissingShellPath_ReturnsRequiredOptionError()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "script.py",
+            ["shell"] = "custom"
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("missing required option(s)", StringComparison.OrdinalIgnoreCase) &&
+            error.Contains("shell_path", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ExportGraphToYaml_InputWithoutPrompt_ExportsSuccessfully()
     {
         var result = ExportSingleBlock("input", new JObject
@@ -1712,6 +1727,90 @@ public class FlowCanvasBridgeTests
         });
 
         AssertExportSuccessWithCanonicalValidation(result);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_LocalCmdArgsJsonArray_ExportsAsSequence()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "dotnet build",
+            ["args"] = "[\"-NoProfile\",\"-ExecutionPolicy\",\"Bypass\"]",
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var localCmd = script.Steps[0].LocalCmd;
+
+        Assert.NotNull(localCmd);
+        Assert.Equal(3, localCmd!.Args.Count);
+        Assert.Equal("-NoProfile", localCmd.Args[0]);
+        Assert.Equal("Bypass", localCmd.Args[2]);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_LocalCmdEnvJson_ExportsAsMapping()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "dotnet build",
+            ["env"] = "{\"CONFIGURATION\":\"Release\",\"DOTNET_CLI_TELEMETRY_OPTOUT\":\"1\"}",
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var localCmd = script.Steps[0].LocalCmd;
+
+        Assert.NotNull(localCmd);
+        Assert.NotNull(localCmd!.Env);
+        Assert.Equal("Release", localCmd.Env!["CONFIGURATION"]);
+        Assert.Equal("1", localCmd.Env["DOTNET_CLI_TELEMETRY_OPTOUT"]);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_LocalCmdQuietAndSuppress_ExportsAsBooleans()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "date",
+            ["quiet"] = true,
+            ["suppress"] = true,
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var localCmd = script.Steps[0].LocalCmd;
+
+        Assert.NotNull(localCmd);
+        Assert.True(localCmd!.Quiet);
+        Assert.True(localCmd.Suppress);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_LocalCmdKeepOpen_ExportsAsBoolean()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "date",
+            ["interactive"] = true,
+            ["keep_open"] = true,
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var localCmd = script.Steps[0].LocalCmd;
+
+        Assert.NotNull(localCmd);
+        Assert.True(localCmd!.Interactive);
+        Assert.True(localCmd.KeepOpen);
     }
 
     [Fact]
