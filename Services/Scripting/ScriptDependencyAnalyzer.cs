@@ -715,6 +715,24 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case StepType.Vault:
+                        if (step.Vault != null)
+                        {
+                            ExtractVarReferences(step.Vault.Path, referencedVars);
+                            if (!string.IsNullOrEmpty(step.Vault.Into))
+                                definedVars.Add(step.Vault.Into);
+                            if (step.Vault.Keys != null)
+                                foreach (var kvp in step.Vault.Keys)
+                                    definedVars.Add(kvp.Value);
+                            if (step.Vault.Write != null)
+                                foreach (var kvp in step.Vault.Write)
+                                    ExtractVarReferences(kvp.Value, referencedVars);
+                            if (step.Vault.Patch != null)
+                                foreach (var kvp in step.Vault.Patch)
+                                    ExtractVarReferences(kvp.Value, referencedVars);
+                        }
+                        break;
+
                     case StepType.Parse:
                         if (step.Parse != null)
                         {
