@@ -402,6 +402,7 @@ Sets or modifies variable values with expression support.
 | pad_left() | `val = pad_left(num, 5, "0")` | Left-pad string (default: space) |
 | pad_right() | `val = pad_right(name, 20)` | Right-pad string (default: space) |
 | repeat() | `val = repeat("-", 40)` | Repeat string N times (max 10,000) |
+| random_string() | `val = random_string(24, "[a-zA-Z0-9@#$%^]")` | Generate random string with optional allowed charset (supports `[a-z]` style ranges) |
 | reverse() | `val = reverse(text)` | Reverse string or list order |
 | regex_replace() | `val = regex_replace(s, '/\d+/', "X")` | Replace regex matches |
 | format() | `val = format("{0} of {1}", a, b)` | C#-style string formatting |
@@ -957,6 +958,12 @@ These supplement `trim`, `upper`, `lower`, `replace`, `split`, `join`, `substrin
 # Repeat a string
 - set: separator = repeat("=", 60)
 - set: dots = repeat(".", 3)
+
+# Random string (default charset: A-Z, a-z, 0-9)
+- set: temp_password = random_string(24)
+# Constrained charset for policy-specific passwords
+- set: pin = random_string(8, "0123456789")
+- set: policy_pass = random_string(16, "[a-zA-Z0-9@#$%^]")
 
 # Reverse a string or list
 - set: reversed = reverse("hello")
@@ -3413,6 +3420,25 @@ Reads and writes secrets from a HashiCorp Vault KV store. Supports KV v1 and KV 
 
 Only the specified keys are updated. All other keys at the path are preserved. Uses the native PATCH method for KV v2; falls back to read-modify-write for KV v1.
 
+**Nested JSON values (object/array) with `write` or `patch`:**
+```yaml
+- vault:
+    path: "myapp/MC000012"
+    key: "entities"
+    into: entities_json
+
+- set:
+    expression: entities_json = json.set(entities_json, "[0].r7_api_key", new_r7_api_key)
+
+# Use write when your Vault policy allows update but not patch
+- vault:
+    path: "myapp/MC000012"
+    write:
+      entities: "${entities_json}"
+```
+
+When a `write`/`patch` value resolves to valid JSON object/array text (for example `${entities_json}`), SSH Helper sends it to Vault as structured JSON instead of a quoted string.
+
 **Options:**
 
 | Option | Required | Description |
@@ -4196,9 +4222,9 @@ ${upper(trim(json.get(data, "name")))}
 
 **All scripting functions are available inline**, including:
 - **JSON functions:** `json.format()`, `json.get()`, `json.keys()`, `json.values()`, `json.len()`, `json.type()`, `json.exists()`, `json.merge()`, `json.items()`, `json.slice()`, etc.
-- **String functions:** `upper()`, `lower()`, `trim()`, `replace()`, `substring()`, `length()`, `pad_left()`, `pad_right()`, `repeat()`, `reverse()`, `format()`, `char_at()`, `index_of()`, `regex_replace()`
+- **String functions:** `upper()`, `lower()`, `trim()`, `replace()`, `substring()`, `length()`, `pad_left()`, `pad_right()`, `repeat()`, `random_string()`, `reverse()`, `format()`, `char_at()`, `index_of()`, `regex_replace()`
 - **List functions:** `join()`, `split()`, `sort()`, `compact()`, `distinct()`, `first()`, `last()`, `map()`, `filter()`, `find()`, `count()`, `any()`, `all()`
-- **Math functions:** `abs()`, `min()`, `max()`, `round()`, `floor()`, `ceil()`, `clamp()`, `iif()`
+- **Math functions:** `abs()`, `min()`, `max()`, `round()`, `floor()`, `ceil()`, `random()`, `clamp()`, `iif()`
 - **Type functions:** `typeof()`, `int()`, `float()`, `str()`, `bool()`, `is_number()`, `is_list()`, `is_json()`, `is_empty()`
 - **DateTime functions:** `now()`, `epoch()`, `epoch_to_date()`, `date_add()`, `date_diff()`, `date_format()`
 - **Encoding functions:** `base64_encode()`, `base64_decode()`, `url_encode()`, `url_decode()`, `hash()`, `hex_encode()`, `hex_decode()`

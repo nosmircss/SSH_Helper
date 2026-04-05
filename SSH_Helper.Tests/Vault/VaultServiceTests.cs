@@ -496,7 +496,7 @@ public class VaultServiceTests
         await svc.ReadSecretAsync("test", "app/db", "pass");
         readCount.Should().Be(1);
 
-        await svc.WriteSecretAsync("test", "app/db", new Dictionary<string, string> { ["pass"] = "new" });
+        await svc.WriteSecretAsync("test", "app/db", new Dictionary<string, object?> { ["pass"] = "new" });
 
         await svc.ReadSecretAsync("test", "app/db", "pass");
         readCount.Should().Be(2, "cache should be invalidated after write");
@@ -602,7 +602,7 @@ public class VaultServiceTests
             handlerFactory: _ => handler,
             tokenProvider: (_, _) => "s.token");
 
-        await svc.PatchSecretAsync("test", "app/config", new Dictionary<string, string> { ["key"] = "patched" });
+        await svc.PatchSecretAsync("test", "app/config", new Dictionary<string, object?> { ["key"] = "patched" });
 
         capturedMethod!.Method.Should().Be("PATCH");
         capturedContentType.Should().Be("application/merge-patch+json");
@@ -650,7 +650,7 @@ public class VaultServiceTests
             handlerFactory: _ => handler,
             tokenProvider: (_, _) => "s.token");
 
-        await svc.PatchSecretAsync("test", "app/config", new Dictionary<string, string> { ["new_key"] = "new_val" });
+        await svc.PatchSecretAsync("test", "app/config", new Dictionary<string, object?> { ["new_key"] = "new_val" });
 
         postCalled.Should().BeTrue("should fall back to POST after 405");
 

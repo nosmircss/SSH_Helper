@@ -185,6 +185,98 @@ public class VaultCommandTests
     }
 
     [Fact]
+    public async Task Write_WithJsonArrayString_WritesStructuredArrayValue()
+    {
+        string? capturedBody = null;
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (path.Contains("auth/token/lookup-self"))
+                return TokenLookupResponse();
+            if (path.Contains("secret/data/myapp/MC000012") && req.Method == HttpMethod.Post)
+            {
+                capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return JsonResponse(HttpStatusCode.OK, new { data = new { version = 2 } });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using var vault = CreateVaultService(handler);
+        var command = new VaultCommand();
+        var step = new ScriptStep
+        {
+            Vault = new VaultStepOptions
+            {
+                Path = "myapp/MC000012",
+                Write = new Dictionary<string, string>
+                {
+                    ["entities"] = "${entities_json}"
+                }
+            }
+        };
+
+        var context = new ScriptContext { VaultService = vault };
+        context.SetVariable("entities_json", "[{\"customer_id\":\"MC000012\",\"r7_api_key\":\"rotated-key\"}]");
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        capturedBody.Should().NotBeNull();
+
+        using var doc = JsonDocument.Parse(capturedBody!);
+        var entities = doc.RootElement.GetProperty("data").GetProperty("entities");
+        entities.ValueKind.Should().Be(JsonValueKind.Array);
+        entities[0].GetProperty("r7_api_key").GetString().Should().Be("rotated-key");
+    }
+
+    [Fact]
+    public async Task Write_WithEscapedJsonArrayString_WritesStructuredArrayValue()
+    {
+        string? capturedBody = null;
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (path.Contains("auth/token/lookup-self"))
+                return TokenLookupResponse();
+            if (path.Contains("secret/data/myapp/MC000012") && req.Method == HttpMethod.Post)
+            {
+                capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return JsonResponse(HttpStatusCode.OK, new { data = new { version = 2 } });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using var vault = CreateVaultService(handler);
+        var command = new VaultCommand();
+        var step = new ScriptStep
+        {
+            Vault = new VaultStepOptions
+            {
+                Path = "myapp/MC000012",
+                Write = new Dictionary<string, string>
+                {
+                    ["entities"] = "${entities_json_escaped}"
+                }
+            }
+        };
+
+        var context = new ScriptContext { VaultService = vault };
+        context.SetVariable("entities_json_escaped", "[{\\\"customer_id\\\":\\\"MC000012\\\",\\\"r7_api_key\\\":\\\"rotated-key\\\"}]");
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        capturedBody.Should().NotBeNull();
+
+        using var doc = JsonDocument.Parse(capturedBody!);
+        var entities = doc.RootElement.GetProperty("data").GetProperty("entities");
+        entities.ValueKind.Should().Be(JsonValueKind.Array);
+        entities[0].GetProperty("r7_api_key").GetString().Should().Be("rotated-key");
+    }
+
+    [Fact]
     public async Task Patch_Succeeds()
     {
         string? capturedBody = null;
@@ -222,6 +314,52 @@ public class VaultCommandTests
         result.Success.Should().BeTrue();
         capturedBody.Should().NotBeNull();
         capturedBody.Should().Contain("patched-pass");
+    }
+
+    [Fact]
+    public async Task Patch_WithJsonArrayString_WritesStructuredArrayValue()
+    {
+        string? capturedBody = null;
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (path.Contains("auth/token/lookup-self"))
+                return TokenLookupResponse();
+            if (path.Contains("secret/data/myapp/MC000012") && req.Method == HttpMethod.Patch)
+            {
+                capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return JsonResponse(HttpStatusCode.OK, new { data = new { version = 3 } });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using var vault = CreateVaultService(handler);
+        var command = new VaultCommand();
+        var step = new ScriptStep
+        {
+            Vault = new VaultStepOptions
+            {
+                Path = "myapp/MC000012",
+                Patch = new Dictionary<string, string>
+                {
+                    ["entities"] = "${entities_json}"
+                }
+            }
+        };
+
+        var context = new ScriptContext { VaultService = vault };
+        context.SetVariable("entities_json", "[{\"customer_id\":\"MC000012\",\"r7_api_key\":\"rotated-key\"}]");
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        capturedBody.Should().NotBeNull();
+
+        using var doc = JsonDocument.Parse(capturedBody!);
+        var entities = doc.RootElement.GetProperty("data").GetProperty("entities");
+        entities.ValueKind.Should().Be(JsonValueKind.Array);
+        entities[0].GetProperty("r7_api_key").GetString().Should().Be("rotated-key");
     }
 
     [Fact]

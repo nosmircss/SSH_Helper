@@ -1,5 +1,92 @@
 # TODO
 
+## 216. Support nested Vault JSON value rotation (immutable secret shape)
+- [x] 216.1 Add focused failing tests for rotating a nested field (for example `entities[0].r7_api_key`) via `vault` + JSON functions.
+- [x] 216.2 Update Vault write/patch runtime to accept object/array values (not only flat strings) while preserving existing scalar behavior.
+- [x] 216.3 Keep parser/command behavior backward compatible for existing scalar map syntax in `vault.write` and `vault.patch`.
+- [x] 216.4 Run focused Vault/scripting tests and capture verification evidence.
+- [x] 216.5 Document the runnable rotation recipe in the final response and add review notes here.
+
+### 216 Review
+- Updated `Services/Scripting/Commands/VaultCommand.cs` to coerce `write`/`patch` values that resolve to JSON object/array text into structured payload values (`JsonNode`) instead of sending them as quoted strings.
+- Updated `Services/Vault/VaultService.cs` write/patch pipeline to accept `Dictionary<string, object?>`, preserving structured values during KV v1/v2 write and patch requests.
+- Updated Vault read internals to keep raw JSON nodes and convert to string output only at command/function boundaries, so cache/consumer behavior remains compatible while nested data remains structurally safe for fallback merge writes.
+- Added regression coverage in `SSH_Helper.Tests/Scripting/VaultCommandTests.cs`:
+- `Write_WithJsonArrayString_WritesStructuredArrayValue`
+- `Patch_WithJsonArrayString_WritesStructuredArrayValue`
+- Updated `SSH_Helper.Tests/Vault/VaultServiceTests.cs` for the new write/patch signature.
+- Updated `SCRIPTING.md` vault docs with a nested JSON rotation example that uses `write` (for update-only policies) and explains structured-value serialization behavior.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultCommandTests|FullyQualifiedName~VaultServiceTests|FullyQualifiedName~VaultFunctionsTests|FullyQualifiedName~VaultInlineSyntaxTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-nested-json/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-nested-json/` (passed `33/33`).
+
+## 217. Harden Vault write/update against escaped JSON string literals
+- [x] 217.1 Add failing regression for `vault.write` when value is escaped JSON text (`[{\"...\"}]`) so it serializes as array/object, not string.
+- [x] 217.2 Update vault write/patch value coercion to recover escaped JSON payloads safely.
+- [x] 217.3 Re-run focused Vault command/service tests and capture verification evidence.
+- [x] 217.4 Add review notes and runnable guidance for update-only rotation flow.
+
+### 217 Review
+- Updated JSON coercion in `Services/Scripting/Commands/VaultCommand.cs`:
+- Added object/array detection helper (`TryParseJsonObjectOrArray`).
+- Added recovery normalization for escaped JSON fragments (for example `[{\"k\":\"v\"}]`) before parsing.
+- Added regression coverage in `SSH_Helper.Tests/Scripting/VaultCommandTests.cs`:
+- `Write_WithEscapedJsonArrayString_WritesStructuredArrayValue`
+- Re-ran focused verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultCommandTests.Write_WithEscapedJsonArrayString_WritesStructuredArrayValue|FullyQualifiedName~VaultCommandTests.Write_WithJsonArrayString_WritesStructuredArrayValue|FullyQualifiedName~VaultCommandTests.Patch_WithJsonArrayString_WritesStructuredArrayValue|FullyQualifiedName~VaultCommandTests.Write_Succeeds|FullyQualifiedName~VaultCommandTests.Patch_Succeeds|FullyQualifiedName~VaultServiceTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-escaped-json/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-escaped-json/` (passed `22/22`).
+
+## 215. Add bracket charset shorthand to random_string()
+- [x] 215.1 Add focused tests for `random_string(..., "[a-zA-Z0-9@#$%^]")` style charset specifications.
+- [x] 215.2 Implement bracket/range charset expansion in `random_string()` while preserving literal charset behavior.
+- [x] 215.3 Update `SCRIPTING.md` to document bracket shorthand examples for password generation.
+- [x] 215.4 Run focused string-function tests and record verification evidence.
+- [x] 215.5 Add review notes and final outcome summary to this task entry.
+
+### 215 Review
+- Extended `random_string()` in `Services/Scripting/Functions/StringFunctions.cs` to accept bracket charset shorthand:
+- Example: `[a-zA-Z0-9@#$%^]`
+- Supports range expansion (`a-z`, `A-Z`, `0-9`) and literal symbols in the same bracket expression.
+- Keeps backward compatibility:
+- Plain literal charset strings (for example `"abc123!@"`) still work unchanged.
+- Empty/invalid effective charset still falls back to the default charset.
+- Added test coverage in `SSH_Helper.Tests/Scripting/StringFunctionTests.cs`:
+- `RandomString_WithBracketCharsetRange_ExpandsRanges`
+- Existing random-string tests continue to pass for default and explicit literal charsets.
+- Updated `SCRIPTING.md` docs:
+- Function table now documents bracket shorthand support.
+- Added password example with `random_string(16, "[a-zA-Z0-9@#$%^]")`.
+- Verification:
+- Focused: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests.RandomString" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/random-string-bracket-focused/ -p:BaseIntermediateOutputPath=artifacts/testobj/random-string-bracket-focused/` (passed `4/4`).
+- Regression slice: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/random-string-bracket-regression/ -p:BaseIntermediateOutputPath=artifacts/testobj/random-string-bracket-regression/` (passed `29/29`).
+
+## 214. Add native random_string() scripting function
+- [x] 214.1 Add focused RED tests for `random_string(length)` behavior (length + allowed character set expectations).
+- [x] 214.2 Implement `random_string()` as a built-in scripting function and register it for expression evaluation.
+- [x] 214.3 Update documentation/examples to use `random_string(...)` instead of hash/substring workaround snippets.
+- [x] 214.4 Run focused scripting tests and record verification evidence.
+- [x] 214.5 Add review notes and final outcome summary to this task entry.
+
+### 214 Review
+- Added first-class `random_string()` function in `Services/Scripting/Functions/StringFunctions.cs`.
+- Function behavior:
+- Signature: `random_string(length?, charset?)`
+- Default length: `16`
+- Default charset: `A-Z`, `a-z`, `0-9`
+- Custom charset supported for constrained password policies (e.g., digits-only or policy-safe symbols).
+- Length is clamped to `[0, 4096]`; `0` returns empty string.
+- Uses `RandomNumberGenerator.GetInt32(...)` for cryptographically secure randomness.
+- Added focused tests in `SSH_Helper.Tests/Scripting/StringFunctionTests.cs`:
+- `RandomString_DefaultLength_UsesDefaultCharset`
+- `RandomString_WithLength_UsesDefaultCharset`
+- `RandomString_WithCustomCharset_OnlyUsesAllowedCharacters`
+- Updated docs/examples:
+- `SCRIPTING.md` function catalog + string function examples now include `random_string(...)`.
+- Vault rotation recipe in `SCRIPTING.md` now uses `random_string(24)` again.
+- `docs/superpowers/specs/2026-04-05-vault-integration-design.md` examples now use `random_string(24)`.
+- Verification:
+- RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests.RandomString" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/random-string-red/ -p:BaseIntermediateOutputPath=artifacts/testobj/random-string-red/` (failed `3/3` before implementation).
+- GREEN (focused): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests.RandomString" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/random-string-green-focused/ -p:BaseIntermediateOutputPath=artifacts/testobj/random-string-green-focused/` (passed `3/3`).
+- GREEN (regression slice): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/random-string-green-regression/ -p:BaseIntermediateOutputPath=artifacts/testobj/random-string-green-regression/` (passed `28/28`).
+
 ## 213. Implement Vault hardening findings 1-9
 - [x] 213.1 Add/extend RED tests for all planned Vault findings:
 - scheduler Vault runtime wiring,

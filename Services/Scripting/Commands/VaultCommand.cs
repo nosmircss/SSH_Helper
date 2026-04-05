@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using SSH_Helper.Services.Scripting.Models;
@@ -128,15 +129,72 @@ namespace SSH_Helper.Services.Scripting.Commands
             return context.VaultService!.ResolveDefaultProfileName(context.EnvironmentVaultProfile);
         }
 
-        private static Dictionary<string, string> ResolveDataDictionary(
+        private static Dictionary<string, object?> ResolveDataDictionary(
             Dictionary<string, string> source, ScriptContext context)
         {
-            var resolved = new Dictionary<string, string>(StringComparer.Ordinal);
+            var resolved = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var kvp in source)
             {
-                resolved[context.SubstituteVariables(kvp.Key)] = context.SubstituteVariables(kvp.Value);
+                var key = context.SubstituteVariables(kvp.Key);
+                var substitutedValue = context.SubstituteVariables(kvp.Value);
+                resolved[key] = TryParseStructuredJson(substitutedValue);
             }
             return resolved;
+        }
+
+        private static object? TryParseStructuredJson(string substitutedValue)
+        {
+            var trimmed = substitutedValue.Trim();
+
+            if (TryParseJsonObjectOrArray(trimmed, out var parsed))
+                return parsed;
+
+            // Recovery path for previously stringified payloads like:
+            // [{\"customer_id\":\"MC000012\",\"r7_api_key\":\"...\"}]
+            var unescaped = trimmed
+                .Replace("\\\"", "\"", StringComparison.Ordinal)
+                .Replace("\\\\", "\\", StringComparison.Ordinal);
+
+            if (!string.Equals(unescaped, trimmed, StringComparison.Ordinal) &&
+                TryParseJsonObjectOrArray(unescaped, out parsed))
+            {
+                return parsed;
+            }
+
+            return substitutedValue;
+        }
+
+        private static bool TryParseJsonObjectOrArray(string text, out JsonNode? node)
+        {
+            node = null;
+            if (!LooksLikeJsonObjectOrArray(text))
+                return false;
+
+            try
+            {
+                var parsed = JsonNode.Parse(text);
+                if (parsed is JsonObject || parsed is JsonArray)
+                {
+                    node = parsed;
+                    return true;
+                }
+            }
+            catch
+            {
+                // Preserve previous behavior when input is not valid JSON.
+            }
+
+            return false;
+        }
+
+        private static bool LooksLikeJsonObjectOrArray(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            var trimmed = value.Trim();
+            return (trimmed.StartsWith("{", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal)) ||
+                   (trimmed.StartsWith("[", StringComparison.Ordinal) && trimmed.EndsWith("]", StringComparison.Ordinal));
         }
 
         private static CommandResult ApplyOnError(ScriptStep step, string message)

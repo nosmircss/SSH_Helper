@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using SSH_Helper.Models;
 
 namespace SSH_Helper.Services.Vault
@@ -70,8 +71,9 @@ namespace SSH_Helper.Services.Vault
                     $"Secret at '{path}' exists but has no key '{key}' — available keys: {availableKeys}");
             }
 
-            SetCacheValue(cacheKey, profileName, value);
-            return value;
+            var scalarValue = ConvertSecretValueToString(value);
+            SetCacheValue(cacheKey, profileName, scalarValue);
+            return scalarValue;
         }
 
         public async Task<Dictionary<string, string?>> ReadSecretKeysAsync(
@@ -107,15 +109,16 @@ namespace SSH_Helper.Services.Vault
                 }
 
                 var cacheKey = BuildCacheKey(profileName, path, key, version);
-                SetCacheValue(cacheKey, profileName, value);
-                result[key] = value;
+                var scalarValue = ConvertSecretValueToString(value);
+                SetCacheValue(cacheKey, profileName, scalarValue);
+                result[key] = scalarValue;
             }
 
             return result;
         }
 
         public async Task WriteSecretAsync(
-            string profileName, string path, Dictionary<string, string> data,
+            string profileName, string path, Dictionary<string, object?> data,
             CancellationToken ct = default)
         {
             var profile = await GetAuthenticatedProfileAsync(profileName, ct);
@@ -145,7 +148,7 @@ namespace SSH_Helper.Services.Vault
         }
 
         public async Task PatchSecretAsync(
-            string profileName, string path, Dictionary<string, string> data,
+            string profileName, string path, Dictionary<string, object?> data,
             CancellationToken ct = default)
         {
             var profile = await GetAuthenticatedProfileAsync(profileName, ct);
@@ -479,7 +482,7 @@ namespace SSH_Helper.Services.Vault
 
         // --- KV Operations ---
 
-        private async Task<Dictionary<string, string?>> ReadSecretDataAsync(
+        private async Task<Dictionary<string, JsonNode?>> ReadSecretDataAsync(
             VaultProfile profile, string path, int? version, CancellationToken ct)
         {
             var mount = profile.Config.MountPath.Trim('/');
@@ -509,19 +512,19 @@ namespace SSH_Helper.Services.Vault
             else
                 dataElement = doc.RootElement.GetProperty("data");
 
-            var result = new Dictionary<string, string?>(StringComparer.Ordinal);
+            var result = new Dictionary<string, JsonNode?>(StringComparer.Ordinal);
             foreach (var prop in dataElement.EnumerateObject())
             {
                 result[prop.Name] = prop.Value.ValueKind == JsonValueKind.Null
                     ? null
-                    : prop.Value.ToString();
+                    : JsonNode.Parse(prop.Value.GetRawText());
             }
 
             return result;
         }
 
         private async Task<bool> TryPatchV2Async(
-            VaultProfile profile, string path, Dictionary<string, string> data,
+            VaultProfile profile, string path, Dictionary<string, object?> data,
             CancellationToken ct)
         {
             var mount = profile.Config.MountPath.Trim('/');
@@ -566,21 +569,21 @@ namespace SSH_Helper.Services.Vault
 
         private async Task ReadModifyWriteAsync(
             VaultProfile profile, string profileName, string path,
-            Dictionary<string, string> data, CancellationToken ct)
+            Dictionary<string, object?> data, CancellationToken ct)
         {
-            Dictionary<string, string?> existing;
+            Dictionary<string, JsonNode?> existing;
             try
             {
                 existing = await ReadSecretDataAsync(profile, path, null, ct);
             }
             catch (VaultException ex) when (ex.Message.Contains("No secret found"))
             {
-                existing = new Dictionary<string, string?>();
+                existing = new Dictionary<string, JsonNode?>();
             }
 
-            var merged = new Dictionary<string, string>(StringComparer.Ordinal);
+            var merged = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var kvp in existing)
-                merged[kvp.Key] = kvp.Value ?? "";
+                merged[kvp.Key] = kvp.Value?.DeepClone();
 
             foreach (var kvp in data)
                 merged[kvp.Key] = kvp.Value;
@@ -607,6 +610,17 @@ namespace SSH_Helper.Services.Vault
             response.Dispose();
 
             InvalidateCacheForPath(profileName, path);
+        }
+
+        private static string? ConvertSecretValueToString(JsonNode? value)
+        {
+            if (value == null)
+                return null;
+
+            if (value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var stringValue))
+                return stringValue;
+
+            return value.ToJsonString();
         }
 
         // --- HTTP Helpers ---

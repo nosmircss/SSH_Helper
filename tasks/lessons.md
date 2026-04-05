@@ -2,6 +2,11 @@
 
 ## 2026-04-05
 - When a user provides an explicit multi-finding implementation plan, I must mirror it as checkable `tasks/todo.md` items, complete all items end-to-end, and record both focused and broader verification evidence before marking the task done.
+- When sharing scripting recipes, I must verify every referenced function exists in `FunctionRegistry`/`SCRIPTING.md`; never use undocumented helpers like `random_string(...)` in runnable examples.
+- When users call out workaround-heavy docs for missing primitives, I should prefer implementing the missing first-class function (with tests/docs) over keeping complex recipe workarounds.
+- When a user asks for regex-like shorthand in generation APIs, prefer direct char-class shorthand support (for example `[a-zA-Z0-9@#$%^]`) over forcing long explicit character strings.
+- When a user says the upstream secret schema cannot change, I must adapt Vault runtime behavior to that existing shape instead of pushing a flattening/migration workaround.
+- When a user reports Vault writes still produce escaped JSON strings, I must test and harden the exact write payload coercion path (including already-escaped array/object text), not assume the first structured-value fix covers all real data states.
 
 ## 2026-04-04
 - When `localcmd` command banners can include multiline command text, I must format the displayed command with explicit line-break markers (`ScriptingHelpers.FormatForDisplay`) so output surfaces never visually merge adjacent tokens (for example `utf8notepad`).

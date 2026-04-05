@@ -120,6 +120,40 @@ public class StringFunctionTests
         result.Should().BeEmpty();
     }
 
+    // --- random_string ---
+
+    [Fact]
+    public async Task RandomString_DefaultLength_UsesDefaultCharset()
+    {
+        var result = await Eval("random_string()");
+        result.Length.Should().Be(16);
+        result.Should().MatchRegex("^[A-Za-z0-9]+$");
+    }
+
+    [Fact]
+    public async Task RandomString_WithLength_UsesDefaultCharset()
+    {
+        var result = await Eval("random_string(32)");
+        result.Length.Should().Be(32);
+        result.Should().MatchRegex("^[A-Za-z0-9]+$");
+    }
+
+    [Fact]
+    public async Task RandomString_WithCustomCharset_OnlyUsesAllowedCharacters()
+    {
+        var result = await Eval("random_string(40, \"abc123!@\")");
+        result.Length.Should().Be(40);
+        result.ToCharArray().Should().OnlyContain(ch => "abc123!@".Contains(ch));
+    }
+
+    [Fact]
+    public async Task RandomString_WithBracketCharsetRange_ExpandsRanges()
+    {
+        var result = await Eval("random_string(48, \"[a-zA-Z0-9@#$%^]\")");
+        result.Length.Should().Be(48);
+        result.Should().MatchRegex("^[a-zA-Z0-9@#$%^]+$");
+    }
+
     // --- reverse ---
 
     [Fact]
