@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
@@ -152,6 +153,25 @@ public class StringFunctionTests
         var result = await Eval("random_string(48, \"[a-zA-Z0-9@#$%^]\")");
         result.Length.Should().Be(48);
         result.Should().MatchRegex("^[a-zA-Z0-9@#$%^]+$");
+    }
+
+    // --- uuid ---
+
+    [Fact]
+    public async Task Uuid_DefaultFormat_ReturnsParseableGuid()
+    {
+        var result = await Eval("uuid()");
+        result.Length.Should().Be(36);
+        Guid.TryParse(result, out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Uuid_ConsecutiveCalls_ReturnDifferentValues()
+    {
+        var first = await Eval("uuid()");
+        var second = await Eval("uuid()");
+
+        first.Should().NotBe(second);
     }
 
     // --- reverse ---

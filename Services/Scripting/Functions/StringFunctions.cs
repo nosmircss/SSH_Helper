@@ -32,6 +32,7 @@ namespace SSH_Helper.Services.Scripting.Functions
             registry.Register("char_at", CharAt);
             registry.Register("index_of", IndexOf);
             registry.Register("random_string", RandomString);
+            registry.Register("uuid", Uuid);
         }
 
         private static object? Contains(string argsString, ScriptContext context)
@@ -250,6 +251,13 @@ namespace SSH_Helper.Services.Scripting.Functions
             }
 
             return new string(chars);
+        }
+
+        private static object? Uuid(string argsString, ScriptContext context)
+        {
+            _ = argsString;
+            _ = context;
+            return Guid.NewGuid().ToString("D");
         }
 
         private static string? TryExpandBracketCharset(string spec)

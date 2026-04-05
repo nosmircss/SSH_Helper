@@ -1,5 +1,28 @@
 # TODO
 
+## 218. Add native uuid() scripting function
+- [x] 218.1 Add focused RED tests covering UUID generation shape/uniqueness expectations for `uuid()`.
+- [x] 218.2 Implement `uuid()` in built-in string functions and register it in the function registry.
+- [x] 218.3 Update `SCRIPTING.md` function catalog/examples to document `uuid()`.
+- [x] 218.4 Run focused string-function verification and capture outcomes.
+- [x] 218.5 Add review notes and final outcome summary to this task entry.
+
+### 218 Review
+- Added focused RED regression coverage in `SSH_Helper.Tests/Scripting/StringFunctionTests.cs`:
+- `Uuid_DefaultFormat_ReturnsParseableGuid`
+- `Uuid_ConsecutiveCalls_ReturnDifferentValues`
+- Implemented `uuid()` in `Services/Scripting/Functions/StringFunctions.cs` and registered it in `StringFunctions.Register(...)`.
+- Runtime behavior:
+- `uuid()` returns a new GUID string in canonical dashed format (`Guid.NewGuid().ToString("D")`).
+- Updated `SCRIPTING.md` documentation in three places:
+- Function catalog table now includes `uuid()`.
+- Additional string function examples now show `request_id = uuid()` style usage.
+- Inline function summary list now includes `uuid()`.
+- Verification:
+- RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests.Uuid" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/uuid-red/ -p:BaseIntermediateOutputPath=artifacts/testobj/uuid-red/` (failed `2/2` before implementation).
+- GREEN (focused): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests.Uuid" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/uuid-green-focused/ -p:BaseIntermediateOutputPath=artifacts/testobj/uuid-green-focused/` (passed `2/2`).
+- GREEN (regression slice): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/uuid-green-regression/ -p:BaseIntermediateOutputPath=artifacts/testobj/uuid-green-regression/` (passed `31/31`).
+
 ## 216. Support nested Vault JSON value rotation (immutable secret shape)
 - [x] 216.1 Add focused failing tests for rotating a nested field (for example `entities[0].r7_api_key`) via `vault` + JSON functions.
 - [x] 216.2 Update Vault write/patch runtime to accept object/array values (not only flat strings) while preserving existing scalar behavior.
