@@ -351,7 +351,7 @@ public class VaultServiceTests
 
         var act = () => svc.ReadSecretAsync("test", "forbidden/path", "key");
         await act.Should().ThrowAsync<VaultException>()
-            .WithMessage("*Permission denied*'read'*'forbidden/path'*");
+            .WithMessage("*Permission denied*'forbidden/path'*'read'*");
     }
 
     // -- Test 8: 503 Sealed -- throws friendly sealed message --

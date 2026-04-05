@@ -530,8 +530,10 @@ namespace SSH_Helper.Services.Vault
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    var patchErrorBody = "";
+                    try { patchErrorBody = await response.Content.ReadAsStringAsync(ct); } catch { }
                     response.Dispose();
-                    TranslateErrorResponse(response.StatusCode, profile.Config.Name, path, "update");
+                    TranslateErrorResponse(response.StatusCode, profile.Config.Name, path, "update", ExtractVaultErrors(patchErrorBody));
                 }
 
                 response.Dispose();
@@ -639,32 +641,68 @@ namespace SSH_Helper.Services.Vault
                 return response;
 
             var statusCode = response.StatusCode;
+            var errorBody = "";
+            try
+            {
+                errorBody = await response.Content.ReadAsStringAsync(ct);
+            }
+            catch { /* ignore read failures */ }
             response.Dispose();
-            TranslateErrorResponse(statusCode, profile.Config.Name, path, capability);
+
+            // Extract Vault's error messages from the response body
+            var vaultErrors = ExtractVaultErrors(errorBody);
+
+            TranslateErrorResponse(statusCode, profile.Config.Name, path, capability, vaultErrors);
 
             // TranslateErrorResponse always throws, but compiler needs this
             throw new VaultException($"Unexpected Vault error: HTTP {(int)statusCode}");
         }
 
-        private static void TranslateErrorResponse(HttpStatusCode statusCode, string profileName, string path, string capability)
+        private static string ExtractVaultErrors(string responseBody)
         {
+            if (string.IsNullOrWhiteSpace(responseBody))
+                return "";
+            try
+            {
+                using var doc = JsonDocument.Parse(responseBody);
+                if (doc.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array)
+                {
+                    var messages = errors.EnumerateArray()
+                        .Select(e => e.GetString())
+                        .Where(s => !string.IsNullOrEmpty(s))
+                        .ToList();
+                    if (messages.Count > 0)
+                        return string.Join("; ", messages);
+                }
+            }
+            catch { /* not JSON or no errors field */ }
+            return "";
+        }
+
+        private static void TranslateErrorResponse(HttpStatusCode statusCode, string profileName, string path, string capability, string vaultErrors)
+        {
+            var detail = string.IsNullOrEmpty(vaultErrors) ? "" : $" ({vaultErrors})";
+
             switch ((int)statusCode)
             {
+                case 400:
+                    throw new VaultException(
+                        $"Vault rejected the request for '{path}'{detail}");
                 case 401:
                     throw new VaultException(
-                        $"Vault authentication failed for profile '{profileName}' — check your token or AppRole credentials");
+                        $"Vault authentication failed for profile '{profileName}'{detail} — check your token or AppRole credentials");
                 case 403:
                     throw new VaultException(
-                        $"Permission denied — check that your Vault policy grants '{capability}' on path '{path}'");
+                        $"Permission denied on '{path}'{detail} — check that your Vault policy grants '{capability}'");
                 case 404:
                     throw new VaultException(
-                        $"No secret found at '{path}' — verify the path exists in Vault");
+                        $"No secret found at '{path}'{detail} — verify the path exists in Vault");
                 case 503:
                     throw new VaultException(
-                        "Vault is sealed — it needs to be unsealed before SSH_Helper can access secrets");
+                        $"Vault is sealed — it needs to be unsealed before SSH_Helper can access secrets");
                 default:
                     throw new VaultException(
-                        $"Vault returned HTTP {(int)statusCode} for path '{path}'");
+                        $"Vault returned HTTP {(int)statusCode} for path '{path}'{detail}");
             }
         }
 
