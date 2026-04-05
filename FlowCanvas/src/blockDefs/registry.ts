@@ -18,7 +18,7 @@ export type PropertyEditor = 'default' | 'choice-options';
 export interface PropertyDef {
   key: string;
   label: string;
-  type: 'text' | 'number' | 'boolean' | 'select' | 'code' | 'textarea';
+  type: 'text' | 'number' | 'boolean' | 'select' | 'code' | 'textarea' | 'keyvalue';
   browse?: 'file';
   required?: boolean;
   placeholder?: string;
@@ -384,6 +384,26 @@ export const blockDefs: BlockDef[] = [
       { key: 'completion_message', label: 'Completion Message', type: 'text' },
       { key: 'failure_message', label: 'Failure Message', type: 'text' },
       { key: 'quiet', label: 'Quiet Output', type: 'boolean', defaultValue: true },
+      onErrorProp,
+    ],
+  },
+
+  {
+    type: 'vault',
+    label: 'Vault',
+    category: 'network',
+    icon: 'vault',
+    description: 'Read, write, or patch secrets from HashiCorp Vault',
+    previewKey: 'path',
+    properties: [
+      { key: 'profile', label: 'Profile', type: 'text' },
+      { key: 'path', label: 'Path', type: 'text', required: true },
+      { key: 'key', label: 'Key', type: 'text' },
+      { key: 'keys', label: 'Keys Map', type: 'keyvalue' },
+      { key: 'into', label: 'Into Variable', type: 'text' },
+      { key: 'version', label: 'Version', type: 'number' },
+      { key: 'write', label: 'Write Data', type: 'keyvalue' },
+      { key: 'patch', label: 'Patch Data', type: 'keyvalue' },
       onErrorProp,
     ],
   },

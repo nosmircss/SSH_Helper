@@ -177,6 +177,7 @@ namespace SSH_Helper.Services
             "volume",
             "max_seconds",
             "max_output_bytes",
+            "version",
         };
 
         private static readonly HashSet<string> ListOptionKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -192,6 +193,9 @@ namespace SSH_Helper.Services
             "args",
             "env",
             "out",
+            "keys",
+            "write",
+            "patch",
         };
 
         private static readonly HashSet<string> ExitStatusTokens = new(StringComparer.OrdinalIgnoreCase)
@@ -237,6 +241,7 @@ namespace SSH_Helper.Services
                 ["updateenvironment"] = ["variable", "value"],
                 ["log"] = ["message"],
                 ["localcmd"] = ["command"],
+                ["vault"] = ["path"],
             };
 
         private static readonly IReadOnlyDictionary<string, string[]> PreferredOptionOrderOverridesByCommand =
