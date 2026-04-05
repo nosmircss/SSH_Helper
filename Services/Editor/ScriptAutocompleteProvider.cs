@@ -151,7 +151,8 @@ namespace SSH_Helper.Services.Editor
             ["parallel"] = "Concurrent",
             ["call"] = "Call sub",
             ["return"] = "Return value",
-            ["table"] = "Data table"
+            ["table"] = "Data table",
+            ["vault"] = "Read, write, or patch secrets from HashiCorp Vault"
         };
 
         private static readonly Dictionary<string, string> TopLevelKeyDescriptions = new(StringComparer.OrdinalIgnoreCase)

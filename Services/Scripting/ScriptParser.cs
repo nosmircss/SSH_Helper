@@ -59,7 +59,8 @@ namespace SSH_Helper.Services.Scripting
             "call",
             "return",
             "table",
-            "localcmd"
+            "localcmd",
+            "vault"
         };
         private static readonly string[] KnownTopLevelKeys =
         {
@@ -133,7 +134,8 @@ namespace SSH_Helper.Services.Scripting
                 ["parallel"] = ["steps", "max_concurrent"],
                 ["call"] = ["subroutine", "args", "out", "on_error"],
                 ["table"] = ["data", "columns", "into", "align", "show_header"],
-                ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "fail_on_nonzero", "success_codes", "max_output_bytes", "confirm", "quiet", "suppress", "title", "into", "timeout", "on_error"]
+                ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "fail_on_nonzero", "success_codes", "max_output_bytes", "confirm", "quiet", "suppress", "title", "into", "timeout", "on_error"],
+                ["vault"] = ["path", "key", "keys", "into", "write", "patch", "profile", "version", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -176,7 +178,8 @@ namespace SSH_Helper.Services.Scripting
                 ["call"] = [],
                 ["return"] = [],
                 ["table"] = [],
-                ["localcmd"] = []
+                ["localcmd"] = [],
+                ["vault"] = []
             };
         private static readonly HashSet<string> CanonicalMapCommands = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -1014,6 +1017,10 @@ namespace SSH_Helper.Services.Scripting
                     case "localcmd":
                         step.DeclaredStepType = StepType.LocalCmd;
                         step.LocalCmd = ParseLocalCmdOptions(parser, step);
+                        break;
+                    case "vault":
+                        step.DeclaredStepType = StepType.Vault;
+                        step.Vault = ParseVaultOptions(parser, step);
                         break;
                     case "cases":
                         step.Cases = ParseSwitchCases(parser);
@@ -3545,6 +3552,66 @@ namespace SSH_Helper.Services.Scripting
             {
                 SkipValue(parser);
             }
+
+            return options;
+        }
+
+        private VaultStepOptions ParseVaultOptions(IParser parser, ScriptStep step)
+        {
+            var options = new VaultStepOptions();
+
+            if (!parser.Accept<MappingStart>(out _))
+            {
+                SkipValue(parser);
+                return options;
+            }
+
+            parser.Consume<MappingStart>();
+
+            while (!parser.Accept<MappingEnd>(out _))
+            {
+                var keyScalar = parser.Consume<Scalar>();
+                var key = keyScalar.Value.ToLowerInvariant();
+
+                switch (key)
+                {
+                    case "path":
+                        options.Path = parser.Consume<Scalar>().Value;
+                        break;
+                    case "profile":
+                        options.Profile = parser.Consume<Scalar>().Value;
+                        break;
+                    case "key":
+                        options.Key = parser.Consume<Scalar>().Value;
+                        break;
+                    case "keys":
+                        options.Keys = ParseStringDictionary(parser);
+                        break;
+                    case "into":
+                        options.Into = parser.Consume<Scalar>().Value;
+                        break;
+                    case "version":
+                        if (int.TryParse(parser.Consume<Scalar>().Value, out var version))
+                            options.Version = version;
+                        break;
+                    case "write":
+                        options.Write = ParseStringDictionary(parser);
+                        break;
+                    case "patch":
+                        options.Patch = ParseStringDictionary(parser);
+                        break;
+                    case "on_error":
+                    case "onerror":
+                        ApplyNestedOnErrorAlias(step, parser);
+                        break;
+                    default:
+                        AddUnknownKeyWarning($"Unknown vault key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                        SkipValue(parser);
+                        break;
+                }
+            }
+
+            parser.Consume<MappingEnd>();
 
             return options;
         }

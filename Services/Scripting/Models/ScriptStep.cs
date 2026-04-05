@@ -226,6 +226,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public LocalCmdOptions? LocalCmd { get; set; }
 
         /// <summary>
+        /// Vault command - reads, writes, or patches secrets from HashiCorp Vault.
+        /// </summary>
+        public VaultStepOptions? Vault { get; set; }
+
+        /// <summary>
         /// Break command - exits the current loop.
         /// </summary>
         public bool BreakLoop { get; set; }
@@ -1279,7 +1284,8 @@ namespace SSH_Helper.Services.Scripting.Models
         Call,
         Return,
         Table,
-        LocalCmd
+        LocalCmd,
+        Vault
     }
 
     /// <summary>
