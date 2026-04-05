@@ -696,8 +696,10 @@ namespace SSH_Helper
             _vaultProfiles.Add(profile);
             _suppressVaultProfileSelection = true;
             _lstVaultProfiles.Items.Add(name);
-            _suppressVaultProfileSelection = false;
             _lstVaultProfiles.SelectedIndex = _lstVaultProfiles.Items.Count - 1;
+            _suppressVaultProfileSelection = false;
+            LoadVaultProfileDetails(profile);
+            UpdateVaultControlStates();
         }
 
         private void BtnVaultRemove_Click(object? sender, EventArgs e)
@@ -719,12 +721,18 @@ namespace SSH_Helper
             _vaultProfiles.RemoveAt(index);
             _suppressVaultProfileSelection = true;
             _lstVaultProfiles.Items.RemoveAt(index);
-            _suppressVaultProfileSelection = false;
 
             if (_lstVaultProfiles.Items.Count > 0)
+            {
                 _lstVaultProfiles.SelectedIndex = Math.Min(index, _lstVaultProfiles.Items.Count - 1);
+                _suppressVaultProfileSelection = false;
+                LoadVaultProfileDetails(_vaultProfiles[_lstVaultProfiles.SelectedIndex]);
+            }
             else
+            {
+                _suppressVaultProfileSelection = false;
                 ClearVaultProfileDetails();
+            }
 
             UpdateVaultControlStates();
         }
