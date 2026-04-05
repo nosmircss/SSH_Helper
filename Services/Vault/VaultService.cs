@@ -189,24 +189,31 @@ namespace SSH_Helper.Services.Vault
             return keys;
         }
 
-        public async Task<bool> TestConnectionAsync(string profileName, CancellationToken ct = default)
+        /// <summary>
+        /// Tests connectivity and authentication against a vault profile.
+        /// Throws VaultException with details on failure instead of returning false.
+        /// </summary>
+        public async Task TestConnectionAsync(string profileName, CancellationToken ct = default)
         {
-            try
-            {
-                var profile = await GetAuthenticatedProfileAsync(profileName, ct);
+            // Step 1: Authenticate (will throw VaultException with details on failure)
+            var profile = await GetAuthenticatedProfileAsync(profileName, ct);
 
-                var request = CreateRequest(HttpMethod.Get, "v1/sys/health", profile);
-                var response = await profile.HttpClient.SendAsync(request, ct);
+            // Step 2: Health check
+            var request = CreateRequest(HttpMethod.Get, "v1/sys/health", profile);
+            var response = await profile.HttpClient.SendAsync(request, ct);
 
-                // Vault returns 200 (initialized+unsealed), 429 (standby), 472 (perf standby), 473 (DR standby)
-                // as "healthy" responses. 501 = not initialized, 503 = sealed.
-                var code = (int)response.StatusCode;
-                response.Dispose();
-                return code is 200 or 429 or 472 or 473;
-            }
-            catch
+            var code = (int)response.StatusCode;
+            response.Dispose();
+
+            if (code is not (200 or 429 or 472 or 473))
             {
-                return false;
+                var status = code switch
+                {
+                    501 => "Vault is not initialized",
+                    503 => "Vault is sealed",
+                    _ => $"Vault returned HTTP {code}"
+                };
+                throw new VaultException($"Authentication succeeded but health check failed: {status}");
             }
         }
 
