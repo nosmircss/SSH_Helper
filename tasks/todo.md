@@ -1,5 +1,50 @@
 # TODO
 
+## 221. Increase Vault settings field width for better text visibility
+- [x] 221.1 Identify Vault tab row/input sizing constraints in `SettingsDialog.cs`.
+- [x] 221.2 Increase minimum width of Vault text input and related combo fields while preserving existing behavior.
+- [x] 221.3 Build solution with existing project flags and record verification evidence.
+- [x] 221.4 Slightly widen `SettingsDialog`/tab layout to remove Vault tab horizontal scrollbar after field-width increase.
+
+### 221 Review
+- Updated Vault layout sizing in `SettingsDialog.cs`:
+- Added shared sizing constants for Vault label and input widths in `CreateVaultTab()`.
+- Increased minimum width for Vault text fields (`Profile Name`, `Address`, `Namespace`, `Mount Path`, auth credentials, token).
+- Increased minimum width for Vault `KV Version` and `Auth Method` combo boxes to match widened field layout.
+- Increased minimum width for `CA Certificate` path textbox.
+- Increased `SettingsDialog` and tab-control width slightly so Vault content no longer overflows horizontally after the input-width increase.
+- Verification:
+- `dotnet build SSH_Helper.sln -v minimal -p:SkipFlowCanvasBuild=true -p:UseAppHost=false` (passed; existing project warnings only).
+
+## 220. Always use Credential Manager for host/Vault credentials; checkbox controls main password persistence only
+- [x] 220.1 Add RED UI tests in `SSH_Helper.Tests` proving host-password credential storage still happens when the checkbox/config flag is off.
+- [x] 220.2 Add RED UI tests proving main-form default password load/save is disabled when the checkbox/config flag is off.
+- [x] 220.3 Update `Form1` credential initialization and host password flows so host/Vault credential-manager usage is always on when provider availability allows.
+- [x] 220.4 Update default password load/save behavior so it is gated by the checkbox/config flag (including cleanup when toggled off).
+- [x] 220.5 Update settings text/comments to reflect the new checkbox meaning (main password persistence).
+- [x] 220.6 Run focused verification and record outcomes in a `220 Review` section.
+
+### 220 Review
+- Added focused RED coverage in `SSH_Helper.Tests/UI/Form1CredentialManagerPreferenceTests.cs`:
+- `BuildApplicationState_StoresHostPasswordsAndStripsPasswordField_WhenCheckboxSettingIsOff`
+- `TryLoadDefaultPassword_DoesNotHydrateMainPassword_WhenCheckboxSettingIsOff`
+- `StoreDefaultPassword_DoesNotPersistMainPassword_WhenCheckboxSettingIsOff`
+- RED verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1CredentialManagerPreferenceTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/testbuild/credential-manager-pref-red/ -p:BaseIntermediateOutputPath=artifacts/testobj/credential-manager-pref-red/` (failed `3/3` as expected before implementation).
+- Updated runtime behavior in `Form1.cs`:
+- Credential provider now initializes independently of the checkbox (Credential Manager always used when available).
+- Host password migration/load/restore paths now gate only on provider availability, not the checkbox flag.
+- Main-form password load/save now gates on the checkbox (`Credentials.UseCredentialManager`) via `ShouldPersistMainFormPassword()`.
+- Added `ClearStoredDefaultPassword()` and invoked cleanup when checkbox is off.
+- Updated settings behavior in `settingsToolStripMenuItem_Click(...)` to apply main-password persistence toggle without disabling Credential Manager host/Vault usage.
+- Updated UI/docs semantics:
+- `SettingsDialog.cs` checkbox label now reads `Store main form password in Windows Credential Manager`.
+- `Models/AppConfiguration.cs` summary now clarifies checkbox scope is main-form password persistence.
+- GREEN focused verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1CredentialManagerPreferenceTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/testbuild/credential-manager-pref-green2/ -p:BaseIntermediateOutputPath=artifacts/testobj/credential-manager-pref-green2/` (passed `3/3`).
+- Build verification:
+- `dotnet build SSH_Helper.sln -v minimal -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/build/credential-manager-pref2/ -p:BaseIntermediateOutputPath=artifacts/obj/credential-manager-pref2/` (passed).
+
 ## 219. Add Vault userpass authentication with portable-safe credential targets
 - [x] 219.1 Add RED tests for `VaultService` userpass login flow and missing-password failure behavior.
 - [x] 219.2 Extend Vault auth model/runtime to support `VaultAuthMethod.Userpass` (`/v1/auth/userpass/login/{username}`).

@@ -508,7 +508,8 @@ namespace SSH_Helper.Models
     public class CredentialSettings
     {
         /// <summary>
-        /// Store and retrieve passwords using Windows Credential Manager.
+        /// When true, persist and auto-load the main form default password via Windows Credential Manager.
+        /// Host, job, and Vault credentials still use Credential Manager whenever the provider is available.
         /// </summary>
         public bool UseCredentialManager { get; set; } = false;
 

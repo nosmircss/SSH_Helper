@@ -176,7 +176,7 @@ namespace SSH_Helper
             AutoScaleMode = AutoScaleMode.Font;
 
             Text = "Settings";
-            Size = new Size(520, 620);
+            Size = new Size(544, 620);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -186,7 +186,7 @@ namespace SSH_Helper
             _tabControl = new BorderlessTabControl
             {
                 Location = new Point(12, 12),
-                Size = new Size(480, 520),
+                Size = new Size(504, 520),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
             };
 
@@ -215,7 +215,7 @@ namespace SSH_Helper
             {
                 Text = "Save",
                 Size = new Size(80, 28),
-                Location = new Point(321, 545),
+                Location = new Point(345, 545),
                 DialogResult = DialogResult.OK
             };
             _btnSave.Click += BtnSave_Click;
@@ -224,7 +224,7 @@ namespace SSH_Helper
             {
                 Text = "Cancel",
                 Size = new Size(80, 28),
-                Location = new Point(407, 545),
+                Location = new Point(431, 545),
                 DialogResult = DialogResult.Cancel
             };
 
@@ -416,7 +416,7 @@ namespace SSH_Helper
 
             // === Credentials ===
             flow.Controls.Add(SectionHeader("Credentials"));
-            flow.Controls.Add(new CheckBox { Name = "chkUseCredentialManager", Text = "Store passwords in Windows Credential Manager", AutoSize = true });
+            flow.Controls.Add(new CheckBox { Name = "chkUseCredentialManager", Text = "Store main form password in Windows Credential Manager", AutoSize = true });
             flow.Controls.Add(new CheckBox { Name = "chkPreferSshAgent", Text = "Prefer SSH agent when available", AutoSize = true });
 
             // === Browser Callback ===
@@ -495,6 +495,9 @@ namespace SSH_Helper
             _scrollableFlowPanels.Add(rightFlow);
 
             var sectionFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            const int vaultLabelColumnWidth = 120;
+            const int vaultInputMinWidth = 205;
+            const int vaultPathInputMinWidth = 145;
 
             TableLayoutPanel LabeledTextBox(string labelText, string textBoxName, out TextBox textBox, bool isPassword = false)
             {
@@ -507,7 +510,7 @@ namespace SSH_Helper
                     Margin = new Padding(0, 2, 0, 2),
                     Width = 430
                 };
-                row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, vaultLabelColumnWidth));
                 row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
                 row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
                 var lbl = new Label { Text = labelText, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) };
@@ -515,6 +518,7 @@ namespace SSH_Helper
                 {
                     Name = textBoxName,
                     Dock = DockStyle.Fill,
+                    MinimumSize = new Size(vaultInputMinWidth, 0),
                     UseSystemPasswordChar = isPassword
                 };
                 row.Controls.Add(lbl, 0, 0);
@@ -535,11 +539,11 @@ namespace SSH_Helper
                 AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 2, 0, 2), Width = 430
             };
-            kvVersionRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            kvVersionRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, vaultLabelColumnWidth));
             kvVersionRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             kvVersionRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             kvVersionRow.Controls.Add(new Label { Text = "KV Version:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
-            _cmbVaultKvVersion = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+            _cmbVaultKvVersion = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, MinimumSize = new Size(vaultInputMinWidth, 0) };
             _cmbVaultKvVersion.Items.AddRange(new object[] { "Auto-detect", "v1", "v2" });
             _cmbVaultKvVersion.SelectedIndex = 0;
             kvVersionRow.Controls.Add(_cmbVaultKvVersion, 1, 0);
@@ -553,11 +557,11 @@ namespace SSH_Helper
                 AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 2, 0, 2), Width = 430
             };
-            authMethodRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            authMethodRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, vaultLabelColumnWidth));
             authMethodRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             authMethodRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             authMethodRow.Controls.Add(new Label { Text = "Auth Method:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
-            _cmbVaultAuthMethod = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+            _cmbVaultAuthMethod = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, MinimumSize = new Size(vaultInputMinWidth, 0) };
             _cmbVaultAuthMethod.Items.AddRange(new object[] { "Token", "AppRole", "LDAP", "Userpass" });
             _cmbVaultAuthMethod.SelectedIndex = 0;
             _cmbVaultAuthMethod.SelectedIndexChanged += (_, _) => UpdateVaultAuthFieldVisibility();
@@ -604,12 +608,12 @@ namespace SSH_Helper
                 AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 3, RowCount = 1, Margin = new Padding(0, 2, 0, 2), Width = 430
             };
-            caCertRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            caCertRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, vaultLabelColumnWidth));
             caCertRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             caCertRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
             caCertRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             caCertRow.Controls.Add(new Label { Text = "CA Certificate:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
-            _txtVaultCaCertPath = new TextBox { Dock = DockStyle.Fill };
+            _txtVaultCaCertPath = new TextBox { Dock = DockStyle.Fill, MinimumSize = new Size(vaultPathInputMinWidth, 0) };
             caCertRow.Controls.Add(_txtVaultCaCertPath, 1, 0);
             _btnVaultBrowseCaCert = new Button { Text = "Browse...", Width = 75, Height = 23 };
             _btnVaultBrowseCaCert.Click += BtnVaultBrowseCaCert_Click;

@@ -1305,10 +1305,7 @@ namespace SSH_Helper
 
         private void InitializeCredentials()
         {
-            var config = _configService.GetCurrent();
-            _credentialProvider = config.Credentials.UseCredentialManager
-                ? new CredentialManagerProvider()
-                : null;
+            _credentialProvider = new CredentialManagerProvider();
 
             if (_credentialProvider?.IsAvailable == true)
             {
@@ -1317,6 +1314,9 @@ namespace SSH_Helper
         }
 
         private bool IsCredentialManagerAvailable => _credentialProvider?.IsAvailable == true;
+
+        private bool ShouldPersistMainFormPassword()
+            => IsCredentialManagerAvailable && _configService.GetCurrent().Credentials.UseCredentialManager;
 
         private void InitializeVault()
         {
@@ -1369,7 +1369,7 @@ namespace SSH_Helper
 
         private void TryLoadDefaultPassword()
         {
-            if (!IsCredentialManagerAvailable)
+            if (!ShouldPersistMainFormPassword())
                 return;
 
             if (_credentialProvider!.TryGetPassword(CredentialTargets.DefaultPasswordTarget, out _, out var password))
@@ -1381,10 +1381,18 @@ namespace SSH_Helper
 
         private void StoreDefaultPassword()
         {
-            if (!IsCredentialManagerAvailable)
+            if (!ShouldPersistMainFormPassword())
                 return;
 
             _credentialProvider!.SavePassword(CredentialTargets.DefaultPasswordTarget, tsbUsername.Text, tsbPassword.Text);
+        }
+
+        private void ClearStoredDefaultPassword()
+        {
+            if (!IsCredentialManagerAvailable)
+                return;
+
+            _credentialProvider!.DeletePassword(CredentialTargets.DefaultPasswordTarget);
         }
 
         private bool TryResolveHostPassword(string hostKey, string username, out string password)
@@ -1410,8 +1418,6 @@ namespace SSH_Helper
         {
             if (!IsCredentialManagerAvailable)
                 return;
-
-            StoreDefaultPassword();
 
             foreach (DataGridViewRow row in dgv_variables.Rows)
             {
@@ -2191,8 +2197,7 @@ namespace SSH_Helper
                 EnsureSelectColumn();
                 dgv_variables.RowTemplate.Height = 28;
 
-                var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                           _configService.GetCurrent().Credentials.UseCredentialManager;
+                var useCredentialManager = IsCredentialManagerAvailable;
 
                 foreach (var rowData in environment.Hosts ?? new List<Dictionary<string, string>>())
                 {
@@ -5505,7 +5510,7 @@ namespace SSH_Helper
 
         private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            var previousCredentialManager = _configService.GetCurrent().Credentials.UseCredentialManager;
+            var previousStoreMainPassword = _configService.GetCurrent().Credentials.UseCredentialManager;
             using var dialog = new SettingsDialog(_configService, _presetManager, _isDarkMode, _credentialProvider);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
             var dialogResult = dialog.ShowDialog(this);
@@ -5524,12 +5529,15 @@ namespace SSH_Helper
                 _sshService.PreferSshAgent = config.Credentials.PreferSshAgent;
                 UpdateStatusBar(config.UseConnectionPooling ? "Connection pooling enabled" : "Connection pooling disabled");
 
-                if (previousCredentialManager != config.Credentials.UseCredentialManager)
+                if (previousStoreMainPassword != config.Credentials.UseCredentialManager)
                 {
-                    InitializeCredentials();
                     if (config.Credentials.UseCredentialManager)
                     {
-                        MigratePasswordsToCredentialManager();
+                        StoreDefaultPassword();
+                    }
+                    else
+                    {
+                        ClearStoredDefaultPassword();
                     }
                 }
 
@@ -12621,8 +12629,7 @@ namespace SSH_Helper
                     vaultResolved = true;
                 }
 
-                var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                           _configService.GetCurrent().Credentials.UseCredentialManager;
+                var useCredentialManager = IsCredentialManagerAvailable;
                 if (!vaultResolved && useCredentialManager)
                 {
                     var resolvedUsername = string.IsNullOrWhiteSpace(host.Username) ? tsbUsername.Text : host.Username;
@@ -13849,10 +13856,11 @@ namespace SSH_Helper
                 });
 
                 var config = _configService.GetCurrent();
-                if (config.Credentials.UseCredentialManager)
+                StoreDefaultPassword();
+                MigratePasswordsToCredentialManager();
+                if (!config.Credentials.UseCredentialManager)
                 {
-                    StoreDefaultPassword();
-                    MigratePasswordsToCredentialManager();
+                    ClearStoredDefaultPassword();
                 }
             }
             catch (Exception ex)
@@ -13875,8 +13883,7 @@ namespace SSH_Helper
                 state.HostColumns.Add(colName);
             }
 
-            var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                       _configService.GetCurrent().Credentials.UseCredentialManager;
+            var useCredentialManager = IsCredentialManagerAvailable;
 
             state.Hosts = new List<Dictionary<string, string>>();
             for (int row = 0; row < dgv_variables.Rows.Count; row++)
@@ -13976,8 +13983,7 @@ namespace SSH_Helper
                     {
                         // Ensure row template height is set before adding rows
                         dgv_variables.RowTemplate.Height = 28;
-                        var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                                   _configService.GetCurrent().Credentials.UseCredentialManager;
+                        var useCredentialManager = IsCredentialManagerAvailable;
 
                         foreach (var rowData in state.Hosts)
                         {
