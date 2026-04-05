@@ -1,5 +1,39 @@
 # TODO
 
+## 208. Add playsound QA preset using Windows media files
+- [x] 208.1 Add a `QA PlaySound [Windows]` preset in `qa_presets.json` following current QA style conventions.
+- [x] 208.2 Cover both successful playback and an intentional unsupported-extension error path with assertions.
+- [x] 208.3 Validate `qa_presets.json` parses successfully after edits.
+- [x] 208.4 Document a concise review summary in this file.
+
+### 208 Review
+- Added `QA PlaySound [Windows]` to `qa_presets.json` under `QA/LocalCmd`.
+- Preset behavior coverage:
+- Resolves a usable Windows media sound path with a primary (`%WINDIR%\\Media\\notify.wav`) + fallback (`%WINDIR%\\Media\\Windows Notify.wav`) check.
+- Verifies successful `playsound` execution for both `wait: true` and `wait: false`, asserting captured metadata (`backend`, `wait`, `volume`).
+- Verifies unsupported-extension handling by writing a `.txt` file and running `playsound` with `on_error: continue`, asserting failure capture/meta error and `_last_error` population.
+- Verification:
+- `Get-Content -Raw qa_presets.json | ConvertFrom-Json` (parsed successfully).
+
+## 207. Add localcmd QA presets for feature coverage
+- [x] 207.1 Add multiple `QA LocalCmd ...` preset scenarios in `qa_presets.json` that cover distinct runtime behaviors.
+- [x] 207.2 Keep naming, descriptions, assertions, and folder conventions aligned with existing QA preset patterns.
+- [x] 207.3 Validate `qa_presets.json` parses successfully after insertion.
+- [x] 207.4 Record a concise review summary in this file.
+
+### 207 Review
+- Added six new presets under `QA/LocalCmd` in `qa_presets.json`:
+- `QA LocalCmd Foreground Capture [Windows]`
+- `QA LocalCmd Env WorkingDir [Windows]`
+- `QA LocalCmd Exit Policies [Windows]`
+- `QA LocalCmd Background Metadata [Windows]`
+- `QA LocalCmd Quiet Suppress [Windows]`
+- `QA LocalCmd Timeout Continue [Windows]`
+- Scenarios cover distinct `localcmd` paths: foreground stdout/stderr capture, env + working dir, non-zero policy handling (`fail_on_nonzero`, `success_codes`, `on_error`), background metadata (`into_pid`, `into_started`, `into_start_error`), quiet/suppress output controls, and timeout recovery behavior.
+- Verification:
+- `Get-Content -Raw qa_presets.json | ConvertFrom-Json` (parsed successfully).
+- `Select-String -Path qa_presets.json -Pattern '"QA LocalCmd'` (confirmed six inserted localcmd presets).
+
 ## 206. Remove `cmd` shell option from `localcmd`
 - [x] 206.1 Remove `cmd` from Flow Canvas `localcmd.shell` selectable options.
 - [x] 206.2 Align `localcmd` shell validation/docs to `powershell` + `custom`.
