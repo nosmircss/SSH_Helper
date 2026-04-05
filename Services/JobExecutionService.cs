@@ -63,6 +63,11 @@ namespace SSH_Helper.Services
         private readonly Func<JobDefinition, bool, CancellationToken, Task>? _jobExecutionOverride;
         private readonly Action<JobDefinition>? _jobEvaluationFaultInjector;
 
+        /// <summary>
+        /// Optional Vault credential provider. Set after construction when VaultService becomes available.
+        /// </summary>
+        public VaultCredentialProvider? VaultCredentialProvider { get; set; }
+
         private System.Threading.Timer? _timer;
         private int _evaluating; // 0 = idle, 1 = evaluating (Interlocked guard)
         private readonly SemaphoreSlim _concurrencyGate;
@@ -548,6 +553,16 @@ namespace SSH_Helper.Services
 
                 case CredentialMode.PerHostColumn:
                     // Per-host credentials are already embedded in HostConnection from BuildHostConnections
+                    return (string.Empty, string.Empty);
+
+                case CredentialMode.Vault:
+                    if (VaultCredentialProvider != null &&
+                        !string.IsNullOrEmpty(job.VaultCredentialPath) &&
+                        VaultCredentialProvider.TryGetPassword(job.VaultCredentialPath, out var vaultUser, out var vaultPass))
+                    {
+                        return (vaultUser, vaultPass);
+                    }
+                    Debug.WriteLine($"Warning: Vault credential resolution failed for job '{job.Name}' at path '{job.VaultCredentialPath}'");
                     return (string.Empty, string.Empty);
 
                 default:
