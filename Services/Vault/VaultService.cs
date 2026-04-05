@@ -421,19 +421,36 @@ namespace SSH_Helper.Services.Vault
 
         private async Task DetectKvVersionByHeuristicAsync(VaultProfile profile, string mount, CancellationToken ct)
         {
-            // Try v2 read path: if it works or returns a structured v2 response, it's v2
+            // Try v2 read path first: a non-404 response means the data/ prefix is valid → v2
             try
             {
-                var request = CreateRequest(HttpMethod.Get, $"v1/{mount}/data/detect-kv-version-probe", profile);
-                var response = await profile.HttpClient.SendAsync(request, ct);
-                var code = (int)response.StatusCode;
-                response.Dispose();
+                var v2Request = CreateRequest(HttpMethod.Get, $"v1/{mount}/data/detect-kv-version-probe", profile);
+                var v2Response = await profile.HttpClient.SendAsync(v2Request, ct);
+                var v2Code = (int)v2Response.StatusCode;
+                v2Response.Dispose();
 
-                // A 404 on v2 data path with structured response indicates v2 engine
-                // A 404 on v1 path means the path doesn't exist, not the engine
-                if (code != 404)
+                if (v2Code != 404)
                 {
                     profile.DetectedKvVersion = VaultKvVersion.V2;
+                    return;
+                }
+            }
+            catch
+            {
+                // Fall through to v1 probe
+            }
+
+            // v2 path returned 404 — try the v1 path (no data/ prefix)
+            try
+            {
+                var v1Request = CreateRequest(HttpMethod.Get, $"v1/{mount}/detect-kv-version-probe", profile);
+                var v1Response = await profile.HttpClient.SendAsync(v1Request, ct);
+                var v1Code = (int)v1Response.StatusCode;
+                v1Response.Dispose();
+
+                if (v1Code != 404)
+                {
+                    profile.DetectedKvVersion = VaultKvVersion.V1;
                     return;
                 }
             }
@@ -442,7 +459,7 @@ namespace SSH_Helper.Services.Vault
                 // ignored
             }
 
-            // Default to v2 as it's the more common modern setup
+            // Both probes returned 404 — default to v2 as the more common modern setup
             profile.DetectedKvVersion = VaultKvVersion.V2;
         }
 
@@ -738,10 +755,21 @@ namespace SSH_Helper.Services.Vault
                 handler.ServerCertificateCustomValidationCallback =
                     HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
             }
-
-            if (!string.IsNullOrEmpty(config.CaCertificatePath) && File.Exists(config.CaCertificatePath))
+            else if (!string.IsNullOrEmpty(config.CaCertificatePath) && File.Exists(config.CaCertificatePath))
             {
-                handler.ClientCertificates.Add(new X509Certificate2(config.CaCertificatePath));
+                var caCert = new X509Certificate2(config.CaCertificatePath);
+                handler.ServerCertificateCustomValidationCallback = (_, cert, chain, errors) =>
+                {
+                    if (errors == System.Net.Security.SslPolicyErrors.None)
+                        return true;
+
+                    if (cert == null || chain == null)
+                        return false;
+
+                    chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+                    chain.ChainPolicy.CustomTrustStore.Add(caCert);
+                    return chain.Build(cert);
+                };
             }
 
             return handler;

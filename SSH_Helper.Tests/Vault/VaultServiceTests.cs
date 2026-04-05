@@ -213,9 +213,10 @@ public class VaultServiceTests
     // -- Test 4: KV v1 fallback when mount tune is forbidden (403) --
 
     [Fact]
-    public async Task KvAutoDetect_FallsBackOnForbiddenTune()
+    public async Task KvAutoDetect_FallsBackToV1OnForbiddenTune()
     {
         var settings = CreateSettings(kvVersion: VaultKvVersion.AutoDetect);
+        string? capturedReadPath = null;
 
         var handler = new DelegatingHandlerStub(req =>
         {
@@ -227,13 +228,20 @@ public class VaultServiceTests
             if (path.Contains("sys/mounts/secret/tune"))
                 return new HttpResponseMessage(HttpStatusCode.Forbidden);
 
-            // Heuristic probe — the probe path returns 404 which triggers fallback to v2
+            // v2 heuristic probe returns 404 — no v2 data/ prefix recognized
             if (path.Contains("secret/data/detect-kv-version-probe"))
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
 
-            // After detection, reads go through v2 paths (default fallback)
-            if (path.Contains("secret/data/app/db"))
-                return KvV2ReadResponse(new Dictionary<string, string> { ["pass"] = "detected" });
+            // v1 heuristic probe succeeds — the mount responds without data/ prefix
+            if (path.EndsWith("secret/detect-kv-version-probe"))
+                return KvV1ReadResponse(new Dictionary<string, string> { ["probe"] = "ok" });
+
+            // After v1 detection, reads should go through v1 path (no data/ prefix)
+            if (path.Contains("secret/app/db") && !path.Contains("secret/data/"))
+            {
+                capturedReadPath = path;
+                return KvV1ReadResponse(new Dictionary<string, string> { ["pass"] = "v1-detected" });
+            }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
@@ -244,7 +252,9 @@ public class VaultServiceTests
             tokenProvider: (_, _) => "s.token");
 
         var val = await svc.ReadSecretAsync("test", "app/db", "pass");
-        val.Should().Be("detected");
+        val.Should().Be("v1-detected");
+        capturedReadPath.Should().Contain("secret/app/db", "should use v1 path without data/ prefix");
+        capturedReadPath.Should().NotContain("secret/data/", "v1 path must not include the v2 data/ segment");
     }
 
     // -- Test 5: Read single key (v2) -- returns correct value --
@@ -450,17 +460,51 @@ public class VaultServiceTests
         readCount.Should().Be(2, "cache should be invalidated after write");
     }
 
-    // -- Test 11: ClearCache -- doesn't throw when empty --
+    // -- Test 11: ClearCache -- forces new HTTP call after cache is cleared --
 
     [Fact]
-    public void ClearCache_WhenEmpty_DoesNotThrow()
+    public async Task ClearCache_ForcesNewHttpCallOnNextRead()
     {
         var settings = CreateSettings();
+        var secretReadCount = 0;
 
-        using var svc = new VaultService(settings);
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
 
-        var act = () => svc.ClearCache();
-        act.Should().NotThrow();
+            if (path.Contains("auth/token/lookup-self"))
+                return TokenLookupResponse();
+
+            if (path.Contains("secret/data/app/creds"))
+            {
+                secretReadCount++;
+                return KvV2ReadResponse(new Dictionary<string, string> { ["api_key"] = "k3y" });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => handler,
+            tokenProvider: (_, _) => "s.token");
+
+        // First read — populates cache
+        var val1 = await svc.ReadSecretAsync("test", "app/creds", "api_key");
+        val1.Should().Be("k3y");
+        secretReadCount.Should().Be(1);
+
+        // Second read — served from cache, no new HTTP call
+        await svc.ReadSecretAsync("test", "app/creds", "api_key");
+        secretReadCount.Should().Be(1, "cached read should not make an HTTP call");
+
+        // Clear the cache
+        svc.ClearCache();
+
+        // Third read — cache is gone, must make a new HTTP call
+        var val3 = await svc.ReadSecretAsync("test", "app/creds", "api_key");
+        val3.Should().Be("k3y");
+        secretReadCount.Should().Be(2, "ClearCache should force a new HTTP call on the next read");
     }
 
     // -- Test 12: Profile not found -- throws descriptive error listing configured profiles --
