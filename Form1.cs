@@ -14,6 +14,7 @@ using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.Services.Vault;
 using SSH_Helper.UI;
 using SSH_Helper.Utilities;
 
@@ -264,6 +265,9 @@ namespace SSH_Helper
         // Credential provider
         private ICredentialProvider? _credentialProvider;
 
+        // Vault service
+        private VaultService? _vaultService;
+
         // Track which TreeView triggered the context menu
         private TreeView? _contextMenuSourceTreeView;
         private readonly ToolStripMenuItem _ctxFolderBaseEnvironment = new();
@@ -315,6 +319,7 @@ namespace SSH_Helper
             {
                 _uiOutputThrottler.Dispose();
                 _scriptValidationService.Dispose();
+                _vaultService?.Dispose();
             };
 
             // Initialize services
@@ -355,6 +360,7 @@ namespace SSH_Helper
 
             InitializeFromConfiguration(config);
             InitializeCredentials();
+            InitializeVault();
             InitializeDataGridView();
             InitializeScriptEditor();
             InitializeOutputHistory();
@@ -1312,6 +1318,38 @@ namespace SSH_Helper
 
         private bool IsCredentialManagerAvailable => _credentialProvider?.IsAvailable == true;
 
+        private void InitializeVault()
+        {
+            _vaultService?.Dispose();
+            _vaultService = null;
+
+            var config = _configService.GetCurrent();
+            if (!config.Vault.Enabled || config.Vault.Profiles.Count == 0)
+                return;
+
+            _vaultService = new VaultService(
+                config.Vault,
+                tokenProvider: (profileName, _) =>
+                {
+                    var target = CredentialTargets.VaultAuthTarget(profileName, "token");
+                    return _credentialProvider?.TryGetPassword(target, out _, out var token) == true ? token : null;
+                },
+                secretIdProvider: (profileName, _) =>
+                {
+                    var target = CredentialTargets.VaultAuthTarget(profileName, "approle_secret");
+                    return _credentialProvider?.TryGetPassword(target, out _, out var secret) == true ? secret : null;
+                },
+                ldapPasswordProvider: (profileName, _) =>
+                {
+                    var target = CredentialTargets.VaultAuthTarget(profileName, "ldap_password");
+                    return _credentialProvider?.TryGetPassword(target, out _, out var pass) == true ? pass : null;
+                });
+
+            _sshService.VaultService = _vaultService;
+            _sshService.EnvironmentVaultProfile = _environmentService.GetEnvironment(
+                _environmentService.GetActiveEnvironmentName()).VaultProfileName;
+        }
+
         private void TryLoadDefaultPassword()
         {
             if (!IsCredentialManagerAvailable)
@@ -1753,6 +1791,7 @@ namespace SSH_Helper
         {
             _activeEnvironmentName = e.CurrentEnvironment;
             _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
+            _sshService.EnvironmentVaultProfile = e.CurrentConfiguration.VaultProfileName;
             ApplyActiveEnvironmentLabelColor();
             RefreshBaseEnvironmentIndicator();
             UpdateWindowTitle();
@@ -5448,7 +5487,7 @@ namespace SSH_Helper
         private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             var previousCredentialManager = _configService.GetCurrent().Credentials.UseCredentialManager;
-            using var dialog = new SettingsDialog(_configService, _presetManager, _isDarkMode);
+            using var dialog = new SettingsDialog(_configService, _presetManager, _isDarkMode, _credentialProvider);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
             var dialogResult = dialog.ShowDialog(this);
             if (dialogResult == DialogResult.OK)
@@ -5474,6 +5513,8 @@ namespace SSH_Helper
                         MigratePasswordsToCredentialManager();
                     }
                 }
+
+                InitializeVault();
             }
 
             // A timeout reset is persisted immediately in the settings dialog.
@@ -6812,6 +6853,9 @@ namespace SSH_Helper
 
                 var context = new Services.Scripting.ScriptContext(initialVars);
                 context.DebugMode = true; // Capture debug-level output (e.g., "Extract: var = 'value'")
+                context.VaultService = _vaultService;
+                context.EnvironmentVaultProfile = _environmentService.GetEnvironment(
+                    _environmentService.GetActiveEnvironmentName()).VaultProfileName;
 
                 // Special handling for _output: GetVariable("_output") reads from LastCommandOutput,
                 // not the dictionary, so we must hydrate it via RecordCommandOutput.
@@ -14142,6 +14186,8 @@ namespace SSH_Helper
             _jobExportService = new JobExportService();
             _jobExecutionService = new JobExecutionService(
                 _jobStorage, _schedulingService, _configService, _presetManager, _credentialProvider);
+            if (_vaultService != null)
+                _jobExecutionService.VaultCredentialProvider = new VaultCredentialProvider(_vaultService);
             _jobHistoryService = new JobHistoryService();
             _jobHistoryService.SubscribeTo(_jobExecutionService, ResolveSchedulerHistoryRetention);
 

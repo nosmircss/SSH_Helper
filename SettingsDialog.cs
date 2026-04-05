@@ -1,6 +1,7 @@
 using SSH_Helper.Models;
 using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
+using SSH_Helper.Services.Vault;
 using SSH_Helper.UI;
 
 namespace SSH_Helper
@@ -14,6 +15,7 @@ namespace SSH_Helper
         private readonly PresetManager? _presetManager;
         private readonly IBrowserCallbackWebViewProfileManager _browserCallbackProfileManager;
         private readonly ISettingsDialogPromptService _promptService;
+        private readonly ICredentialProvider? _credentialProvider;
 
         private readonly BorderlessTabControl _tabControl;
 
@@ -97,6 +99,34 @@ namespace SSH_Helper
         private TextBox _txtPreviewCode = null!;
         private Button _btnPreviewButton = null!;
 
+        // Vault tab controls
+        private CheckBox _chkVaultEnabled = null!;
+        private ListBox _lstVaultProfiles = null!;
+        private Button _btnVaultAdd = null!;
+        private Button _btnVaultRemove = null!;
+        private TextBox _txtVaultProfileName = null!;
+        private TextBox _txtVaultAddress = null!;
+        private TextBox _txtVaultNamespace = null!;
+        private TextBox _txtVaultMountPath = null!;
+        private ComboBox _cmbVaultKvVersion = null!;
+        private ComboBox _cmbVaultAuthMethod = null!;
+        private TextBox _txtVaultToken = null!;
+        private TextBox _txtVaultAppRoleId = null!;
+        private TextBox _txtVaultAppRoleSecret = null!;
+        private TextBox _txtVaultLdapUsername = null!;
+        private TextBox _txtVaultLdapPassword = null!;
+        private TextBox _txtVaultCaCertPath = null!;
+        private Button _btnVaultBrowseCaCert = null!;
+        private CheckBox _chkVaultSkipTls = null!;
+        private NumericUpDown _numVaultCacheTtl = null!;
+        private CheckBox _chkVaultDefault = null!;
+        private Button _btnVaultTestConnection = null!;
+        private Panel _pnlVaultAuthToken = null!;
+        private Panel _pnlVaultAuthAppRole = null!;
+        private Panel _pnlVaultAuthLdap = null!;
+        private readonly List<VaultProfileConfig> _vaultProfiles = new();
+        private bool _suppressVaultProfileSelection;
+
         // Reset buttons
         private Button _btnResetDefaults = null!;
         private Button _btnResetPresetTimeouts = null!;
@@ -110,13 +140,14 @@ namespace SSH_Helper
         private List<Font> _previewFonts = new();
         public bool PresetTimeoutsWereCleared { get; private set; }
 
-        public SettingsDialog(ConfigurationService configService, PresetManager? presetManager = null, bool darkMode = false)
+        public SettingsDialog(ConfigurationService configService, PresetManager? presetManager = null, bool darkMode = false, ICredentialProvider? credentialProvider = null)
             : this(
                 configService,
                 presetManager,
                 darkMode,
                 BrowserCallbackWebViewProfileManager.Shared,
-                new SettingsDialogPromptService())
+                new SettingsDialogPromptService(),
+                credentialProvider)
         {
         }
 
@@ -125,12 +156,14 @@ namespace SSH_Helper
             PresetManager? presetManager,
             bool darkMode,
             IBrowserCallbackWebViewProfileManager browserCallbackProfileManager,
-            ISettingsDialogPromptService promptService)
+            ISettingsDialogPromptService promptService,
+            ICredentialProvider? credentialProvider = null)
         {
             _configService = configService;
             _presetManager = presetManager;
             _browserCallbackProfileManager = browserCallbackProfileManager ?? throw new ArgumentNullException(nameof(browserCallbackProfileManager));
             _promptService = promptService ?? throw new ArgumentNullException(nameof(promptService));
+            _credentialProvider = credentialProvider;
 
             // Enable DPI scaling - must be set before any Size/Location values
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -166,6 +199,10 @@ namespace SSH_Helper
             // === Appearance Tab (with scrollable panel) ===
             var tabAppearance = CreateAppearanceTab();
             _tabControl.TabPages.Add(tabAppearance);
+
+            // === Vault Tab ===
+            var tabVault = CreateVaultTab();
+            _tabControl.TabPages.Add(tabVault);
 
             // Buttons
             _btnSave = new Button
@@ -246,6 +283,10 @@ namespace SSH_Helper
             DialogTheme.StyleButton(_btnResetPresetTimeouts, darkMode);
             DialogTheme.StyleButton(_btnClearEmbeddedBrowserData, darkMode);
             DialogTheme.StyleButton(_btnChooseAccentColor, darkMode);
+            DialogTheme.StyleButton(_btnVaultAdd, darkMode);
+            DialogTheme.StyleButton(_btnVaultRemove, darkMode);
+            DialogTheme.StyleButton(_btnVaultBrowseCaCert, darkMode);
+            DialogTheme.StyleButton(_btnVaultTestConnection, darkMode);
             DialogTheme.SetDarkTitleBar(this, darkMode);
             DialogTheme.StyleTabControl(_tabControl, darkMode);
 
@@ -386,6 +427,521 @@ namespace SSH_Helper
 
             tabGeneral.Controls.Add(flow);
             return tabGeneral;
+        }
+
+        private TabPage CreateVaultTab()
+        {
+            var tabVault = new TabPage("Vault");
+            var mainSplit = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Vertical,
+                SplitterDistance = 160,
+                FixedPanel = FixedPanel.Panel1
+            };
+
+            // Left panel: enable checkbox + profile list + add/remove
+            var leftPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8) };
+            _chkVaultEnabled = new CheckBox
+            {
+                Name = "chkVaultEnabled",
+                Text = "Enable Vault",
+                AutoSize = true,
+                Dock = DockStyle.Top
+            };
+            _chkVaultEnabled.CheckedChanged += (_, _) => UpdateVaultControlStates();
+
+            _lstVaultProfiles = new ListBox
+            {
+                Dock = DockStyle.Fill,
+                IntegralHeight = false,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            _lstVaultProfiles.SelectedIndexChanged += LstVaultProfiles_SelectedIndexChanged;
+
+            var profileButtonPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                Padding = new Padding(0, 4, 0, 0)
+            };
+            _btnVaultAdd = new Button { Text = "Add", Width = 70, Height = 26 };
+            _btnVaultAdd.Click += BtnVaultAdd_Click;
+            _btnVaultRemove = new Button { Text = "Remove", Width = 70, Height = 26 };
+            _btnVaultRemove.Click += BtnVaultRemove_Click;
+            profileButtonPanel.Controls.Add(_btnVaultAdd);
+            profileButtonPanel.Controls.Add(_btnVaultRemove);
+
+            leftPanel.Controls.Add(_lstVaultProfiles);
+            leftPanel.Controls.Add(profileButtonPanel);
+            leftPanel.Controls.Add(_chkVaultEnabled);
+
+            // Right panel: profile detail fields
+            var rightFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(8, 8, 8, 8)
+            };
+            _scrollableFlowPanels.Add(rightFlow);
+
+            var sectionFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+
+            TableLayoutPanel LabeledTextBox(string labelText, string textBoxName, out TextBox textBox, bool isPassword = false)
+            {
+                var row = new TableLayoutPanel
+                {
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    ColumnCount = 2,
+                    RowCount = 1,
+                    Margin = new Padding(0, 2, 0, 2),
+                    Width = 430
+                };
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                var lbl = new Label { Text = labelText, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) };
+                textBox = new TextBox
+                {
+                    Name = textBoxName,
+                    Dock = DockStyle.Fill,
+                    UseSystemPasswordChar = isPassword
+                };
+                row.Controls.Add(lbl, 0, 0);
+                row.Controls.Add(textBox, 1, 0);
+                return row;
+            }
+
+            // Connection
+            rightFlow.Controls.Add(new Label { Text = "Connection", Font = sectionFont, AutoSize = true, Margin = new Padding(0, 0, 0, 4) });
+            rightFlow.Controls.Add(LabeledTextBox("Profile Name:", "txtVaultProfileName", out _txtVaultProfileName));
+            rightFlow.Controls.Add(LabeledTextBox("Address:", "txtVaultAddress", out _txtVaultAddress));
+            rightFlow.Controls.Add(LabeledTextBox("Namespace:", "txtVaultNamespace", out _txtVaultNamespace));
+            rightFlow.Controls.Add(LabeledTextBox("Mount Path:", "txtVaultMountPath", out _txtVaultMountPath));
+
+            // KV Version combo
+            var kvVersionRow = new TableLayoutPanel
+            {
+                AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 2, 0, 2), Width = 430
+            };
+            kvVersionRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            kvVersionRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            kvVersionRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            kvVersionRow.Controls.Add(new Label { Text = "KV Version:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
+            _cmbVaultKvVersion = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+            _cmbVaultKvVersion.Items.AddRange(new object[] { "Auto-detect", "v1", "v2" });
+            _cmbVaultKvVersion.SelectedIndex = 0;
+            kvVersionRow.Controls.Add(_cmbVaultKvVersion, 1, 0);
+            rightFlow.Controls.Add(kvVersionRow);
+
+            // Authentication
+            rightFlow.Controls.Add(new Label { Text = "Authentication", Font = sectionFont, AutoSize = true, Margin = new Padding(0, 10, 0, 4) });
+
+            var authMethodRow = new TableLayoutPanel
+            {
+                AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 2, 0, 2), Width = 430
+            };
+            authMethodRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            authMethodRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            authMethodRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            authMethodRow.Controls.Add(new Label { Text = "Auth Method:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
+            _cmbVaultAuthMethod = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+            _cmbVaultAuthMethod.Items.AddRange(new object[] { "Token", "AppRole", "LDAP" });
+            _cmbVaultAuthMethod.SelectedIndex = 0;
+            _cmbVaultAuthMethod.SelectedIndexChanged += (_, _) => UpdateVaultAuthFieldVisibility();
+            authMethodRow.Controls.Add(_cmbVaultAuthMethod, 1, 0);
+            rightFlow.Controls.Add(authMethodRow);
+
+            // Token auth panel
+            _pnlVaultAuthToken = new Panel { AutoSize = true, Width = 430 };
+            var tokenLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+            tokenLayout.Controls.Add(LabeledTextBox("Token:", "txtVaultToken", out _txtVaultToken, isPassword: true));
+            _pnlVaultAuthToken.Controls.Add(tokenLayout);
+            rightFlow.Controls.Add(_pnlVaultAuthToken);
+
+            // AppRole auth panel
+            _pnlVaultAuthAppRole = new Panel { AutoSize = true, Width = 430, Visible = false };
+            var appRoleLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+            appRoleLayout.Controls.Add(LabeledTextBox("Role ID:", "txtVaultAppRoleId", out _txtVaultAppRoleId));
+            appRoleLayout.Controls.Add(LabeledTextBox("Secret ID:", "txtVaultAppRoleSecret", out _txtVaultAppRoleSecret, isPassword: true));
+            _pnlVaultAuthAppRole.Controls.Add(appRoleLayout);
+            rightFlow.Controls.Add(_pnlVaultAuthAppRole);
+
+            // LDAP auth panel
+            _pnlVaultAuthLdap = new Panel { AutoSize = true, Width = 430, Visible = false };
+            var ldapLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+            ldapLayout.Controls.Add(LabeledTextBox("Username:", "txtVaultLdapUsername", out _txtVaultLdapUsername));
+            ldapLayout.Controls.Add(LabeledTextBox("Password:", "txtVaultLdapPassword", out _txtVaultLdapPassword, isPassword: true));
+            _pnlVaultAuthLdap.Controls.Add(ldapLayout);
+            rightFlow.Controls.Add(_pnlVaultAuthLdap);
+
+            // TLS
+            rightFlow.Controls.Add(new Label { Text = "TLS", Font = sectionFont, AutoSize = true, Margin = new Padding(0, 10, 0, 4) });
+
+            // CA cert path with browse button
+            var caCertRow = new TableLayoutPanel
+            {
+                AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 3, RowCount = 1, Margin = new Padding(0, 2, 0, 2), Width = 430
+            };
+            caCertRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            caCertRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            caCertRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
+            caCertRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            caCertRow.Controls.Add(new Label { Text = "CA Certificate:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
+            _txtVaultCaCertPath = new TextBox { Dock = DockStyle.Fill };
+            caCertRow.Controls.Add(_txtVaultCaCertPath, 1, 0);
+            _btnVaultBrowseCaCert = new Button { Text = "Browse...", Width = 75, Height = 23 };
+            _btnVaultBrowseCaCert.Click += BtnVaultBrowseCaCert_Click;
+            caCertRow.Controls.Add(_btnVaultBrowseCaCert, 2, 0);
+            rightFlow.Controls.Add(caCertRow);
+
+            _chkVaultSkipTls = new CheckBox { Text = "Skip TLS verification (development only)", AutoSize = true, Margin = new Padding(0, 2, 0, 2) };
+            rightFlow.Controls.Add(_chkVaultSkipTls);
+
+            // Cache
+            rightFlow.Controls.Add(new Label { Text = "Cache", Font = sectionFont, AutoSize = true, Margin = new Padding(0, 10, 0, 4) });
+            var cacheTtlRow = new TableLayoutPanel
+            {
+                AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 2, 0, 2), Width = 430
+            };
+            cacheTtlRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            cacheTtlRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+            cacheTtlRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            cacheTtlRow.Controls.Add(new Label { Text = "Cache TTL (sec):", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
+            _numVaultCacheTtl = new NumericUpDown { Minimum = 0, Maximum = 86400, Value = 300, Width = 90, TextAlign = HorizontalAlignment.Right };
+            cacheTtlRow.Controls.Add(_numVaultCacheTtl, 1, 0);
+            rightFlow.Controls.Add(cacheTtlRow);
+
+            // Default + Test
+            _chkVaultDefault = new CheckBox { Text = "Set as default profile", AutoSize = true, Margin = new Padding(0, 8, 0, 2) };
+            rightFlow.Controls.Add(_chkVaultDefault);
+
+            _btnVaultTestConnection = new Button { Text = "Test Connection", AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+            _btnVaultTestConnection.Click += BtnVaultTestConnection_Click;
+            rightFlow.Controls.Add(_btnVaultTestConnection);
+
+            mainSplit.Panel1.Controls.Add(leftPanel);
+            mainSplit.Panel2.Controls.Add(rightFlow);
+            tabVault.Controls.Add(mainSplit);
+
+            return tabVault;
+        }
+
+        private void UpdateVaultControlStates()
+        {
+            bool enabled = _chkVaultEnabled.Checked;
+            _lstVaultProfiles.Enabled = enabled;
+            _btnVaultAdd.Enabled = enabled;
+            _btnVaultRemove.Enabled = enabled && _lstVaultProfiles.SelectedIndex >= 0;
+            SetVaultDetailFieldsEnabled(enabled && _lstVaultProfiles.SelectedIndex >= 0);
+        }
+
+        private void SetVaultDetailFieldsEnabled(bool enabled)
+        {
+            _txtVaultProfileName.Enabled = enabled;
+            _txtVaultAddress.Enabled = enabled;
+            _txtVaultNamespace.Enabled = enabled;
+            _txtVaultMountPath.Enabled = enabled;
+            _cmbVaultKvVersion.Enabled = enabled;
+            _cmbVaultAuthMethod.Enabled = enabled;
+            _txtVaultToken.Enabled = enabled;
+            _txtVaultAppRoleId.Enabled = enabled;
+            _txtVaultAppRoleSecret.Enabled = enabled;
+            _txtVaultLdapUsername.Enabled = enabled;
+            _txtVaultLdapPassword.Enabled = enabled;
+            _txtVaultCaCertPath.Enabled = enabled;
+            _btnVaultBrowseCaCert.Enabled = enabled;
+            _chkVaultSkipTls.Enabled = enabled;
+            _numVaultCacheTtl.Enabled = enabled;
+            _chkVaultDefault.Enabled = enabled;
+            _btnVaultTestConnection.Enabled = enabled;
+        }
+
+        private void UpdateVaultAuthFieldVisibility()
+        {
+            var method = _cmbVaultAuthMethod.SelectedIndex;
+            _pnlVaultAuthToken.Visible = method == 0;
+            _pnlVaultAuthAppRole.Visible = method == 1;
+            _pnlVaultAuthLdap.Visible = method == 2;
+        }
+
+        private void LstVaultProfiles_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            if (_suppressVaultProfileSelection)
+                return;
+
+            PersistCurrentVaultProfile();
+
+            if (_lstVaultProfiles.SelectedIndex >= 0 && _lstVaultProfiles.SelectedIndex < _vaultProfiles.Count)
+            {
+                LoadVaultProfileDetails(_vaultProfiles[_lstVaultProfiles.SelectedIndex]);
+            }
+
+            UpdateVaultControlStates();
+        }
+
+        private void BtnVaultAdd_Click(object? sender, EventArgs e)
+        {
+            PersistCurrentVaultProfile();
+            var name = $"profile-{_vaultProfiles.Count + 1}";
+            var profile = new VaultProfileConfig { Name = name, MountPath = "secret" };
+            _vaultProfiles.Add(profile);
+            _suppressVaultProfileSelection = true;
+            _lstVaultProfiles.Items.Add(name);
+            _suppressVaultProfileSelection = false;
+            _lstVaultProfiles.SelectedIndex = _lstVaultProfiles.Items.Count - 1;
+        }
+
+        private void BtnVaultRemove_Click(object? sender, EventArgs e)
+        {
+            var index = _lstVaultProfiles.SelectedIndex;
+            if (index < 0 || index >= _vaultProfiles.Count)
+                return;
+
+            var profileName = _vaultProfiles[index].Name;
+
+            // Remove stored credentials for this profile
+            if (_credentialProvider != null)
+            {
+                _credentialProvider.DeletePassword(CredentialTargets.VaultAuthTarget(profileName, "token"));
+                _credentialProvider.DeletePassword(CredentialTargets.VaultAuthTarget(profileName, "approle_secret"));
+                _credentialProvider.DeletePassword(CredentialTargets.VaultAuthTarget(profileName, "ldap_password"));
+            }
+
+            _vaultProfiles.RemoveAt(index);
+            _suppressVaultProfileSelection = true;
+            _lstVaultProfiles.Items.RemoveAt(index);
+            _suppressVaultProfileSelection = false;
+
+            if (_lstVaultProfiles.Items.Count > 0)
+                _lstVaultProfiles.SelectedIndex = Math.Min(index, _lstVaultProfiles.Items.Count - 1);
+            else
+                ClearVaultProfileDetails();
+
+            UpdateVaultControlStates();
+        }
+
+        private void LoadVaultProfileDetails(VaultProfileConfig profile)
+        {
+            _txtVaultProfileName.Text = profile.Name;
+            _txtVaultAddress.Text = profile.Address;
+            _txtVaultNamespace.Text = profile.Namespace;
+            _txtVaultMountPath.Text = profile.MountPath;
+            _cmbVaultKvVersion.SelectedIndex = (int)profile.KvVersion;
+            _cmbVaultAuthMethod.SelectedIndex = (int)profile.AuthMethod;
+            _txtVaultAppRoleId.Text = profile.AppRoleRoleId;
+            _txtVaultLdapUsername.Text = profile.LdapUsername;
+            _numVaultCacheTtl.Value = Math.Clamp(profile.CacheTtlSeconds, 0, 86400);
+            _txtVaultCaCertPath.Text = profile.CaCertificatePath;
+            _chkVaultSkipTls.Checked = profile.SkipTlsVerification;
+
+            var config = _configService.GetCurrent();
+            _chkVaultDefault.Checked = string.Equals(profile.Name, config.Vault.DefaultProfileName, StringComparison.OrdinalIgnoreCase);
+
+            // Load secrets from credential manager
+            _txtVaultToken.Text = string.Empty;
+            _txtVaultAppRoleSecret.Text = string.Empty;
+            _txtVaultLdapPassword.Text = string.Empty;
+
+            if (_credentialProvider != null)
+            {
+                if (_credentialProvider.TryGetPassword(CredentialTargets.VaultAuthTarget(profile.Name, "token"), out _, out var token))
+                    _txtVaultToken.Text = token;
+                if (_credentialProvider.TryGetPassword(CredentialTargets.VaultAuthTarget(profile.Name, "approle_secret"), out _, out var secret))
+                    _txtVaultAppRoleSecret.Text = secret;
+                if (_credentialProvider.TryGetPassword(CredentialTargets.VaultAuthTarget(profile.Name, "ldap_password"), out _, out var ldapPass))
+                    _txtVaultLdapPassword.Text = ldapPass;
+            }
+
+            UpdateVaultAuthFieldVisibility();
+        }
+
+        private void ClearVaultProfileDetails()
+        {
+            _txtVaultProfileName.Text = string.Empty;
+            _txtVaultAddress.Text = string.Empty;
+            _txtVaultNamespace.Text = string.Empty;
+            _txtVaultMountPath.Text = "secret";
+            _cmbVaultKvVersion.SelectedIndex = 0;
+            _cmbVaultAuthMethod.SelectedIndex = 0;
+            _txtVaultToken.Text = string.Empty;
+            _txtVaultAppRoleId.Text = string.Empty;
+            _txtVaultAppRoleSecret.Text = string.Empty;
+            _txtVaultLdapUsername.Text = string.Empty;
+            _txtVaultLdapPassword.Text = string.Empty;
+            _txtVaultCaCertPath.Text = string.Empty;
+            _chkVaultSkipTls.Checked = false;
+            _numVaultCacheTtl.Value = 300;
+            _chkVaultDefault.Checked = false;
+            UpdateVaultAuthFieldVisibility();
+        }
+
+        private void PersistCurrentVaultProfile()
+        {
+            var index = _lstVaultProfiles.SelectedIndex;
+            if (index < 0 || index >= _vaultProfiles.Count)
+                return;
+
+            var profile = _vaultProfiles[index];
+            var oldName = profile.Name;
+            profile.Name = _txtVaultProfileName.Text.Trim();
+            profile.Address = _txtVaultAddress.Text.Trim();
+            profile.Namespace = _txtVaultNamespace.Text.Trim();
+            profile.MountPath = string.IsNullOrWhiteSpace(_txtVaultMountPath.Text) ? "secret" : _txtVaultMountPath.Text.Trim();
+            profile.KvVersion = (VaultKvVersion)_cmbVaultKvVersion.SelectedIndex;
+            profile.AuthMethod = (VaultAuthMethod)_cmbVaultAuthMethod.SelectedIndex;
+            profile.AppRoleRoleId = _txtVaultAppRoleId.Text.Trim();
+            profile.LdapUsername = _txtVaultLdapUsername.Text.Trim();
+            profile.CacheTtlSeconds = (int)_numVaultCacheTtl.Value;
+            profile.CaCertificatePath = _txtVaultCaCertPath.Text.Trim();
+            profile.SkipTlsVerification = _chkVaultSkipTls.Checked;
+
+            // Update list display if name changed
+            if (!string.Equals(oldName, profile.Name, StringComparison.Ordinal))
+            {
+                _suppressVaultProfileSelection = true;
+                _lstVaultProfiles.Items[index] = profile.Name;
+                _suppressVaultProfileSelection = false;
+            }
+
+            // Store secrets in credential manager
+            if (_credentialProvider != null && !string.IsNullOrEmpty(profile.Name))
+            {
+                SaveVaultCredential(profile.Name, "token", _txtVaultToken.Text);
+                SaveVaultCredential(profile.Name, "approle_secret", _txtVaultAppRoleSecret.Text);
+                SaveVaultCredential(profile.Name, "ldap_password", _txtVaultLdapPassword.Text);
+            }
+        }
+
+        private void SaveVaultCredential(string profileName, string authType, string value)
+        {
+            var target = CredentialTargets.VaultAuthTarget(profileName, authType);
+            if (string.IsNullOrEmpty(value))
+                _credentialProvider?.DeletePassword(target);
+            else
+                _credentialProvider?.SavePassword(target, string.Empty, value);
+        }
+
+        private void BtnVaultBrowseCaCert_Click(object? sender, EventArgs e)
+        {
+            using var dialog = new OpenFileDialog
+            {
+                Title = "Select CA Certificate",
+                Filter = "Certificate files (*.pem;*.crt;*.cer)|*.pem;*.crt;*.cer|All files (*.*)|*.*"
+            };
+
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+                _txtVaultCaCertPath.Text = dialog.FileName;
+        }
+
+        private async void BtnVaultTestConnection_Click(object? sender, EventArgs e)
+        {
+            PersistCurrentVaultProfile();
+            var index = _lstVaultProfiles.SelectedIndex;
+            if (index < 0 || index >= _vaultProfiles.Count)
+                return;
+
+            var profile = _vaultProfiles[index];
+            _btnVaultTestConnection.Enabled = false;
+            _btnVaultTestConnection.Text = "Testing...";
+            try
+            {
+                var testSettings = new VaultSettings
+                {
+                    Enabled = true,
+                    Profiles = new List<VaultProfileConfig> { profile },
+                    DefaultProfileName = profile.Name
+                };
+
+                using var testService = new VaultService(
+                    testSettings,
+                    tokenProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultToken.Text) ? _txtVaultToken.Text : null,
+                    secretIdProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultAppRoleSecret.Text) ? _txtVaultAppRoleSecret.Text : null,
+                    ldapPasswordProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultLdapPassword.Text) ? _txtVaultLdapPassword.Text : null);
+
+                await testService.TestConnectionAsync(profile.Name);
+                MessageBox.Show(this, "Connection successful.", "Vault Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Connection failed:\n{ex.Message}", "Vault Test", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                _btnVaultTestConnection.Text = "Test Connection";
+                _btnVaultTestConnection.Enabled = true;
+            }
+        }
+
+        private void LoadVaultSettings()
+        {
+            var config = _configService.GetCurrent();
+            _chkVaultEnabled.Checked = config.Vault.Enabled;
+            _vaultProfiles.Clear();
+            _lstVaultProfiles.Items.Clear();
+
+            foreach (var p in config.Vault.Profiles)
+            {
+                var clone = new VaultProfileConfig
+                {
+                    Name = p.Name,
+                    Address = p.Address,
+                    Namespace = p.Namespace,
+                    MountPath = p.MountPath,
+                    KvVersion = p.KvVersion,
+                    AuthMethod = p.AuthMethod,
+                    AppRoleRoleId = p.AppRoleRoleId,
+                    LdapUsername = p.LdapUsername,
+                    CacheTtlSeconds = p.CacheTtlSeconds,
+                    CaCertificatePath = p.CaCertificatePath,
+                    SkipTlsVerification = p.SkipTlsVerification
+                };
+                _vaultProfiles.Add(clone);
+                _lstVaultProfiles.Items.Add(clone.Name);
+            }
+
+            if (_lstVaultProfiles.Items.Count > 0)
+                _lstVaultProfiles.SelectedIndex = 0;
+            else
+                ClearVaultProfileDetails();
+
+            UpdateVaultControlStates();
+        }
+
+        private void SaveVaultSettings(AppConfiguration config)
+        {
+            PersistCurrentVaultProfile();
+            config.Vault.Enabled = _chkVaultEnabled.Checked;
+            config.Vault.Profiles = _vaultProfiles.Select(p => new VaultProfileConfig
+            {
+                Name = p.Name,
+                Address = p.Address,
+                Namespace = p.Namespace,
+                MountPath = p.MountPath,
+                KvVersion = p.KvVersion,
+                AuthMethod = p.AuthMethod,
+                AppRoleRoleId = p.AppRoleRoleId,
+                LdapUsername = p.LdapUsername,
+                CacheTtlSeconds = p.CacheTtlSeconds,
+                CaCertificatePath = p.CaCertificatePath,
+                SkipTlsVerification = p.SkipTlsVerification
+            }).ToList();
+
+            // Resolve default profile name
+            var defaultProfile = _vaultProfiles.FirstOrDefault(p =>
+            {
+                var idx = _vaultProfiles.IndexOf(p);
+                return idx == _lstVaultProfiles.SelectedIndex && _chkVaultDefault.Checked;
+            });
+            config.Vault.DefaultProfileName = defaultProfile?.Name ?? (config.Vault.Profiles.Count > 0 ? config.Vault.Profiles[0].Name : "");
         }
 
         private TabPage CreateUpdatesTab()
@@ -1273,6 +1829,9 @@ namespace SSH_Helper
 
             // Appearance
             ApplyFontSettingsToControls(config.FontSettings);
+
+            // Vault
+            LoadVaultSettings();
         }
 
         private void PopulateFontComboBox(ComboBox comboBox, bool monospacedOnly)
@@ -1421,6 +1980,9 @@ namespace SSH_Helper
                 config.FontSettings.CustomAccentColor = _chkUseCustomAccent.Checked
                     ? _customAccentColor.ToArgb()
                     : null;
+
+                // Vault
+                SaveVaultSettings(config);
             });
         }
         protected override void Dispose(bool disposing)

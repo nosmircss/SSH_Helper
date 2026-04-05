@@ -49,6 +49,7 @@ namespace SSH_Helper
         private readonly Button _btnDefaultColor;
         private readonly Button _btnSave;
         private readonly Button _btnCancel;
+        private readonly ComboBox _cmbVaultProfile;
         private readonly Dictionary<string, int?> _environmentLabelColors = new(StringComparer.OrdinalIgnoreCase);
         private string? _currentEnvironmentName;
         private int? _selectedLabelColor;
@@ -140,7 +141,7 @@ namespace SSH_Helper
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 ColumnCount = 3,
-                RowCount = 3,
+                RowCount = 4,
                 Padding = new Padding(0, 10, 0, 10)
             };
             metadataPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -185,6 +186,17 @@ namespace SSH_Helper
             metadataPanel.Controls.Add(lblColor, 0, 2);
             metadataPanel.Controls.Add(colorPanel, 1, 2);
             metadataPanel.SetColumnSpan(colorPanel, 2);
+
+            var lblVaultProfile = new Label { Text = "Vault Profile:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 8, 6) };
+            _cmbVaultProfile = new ComboBox
+            {
+                Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            PopulateVaultProfileCombo();
+            metadataPanel.Controls.Add(lblVaultProfile, 0, 3);
+            metadataPanel.Controls.Add(_cmbVaultProfile, 1, 3);
+            metadataPanel.SetColumnSpan(_cmbVaultProfile, 2);
 
             var lblVariables = new Label
             {
@@ -733,6 +745,13 @@ namespace SSH_Helper
             RefreshColorPreview();
             _lstEnvironments.Invalidate();
 
+            // Vault profile
+            var profileName = environment.VaultProfileName;
+            if (!string.IsNullOrEmpty(profileName) && _cmbVaultProfile.Items.Contains(profileName))
+                _cmbVaultProfile.SelectedItem = profileName;
+            else
+                _cmbVaultProfile.SelectedIndex = 0; // "(none)"
+
             _gridVariables.Rows.Clear();
             foreach (var kvp in environment.Variables.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
             {
@@ -757,6 +776,22 @@ namespace SSH_Helper
             _lstEnvironments.HorizontalExtent = maxTextWidth + 36;
         }
 
+        private void PopulateVaultProfileCombo()
+        {
+            _cmbVaultProfile.Items.Clear();
+            _cmbVaultProfile.Items.Add("(none)");
+            var vaultSettings = _configService.GetCurrent().Vault;
+            if (vaultSettings.Enabled)
+            {
+                foreach (var profile in vaultSettings.Profiles)
+                {
+                    if (!string.IsNullOrWhiteSpace(profile.Name))
+                        _cmbVaultProfile.Items.Add(profile.Name);
+                }
+            }
+            _cmbVaultProfile.SelectedIndex = 0;
+        }
+
         private void RefreshColorPreview()
         {
             _colorPreview.BackColor = _selectedLabelColor.HasValue
@@ -771,11 +806,15 @@ namespace SSH_Helper
 
             try
             {
+                var selectedVault = _cmbVaultProfile.SelectedItem as string;
+                var vaultProfileName = selectedVault == "(none)" ? null : selectedVault;
+
                 _environmentService.UpdateEnvironmentDetails(
                     _currentEnvironmentName,
                     _txtDescription.Text,
                     _selectedLabelColor,
-                    CollectVariables());
+                    CollectVariables(),
+                    vaultProfileName);
             }
             catch
             {

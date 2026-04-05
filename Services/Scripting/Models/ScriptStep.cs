@@ -388,6 +388,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Call != null) return StepType.Call;
             if (Table != null) return StepType.Table;
             if (LocalCmd != null) return StepType.LocalCmd;
+            if (Vault != null) return StepType.Vault;
             if (ReturnFromSubroutine) return StepType.Return;
             if (DeclaredStepType != StepType.Unknown) return DeclaredStepType;
             return StepType.Unknown;

@@ -136,6 +136,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Return, new ReturnCommand() },
                 { StepType.Table, new TableCommand() },
                 { StepType.LocalCmd, new LocalCmdCommand(localCmdConfirmation) },
+                { StepType.Vault, new VaultCommand() },
             };
         }
 
