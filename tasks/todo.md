@@ -1,5 +1,20 @@
 # TODO
 
+## 212. Add rejected feature-idea tracking
+- [x] 212.1 Create `rejected_ideas.md` with a clear purpose and reusable entry template.
+- [x] 212.2 Update `CLAUDE.md` to instruct tracking rejected feature ideas in that file.
+- [x] 212.3 Verify both docs exist and contain the expected guidance.
+
+### 212 Review
+- Added root-level `rejected_ideas.md` with:
+- purpose statement,
+- required field list (`date`, `idea`, `category`, `reason`, `revisit trigger`, related refs),
+- starter `Entries` section.
+- Updated `CLAUDE.md` Development Guidelines with a new item directing assistants to log declined feature ideas in `rejected_ideas.md`.
+- Verification:
+- `Test-Path rejected_ideas.md` returned `True`.
+- `rg -n "Track rejected feature ideas|rejected_ideas.md" CLAUDE.md rejected_ideas.md` confirmed the new guidance and file content.
+
 ## 208. Add playsound QA preset using Windows media files
 - [x] 208.1 Add a `QA PlaySound [Windows]` preset in `qa_presets.json` following current QA style conventions.
 - [x] 208.2 Cover both successful playback and an intentional unsupported-extension error path with assertions.
