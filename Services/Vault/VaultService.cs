@@ -19,6 +19,7 @@ namespace SSH_Helper.Services.Vault
         private readonly Func<string, string, string?>? _tokenProvider;
         private readonly Func<string, string, string?>? _secretIdProvider;
         private readonly Func<string, string, string?>? _ldapPasswordProvider;
+        private readonly Func<string, string, string?>? _userpassPasswordProvider;
 
         private readonly Dictionary<string, VaultProfile> _profiles = new(StringComparer.OrdinalIgnoreCase);
         private readonly object _profilesLock = new();
@@ -31,13 +32,15 @@ namespace SSH_Helper.Services.Vault
             Func<VaultProfileConfig, HttpMessageHandler>? handlerFactory = null,
             Func<string, string, string?>? tokenProvider = null,
             Func<string, string, string?>? secretIdProvider = null,
-            Func<string, string, string?>? ldapPasswordProvider = null)
+            Func<string, string, string?>? ldapPasswordProvider = null,
+            Func<string, string, string?>? userpassPasswordProvider = null)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _handlerFactory = handlerFactory ?? CreateDefaultHandler;
             _tokenProvider = tokenProvider;
             _secretIdProvider = secretIdProvider;
             _ldapPasswordProvider = ldapPasswordProvider;
+            _userpassPasswordProvider = userpassPasswordProvider;
         }
 
         public bool IsEnabled => _settings.Enabled && _settings.Profiles.Count > 0;
@@ -267,6 +270,9 @@ namespace SSH_Helper.Services.Vault
                 case VaultAuthMethod.Ldap:
                     await AuthenticateWithLdapAsync(profile, ct);
                     break;
+                case VaultAuthMethod.Userpass:
+                    await AuthenticateWithUserpassAsync(profile, ct);
+                    break;
                 default:
                     throw new VaultException($"Unsupported auth method: {profile.Config.AuthMethod}");
             }
@@ -367,6 +373,48 @@ namespace SSH_Helper.Services.Vault
             ApplyNamespaceHeader(request, profile);
 
             var response = await SendWithErrorTranslationAsync(profile, request, $"auth/ldap/login/{username}", "write", ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
+            response.Dispose();
+
+            using var doc = JsonDocument.Parse(body);
+            var auth = doc.RootElement.GetProperty("auth");
+            profile.ClientToken = auth.GetProperty("client_token").GetString();
+
+            if (auth.TryGetProperty("lease_duration", out var leaseDuration))
+            {
+                var ttl = leaseDuration.GetInt64();
+                profile.TokenExpiry = ttl > 0
+                    ? DateTime.UtcNow.AddSeconds(ttl * 0.75)
+                    : DateTime.MaxValue;
+            }
+            else
+            {
+                profile.TokenExpiry = DateTime.MaxValue;
+            }
+        }
+
+        private async Task AuthenticateWithUserpassAsync(VaultProfile profile, CancellationToken ct)
+        {
+            var password = _userpassPasswordProvider?.Invoke(profile.Config.Name, "userpass");
+            if (string.IsNullOrEmpty(password))
+                throw new VaultException(
+                    $"Vault authentication failed for profile '{profile.Config.Name}' — no userpass password found in credential manager");
+
+            var username = profile.Config.UserpassUsername?.Trim();
+            if (string.IsNullOrEmpty(username))
+                throw new VaultException(
+                    $"Vault authentication failed for profile '{profile.Config.Name}' — no userpass username configured");
+
+            var payload = JsonSerializer.Serialize(new { password });
+
+            var request = new HttpRequestMessage(HttpMethod.Post, $"v1/auth/userpass/login/{Uri.EscapeDataString(username)}")
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            };
+
+            ApplyNamespaceHeader(request, profile);
+
+            var response = await SendWithErrorTranslationAsync(profile, request, $"auth/userpass/login/{username}", "write", ct);
             var body = await response.Content.ReadAsStringAsync(ct);
             response.Dispose();
 
@@ -718,7 +766,7 @@ namespace SSH_Helper.Services.Vault
                         $"Vault rejected the request for '{path}'{detail}");
                 case 401:
                     throw new VaultException(
-                        $"Vault authentication failed for profile '{profileName}'{detail} — check your token or AppRole credentials");
+                        $"Vault authentication failed for profile '{profileName}'{detail} — check your token, AppRole, LDAP, or userpass credentials");
                 case 403:
                     throw new VaultException(
                         $"Permission denied on '{path}'{detail} — check that your Vault policy grants '{capability}'");
@@ -859,3 +907,4 @@ namespace SSH_Helper.Services.Vault
         private sealed record CacheEntry(string? Value, DateTime Expiry);
     }
 }
+

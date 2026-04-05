@@ -1355,6 +1355,11 @@ namespace SSH_Helper
                 {
                     var target = CredentialTargets.VaultAuthTarget(profileName, "ldap_password");
                     return _credentialProvider?.TryGetPassword(target, out _, out var pass) == true ? pass : null;
+                },
+                userpassPasswordProvider: (profileName, _) =>
+                {
+                    var target = CredentialTargets.VaultAuthTarget(profileName, "userpass_password");
+                    return _credentialProvider?.TryGetPassword(target, out _, out var pass) == true ? pass : null;
                 });
 
             _sshService.VaultService = _vaultService;

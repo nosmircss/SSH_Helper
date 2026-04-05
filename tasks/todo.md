@@ -1,5 +1,31 @@
 # TODO
 
+## 219. Add Vault userpass authentication with portable-safe credential targets
+- [x] 219.1 Add RED tests for `VaultService` userpass login flow and missing-password failure behavior.
+- [x] 219.2 Extend Vault auth model/runtime to support `VaultAuthMethod.Userpass` (`/v1/auth/userpass/login/{username}`).
+- [x] 219.3 Extend Settings/Form wiring so userpass username/password can be configured and loaded/saved via Credential Manager.
+- [x] 219.4 Ensure userpass credential storage uses `CredentialTargets.VaultAuthTarget(...)` so portable/non-portable targets stay isolated.
+- [x] 219.5 Run focused Vault/settings/credential-target tests and record results.
+- [x] 219.6 Add review notes in this task entry with verification evidence.
+
+### 219 Review
+- Added RED coverage in `SSH_Helper.Tests/Vault/VaultServiceTests.cs` for userpass auth:
+- `UserpassAuth_GetsClientToken`
+- `UserpassAuth_MissingPassword_ThrowsFriendlyError`
+- `UserpassAuth_MissingUsername_ThrowsFriendlyError`
+- RED verification (before implementation) showed expected failures with unsupported auth method:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultServiceTests.UserpassAuth_GetsClientToken|FullyQualifiedName~VaultServiceTests.UserpassAuth_MissingPassword_ThrowsFriendlyError" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-userpass-red/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-userpass-red/` (failed `2/2` as expected).
+- Implemented userpass support end-to-end:
+- `Models/VaultSettings.cs`: added `VaultProfileConfig.UserpassUsername` and `VaultAuthMethod.Userpass = 3`.
+- `Services/Vault/VaultService.cs`: added `userpassPasswordProvider`, auth switch case, and `/v1/auth/userpass/login/{username}` flow.
+- `SettingsDialog.cs`: added `Userpass` auth panel (username/password), profile persistence, credential load/save/delete wiring.
+- `Form1.cs`: wired runtime credential retrieval through `CredentialTargets.VaultAuthTarget(profile, "userpass_password")`.
+- Added portability/isolation verification and settings persistence coverage:
+- `SSH_Helper.Tests/Vault/VaultSettingsTests.cs` now verifies userpass enum value and portable target format `SSH_Helper_Portable:vault:my-profile:userpass_password`.
+- `SSH_Helper.Tests/UI/SettingsDialogVaultTests.cs` now verifies userpass username persistence and credential-manager target storage.
+- GREEN focused verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultServiceTests|FullyQualifiedName~VaultSettingsTests|FullyQualifiedName~SettingsDialogVaultTests|FullyQualifiedName~CredentialTargetsTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-userpass-green/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-userpass-green/` (passed `50/50`).
+
 ## 218. Add native uuid() scripting function
 - [x] 218.1 Add focused RED tests covering UUID generation shape/uniqueness expectations for `uuid()`.
 - [x] 218.2 Implement `uuid()` in built-in string functions and register it in the function registry.

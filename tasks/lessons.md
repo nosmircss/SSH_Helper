@@ -7,6 +7,7 @@
 - When a user asks for regex-like shorthand in generation APIs, prefer direct char-class shorthand support (for example `[a-zA-Z0-9@#$%^]`) over forcing long explicit character strings.
 - When a user says the upstream secret schema cannot change, I must adapt Vault runtime behavior to that existing shape instead of pushing a flattening/migration workaround.
 - When a user reports Vault writes still produce escaped JSON strings, I must test and harden the exact write payload coercion path (including already-escaped array/object text), not assume the first structured-value fix covers all real data states.
+- When adding a new credential type, I must verify portable/non-portable isolation by using `CredentialTargets.*` target builders and add an explicit portable-prefix regression test.
 
 ## 2026-04-04
 - When `localcmd` command banners can include multiline command text, I must format the displayed command with explicit line-break markers (`ScriptingHelpers.FormatForDisplay`) so output surfaces never visually merge adjacent tokens (for example `utf8notepad`).

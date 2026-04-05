@@ -64,6 +64,12 @@ namespace SSH_Helper.Models
         public string LdapUsername { get; set; } = "";
 
         /// <summary>
+        /// Userpass username (used when <see cref="AuthMethod"/> is <see cref="VaultAuthMethod.Userpass"/>).
+        /// The password is stored in Windows Credential Manager.
+        /// </summary>
+        public string UserpassUsername { get; set; } = "";
+
+        /// <summary>
         /// How long (in seconds) to cache retrieved secrets before re-fetching. Default: 300 (5 minutes).
         /// </summary>
         public int CacheTtlSeconds { get; set; } = 300;
@@ -96,7 +102,10 @@ namespace SSH_Helper.Models
         AppRole = 1,
 
         /// <summary>LDAP authentication. Username stored in config; password in Credential Manager.</summary>
-        Ldap = 2
+        Ldap = 2,
+
+        /// <summary>Userpass authentication. Username stored in config; password in Credential Manager.</summary>
+        Userpass = 3
     }
 
     /// <summary>

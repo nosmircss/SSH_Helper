@@ -30,6 +30,7 @@ public class VaultSettingsTests
         profile.AuthMethod.Should().Be(VaultAuthMethod.Token);
         profile.AppRoleRoleId.Should().BeEmpty();
         profile.LdapUsername.Should().BeEmpty();
+        profile.UserpassUsername.Should().BeEmpty();
         profile.CacheTtlSeconds.Should().Be(300);
         profile.CaCertificatePath.Should().BeEmpty();
         profile.SkipTlsVerification.Should().BeFalse();
@@ -54,6 +55,7 @@ public class VaultSettingsTests
                     AuthMethod = VaultAuthMethod.AppRole,
                     AppRoleRoleId = "my-role-id",
                     LdapUsername = "svc-account",
+                    UserpassUsername = "svc-userpass",
                     CacheTtlSeconds = 600,
                     CaCertificatePath = "/etc/ssl/vault-ca.pem",
                     SkipTlsVerification = true,
@@ -77,6 +79,7 @@ public class VaultSettingsTests
         profile.AuthMethod.Should().Be(VaultAuthMethod.AppRole);
         profile.AppRoleRoleId.Should().Be("my-role-id");
         profile.LdapUsername.Should().Be("svc-account");
+        profile.UserpassUsername.Should().Be("svc-userpass");
         profile.CacheTtlSeconds.Should().Be(600);
         profile.CaCertificatePath.Should().Be("/etc/ssl/vault-ca.pem");
         profile.SkipTlsVerification.Should().BeTrue();
@@ -173,6 +176,21 @@ public class VaultSettingsTests
         ((int)VaultAuthMethod.Token).Should().Be(0);
         ((int)VaultAuthMethod.AppRole).Should().Be(1);
         ((int)VaultAuthMethod.Ldap).Should().Be(2);
+        ((int)VaultAuthMethod.Userpass).Should().Be(3);
+    }
+
+    [Fact]
+    public void VaultAuthMethod_UserpassValue_IsDefined()
+    {
+        Enum.IsDefined(typeof(VaultAuthMethod), 3).Should().BeTrue();
+    }
+
+    [Fact]
+    public void VaultAuthTarget_Userpass_PortableBuild_UsesPortablePrefix()
+    {
+        var target = CredentialTargets.BuildVaultAuthTarget(portableBuild: true, "my-profile", "userpass_password");
+
+        target.Should().Be("SSH_Helper_Portable:vault:my-profile:userpass_password");
     }
 
     [Fact]

@@ -1,5 +1,194 @@
 # Changelog
 
+## Changes Since `fe629ed` (0.51.14)
+
+### HashiCorp Vault Integration
+
+Full integration with HashiCorp Vault for secret management, available as both a YAML scripting command and a credential provider for jobs and environments.
+
+**Vault Service** (`Services/Vault/VaultService.cs`) — Core client supporting KV v1 and v2 secrets engines with automatic version detection. Operations include read (single key, multi-key), write, patch (native v2 PATCH with read-modify-write fallback for v1), and list. Per-profile secret caching with configurable TTL (default 300s) reduces API calls during script execution.
+
+**Authentication** — Three methods via `VaultAuthMethod` enum:
+
+| Method | Config Storage | Credential Storage |
+|--------|---------------|-------------------|
+| `Token` | - | Windows Credential Manager |
+| `AppRole` | Role ID in config | Secret ID in Windows Credential Manager |
+| `Ldap` | Username in config | Password in Windows Credential Manager |
+
+**Named profiles** — `VaultSettings` supports multiple named connection profiles (`VaultProfileConfig`) with per-profile address, namespace (Enterprise), mount path, KV version, auth method, TLS CA certificate path, and `SkipTlsVerification` for dev environments. A default profile is configurable globally and overridable per environment.
+
+**`vault` scripting command** (`Services/Scripting/Commands/VaultCommand.cs`) — Reads, writes, or patches secrets from within YAML scripts:
+
+```yaml
+# Read a single key
+- vault:
+    path: ssh/creds/production
+    key: password
+    into: ssh_pass
+    profile: prod
+
+# Read multiple keys
+- vault:
+    path: ssh/creds/production
+    keys:
+      username: ssh_user
+      password: ssh_pass
+
+# Write secrets (supports structured JSON values)
+- vault:
+    path: app/config/myservice
+    write:
+      api_key: "{{generated_key}}"
+      metadata: '{"env": "prod", "version": 2}'
+
+# Patch (merge with existing)
+- vault:
+    path: app/config/myservice
+    patch:
+      api_key: "{{new_key}}"
+```
+
+Write and patch operations resolve structured JSON values — if a value parses as a JSON object or array, it is sent as structured data rather than a string. This includes recovery for previously-stringified payloads with escaped quotes.
+
+**`vault()` inline function** (`Services/Scripting/Functions/VaultFunctions.cs`) — Read secrets inline within expressions:
+
+```yaml
+- send: "configure password {{vault('ssh/creds/router', 'password')}}"
+- set:
+    keys: "{{vault_list('ssh/creds/')}}"
+    cleared: "{{vault_clear_cache()}}"
+```
+
+Three functions registered: `vault(path, key [, profile])`, `vault_list(prefix [, profile])`, and `vault_clear_cache()`.
+
+**Credential provider** (`Services/VaultCredentialProvider.cs`) — Implements `ICredentialProvider` for the SSH credential resolution pipeline. Vault path syntax: `[profile@]path[#usernameKey,passwordKey]`, defaulting to `username` and `password` field names. Jobs gain `CredentialMode.Vault` with `VaultCredentialPath` and optional `VaultProfileName` on `JobDefinition`.
+
+**Environment integration** — `EnvironmentConfig.VaultProfileName` allows per-environment Vault profile override. The Environment Dialog gains a Vault Profile dropdown. `ScriptContext` exposes `VaultService` and `EnvironmentVaultProfile` so scripts resolve the correct profile for the active environment.
+
+**Settings UI** — `SettingsDialog` gains a dedicated Vault tab with profile list management (add/remove), connection details (address, namespace, mount path, KV version), auth method panels (token, AppRole, LDAP) with credential storage via `ICredentialProvider`, CA certificate browsing, TLS skip toggle, cache TTL, default profile checkbox, and a Test Connection button that verifies authentication and surfaces detailed error messages.
+
+**Flow Canvas** — `vault` block added to the `network` category in `blockDefs/registry.ts` with `keyvalue` property type support for `keys`, `write`, and `patch` maps. `FlowCanvasBridge` dispatch maps updated for import/export round-tripping.
+
+**Dependency analysis** — `ScriptDependencyAnalyzer` recognizes `vault` steps: extracts variable references from `path`, tracks defined variables from `into`/`keys`/`write`/`patch`, and correctly identifies vault steps as not requiring an SSH session.
+
+### `localcmd` Command
+
+`LocalCmdCommand` (`Services/Scripting/Commands/LocalCmdCommand.cs`) executes arbitrary local processes from within YAML scripts. Three execution modes with user-facing confirmation dialogs for security.
+
+```yaml
+# Foreground execution with output capture
+- localcmd:
+    command: "Get-Process | Select-Object -First 5"
+    shell: powershell
+    into: proc_result
+
+# Background process
+- localcmd:
+    command: "ping -t 10.0.0.1"
+    run_mode: background
+    lifetime: script
+    into: ping_proc
+
+# Interactive window
+- localcmd:
+    command: "ssh admin@10.0.0.1"
+    interactive: true
+    keep_open: true
+```
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `command` | Yes | - | Command string to execute |
+| `shell` | No | `powershell` | Shell: `powershell` or `custom` (enables `shell_path`) |
+| `shell_path` | No | - | Path to custom shell executable |
+| `args` | No | - | Additional shell arguments |
+| `env` | No | - | Environment variable overrides (dictionary) |
+| `working_dir` | No | current | Working directory for the process |
+| `interactive` | No | `false` | Launch in a visible window |
+| `keep_open` | No | `false` | Keep interactive window open after command exits |
+| `run_mode` | No | `foreground` | `foreground` or `background` |
+| `lifetime` | No | `detached` | Background process lifetime: `detached` or `script` |
+| `kill_on_cancel` | No | `false` | Kill background process on script cancellation |
+| `fail_on_nonzero` | No | `true` | Fail step on non-zero exit code |
+| `success_codes` | No | `[0]` | List of acceptable exit codes |
+| `max_output_bytes` | No | 1MB | Output capture limit with truncation marker |
+| `confirm` | No | `always` | Confirmation policy: `always`, `once`, or `never` |
+| `quiet` | No | `false` | Suppress command echo but not output |
+| `suppress` | No | `false` | Suppress all output |
+| `into` | No | - | Variable prefix for result capture |
+| `timeout` | No | - | Timeout in seconds |
+| `on_error` | No | `stop` | Error handling: `stop` or `continue` |
+
+**Execution modes:**
+
+- **Foreground** — Captures stdout/stderr with byte-level truncation. Populates `${into}_stdout`, `${into}_stderr`, `${into}_exit_code`.
+- **Background** — Launches process and returns immediately. Populates `${into}_pid`, `${into}_started`, `${into}_start_error`. Supports `lifetime: script` for automatic cleanup on script completion, and `kill_on_cancel` for cancellation-triggered termination.
+- **Interactive** — Opens a visible window (`UseShellExecute = true`). Mutually exclusive with `run_mode: background`. Populates `${into}_exit_code`.
+
+**Confirmation dialog** (`UI/LocalCmdConfirmationDialog.cs`) — Modal dialog showing the resolved command, shell, and working directory with Run/Run All/Cancel buttons. "Run All" approves all subsequent commands for the same host. Confirmation state is tracked per-host in `ScriptContext` via `LocalCmdApprovedCommands` and `LocalCmdRunAllApproved`. Dark mode support via `DialogTheme`.
+
+**Process lifecycle** — Background processes with `lifetime: script` are tracked via `BackgroundProcessesByContext` and cleaned up in `ScriptExecutor`'s `finally` block via `LocalCmdCommand.CleanupTrackedBackgroundProcesses`. App-lifetime processes are cleaned up on `AppDomain.ProcessExit`. Process abstraction via `IProcessRunner`/`IProcessHandle` interfaces enables full test isolation.
+
+**Flow Canvas** — `localcmd` block added to the `io` category with 20 configurable properties across core and advanced groups.
+
+**Dependency analysis** — `ScriptDependencyAnalyzer` recognizes `localcmd` steps: extracts variable references from `command`, `working_dir`, and `env` values, and tracks defined output variables by execution mode (foreground, background, interactive).
+
+### `uuid()` Function
+
+`uuid()` generates RFC 4122 version 4 UUIDs. Returns a lowercase hyphenated string (e.g. `550e8400-e29b-41d4-a716-446655440000`). Takes no arguments.
+
+```yaml
+- set:
+    request_id: "{{uuid()}}"
+```
+
+### `random_string()` Function Enhancement
+
+`random_string(length, charset)` now accepts an optional second argument for custom character sets, including bracket-range syntax:
+
+```yaml
+- set:
+    hex_token: "{{random_string(32, '[0-9a-f]')}}"
+    pin: "{{random_string(6, '[0-9]')}}"
+    custom: "{{random_string(16, 'ABC123!@#')}}"
+```
+
+Bracket syntax supports ranges (`a-z`, `0-9`, `A-F`) with proper edge-case handling for literal hyphens. Maximum length clamped to 4096. Uses `RandomNumberGenerator` for cryptographic randomness.
+
+### UI Changes
+
+**"Run All" button removed** — The `btnExecuteAll` button is removed from the execution panel in `Form1.Designer.cs`. Execution is streamlined to "Run Selected" and "Stop All" only.
+
+### Bug Fixes
+
+- **Flow Canvas branch ordering** — `FlowCanvasBridge` now uses numeric segment comparison (`CompareStepPathSegments`) instead of lexicographic `string.Compare` for step paths, so step index `10` is correctly treated as later than `2` when determining branch first-child connections.
+- **JSON exception handling** — Improved JSON exception handling and branch first-child ordering logic.
+
+### Dependency Analysis
+
+`ScriptDependencyAnalyzer` updated for both `localcmd` and `vault` step types. The analyzer correctly identifies scripts using only `localcmd`, `vault`, `exists`, `playsound`, `readfile`, `writefile`, or other non-SSH commands as not requiring an SSH session, enabling offline script validation.
+
+### Test Coverage
+
+| Area | Test Class |
+|------|-----------|
+| Vault command execution | `VaultCommandTests` |
+| Vault function registry | `VaultFunctionsTests` |
+| Vault inline syntax | `VaultInlineSyntaxTests` |
+| Vault YAML parsing | `VaultParserTests` |
+| Vault service (auth, KV, cache) | `VaultServiceTests` |
+| Vault credential provider | `VaultCredentialProviderTests` |
+| Vault settings model | `VaultSettingsTests` |
+| Settings dialog Vault tab | `SettingsDialogVaultTests` |
+| Job editor Vault credentials | `JobEditorDialogVaultCredentialTests` |
+| LocalCmd command execution | `LocalCmdCommandTests` |
+| LocalCmd YAML parsing | `LocalCmdParserTests` |
+| Dependency analyzer (vault/localcmd) | `ScriptDependencyAnalyzerTests` |
+| Flow Canvas bridge (vault/localcmd) | `FlowCanvasBridgeTests` |
+
+---
+
 ## Changes Since `a5e5905` (0.51.12)
 
 ### Portable Release Build

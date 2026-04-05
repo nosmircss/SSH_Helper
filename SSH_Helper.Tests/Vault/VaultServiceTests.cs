@@ -81,6 +81,14 @@ public class VaultServiceTests
         });
     }
 
+    private static HttpResponseMessage UserpassLoginResponse(string token = "s.userpass-token", int leaseDuration = 3600)
+    {
+        return JsonResponse(HttpStatusCode.OK, new
+        {
+            auth = new { client_token = token, lease_duration = leaseDuration, policies = new[] { "default" } }
+        });
+    }
+
     private static HttpResponseMessage KvV2ReadResponse(Dictionary<string, string> data)
     {
         return JsonResponse(HttpStatusCode.OK, new
@@ -171,6 +179,78 @@ public class VaultServiceTests
         var val = await svc.ReadSecretAsync("test", "app/creds", "key");
         val.Should().Be("val");
         capturedToken.Should().Be("s.approle-result");
+    }
+
+    // -- Test 2b: Userpass auth -- gets client_token from login response --
+
+    [Fact]
+    public async Task UserpassAuth_GetsClientToken()
+    {
+        var settings = CreateSettings(authMethod: VaultAuthMethod.Userpass);
+        settings.Profiles[0].UserpassUsername = "alice";
+
+        string? capturedToken = null;
+        string? capturedBody = null;
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+
+            if (path.Contains("auth/userpass/login/alice"))
+            {
+                capturedBody = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return UserpassLoginResponse("s.userpass-result");
+            }
+
+            if (path.Contains("secret/data/app/creds"))
+            {
+                capturedToken = req.Headers.GetValues("X-Vault-Token").FirstOrDefault();
+                return KvV2ReadResponse(new Dictionary<string, string> { ["key"] = "val" });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => handler,
+            userpassPasswordProvider: (_, _) => "my-userpass-password");
+
+        var val = await svc.ReadSecretAsync("test", "app/creds", "key");
+        val.Should().Be("val");
+        capturedToken.Should().Be("s.userpass-result");
+        capturedBody.Should().Contain("my-userpass-password");
+    }
+
+    // -- Test 2c: Userpass auth -- missing password fails with clear message --
+
+    [Fact]
+    public async Task UserpassAuth_MissingPassword_ThrowsFriendlyError()
+    {
+        var settings = CreateSettings(authMethod: VaultAuthMethod.Userpass);
+        settings.Profiles[0].UserpassUsername = "alice";
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => new DelegatingHandlerStub(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
+
+        var act = () => svc.ReadSecretAsync("test", "app/creds", "key");
+        await act.Should().ThrowAsync<VaultException>()
+            .WithMessage("*userpass password*credential manager*");
+    }
+
+    [Fact]
+    public async Task UserpassAuth_MissingUsername_ThrowsFriendlyError()
+    {
+        var settings = CreateSettings(authMethod: VaultAuthMethod.Userpass);
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => new DelegatingHandlerStub(_ => new HttpResponseMessage(HttpStatusCode.NotFound)),
+            userpassPasswordProvider: (_, _) => "set");
+
+        var act = () => svc.ReadSecretAsync("test", "app/creds", "key");
+        await act.Should().ThrowAsync<VaultException>()
+            .WithMessage("*userpass username configured*");
     }
 
     // -- Test 3: KV v2 auto-detection via mount tune --

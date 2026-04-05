@@ -115,6 +115,8 @@ namespace SSH_Helper
         private TextBox _txtVaultAppRoleSecret = null!;
         private TextBox _txtVaultLdapUsername = null!;
         private TextBox _txtVaultLdapPassword = null!;
+        private TextBox _txtVaultUserpassUsername = null!;
+        private TextBox _txtVaultUserpassPassword = null!;
         private TextBox _txtVaultCaCertPath = null!;
         private Button _btnVaultBrowseCaCert = null!;
         private CheckBox _chkVaultSkipTls = null!;
@@ -124,6 +126,7 @@ namespace SSH_Helper
         private Panel _pnlVaultAuthToken = null!;
         private Panel _pnlVaultAuthAppRole = null!;
         private Panel _pnlVaultAuthLdap = null!;
+        private Panel _pnlVaultAuthUserpass = null!;
         private readonly List<VaultProfileConfig> _vaultProfiles = new();
         private bool _suppressVaultProfileSelection;
         private bool _suppressVaultDefaultToggle;
@@ -555,7 +558,7 @@ namespace SSH_Helper
             authMethodRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             authMethodRow.Controls.Add(new Label { Text = "Auth Method:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
             _cmbVaultAuthMethod = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
-            _cmbVaultAuthMethod.Items.AddRange(new object[] { "Token", "AppRole", "LDAP" });
+            _cmbVaultAuthMethod.Items.AddRange(new object[] { "Token", "AppRole", "LDAP", "Userpass" });
             _cmbVaultAuthMethod.SelectedIndex = 0;
             _cmbVaultAuthMethod.SelectedIndexChanged += (_, _) => UpdateVaultAuthFieldVisibility();
             authMethodRow.Controls.Add(_cmbVaultAuthMethod, 1, 0);
@@ -583,6 +586,14 @@ namespace SSH_Helper
             ldapLayout.Controls.Add(LabeledTextBox("Password:", "txtVaultLdapPassword", out _txtVaultLdapPassword, isPassword: true));
             _pnlVaultAuthLdap.Controls.Add(ldapLayout);
             rightFlow.Controls.Add(_pnlVaultAuthLdap);
+
+            // Userpass auth panel
+            _pnlVaultAuthUserpass = new Panel { AutoSize = true, Width = 430, Visible = false };
+            var userpassLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+            userpassLayout.Controls.Add(LabeledTextBox("Username:", "txtVaultUserpassUsername", out _txtVaultUserpassUsername));
+            userpassLayout.Controls.Add(LabeledTextBox("Password:", "txtVaultUserpassPassword", out _txtVaultUserpassPassword, isPassword: true));
+            _pnlVaultAuthUserpass.Controls.Add(userpassLayout);
+            rightFlow.Controls.Add(_pnlVaultAuthUserpass);
 
             // TLS
             rightFlow.Controls.Add(new Label { Text = "TLS", Font = sectionFont, AutoSize = true, Margin = new Padding(0, 10, 0, 4) });
@@ -661,6 +672,8 @@ namespace SSH_Helper
             _txtVaultAppRoleSecret.Enabled = enabled;
             _txtVaultLdapUsername.Enabled = enabled;
             _txtVaultLdapPassword.Enabled = enabled;
+            _txtVaultUserpassUsername.Enabled = enabled;
+            _txtVaultUserpassPassword.Enabled = enabled;
             _txtVaultCaCertPath.Enabled = enabled;
             _btnVaultBrowseCaCert.Enabled = enabled;
             _chkVaultSkipTls.Enabled = enabled;
@@ -675,6 +688,7 @@ namespace SSH_Helper
             _pnlVaultAuthToken.Visible = method == 0;
             _pnlVaultAuthAppRole.Visible = method == 1;
             _pnlVaultAuthLdap.Visible = method == 2;
+            _pnlVaultAuthUserpass.Visible = method == 3;
         }
 
         private void LstVaultProfiles_SelectedIndexChanged(object? sender, EventArgs e)
@@ -744,6 +758,7 @@ namespace SSH_Helper
                 _credentialProvider.DeletePassword(CredentialTargets.VaultAuthTarget(profileName, "token"));
                 _credentialProvider.DeletePassword(CredentialTargets.VaultAuthTarget(profileName, "approle_secret"));
                 _credentialProvider.DeletePassword(CredentialTargets.VaultAuthTarget(profileName, "ldap_password"));
+                _credentialProvider.DeletePassword(CredentialTargets.VaultAuthTarget(profileName, "userpass_password"));
             }
 
             _vaultProfiles.RemoveAt(index);
@@ -784,6 +799,7 @@ namespace SSH_Helper
             _cmbVaultAuthMethod.SelectedIndex = (int)profile.AuthMethod;
             _txtVaultAppRoleId.Text = profile.AppRoleRoleId;
             _txtVaultLdapUsername.Text = profile.LdapUsername;
+            _txtVaultUserpassUsername.Text = profile.UserpassUsername;
             _numVaultCacheTtl.Value = Math.Clamp(profile.CacheTtlSeconds, 0, 86400);
             _txtVaultCaCertPath.Text = profile.CaCertificatePath;
             _chkVaultSkipTls.Checked = profile.SkipTlsVerification;
@@ -799,6 +815,7 @@ namespace SSH_Helper
             _txtVaultToken.Text = string.Empty;
             _txtVaultAppRoleSecret.Text = string.Empty;
             _txtVaultLdapPassword.Text = string.Empty;
+            _txtVaultUserpassPassword.Text = string.Empty;
 
             if (_credentialProvider != null)
             {
@@ -808,6 +825,8 @@ namespace SSH_Helper
                     _txtVaultAppRoleSecret.Text = secret;
                 if (_credentialProvider.TryGetPassword(CredentialTargets.VaultAuthTarget(profile.Name, "ldap_password"), out _, out var ldapPass))
                     _txtVaultLdapPassword.Text = ldapPass;
+                if (_credentialProvider.TryGetPassword(CredentialTargets.VaultAuthTarget(profile.Name, "userpass_password"), out _, out var userpass))
+                    _txtVaultUserpassPassword.Text = userpass;
             }
 
             UpdateVaultAuthFieldVisibility();
@@ -826,6 +845,8 @@ namespace SSH_Helper
             _txtVaultAppRoleSecret.Text = string.Empty;
             _txtVaultLdapUsername.Text = string.Empty;
             _txtVaultLdapPassword.Text = string.Empty;
+            _txtVaultUserpassUsername.Text = string.Empty;
+            _txtVaultUserpassPassword.Text = string.Empty;
             _txtVaultCaCertPath.Text = string.Empty;
             _chkVaultSkipTls.Checked = false;
             _numVaultCacheTtl.Value = 300;
@@ -853,6 +874,7 @@ namespace SSH_Helper
             profile.AuthMethod = (VaultAuthMethod)_cmbVaultAuthMethod.SelectedIndex;
             profile.AppRoleRoleId = _txtVaultAppRoleId.Text.Trim();
             profile.LdapUsername = _txtVaultLdapUsername.Text.Trim();
+            profile.UserpassUsername = _txtVaultUserpassUsername.Text.Trim();
             profile.CacheTtlSeconds = (int)_numVaultCacheTtl.Value;
             profile.CaCertificatePath = _txtVaultCaCertPath.Text.Trim();
             profile.SkipTlsVerification = _chkVaultSkipTls.Checked;
@@ -877,6 +899,7 @@ namespace SSH_Helper
                 SaveVaultCredential(profile.Name, "token", _txtVaultToken.Text);
                 SaveVaultCredential(profile.Name, "approle_secret", _txtVaultAppRoleSecret.Text);
                 SaveVaultCredential(profile.Name, "ldap_password", _txtVaultLdapPassword.Text);
+                SaveVaultCredential(profile.Name, "userpass_password", _txtVaultUserpassPassword.Text);
             }
         }
 
@@ -924,7 +947,8 @@ namespace SSH_Helper
                     testSettings,
                     tokenProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultToken.Text) ? _txtVaultToken.Text : null,
                     secretIdProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultAppRoleSecret.Text) ? _txtVaultAppRoleSecret.Text : null,
-                    ldapPasswordProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultLdapPassword.Text) ? _txtVaultLdapPassword.Text : null);
+                    ldapPasswordProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultLdapPassword.Text) ? _txtVaultLdapPassword.Text : null,
+                    userpassPasswordProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultUserpassPassword.Text) ? _txtVaultUserpassPassword.Text : null);
 
                 await testService.TestConnectionAsync(profile.Name);
                 MessageBox.Show(this, "Connection successful.", "Vault Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -964,6 +988,7 @@ namespace SSH_Helper
                     AuthMethod = p.AuthMethod,
                     AppRoleRoleId = p.AppRoleRoleId,
                     LdapUsername = p.LdapUsername,
+                    UserpassUsername = p.UserpassUsername,
                     CacheTtlSeconds = p.CacheTtlSeconds,
                     CaCertificatePath = p.CaCertificatePath,
                     SkipTlsVerification = p.SkipTlsVerification
@@ -1008,6 +1033,7 @@ namespace SSH_Helper
                 AuthMethod = p.AuthMethod,
                 AppRoleRoleId = p.AppRoleRoleId,
                 LdapUsername = p.LdapUsername,
+                UserpassUsername = p.UserpassUsername,
                 CacheTtlSeconds = p.CacheTtlSeconds,
                 CaCertificatePath = p.CaCertificatePath,
                 SkipTlsVerification = p.SkipTlsVerification

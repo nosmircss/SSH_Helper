@@ -111,6 +111,41 @@ public class SettingsDialogVaultTests : IDisposable
         config.Vault.DefaultProfileName.Should().Be("profile-a");
     }
 
+    [WinFormsFact]
+    public void SavingUserpassProfile_PersistsUsernameAndPasswordTarget()
+    {
+        SeedVaultProfiles(defaultProfileName: "profile-a");
+        var credentialProvider = new FakeCredentialProvider();
+
+        using var dialog = new SettingsDialog(
+            _configService,
+            presetManager: null,
+            darkMode: false,
+            credentialProvider: credentialProvider);
+
+        var list = GetField<ListBox>(dialog, "_lstVaultProfiles");
+        var authMethod = GetField<ComboBox>(dialog, "_cmbVaultAuthMethod");
+        var userpassUsername = GetField<TextBox>(dialog, "_txtVaultUserpassUsername");
+        var userpassPassword = GetField<TextBox>(dialog, "_txtVaultUserpassPassword");
+
+        list.SelectedIndex = 0;
+        authMethod.SelectedIndex = (int)VaultAuthMethod.Userpass;
+        userpassUsername.Text = "svc-user";
+        userpassPassword.Text = "svc-password";
+
+        InvokeMethod(dialog, "BtnSave_Click", null!, EventArgs.Empty);
+
+        var savedProfile = _configService.GetCurrent().Vault.Profiles.Single(p => p.Name == "profile-a");
+        savedProfile.AuthMethod.Should().Be(VaultAuthMethod.Userpass);
+        savedProfile.UserpassUsername.Should().Be("svc-user");
+
+        credentialProvider.TryGetPassword(
+            CredentialTargets.VaultAuthTarget("profile-a", "userpass_password"),
+            out _,
+            out var storedPassword).Should().BeTrue();
+        storedPassword.Should().Be("svc-password");
+    }
+
     private void SeedVaultProfiles(string defaultProfileName)
     {
         _configService.Update(config =>
@@ -151,5 +186,34 @@ public class SettingsDialogVaultTests : IDisposable
         var method = instance.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
         method.Should().NotBeNull($"method '{methodName}' should exist on {instance.GetType().Name}");
         method!.Invoke(instance, args);
+    }
+
+    private sealed class FakeCredentialProvider : ICredentialProvider
+    {
+        private readonly Dictionary<string, (string Username, string Password)> _store = new(StringComparer.Ordinal);
+
+        public bool IsAvailable => true;
+
+        public bool TryGetPassword(string target, out string username, out string password)
+        {
+            if (_store.TryGetValue(target, out var entry))
+            {
+                username = entry.Username;
+                password = entry.Password;
+                return true;
+            }
+
+            username = string.Empty;
+            password = string.Empty;
+            return false;
+        }
+
+        public bool SavePassword(string target, string username, string password, string? comment = null)
+        {
+            _store[target] = (username, password);
+            return true;
+        }
+
+        public bool DeletePassword(string target) => _store.Remove(target);
     }
 }
