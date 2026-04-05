@@ -894,6 +894,8 @@ namespace SSH_Helper
             var config = _configService.GetCurrent();
             _chkVaultEnabled.Checked = config.Vault.Enabled;
             _vaultProfiles.Clear();
+
+            _suppressVaultProfileSelection = true;
             _lstVaultProfiles.Items.Clear();
 
             foreach (var p in config.Vault.Profiles)
@@ -917,9 +919,16 @@ namespace SSH_Helper
             }
 
             if (_lstVaultProfiles.Items.Count > 0)
+            {
                 _lstVaultProfiles.SelectedIndex = 0;
+                _suppressVaultProfileSelection = false;
+                LoadVaultProfileDetails(_vaultProfiles[0]);
+            }
             else
+            {
+                _suppressVaultProfileSelection = false;
                 ClearVaultProfileDetails();
+            }
 
             UpdateVaultControlStates();
         }
