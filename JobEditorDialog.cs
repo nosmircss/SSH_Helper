@@ -75,9 +75,13 @@ namespace SSH_Helper
         private readonly RadioButton _rbInheritFromApp;
         private readonly RadioButton _rbStored;
         private readonly RadioButton _rbPerHostColumn;
+        private readonly RadioButton _rbVault;
         private readonly Panel _panelStoredCreds;
+        private readonly Panel _panelVaultCreds;
         private readonly TextBox _txtUsername;
         private readonly TextBox _txtPassword;
+        private readonly TextBox _txtVaultPath;
+        private readonly ComboBox _cboVaultProfileOverride;
         private readonly Label _lblStoredCredNote;
         private readonly Panel _panelPerHost;
         private bool _hasStoredPassword;
@@ -178,9 +182,13 @@ namespace SSH_Helper
             _rbInheritFromApp = new RadioButton();
             _rbStored = new RadioButton();
             _rbPerHostColumn = new RadioButton();
+            _rbVault = new RadioButton();
             _panelStoredCreds = new Panel();
+            _panelVaultCreds = new Panel();
             _txtUsername = new TextBox();
             _txtPassword = new TextBox();
+            _txtVaultPath = new TextBox();
+            _cboVaultProfileOverride = new ComboBox();
             _lblStoredCredNote = new Label();
             _panelPerHost = new Panel();
 
@@ -1058,7 +1066,7 @@ namespace SSH_Helper
             {
                 Text = "Credential Mode",
                 Location = new Point(16, yPos),
-                Size = new Size(tab.Width - 48, 110),
+                Size = new Size(tab.Width - 48, 136),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
@@ -1075,9 +1083,14 @@ namespace SSH_Helper
             _rbPerHostColumn.Location = new Point(16, 76);
             _rbPerHostColumn.AutoSize = true;
 
+            _rbVault.Text = "Credentials from Vault secret path";
+            _rbVault.Location = new Point(16, 102);
+            _rbVault.AutoSize = true;
+
             grpCredMode.Controls.Add(_rbInheritFromApp);
             grpCredMode.Controls.Add(_rbStored);
             grpCredMode.Controls.Add(_rbPerHostColumn);
+            grpCredMode.Controls.Add(_rbVault);
             tab.Controls.Add(grpCredMode);
             yPos += grpCredMode.Height + 12;
 
@@ -1135,6 +1148,53 @@ namespace SSH_Helper
             };
             _panelPerHost.Controls.Add(lblPerHostInfo);
             tab.Controls.Add(_panelPerHost);
+
+            // Vault credentials panel (positioned over stored creds/per-host panel; only one visible at a time)
+            _panelVaultCreds.Location = new Point(16, grpCredMode.Bottom + 12);
+            _panelVaultCreds.Size = new Size(tab.Width - 48, 88);
+            _panelVaultCreds.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            _panelVaultCreds.Visible = false;
+
+            var lblVaultPath = new Label
+            {
+                Text = "Vault Path:",
+                Location = new Point(0, 6),
+                AutoSize = true
+            };
+
+            _txtVaultPath.Location = new Point(100, 3);
+            _txtVaultPath.Size = new Size(_panelVaultCreds.Width - 110, 23);
+            _txtVaultPath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            _txtVaultPath.PlaceholderText = "profile@path or path[#usernameKey,passwordKey]";
+
+            var lblVaultProfile = new Label
+            {
+                Text = "Default Profile:",
+                Location = new Point(0, 36),
+                AutoSize = true
+            };
+
+            _cboVaultProfileOverride.Location = new Point(100, 33);
+            _cboVaultProfileOverride.Size = new Size(_panelVaultCreds.Width - 110, 23);
+            _cboVaultProfileOverride.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            _cboVaultProfileOverride.DropDownStyle = ComboBoxStyle.DropDownList;
+
+            var lblVaultInfo = new Label
+            {
+                Text = "Used when the Vault path does not include an explicit profile prefix.",
+                Location = new Point(0, 62),
+                AutoSize = true,
+                ForeColor = Color.FromArgb(108, 117, 125)
+            };
+
+            _panelVaultCreds.Controls.Add(lblVaultPath);
+            _panelVaultCreds.Controls.Add(_txtVaultPath);
+            _panelVaultCreds.Controls.Add(lblVaultProfile);
+            _panelVaultCreds.Controls.Add(_cboVaultProfileOverride);
+            _panelVaultCreds.Controls.Add(lblVaultInfo);
+            tab.Controls.Add(_panelVaultCreds);
+
+            PopulateVaultProfileOverrideOptions();
         }
 
         #endregion
@@ -1317,6 +1377,7 @@ namespace SSH_Helper
             _rbInheritFromApp.CheckedChanged += (_, _) => UpdateCredentialPanels();
             _rbStored.CheckedChanged += (_, _) => UpdateCredentialPanels();
             _rbPerHostColumn.CheckedChanged += (_, _) => UpdateCredentialPanels();
+            _rbVault.CheckedChanged += (_, _) => UpdateCredentialPanels();
             _cboTarget.SelectedIndexChanged += (_, _) => UpdateTimeoutOverrideGuidance();
 
             // Timeout override toggles
@@ -1348,7 +1409,56 @@ namespace SSH_Helper
         {
             _panelStoredCreds.Visible = _rbStored.Checked;
             _panelPerHost.Visible = _rbPerHostColumn.Checked;
+            _panelVaultCreds.Visible = _rbVault.Checked;
             UpdateStoredCredentialNote();
+        }
+
+        private void PopulateVaultProfileOverrideOptions()
+        {
+            _cboVaultProfileOverride.Items.Clear();
+            _cboVaultProfileOverride.Items.Add(string.Empty);
+
+            var vaultProfiles = _presetManager.GetCurrentConfiguration().Vault?.Profiles;
+            if (vaultProfiles != null)
+            {
+                foreach (var profile in vaultProfiles)
+                {
+                    if (!string.IsNullOrWhiteSpace(profile.Name))
+                        _cboVaultProfileOverride.Items.Add(profile.Name.Trim());
+                }
+            }
+
+            _cboVaultProfileOverride.SelectedIndex = 0;
+        }
+
+        private void SetVaultProfileOverrideSelection(string? profileName)
+        {
+            if (string.IsNullOrWhiteSpace(profileName))
+            {
+                _cboVaultProfileOverride.SelectedIndex = 0;
+                return;
+            }
+
+            var index = _cboVaultProfileOverride.Items
+                .Cast<object>()
+                .Select((value, idx) => new { Value = value?.ToString() ?? string.Empty, Index = idx })
+                .FirstOrDefault(item => string.Equals(item.Value, profileName, StringComparison.OrdinalIgnoreCase))
+                ?.Index ?? -1;
+
+            if (index >= 0)
+            {
+                _cboVaultProfileOverride.SelectedIndex = index;
+                return;
+            }
+
+            _cboVaultProfileOverride.Items.Add(profileName.Trim());
+            _cboVaultProfileOverride.SelectedIndex = _cboVaultProfileOverride.Items.Count - 1;
+        }
+
+        private string? GetSelectedVaultProfileOverride()
+        {
+            var selected = _cboVaultProfileOverride.SelectedItem?.ToString();
+            return string.IsNullOrWhiteSpace(selected) ? null : selected.Trim();
         }
 
         private void LoadStoredCredentials()
@@ -1512,7 +1622,12 @@ namespace SSH_Helper
                 case CredentialMode.PerHostColumn:
                     _rbPerHostColumn.Checked = true;
                     break;
+                case CredentialMode.Vault:
+                    _rbVault.Checked = true;
+                    break;
             }
+            _txtVaultPath.Text = _editingJob.VaultCredentialPath ?? string.Empty;
+            SetVaultProfileOverrideSelection(_editingJob.VaultProfileName);
             LoadStoredCredentials();
             UpdateCredentialPanels();
 
@@ -1842,6 +1957,7 @@ namespace SSH_Helper
         {
             if (_rbStored.Checked) return CredentialMode.Stored;
             if (_rbPerHostColumn.Checked) return CredentialMode.PerHostColumn;
+            if (_rbVault.Checked) return CredentialMode.Vault;
             return CredentialMode.InheritFromApp;
         }
 
@@ -1914,6 +2030,12 @@ namespace SSH_Helper
                 ? _txtUsername.Text : null;
             var storedPassword = credentialMode == CredentialMode.Stored
                 ? _txtPassword.Text : string.Empty;
+            var vaultCredentialPath = credentialMode == CredentialMode.Vault
+                ? _txtVaultPath.Text
+                : null;
+            var vaultProfileOverride = credentialMode == CredentialMode.Vault
+                ? GetSelectedVaultProfileOverride()
+                : null;
             var commandTimeoutOverrideSeconds = _chkOverrideCommandTimeout.Checked
                 ? (int)_numCommandTimeoutOverride.Value
                 : (int?)null;
@@ -1924,8 +2046,10 @@ namespace SSH_Helper
             // Delegate ALL validation to JobEditorValidator
             var error = JobEditorValidator.ValidateAll(
                 name, targetName, scheduleType, cronExpression,
-                oneTimeUtc, hosts, hostColumns, credentialMode, storedUsername, targetType, customPresetCommands,
-                commandTimeoutOverrideSeconds, connectionTimeoutOverrideSeconds);
+                oneTimeUtc, hosts, hostColumns, credentialMode, storedUsername,
+                targetType, customPresetCommands,
+                commandTimeoutOverrideSeconds, connectionTimeoutOverrideSeconds,
+                vaultCredentialPath);
 
             if (error != null)
             {
@@ -1985,6 +2109,12 @@ namespace SSH_Helper
 
             // Credentials
             _editingJob.CredentialMode = credentialMode;
+            _editingJob.VaultCredentialPath = credentialMode == CredentialMode.Vault
+                ? (vaultCredentialPath ?? string.Empty).Trim()
+                : string.Empty;
+            _editingJob.VaultProfileName = credentialMode == CredentialMode.Vault
+                ? vaultProfileOverride
+                : null;
 
             // Advanced tab
             _editingJob.FolderExecutionMode = _rbParallel.Checked

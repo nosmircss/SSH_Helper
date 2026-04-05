@@ -126,6 +126,9 @@ namespace SSH_Helper
         private Panel _pnlVaultAuthLdap = null!;
         private readonly List<VaultProfileConfig> _vaultProfiles = new();
         private bool _suppressVaultProfileSelection;
+        private bool _suppressVaultDefaultToggle;
+        private int _activeVaultProfileIndex = -1;
+        private string? _vaultDefaultProfileName;
 
         // Reset buttons
         private Button _btnResetDefaults = null!;
@@ -622,6 +625,7 @@ namespace SSH_Helper
 
             // Default + Test
             _chkVaultDefault = new CheckBox { Text = "Set as default profile", AutoSize = true, Margin = new Padding(0, 8, 0, 2) };
+            _chkVaultDefault.CheckedChanged += ChkVaultDefault_CheckedChanged;
             rightFlow.Controls.Add(_chkVaultDefault);
 
             _btnVaultTestConnection = new Button { Text = "Test Connection", AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
@@ -678,7 +682,8 @@ namespace SSH_Helper
             if (_suppressVaultProfileSelection)
                 return;
 
-            PersistCurrentVaultProfile();
+            PersistVaultProfileByIndex(_activeVaultProfileIndex);
+            _activeVaultProfileIndex = _lstVaultProfiles.SelectedIndex;
 
             if (_lstVaultProfiles.SelectedIndex >= 0 && _lstVaultProfiles.SelectedIndex < _vaultProfiles.Count)
             {
@@ -686,6 +691,18 @@ namespace SSH_Helper
             }
 
             UpdateVaultControlStates();
+        }
+
+        private void ChkVaultDefault_CheckedChanged(object? sender, EventArgs e)
+        {
+            if (_suppressVaultDefaultToggle || !_chkVaultDefault.Checked)
+                return;
+
+            var index = _activeVaultProfileIndex;
+            if (index < 0 || index >= _vaultProfiles.Count)
+                return;
+
+            _vaultDefaultProfileName = _vaultProfiles[index].Name;
         }
 
         private void BtnVaultAdd_Click(object? sender, EventArgs e)
@@ -698,7 +715,12 @@ namespace SSH_Helper
             _lstVaultProfiles.Items.Add(name);
             _lstVaultProfiles.SelectedIndex = _lstVaultProfiles.Items.Count - 1;
             _suppressVaultProfileSelection = false;
+            _activeVaultProfileIndex = _lstVaultProfiles.SelectedIndex;
             LoadVaultProfileDetails(profile);
+
+            if (string.IsNullOrWhiteSpace(_vaultDefaultProfileName) && _vaultProfiles.Count == 1)
+                _vaultDefaultProfileName = profile.Name;
+
             UpdateVaultControlStates();
         }
 
@@ -708,7 +730,13 @@ namespace SSH_Helper
             if (index < 0 || index >= _vaultProfiles.Count)
                 return;
 
+            PersistCurrentVaultProfile();
+
             var profileName = _vaultProfiles[index].Name;
+            var removedWasDefault = string.Equals(
+                profileName,
+                _vaultDefaultProfileName,
+                StringComparison.OrdinalIgnoreCase);
 
             // Remove stored credentials for this profile
             if (_credentialProvider != null)
@@ -726,12 +754,21 @@ namespace SSH_Helper
             {
                 _lstVaultProfiles.SelectedIndex = Math.Min(index, _lstVaultProfiles.Items.Count - 1);
                 _suppressVaultProfileSelection = false;
+                _activeVaultProfileIndex = _lstVaultProfiles.SelectedIndex;
                 LoadVaultProfileDetails(_vaultProfiles[_lstVaultProfiles.SelectedIndex]);
             }
             else
             {
                 _suppressVaultProfileSelection = false;
+                _activeVaultProfileIndex = -1;
                 ClearVaultProfileDetails();
+            }
+
+            if (removedWasDefault)
+            {
+                _vaultDefaultProfileName = _activeVaultProfileIndex >= 0
+                    ? _vaultProfiles[_activeVaultProfileIndex].Name
+                    : null;
             }
 
             UpdateVaultControlStates();
@@ -751,8 +788,12 @@ namespace SSH_Helper
             _txtVaultCaCertPath.Text = profile.CaCertificatePath;
             _chkVaultSkipTls.Checked = profile.SkipTlsVerification;
 
-            var config = _configService.GetCurrent();
-            _chkVaultDefault.Checked = string.Equals(profile.Name, config.Vault.DefaultProfileName, StringComparison.OrdinalIgnoreCase);
+            _suppressVaultDefaultToggle = true;
+            _chkVaultDefault.Checked = string.Equals(
+                profile.Name,
+                _vaultDefaultProfileName,
+                StringComparison.OrdinalIgnoreCase);
+            _suppressVaultDefaultToggle = false;
 
             // Load secrets from credential manager
             _txtVaultToken.Text = string.Empty;
@@ -794,7 +835,11 @@ namespace SSH_Helper
 
         private void PersistCurrentVaultProfile()
         {
-            var index = _lstVaultProfiles.SelectedIndex;
+            PersistVaultProfileByIndex(_activeVaultProfileIndex);
+        }
+
+        private void PersistVaultProfileByIndex(int index)
+        {
             if (index < 0 || index >= _vaultProfiles.Count)
                 return;
 
@@ -818,7 +863,13 @@ namespace SSH_Helper
                 _suppressVaultProfileSelection = true;
                 _lstVaultProfiles.Items[index] = profile.Name;
                 _suppressVaultProfileSelection = false;
+
+                if (string.Equals(_vaultDefaultProfileName, oldName, StringComparison.OrdinalIgnoreCase))
+                    _vaultDefaultProfileName = profile.Name;
             }
+
+            if (_chkVaultDefault.Checked)
+                _vaultDefaultProfileName = profile.Name;
 
             // Store secrets in credential manager
             if (_credentialProvider != null && !string.IsNullOrEmpty(profile.Name))
@@ -892,6 +943,9 @@ namespace SSH_Helper
         private void LoadVaultSettings()
         {
             var config = _configService.GetCurrent();
+            _vaultDefaultProfileName = string.IsNullOrWhiteSpace(config.Vault.DefaultProfileName)
+                ? null
+                : config.Vault.DefaultProfileName.Trim();
             _chkVaultEnabled.Checked = config.Vault.Enabled;
             _vaultProfiles.Clear();
 
@@ -920,13 +974,20 @@ namespace SSH_Helper
 
             if (_lstVaultProfiles.Items.Count > 0)
             {
-                _lstVaultProfiles.SelectedIndex = 0;
+                var initialIndex = _vaultProfiles.FindIndex(p =>
+                    string.Equals(p.Name, _vaultDefaultProfileName, StringComparison.OrdinalIgnoreCase));
+                if (initialIndex < 0)
+                    initialIndex = 0;
+
+                _lstVaultProfiles.SelectedIndex = initialIndex;
                 _suppressVaultProfileSelection = false;
-                LoadVaultProfileDetails(_vaultProfiles[0]);
+                _activeVaultProfileIndex = initialIndex;
+                LoadVaultProfileDetails(_vaultProfiles[initialIndex]);
             }
             else
             {
                 _suppressVaultProfileSelection = false;
+                _activeVaultProfileIndex = -1;
                 ClearVaultProfileDetails();
             }
 
@@ -952,13 +1013,15 @@ namespace SSH_Helper
                 SkipTlsVerification = p.SkipTlsVerification
             }).ToList();
 
-            // Resolve default profile name
-            var defaultProfile = _vaultProfiles.FirstOrDefault(p =>
-            {
-                var idx = _vaultProfiles.IndexOf(p);
-                return idx == _lstVaultProfiles.SelectedIndex && _chkVaultDefault.Checked;
-            });
-            config.Vault.DefaultProfileName = defaultProfile?.Name ?? (config.Vault.Profiles.Count > 0 ? config.Vault.Profiles[0].Name : "");
+            var resolvedDefaultProfile = _vaultProfiles
+                .FirstOrDefault(p => string.Equals(p.Name, _vaultDefaultProfileName, StringComparison.OrdinalIgnoreCase))
+                ?.Name;
+
+            if (string.IsNullOrWhiteSpace(resolvedDefaultProfile) && config.Vault.Profiles.Count > 0)
+                resolvedDefaultProfile = config.Vault.Profiles[0].Name;
+
+            _vaultDefaultProfileName = resolvedDefaultProfile;
+            config.Vault.DefaultProfileName = resolvedDefaultProfile ?? "";
         }
 
         private TabPage CreateUpdatesTab()

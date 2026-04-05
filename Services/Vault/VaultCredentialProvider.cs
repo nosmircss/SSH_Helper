@@ -10,6 +10,7 @@ namespace SSH_Helper.Services
     public sealed class VaultCredentialProvider : ICredentialProvider
     {
         private readonly VaultService _vaultService;
+        public VaultService VaultService => _vaultService;
 
         public VaultCredentialProvider(VaultService vaultService)
         {
@@ -19,6 +20,13 @@ namespace SSH_Helper.Services
         public bool IsAvailable => _vaultService.IsEnabled;
 
         public bool TryGetPassword(string target, out string username, out string password)
+            => TryGetPassword(target, out username, out password, defaultProfileOverride: null);
+
+        public bool TryGetPassword(
+            string target,
+            out string username,
+            out string password,
+            string? defaultProfileOverride)
         {
             username = string.Empty;
             password = string.Empty;
@@ -30,7 +38,9 @@ namespace SSH_Helper.Services
             {
                 ParseVaultPath(target, out var profile, out var path, out var usernameKey, out var passwordKey);
 
-                var resolvedProfile = profile ?? _vaultService.ResolveDefaultProfileName();
+                var resolvedProfile = !string.IsNullOrWhiteSpace(profile)
+                    ? profile
+                    : _vaultService.ResolveDefaultProfileName(defaultProfileOverride);
                 if (string.IsNullOrEmpty(resolvedProfile))
                     return false;
 

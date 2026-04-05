@@ -1323,6 +1323,18 @@ namespace SSH_Helper
             _vaultService?.Dispose();
             _vaultService = null;
 
+            var activeEnvironmentVaultProfile = _environmentService.GetEnvironment(
+                _environmentService.GetActiveEnvironmentName()).VaultProfileName;
+
+            _sshService.VaultService = null;
+            _sshService.EnvironmentVaultProfile = activeEnvironmentVaultProfile;
+
+            if (_jobExecutionService != null)
+            {
+                _jobExecutionService.VaultCredentialProvider = null;
+                _jobExecutionService.EnvironmentVaultProfile = activeEnvironmentVaultProfile;
+            }
+
             var config = _configService.GetCurrent();
             if (!config.Vault.Enabled || config.Vault.Profiles.Count == 0)
                 return;
@@ -1346,8 +1358,8 @@ namespace SSH_Helper
                 });
 
             _sshService.VaultService = _vaultService;
-            _sshService.EnvironmentVaultProfile = _environmentService.GetEnvironment(
-                _environmentService.GetActiveEnvironmentName()).VaultProfileName;
+            if (_jobExecutionService != null)
+                _jobExecutionService.VaultCredentialProvider = new VaultCredentialProvider(_vaultService);
         }
 
         private void TryLoadDefaultPassword()
@@ -1792,6 +1804,8 @@ namespace SSH_Helper
             _activeEnvironmentName = e.CurrentEnvironment;
             _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
             _sshService.EnvironmentVaultProfile = e.CurrentConfiguration.VaultProfileName;
+            if (_jobExecutionService != null)
+                _jobExecutionService.EnvironmentVaultProfile = e.CurrentConfiguration.VaultProfileName;
             ApplyActiveEnvironmentLabelColor();
             RefreshBaseEnvironmentIndicator();
             UpdateWindowTitle();
@@ -12571,6 +12585,9 @@ namespace SSH_Helper
         {
             // Check if SSH config is enabled
             var sshConfigEnabled = _configService.GetCurrent().SshConfig.EnableSshConfig;
+            var vaultCredentialProvider = _vaultService != null
+                ? new VaultCredentialProvider(_vaultService)
+                : null;
 
             foreach (var row in rows)
             {
@@ -12582,13 +12599,28 @@ namespace SSH_Helper
 
                 var host = HostConnection.Parse(hostIp);
                 host.Username = GetCellValue(row, "username");
-                var resolvedUsername = string.IsNullOrWhiteSpace(host.Username) ? tsbUsername.Text : host.Username;
                 var passwordValue = GetCellValue(row, "password");
+                var vaultPathValue = GetCellValue(row, "vault_path");
+                var vaultResolved = false;
+
+                if (!string.IsNullOrWhiteSpace(vaultPathValue) &&
+                    vaultCredentialProvider != null &&
+                    vaultCredentialProvider.TryGetPassword(
+                        vaultPathValue,
+                        out var vaultUsername,
+                        out var vaultPassword,
+                        _sshService.EnvironmentVaultProfile))
+                {
+                    host.Username = vaultUsername;
+                    passwordValue = vaultPassword;
+                    vaultResolved = true;
+                }
 
                 var useCredentialManager = _credentialProvider?.IsAvailable == true &&
                                            _configService.GetCurrent().Credentials.UseCredentialManager;
-                if (useCredentialManager)
+                if (!vaultResolved && useCredentialManager)
                 {
+                    var resolvedUsername = string.IsNullOrWhiteSpace(host.Username) ? tsbUsername.Text : host.Username;
                     if (!string.IsNullOrWhiteSpace(passwordValue))
                     {
                         StoreHostPassword(host.ToString(), resolvedUsername, passwordValue);
@@ -14186,8 +14218,11 @@ namespace SSH_Helper
             _jobExportService = new JobExportService();
             _jobExecutionService = new JobExecutionService(
                 _jobStorage, _schedulingService, _configService, _presetManager, _credentialProvider);
-            if (_vaultService != null)
-                _jobExecutionService.VaultCredentialProvider = new VaultCredentialProvider(_vaultService);
+            _jobExecutionService.VaultCredentialProvider = _vaultService != null
+                ? new VaultCredentialProvider(_vaultService)
+                : null;
+            _jobExecutionService.EnvironmentVaultProfile = _environmentService.GetEnvironment(
+                _environmentService.GetActiveEnvironmentName()).VaultProfileName;
             _jobHistoryService = new JobHistoryService();
             _jobHistoryService.SubscribeTo(_jobExecutionService, ResolveSchedulerHistoryRetention);
 

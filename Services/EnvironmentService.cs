@@ -378,6 +378,7 @@ namespace SSH_Helper.Services
                 SelectedHostIndices = selectedIndices?.ToList() ?? new List<int>(),
                 LastCsvPath = csvPath,
                 LastCsvFingerprint = csvFingerprint?.Clone(),
+                VaultProfileName = existing?.VaultProfileName,
                 Variables = existing?.Variables != null
                     ? new Dictionary<string, string>(existing.Variables, StringComparer.OrdinalIgnoreCase)
                     : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

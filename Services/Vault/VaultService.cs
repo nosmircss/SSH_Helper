@@ -20,6 +20,7 @@ namespace SSH_Helper.Services.Vault
         private readonly Func<string, string, string?>? _ldapPasswordProvider;
 
         private readonly Dictionary<string, VaultProfile> _profiles = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _profilesLock = new();
         private readonly Dictionary<string, CacheEntry> _cache = new(StringComparer.Ordinal);
         private readonly object _cacheLock = new();
         private bool _disposed;
@@ -55,7 +56,7 @@ namespace SSH_Helper.Services.Vault
             string profileName, string path, string key,
             int? version = null, CancellationToken ct = default)
         {
-            var cacheKey = BuildCacheKey(profileName, path, key);
+            var cacheKey = BuildCacheKey(profileName, path, key, version);
             if (TryGetCachedValue(cacheKey, profileName, out var cached))
                 return cached;
 
@@ -83,7 +84,7 @@ namespace SSH_Helper.Services.Vault
 
             foreach (var key in keyList)
             {
-                var cacheKey = BuildCacheKey(profileName, path, key);
+                var cacheKey = BuildCacheKey(profileName, path, key, version);
                 if (TryGetCachedValue(cacheKey, profileName, out var cached))
                     result[key] = cached;
                 else
@@ -105,7 +106,7 @@ namespace SSH_Helper.Services.Vault
                         $"Secret at '{path}' exists but has no key '{key}' — available keys: {availableKeys}");
                 }
 
-                var cacheKey = BuildCacheKey(profileName, path, key);
+                var cacheKey = BuildCacheKey(profileName, path, key, version);
                 SetCacheValue(cacheKey, profileName, value);
                 result[key] = value;
             }
@@ -230,10 +231,16 @@ namespace SSH_Helper.Services.Vault
             if (_disposed) return;
             _disposed = true;
 
-            foreach (var profile in _profiles.Values)
+            List<VaultProfile> profilesToDispose;
+            lock (_profilesLock)
+            {
+                profilesToDispose = _profiles.Values.ToList();
+                _profiles.Clear();
+            }
+
+            foreach (var profile in profilesToDispose)
                 profile.Dispose();
 
-            _profiles.Clear();
             ClearCache();
         }
 
@@ -717,8 +724,11 @@ namespace SSH_Helper.Services.Vault
 
         private VaultProfile GetOrCreateProfile(string profileName)
         {
-            if (_profiles.TryGetValue(profileName, out var existing))
-                return existing;
+            lock (_profilesLock)
+            {
+                if (_profiles.TryGetValue(profileName, out var existing))
+                    return existing;
+            }
 
             var config = _settings.Profiles.FirstOrDefault(
                 p => string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase));
@@ -731,15 +741,25 @@ namespace SSH_Helper.Services.Vault
             }
 
             var handler = _handlerFactory(config);
-            var profile = new VaultProfile(config, handler);
-            _profiles[profileName] = profile;
-            return profile;
+            var createdProfile = new VaultProfile(config, handler);
+
+            lock (_profilesLock)
+            {
+                if (_profiles.TryGetValue(profileName, out var racedExisting))
+                {
+                    createdProfile.Dispose();
+                    return racedExisting;
+                }
+
+                _profiles[config.Name] = createdProfile;
+                return createdProfile;
+            }
         }
 
         // --- Caching ---
 
-        private static string BuildCacheKey(string profileName, string path, string key)
-            => $"{profileName}|{path}|{key}";
+        private static string BuildCacheKey(string profileName, string path, string key, int? version)
+            => $"{profileName}|{path}|v={(version?.ToString() ?? "latest")}|{key}";
 
         private bool TryGetCachedValue(string cacheKey, string profileName, out string? value)
         {

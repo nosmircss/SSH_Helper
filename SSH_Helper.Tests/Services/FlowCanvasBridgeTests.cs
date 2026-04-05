@@ -17,6 +17,39 @@ namespace SSH_Helper.Tests.Services;
 public class FlowCanvasBridgeTests
 {
     [Fact]
+    public void TextToGraph_VaultStep_ImportsAsVaultBlock_WithPreviewAndExtractedProps()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - vault:
+                  path: ssh/creds/router-a
+                  key: password
+                  into: secret_password
+            """;
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var vaultNode = nodes
+            .OfType<JObject>()
+            .FirstOrDefault(node =>
+                string.Equals(
+                    node["data"]?["blockType"]?.ToString(),
+                    "vault",
+                    StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotNull(vaultNode);
+
+        var props = vaultNode!["data"]?["props"] as JObject;
+        Assert.NotNull(props);
+        Assert.Equal("ssh/creds/router-a", props!["path"]?.ToString());
+        Assert.Equal("password", props["key"]?.ToString());
+        Assert.Equal("secret_password", props["into"]?.ToString());
+        Assert.Equal("ssh/creds/router-a", props["_preview"]?.ToString());
+    }
+
+    [Fact]
     public void ExportGraphToYaml_MixedGeneratedAndContainerSteps_ProducesParsableYaml()
     {
         var bridge = new FlowCanvasBridge();

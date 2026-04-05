@@ -2,6 +2,7 @@ using FluentAssertions;
 using Moq;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using SSH_Helper.Services.Vault;
 using System.Collections.Concurrent;
 using System.Reflection;
 using Xunit;
@@ -141,6 +142,130 @@ public class JobExecutionServiceTests : IDisposable
         return (T)field!.GetValue(instance)!;
     }
 
+    private static VaultCredentialProvider CreateVaultCredentialProvider(
+        string profileName = "default",
+        string password = "vault-pass")
+    {
+        var settings = new VaultSettings
+        {
+            Enabled = true,
+            DefaultProfileName = profileName,
+            Profiles =
+            [
+                new VaultProfileConfig
+                {
+                    Name = profileName,
+                    Address = "https://vault.test:8200",
+                    AuthMethod = VaultAuthMethod.Token,
+                    KvVersion = VaultKvVersion.V2
+                }
+            ]
+        };
+
+        var vaultService = new VaultService(
+            settings,
+            handlerFactory: _ => new DelegatingHandlerStub(req =>
+            {
+                if (req.RequestUri!.PathAndQuery.Contains("lookup-self", StringComparison.Ordinal))
+                {
+                    return JsonResponse(new
+                    {
+                        data = new { ttl = 3600, display_name = "token", policies = new[] { "default" } }
+                    });
+                }
+
+                return JsonResponse(new
+                {
+                    data = new
+                    {
+                        data = new { username = "vault-user", password }
+                    }
+                });
+            }),
+            tokenProvider: (_, _) => "test-token");
+
+        return new VaultCredentialProvider(vaultService);
+    }
+
+    private static VaultCredentialProvider CreateVaultCredentialProviderWithProfiles(
+        IReadOnlyDictionary<string, (string Username, string Password)> profileValues,
+        string defaultProfileName)
+    {
+        var profiles = profileValues.Keys
+            .Select(name => new VaultProfileConfig
+            {
+                Name = name,
+                Address = "https://vault.test:8200",
+                AuthMethod = VaultAuthMethod.Token,
+                KvVersion = VaultKvVersion.V2
+            })
+            .ToList();
+
+        var settings = new VaultSettings
+        {
+            Enabled = true,
+            DefaultProfileName = defaultProfileName,
+            Profiles = profiles
+        };
+
+        var vaultService = new VaultService(
+            settings,
+            handlerFactory: config => new DelegatingHandlerStub(req =>
+            {
+                if (req.RequestUri!.PathAndQuery.Contains("lookup-self", StringComparison.Ordinal))
+                {
+                    return JsonResponse(new
+                    {
+                        data = new { ttl = 3600, display_name = "token", policies = new[] { "default" } }
+                    });
+                }
+
+                var values = profileValues[config.Name];
+                return JsonResponse(new
+                {
+                    data = new
+                    {
+                        data = new
+                        {
+                            username = values.Username,
+                            password = values.Password
+                        }
+                    }
+                });
+            }),
+            tokenProvider: (_, _) => "test-token");
+
+        return new VaultCredentialProvider(vaultService);
+    }
+
+    private static HttpResponseMessage JsonResponse(object body)
+    {
+        return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                System.Text.Json.JsonSerializer.Serialize(body),
+                System.Text.Encoding.UTF8,
+                "application/json")
+        };
+    }
+
+    private sealed class DelegatingHandlerStub : DelegatingHandler
+    {
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> _handler;
+
+        public DelegatingHandlerStub(Func<HttpRequestMessage, HttpResponseMessage> handler)
+        {
+            _handler = handler;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(_handler(request));
+        }
+    }
+
     #endregion
 
     #region EXEC-01: Scheduled execution (Initialize/Start/Stop basics)
@@ -256,6 +381,245 @@ public class JobExecutionServiceTests : IDisposable
 
         // Assert
         states.Should().Contain(JobExecutionState.Started);
+    }
+
+    [Fact]
+    public async Task RunNowAsync_CustomPresetWithVaultStep_SucceedsWhenVaultRuntimeIsAvailable()
+    {
+        var job = CreateTestJob(name: "VaultScriptJob", schedule: ScheduleType.None);
+        job.TargetType = JobTargetType.CustomPreset;
+        job.TargetName = string.Empty;
+        job.CustomPresetCommands =
+            "---\n" +
+            "steps:\n" +
+            "  - vault:\n" +
+            "      path: app/creds\n" +
+            "      key: password\n" +
+            "      into: secret_pass\n" +
+            "  - print: \"{{secret_pass}}\"\n";
+        job.CredentialMode = CredentialMode.PerHostColumn;
+        job.Hosts.Clear();
+        job.Hosts.Add(new Dictionary<string, string>
+        {
+            ["Host_IP"] = "127.0.0.1",
+            ["username"] = "host-user",
+            ["password"] = "host-pass"
+        });
+        _jobStorage.Save(job);
+
+        using var service = CreateService();
+        service.VaultCredentialProvider = CreateVaultCredentialProvider(password: "script-vault-value");
+
+        JobRunResult? completion = null;
+        service.JobCompleted += (_, result) => completion = result;
+
+        var runNowResult = await service.RunNowAsync(job.Id);
+
+        runNowResult.Should().BeTrue("job dispatch itself should succeed");
+        completion.Should().NotBeNull();
+        completion!.Success.Should().BeTrue("vault step should execute successfully in scheduler custom preset runs");
+    }
+
+    [Fact]
+    public async Task RunNowAsync_CustomPresetWithVaultStep_UsesJobVaultProfileOverrideForScriptRuntime()
+    {
+        var job = CreateTestJob(name: "VaultScriptProfileOverrideJob", schedule: ScheduleType.None);
+        job.TargetType = JobTargetType.CustomPreset;
+        job.TargetName = string.Empty;
+        job.CustomPresetCommands =
+            "---\n" +
+            "steps:\n" +
+            "  - vault:\n" +
+            "      path: app/creds\n" +
+            "      key: password\n" +
+            "      into: secret_pass\n" +
+            "  - print: \"{{secret_pass}}\"\n";
+        job.CredentialMode = CredentialMode.PerHostColumn;
+        job.VaultProfileName = "job-default";
+        job.Hosts.Clear();
+        job.Hosts.Add(new Dictionary<string, string>
+        {
+            ["Host_IP"] = "127.0.0.1",
+            ["username"] = "host-user",
+            ["password"] = "host-pass"
+        });
+        _jobStorage.Save(job);
+
+        var settings = new VaultSettings
+        {
+            Enabled = true,
+            DefaultProfileName = "app-default",
+            Profiles =
+            [
+                new VaultProfileConfig
+                {
+                    Name = "app-default",
+                    Address = "https://vault.test:8200",
+                    AuthMethod = VaultAuthMethod.Token,
+                    KvVersion = VaultKvVersion.V2
+                },
+                new VaultProfileConfig
+                {
+                    Name = "env-default",
+                    Address = "https://vault.test:8200",
+                    AuthMethod = VaultAuthMethod.Token,
+                    KvVersion = VaultKvVersion.V2
+                },
+                new VaultProfileConfig
+                {
+                    Name = "job-default",
+                    Address = "https://vault.test:8200",
+                    AuthMethod = VaultAuthMethod.Token,
+                    KvVersion = VaultKvVersion.V2
+                }
+            ]
+        };
+
+        using var vaultService = new VaultService(
+            settings,
+            handlerFactory: profileConfig => new DelegatingHandlerStub(req =>
+            {
+                if (req.RequestUri!.PathAndQuery.Contains("lookup-self", StringComparison.Ordinal))
+                {
+                    return JsonResponse(new
+                    {
+                        data = new { ttl = 3600, display_name = "token", policies = new[] { "default" } }
+                    });
+                }
+
+                Dictionary<string, string> payload = profileConfig.Name == "job-default"
+                    ? new Dictionary<string, string>(StringComparer.Ordinal) { ["password"] = "job-secret" }
+                    : new Dictionary<string, string>(StringComparer.Ordinal) { ["not_password"] = "wrong-profile" };
+
+                return JsonResponse(new
+                {
+                    data = new
+                    {
+                        data = payload
+                    }
+                });
+            }),
+            tokenProvider: (_, _) => "test-token");
+
+        using var service = CreateService();
+        service.EnvironmentVaultProfile = "env-default";
+        service.VaultCredentialProvider = new VaultCredentialProvider(vaultService);
+
+        JobRunResult? completion = null;
+        service.JobCompleted += (_, result) => completion = result;
+
+        var runNowResult = await service.RunNowAsync(job.Id);
+
+        runNowResult.Should().BeTrue();
+        completion.Should().NotBeNull();
+        completion!.Success.Should().BeTrue("job-level vault profile override should become the default for vault script operations");
+        completion.HostOutputs.Should().ContainSingle();
+        completion.HostOutputs[0].Output.Should().Contain("job-secret");
+    }
+
+    [Fact]
+    public void ResolveCredentials_VaultMode_UsesJobVaultProfileOverrideAsDefault()
+    {
+        var job = CreateTestJob(name: "VaultCredJob", schedule: ScheduleType.None);
+        job.CredentialMode = CredentialMode.Vault;
+        job.VaultCredentialPath = "ssh/creds";
+        job.VaultProfileName = "job-default";
+
+        using var service = CreateService();
+        service.VaultCredentialProvider = CreateVaultCredentialProviderWithProfiles(
+            new Dictionary<string, (string Username, string Password)>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["app-default"] = ("app-user", "app-pass"),
+                ["job-default"] = ("job-user", "job-pass")
+            },
+            defaultProfileName: "app-default");
+
+        var resolved = InvokePrivate<(string username, string password)>(service, "ResolveCredentials", job);
+
+        resolved.username.Should().Be("job-user");
+        resolved.password.Should().Be("job-pass");
+    }
+
+    [Fact]
+    public void ResolveCredentials_VaultMode_FallsBackToEnvironmentVaultProfileWhenJobOverrideMissing()
+    {
+        var job = CreateTestJob(name: "VaultCredEnvJob", schedule: ScheduleType.None);
+        job.CredentialMode = CredentialMode.Vault;
+        job.VaultCredentialPath = "ssh/creds";
+        job.VaultProfileName = null;
+
+        using var service = CreateService();
+        service.EnvironmentVaultProfile = "env-default";
+        service.VaultCredentialProvider = CreateVaultCredentialProviderWithProfiles(
+            new Dictionary<string, (string Username, string Password)>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["app-default"] = ("app-user", "app-pass"),
+                ["env-default"] = ("env-user", "env-pass")
+            },
+            defaultProfileName: "app-default");
+
+        var resolved = InvokePrivate<(string username, string password)>(service, "ResolveCredentials", job);
+
+        resolved.username.Should().Be("env-user");
+        resolved.password.Should().Be("env-pass");
+    }
+
+    [Fact]
+    public void BuildHostConnections_VaultPath_OverridesRowCredentials_AndUsesJobDefaultProfile()
+    {
+        var job = CreateTestJob(name: "VaultPerHostJob", schedule: ScheduleType.None);
+        job.VaultProfileName = "job-default";
+        job.Hosts.Clear();
+        job.Hosts.Add(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Host_IP"] = "192.0.2.10",
+            ["username"] = "row-user",
+            ["password"] = "row-pass",
+            ["vault_path"] = "ssh/hosts/switch-a"
+        });
+
+        using var service = CreateService();
+        service.VaultCredentialProvider = CreateVaultCredentialProviderWithProfiles(
+            new Dictionary<string, (string Username, string Password)>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["app-default"] = ("app-user", "app-pass"),
+                ["job-default"] = ("vault-user", "vault-pass")
+            },
+            defaultProfileName: "app-default");
+
+        var hosts = InvokePrivate<List<HostConnection>>(service, "BuildHostConnections", job);
+
+        hosts.Should().ContainSingle();
+        hosts[0].Username.Should().Be("vault-user");
+        hosts[0].Password.Should().Be("vault-pass");
+    }
+
+    [Fact]
+    public void BuildHostConnections_VaultPathFailure_FallsBackToRowCredentials()
+    {
+        var job = CreateTestJob(name: "VaultPerHostFallbackJob", schedule: ScheduleType.None);
+        job.Hosts.Clear();
+        job.Hosts.Add(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Host_IP"] = "192.0.2.11",
+            ["username"] = "row-user",
+            ["password"] = "row-pass",
+            ["vault_path"] = "missing-profile@ssh/hosts/switch-b"
+        });
+
+        using var service = CreateService();
+        service.VaultCredentialProvider = CreateVaultCredentialProviderWithProfiles(
+            new Dictionary<string, (string Username, string Password)>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["app-default"] = ("app-user", "app-pass")
+            },
+            defaultProfileName: "app-default");
+
+        var hosts = InvokePrivate<List<HostConnection>>(service, "BuildHostConnections", job);
+
+        hosts.Should().ContainSingle();
+        hosts[0].Username.Should().Be("row-user");
+        hosts[0].Password.Should().Be("row-pass");
     }
 
     [Fact]

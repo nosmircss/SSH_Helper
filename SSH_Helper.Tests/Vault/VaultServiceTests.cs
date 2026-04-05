@@ -419,6 +419,48 @@ public class VaultServiceTests
         readCount.Should().Be(1, "second read should use cache");
     }
 
+    // -- Test 9b: Caching must include version in the cache key --
+
+    [Fact]
+    public async Task Caching_DifferentVersions_DoNotShareCacheEntries()
+    {
+        var settings = CreateSettings();
+        var readCount = 0;
+
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var pathAndQuery = req.RequestUri!.PathAndQuery;
+
+            if (pathAndQuery.Contains("auth/token/lookup-self", StringComparison.Ordinal))
+                return TokenLookupResponse();
+
+            if (pathAndQuery.Contains("secret/data/versioned/path", StringComparison.Ordinal))
+            {
+                readCount++;
+                var version = req.RequestUri!.Query;
+                var value = version.Contains("version=2", StringComparison.Ordinal)
+                    ? "value-v2"
+                    : "value-v1";
+
+                return KvV2ReadResponse(new Dictionary<string, string> { ["key"] = value });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => handler,
+            tokenProvider: (_, _) => "s.token");
+
+        var v1 = await svc.ReadSecretAsync("test", "versioned/path", "key", version: 1);
+        var v2 = await svc.ReadSecretAsync("test", "versioned/path", "key", version: 2);
+
+        v1.Should().Be("value-v1");
+        v2.Should().Be("value-v2");
+        readCount.Should().Be(2, "versioned reads must not reuse cache entries across different versions");
+    }
+
     // -- Test 10: Write invalidates cache -- read after write makes new HTTP call --
 
     [Fact]
@@ -656,5 +698,51 @@ public class VaultServiceTests
         results.Should().Contain("app1/");
         results.Should().Contain("app2/");
         results.Should().Contain("shared");
+    }
+
+    [Fact]
+    public async Task ConcurrentProfileAccess_DoesNotThrowDictionaryRaceExceptions()
+    {
+        async Task RunAttemptAsync()
+        {
+            var settings = CreateSettings();
+            var handler = new DelegatingHandlerStub(req =>
+            {
+                var path = req.RequestUri!.AbsolutePath;
+
+                if (path.Contains("auth/token/lookup-self", StringComparison.Ordinal))
+                    return TokenLookupResponse();
+
+                if (path.Contains("secret/data/concurrent/path", StringComparison.Ordinal))
+                    return KvV2ReadResponse(new Dictionary<string, string> { ["key"] = "ok" });
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            });
+
+            using var svc = new VaultService(
+                settings,
+                handlerFactory: _ => handler,
+                tokenProvider: (_, _) => "s.token");
+
+            using var gate = new ManualResetEventSlim(false);
+            var tasks = Enumerable.Range(0, 64)
+                .Select(_ => Task.Run(async () =>
+                {
+                    gate.Wait();
+                    await svc.ReadSecretAsync("test", "concurrent/path", "key");
+                }))
+                .ToArray();
+
+            gate.Set();
+            await Task.WhenAll(tasks);
+        }
+
+        Func<Task> act = async () =>
+        {
+            for (var attempt = 0; attempt < 8; attempt++)
+                await RunAttemptAsync();
+        };
+
+        await act.Should().NotThrowAsync();
     }
 }

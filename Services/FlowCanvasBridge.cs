@@ -254,6 +254,7 @@ namespace SSH_Helper.Services
                 ["multiselect"] = ["title", "prompt", "options", "into", "min", "max", "on_error"],
                 ["playsound"] = ["path", "max_seconds", "into", "wait", "volume", "on_error"],
                 ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "success_codes", "max_output_bytes", "confirm", "quiet", "into", "fail_on_nonzero", "suppress", "title", "timeout", "on_error"],
+                ["vault"] = ["profile", "path", "key", "keys", "into", "version", "write", "patch", "on_error"],
             };
 
         private static readonly HashSet<string> AdvancedPanelOptionKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -2688,6 +2689,24 @@ namespace SSH_Helper.Services
                     }
                     break;
 
+                case StepType.Vault:
+                    if (step.Vault != null)
+                    {
+                        SetIfNotNull(props, "path", step.Vault.Path);
+                        SetIfNotNull(props, "profile", step.Vault.Profile);
+                        SetIfNotNull(props, "key", step.Vault.Key);
+                        SetIfNotNull(props, "into", step.Vault.Into);
+                        SetIfNumber(props, "version", step.Vault.Version);
+                        if (step.Vault.Keys?.Count > 0)
+                            props["keys"] = JObject.FromObject(step.Vault.Keys);
+                        if (step.Vault.Write?.Count > 0)
+                            props["write"] = JObject.FromObject(step.Vault.Write);
+                        if (step.Vault.Patch?.Count > 0)
+                            props["patch"] = JObject.FromObject(step.Vault.Patch);
+                        SetIfNotNull(props, "on_error", step.Vault.OnError);
+                    }
+                    break;
+
                 case StepType.Log:
                     switch (step.Log)
                     {
@@ -4018,6 +4037,7 @@ namespace SSH_Helper.Services
                 StepType.UpdateColumn => ("updatecolumn", step.UpdateColumn?.Column),
                 StepType.UpdateEnvironment => ("updateenvironment", step.UpdateEnvironment?.Variable),
                 StepType.LocalCmd => ("localcmd", step.LocalCmd?.Command),
+                StepType.Vault => ("vault", step.Vault?.Path),
                 _ => ("unknown", null),
             };
         }
@@ -4509,6 +4529,7 @@ namespace SSH_Helper.Services
                 "while" => "condition",
                 "set" => "expression",
                 "wait" => "seconds",
+                "vault" => "path",
                 _ => null,
             };
         }

@@ -108,6 +108,14 @@ public class VaultSettingsTests
     }
 
     [Fact]
+    public void JobDefinition_VaultProfileName_DefaultsToNull()
+    {
+        var job = new JobDefinition();
+
+        job.VaultProfileName.Should().BeNull();
+    }
+
+    [Fact]
     public void EnvironmentConfig_VaultProfileName_DefaultsToNull()
     {
         var env = new EnvironmentConfig();

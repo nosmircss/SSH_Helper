@@ -4038,7 +4038,7 @@ The host grid recognizes several columns with built-in meaning in addition to `H
 | `username` | Per-host SSH username. Overrides global credentials. |
 | `password` | Per-host SSH password. Overrides global credentials. |
 | `personality` | Device personality hint (e.g., `fortigate`, `cisco`). |
-| `vault_path` | Optional. Vault path for per-host credential resolution. Format: `[profile@]path[#usernameKey,passwordKey]`. Defaults to `username` and `password` as the key names. Examples: `ssh/switches`, `network@ssh/switches`, `ssh/switches#admin_user,admin_pass`. |
+| `vault_path` | Optional. Vault path for per-host credential resolution. Format: `[profile@]path[#usernameKey,passwordKey]`. Defaults to `username` and `password` as the key names. Examples: `ssh/switches`, `network@ssh/switches`, `ssh/switches#admin_user,admin_pass`. Supported in both manual runs and scheduler jobs. In scheduler jobs, when the path omits `profile@`, the default profile precedence is: job Vault profile override -> active environment Vault profile -> app default Vault profile. If lookup fails, execution falls back to row/global credentials. |
 
 All other column names become script variables accessible via `${column_name}`.
 

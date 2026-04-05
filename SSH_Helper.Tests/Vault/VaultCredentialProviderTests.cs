@@ -179,6 +179,118 @@ public class VaultCredentialProviderTests
     }
 
     [Fact]
+    public void TryGetPassword_DefaultProfileOverride_IsUsedWhenPathHasNoExplicitProfile()
+    {
+        var settings = new VaultSettings
+        {
+            Enabled = true,
+            DefaultProfileName = "app-default",
+            Profiles =
+            [
+                new VaultProfileConfig
+                {
+                    Name = "app-default",
+                    Address = "https://vault.test:8200",
+                    AuthMethod = VaultAuthMethod.Token,
+                    KvVersion = VaultKvVersion.V2
+                },
+                new VaultProfileConfig
+                {
+                    Name = "job-default",
+                    Address = "https://vault.test:8200",
+                    AuthMethod = VaultAuthMethod.Token,
+                    KvVersion = VaultKvVersion.V2
+                }
+            ]
+        };
+
+        var vault = new VaultService(
+            settings,
+            handlerFactory: profileConfig => new DelegatingHandlerStub(req =>
+            {
+                if (req.RequestUri!.PathAndQuery.Contains("lookup-self", StringComparison.Ordinal))
+                    return TokenLookupResponse();
+
+                var payload = profileConfig.Name == "job-default"
+                    ? new { username = "job-user", password = "job-pass" }
+                    : new { username = "app-user", password = "app-pass" };
+
+                return JsonResponse(HttpStatusCode.OK, new
+                {
+                    data = new
+                    {
+                        data = payload
+                    }
+                });
+            }),
+            tokenProvider: (_, _) => "test-token");
+
+        var provider = new VaultCredentialProvider(vault);
+
+        var result = provider.TryGetPassword("ssh/switches", out var user, out var pass, "job-default");
+
+        result.Should().BeTrue();
+        user.Should().Be("job-user");
+        pass.Should().Be("job-pass");
+    }
+
+    [Fact]
+    public void TryGetPassword_ExplicitProfileInPath_WinsOverDefaultProfileOverride()
+    {
+        var settings = new VaultSettings
+        {
+            Enabled = true,
+            DefaultProfileName = "app-default",
+            Profiles =
+            [
+                new VaultProfileConfig
+                {
+                    Name = "app-default",
+                    Address = "https://vault.test:8200",
+                    AuthMethod = VaultAuthMethod.Token,
+                    KvVersion = VaultKvVersion.V2
+                },
+                new VaultProfileConfig
+                {
+                    Name = "job-default",
+                    Address = "https://vault.test:8200",
+                    AuthMethod = VaultAuthMethod.Token,
+                    KvVersion = VaultKvVersion.V2
+                }
+            ]
+        };
+
+        var vault = new VaultService(
+            settings,
+            handlerFactory: profileConfig => new DelegatingHandlerStub(req =>
+            {
+                if (req.RequestUri!.PathAndQuery.Contains("lookup-self", StringComparison.Ordinal))
+                    return TokenLookupResponse();
+
+                var payload = profileConfig.Name == "app-default"
+                    ? new { username = "app-user", password = "app-pass" }
+                    : new { username = "job-user", password = "job-pass" };
+
+                return JsonResponse(HttpStatusCode.OK, new
+                {
+                    data = new
+                    {
+                        data = payload
+                    }
+                });
+            }),
+            tokenProvider: (_, _) => "test-token");
+
+        var provider = new VaultCredentialProvider(vault);
+
+        var result = provider.TryGetPassword("app-default@ssh/switches", out var user, out var pass, "job-default");
+
+        result.Should().BeTrue();
+        user.Should().Be("app-user");
+        pass.Should().Be("app-pass");
+    }
+
+    [Fact]
     public void TryGetPassword_VaultThrows_ReturnsFalse()
     {
         var settings = CreateEnabledSettings("default");

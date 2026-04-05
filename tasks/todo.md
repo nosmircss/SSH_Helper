@@ -1,5 +1,40 @@
 # TODO
 
+## 213. Implement Vault hardening findings 1-9
+- [x] 213.1 Add/extend RED tests for all planned Vault findings:
+- scheduler Vault runtime wiring,
+- stale/disposed provider rebinding,
+- cache version key correctness,
+- settings profile/default persistence,
+- environment snapshot Vault profile retention,
+- Flow Canvas Vault import mapping,
+- thread-safe profile dictionary access,
+- `vault_path` runtime resolution and job-profile override behavior,
+- Job Editor Vault mode + validation/data persistence.
+- [x] 213.2 Implement scheduler/runtime Vault fixes in `JobExecutionService`, `Form1`, and Vault provider wiring.
+- [x] 213.3 Implement Vault service correctness fixes (`version`-aware cache keys + synchronized profile dictionary access).
+- [x] 213.4 Implement Settings dialog profile/default behavior fixes.
+- [x] 213.5 Implement environment snapshot + Flow Canvas Vault mapping fixes.
+- [x] 213.6 Implement full `vault_path` runtime support for scheduler and manual host execution paths.
+- [x] 213.7 Implement Job Editor Vault credential mode UI, validation, and persistence including per-job Vault profile override.
+- [x] 213.8 Update docs for Vault credential-flow/runtime parity (`SCRIPTING.md` + relevant model/docs comments).
+- [x] 213.9 Run focused Vault slices first, then broader Vault-related suites, and capture verification evidence.
+- [x] 213.10 Add review notes and final verification summary to this task entry.
+
+### 213 Review
+- Implemented scheduler Vault runtime wiring and per-run default profile propagation across `Form1`, `JobExecutionService`, `VaultCredentialProvider`, and `SshExecutionService` integration points.
+- Added per-job Vault profile override model support via `JobDefinition.VaultProfileName` and applied precedence `job -> environment -> app default` when path omits explicit `profile@`.
+- Fixed Vault service correctness issues by making cache keys `version`-aware and synchronizing profile dictionary create/read/clear/dispose access.
+- Fixed Settings Vault profile UX/data bugs by persisting edits to the previously selected profile and tracking default profile independently from list selection, including rename/remove behavior.
+- Preserved environment Vault profile during grid snapshot saves in `EnvironmentService.BuildSnapshot`.
+- Added missing Flow Canvas Vault import/preview/property extraction mapping and deterministic Vault export key ordering.
+- Implemented `vault_path` resolution for both scheduler and manual host-connection paths, with fallback to row/global credentials on lookup failure.
+- Added Job Editor Vault credential mode UI + validation + persistence for `CredentialMode.Vault`, `VaultCredentialPath`, and optional job-level profile override.
+- Updated Vault runtime/credential behavior docs in `SCRIPTING.md` to match implementation.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultServiceTests|FullyQualifiedName~VaultCredentialProviderTests|FullyQualifiedName~SettingsDialogVaultTests|FullyQualifiedName~JobEditorDialogVaultCredentialTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~SaveCurrentGridToEnvironment_PreservesVaultProfileName|FullyQualifiedName~TextToGraph_VaultStep_ImportsAsVaultBlock_WithPreviewAndExtractedProps|FullyQualifiedName~RunNowAsync_CustomPresetWithVaultStep_SucceedsWhenVaultRuntimeIsAvailable|FullyQualifiedName~BuildHostConnections_VaultPath_OverridesRowCredentials_AndUsesJobDefaultProfile" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-focused-final/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-focused-final/` (passed `84/84`).
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultServiceTests|FullyQualifiedName~VaultCredentialProviderTests|FullyQualifiedName~VaultSettingsTests|FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~EnvironmentServiceTests|FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~SettingsDialogVaultTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~JobEditorDialogVaultCredentialTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-final/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-final/` (passed `234/234`).
+
 ## 212. Add rejected feature-idea tracking
 - [x] 212.1 Create `rejected_ideas.md` with a clear purpose and reusable entry template.
 - [x] 212.2 Update `CLAUDE.md` to instruct tracking rejected feature ideas in that file.

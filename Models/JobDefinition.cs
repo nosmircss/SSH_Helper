@@ -175,6 +175,12 @@ namespace SSH_Helper.Models
         public string VaultCredentialPath { get; set; } = "";
 
         /// <summary>
+        /// Optional per-job default Vault profile override used when Vault paths do not specify an explicit profile.
+        /// Null falls back to environment/app-level defaults.
+        /// </summary>
+        public string? VaultProfileName { get; set; }
+
+        /// <summary>
         /// Optional cron expression for recurring schedule (placeholder for Phase 3).
         /// </summary>
         public string? CronExpression { get; set; }

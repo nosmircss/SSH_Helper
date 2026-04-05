@@ -1,5 +1,8 @@
 # Lessons
 
+## 2026-04-05
+- When a user provides an explicit multi-finding implementation plan, I must mirror it as checkable `tasks/todo.md` items, complete all items end-to-end, and record both focused and broader verification evidence before marking the task done.
+
 ## 2026-04-04
 - When `localcmd` command banners can include multiline command text, I must format the displayed command with explicit line-break markers (`ScriptingHelpers.FormatForDisplay`) so output surfaces never visually merge adjacent tokens (for example `utf8notepad`).
 - When a user clarifies they want output preserved in Execution Details (interactive session audit log) rather than script variables, I must shift the fix to the interactive history pipeline instead of expanding `into` capture variables.
