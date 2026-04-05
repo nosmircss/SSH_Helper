@@ -2848,7 +2848,6 @@ namespace SSH_Helper
             // Execute buttons (Semibold)
             var execButtonFont = new Font(semiboldUiFont, Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
             _managedFonts.Add(execButtonFont);
-            btnExecuteAll.Font = execButtonFont;
             btnExecuteSelected.Font = execButtonFont;
             btnStopAll.Font = execButtonFont;
 
@@ -3196,11 +3195,6 @@ namespace SSH_Helper
             var contrastColor = GetContrastColor(accentColor);
 
             // Apply accent to execute buttons
-            btnExecuteAll.BackColor = accentColor;
-            btnExecuteAll.ForeColor = contrastColor;
-            btnExecuteAll.FlatStyle = FlatStyle.Flat;
-            btnExecuteAll.FlatAppearance.BorderSize = 0;
-
             btnExecuteSelected.BackColor = accentColor;
             btnExecuteSelected.ForeColor = contrastColor;
             btnExecuteSelected.FlatStyle = FlatStyle.Flat;
@@ -5351,46 +5345,6 @@ namespace SSH_Helper
             SaveCurrentPreset();
         }
 
-        private void btnExecuteAll_Click(object sender, EventArgs e)
-        {
-            // Check if a folder is selected - use tracked folder name as fallback
-            // (TreeView selection can be unreliable when clicking buttons)
-            string? folderName = null;
-
-            // Check both trvPresets and trvFavorites based on current tab
-            if (presetsTabControl.SelectedTab == tabFavorites)
-            {
-                if (trvFavorites.SelectedNode?.Tag is PresetNodeTag favTag && favTag.IsFolder)
-                {
-                    folderName = favTag.Name;
-                }
-                else if (!string.IsNullOrEmpty(_selectedFolderName))
-                {
-                    folderName = _selectedFolderName;
-                }
-            }
-            else
-            {
-                if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag && tag.IsFolder)
-                {
-                    folderName = tag.Name;
-                }
-                else if (!string.IsNullOrEmpty(_selectedFolderName))
-                {
-                    folderName = _selectedFolderName;
-                }
-            }
-
-            if (folderName != null)
-            {
-                ExecuteFolderPresetsOnAllHosts(folderName);
-            }
-            else
-            {
-                ExecuteOnAllHosts();
-            }
-        }
-
         private void btnExecuteSelected_Click(object sender, EventArgs e)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -6418,7 +6372,7 @@ namespace SSH_Helper
             _flowCanvasForm.OnRunRequest += (_) =>
             {
                 SshDebugLog("FLOWCANVAS", "Received deprecated 'run-request' message.");
-                BeginInvoke(() => btnExecuteAll.PerformClick());
+                BeginInvoke(() => btnExecuteSelected.PerformClick());
             };
 
             // Lightweight data-block test — runs a single data block (extract, parse, set, table, assert)
@@ -10632,15 +10586,12 @@ namespace SSH_Helper
 
             if (!string.IsNullOrEmpty(_selectedFolderName))
             {
-                int count = _presetManager.GetPresetsInFolder(_selectedFolderName).Count();
-                btnExecuteAll.Text = $"Run {FolderIcon} {_selectedFolderName} ({count})";
                 btnExecuteSelected.Text = checkedCount > 0
                     ? $"Run Checked ({checkedCount}) {FolderIcon}"
                     : $"Run Selected {FolderIcon}";
             }
             else
             {
-                btnExecuteAll.Text = "Run All";
                 btnExecuteSelected.Text = checkedCount > 0
                     ? $"Run Checked ({checkedCount})"
                     : "Run Selected";
@@ -10653,13 +10604,9 @@ namespace SSH_Helper
                 var selectedSize = g.MeasureString(btnExecuteSelected.Text, btnExecuteSelected.Font);
                 btnExecuteSelected.Width = (int)selectedSize.Width + 40;
 
-                var allSize = g.MeasureString(btnExecuteAll.Text, btnExecuteAll.Font);
-                btnExecuteAll.Width = (int)allSize.Width + 40;
-                btnExecuteAll.Left = btnExecuteSelected.Right + 8;
-
                 // Position Stop button with same spacing and ensure matching height
-                btnStopAll.Left = btnExecuteAll.Right + 8;
-                btnStopAll.Height = btnExecuteAll.Height;
+                btnStopAll.Left = btnExecuteSelected.Right + 8;
+                btnStopAll.Height = btnExecuteSelected.Height;
             }
             catch (ArgumentException)
             {
@@ -12735,8 +12682,6 @@ namespace SSH_Helper
                     Cursor = targetCursor;
 
                 var runButtonsEnabled = !executing;
-                if (btnExecuteAll.Enabled != runButtonsEnabled)
-                    btnExecuteAll.Enabled = runButtonsEnabled;
                 if (btnExecuteSelected.Enabled != runButtonsEnabled)
                     btnExecuteSelected.Enabled = runButtonsEnabled;
                 if (btnStopAll.Visible != executing)

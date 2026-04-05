@@ -3630,3 +3630,59 @@
   - `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_ImportedIfWithTwoDigitThenIndex_UsesStoredSnippetWhenFirstChildEdgeExists|FullyQualifiedName~ExportGraphToYaml_ImportedIfWithDeletedElseEdge_RegeneratesWithoutElse" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true` (passed `2/2`).
   - `dotnet run --project FlowCanvas/tools/FlowCanvasParityCli/FlowCanvasParityCli.csproj -- evaluate-cases` with malformed stdin payload now prints `Invalid input JSON: ...` and exits with code `1`.
   - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` (passed; existing warnings unchanged: `MSB3277`, `CS8602`, `xUnit1031`).
+
+## 209. Remove redundant Run All button from main execute bar
+- [x] 209.1 Remove `btnExecuteAll` from WinForms designer and control declarations.
+- [x] 209.2 Update `Form1.cs` runtime styling/layout/state logic to operate with `Run Selected` + `Stop` only.
+- [x] 209.3 Retarget legacy click forwarding that depended on `btnExecuteAll`.
+- [x] 209.4 Build solution and record verification results.
+
+### 209 Review
+- Removed `btnExecuteAll` from `Form1.Designer.cs` initialization, execute-panel control list, and private field declarations.
+- Updated execute-bar layout defaults to place `Stop` beside `Run Selected` and removed all runtime references to `btnExecuteAll` in:
+  - font/accent application,
+  - `UpdateRunButtonText()` width/position logic,
+  - `SetExecutionMode(...)` enable/disable handling.
+- Removed obsolete `btnExecuteAll_Click(...)` handler and changed deprecated FlowCanvas run-request forwarding to `btnExecuteSelected.PerformClick()`.
+- Verification:
+  - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` (failed due expected local lock: `SSH_Helper.exe` running and locking `bin\Debug\net8.0-windows\SSH_Helper.exe`).
+  - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/runall-removal-build/bin/ -p:BaseIntermediateOutputPath=artifacts/runall-removal-build/obj/ -v minimal` (passed; existing warnings remain: `MSB3277`, `CS8602`, `xUnit1031`).
+  - `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ApplyFontSettingsTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts/runall-removal-tests/bin/ -p:BaseIntermediateOutputPath=artifacts/runall-removal-tests/obj/ -v minimal` (passed: `35/35`).
+
+## 210. Full README refresh for current app capabilities
+- [x] 210.1 Audit README claims against current code/docs (execution UI, shortcuts, scheduler, Flow Canvas, scripting).
+- [x] 210.2 Rewrite README sections to reflect current behavior and latest features.
+- [x] 210.3 Verify README wording against code paths and remove stale/incorrect statements.
+
+### 210 Review
+- Rewrote `README.md` to reflect current capabilities and removed stale execution/shortcut guidance:
+  - replaced old execute guidance with `Run Selected` + checked-host behavior,
+  - added explicit Scheduler and Flow Canvas usage sections,
+  - updated scripting summary to cover current command families and local command support,
+  - corrected source-build instructions to include `FlowCanvas` npm dependency setup.
+- Updated keyboard shortcuts to match actual bindings in `Form1.Designer.cs` and `Form1.cs`:
+  - removed stale `F5`/`F6`/`Alt+W`/`Alt+R` claims,
+  - added `Ctrl+Shift+V` (Validate Script), `Ctrl+Shift+F` (Flow Canvas), and current supported shortcuts.
+- Verification:
+  - `rg -n "Execute All|F5|F6|Alt\\+W|Alt\\+R|Escape \\| Stop|Execute on all hosts|Execute on selected hosts" README.md` (no matches).
+  - `rg -n "ShortcutKeys\\s*=|case Keys\\.|btnExecuteSelected|Run Selected|Flow Canvas" Form1.Designer.cs Form1.cs` (confirmed README shortcut/run wording parity).
+  - `rg -n "public enum StepType|LocalCmd|PlaySound|BrowserCallbackCapture|Parallel|Switch|Call|Return" Services/Scripting/Models/ScriptStep.cs` (confirmed scripting feature wording aligns with current step model).
+
+## 211. Complete SCRIPTING.md TOC coverage
+- [x] 211.1 Audit `SCRIPTING.md` TOC vs actual section headings and command entries.
+- [x] 211.2 Add missing command links and missing top-level sections to the TOC.
+- [x] 211.3 Verify TOC now covers all command sections and top-level sections.
+
+### 211 Review
+- Updated `SCRIPTING.md` TOC command list to include missing command sections:
+  - `exists`
+  - `playsound`
+  - `localcmd`
+- Added missing top-level TOC entries and renumbered:
+  - `Output Options`
+  - `Tips and Best Practices`
+- Verification:
+  - Coverage check script comparing command headings vs TOC command entries now reports:
+    - `missing-in-toc=` (empty)
+    - `extra-in-toc=` (empty)
+  - `rg -n "^## " SCRIPTING.md` confirms TOC now includes all major top-level sections, including `Output Options` and `Tips and Best Practices`.

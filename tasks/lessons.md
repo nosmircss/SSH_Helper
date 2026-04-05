@@ -13,6 +13,7 @@
 - When changing interactive launch paths (`wt.exe` vs direct shell), I must verify `working_dir` is still honored in both branches; if `-d` is no longer used, `ProcessStartInfo.WorkingDirectory` must be set explicitly.
 - When a command option is exposed across multiple modes (foreground/background/interactive), I must verify runtime behavior, dependency analysis, and docs all agree on which output variables are produced per mode.
 - When adding new audit/transcript capture behavior, I must reuse the existing `InteractiveTerminalSessionDetails` history pipeline instead of inventing a separate storage model, so execution-details UX stays unified.
+- When a user asks for a "full README update" after I fixed only one stale line, I must perform an end-to-end documentation sweep (features, usage, shortcuts, build prerequisites), cross-check claims against live code paths, and capture verification evidence in `tasks/todo.md` rather than shipping another narrow edit.
 
 ## 2026-04-03
 - When a user reports "build fails now" after my change, I must validate with the same build command/profile they are using (including warning-as-error settings and IDE file-lock conditions) before assuming a code regression.

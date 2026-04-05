@@ -124,7 +124,6 @@ namespace SSH_Helper
             btnSavePreset = new Button();
             lblScriptTitle = new Label();
             executePanel = new BufferedPanel();
-            btnExecuteAll = new Button();
             btnExecuteSelected = new Button();
             btnStopAll = new Button();
             outputPanel = new BufferedPanel();
@@ -998,7 +997,6 @@ namespace SSH_Helper
             // executePanel
             // 
             executePanel.BackColor = Color.FromArgb(248, 249, 250);
-            executePanel.Controls.Add(btnExecuteAll);
             executePanel.Controls.Add(btnExecuteSelected);
             executePanel.Controls.Add(btnStopAll);
             executePanel.Dock = DockStyle.Bottom;
@@ -1007,24 +1005,6 @@ namespace SSH_Helper
             executePanel.Padding = new Padding(8);
             executePanel.Size = new Size(258, 50);
             executePanel.TabIndex = 1;
-            //
-            // btnExecuteAll
-            //
-            btnExecuteAll.BackColor = Color.FromArgb(25, 135, 84);
-            btnExecuteAll.Cursor = Cursors.Hand;
-            btnExecuteAll.FlatAppearance.BorderSize = 0;
-            btnExecuteAll.FlatAppearance.MouseDownBackColor = Color.FromArgb(20, 108, 67);
-            btnExecuteAll.FlatAppearance.MouseOverBackColor = Color.FromArgb(21, 117, 73);
-            btnExecuteAll.FlatStyle = FlatStyle.Flat;
-            btnExecuteAll.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
-            btnExecuteAll.ForeColor = Color.White;
-            btnExecuteAll.Location = new Point(138, 8);
-            btnExecuteAll.Name = "btnExecuteAll";
-            btnExecuteAll.Size = new Size(120, 34);
-            btnExecuteAll.TabIndex = 1;
-            btnExecuteAll.Text = "Run All";
-            btnExecuteAll.UseVisualStyleBackColor = false;
-            btnExecuteAll.Click += btnExecuteAll_Click;
             //
             // btnExecuteSelected
             //
@@ -1054,7 +1034,7 @@ namespace SSH_Helper
             btnStopAll.FlatStyle = FlatStyle.Flat;
             btnStopAll.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
             btnStopAll.ForeColor = Color.White;
-            btnStopAll.Location = new Point(266, 8);
+            btnStopAll.Location = new Point(138, 8);
             btnStopAll.Name = "btnStopAll";
             btnStopAll.Size = new Size(80, 34);
             btnStopAll.TabIndex = 2;
@@ -1863,7 +1843,6 @@ namespace SSH_Helper
 
         // Execute panel
         private BufferedPanel executePanel;
-        private Button btnExecuteAll;
         private Button btnExecuteSelected;
         private Button btnStopAll;
 
