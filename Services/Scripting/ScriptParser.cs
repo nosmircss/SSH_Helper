@@ -58,7 +58,9 @@ namespace SSH_Helper.Services.Scripting
             "parallel",
             "call",
             "return",
-            "table"
+            "table",
+            "localcmd",
+            "vault"
         };
         private static readonly string[] KnownTopLevelKeys =
         {
@@ -131,7 +133,9 @@ namespace SSH_Helper.Services.Scripting
                 ["switch"] = ["value", "cases", "default"],
                 ["parallel"] = ["steps", "max_concurrent"],
                 ["call"] = ["subroutine", "args", "out", "on_error"],
-                ["table"] = ["data", "columns", "into", "align", "show_header"]
+                ["table"] = ["data", "columns", "into", "align", "show_header"],
+                ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "fail_on_nonzero", "success_codes", "max_output_bytes", "confirm", "quiet", "suppress", "title", "into", "timeout", "on_error"],
+                ["vault"] = ["path", "key", "keys", "into", "write", "patch", "profile", "version", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -173,7 +177,9 @@ namespace SSH_Helper.Services.Scripting
                 ["parallel"] = [],
                 ["call"] = [],
                 ["return"] = [],
-                ["table"] = []
+                ["table"] = [],
+                ["localcmd"] = [],
+                ["vault"] = []
             };
         private static readonly HashSet<string> CanonicalMapCommands = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -1007,6 +1013,14 @@ namespace SSH_Helper.Services.Scripting
                     case "table":
                         step.DeclaredStepType = StepType.Table;
                         step.Table = ParseTableOptions(parser, step);
+                        break;
+                    case "localcmd":
+                        step.DeclaredStepType = StepType.LocalCmd;
+                        step.LocalCmd = ParseLocalCmdOptions(parser, step);
+                        break;
+                    case "vault":
+                        step.DeclaredStepType = StepType.Vault;
+                        step.Vault = ParseVaultOptions(parser, step);
                         break;
                     case "cases":
                         step.Cases = ParseSwitchCases(parser);
@@ -3438,6 +3452,208 @@ namespace SSH_Helper.Services.Scripting
             return columns;
         }
 
+        private LocalCmdOptions ParseLocalCmdOptions(IParser parser, ScriptStep step)
+        {
+            var options = new LocalCmdOptions();
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                options.Command = parser.Consume<Scalar>().Value;
+                return options;
+            }
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "command":
+                            options.Command = parser.Consume<Scalar>().Value;
+                            break;
+                        case "shell":
+                            options.Shell = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "shell_path":
+                            options.ShellPath = parser.Consume<Scalar>().Value;
+                            break;
+                        case "args":
+                            options.Args = ParseStringList(parser);
+                            break;
+                        case "env":
+                            options.Env = ParseStringDictionary(parser);
+                            break;
+                        case "working_dir":
+                            options.WorkingDir = parser.Consume<Scalar>().Value;
+                            break;
+                        case "interactive":
+                            options.Interactive = ParseBooleanOrDefault(parser, false);
+                            break;
+                        case "keep_open":
+                            options.KeepOpen = ParseBooleanOrDefault(parser, false);
+                            break;
+                        case "run_mode":
+                            options.RunMode = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "lifetime":
+                            options.Lifetime = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "kill_on_cancel":
+                            options.KillOnCancel = ParseBooleanOrDefault(parser, false);
+                            break;
+                        case "fail_on_nonzero":
+                            options.FailOnNonZero = ParseBooleanOrDefault(parser, true);
+                            break;
+                        case "success_codes":
+                            options.SuccessCodes = ParseIntList(parser);
+                            break;
+                        case "max_output_bytes":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var maxBytes))
+                                options.MaxOutputBytes = maxBytes;
+                            break;
+                        case "confirm":
+                            options.Confirm = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            break;
+                        case "quiet":
+                            options.Quiet = ParseBooleanOrDefault(parser, false);
+                            break;
+                        case "suppress":
+                            options.Suppress = ParseBooleanOrDefault(parser, false);
+                            break;
+                        case "title":
+                            options.Title = parser.Consume<Scalar>().Value;
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "timeout":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var timeout))
+                                step.Timeout = timeout;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown localcmd key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private VaultStepOptions ParseVaultOptions(IParser parser, ScriptStep step)
+        {
+            var options = new VaultStepOptions();
+
+            if (!parser.Accept<MappingStart>(out _))
+            {
+                SkipValue(parser);
+                return options;
+            }
+
+            parser.Consume<MappingStart>();
+
+            while (!parser.Accept<MappingEnd>(out _))
+            {
+                var keyScalar = parser.Consume<Scalar>();
+                var key = keyScalar.Value.ToLowerInvariant();
+
+                switch (key)
+                {
+                    case "path":
+                        options.Path = parser.Consume<Scalar>().Value;
+                        break;
+                    case "profile":
+                        options.Profile = parser.Consume<Scalar>().Value;
+                        break;
+                    case "key":
+                        options.Key = parser.Consume<Scalar>().Value;
+                        break;
+                    case "keys":
+                        options.Keys = ParseStringDictionary(parser);
+                        break;
+                    case "into":
+                        options.Into = parser.Consume<Scalar>().Value;
+                        break;
+                    case "version":
+                        if (int.TryParse(parser.Consume<Scalar>().Value, out var version))
+                            options.Version = version;
+                        break;
+                    case "write":
+                        options.Write = ParseStringDictionary(parser);
+                        break;
+                    case "patch":
+                        options.Patch = ParseStringDictionary(parser);
+                        break;
+                    case "on_error":
+                    case "onerror":
+                        ApplyNestedOnErrorAlias(step, parser);
+                        break;
+                    default:
+                        AddUnknownKeyWarning($"Unknown vault key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                        SkipValue(parser);
+                        break;
+                }
+            }
+
+            parser.Consume<MappingEnd>();
+
+            return options;
+        }
+
+        private List<int> ParseIntList(IParser parser)
+        {
+            var list = new List<int>();
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                var value = parser.Consume<Scalar>().Value;
+                foreach (var part in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (int.TryParse(part, out var n))
+                        list.Add(n);
+                }
+                return list;
+            }
+
+            if (parser.Accept<SequenceStart>(out _))
+            {
+                parser.Consume<SequenceStart>();
+                while (!parser.Accept<SequenceEnd>(out _))
+                {
+                    if (parser.Accept<Scalar>(out _))
+                    {
+                        if (int.TryParse(parser.Consume<Scalar>().Value, out var n))
+                            list.Add(n);
+                    }
+                    else
+                    {
+                        SkipValue(parser);
+                    }
+                }
+                parser.Consume<SequenceEnd>();
+                return list;
+            }
+
+            SkipValue(parser);
+            return list;
+        }
+
         private List<RespondPair> ParseRespondPairs(IParser parser, ScriptStep step)
         {
             var pairs = new List<RespondPair>();
@@ -4322,6 +4538,72 @@ namespace SSH_Helper.Services.Scripting
                         }
                         break;
 
+                    case StepType.LocalCmd:
+                        if (step.LocalCmd == null)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: LocalCmd requires options{lineContent}");
+                            break;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(step.LocalCmd.Command))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: LocalCmd requires 'command'{lineContent}");
+                        }
+
+                        if (!IsDynamicValue(step.LocalCmd.Shell) && !IsValidLocalCmdShell(step.LocalCmd.Shell))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'shell' must be one of powershell, custom{lineContent}");
+                        }
+
+                        if (!IsDynamicValue(step.LocalCmd.Shell) &&
+                            string.Equals(step.LocalCmd.Shell, "custom", StringComparison.OrdinalIgnoreCase) &&
+                            string.IsNullOrWhiteSpace(step.LocalCmd.ShellPath))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'shell_path' is required when shell is custom{lineContent}");
+                        }
+
+                        if (!IsDynamicValue(step.LocalCmd.RunMode) && !IsValidLocalCmdRunMode(step.LocalCmd.RunMode))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'run_mode' must be one of foreground, background{lineContent}");
+                        }
+
+                        if (step.LocalCmd.Interactive &&
+                            string.Equals(step.LocalCmd.RunMode, "background", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: interactive: true and run_mode: background are mutually exclusive{lineContent}");
+                        }
+
+                        if (step.LocalCmd.KeepOpen && !step.LocalCmd.Interactive)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd.keep_open requires interactive: true{lineContent}");
+                        }
+
+                        if (!IsDynamicValue(step.LocalCmd.Lifetime) && !IsValidLocalCmdLifetime(step.LocalCmd.Lifetime))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'lifetime' must be one of detached, script, app{lineContent}");
+                        }
+
+                        if (!IsDynamicValue(step.LocalCmd.Confirm) && !IsValidLocalCmdConfirm(step.LocalCmd.Confirm))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'confirm' must be one of always, once, never{lineContent}");
+                        }
+
+                        if (step.LocalCmd.MaxOutputBytes <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd.max_output_bytes must be greater than 0{lineContent}");
+                        }
+                        break;
+
                     case StepType.Interactive:
                         if (step.Interactive == null)
                         {
@@ -4530,6 +4812,39 @@ namespace SSH_Helper.Services.Scripting
         {
             return string.Equals(action, "upload", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(action, "download", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidLocalCmdShell(string shell)
+        {
+            if (string.IsNullOrWhiteSpace(shell))
+                return false;
+
+            var normalized = shell.Trim();
+            return string.Equals(shell, "powershell", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(shell, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith("\\powershell.exe", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith("/powershell.exe", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(shell, "custom", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidLocalCmdRunMode(string runMode)
+        {
+            return string.Equals(runMode, "foreground", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(runMode, "background", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidLocalCmdLifetime(string lifetime)
+        {
+            return string.Equals(lifetime, "detached", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(lifetime, "script", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(lifetime, "app", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidLocalCmdConfirm(string confirm)
+        {
+            return string.Equals(confirm, "always", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(confirm, "once", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(confirm, "never", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool ContainsVariableToken(string? value)

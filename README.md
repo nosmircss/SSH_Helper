@@ -1,309 +1,238 @@
 # SSH Helper
 
-A Windows Forms application for executing SSH commands across multiple hosts with YAML-based scripting, environment management, multi-protocol network commands, and a code-editor-grade script editor.
+SSH Helper is a Windows Forms desktop app for executing SSH commands and YAML automation across many hosts, with presets/folders, scheduler jobs, Flow Canvas visual authoring, and persistent execution history.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
 
-- **Multi-Host Execution**: Run commands on multiple hosts simultaneously with configurable parallelism
-- **CSV Host Import**: Load host lists from CSV files with custom columns that become script variables
-- **Command Presets**: Save, organize into folders, and favorite frequently used commands
-- **YAML Scripting**: 24+ commands for complex automation workflows with control flow, error handling, and expressions
-- **Multi-Protocol Commands**: HTTP/HTTPS, DNS, ICMP Ping, TCP Port Check, and SFTP beyond SSH
-- **Environment Management**: Named profiles (dev, staging, prod) with independent host grids, variables, and color labels
-- **Script Editor**: Scintilla-based editor with syntax highlighting, context-aware autocomplete, inline diagnostics, and smart indentation
-- **Dark Mode**: Full application-wide dark and light theme support
-- **Expression Engine**: 40+ built-in functions for string, array, JSON, and math operations
-- **History Management**: Track execution history with output preservation and per-host details that persist across restarts
-- **SSH Config Integration**: Read `~/.ssh/config` for host configurations
-- **Device Config Parsing**: Parse FortiGate configurations into structured data for scripting
-- **State Persistence**: Remember hosts, presets, environments, history, and window layout between sessions
-- **Auto-Updates**: Check for updates from GitHub releases with SHA256 checksum verification
+- **Multi-host execution**: Run against checked hosts or the currently selected host, with live progress and cancellation.
+- **Preset library**: Save commands/scripts as presets, organize into folders, favorite frequently used items, and reorder manually.
+- **Folder execution dialog**: Run folder presets sequentially or in parallel with host parallelism, stop-on-error, and output separator controls.
+- **Scheduler**: Create on-demand, one-time, or recurring (cron) jobs targeting a preset, folder, or scheduler-local custom content.
+- **Flow Canvas**: Visual script builder with apply/run/test-step integration and runtime/debug signaling back to the host app.
+- **YAML scripting engine**: 39 script step types (SSH, local command execution, HTTP/network checks, parsing, control flow, file I/O, prompts, and more).
+- **Expressions and functions**: 55 built-in function helpers plus JSON/list expression utilities for data transformation and conditions.
+- **Script editor (Scintilla)**: Syntax highlighting, context-aware autocomplete, inline diagnostics, variable inspector tooltips, and smart indentation.
+- **Environment management**: Named environments (for example dev/staging/prod) with isolated host grids, variables, and color labels.
+- **History and details**: Persisted run history with per-host payloads, details dialogs, and separate scheduler history retention.
+- **Credential/security options**: Windows Credential Manager support, SSH agent preference, and build-flavor credential isolation.
+- **Auto-updates**: GitHub release checks with verified download/update flow.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Windows 10 or later
-- .NET 8.0 Runtime
+- .NET 8 Runtime
+- Microsoft Edge WebView2 Runtime (used by embedded browser features)
 
 ### Installation
 
-1. Download the latest release from the [Releases](https://github.com/nosmircss/SSH_Helper/releases) page
-2. Extract to your preferred location
-3. Run your preferred build:
+1. Download the latest release from [Releases](https://github.com/nosmircss/SSH_Helper/releases).
+2. Extract to a folder of your choice.
+3. Launch one of:
    - `SSH_Helper.exe` (standard)
    - `SSH_Helper_Portable.exe` (portable)
 
 ### Release Flavors
 
-- **Standard (`SSH_Helper.exe`)**: Stores app-managed data under `%LocalAppData%\SSH_Helper`.
-- **Portable (`SSH_Helper_Portable.exe`)**: Stores app-managed data beside the executable.
-  - Portable mode requires write access to the folder containing `SSH_Helper_Portable.exe`.
-- **Credential isolation**: Windows Credential Manager entries are build-flavor scoped.
-  - Standard build uses `SSH_Helper:*` targets.
+- **Standard (`SSH_Helper.exe`)**: App data stored under `%LocalAppData%\SSH_Helper`.
+- **Portable (`SSH_Helper_Portable.exe`)**: App data stored beside the executable.
+  - Portable mode requires write access to the executable folder.
+- **Credential isolation**:
+  - Standard build uses `SSH_Helper:*` Windows Credential Manager targets.
   - Portable build uses `SSH_Helper_Portable:*` targets.
 
 ## Usage
 
-### Loading Hosts
+### Load Hosts
 
-1. **From CSV**: File > Open CSV or drag-and-drop a CSV file
-   - CSV must contain a `Host_IP` column
-   - Additional columns become variables for scripts (`${column_name}` or `{{column_name}}`)
-2. **Manual Entry**: Add hosts directly in the grid
+1. Use **File > Open CSV** (or drag and drop a CSV onto the app).
+2. CSV must include `Host_IP`.
+3. Additional columns become variables (`${column_name}` and `{{column_name}}`).
+4. You can also add/edit rows manually in the host grid.
 
-### Running Commands
+### Run Commands or Presets
 
-1. Enter credentials in the toolbar (Username/Password)
-2. Select a preset or type commands in the editor
-3. Click **Execute All** to run on all hosts, or **Execute Selected** for selected hosts
+1. Enter credentials in the toolbar.
+2. Select a preset (or type commands/script content).
+3. Check one or more hosts and click **Run Selected**.
+4. If no hosts are checked, the run targets the currently selected host.
+5. Use **Stop** to request cancellation for the active run.
 
-### Command Presets
+### Presets and Folders
 
-- **Save**: Enter a name and click Save to store the current commands
-- **Rename**: Changing the preset name then saving prompts to rename existing or create new
-- **Favorites**: Right-click a preset to mark as favorite (shown with star)
-  - Access all favorites quickly via the Favorites tab
-  - Both presets and folders can be marked as favorites
-- **Sorting**: Use the sort button to organize presets
-  - Ascending, descending, or manual drag-and-drop reordering
-- **Folders**: Organize presets into folders for better management
-  - Right-click to create/rename/delete folders
-  - Drag presets into folders or use "Move to Folder" menu
-  - Folders can be expanded/collapsed (state is remembered)
-  - Selecting a folder displays a summary showing preset count and contents
-  - Execute all presets in a folder at once via right-click menu
+- Save and rename presets from the editor area.
+- Right-click presets/folders for favorites, import/export, move, duplicate, rename, and delete actions.
+- Use folder execution to run all direct child presets with advanced controls.
+- Undo latest preset/folder delete is available (when pending) via `Ctrl+Z`.
 
-### Folder Execution
+### Scheduler Jobs
 
-Execute multiple presets from a folder with advanced options:
-- **Preset Selection**: Choose which presets to run from a checklist
-- **Execution Mode**: Run presets sequentially or in parallel
-- **Stop on Error**: Optionally stop execution if any preset fails
-- **Parallel Hosts**: Configure how many hosts to run simultaneously (1-N)
-- **Suppress Separators**: Hide preset name separators from output
-- Per-host results are tracked in history for later review
+Open the scheduler from the top menu (`Scheduler`) or status bar link.
 
-### Environment Management
+Scheduler supports:
+- Preset, folder, or custom scheduler-local content targets
+- Run now, one-time, or recurring cron schedules
+- Per-job host grids and credential mode selection
+- Optional per-job timeout overrides
+- Persisted run history and retention controls
 
-Environments let you maintain separate host configurations and variables for different contexts (development, staging, production, etc.).
+### Flow Canvas
 
-- **Create/Switch**: Use the toolbar dropdown to switch between environments; the entire host grid and variable context swaps on switch
-- **Variables**: Each environment has its own key-value variable dictionary, injected into execution context
-- **Host Grids**: Each environment stores independent host columns, entries, and selections
-- **Color Labels**: Assign optional colors to environments for visual identification in the toolbar
-- **Import/Export**: Share environments via `.sshenv.json` files with conflict resolution on import
-- **Script Integration**: Use `updateenvironment:` in YAML scripts to persist variable updates back to the active environment
-- **Default Environment**: A reserved "Default" environment is always present; legacy state is automatically captured on first use
-- **Window Title**: The title bar shows the active environment name
+Open **Edit > Flow Canvas...** (or `Ctrl+Shift+F`) to author scripts visually.
 
-Manage environments via **Edit > Environments** or the toolbar dropdown button.
+Flow Canvas supports:
+- Block graph editing with start block metadata
+- Apply-to-YAML back into the main editor
+- Unified run/test-step execution from the canvas
+- Variable/host/debug state synchronization with the main app
 
-### YAML Scripts
+### YAML Scripting
 
-For complex automation, use YAML scripts. Scripts support:
-- Variables and expressions with 40+ built-in functions
-- Conditional logic (if/elif/else)
-- Loops (foreach with filters, while with max iterations)
-- Output capture and regex extraction
-- File operations (read/write with JSON, JSONL, CSV, text formats)
-- User input prompts with validation
-- Try/catch/finally error handling
-- Multi-protocol network commands (HTTP, DNS, Ping, Port Check, SFTP)
-- Grid column updates and environment variable persistence
-- Device configuration parsing (FortiGate)
-- Logging with levels (debug, info, warning, error, success)
-- Built-in variables: `${_output}`, `${_timestamp}`, `${_iteration}`, `${_last_error}`
+Use YAML for advanced workflows:
+- Control flow: `if`, `switch`, `try/catch/finally`, `foreach`, `while`, `parallel`, `call/return`
+- Execution steps: `send`, `interactive`, `localcmd`, `http`, `ping`, `dns`, `portcheck`, `sftp`
+- Data operations: `set`, `extract`, `readfile`, `writefile`, `parse`, `table`, assertions, prompts, and logging
+- Environment/grid updates: `updateenvironment`, `updatecolumn`
 
-Flow Canvas required markers (`*`) are tied to runtime/parser validation rules, including conditional requirements (for example `readfile.path` vs `select_file`, HTTP auth credentials by `auth` mode, and headless `interactive` capture constraints).
-
-See [Scripting Documentation](SCRIPTING.md) for full details.
-
-**Example Script:**
-```yaml
----
-name: Quick Status Check
-steps:
-  - send: show version
-    capture: output
-  - extract:
-      from: output
-      pattern: 'Version (.+?)$'
-      into: version
-  - print: "Device version: ${version}"
-```
-
-**Example: HTTP Health Check:**
-```yaml
----
-name: API Health Check
-steps:
-  - http:
-      url: "https://${Host_IP}/api/health"
-      method: GET
-      timeout: 10
-      into: health
-      on_error: continue
-  - if: ${health_status} == 200
-    then:
-      - log:
-          message: "${Host_IP} healthy"
-          level: success
-    else:
-      - log:
-          message: "${Host_IP} unhealthy (status: ${health_status})"
-          level: warning
-```
-
-**Example: Block IPs from File:**
-```yaml
----
-name: Block IPs from File
-steps:
-  - readfile:
-      path: "C:\\blocklist.txt"
-      into: blocked_ips
-  - foreach: ip in blocked_ips
-    do:
-      - send: iptables -A INPUT -s ${ip} -j DROP
-      - print: "Blocked ${ip}"
-```
+See:
+- [SCRIPTING.md](SCRIPTING.md) for full command reference
+- [ScriptSamples/README.md](ScriptSamples/README.md) and `ScriptSamples/` for examples
 
 ### Script Editor
 
-The built-in script editor provides a code-editor-grade experience for writing YAML scripts:
+The built-in editor includes:
+- YAML-aware syntax highlighting
+- Context-sensitive autocomplete (`Ctrl+Space`)
+- Inline errors/warnings and hover diagnostics
+- Variable inspector hover previews
+- Smart Enter/indent behavior (`Tab` / `Shift+Tab`)
+- Optional YAML hygiene checks (tabs, mixed indentation, duplicate keys)
 
-- **Syntax Highlighting**: 8 token types (keys, commands, options, variables, strings, numbers, booleans, comments) with light and dark theme palettes
-- **Context-Aware Autocomplete**: Suggestions adapt to your position in the YAML document -- root keys, step commands, command-specific options, enum values, and variable interpolation. Triggered by typing or Ctrl+Space
-- **Inline Diagnostics**: Real-time validation with red (error) and yellow (warning) squiggle underlines and hover tooltips
-- **Variable Inspector**: Hover over `${var}` or `{{column}}` tokens to see resolved values
-- **Smart Editing**: Context-aware Enter key (deeper indent after `:`, sibling indent after `-`), Tab/Shift+Tab for block indent/outdent
-- **YAML Hygiene**: Optional warnings for tab indentation, mixed indent styles, and duplicate keys
+### Custom Columns and Connection Testing
 
-All editor features are configurable via **Edit > Settings > Command Editor**.
-
-### Custom Columns
-
-Right-click column headers to add, rename, or delete custom columns. Custom columns:
-- Become available as variables in scripts using `${column_name}` or `{{column_name}}` syntax
-- Can be updated by scripts using the `updatecolumn` command
-- Are saved when exporting to CSV
-- Are scoped per environment
+- Right-click host grid column headers to add/rename/delete custom columns.
+- Custom columns are available to scripts and CSV export.
+- Host grid context menu includes connection testing actions for quick validation.
 
 ## Settings
 
-Access via **Edit > Settings**:
+Open **File > Settings**.
 
 ### General
-- **Remember State**: Save hosts, presets, environments, and history on exit
-- **Max History Entries**: Limit stored history items (default: 30)
-- **Default Timeout**: Command timeout in seconds
-- **Connection Timeout**: SSH connection timeout
-- **Dark Mode**: Toggle application-wide dark/light theme
-- **Auto-Resize Columns**: Automatically fit host grid columns
-- **SSH Config**: Integrate with `~/.ssh/config` for host lookups
-- **Connection Pooling**: Reuse SSH connections across commands
-- **Credential Manager**: Use Windows Credential Manager for stored credentials
-- **SSH Agent**: Prefer SSH agent for authentication
+- Remember state on exit
+- Default command timeout and SSH connection timeout
+- Maximum manual history entries
+- Dark mode and host-grid auto-resize
+- SSH config integration
+- SSH connection pooling
+- Credential Manager and SSH agent preferences
 
 ### Updates
-- **Check for Updates**: Automatic update checks on startup
-- **Update Log**: Enable detailed logging for troubleshooting updates
+- Check for updates on startup
+- Update log toggle
 
 ### Command Editor
-- **Syntax Highlighting**: Toggle on/off
-- **Autocomplete**: Enable autocomplete, auto-show on typing
-- **Validation**: Inline validation toggle, debounce timing (150-2000ms), show warnings
-- **Tooltips**: Diagnostic tooltips, variable inspector tooltips
-- **YAML Hygiene**: Flag tabs, mixed indents, duplicate keys
-- **Indentation**: Spaces vs. tabs, indent size (2-8), smart Enter, blank line preservation
+- Syntax highlighting/autocomplete toggles
+- Inline validation and debounce
+- Diagnostic and variable-inspector tooltips
+- YAML hygiene warnings
+- Indentation, smart Enter, and blank-line behavior
 
 ### Appearance
-- **Font Families**: Separate UI and code font families
-- **Font Sizes**: 12 individually configurable sizes (section titles, tree view, code editor, output, tabs, buttons, host list, menu, status bar, dialogs, and more)
-- **Global Scale**: Scale factor from 0.8x to 1.5x
-- **Layout**: Word wrap for code editor and output, row heights for tree view and host list
-- **Accent Color**: Custom accent color with picker
+- Separate UI/code font families
+- Per-surface font sizes
+- Global scaling
+- Word wrap and row-height controls
+- Accent color
 
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| Ctrl+O | Open CSV file |
-| Ctrl+S | Save CSV file / Save preset |
-| Ctrl+F | Find in output |
-| F3 | Find next match |
-| Shift+F3 | Find previous match |
-| Alt+C | Toggle case sensitivity (Find) |
-| Alt+W | Toggle whole word match (Find) |
-| Alt+R | Toggle regex mode (Find) |
-| F5 | Execute on all hosts |
-| F6 | Execute on selected hosts |
-| Escape | Stop execution / Close Find |
-| Ctrl+A | Select all cells |
-| Ctrl+C | Copy selected cells |
-| Ctrl+V | Paste to cells |
-| Delete | Clear selected cells |
-| Ctrl+Space | Trigger autocomplete (Script Editor) |
-| Tab | Indent selected lines (Script Editor) |
-| Shift+Tab | Outdent selected lines (Script Editor) |
+| Ctrl+O | Open CSV |
+| Ctrl+S | Save preset (editor focus) or save CSV |
+| Ctrl+Shift+S | Save CSV As |
+| Ctrl+F | Open Find |
+| F3 | Find next |
+| Shift+F3 | Find previous |
+| Ctrl+Shift+V | Validate script |
+| Ctrl+Shift+F | Open Flow Canvas |
+| Ctrl+Z | Undo latest preset/folder delete (when available) |
+| Alt+F4 | Exit app |
 
-## Configuration
+Host grid (when focused):
+- `Ctrl+A` select all cells
+- `Ctrl+C` copy
+- `Ctrl+V` paste
+- `Delete` / `Backspace` clear selected cells
 
-Settings are stored in `config.json` in the application storage directory:
-- **Standard build**: `%LocalAppData%\SSH_Helper\`
-- **Portable build**: the executable directory (same folder as `SSH_Helper_Portable.exe`)
+Script editor:
+- `Ctrl+Space` autocomplete
+- `Tab` indent selection
+- `Shift+Tab` outdent selection
 
-This storage location also contains runtime files such as:
-- Window position, size, and splitter positions
-- Presets, folders, favorites, and manual sort order
-- Folder expand/collapse states
-- Environment profiles with variables and active environment
-- Command editor preferences
-- Font and appearance settings
-- Dark mode preference
-- Execution history metadata in `history.index.json` and full per-run payloads in `history/<run-id>.json`
-- Update settings
+Find dialog:
+- `Alt+C` toggle case-sensitive find
+
+## Configuration and Data Storage
+
+Application data location:
+- Standard build: `%LocalAppData%\SSH_Helper\`
+- Portable build: executable directory (same folder as `SSH_Helper_Portable.exe`)
+
+Key files/folders include:
+- `config.json` (application settings and UI state)
+- `jobs.json` (scheduler jobs)
+- `history.index.json` and `history/<run-id>.json` (manual run history)
+- `job-history/<job-id>/index.json` plus run payload files (scheduler history)
+- Preset/folder/environment state and appearance/editor preferences
 
 ## Building from Source
 
 ```bash
-# Clone the repository
+# Clone
 git clone https://github.com/nosmircss/SSH_Helper.git
-
-# Navigate to project
 cd SSH_Helper
 
-# Build
+# Install Flow Canvas dependencies (first time)
+cd FlowCanvas
+npm install
+cd ..
+
+# Build (runs Flow Canvas build target by default)
 dotnet build
 
 # Run
 dotnet run
 ```
 
-### Requirements
+Optional: skip Flow Canvas build during .NET build with:
 
-- Visual Studio 2022 or later (recommended)
-- .NET 8.0 SDK
-- NuGet packages (restored automatically):
-  - Rebex.SshShell - SSH terminal sessions
-  - SSH.NET - SFTP file transfers
-  - Scintilla5.NET - Script editor control
-  - YamlDotNet - YAML parsing
-  - Newtonsoft.Json - JSON serialization
+```bash
+dotnet build -p:SkipFlowCanvasBuild=true
+```
+
+### Source Build Requirements
+
+- Windows 10+ and .NET 8 SDK
+- Node.js and npm (for Flow Canvas assets)
+- Visual Studio 2022+ recommended
+
+Major runtime dependencies are restored automatically (`Rebex.SshShell`, `SSH.NET`, `Scintilla5.NET`, `YamlDotNet`, `Newtonsoft.Json`, `Microsoft.Web.WebView2`, `Cronos`, `NAudio`).
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request
+1. Fork the repository.
+2. Create a feature branch.
+3. Submit a pull request.
 
 ## Support
 
-For issues and feature requests, please use the [GitHub Issues](https://github.com/nosmircss/SSH_Helper/issues) page.
+For issues and feature requests, use [GitHub Issues](https://github.com/nosmircss/SSH_Helper/issues).

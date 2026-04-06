@@ -1,6 +1,31 @@
 # Lessons
 
+## 2026-04-05
+- When a user provides an explicit multi-finding implementation plan, I must mirror it as checkable `tasks/todo.md` items, complete all items end-to-end, and record both focused and broader verification evidence before marking the task done.
+- When sharing scripting recipes, I must verify every referenced function exists in `FunctionRegistry`/`SCRIPTING.md`; never use undocumented helpers like `random_string(...)` in runnable examples.
+- When users call out workaround-heavy docs for missing primitives, I should prefer implementing the missing first-class function (with tests/docs) over keeping complex recipe workarounds.
+- When a user asks for regex-like shorthand in generation APIs, prefer direct char-class shorthand support (for example `[a-zA-Z0-9@#$%^]`) over forcing long explicit character strings.
+- When a user says the upstream secret schema cannot change, I must adapt Vault runtime behavior to that existing shape instead of pushing a flattening/migration workaround.
+- When a user reports Vault writes still produce escaped JSON strings, I must test and harden the exact write payload coercion path (including already-escaped array/object text), not assume the first structured-value fix covers all real data states.
+- When adding a new credential type, I must verify portable/non-portable isolation by using `CredentialTargets.*` target builders and add an explicit portable-prefix regression test.
+
+## 2026-04-04
+- When `localcmd` command banners can include multiline command text, I must format the displayed command with explicit line-break markers (`ScriptingHelpers.FormatForDisplay`) so output surfaces never visually merge adjacent tokens (for example `utf8notepad`).
+- When a user clarifies they want output preserved in Execution Details (interactive session audit log) rather than script variables, I must shift the fix to the interactive history pipeline instead of expanding `into` capture variables.
+- When interactive local terminal windows can be closed by the user (`X`), I must treat Windows close exit code `-1073741510` as a user-initiated close in interactive mode rather than a generic nonzero failure.
+- When users report `keep_open` closes immediately, I must verify shell-token normalization (`powershell` vs `powershell.exe`/path variants) because keep-open logic can silently bypass if shell aliases are not recognized.
+- When `localcmd` runs in `run_mode: background` with `lifetime: detached`, I must treat process-handle metadata failures (PID lookup/dispose) as non-fatal after spawn; only spawn failures should trigger step failure.
+- When adding a new localcmd noise-control flag (`quiet`), I must also evaluate send-parity expectations and include `suppress` behavior for live output, not just banner suppression.
+- When introducing a new command or command options, I must update autocomplete required-option metadata (`ScriptAutocompleteProvider.RequiredOptionKeysByCommand`) so required tags stay consistent with parser/runtime validation.
+- When adding keep-open behavior to interactive local command launches, I must validate which process handle is actually being awaited; waiting on a terminal launcher (`wt.exe`) can break capture semantics, so keep-open modes should use a directly tracked shell process when capture/exit tracking is expected.
+- When interactive `localcmd` transcript capture must be reliable, I must avoid waiting on terminal launchers (`wt.exe`) for non-keep-open `powershell`/`cmd` runs and instead track the real shell process lifetime directly.
+- When changing interactive launch paths (`wt.exe` vs direct shell), I must verify `working_dir` is still honored in both branches; if `-d` is no longer used, `ProcessStartInfo.WorkingDirectory` must be set explicitly.
+- When a command option is exposed across multiple modes (foreground/background/interactive), I must verify runtime behavior, dependency analysis, and docs all agree on which output variables are produced per mode.
+- When adding new audit/transcript capture behavior, I must reuse the existing `InteractiveTerminalSessionDetails` history pipeline instead of inventing a separate storage model, so execution-details UX stays unified.
+- When a user asks for a "full README update" after I fixed only one stale line, I must perform an end-to-end documentation sweep (features, usage, shortcuts, build prerequisites), cross-check claims against live code paths, and capture verification evidence in `tasks/todo.md` rather than shipping another narrow edit.
+
 ## 2026-04-03
+- When a user reports "build fails now" after my change, I must validate with the same build command/profile they are using (including warning-as-error settings and IDE file-lock conditions) before assuming a code regression.
 - When portable/self-update runs from synced folders (for example OneDrive Desktop), I must treat copy/relaunch as transiently lock-prone and add retry logic in updater scripts instead of assuming immediate file availability.
 - When introducing parallel standard/portable editions, I must audit all shared OS-level namespaces in one pass (credential targets, updater temp staging paths, and scheduler ownership) instead of stopping after the first collision point.
 - When users ask for YAML key order to match the Flow Canvas Properties panel, I must not rely on parser key catalogs that are alphabetically normalized; I need explicit panel-order mappings (especially for grouped Core/Advanced/On Error layouts like `playsound`).

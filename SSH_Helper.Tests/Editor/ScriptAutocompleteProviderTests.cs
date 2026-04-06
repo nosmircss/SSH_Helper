@@ -158,6 +158,20 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_StepPrefix_LocalCmd_ShowsDetailText()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - lo";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Should().Contain(item =>
+            item.Label == "localcmd" &&
+            item.Detail == "run local cmd");
+    }
+
+    [Fact]
     public void GetCompletion_LogBlockOptionKey_SuggestsOnlyLogOptions()
     {
         var provider = new ScriptAutocompleteProvider();
@@ -512,5 +526,6 @@ public class ScriptAutocompleteProviderTests
         yield return new object[] { "assert", new[] { "condition" } };
         yield return new object[] { "switch", new[] { "value", "cases" } };
         yield return new object[] { "browser_callback_capture", new[] { "start_url", "callback_path", "into" } };
+        yield return new object[] { "localcmd", new[] { "command" } };
     }
 }

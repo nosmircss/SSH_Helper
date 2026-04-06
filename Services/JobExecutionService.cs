@@ -63,6 +63,16 @@ namespace SSH_Helper.Services
         private readonly Func<JobDefinition, bool, CancellationToken, Task>? _jobExecutionOverride;
         private readonly Action<JobDefinition>? _jobEvaluationFaultInjector;
 
+        /// <summary>
+        /// Optional Vault credential provider. Set after construction when VaultService becomes available.
+        /// </summary>
+        public VaultCredentialProvider? VaultCredentialProvider { get; set; }
+
+        /// <summary>
+        /// Optional active-environment Vault profile name used as a scheduler default when jobs do not specify one.
+        /// </summary>
+        public string? EnvironmentVaultProfile { get; set; }
+
         private System.Threading.Timer? _timer;
         private int _evaluating; // 0 = idle, 1 = evaluating (Interlocked guard)
         private readonly SemaphoreSlim _concurrencyGate;
@@ -365,6 +375,8 @@ namespace SSH_Helper.Services
         /// </summary>
         private async Task ExecuteJobCoreAsync(JobDefinition job, bool isRunNow, CancellationToken ct)
         {
+            var defaultVaultProfileOverride = ResolveJobDefaultVaultProfile(job);
+
             // Validate credential availability before attempting execution
             var (username, password) = ResolveCredentials(job);
             if (job.CredentialMode != CredentialMode.PerHostColumn
@@ -384,6 +396,11 @@ namespace SSH_Helper.Services
             // Create a new SshExecutionService per job run (NOT shared with UI)
             using var sshService = new SshExecutionService();
             sshService.UseConnectionPooling = false; // Avoid pool conflicts with UI instance
+            if (VaultCredentialProvider != null)
+            {
+                sshService.VaultService = VaultCredentialProvider.VaultService;
+                sshService.EnvironmentVaultProfile = defaultVaultProfileOverride;
+            }
 
             // Scheduler cancellation for both single-preset and folder jobs flows through
             // the per-run SSH service via Stop(), which cancels its internal execution token.
@@ -458,9 +475,10 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Builds HostConnection objects from the job's persisted host rows.
         /// </summary>
-        private static List<HostConnection> BuildHostConnections(JobDefinition job)
+        private List<HostConnection> BuildHostConnections(JobDefinition job)
         {
             var hosts = new List<HostConnection>();
+            var defaultVaultProfileOverride = ResolveJobDefaultVaultProfile(job);
 
             foreach (var row in job.Hosts)
             {
@@ -477,11 +495,31 @@ namespace SSH_Helper.Services
                     host.Port = port;
                 }
 
-                if (TryGetRowValue(row, "username", out var user) && !string.IsNullOrEmpty(user))
-                    host.Username = user;
+                var rowHasVaultPath = TryGetRowValue(row, "vault_path", out var vaultPath)
+                    && !string.IsNullOrWhiteSpace(vaultPath);
+                var vaultResolved = false;
 
-                if (TryGetRowValue(row, "password", out var pass) && !string.IsNullOrEmpty(pass))
-                    host.Password = pass;
+                if (rowHasVaultPath &&
+                    VaultCredentialProvider != null &&
+                    VaultCredentialProvider.TryGetPassword(
+                        vaultPath,
+                        out var vaultUser,
+                        out var vaultPassword,
+                        defaultVaultProfileOverride))
+                {
+                    host.Username = vaultUser;
+                    host.Password = vaultPassword;
+                    vaultResolved = true;
+                }
+
+                if (!vaultResolved)
+                {
+                    if (TryGetRowValue(row, "username", out var user) && !string.IsNullOrEmpty(user))
+                        host.Username = user;
+
+                    if (TryGetRowValue(row, "password", out var pass) && !string.IsNullOrEmpty(pass))
+                        host.Password = pass;
+                }
 
                 // Copy all row columns as variables for {{variable}} substitution
                 foreach (var kvp in row)
@@ -518,6 +556,8 @@ namespace SSH_Helper.Services
         /// </summary>
         private (string username, string password) ResolveCredentials(JobDefinition job)
         {
+            var defaultVaultProfileOverride = ResolveJobDefaultVaultProfile(job);
+
             switch (job.CredentialMode)
             {
                 case CredentialMode.Stored:
@@ -550,9 +590,33 @@ namespace SSH_Helper.Services
                     // Per-host credentials are already embedded in HostConnection from BuildHostConnections
                     return (string.Empty, string.Empty);
 
+                case CredentialMode.Vault:
+                    if (VaultCredentialProvider != null &&
+                        !string.IsNullOrEmpty(job.VaultCredentialPath) &&
+                        VaultCredentialProvider.TryGetPassword(
+                            job.VaultCredentialPath,
+                            out var vaultUser,
+                            out var vaultPass,
+                            defaultVaultProfileOverride))
+                    {
+                        return (vaultUser, vaultPass);
+                    }
+                    Debug.WriteLine($"Warning: Vault credential resolution failed for job '{job.Name}' at path '{job.VaultCredentialPath}'");
+                    return (string.Empty, string.Empty);
+
                 default:
                     return (string.Empty, string.Empty);
             }
+        }
+
+        private string? ResolveJobDefaultVaultProfile(JobDefinition job)
+        {
+            if (!string.IsNullOrWhiteSpace(job.VaultProfileName))
+                return job.VaultProfileName;
+
+            return string.IsNullOrWhiteSpace(EnvironmentVaultProfile)
+                ? null
+                : EnvironmentVaultProfile;
         }
 
         /// <summary>

@@ -14,6 +14,7 @@ using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.Services.Vault;
 using SSH_Helper.UI;
 using SSH_Helper.Utilities;
 
@@ -110,7 +111,7 @@ namespace SSH_Helper
 
         #region Constants
 
-        private const string ApplicationVersion = "0.51.12";
+        private const string ApplicationVersion = "0.51.14";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -264,6 +265,9 @@ namespace SSH_Helper
         // Credential provider
         private ICredentialProvider? _credentialProvider;
 
+        // Vault service
+        private VaultService? _vaultService;
+
         // Track which TreeView triggered the context menu
         private TreeView? _contextMenuSourceTreeView;
         private readonly ToolStripMenuItem _ctxFolderBaseEnvironment = new();
@@ -315,6 +319,7 @@ namespace SSH_Helper
             {
                 _uiOutputThrottler.Dispose();
                 _scriptValidationService.Dispose();
+                _vaultService?.Dispose();
             };
 
             // Initialize services
@@ -355,6 +360,7 @@ namespace SSH_Helper
 
             InitializeFromConfiguration(config);
             InitializeCredentials();
+            InitializeVault();
             InitializeDataGridView();
             InitializeScriptEditor();
             InitializeOutputHistory();
@@ -1299,10 +1305,7 @@ namespace SSH_Helper
 
         private void InitializeCredentials()
         {
-            var config = _configService.GetCurrent();
-            _credentialProvider = config.Credentials.UseCredentialManager
-                ? new CredentialManagerProvider()
-                : null;
+            _credentialProvider = new CredentialManagerProvider();
 
             if (_credentialProvider?.IsAvailable == true)
             {
@@ -1312,9 +1315,61 @@ namespace SSH_Helper
 
         private bool IsCredentialManagerAvailable => _credentialProvider?.IsAvailable == true;
 
+        private bool ShouldPersistMainFormPassword()
+            => IsCredentialManagerAvailable && _configService.GetCurrent().Credentials.UseCredentialManager;
+
+        private void InitializeVault()
+        {
+            _vaultService?.Dispose();
+            _vaultService = null;
+
+            var activeEnvironmentVaultProfile = _environmentService.GetEnvironment(
+                _environmentService.GetActiveEnvironmentName()).VaultProfileName;
+
+            _sshService.VaultService = null;
+            _sshService.EnvironmentVaultProfile = activeEnvironmentVaultProfile;
+
+            if (_jobExecutionService != null)
+            {
+                _jobExecutionService.VaultCredentialProvider = null;
+                _jobExecutionService.EnvironmentVaultProfile = activeEnvironmentVaultProfile;
+            }
+
+            var config = _configService.GetCurrent();
+            if (!config.Vault.Enabled || config.Vault.Profiles.Count == 0)
+                return;
+
+            _vaultService = new VaultService(
+                config.Vault,
+                tokenProvider: (profileName, _) =>
+                {
+                    var target = CredentialTargets.VaultAuthTarget(profileName, "token");
+                    return _credentialProvider?.TryGetPassword(target, out _, out var token) == true ? token : null;
+                },
+                secretIdProvider: (profileName, _) =>
+                {
+                    var target = CredentialTargets.VaultAuthTarget(profileName, "approle_secret");
+                    return _credentialProvider?.TryGetPassword(target, out _, out var secret) == true ? secret : null;
+                },
+                ldapPasswordProvider: (profileName, _) =>
+                {
+                    var target = CredentialTargets.VaultAuthTarget(profileName, "ldap_password");
+                    return _credentialProvider?.TryGetPassword(target, out _, out var pass) == true ? pass : null;
+                },
+                userpassPasswordProvider: (profileName, _) =>
+                {
+                    var target = CredentialTargets.VaultAuthTarget(profileName, "userpass_password");
+                    return _credentialProvider?.TryGetPassword(target, out _, out var pass) == true ? pass : null;
+                });
+
+            _sshService.VaultService = _vaultService;
+            if (_jobExecutionService != null)
+                _jobExecutionService.VaultCredentialProvider = new VaultCredentialProvider(_vaultService);
+        }
+
         private void TryLoadDefaultPassword()
         {
-            if (!IsCredentialManagerAvailable)
+            if (!ShouldPersistMainFormPassword())
                 return;
 
             if (_credentialProvider!.TryGetPassword(CredentialTargets.DefaultPasswordTarget, out _, out var password))
@@ -1326,10 +1381,18 @@ namespace SSH_Helper
 
         private void StoreDefaultPassword()
         {
-            if (!IsCredentialManagerAvailable)
+            if (!ShouldPersistMainFormPassword())
                 return;
 
             _credentialProvider!.SavePassword(CredentialTargets.DefaultPasswordTarget, tsbUsername.Text, tsbPassword.Text);
+        }
+
+        private void ClearStoredDefaultPassword()
+        {
+            if (!IsCredentialManagerAvailable)
+                return;
+
+            _credentialProvider!.DeletePassword(CredentialTargets.DefaultPasswordTarget);
         }
 
         private bool TryResolveHostPassword(string hostKey, string username, out string password)
@@ -1355,8 +1418,6 @@ namespace SSH_Helper
         {
             if (!IsCredentialManagerAvailable)
                 return;
-
-            StoreDefaultPassword();
 
             foreach (DataGridViewRow row in dgv_variables.Rows)
             {
@@ -1753,6 +1814,9 @@ namespace SSH_Helper
         {
             _activeEnvironmentName = e.CurrentEnvironment;
             _baseEnvironmentName = _environmentService.GetBaseEnvironmentName();
+            _sshService.EnvironmentVaultProfile = e.CurrentConfiguration.VaultProfileName;
+            if (_jobExecutionService != null)
+                _jobExecutionService.EnvironmentVaultProfile = e.CurrentConfiguration.VaultProfileName;
             ApplyActiveEnvironmentLabelColor();
             RefreshBaseEnvironmentIndicator();
             UpdateWindowTitle();
@@ -2133,8 +2197,7 @@ namespace SSH_Helper
                 EnsureSelectColumn();
                 dgv_variables.RowTemplate.Height = 28;
 
-                var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                           _configService.GetCurrent().Credentials.UseCredentialManager;
+                var useCredentialManager = IsCredentialManagerAvailable;
 
                 foreach (var rowData in environment.Hosts ?? new List<Dictionary<string, string>>())
                 {
@@ -2848,7 +2911,6 @@ namespace SSH_Helper
             // Execute buttons (Semibold)
             var execButtonFont = new Font(semiboldUiFont, Scaled(fontSettings.ExecuteButtonFontSize), FontStyle.Bold);
             _managedFonts.Add(execButtonFont);
-            btnExecuteAll.Font = execButtonFont;
             btnExecuteSelected.Font = execButtonFont;
             btnStopAll.Font = execButtonFont;
 
@@ -3196,11 +3258,6 @@ namespace SSH_Helper
             var contrastColor = GetContrastColor(accentColor);
 
             // Apply accent to execute buttons
-            btnExecuteAll.BackColor = accentColor;
-            btnExecuteAll.ForeColor = contrastColor;
-            btnExecuteAll.FlatStyle = FlatStyle.Flat;
-            btnExecuteAll.FlatAppearance.BorderSize = 0;
-
             btnExecuteSelected.BackColor = accentColor;
             btnExecuteSelected.ForeColor = contrastColor;
             btnExecuteSelected.FlatStyle = FlatStyle.Flat;
@@ -5351,46 +5408,6 @@ namespace SSH_Helper
             SaveCurrentPreset();
         }
 
-        private void btnExecuteAll_Click(object sender, EventArgs e)
-        {
-            // Check if a folder is selected - use tracked folder name as fallback
-            // (TreeView selection can be unreliable when clicking buttons)
-            string? folderName = null;
-
-            // Check both trvPresets and trvFavorites based on current tab
-            if (presetsTabControl.SelectedTab == tabFavorites)
-            {
-                if (trvFavorites.SelectedNode?.Tag is PresetNodeTag favTag && favTag.IsFolder)
-                {
-                    folderName = favTag.Name;
-                }
-                else if (!string.IsNullOrEmpty(_selectedFolderName))
-                {
-                    folderName = _selectedFolderName;
-                }
-            }
-            else
-            {
-                if (trvPresets.SelectedNode?.Tag is PresetNodeTag tag && tag.IsFolder)
-                {
-                    folderName = tag.Name;
-                }
-                else if (!string.IsNullOrEmpty(_selectedFolderName))
-                {
-                    folderName = _selectedFolderName;
-                }
-            }
-
-            if (folderName != null)
-            {
-                ExecuteFolderPresetsOnAllHosts(folderName);
-            }
-            else
-            {
-                ExecuteOnAllHosts();
-            }
-        }
-
         private void btnExecuteSelected_Click(object sender, EventArgs e)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -5493,8 +5510,8 @@ namespace SSH_Helper
 
         private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            var previousCredentialManager = _configService.GetCurrent().Credentials.UseCredentialManager;
-            using var dialog = new SettingsDialog(_configService, _presetManager, _isDarkMode);
+            var previousStoreMainPassword = _configService.GetCurrent().Credentials.UseCredentialManager;
+            using var dialog = new SettingsDialog(_configService, _presetManager, _isDarkMode, _credentialProvider);
             DialogTheme.SetDialogFont(dialog, _dialogFont);
             var dialogResult = dialog.ShowDialog(this);
             if (dialogResult == DialogResult.OK)
@@ -5512,14 +5529,19 @@ namespace SSH_Helper
                 _sshService.PreferSshAgent = config.Credentials.PreferSshAgent;
                 UpdateStatusBar(config.UseConnectionPooling ? "Connection pooling enabled" : "Connection pooling disabled");
 
-                if (previousCredentialManager != config.Credentials.UseCredentialManager)
+                if (previousStoreMainPassword != config.Credentials.UseCredentialManager)
                 {
-                    InitializeCredentials();
                     if (config.Credentials.UseCredentialManager)
                     {
-                        MigratePasswordsToCredentialManager();
+                        StoreDefaultPassword();
+                    }
+                    else
+                    {
+                        ClearStoredDefaultPassword();
                     }
                 }
+
+                InitializeVault();
             }
 
             // A timeout reset is persisted immediately in the settings dialog.
@@ -6418,7 +6440,7 @@ namespace SSH_Helper
             _flowCanvasForm.OnRunRequest += (_) =>
             {
                 SshDebugLog("FLOWCANVAS", "Received deprecated 'run-request' message.");
-                BeginInvoke(() => btnExecuteAll.PerformClick());
+                BeginInvoke(() => btnExecuteSelected.PerformClick());
             };
 
             // Lightweight data-block test — runs a single data block (extract, parse, set, table, assert)
@@ -6858,6 +6880,9 @@ namespace SSH_Helper
 
                 var context = new Services.Scripting.ScriptContext(initialVars);
                 context.DebugMode = true; // Capture debug-level output (e.g., "Extract: var = 'value'")
+                context.VaultService = _vaultService;
+                context.EnvironmentVaultProfile = _environmentService.GetEnvironment(
+                    _environmentService.GetActiveEnvironmentName()).VaultProfileName;
 
                 // Special handling for _output: GetVariable("_output") reads from LastCommandOutput,
                 // not the dictionary, so we must hydrate it via RecordCommandOutput.
@@ -10632,15 +10657,12 @@ namespace SSH_Helper
 
             if (!string.IsNullOrEmpty(_selectedFolderName))
             {
-                int count = _presetManager.GetPresetsInFolder(_selectedFolderName).Count();
-                btnExecuteAll.Text = $"Run {FolderIcon} {_selectedFolderName} ({count})";
                 btnExecuteSelected.Text = checkedCount > 0
                     ? $"Run Checked ({checkedCount}) {FolderIcon}"
                     : $"Run Selected {FolderIcon}";
             }
             else
             {
-                btnExecuteAll.Text = "Run All";
                 btnExecuteSelected.Text = checkedCount > 0
                     ? $"Run Checked ({checkedCount})"
                     : "Run Selected";
@@ -10653,13 +10675,9 @@ namespace SSH_Helper
                 var selectedSize = g.MeasureString(btnExecuteSelected.Text, btnExecuteSelected.Font);
                 btnExecuteSelected.Width = (int)selectedSize.Width + 40;
 
-                var allSize = g.MeasureString(btnExecuteAll.Text, btnExecuteAll.Font);
-                btnExecuteAll.Width = (int)allSize.Width + 40;
-                btnExecuteAll.Left = btnExecuteSelected.Right + 8;
-
                 // Position Stop button with same spacing and ensure matching height
-                btnStopAll.Left = btnExecuteAll.Right + 8;
-                btnStopAll.Height = btnExecuteAll.Height;
+                btnStopAll.Left = btnExecuteSelected.Right + 8;
+                btnStopAll.Height = btnExecuteSelected.Height;
             }
             catch (ArgumentException)
             {
@@ -12580,6 +12598,9 @@ namespace SSH_Helper
         {
             // Check if SSH config is enabled
             var sshConfigEnabled = _configService.GetCurrent().SshConfig.EnableSshConfig;
+            var vaultCredentialProvider = _vaultService != null
+                ? new VaultCredentialProvider(_vaultService)
+                : null;
 
             foreach (var row in rows)
             {
@@ -12591,13 +12612,27 @@ namespace SSH_Helper
 
                 var host = HostConnection.Parse(hostIp);
                 host.Username = GetCellValue(row, "username");
-                var resolvedUsername = string.IsNullOrWhiteSpace(host.Username) ? tsbUsername.Text : host.Username;
                 var passwordValue = GetCellValue(row, "password");
+                var vaultPathValue = GetCellValue(row, "vault_path");
+                var vaultResolved = false;
 
-                var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                           _configService.GetCurrent().Credentials.UseCredentialManager;
-                if (useCredentialManager)
+                if (!string.IsNullOrWhiteSpace(vaultPathValue) &&
+                    vaultCredentialProvider != null &&
+                    vaultCredentialProvider.TryGetPassword(
+                        vaultPathValue,
+                        out var vaultUsername,
+                        out var vaultPassword,
+                        _sshService.EnvironmentVaultProfile))
                 {
+                    host.Username = vaultUsername;
+                    passwordValue = vaultPassword;
+                    vaultResolved = true;
+                }
+
+                var useCredentialManager = IsCredentialManagerAvailable;
+                if (!vaultResolved && useCredentialManager)
+                {
+                    var resolvedUsername = string.IsNullOrWhiteSpace(host.Username) ? tsbUsername.Text : host.Username;
                     if (!string.IsNullOrWhiteSpace(passwordValue))
                     {
                         StoreHostPassword(host.ToString(), resolvedUsername, passwordValue);
@@ -12735,8 +12770,6 @@ namespace SSH_Helper
                     Cursor = targetCursor;
 
                 var runButtonsEnabled = !executing;
-                if (btnExecuteAll.Enabled != runButtonsEnabled)
-                    btnExecuteAll.Enabled = runButtonsEnabled;
                 if (btnExecuteSelected.Enabled != runButtonsEnabled)
                     btnExecuteSelected.Enabled = runButtonsEnabled;
                 if (btnStopAll.Visible != executing)
@@ -13823,10 +13856,11 @@ namespace SSH_Helper
                 });
 
                 var config = _configService.GetCurrent();
-                if (config.Credentials.UseCredentialManager)
+                StoreDefaultPassword();
+                MigratePasswordsToCredentialManager();
+                if (!config.Credentials.UseCredentialManager)
                 {
-                    StoreDefaultPassword();
-                    MigratePasswordsToCredentialManager();
+                    ClearStoredDefaultPassword();
                 }
             }
             catch (Exception ex)
@@ -13849,8 +13883,7 @@ namespace SSH_Helper
                 state.HostColumns.Add(colName);
             }
 
-            var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                       _configService.GetCurrent().Credentials.UseCredentialManager;
+            var useCredentialManager = IsCredentialManagerAvailable;
 
             state.Hosts = new List<Dictionary<string, string>>();
             for (int row = 0; row < dgv_variables.Rows.Count; row++)
@@ -13950,8 +13983,7 @@ namespace SSH_Helper
                     {
                         // Ensure row template height is set before adding rows
                         dgv_variables.RowTemplate.Height = 28;
-                        var useCredentialManager = _credentialProvider?.IsAvailable == true &&
-                                                   _configService.GetCurrent().Credentials.UseCredentialManager;
+                        var useCredentialManager = IsCredentialManagerAvailable;
 
                         foreach (var rowData in state.Hosts)
                         {
@@ -14197,6 +14229,11 @@ namespace SSH_Helper
             _jobExportService = new JobExportService();
             _jobExecutionService = new JobExecutionService(
                 _jobStorage, _schedulingService, _configService, _presetManager, _credentialProvider);
+            _jobExecutionService.VaultCredentialProvider = _vaultService != null
+                ? new VaultCredentialProvider(_vaultService)
+                : null;
+            _jobExecutionService.EnvironmentVaultProfile = _environmentService.GetEnvironment(
+                _environmentService.GetActiveEnvironmentName()).VaultProfileName;
             _jobHistoryService = new JobHistoryService();
             _jobHistoryService.SubscribeTo(_jobExecutionService, ResolveSchedulerHistoryRetention);
 

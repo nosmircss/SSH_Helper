@@ -136,6 +136,31 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - localcmd:
+                      command: "date"
+                      interactive: true
+                      keep_open: true
+                      into: date2
+                  - print:
+                      message: "exit=${date2_exit_code} stdout=${date2_stdout}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().NotContain("date2_exit_code");
+        result.ReferencedColumns.Should().Contain("date2_stdout");
+    }
+
+    [Fact]
     public void AnalyzePresets_ForeachCollectionExpression_DoesNotReportFunctionCallAsMissingColumn()
     {
         var analyzer = new ScriptDependencyAnalyzer();

@@ -12,21 +12,24 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [set](#set---variable-assignment)
    - [extract](#extract---regex-data-extraction)
    - [if](#if---conditional-execution)
-   - [break](#break---exit-current-loop)
-   - [continue](#continue---next-loop-iteration)
    - [foreach](#foreach---loop-over-collections)
    - [while](#while---conditional-loop)
+   - [break](#break---exit-current-loop)
+   - [continue](#continue---next-loop-iteration)
    - [try](#try---structured-error-handling)
    - [call](#call---invoke-a-subroutine)
    - [return](#return---exit-current-subroutine)
    - [exit](#exit---terminate-script)
    - [readfile](#readfile---read-text-files)
    - [writefile](#writefile---write-text-files)
+   - [exists](#exists---check-local-filedirectory-existence)
+   - [playsound](#playsound---play-local-audio-file)
    - [input](#input---prompt-for-user-input)
    - [choose](#choose---single-select-from-list)
    - [multiselect](#multiselect---multiple-select-from-list)
    - [confirm](#confirm---yesno-confirmation)
    - [interactive](#interactive---in-app-ssh-terminal)
+   - [localcmd](#localcmd---run-local-command)
    - [updatecolumn](#updatecolumn---update-host-table-column)
    - [updateenvironment](#updateenvironment---update-active-environment-variable)
    - [log](#log---output-with-log-level)
@@ -42,12 +45,15 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [parallel](#parallel---concurrent-execution)
    - [table](#table---formatted-table-output)
    - [parse](#parse---configuration-parsing)
+   - [vault](#vault---hashicorp-vault-integration)
 3. [Variables](#variables)
 4. [Expressions and Conditions](#expressions-and-conditions)
 5. [Error Handling](#error-handling)
-6. [Debug Mode](#debug-mode)
-7. [Working with JSON](#working-with-json)
-8. [Examples](#examples)
+6. [Output Options](#output-options)
+7. [Debug Mode](#debug-mode)
+8. [Working with JSON](#working-with-json)
+9. [Examples](#examples)
+10. [Tips and Best Practices](#tips-and-best-practices)
 
 ---
 
@@ -104,7 +110,7 @@ Executable scripts may also declare `imports:` and `subroutines:`. Library files
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
 - Distinctive top-level sections: `vars:`, `imports:`, `subroutines:`, `steps:`
-- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- exists:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`
+- Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- exists:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- localcmd:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`, `- vault:`
 
 Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.
 
@@ -396,6 +402,8 @@ Sets or modifies variable values with expression support.
 | pad_left() | `val = pad_left(num, 5, "0")` | Left-pad string (default: space) |
 | pad_right() | `val = pad_right(name, 20)` | Right-pad string (default: space) |
 | repeat() | `val = repeat("-", 40)` | Repeat string N times (max 10,000) |
+| random_string() | `val = random_string(24, "[a-zA-Z0-9@#$%^]")` | Generate random string with optional allowed charset (supports `[a-z]` style ranges) |
+| uuid() | `val = uuid()` | Generate RFC 4122 UUID (GUID) string |
 | reverse() | `val = reverse(text)` | Reverse string or list order |
 | regex_replace() | `val = regex_replace(s, '/\d+/', "X")` | Replace regex matches |
 | format() | `val = format("{0} of {1}", a, b)` | C#-style string formatting |
@@ -952,6 +960,16 @@ These supplement `trim`, `upper`, `lower`, `replace`, `split`, `join`, `substrin
 - set: separator = repeat("=", 60)
 - set: dots = repeat(".", 3)
 
+# Random string (default charset: A-Z, a-z, 0-9)
+- set: temp_password = random_string(24)
+# Constrained charset for policy-specific passwords
+- set: pin = random_string(8, "0123456789")
+- set: policy_pass = random_string(16, "[a-zA-Z0-9@#$%^]")
+
+# UUID / GUID generation
+- set: request_id = uuid()
+- set: correlation_id = uuid()
+
 # Reverse a string or list
 - set: reversed = reverse("hello")
 # Result: "olleh"
@@ -1136,6 +1154,41 @@ These functions accept lambda expressions in the form `x => expression` (single 
 # Result: "414243"
 - set: text = hex_decode(hex)
 # Result: "ABC"
+```
+
+---
+
+**Vault Functions:**
+
+Read secrets from HashiCorp Vault directly inside expressions. These functions are the expression-level counterpart to the `vault` step command.
+
+**`vault(path, key [, profile])`** — Read a single secret value. Returns the value string, or `null` on error.
+
+```yaml
+- set:
+    expression: secret = vault("ssh/server", "password")
+- set:
+    expression: secret = vault("ssh/server", "password", "network")
+```
+
+**`vault_list(prefix [, profile])`** — List secret paths under a prefix. Returns a list of path strings.
+
+```yaml
+- set:
+    expression: paths = vault_list("ssh/")
+- set:
+    expression: paths = vault_list("ssh/", "network")
+- foreach:
+    iterator: p in paths
+    do:
+      - print: "Found secret path: ${p}"
+```
+
+**`vault_clear_cache()`** — Clears the in-memory vault secret cache. Returns `true`. Useful before rotation scripts to ensure stale cached values are not used.
+
+```yaml
+- set:
+    expression: dummy = vault_clear_cache()
 ```
 
 ---
@@ -2563,6 +2616,104 @@ When `show_window: false`, set `max_seconds` and/or `max_lines`.
 
 ---
 
+### localcmd - Run Local Command
+
+Runs a command on the local machine (not over SSH).
+
+**Syntax:**
+```yaml
+# Shorthand (defaults to powershell + foreground)
+- localcmd: Get-Date
+
+# Full form
+- localcmd:
+    command: "dotnet build"
+    shell: powershell          # powershell | custom
+    shell_path: "python"       # required only when shell: custom
+    args: ["-NoProfile"]
+    env:
+      CONFIGURATION: Release
+    working_dir: "C:\\Scripts"
+    interactive: false
+    keep_open: false
+    run_mode: foreground       # foreground | background
+    lifetime: detached         # detached | script | app (background only)
+    kill_on_cancel: false      # background + non-detached only
+    fail_on_nonzero: true
+    success_codes: [0]
+    max_output_bytes: 1048576
+    confirm: once              # always | once | never
+    quiet: false
+    suppress: false
+    title: "Local Command"
+    into: result
+    timeout: 30
+    on_error: stop
+```
+
+**Important behavior:**
+- `interactive: true` and `run_mode: background` are mutually exclusive.
+- `keep_open: true` requires `interactive: true`.
+- Foreground (non-interactive) captures `<into>_stdout`, `<into>_stderr`, `<into>_exit_code`.
+- Interactive captures only `<into>_exit_code`.
+- Interactive runs are also recorded in history execution details under Interactive Sessions.
+- `shell: powershell` uses session transcripts for interactive audit capture, so `keep_open: true` includes follow-up user-entered commands until the shell closes.
+- Background captures startup metadata: `<into>_pid`, `<into>_started`, `<into>_start_error`.
+- `fail_on_nonzero` + `success_codes` apply to both foreground and interactive close exit code evaluation.
+- `quiet: true` hides command banner lines only; `suppress: true` hides command banner + live output streaming.
+
+**Parameters:**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `command` | Yes | - | Command text after variable substitution |
+| `shell` | No | `powershell` | `powershell` or `custom` |
+| `shell_path` | Conditionally | - | Required when `shell: custom` |
+| `args` | No | `[]` | Shell arguments (sequence preferred; scalar accepted) |
+| `env` | No | - | Environment variables for launched process |
+| `working_dir` | No | current process dir | Working directory |
+| `interactive` | No | `false` | Launch in external terminal |
+| `keep_open` | No | `false` | Keep interactive shell open after command |
+| `run_mode` | No | `foreground` | `foreground` waits; `background` returns after spawn |
+| `lifetime` | No | `detached` | Background lifetime: `detached`, `script`, `app` |
+| `kill_on_cancel` | No | `false` | Background cancel cleanup for tracked processes |
+| `fail_on_nonzero` | No | `true` | Fail when exit code not in `success_codes` |
+| `success_codes` | No | `[0]` | Allowed exit codes |
+| `max_output_bytes` | No | `1048576` | Per-stream capture cap (foreground) |
+| `confirm` | No | `always` | Confirmation policy: `always`, `once`, `never` |
+| `quiet` | No | `false` | Hide localcmd command banner lines |
+| `suppress` | No | `false` | Hide banner and live stdout/stderr output |
+| `title` | No | `Local Command` | Interactive terminal title |
+| `into` | No | - | Output variable prefix |
+| `timeout` | No | - | Step timeout in seconds (ignored for background) |
+| `on_error` | No | `stop` | Error handling: `continue` or `stop` |
+
+**Examples:**
+```yaml
+# Foreground capture
+- localcmd:
+    command: "git status --short"
+    into: git
+
+# Interactive troubleshooting terminal that stays open
+- localcmd:
+    command: "date"
+    interactive: true
+    keep_open: true
+    run_mode: foreground
+    into: date2
+    quiet: true
+
+# Background launch
+- localcmd:
+    command: "notepad.exe"
+    run_mode: background
+    lifetime: script
+    into: np
+```
+
+---
+
 ### updatecolumn - Update Host Table Column
 
 Writes a value back to a column in the host table for the current host. This allows scripts to store extracted data directly in the grid for later reference or export.
@@ -3221,6 +3372,101 @@ When using the `into` parameter, two variables are created:
 
 ---
 
+### vault - HashiCorp Vault Integration
+
+Reads and writes secrets from a HashiCorp Vault KV store. Supports KV v1 and KV v2, multiple profiles, version pinning, full-replace writes, and patch (merge) updates.
+
+**Read a single key:**
+```yaml
+- vault:
+    profile: network           # optional, uses default if omitted
+    path: "ssh/prod-switches"
+    key: "password"
+    into: switch_password
+```
+
+**Read multiple keys:**
+```yaml
+- vault:
+    path: "ssh/prod-switches"
+    keys:
+      password: switch_pass
+      username: switch_user
+      enable_secret: enable_pass
+```
+
+**Version pinning (KV v2 only):**
+```yaml
+- vault:
+    path: "ssh/prod-switches"
+    version: 3
+    key: "password"
+    into: switch_password
+```
+
+**Write (full replace):**
+```yaml
+- vault:
+    path: "ssh/prod-switches"
+    write:
+      password: "{{new_pass}}"
+      rotated_by: "ssh_helper"
+```
+
+> **Warning:** `write:` replaces **all** keys at the path. Any key not included in the map is deleted. Use `patch:` to preserve existing keys.
+
+**Patch (merge update):**
+```yaml
+- vault:
+    path: "ssh/prod-switches"
+    patch:
+      password: "{{new_pass}}"
+```
+
+Only the specified keys are updated. All other keys at the path are preserved. Uses the native PATCH method for KV v2; falls back to read-modify-write for KV v1.
+
+**Nested JSON values (object/array) with `write` or `patch`:**
+```yaml
+- vault:
+    path: "myapp/MC000012"
+    key: "entities"
+    into: entities_json
+
+- set:
+    expression: entities_json = json.set(entities_json, "[0].r7_api_key", new_r7_api_key)
+
+# Use write when your Vault policy allows update but not patch
+- vault:
+    path: "myapp/MC000012"
+    write:
+      entities: "${entities_json}"
+```
+
+When a `write`/`patch` value resolves to valid JSON object/array text (for example `${entities_json}`), SSH Helper sends it to Vault as structured JSON instead of a quoted string.
+
+**Options:**
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `path` | Yes | Secret path relative to the mount (e.g., `ssh/prod-switches`) |
+| `profile` | No | Vault profile name. Uses default or environment profile if omitted |
+| `key` | No* | Single key to read from the secret |
+| `keys` | No* | Map of secret keys to variable names (key: variable) |
+| `into` | Yes (with `key`) | Variable name to store the read value |
+| `version` | No | Pin to a specific secret version (KV v2 only) |
+| `write` | No* | Map of key-value pairs to write — full replace |
+| `patch` | No* | Map of key-value pairs to patch — merge update |
+| `on_error` | No | `continue` to suppress errors, `fail` (default) to stop execution |
+
+\* One of `key`, `keys`, `write`, or `patch` is required. They are mutually exclusive.
+
+**Error handling and audit logging:**
+- Sets `_last_error` on failure (when `on_error: continue` is used)
+- Logs `[vault] READ/WRITE/PATCH profile@path → ok/FAIL` to debug output
+- Secret values are never written to logs or output
+
+---
+
 ### assert - Validate Conditions
 
 Validates that a condition is true. Useful for adding guardrails and sanity checks to scripts.
@@ -3809,6 +4055,24 @@ These are accessible via nested paths:
 
 **Note:** Any column in the host grid becomes available as a variable. For example, if you have a column named `location`, you can use `${location}` in your scripts.
 
+### Special Grid Columns
+
+The host grid recognizes several columns with built-in meaning in addition to `Host_IP` and `port`:
+
+| Column | Description |
+|--------|-------------|
+| `Host_IP` | Required. The host address used for SSH connections. Cannot be deleted. |
+| `port` | SSH port override for this host. Defaults to `22`. |
+| `delay` | Per-host delay (seconds) between command sends. Overrides the global setting. |
+| `timeout` | Per-host command timeout (seconds). Overrides the global setting. |
+| `transport` | Connection transport protocol (e.g., `ssh`). |
+| `username` | Per-host SSH username. Overrides global credentials. |
+| `password` | Per-host SSH password. Overrides global credentials. |
+| `personality` | Device personality hint (e.g., `fortigate`, `cisco`). |
+| `vault_path` | Optional. Vault path for per-host credential resolution. Format: `[profile@]path[#usernameKey,passwordKey]`. Defaults to `username` and `password` as the key names. Examples: `ssh/switches`, `network@ssh/switches`, `ssh/switches#admin_user,admin_pass`. Supported in both manual runs and scheduler jobs. In scheduler jobs, when the path omits `profile@`, the default profile precedence is: job Vault profile override -> active environment Vault profile -> app default Vault profile. If lookup fails, execution falls back to row/global credentials. |
+
+All other column names become script variables accessible via `${column_name}`.
+
 ### Variable Substitution Syntax
 
 Variables are substituted using `${variable_name}`. Function expressions are also supported inline using `${function(args)}`, including nested calls:
@@ -3842,6 +4106,36 @@ Variables are substituted using `${variable_name}`. Function expressions are als
 ```
 
 Inline expressions work everywhere `${...}` is supported — `print`, `writefile` content, `send` commands, URLs, headers, and any other string field that performs variable substitution. All scripting functions (`json.*`, `upper`, `lower`, `trim`, `replace`, `split`, `join`, `length`, etc.) are available inline.
+
+### Vault Inline Syntax
+
+`{{vault:[profile@]path#key}}` resolves a secret from HashiCorp Vault inline, without a separate `vault` step.
+
+```yaml
+# Uses default vault profile
+- send:
+    command: "enable"
+    respond:
+      - expect: "Password:"
+        reply: "{{vault:ssh/prod-switches#enable_secret}}"
+
+# Uses a named profile
+- http:
+    url: "https://api.example.com/data"
+    headers:
+      Authorization: "Bearer {{vault:network@tokens/api#token}}"
+    into: response
+```
+
+**Format:** `{{vault:path#key}}` or `{{vault:profile@path#key}}`
+
+| Part | Required | Description |
+|------|----------|-------------|
+| `profile` | No | Vault profile name. Uses default or environment profile if omitted |
+| `path` | Yes | Secret path relative to the mount |
+| `key` | Yes | Key name within the secret |
+
+On error, the token resolves to an empty string and `_last_error` is set.
 
 ### Quoting and Escaping
 
@@ -3933,9 +4227,9 @@ ${upper(trim(json.get(data, "name")))}
 
 **All scripting functions are available inline**, including:
 - **JSON functions:** `json.format()`, `json.get()`, `json.keys()`, `json.values()`, `json.len()`, `json.type()`, `json.exists()`, `json.merge()`, `json.items()`, `json.slice()`, etc.
-- **String functions:** `upper()`, `lower()`, `trim()`, `replace()`, `substring()`, `length()`, `pad_left()`, `pad_right()`, `repeat()`, `reverse()`, `format()`, `char_at()`, `index_of()`, `regex_replace()`
+- **String functions:** `upper()`, `lower()`, `trim()`, `replace()`, `substring()`, `length()`, `pad_left()`, `pad_right()`, `repeat()`, `random_string()`, `uuid()`, `reverse()`, `format()`, `char_at()`, `index_of()`, `regex_replace()`
 - **List functions:** `join()`, `split()`, `sort()`, `compact()`, `distinct()`, `first()`, `last()`, `map()`, `filter()`, `find()`, `count()`, `any()`, `all()`
-- **Math functions:** `abs()`, `min()`, `max()`, `round()`, `floor()`, `ceil()`, `clamp()`, `iif()`
+- **Math functions:** `abs()`, `min()`, `max()`, `round()`, `floor()`, `ceil()`, `random()`, `clamp()`, `iif()`
 - **Type functions:** `typeof()`, `int()`, `float()`, `str()`, `bool()`, `is_number()`, `is_list()`, `is_json()`, `is_empty()`
 - **DateTime functions:** `now()`, `epoch()`, `epoch_to_date()`, `date_add()`, `date_diff()`, `date_format()`
 - **Encoding functions:** `base64_encode()`, `base64_decode()`, `url_encode()`, `url_decode()`, `hash()`, `hex_encode()`, `hex_decode()`
@@ -5700,3 +5994,82 @@ steps:
 29. **Filter sections for large configs**: Use the `sections` parameter to only parse what you need
 30. **Access parsed data with `json.get()`**: Use default values to handle missing keys gracefully
 31. **Iterate with `json.keys()`**: Get all interface names, policy IDs, etc. for processing in loops
+
+### Working with Vault
+32. **Use `vault` steps for bulk reads**: Read multiple keys in one step with `keys:` instead of separate steps per key
+33. **Use `patch:` not `write:` for rotation**: `patch:` preserves all other keys; `write:` deletes them
+34. **Clear the cache before rotation**: Call `vault_clear_cache()` at the start of rotation scripts so no stale values are used
+35. **Verify after rotation**: Read back the secret with a `vault` step and `assert:` that the stored value matches the one just written
+36. **Use `on_error: continue` sparingly**: Only when a missing secret has a safe fallback; always check `_last_error` afterward
+37. **Inline syntax for one-off reads**: `{{vault:path#key}}` avoids a separate step when a secret is used in a single field
+
+---
+
+## Secret Rotation Recipe
+
+This recipe changes a device password, updates the credential in Vault, then verifies the rotation succeeded.
+
+```yaml
+---
+name: "Rotate Switch Password"
+description: "Rotates the enable/admin password and writes the new value to Vault"
+
+steps:
+  # 1. Generate a new password
+  - set:
+      expression: new_pass = random_string(24)
+
+  # 2. Apply the new password on the device
+  - send: "configure terminal"
+  - send: "username admin secret {{new_pass}}"
+  - send: "end"
+  - send: "write memory"
+
+  # 3. Persist the new password in Vault (patch preserves all other keys)
+  - vault:
+      profile: network
+      path: "ssh/prod-switches"
+      patch:
+        password: "{{new_pass}}"
+        rotated_at: "{{now()}}"
+
+  # 4. Verify the stored value matches what we set
+  - vault:
+      path: "ssh/prod-switches"
+      key: "password"
+      into: verify_pass
+
+  - assert:
+      condition: verify_pass == new_pass
+      message: "Vault rotation verification failed — stored password does not match"
+```
+
+---
+
+## Vault Policy Reference
+
+Minimum Vault policies required for SSH Helper to read and rotate credentials.
+
+**Read-only (inventory and connection):**
+```hcl
+path "secret/data/ssh/*" {
+  capabilities = ["read"]
+}
+
+path "secret/metadata/ssh/*" {
+  capabilities = ["list"]
+}
+```
+
+**Read-write (credential rotation):**
+```hcl
+path "secret/data/ssh/*" {
+  capabilities = ["read", "create", "update", "patch"]
+}
+
+path "secret/metadata/ssh/*" {
+  capabilities = ["list"]
+}
+```
+
+Adjust the mount prefix (`secret/`) to match your Vault KV mount name. For KV v1, replace `secret/data/` with `secret/`.

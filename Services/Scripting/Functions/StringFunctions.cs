@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 
 namespace SSH_Helper.Services.Scripting.Functions
@@ -12,6 +13,10 @@ namespace SSH_Helper.Services.Scripting.Functions
     /// </summary>
     public class StringFunctions : IFunctionCategory
     {
+        private const int DefaultRandomStringLength = 16;
+        private const int MaxRandomStringLength = 4096;
+        private const string DefaultRandomStringCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
         public void Register(FunctionRegistry registry)
         {
             // New string functions
@@ -26,6 +31,8 @@ namespace SSH_Helper.Services.Scripting.Functions
             registry.Register("format", Format);
             registry.Register("char_at", CharAt);
             registry.Register("index_of", IndexOf);
+            registry.Register("random_string", RandomString);
+            registry.Register("uuid", Uuid);
         }
 
         private static object? Contains(string argsString, ScriptContext context)
@@ -207,6 +214,117 @@ namespace SSH_Helper.Services.Scripting.Functions
             var source = Resolve(args[0], context);
             var sub = Resolve(args[1], context);
             return source.IndexOf(sub, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static object? RandomString(string argsString, ScriptContext context)
+        {
+            var args = JsonUtilities.SplitTopLevelCommas(argsString);
+
+            var length = DefaultRandomStringLength;
+            if (args.Count >= 1)
+            {
+                var resolvedLength = JsonUtilities.ResolveJsonValue(args[0], context)?.ToString() ?? string.Empty;
+                if (!int.TryParse(resolvedLength, NumberStyles.Integer, CultureInfo.InvariantCulture, out length))
+                    length = DefaultRandomStringLength;
+            }
+
+            length = Math.Clamp(length, 0, MaxRandomStringLength);
+            if (length == 0)
+                return string.Empty;
+
+            var charset = args.Count >= 2
+                ? JsonUtilities.ResolveJsonValue(args[1], context)?.ToString() ?? string.Empty
+                : DefaultRandomStringCharset;
+
+            var expandedBracketCharset = TryExpandBracketCharset(charset);
+            if (expandedBracketCharset != null)
+                charset = expandedBracketCharset;
+
+            if (string.IsNullOrEmpty(charset))
+                charset = DefaultRandomStringCharset;
+
+            var chars = new char[length];
+            for (int i = 0; i < length; i++)
+            {
+                var index = RandomNumberGenerator.GetInt32(charset.Length);
+                chars[i] = charset[index];
+            }
+
+            return new string(chars);
+        }
+
+        private static object? Uuid(string argsString, ScriptContext context)
+        {
+            _ = argsString;
+            _ = context;
+            return Guid.NewGuid().ToString("D");
+        }
+
+        private static string? TryExpandBracketCharset(string spec)
+        {
+            if (string.IsNullOrEmpty(spec) || spec.Length < 2 || spec[0] != '[' || spec[^1] != ']')
+                return null;
+
+            var body = spec.Substring(1, spec.Length - 2);
+            if (body.Length == 0)
+                return string.Empty;
+
+            var expanded = new List<char>();
+            var seen = new HashSet<char>();
+            var cursor = 0;
+
+            while (TryReadClassChar(body, ref cursor, out var start))
+            {
+                if (cursor < body.Length - 1 && body[cursor] == '-')
+                {
+                    var rangeCursor = cursor + 1;
+                    if (TryReadClassChar(body, ref rangeCursor, out var end))
+                    {
+                        AddRange(start, end, expanded, seen);
+                        cursor = rangeCursor;
+                        continue;
+                    }
+                }
+
+                AddChar(start, expanded, seen);
+            }
+
+            return new string(expanded.ToArray());
+        }
+
+        private static bool TryReadClassChar(string body, ref int cursor, out char value)
+        {
+            value = '\0';
+            if (cursor >= body.Length)
+                return false;
+
+            if (body[cursor] == '\\' && cursor + 1 < body.Length)
+            {
+                value = body[cursor + 1];
+                cursor += 2;
+                return true;
+            }
+
+            value = body[cursor];
+            cursor++;
+            return true;
+        }
+
+        private static void AddRange(char start, char end, List<char> buffer, HashSet<char> seen)
+        {
+            var step = start <= end ? 1 : -1;
+            for (var c = start; ; c = (char)(c + step))
+            {
+                AddChar(c, buffer, seen);
+                if (c == end)
+                    break;
+            }
+        }
+
+        private static void AddChar(char value, List<char> buffer, HashSet<char> seen)
+        {
+            if (seen.Add(value))
+                buffer.Add(value);
         }
 
         // --- Helpers ---

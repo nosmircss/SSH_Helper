@@ -284,3 +284,4 @@ Custom columns can be added and used as variables in commands/scripts via `{{col
 8. **Flow Canvas changes** require both React (`FlowCanvas/src/`) and C# (`FlowCanvasBridge.cs`, `FlowCanvasForm.cs`) updates
 9. **Use DialogTheme** for consistent dark/light mode theming in new dialogs
 10. **Use AppDataPaths** for any file paths under `%LocalAppData%\SSH_Helper\`
+11. **Track rejected feature ideas** in `rejected_ideas.md` so declined proposals are documented and not repeatedly reintroduced

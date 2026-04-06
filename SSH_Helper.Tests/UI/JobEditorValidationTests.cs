@@ -281,6 +281,24 @@ namespace SSH_Helper.Tests.UI
 
         #endregion
 
+        #region ValidateVaultCredentials
+
+        [Fact]
+        public void ValidateVaultCredentials_VaultModeWithoutPath_ReturnsError()
+        {
+            JobEditorValidator.ValidateVaultCredentials(CredentialMode.Vault, "")
+                .Should().Be("Vault credential mode requires a Vault path.");
+        }
+
+        [Fact]
+        public void ValidateVaultCredentials_VaultModeWithPath_ReturnsNull()
+        {
+            JobEditorValidator.ValidateVaultCredentials(CredentialMode.Vault, "ssh/creds/router-a")
+                .Should().BeNull();
+        }
+
+        #endregion
+
         #region ValidateTimeoutOverrides
 
         [Fact]
@@ -403,6 +421,23 @@ namespace SSH_Helper.Tests.UI
                 commandTimeoutOverrideSeconds: 301);
 
             result.Should().Be("Command timeout override must be between 1 and 300 seconds.");
+        }
+
+        [Fact]
+        public void ValidateAll_VaultModeWithoutPath_ReturnsVaultPathError()
+        {
+            var hosts = new List<Dictionary<string, string>>
+            {
+                new() { { "Host_IP", "10.0.0.1" } }
+            };
+
+            var result = JobEditorValidator.ValidateAll(
+                "MyJob", "MyPreset",
+                ScheduleType.None, null, null,
+                hosts, new List<string> { "Host_IP" }, CredentialMode.Vault, null,
+                vaultCredentialPath: "  ");
+
+            result.Should().Be("Vault credential mode requires a Vault path.");
         }
 
         #endregion

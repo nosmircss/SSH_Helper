@@ -116,6 +116,9 @@ namespace SSH_Helper.Services.Scripting
             public DebugState DebugState { get; } = new();
             public bool AllowFileSelectionDialogs { get; set; } = true;
             public bool DebugMode { get; set; }
+            public bool LocalCmdRunAllApproved { get; set; }
+            public string? LocalCmdApprovedHost { get; set; }
+            public HashSet<string> LocalCmdApprovedCommands { get; } = new();
             public EventHandler<ScriptOutputEventArgs>? OutputReceived { get; set; }
             public EventHandler<ColumnUpdateEventArgs>? ColumnUpdateRequested { get; set; }
             public EventHandler<EnvironmentUpdateEventArgs>? EnvironmentUpdateRequested { get; set; }
@@ -190,6 +193,29 @@ namespace SSH_Helper.Services.Scripting
             set => _sharedState.DebugMode = value;
         }
 
+        public bool LocalCmdRunAllApproved
+        {
+            get => _sharedState.LocalCmdRunAllApproved;
+            set => _sharedState.LocalCmdRunAllApproved = value;
+        }
+
+        public string? LocalCmdApprovedHost
+        {
+            get => _sharedState.LocalCmdApprovedHost;
+            set => _sharedState.LocalCmdApprovedHost = value;
+        }
+
+        public HashSet<string> LocalCmdApprovedCommands => _sharedState.LocalCmdApprovedCommands;
+
+        internal object LocalCmdTrackingKey => _sharedState;
+
+        public void ResetLocalCmdApproval()
+        {
+            _sharedState.LocalCmdRunAllApproved = false;
+            _sharedState.LocalCmdApprovedHost = null;
+            _sharedState.LocalCmdApprovedCommands.Clear();
+        }
+
         /// <summary>
         /// Current loop nesting depth. Managed by ScriptExecutor.
         /// </summary>
@@ -207,6 +233,16 @@ namespace SSH_Helper.Services.Scripting
             get => _callDepth.Value;
             set => _callDepth.Value = value;
         }
+
+        /// <summary>
+        /// Vault service for reading/writing secrets. Null when Vault is not configured.
+        /// </summary>
+        public Vault.VaultService? VaultService { get; set; }
+
+        /// <summary>
+        /// Environment-level Vault profile override, if any.
+        /// </summary>
+        public string? EnvironmentVaultProfile { get; set; }
 
         /// <summary>
         /// Active root script for this execution context.
@@ -455,6 +491,10 @@ namespace SSH_Helper.Services.Scripting
         /// </summary>
         private string ResolveVariableExpression(string expr)
         {
+            // Inline vault secret resolution: {{vault:path#key}} or {{vault:profile@path#key}}
+            if (expr.StartsWith("vault:", StringComparison.OrdinalIgnoreCase))
+                return ResolveVaultExpression(expr.Substring(6));
+
             // Support list length property: ${list.length}
             var (handled, length) = ValueResolver.TryResolveLengthExpression(expr, GetVariable);
             if (handled)
@@ -505,6 +545,57 @@ namespace SSH_Helper.Services.Scripting
 
             // Simple variable lookup
             return GetVariableString(expr);
+        }
+
+        private string ResolveVaultExpression(string vaultExpr)
+        {
+            if (VaultService == null)
+            {
+                SetVariable("_last_error", "Vault is not configured");
+                return string.Empty;
+            }
+
+            // Parse [profile@]path#key
+            string? profile = null;
+            string remaining = vaultExpr;
+
+            var hashIndex = remaining.IndexOf('#');
+            if (hashIndex < 0)
+            {
+                SetVariable("_last_error", "Vault inline syntax requires '#' delimiter: vault:[profile@]path#key");
+                return string.Empty;
+            }
+
+            var key = remaining.Substring(hashIndex + 1);
+            var pathPart = remaining.Substring(0, hashIndex);
+
+            var atIndex = pathPart.IndexOf('@');
+            if (atIndex >= 0)
+            {
+                profile = pathPart.Substring(0, atIndex);
+                pathPart = pathPart.Substring(atIndex + 1);
+            }
+
+            var profileName = !string.IsNullOrEmpty(profile)
+                ? profile
+                : VaultService.ResolveDefaultProfileName(EnvironmentVaultProfile);
+
+            if (string.IsNullOrEmpty(profileName))
+            {
+                SetVariable("_last_error", "No Vault profile available");
+                return string.Empty;
+            }
+
+            try
+            {
+                var value = VaultService.ReadSecretAsync(profileName, pathPart, key).GetAwaiter().GetResult();
+                return value ?? string.Empty;
+            }
+            catch (Vault.VaultException ex)
+            {
+                SetVariable("_last_error", ex.Message);
+                return string.Empty;
+            }
         }
 
         private string SubstituteVariableTokens(string input)

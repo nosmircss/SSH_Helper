@@ -18,7 +18,7 @@ export type PropertyEditor = 'default' | 'choice-options';
 export interface PropertyDef {
   key: string;
   label: string;
-  type: 'text' | 'number' | 'boolean' | 'select' | 'code' | 'textarea';
+  type: 'text' | 'number' | 'boolean' | 'select' | 'code' | 'textarea' | 'keyvalue';
   browse?: 'file';
   required?: boolean;
   placeholder?: string;
@@ -388,6 +388,26 @@ export const blockDefs: BlockDef[] = [
     ],
   },
 
+  {
+    type: 'vault',
+    label: 'Vault',
+    category: 'network',
+    icon: 'vault',
+    description: 'Read, write, or patch secrets from HashiCorp Vault',
+    previewKey: 'path',
+    properties: [
+      { key: 'profile', label: 'Profile', type: 'text' },
+      { key: 'path', label: 'Path', type: 'text', required: true },
+      { key: 'key', label: 'Key', type: 'text' },
+      { key: 'keys', label: 'Keys Map', type: 'keyvalue' },
+      { key: 'into', label: 'Into Variable', type: 'text' },
+      { key: 'version', label: 'Version', type: 'number' },
+      { key: 'write', label: 'Write Data', type: 'keyvalue' },
+      { key: 'patch', label: 'Patch Data', type: 'keyvalue' },
+      onErrorProp,
+    ],
+  },
+
   // I/O & UI
   {
     type: 'print',
@@ -555,6 +575,67 @@ export const blockDefs: BlockDef[] = [
     properties: [
       { key: 'message', label: 'Message', type: 'code', required: true },
       { key: 'level', label: 'Level', type: 'select', options: ['info', 'debug', 'warning', 'error', 'success'], defaultValue: 'info' },
+    ],
+  },
+
+  // Local Command
+  {
+    type: 'localcmd',
+    label: 'Local Command',
+    category: 'io',
+    icon: 'terminal',
+    description: 'Run a command on the local machine',
+    previewKey: 'command',
+    properties: [
+      { key: 'command', label: 'Command', type: 'textarea', required: true,
+        placeholder: 'Get-Process | Select-Object -First 5',
+        helpText: 'The command to execute locally', group: 'core' },
+      { key: 'shell', label: 'Shell', type: 'select',
+        options: ['powershell', 'custom'], defaultValue: 'powershell',
+        helpText: 'Shell to execute the command in. "custom" enables Shell Path.', group: 'core' },
+      { key: 'shell_path', label: 'Shell Path', type: 'text',
+        placeholder: 'python',
+        helpText: 'Path to custom shell executable (Shell=custom)', group: 'core' },
+      { key: 'args', label: 'Shell Arguments', type: 'textarea',
+        placeholder: '["-NoProfile"]',
+        helpText: 'Prefer JSON array syntax. Scalar string still supported.', group: 'core' },
+      { key: 'env', label: 'Environment (JSON)', type: 'textarea',
+        placeholder: '{"CONFIGURATION":"Release"}',
+        helpText: 'Optional process environment variables', group: 'core' },
+      { key: 'working_dir', label: 'Working Directory', type: 'text',
+        placeholder: 'C:\\Scripts',
+        helpText: 'Directory to run the command in', group: 'core' },
+      { key: 'interactive', label: 'Interactive', type: 'boolean', defaultValue: false,
+        helpText: 'Open in an external terminal window (foreground only)', group: 'core' },
+      { key: 'keep_open', label: 'Keep Open', type: 'boolean', defaultValue: false,
+        helpText: 'Keep the terminal open after command completion (interactive only)', group: 'core' },
+      { key: 'run_mode', label: 'Run Mode', type: 'select',
+        options: ['foreground', 'background'], defaultValue: 'foreground',
+        helpText: 'Foreground waits for completion; background returns after spawn', group: 'core' },
+      { key: 'lifetime', label: 'Background Lifetime', type: 'select',
+        options: ['detached', 'script', 'app'], defaultValue: 'detached',
+        helpText: 'Applies only when run_mode=background', group: 'advanced' },
+      { key: 'kill_on_cancel', label: 'Kill On Cancel', type: 'boolean', defaultValue: false,
+        helpText: 'Applies to non-detached background mode', group: 'advanced' },
+      { key: 'fail_on_nonzero', label: 'Fail On Non-Zero', type: 'boolean', defaultValue: true,
+        helpText: 'Fail when exit code is not in success_codes', group: 'advanced' },
+      { key: 'success_codes', label: 'Success Codes', type: 'text',
+        placeholder: '0,3010',
+        helpText: 'Comma-separated allowed exit codes (foreground and interactive close)', group: 'advanced' },
+      { key: 'max_output_bytes', label: 'Max Capture Bytes', type: 'number', defaultValue: 1048576,
+        helpText: 'Per-stream capture limit', group: 'advanced' },
+      { key: 'confirm', label: 'Confirm Policy', type: 'select',
+        options: ['always', 'once', 'never'], defaultValue: 'always',
+        helpText: 'Prompt policy before execution', group: 'advanced' },
+      { key: 'quiet', label: 'Quiet Command Echo', type: 'boolean', defaultValue: false,
+        helpText: 'Hide the [localcmd] command banner lines', group: 'advanced' },
+      { key: 'suppress', label: 'Suppress Output', type: 'boolean', defaultValue: false,
+        helpText: 'Hide command banner and live stdout/stderr output (capture still works)', group: 'advanced' },
+      { key: 'into', label: 'Into Prefix', type: 'text',
+        placeholder: 'result',
+        helpText: 'Prefix for output variables. Interactive mode sets only <into>_exit_code.', group: 'core' },
+      timeoutProp,
+      onErrorProp,
     ],
   },
 

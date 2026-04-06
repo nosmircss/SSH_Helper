@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
@@ -118,6 +119,59 @@ public class StringFunctionTests
     {
         var result = await Eval("repeat(\"ab\", 0)");
         result.Should().BeEmpty();
+    }
+
+    // --- random_string ---
+
+    [Fact]
+    public async Task RandomString_DefaultLength_UsesDefaultCharset()
+    {
+        var result = await Eval("random_string()");
+        result.Length.Should().Be(16);
+        result.Should().MatchRegex("^[A-Za-z0-9]+$");
+    }
+
+    [Fact]
+    public async Task RandomString_WithLength_UsesDefaultCharset()
+    {
+        var result = await Eval("random_string(32)");
+        result.Length.Should().Be(32);
+        result.Should().MatchRegex("^[A-Za-z0-9]+$");
+    }
+
+    [Fact]
+    public async Task RandomString_WithCustomCharset_OnlyUsesAllowedCharacters()
+    {
+        var result = await Eval("random_string(40, \"abc123!@\")");
+        result.Length.Should().Be(40);
+        result.ToCharArray().Should().OnlyContain(ch => "abc123!@".Contains(ch));
+    }
+
+    [Fact]
+    public async Task RandomString_WithBracketCharsetRange_ExpandsRanges()
+    {
+        var result = await Eval("random_string(48, \"[a-zA-Z0-9@#$%^]\")");
+        result.Length.Should().Be(48);
+        result.Should().MatchRegex("^[a-zA-Z0-9@#$%^]+$");
+    }
+
+    // --- uuid ---
+
+    [Fact]
+    public async Task Uuid_DefaultFormat_ReturnsParseableGuid()
+    {
+        var result = await Eval("uuid()");
+        result.Length.Should().Be(36);
+        Guid.TryParse(result, out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Uuid_ConsecutiveCalls_ReturnDifferentValues()
+    {
+        var first = await Eval("uuid()");
+        var second = await Eval("uuid()");
+
+        first.Should().NotBe(second);
     }
 
     // --- reverse ---

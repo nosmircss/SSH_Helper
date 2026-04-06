@@ -1,6 +1,183 @@
 # Changelog
 
-## Changes Since `a5e5905` (0.51.11)
+## Changes Since `fe629ed` (0.51.14)
+
+### `localcmd` Command — Local Process Execution
+
+`LocalCmdCommand` (`Services/Scripting/Commands/LocalCmdCommand.cs`) executes arbitrary local processes from within YAML scripts, with a mandatory user-confirmation dialog before execution:
+
+```yaml
+- localcmd:
+    command: "Get-Process | Select-Object -First 5"
+    shell: powershell
+    into: result
+    confirm: always
+```
+
+**Execution modes:**
+
+- **Foreground** (default) — Captures stdout and stderr into `${into}_stdout`, `${into}_stderr`, and `${into}_exit_code`. Output is streamed to the script output panel in real time. Supports `timeout` and `max_output_bytes` (default 1 MB) with truncation markers.
+- **Background** (`run_mode: background`) — Starts the process detached from the script's execution flow. Populates `${into}_pid`, `${into}_started`, and `${into}_start_error`. Lifetime management via `lifetime` (`script`, `app`, `detached`) and `kill_on_cancel` options. Background processes registered against the `ScriptContext` are cleaned up on script completion; app-lifetime processes are cleaned up on `AppDomain.ProcessExit`.
+- **Interactive** (`interactive: true`) — Opens a visible terminal window via `powershell -NoExit`. Supports `keep_open` to leave the window open after the command completes. Exit code is captured into `${into}_exit_code`. Mutually exclusive with background mode.
+
+**Confirmation system:**
+
+- `ILocalCmdConfirmation` interface with `LocalCmdConfirmResult` enum (`Run`, `RunAll`, `Cancel`)
+- `LocalCmdConfirmationDialog` (`UI/LocalCmdConfirmationDialog.cs`) shows the resolved command, shell, and working directory before execution
+- `confirm` policy: `always` (default), `once` (per command+host), or `never`
+- `RunAll` approval persists per-host across subsequent commands within the same script execution via `ScriptContext.LocalCmdRunAllApproved`
+
+**Shell support:**
+
+- `powershell` (default) — `powershell.exe -NoProfile -NonInteractive -Command`
+- `custom` — Uses `shell_path` for arbitrary executables with `args` passthrough
+- Custom `env` dictionary for injecting environment variables into the child process
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `command` | Yes | — | Command string to execute |
+| `shell` | No | `powershell` | Shell: `powershell`, or `custom` |
+| `shell_path` | No | — | Executable path when `shell: custom` |
+| `args` | No | — | Extra CLI arguments for custom shell |
+| `env` | No | — | Environment variable key/value pairs |
+| `working_dir` | No | — | Working directory (supports `%VAR%` expansion) |
+| `interactive` | No | `false` | Open a visible terminal window |
+| `keep_open` | No | `false` | Keep interactive terminal open after command completes |
+| `run_mode` | No | `foreground` | `foreground` or `background` |
+| `lifetime` | No | `script` | Background process lifetime: `script`, `app`, or `detached` |
+| `kill_on_cancel` | No | `true` | Kill background process on script cancellation |
+| `fail_on_nonzero` | No | `true` | Fail step on non-zero exit code |
+| `success_codes` | No | `[0]` | List of acceptable exit codes |
+| `max_output_bytes` | No | `1048576` | Max captured output size before truncation |
+| `confirm` | No | `always` | Confirmation policy: `always`, `once`, `never` |
+| `quiet` | No | `false` | Suppress command echo but show output |
+| `into` | No | — | Variable prefix for captured results |
+| `timeout` | No | — | Timeout in seconds |
+| `on_error` | No | `stop` | Error handling: `stop` or `continue` |
+
+`ScriptDependencyAnalyzer` recognizes `localcmd` steps as not requiring an SSH session. The `into` variable tracking accounts for all three execution modes with their distinct output variable sets.
+
+### HashiCorp Vault Integration
+
+A full HashiCorp Vault integration provides secret management across scripts, jobs, environments, and credentials.
+
+**VaultService** (`Services/Vault/VaultService.cs`) — Core service implementing:
+
+- **Authentication** — Four auth methods: `Token`, `AppRole`, `LDAP`, and `Userpass`. All secrets (tokens, secret IDs, passwords) are stored in Windows Credential Manager via `CredentialTargets.VaultAuthTarget(profileName, authType)`. Token TTL tracking with 75% expiry threshold for automatic re-authentication.
+- **KV v1/v2 support** — `AutoDetect` mode queries the Vault mount's `options.version` to determine the KV engine version. V2 paths are automatically adjusted to include `/data/` and `/metadata/` segments. Secret version pinning supported on V2 reads.
+- **Read/Write/Patch/List operations** — `ReadSecretAsync`, `ReadSecretKeysAsync`, `WriteSecretAsync`, `PatchSecretAsync`, `ListSecretsAsync`. Write and patch accept structured JSON values — `TryParseStructuredJson` detects JSON objects/arrays in value strings (including escaped payloads) and preserves their structure.
+- **Caching** — Per-profile TTL-based cache with `CacheTtlSeconds` (default 300s). Cache keys are scoped to `profile:path:key:version`. Path-level invalidation on writes/patches.
+- **TLS** — Custom CA certificate support via `CaCertificatePath` and `SkipTlsVerification` for development environments.
+- **Error translation** — HTTP errors are translated into `VaultException` with context: 403 → "access denied", 404 → "secret not found", etc.
+- **Connection testing** — `TestConnectionAsync` validates authentication and runs a `v1/sys/health` check, surfacing sealed/uninitialized states.
+
+**Configuration** (`Models/VaultSettings.cs`, `Models/AppConfiguration.cs`) — `VaultSettings` on `AppConfiguration.Vault` with named `VaultProfileConfig` profiles. Each profile specifies `Address`, `Namespace`, `MountPath`, `AuthMethod`, `KvVersion`, `CacheTtlSeconds`, `CaCertificatePath`, and `SkipTlsVerification`. Auth-method-specific fields: `AppRoleRoleId`, `LdapUsername`, `UserpassUsername`.
+
+**`vault` Script Command** (`Services/Scripting/Commands/VaultCommand.cs`) — Reads, writes, or patches Vault secrets from YAML scripts:
+
+```yaml
+# Read a single key
+- vault:
+    path: ssh/creds/server01
+    key: password
+    into: ssh_password
+    profile: prod
+
+# Read multiple keys
+- vault:
+    path: ssh/creds/server01
+    keys:
+      username: ssh_user
+      password: ssh_pass
+
+# Write secrets
+- vault:
+    path: app/config/myservice
+    write:
+      api_key: "${generated_key}"
+      endpoint: "https://api.example.com"
+
+# Patch existing secrets (KV v2 merge)
+- vault:
+    path: app/config/myservice
+    patch:
+      api_key: "${new_key}"
+```
+
+**Vault Functions** (`Services/Scripting/Functions/VaultFunctions.cs`) — Three inline functions registered in `FunctionRegistry`:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `vault` | `vault(path, key [, profile])` | Read a single secret value |
+| `vault_list` | `vault_list(prefix [, profile])` | List secret keys at a path |
+| `vault_clear_cache` | `vault_clear_cache()` | Flush the secret cache |
+
+**VaultCredentialProvider** (`Services/Vault/VaultCredentialProvider.cs`) — Adapts `VaultService` to the `ICredentialProvider` interface for SSH credential resolution. Vault path syntax: `[profile@]path[#usernameKey,passwordKey]` (defaults to `username` and `password` fields).
+
+**Job Scheduler Integration** — `CredentialMode.Vault` added to `JobDefinition` with `VaultCredentialPath` and optional `VaultProfileName` override. `JobExecutionService` resolves SSH credentials from Vault at runtime when this mode is selected.
+
+**Environment Integration** — `EnvironmentConfig.VaultProfileName` enables per-environment Vault profile overrides. The `EnvironmentDialog` gains a "Vault Profile" dropdown populated from configured profiles. Environment switches propagate the profile override to `SshExecutionService` and `JobExecutionService`.
+
+**Settings UI** — A new "Vault" tab in `SettingsDialog` with:
+
+- Profile list with add/remove
+- Connection details (address, namespace, mount path, KV version)
+- Auth method switcher with context-sensitive panels (Token, AppRole, LDAP, Userpass)
+- Credentials stored/retrieved from Windows Credential Manager
+- CA certificate path browser and TLS skip toggle
+- Cache TTL configuration
+- Default profile designation
+- "Test Connection" button that validates auth + health check
+
+**Flow Canvas** — `vault` block registered in `blockDefs/registry.ts` under the `network` category with `keyvalue` property type for keys/write/patch maps. `FlowCanvasBridge` dispatch maps updated for YAML round-tripping.
+
+### `random_string` and `uuid` Functions
+
+Two new functions registered in `StringFunctions`:
+
+- **`random_string([length] [, charset])`** — Generates a cryptographically random string using `RandomNumberGenerator.GetInt32`. Default length 16, max 4096. Default charset: alphanumeric (a-z, A-Z, 0-9). Supports bracket-style charset expansion (e.g., `[a-z0-9]`).
+
+```yaml
+- set:
+    name: api_key
+    value: "${random_string(32)}"
+- set:
+    name: hex_token
+    value: "${random_string(16, '[0-9a-f]')}"
+```
+
+- **`uuid()`** — Returns an RFC 4122 UUID v4 string via `Guid.NewGuid().ToString("D")`.
+
+```yaml
+- set:
+    name: request_id
+    value: "${uuid()}"
+```
+
+### Credential Manager Behavior Change
+
+The `CredentialSettings.UseCredentialManager` toggle is narrowed in scope — it now controls only whether the **main form default password** is persisted and auto-loaded from Windows Credential Manager. Host-level credentials, job credentials, and Vault authentication tokens always use Credential Manager whenever the provider is available. The `CredentialManagerProvider` is now always initialized regardless of the toggle state. The checkbox label in Settings is updated to "Store main form password in Windows Credential Manager". A `ClearStoredDefaultPassword` method is added for cleanup when the toggle is disabled.
+
+### UI Changes
+
+- **"Run All" button removed** — `btnExecuteAll` and its click handler are removed from `Form1`. The execute panel retains "Run Selected" and "Stop All". `btnStopAll` shifts left to fill the gap.
+
+### Flow Canvas Bridge Fix
+
+`FlowCanvasBridge.CompareStepPathSegments` replaces string-based step path comparison with numeric-segment-aware ordering. Previously, branch first-child detection used `string.Compare` which sorted `steps/10/then/0` before `steps/2/then/0`. The new method splits paths on `/` and compares numeric segments numerically, ensuring correct ordering for scripts with 10+ top-level steps.
+
+### Test Coverage
+
+New test suites added:
+
+- **Scripting** — `LocalCmdCommandTests` (foreground/background/interactive execution, confirmation flow, environment variables, timeout, output truncation), `LocalCmdParserTests` (YAML parsing of all `localcmd` options), `VaultCommandTests` (read single/multiple keys, write, patch, on_error handling, structured JSON values), `VaultFunctionsTests` (`vault`, `vault_list`, `vault_clear_cache` functions), `VaultInlineSyntaxTests` (inline `${vault(...)}` expression evaluation), `VaultParserTests` (YAML parsing of vault step options)
+- **Services** — `VaultServiceTests` (auth methods, KV v1/v2 read/write/patch/list, caching, TLS, error translation), `VaultSettingsTests` (model serialization), `VaultCredentialProviderTests` (vault path parsing, credential resolution), `FlowCanvasBridgeTests` (vault/localcmd YAML round-tripping), `EnvironmentServiceTests` (vault profile propagation), `JobExecutionServiceTests` (Vault credential mode)
+- **UI** — `Form1CredentialManagerPreferenceTests` (narrowed credential toggle behavior), `SettingsDialogVaultTests` (Vault tab profile management, auth panel switching, test connection), `JobEditorDialogVaultCredentialTests` (Vault credential mode in job editor), `JobEditorValidationTests` (Vault path validation)
+- **Editor** — `ScriptAutocompleteProviderTests` (vault/localcmd autocomplete candidates)
+
+---
+
+## Changes Since `a5e5905` (0.51.12)
 
 ### Portable Release Build
 

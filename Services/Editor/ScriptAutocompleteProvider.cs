@@ -130,6 +130,7 @@ namespace SSH_Helper.Services.Editor
             ["playsound"] = "Play audio",
             ["input"] = "User input",
             ["log"] = "Log message",
+            ["localcmd"] = "run local cmd",
             ["http"] = "HTTP request",
             ["browser_callback_capture"] = "OAuth capture",
             ["ping"] = "Ping host",
@@ -150,7 +151,8 @@ namespace SSH_Helper.Services.Editor
             ["parallel"] = "Concurrent",
             ["call"] = "Call sub",
             ["return"] = "Return value",
-            ["table"] = "Data table"
+            ["table"] = "Data table",
+            ["vault"] = "Read, write, or patch secrets from HashiCorp Vault"
         };
 
         private static readonly Dictionary<string, string> TopLevelKeyDescriptions = new(StringComparer.OrdinalIgnoreCase)
@@ -202,7 +204,8 @@ namespace SSH_Helper.Services.Editor
             ["multiselect"] = ["into", "options"],
             ["confirm"] = ["into"],
             ["assert"] = ["condition"],
-            ["browser_callback_capture"] = ["start_url", "callback_path", "into"]
+            ["browser_callback_capture"] = ["start_url", "callback_path", "into"],
+            ["localcmd"] = ["command"]
         };
 
         private static readonly Dictionary<string, string> BuiltInSymbolDescriptions = new(StringComparer.OrdinalIgnoreCase)

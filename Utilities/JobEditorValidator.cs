@@ -172,6 +172,20 @@ namespace SSH_Helper.Utilities
         }
 
         /// <summary>
+        /// Validates Vault credential settings when credential mode is Vault.
+        /// </summary>
+        public static string? ValidateVaultCredentials(CredentialMode mode, string? vaultCredentialPath)
+        {
+            if (mode != CredentialMode.Vault)
+                return null;
+
+            if (string.IsNullOrWhiteSpace(vaultCredentialPath))
+                return "Vault credential mode requires a Vault path.";
+
+            return null;
+        }
+
+        /// <summary>
         /// Validates optional per-job timeout overrides.
         /// </summary>
         public static string? ValidateTimeoutOverrides(
@@ -211,7 +225,8 @@ namespace SSH_Helper.Utilities
             JobTargetType targetType = JobTargetType.Preset,
             string? customPresetCommands = null,
             int? commandTimeoutOverrideSeconds = null,
-            int? connectionTimeoutOverrideSeconds = null)
+            int? connectionTimeoutOverrideSeconds = null,
+            string? vaultCredentialPath = null)
         {
             return ValidateName(name)
                 ?? ValidateTarget(targetType, targetName)
@@ -221,7 +236,8 @@ namespace SSH_Helper.Utilities
                 ?? ValidateOneTimeDate(scheduleType, oneTimeUtc)
                 ?? ValidateHosts(hosts)
                 ?? ValidatePerHostCredentials(credentialMode, hosts, hostColumns)
-                ?? ValidateStoredCredentials(credentialMode, storedUsername);
+                ?? ValidateStoredCredentials(credentialMode, storedUsername)
+                ?? ValidateVaultCredentials(credentialMode, vaultCredentialPath);
         }
 
         private static bool TryGetRowValue(

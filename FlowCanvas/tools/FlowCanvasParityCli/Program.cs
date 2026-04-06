@@ -132,7 +132,7 @@ internal static class Program
         {
             input = JObject.Parse(stdin);
         }
-        catch (System.Text.Json.JsonException ex)
+        catch (Newtonsoft.Json.JsonReaderException ex)
         {
             Console.Error.WriteLine($"Invalid input JSON: {ex.Message}");
             return 1;

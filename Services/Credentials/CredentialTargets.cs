@@ -22,6 +22,11 @@ namespace SSH_Helper.Services
             return BuildJobPasswordTarget(AppDataPaths.IsPortableBuild, jobId);
         }
 
+        public static string VaultAuthTarget(string profileName, string authType)
+        {
+            return BuildVaultAuthTarget(AppDataPaths.IsPortableBuild, profileName, authType);
+        }
+
         internal static string BuildDefaultPasswordTarget(bool portableBuild)
         {
             var prefix = GetPrefix(portableBuild);
@@ -41,6 +46,12 @@ namespace SSH_Helper.Services
             var prefix = GetPrefix(portableBuild);
             var safeId = (jobId ?? string.Empty).Trim();
             return $"{prefix}:job:{safeId}";
+        }
+
+        internal static string BuildVaultAuthTarget(bool portableBuild, string profileName, string authType)
+        {
+            var prefix = GetPrefix(portableBuild);
+            return $"{prefix}:vault:{profileName}:{authType}";
         }
 
         private static string GetPrefix(bool portableBuild)

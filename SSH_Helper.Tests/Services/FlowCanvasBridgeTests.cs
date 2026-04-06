@@ -17,6 +17,39 @@ namespace SSH_Helper.Tests.Services;
 public class FlowCanvasBridgeTests
 {
     [Fact]
+    public void TextToGraph_VaultStep_ImportsAsVaultBlock_WithPreviewAndExtractedProps()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - vault:
+                  path: ssh/creds/router-a
+                  key: password
+                  into: secret_password
+            """;
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var vaultNode = nodes
+            .OfType<JObject>()
+            .FirstOrDefault(node =>
+                string.Equals(
+                    node["data"]?["blockType"]?.ToString(),
+                    "vault",
+                    StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotNull(vaultNode);
+
+        var props = vaultNode!["data"]?["props"] as JObject;
+        Assert.NotNull(props);
+        Assert.Equal("ssh/creds/router-a", props!["path"]?.ToString());
+        Assert.Equal("password", props["key"]?.ToString());
+        Assert.Equal("secret_password", props["into"]?.ToString());
+        Assert.Equal("ssh/creds/router-a", props["_preview"]?.ToString());
+    }
+
+    [Fact]
     public void ExportGraphToYaml_MixedGeneratedAndContainerSteps_ProducesParsableYaml()
     {
         var bridge = new FlowCanvasBridge();
@@ -1419,6 +1452,21 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_LocalCmdCustomShellMissingShellPath_ReturnsRequiredOptionError()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "script.py",
+            ["shell"] = "custom"
+        });
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("missing required option(s)", StringComparison.OrdinalIgnoreCase) &&
+            error.Contains("shell_path", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ExportGraphToYaml_InputWithoutPrompt_ExportsSuccessfully()
     {
         var result = ExportSingleBlock("input", new JObject
@@ -1712,6 +1760,90 @@ public class FlowCanvasBridgeTests
         });
 
         AssertExportSuccessWithCanonicalValidation(result);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_LocalCmdArgsJsonArray_ExportsAsSequence()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "dotnet build",
+            ["args"] = "[\"-NoProfile\",\"-ExecutionPolicy\",\"Bypass\"]",
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var localCmd = script.Steps[0].LocalCmd;
+
+        Assert.NotNull(localCmd);
+        Assert.Equal(3, localCmd!.Args.Count);
+        Assert.Equal("-NoProfile", localCmd.Args[0]);
+        Assert.Equal("Bypass", localCmd.Args[2]);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_LocalCmdEnvJson_ExportsAsMapping()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "dotnet build",
+            ["env"] = "{\"CONFIGURATION\":\"Release\",\"DOTNET_CLI_TELEMETRY_OPTOUT\":\"1\"}",
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var localCmd = script.Steps[0].LocalCmd;
+
+        Assert.NotNull(localCmd);
+        Assert.NotNull(localCmd!.Env);
+        Assert.Equal("Release", localCmd.Env!["CONFIGURATION"]);
+        Assert.Equal("1", localCmd.Env["DOTNET_CLI_TELEMETRY_OPTOUT"]);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_LocalCmdQuietAndSuppress_ExportsAsBooleans()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "date",
+            ["quiet"] = true,
+            ["suppress"] = true,
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var localCmd = script.Steps[0].LocalCmd;
+
+        Assert.NotNull(localCmd);
+        Assert.True(localCmd!.Quiet);
+        Assert.True(localCmd.Suppress);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_LocalCmdKeepOpen_ExportsAsBoolean()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "date",
+            ["interactive"] = true,
+            ["keep_open"] = true,
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var localCmd = script.Steps[0].LocalCmd;
+
+        Assert.NotNull(localCmd);
+        Assert.True(localCmd!.Interactive);
+        Assert.True(localCmd.KeepOpen);
     }
 
     [Fact]
@@ -2272,6 +2404,74 @@ public class FlowCanvasBridgeTests
         Assert.NotNull(ifStep.Then);
         Assert.Single(ifStep.Then);
         Assert.Null(ifStep.Else);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ImportedIfWithTwoDigitThenIndex_UsesStoredSnippetWhenFirstChildEdgeExists()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            steps:
+              - if:
+                  condition: "true"
+                  then:
+                    - print: "first"
+                    - print: "second"
+              - print: "after"
+            """;
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+
+        var ifNode = nodes.Cast<JObject>().First(n => n["data"]?["blockType"]?.ToString() == "if");
+        var ifId = ifNode["id"]!.ToString();
+
+        var thenChildren = nodes.Cast<JObject>()
+            .Where(n =>
+            {
+                var props = n["data"]?["props"] as JObject;
+                return props?["_isChildOf"]?.ToString() == ifId &&
+                       string.Equals(props?["_branchLabel"]?.ToString(), "then", StringComparison.OrdinalIgnoreCase);
+            })
+            .ToList();
+
+        Assert.Equal(2, thenChildren.Count);
+
+        var directThenChildIds = edges.Cast<JObject>()
+            .Where(e => e["source"]?.ToString() == ifId &&
+                        thenChildren.Any(c => c["id"]?.ToString() == e["target"]?.ToString()))
+            .Select(e => e["target"]!.ToString())
+            .ToList();
+
+        Assert.Single(directThenChildIds);
+        var directThenChildId = directThenChildIds[0];
+
+        foreach (var child in thenChildren)
+        {
+            var childId = child["id"]!.ToString();
+            var props = (JObject)child["data"]!["props"]!;
+            props["_stepPath"] = childId == directThenChildId ? "steps/0/then/2" : "steps/0/then/10";
+        }
+
+        var ifProps = (JObject)ifNode["data"]!["props"]!;
+        ifProps["_stepPath"] = "steps/0";
+        ifProps["_yamlSnippet"] = """
+            - if:
+                condition: "true"
+                then:
+                  # keep-imported-snippet
+                  - print: "first"
+                  - print: "second"
+            """;
+
+        var graph = new JObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges
+        };
+
+        var result = bridge.ExportGraphToYaml(graph);
+        Assert.True(result.Success, string.Join(" | ", result.Errors));
+        Assert.Contains("# keep-imported-snippet", result.Yaml);
     }
 
     private static JObject CreateEdge(

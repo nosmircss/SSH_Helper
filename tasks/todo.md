@@ -1,5 +1,592 @@
 # TODO
 
+## 221. Increase Vault settings field width for better text visibility
+- [x] 221.1 Identify Vault tab row/input sizing constraints in `SettingsDialog.cs`.
+- [x] 221.2 Increase minimum width of Vault text input and related combo fields while preserving existing behavior.
+- [x] 221.3 Build solution with existing project flags and record verification evidence.
+- [x] 221.4 Slightly widen `SettingsDialog`/tab layout to remove Vault tab horizontal scrollbar after field-width increase.
+
+### 221 Review
+- Updated Vault layout sizing in `SettingsDialog.cs`:
+- Added shared sizing constants for Vault label and input widths in `CreateVaultTab()`.
+- Increased minimum width for Vault text fields (`Profile Name`, `Address`, `Namespace`, `Mount Path`, auth credentials, token).
+- Increased minimum width for Vault `KV Version` and `Auth Method` combo boxes to match widened field layout.
+- Increased minimum width for `CA Certificate` path textbox.
+- Increased `SettingsDialog` and tab-control width slightly so Vault content no longer overflows horizontally after the input-width increase.
+- Verification:
+- `dotnet build SSH_Helper.sln -v minimal -p:SkipFlowCanvasBuild=true -p:UseAppHost=false` (passed; existing project warnings only).
+
+## 220. Always use Credential Manager for host/Vault credentials; checkbox controls main password persistence only
+- [x] 220.1 Add RED UI tests in `SSH_Helper.Tests` proving host-password credential storage still happens when the checkbox/config flag is off.
+- [x] 220.2 Add RED UI tests proving main-form default password load/save is disabled when the checkbox/config flag is off.
+- [x] 220.3 Update `Form1` credential initialization and host password flows so host/Vault credential-manager usage is always on when provider availability allows.
+- [x] 220.4 Update default password load/save behavior so it is gated by the checkbox/config flag (including cleanup when toggled off).
+- [x] 220.5 Update settings text/comments to reflect the new checkbox meaning (main password persistence).
+- [x] 220.6 Run focused verification and record outcomes in a `220 Review` section.
+
+### 220 Review
+- Added focused RED coverage in `SSH_Helper.Tests/UI/Form1CredentialManagerPreferenceTests.cs`:
+- `BuildApplicationState_StoresHostPasswordsAndStripsPasswordField_WhenCheckboxSettingIsOff`
+- `TryLoadDefaultPassword_DoesNotHydrateMainPassword_WhenCheckboxSettingIsOff`
+- `StoreDefaultPassword_DoesNotPersistMainPassword_WhenCheckboxSettingIsOff`
+- RED verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1CredentialManagerPreferenceTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/testbuild/credential-manager-pref-red/ -p:BaseIntermediateOutputPath=artifacts/testobj/credential-manager-pref-red/` (failed `3/3` as expected before implementation).
+- Updated runtime behavior in `Form1.cs`:
+- Credential provider now initializes independently of the checkbox (Credential Manager always used when available).
+- Host password migration/load/restore paths now gate only on provider availability, not the checkbox flag.
+- Main-form password load/save now gates on the checkbox (`Credentials.UseCredentialManager`) via `ShouldPersistMainFormPassword()`.
+- Added `ClearStoredDefaultPassword()` and invoked cleanup when checkbox is off.
+- Updated settings behavior in `settingsToolStripMenuItem_Click(...)` to apply main-password persistence toggle without disabling Credential Manager host/Vault usage.
+- Updated UI/docs semantics:
+- `SettingsDialog.cs` checkbox label now reads `Store main form password in Windows Credential Manager`.
+- `Models/AppConfiguration.cs` summary now clarifies checkbox scope is main-form password persistence.
+- GREEN focused verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1CredentialManagerPreferenceTests" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/testbuild/credential-manager-pref-green2/ -p:BaseIntermediateOutputPath=artifacts/testobj/credential-manager-pref-green2/` (passed `3/3`).
+- Build verification:
+- `dotnet build SSH_Helper.sln -v minimal -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/build/credential-manager-pref2/ -p:BaseIntermediateOutputPath=artifacts/obj/credential-manager-pref2/` (passed).
+
+## 219. Add Vault userpass authentication with portable-safe credential targets
+- [x] 219.1 Add RED tests for `VaultService` userpass login flow and missing-password failure behavior.
+- [x] 219.2 Extend Vault auth model/runtime to support `VaultAuthMethod.Userpass` (`/v1/auth/userpass/login/{username}`).
+- [x] 219.3 Extend Settings/Form wiring so userpass username/password can be configured and loaded/saved via Credential Manager.
+- [x] 219.4 Ensure userpass credential storage uses `CredentialTargets.VaultAuthTarget(...)` so portable/non-portable targets stay isolated.
+- [x] 219.5 Run focused Vault/settings/credential-target tests and record results.
+- [x] 219.6 Add review notes in this task entry with verification evidence.
+
+### 219 Review
+- Added RED coverage in `SSH_Helper.Tests/Vault/VaultServiceTests.cs` for userpass auth:
+- `UserpassAuth_GetsClientToken`
+- `UserpassAuth_MissingPassword_ThrowsFriendlyError`
+- `UserpassAuth_MissingUsername_ThrowsFriendlyError`
+- RED verification (before implementation) showed expected failures with unsupported auth method:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultServiceTests.UserpassAuth_GetsClientToken|FullyQualifiedName~VaultServiceTests.UserpassAuth_MissingPassword_ThrowsFriendlyError" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-userpass-red/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-userpass-red/` (failed `2/2` as expected).
+- Implemented userpass support end-to-end:
+- `Models/VaultSettings.cs`: added `VaultProfileConfig.UserpassUsername` and `VaultAuthMethod.Userpass = 3`.
+- `Services/Vault/VaultService.cs`: added `userpassPasswordProvider`, auth switch case, and `/v1/auth/userpass/login/{username}` flow.
+- `SettingsDialog.cs`: added `Userpass` auth panel (username/password), profile persistence, credential load/save/delete wiring.
+- `Form1.cs`: wired runtime credential retrieval through `CredentialTargets.VaultAuthTarget(profile, "userpass_password")`.
+- Added portability/isolation verification and settings persistence coverage:
+- `SSH_Helper.Tests/Vault/VaultSettingsTests.cs` now verifies userpass enum value and portable target format `SSH_Helper_Portable:vault:my-profile:userpass_password`.
+- `SSH_Helper.Tests/UI/SettingsDialogVaultTests.cs` now verifies userpass username persistence and credential-manager target storage.
+- GREEN focused verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultServiceTests|FullyQualifiedName~VaultSettingsTests|FullyQualifiedName~SettingsDialogVaultTests|FullyQualifiedName~CredentialTargetsTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-userpass-green/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-userpass-green/` (passed `50/50`).
+
+## 218. Add native uuid() scripting function
+- [x] 218.1 Add focused RED tests covering UUID generation shape/uniqueness expectations for `uuid()`.
+- [x] 218.2 Implement `uuid()` in built-in string functions and register it in the function registry.
+- [x] 218.3 Update `SCRIPTING.md` function catalog/examples to document `uuid()`.
+- [x] 218.4 Run focused string-function verification and capture outcomes.
+- [x] 218.5 Add review notes and final outcome summary to this task entry.
+
+### 218 Review
+- Added focused RED regression coverage in `SSH_Helper.Tests/Scripting/StringFunctionTests.cs`:
+- `Uuid_DefaultFormat_ReturnsParseableGuid`
+- `Uuid_ConsecutiveCalls_ReturnDifferentValues`
+- Implemented `uuid()` in `Services/Scripting/Functions/StringFunctions.cs` and registered it in `StringFunctions.Register(...)`.
+- Runtime behavior:
+- `uuid()` returns a new GUID string in canonical dashed format (`Guid.NewGuid().ToString("D")`).
+- Updated `SCRIPTING.md` documentation in three places:
+- Function catalog table now includes `uuid()`.
+- Additional string function examples now show `request_id = uuid()` style usage.
+- Inline function summary list now includes `uuid()`.
+- Verification:
+- RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests.Uuid" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/uuid-red/ -p:BaseIntermediateOutputPath=artifacts/testobj/uuid-red/` (failed `2/2` before implementation).
+- GREEN (focused): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests.Uuid" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/uuid-green-focused/ -p:BaseIntermediateOutputPath=artifacts/testobj/uuid-green-focused/` (passed `2/2`).
+- GREEN (regression slice): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/uuid-green-regression/ -p:BaseIntermediateOutputPath=artifacts/testobj/uuid-green-regression/` (passed `31/31`).
+
+## 216. Support nested Vault JSON value rotation (immutable secret shape)
+- [x] 216.1 Add focused failing tests for rotating a nested field (for example `entities[0].r7_api_key`) via `vault` + JSON functions.
+- [x] 216.2 Update Vault write/patch runtime to accept object/array values (not only flat strings) while preserving existing scalar behavior.
+- [x] 216.3 Keep parser/command behavior backward compatible for existing scalar map syntax in `vault.write` and `vault.patch`.
+- [x] 216.4 Run focused Vault/scripting tests and capture verification evidence.
+- [x] 216.5 Document the runnable rotation recipe in the final response and add review notes here.
+
+### 216 Review
+- Updated `Services/Scripting/Commands/VaultCommand.cs` to coerce `write`/`patch` values that resolve to JSON object/array text into structured payload values (`JsonNode`) instead of sending them as quoted strings.
+- Updated `Services/Vault/VaultService.cs` write/patch pipeline to accept `Dictionary<string, object?>`, preserving structured values during KV v1/v2 write and patch requests.
+- Updated Vault read internals to keep raw JSON nodes and convert to string output only at command/function boundaries, so cache/consumer behavior remains compatible while nested data remains structurally safe for fallback merge writes.
+- Added regression coverage in `SSH_Helper.Tests/Scripting/VaultCommandTests.cs`:
+- `Write_WithJsonArrayString_WritesStructuredArrayValue`
+- `Patch_WithJsonArrayString_WritesStructuredArrayValue`
+- Updated `SSH_Helper.Tests/Vault/VaultServiceTests.cs` for the new write/patch signature.
+- Updated `SCRIPTING.md` vault docs with a nested JSON rotation example that uses `write` (for update-only policies) and explains structured-value serialization behavior.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultCommandTests|FullyQualifiedName~VaultServiceTests|FullyQualifiedName~VaultFunctionsTests|FullyQualifiedName~VaultInlineSyntaxTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-nested-json/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-nested-json/` (passed `33/33`).
+
+## 217. Harden Vault write/update against escaped JSON string literals
+- [x] 217.1 Add failing regression for `vault.write` when value is escaped JSON text (`[{\"...\"}]`) so it serializes as array/object, not string.
+- [x] 217.2 Update vault write/patch value coercion to recover escaped JSON payloads safely.
+- [x] 217.3 Re-run focused Vault command/service tests and capture verification evidence.
+- [x] 217.4 Add review notes and runnable guidance for update-only rotation flow.
+
+### 217 Review
+- Updated JSON coercion in `Services/Scripting/Commands/VaultCommand.cs`:
+- Added object/array detection helper (`TryParseJsonObjectOrArray`).
+- Added recovery normalization for escaped JSON fragments (for example `[{\"k\":\"v\"}]`) before parsing.
+- Added regression coverage in `SSH_Helper.Tests/Scripting/VaultCommandTests.cs`:
+- `Write_WithEscapedJsonArrayString_WritesStructuredArrayValue`
+- Re-ran focused verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultCommandTests.Write_WithEscapedJsonArrayString_WritesStructuredArrayValue|FullyQualifiedName~VaultCommandTests.Write_WithJsonArrayString_WritesStructuredArrayValue|FullyQualifiedName~VaultCommandTests.Patch_WithJsonArrayString_WritesStructuredArrayValue|FullyQualifiedName~VaultCommandTests.Write_Succeeds|FullyQualifiedName~VaultCommandTests.Patch_Succeeds|FullyQualifiedName~VaultServiceTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-escaped-json/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-escaped-json/` (passed `22/22`).
+
+## 215. Add bracket charset shorthand to random_string()
+- [x] 215.1 Add focused tests for `random_string(..., "[a-zA-Z0-9@#$%^]")` style charset specifications.
+- [x] 215.2 Implement bracket/range charset expansion in `random_string()` while preserving literal charset behavior.
+- [x] 215.3 Update `SCRIPTING.md` to document bracket shorthand examples for password generation.
+- [x] 215.4 Run focused string-function tests and record verification evidence.
+- [x] 215.5 Add review notes and final outcome summary to this task entry.
+
+### 215 Review
+- Extended `random_string()` in `Services/Scripting/Functions/StringFunctions.cs` to accept bracket charset shorthand:
+- Example: `[a-zA-Z0-9@#$%^]`
+- Supports range expansion (`a-z`, `A-Z`, `0-9`) and literal symbols in the same bracket expression.
+- Keeps backward compatibility:
+- Plain literal charset strings (for example `"abc123!@"`) still work unchanged.
+- Empty/invalid effective charset still falls back to the default charset.
+- Added test coverage in `SSH_Helper.Tests/Scripting/StringFunctionTests.cs`:
+- `RandomString_WithBracketCharsetRange_ExpandsRanges`
+- Existing random-string tests continue to pass for default and explicit literal charsets.
+- Updated `SCRIPTING.md` docs:
+- Function table now documents bracket shorthand support.
+- Added password example with `random_string(16, "[a-zA-Z0-9@#$%^]")`.
+- Verification:
+- Focused: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests.RandomString" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/random-string-bracket-focused/ -p:BaseIntermediateOutputPath=artifacts/testobj/random-string-bracket-focused/` (passed `4/4`).
+- Regression slice: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/random-string-bracket-regression/ -p:BaseIntermediateOutputPath=artifacts/testobj/random-string-bracket-regression/` (passed `29/29`).
+
+## 214. Add native random_string() scripting function
+- [x] 214.1 Add focused RED tests for `random_string(length)` behavior (length + allowed character set expectations).
+- [x] 214.2 Implement `random_string()` as a built-in scripting function and register it for expression evaluation.
+- [x] 214.3 Update documentation/examples to use `random_string(...)` instead of hash/substring workaround snippets.
+- [x] 214.4 Run focused scripting tests and record verification evidence.
+- [x] 214.5 Add review notes and final outcome summary to this task entry.
+
+### 214 Review
+- Added first-class `random_string()` function in `Services/Scripting/Functions/StringFunctions.cs`.
+- Function behavior:
+- Signature: `random_string(length?, charset?)`
+- Default length: `16`
+- Default charset: `A-Z`, `a-z`, `0-9`
+- Custom charset supported for constrained password policies (e.g., digits-only or policy-safe symbols).
+- Length is clamped to `[0, 4096]`; `0` returns empty string.
+- Uses `RandomNumberGenerator.GetInt32(...)` for cryptographically secure randomness.
+- Added focused tests in `SSH_Helper.Tests/Scripting/StringFunctionTests.cs`:
+- `RandomString_DefaultLength_UsesDefaultCharset`
+- `RandomString_WithLength_UsesDefaultCharset`
+- `RandomString_WithCustomCharset_OnlyUsesAllowedCharacters`
+- Updated docs/examples:
+- `SCRIPTING.md` function catalog + string function examples now include `random_string(...)`.
+- Vault rotation recipe in `SCRIPTING.md` now uses `random_string(24)` again.
+- `docs/superpowers/specs/2026-04-05-vault-integration-design.md` examples now use `random_string(24)`.
+- Verification:
+- RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests.RandomString" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/random-string-red/ -p:BaseIntermediateOutputPath=artifacts/testobj/random-string-red/` (failed `3/3` before implementation).
+- GREEN (focused): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests.RandomString" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/random-string-green-focused/ -p:BaseIntermediateOutputPath=artifacts/testobj/random-string-green-focused/` (passed `3/3`).
+- GREEN (regression slice): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~StringFunctionTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/random-string-green-regression/ -p:BaseIntermediateOutputPath=artifacts/testobj/random-string-green-regression/` (passed `28/28`).
+
+## 213. Implement Vault hardening findings 1-9
+- [x] 213.1 Add/extend RED tests for all planned Vault findings:
+- scheduler Vault runtime wiring,
+- stale/disposed provider rebinding,
+- cache version key correctness,
+- settings profile/default persistence,
+- environment snapshot Vault profile retention,
+- Flow Canvas Vault import mapping,
+- thread-safe profile dictionary access,
+- `vault_path` runtime resolution and job-profile override behavior,
+- Job Editor Vault mode + validation/data persistence.
+- [x] 213.2 Implement scheduler/runtime Vault fixes in `JobExecutionService`, `Form1`, and Vault provider wiring.
+- [x] 213.3 Implement Vault service correctness fixes (`version`-aware cache keys + synchronized profile dictionary access).
+- [x] 213.4 Implement Settings dialog profile/default behavior fixes.
+- [x] 213.5 Implement environment snapshot + Flow Canvas Vault mapping fixes.
+- [x] 213.6 Implement full `vault_path` runtime support for scheduler and manual host execution paths.
+- [x] 213.7 Implement Job Editor Vault credential mode UI, validation, and persistence including per-job Vault profile override.
+- [x] 213.8 Update docs for Vault credential-flow/runtime parity (`SCRIPTING.md` + relevant model/docs comments).
+- [x] 213.9 Run focused Vault slices first, then broader Vault-related suites, and capture verification evidence.
+- [x] 213.10 Add review notes and final verification summary to this task entry.
+
+### 213 Review
+- Implemented scheduler Vault runtime wiring and per-run default profile propagation across `Form1`, `JobExecutionService`, `VaultCredentialProvider`, and `SshExecutionService` integration points.
+- Added per-job Vault profile override model support via `JobDefinition.VaultProfileName` and applied precedence `job -> environment -> app default` when path omits explicit `profile@`.
+- Fixed Vault service correctness issues by making cache keys `version`-aware and synchronizing profile dictionary create/read/clear/dispose access.
+- Fixed Settings Vault profile UX/data bugs by persisting edits to the previously selected profile and tracking default profile independently from list selection, including rename/remove behavior.
+- Preserved environment Vault profile during grid snapshot saves in `EnvironmentService.BuildSnapshot`.
+- Added missing Flow Canvas Vault import/preview/property extraction mapping and deterministic Vault export key ordering.
+- Implemented `vault_path` resolution for both scheduler and manual host-connection paths, with fallback to row/global credentials on lookup failure.
+- Added Job Editor Vault credential mode UI + validation + persistence for `CredentialMode.Vault`, `VaultCredentialPath`, and optional job-level profile override.
+- Updated Vault runtime/credential behavior docs in `SCRIPTING.md` to match implementation.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultServiceTests|FullyQualifiedName~VaultCredentialProviderTests|FullyQualifiedName~SettingsDialogVaultTests|FullyQualifiedName~JobEditorDialogVaultCredentialTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~SaveCurrentGridToEnvironment_PreservesVaultProfileName|FullyQualifiedName~TextToGraph_VaultStep_ImportsAsVaultBlock_WithPreviewAndExtractedProps|FullyQualifiedName~RunNowAsync_CustomPresetWithVaultStep_SucceedsWhenVaultRuntimeIsAvailable|FullyQualifiedName~BuildHostConnections_VaultPath_OverridesRowCredentials_AndUsesJobDefaultProfile" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-focused-final/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-focused-final/` (passed `84/84`).
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~VaultServiceTests|FullyQualifiedName~VaultCredentialProviderTests|FullyQualifiedName~VaultSettingsTests|FullyQualifiedName~JobExecutionServiceTests|FullyQualifiedName~EnvironmentServiceTests|FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~SettingsDialogVaultTests|FullyQualifiedName~JobEditorValidationTests|FullyQualifiedName~JobEditorDialogVaultCredentialTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/vault-final/ -p:BaseIntermediateOutputPath=artifacts/testobj/vault-final/` (passed `234/234`).
+
+## 212. Add rejected feature-idea tracking
+- [x] 212.1 Create `rejected_ideas.md` with a clear purpose and reusable entry template.
+- [x] 212.2 Update `CLAUDE.md` to instruct tracking rejected feature ideas in that file.
+- [x] 212.3 Verify both docs exist and contain the expected guidance.
+
+### 212 Review
+- Added root-level `rejected_ideas.md` with:
+- purpose statement,
+- required field list (`date`, `idea`, `category`, `reason`, `revisit trigger`, related refs),
+- starter `Entries` section.
+- Updated `CLAUDE.md` Development Guidelines with a new item directing assistants to log declined feature ideas in `rejected_ideas.md`.
+- Verification:
+- `Test-Path rejected_ideas.md` returned `True`.
+- `rg -n "Track rejected feature ideas|rejected_ideas.md" CLAUDE.md rejected_ideas.md` confirmed the new guidance and file content.
+
+## 208. Add playsound QA preset using Windows media files
+- [x] 208.1 Add a `QA PlaySound [Windows]` preset in `qa_presets.json` following current QA style conventions.
+- [x] 208.2 Cover both successful playback and an intentional unsupported-extension error path with assertions.
+- [x] 208.3 Validate `qa_presets.json` parses successfully after edits.
+- [x] 208.4 Document a concise review summary in this file.
+
+### 208 Review
+- Added `QA PlaySound [Windows]` to `qa_presets.json` under `QA/LocalCmd`.
+- Preset behavior coverage:
+- Resolves a usable Windows media sound path with a primary (`%WINDIR%\\Media\\notify.wav`) + fallback (`%WINDIR%\\Media\\Windows Notify.wav`) check.
+- Verifies successful `playsound` execution for both `wait: true` and `wait: false`, asserting captured metadata (`backend`, `wait`, `volume`).
+- Verifies unsupported-extension handling by writing a `.txt` file and running `playsound` with `on_error: continue`, asserting failure capture/meta error and `_last_error` population.
+- Verification:
+- `Get-Content -Raw qa_presets.json | ConvertFrom-Json` (parsed successfully).
+
+## 207. Add localcmd QA presets for feature coverage
+- [x] 207.1 Add multiple `QA LocalCmd ...` preset scenarios in `qa_presets.json` that cover distinct runtime behaviors.
+- [x] 207.2 Keep naming, descriptions, assertions, and folder conventions aligned with existing QA preset patterns.
+- [x] 207.3 Validate `qa_presets.json` parses successfully after insertion.
+- [x] 207.4 Record a concise review summary in this file.
+
+### 207 Review
+- Added six new presets under `QA/LocalCmd` in `qa_presets.json`:
+- `QA LocalCmd Foreground Capture [Windows]`
+- `QA LocalCmd Env WorkingDir [Windows]`
+- `QA LocalCmd Exit Policies [Windows]`
+- `QA LocalCmd Background Metadata [Windows]`
+- `QA LocalCmd Quiet Suppress [Windows]`
+- `QA LocalCmd Timeout Continue [Windows]`
+- Scenarios cover distinct `localcmd` paths: foreground stdout/stderr capture, env + working dir, non-zero policy handling (`fail_on_nonzero`, `success_codes`, `on_error`), background metadata (`into_pid`, `into_started`, `into_start_error`), quiet/suppress output controls, and timeout recovery behavior.
+- Verification:
+- `Get-Content -Raw qa_presets.json | ConvertFrom-Json` (parsed successfully).
+- `Select-String -Path qa_presets.json -Pattern '"QA LocalCmd'` (confirmed six inserted localcmd presets).
+
+## 206. Remove `cmd` shell option from `localcmd`
+- [x] 206.1 Remove `cmd` from Flow Canvas `localcmd.shell` selectable options.
+- [x] 206.2 Align `localcmd` shell validation/docs to `powershell` + `custom`.
+- [x] 206.3 Update parser coverage and run focused verification.
+
+### 206 Review
+- Updated `FlowCanvas/src/blockDefs/registry.ts` localcmd shell selector options to `['powershell', 'custom']`.
+- Updated `Services/Scripting/ScriptParser.cs` shell validation error text and allowed shell set to remove `cmd`.
+- Updated parser tests in `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs`:
+- Full-form parse fixture now uses `shell: powershell`.
+- Added validation regression `Validate_CmdShell_ReturnsShellValidationError`.
+- Updated docs in `SCRIPTING.md` and `docs/superpowers/specs/2026-04-04-localcmd-command-design.md` to remove `cmd` as a documented localcmd shell option.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdParserTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/localcmd-shell-removal/ -p:BaseIntermediateOutputPath=artifacts/testobj/localcmd-shell-removal/` (passed `18/18`).
+
+## 205. Fix localcmd command-banner formatting for folded multiline commands
+- [x] 205.1 Add failing parser/runtime regression(s) that reproduce folded multiline `localcmd.command` collapsing into `utf8notepad` in emitted command banners.
+- [x] 205.2 Patch localcmd command formatting so displayed banner text preserves readable command boundaries (at minimum, no token concatenation across folded lines).
+- [x] 205.3 Run focused localcmd/parser/output-format tests and capture RED/GREEN evidence.
+- [x] 205.4 Document review notes and update `tasks/lessons.md` with this correction pattern.
+
+### 205 Review
+- Root-cause isolation:
+- Added parser regression `Parse_FoldedMultilineCommand_DoesNotConcatenateAdjacentTokens` in `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs`.
+- Result: parser already preserved command boundaries (no `utf8notepad` concatenation), so the improvement target was command-banner rendering.
+- Added RED runtime regression `Background_CommandBanner_MultilineCommand_UsesVisibleLineBreakMarkers` in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`.
+- RED evidence (pre-fix): banner emitted raw multiline text and did not contain visible `\n` markers.
+- Runtime patch in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- Command-banner output for foreground/background/interactive localcmd now formats the displayed command through `ScriptingHelpers.FormatForDisplay(...)`.
+- This preserves execution behavior while making line boundaries explicit in output (`\n` markers), avoiding ambiguous merged tokens in one-line render surfaces.
+- Verification:
+- RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Background_CommandBanner_MultilineCommand_UsesVisibleLineBreakMarkers" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/205-red-banner/ -p:BaseIntermediateOutputPath=artifacts/testobj/205-red-banner/` (failed as expected).
+- GREEN (focused): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Background_CommandBanner_MultilineCommand_UsesVisibleLineBreakMarkers|FullyQualifiedName~Parse_FoldedMultilineCommand_DoesNotConcatenateAdjacentTokens" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/205-green/ -p:BaseIntermediateOutputPath=artifacts/testobj/205-green/` (passed `2/2`).
+- GREEN (regression slice): `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests" -v minimal -p:UseAppHost=false -p:BaseOutputPath=artifacts/testbuild/205-regression/ -p:BaseIntermediateOutputPath=artifacts/testobj/205-regression/` (passed `55/55`).
+
+## 204. Fix keep_open immediate-close when shell aliases are used
+- [x] 204.1 Add a failing regression test proving `shell: powershell.exe` + `keep_open: true` must still launch keep-open mode (`-NoExit`).
+- [x] 204.2 Patch localcmd shell normalization/alias handling so keep-open and direct-capture logic recognizes `powershell.exe`/`cmd.exe` (and path variants).
+- [x] 204.3 Keep parser validation aligned so shell aliases do not get rejected as invalid.
+- [x] 204.4 Run focused localcmd tests and capture verification evidence.
+- [x] 204.5 Update lessons with the correction pattern.
+
+### 204 Review
+- Added RED regression in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `BuildInteractiveArgs_KeepOpen_PowerShellExeAlias_UsesNoExit`
+- RED evidence (pre-fix): keep-open alias case launched via `wt.exe` (non-keep-open path), causing immediate close behavior instead of `-NoExit`.
+- Patched `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- Added shell normalization (`NormalizeShell`) at runtime entry.
+- Added shell alias/path detection helpers:
+- `IsPowerShellShell(...)`
+- `IsCmdShell(...)`
+- `ResolvePowerShellExecutable(...)`
+- `ResolveCmdExecutable(...)`
+- Updated keep-open decision points and process-arg builders to use alias-aware shell checks.
+- Updated interactive reliable-capture and audit-wrapper shell checks to use alias-aware detection.
+- Patched parser shell validation in `Services/Scripting/ScriptParser.cs`:
+- `IsValidLocalCmdShell(...)` now accepts `powershell.exe`/`cmd.exe` and path variants in addition to canonical tokens.
+- Added parser validation regression in `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs`:
+- `Validate_PowerShellExeShellAlias_DoesNotReturnShellValidationError`
+- Verification:
+- RED:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BuildInteractiveArgs_KeepOpen_PowerShellExeAlias_UsesNoExit" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` failed before patch.
+- GREEN:
+- same alias keep-open test passed (`1/1`) after patch.
+- focused slice: `BuildInteractiveArgs_KeepOpen_PowerShellExeAlias_UsesNoExit|Validate_PowerShellExeShellAlias_DoesNotReturnShellValidationError|Interactive_WindowCloseExitCode_DoesNotFail_WhenFailOnNonZeroTrue` passed (`3/3`).
+- broader localcmd slice: `LocalCmdCommandTests|LocalCmdParserTests|AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable` passed (`54/54`).
+
+## 203. Treat interactive window close (X) as graceful localcmd completion
+- [x] 203.1 Add a failing regression test for `interactive: true` where process exit code `-1073741510` (window closed) does not fail the step.
+- [x] 203.2 Patch `LocalCmdCommand.ExecuteInteractive(...)` to classify window-close exit code as user-initiated close and bypass `fail_on_nonzero` failure.
+- [x] 203.3 Preserve `into` exit-code capture and interactive-session audit details while marking close reason explicitly.
+- [x] 203.4 Run focused localcmd regression tests and record verification output.
+- [x] 203.5 Document review notes in `tasks/todo.md` and update `tasks/lessons.md` for this correction pattern.
+
+### 203 Review
+- Added RED regression in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `Interactive_WindowCloseExitCode_DoesNotFail_WhenFailOnNonZeroTrue`
+- RED evidence (pre-fix): interactive step failed when process exit code was `-1073741510` (`0xC000013A`) even though this is a user-closed terminal window case.
+- Patched `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- Added `UserClosedInteractiveWindowExitCode` constant (`0xC000013A`).
+- Added `IsInteractiveWindowCloseExitCode(...)` helper.
+- In `ExecuteInteractive(...)`, window-close exit is now mapped to close reason `user_closed_window` and excluded from `fail_on_nonzero` failure evaluation.
+- `into` behavior is preserved: `<into>_exit_code` still records the raw exit code for audit/logic.
+- Interactive session audit remains preserved via `CaptureInteractiveAuditSession(...)`.
+- Updated `tasks/lessons.md` with this correction pattern.
+- Verification:
+- RED:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Interactive_WindowCloseExitCode_DoesNotFail_WhenFailOnNonZeroTrue" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` (failed before patch).
+- GREEN:
+- Same focused test passed (`1/1`) after patch.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`52/52`).
+
+## 202. Capture full PowerShell interactive session history in execution details
+- [x] 202.1 Add a failing test that proves `localcmd` PowerShell `interactive: true` + `keep_open: true` uses session-level transcript capture (not one-shot `Tee-Object` capture).
+- [x] 202.2 Patch interactive localcmd audit wrapping so PowerShell starts a session transcript before running the initial command, allowing follow-up user-entered commands to be captured until shell close.
+- [x] 202.3 Keep existing interactive history plumbing (`ScriptContext.AddInteractiveSession`) and transcript cleanup behavior intact.
+- [x] 202.4 Run focused localcmd tests and record verification output.
+- [x] 202.5 Document review notes and behavior change in `tasks/todo.md` and `SCRIPTING.md`.
+
+### 202 Review
+- Added RED regression in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `Interactive_KeepOpen_PowerShell_UsesSessionTranscriptCapture`
+- RED evidence (pre-fix): keep-open PowerShell interactive launch arguments used one-shot `Tee-Object` wrapping and did not contain `Start-Transcript`.
+- Patched `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- `ExecuteInteractive(...)` now passes `keep_open` into interactive audit preparation.
+- PowerShell interactive audit wrapping now uses session-level `Start-Transcript` capture:
+- keep-open mode starts transcript and leaves it active until shell close (captures follow-up user-entered commands).
+- non-keep-open mode starts transcript and best-effort stops it in a `finally` block.
+- Existing interactive history storage path remains unchanged (`CaptureInteractiveAuditSession(...)` -> `context.AddInteractiveSession(...)`).
+- Updated test helper `TryExtractInteractiveAuditTranscriptPath(...)` in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs` to parse both `-FilePath` and `-Path` transcript markers.
+- Updated `SCRIPTING.md` localcmd behavior notes:
+- PowerShell interactive capture now documents session transcript behavior for `keep_open: true`.
+- cmd shell remains best-effort launched-command capture.
+- Verification:
+- RED:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Interactive_KeepOpen_PowerShell_UsesSessionTranscriptCapture" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` (failed as expected before patch).
+- GREEN:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`35/35`).
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`51/51`).
+
+## 201. Make localcmd interactive transcript capture reliable for non-keep-open runs
+- [x] 201.1 Add a failing regression test that demonstrates non-keep-open interactive PowerShell launch must use a directly tracked shell process (not `wt.exe` launcher).
+- [x] 201.2 Patch `LocalCmdCommand` interactive argument selection to bypass `wt.exe` launcher for powershell/cmd when transcript reliability is required.
+- [x] 201.3 Run focused localcmd tests to verify the regression and surrounding behavior.
+- [x] 201.4 Add review notes and verification evidence.
+
+### 201 Review
+- Added RED regression in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `BuildInteractiveArgs_NonKeepOpen_Powershell_UsesDirectShellProcessForReliableCapture`
+- RED evidence (pre-fix): test failed because interactive arg selection returned `...\\WindowsApps\\wt.exe` instead of `powershell.exe`.
+- Patched `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- `BuildInteractiveArgs(...)` now bypasses Windows Terminal launcher for non-keep-open `powershell`/`cmd` interactive runs and returns a directly tracked shell process via `BuildProcessArgs(...)`.
+- Added helper `RequiresDirectInteractiveShellForReliableCapture(...)` to centralize this rule.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~BuildInteractiveArgs_NonKeepOpen_Powershell_UsesDirectShellProcessForReliableCapture" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/`
+- RED run failed as expected (`0/1` pass), then GREEN rerun passed (`1/1`).
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`34/34`).
+
+## 200. Add localcmd interactive audit transcript capture to execution details
+- [x] 200.1 Design always-on interactive localcmd audit capture behavior and confirm always-on mode.
+- [x] 200.2 Implement interactive launch wrapping for powershell/cmd to tee output into a transient transcript file.
+- [x] 200.3 Persist captured transcript into execution history via `ScriptContext.AddInteractiveSession(...)`.
+- [x] 200.4 Ensure timeout/cancel paths still record partial audit sessions and always clean up temp transcript files.
+- [x] 200.5 Add focused tests for transcript capture/session persistence and cmd wrapper coverage.
+- [x] 200.6 Update scripting docs to clarify localcmd interactive audit behavior and run focused verification.
+
+### 200 Review
+- Added always-on localcmd interactive audit capture in `Services/Scripting/Commands/LocalCmdCommand.cs`.
+- Interactive command launch now uses an audit wrapper for:
+- `shell: powershell` -> `Tee-Object` transcript capture.
+- `shell: cmd` -> pipeline to PowerShell `Tee-Object` transcript capture.
+- Captured transcript is cleaned and size-limited (using `max_output_bytes`), then stored as an interactive session via `context.AddInteractiveSession(...)` with:
+- `SessionMode = localcmd-interactive`
+- `EmulationMode = <shell>`
+- close reason (`exit_code:<n>`, `timeout`, `cancelled`)
+- `Completed` status and transcript text for history details.
+- Timeout/cancel/success paths all capture audit session metadata, and temp transcript files are cleaned up in a `finally` path.
+- Added tests in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `Interactive_PowerShell_CapturesAuditTranscriptIntoInteractiveSessions`
+- `Interactive_Cmd_WrapsCommandForAuditCapture`
+- Updated docs in `SCRIPTING.md` localcmd section to state that interactive runs are recorded in history interactive sessions and that transcript capture is best-effort for powershell/cmd.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable|FullyQualifiedName~ExportGraphToYaml_LocalCmdCustomShellMissingShellPath_ReturnsRequiredOptionError" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`50/50`).
+
+## 199. Address localcmd option-review findings (runtime, analyzer, validation, docs)
+- [x] 199.1 Align interactive localcmd exit handling with `fail_on_nonzero` + `success_codes`.
+- [x] 199.2 Ensure cmd-shell `args` are honored across foreground/interactive/keep-open argument builders.
+- [x] 199.3 Fix dependency analyzer localcmd `into` definitions for interactive mode (`*_exit_code` only).
+- [x] 199.4 Add parser/FlowCanvas validation for localcmd conditional requirements and invalid combinations.
+- [x] 199.5 Document localcmd in `SCRIPTING.md` and clarify option semantics in Flow Canvas help text.
+- [x] 199.6 Add focused regression tests and run verification.
+
+### 199 Review
+- Runtime updates in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- Interactive mode now applies `fail_on_nonzero` + `success_codes` against the interactive close exit code (with normal `on_error` handling).
+- `cmd` shell now honors `args` in both `/c` and `/K` paths.
+- Analyzer update in `Services/Scripting/ScriptDependencyAnalyzer.cs`:
+- `localcmd` interactive `into` now defines only `<into>_exit_code`; stdout/stderr are no longer treated as defined for interactive mode.
+- Parser validation updates in `Services/Scripting/ScriptParser.cs`:
+- Added localcmd validation for `command`, shell enum, conditional `shell_path` requirement, `run_mode`, `lifetime`, `confirm`, `max_output_bytes`, interactive/background mutual exclusion, and `keep_open` requiring `interactive: true`.
+- Flow Canvas bridge update in `Services/FlowCanvasBridge.cs`:
+- Added conditional required-option enforcement so `shell: custom` requires `shell_path`.
+- UX/docs updates:
+- `FlowCanvas/src/blockDefs/registry.ts` localcmd help text now clarifies interactive `into` behavior and success-code scope.
+- `SCRIPTING.md` now includes `localcmd` in the command list plus a dedicated command section with syntax, mode matrix, and examples.
+- Added/updated focused tests:
+- `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs` for interactive exit policy and cmd-args forwarding.
+- `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs` for new localcmd parser validation rules.
+- `SSH_Helper.Tests/Scripting/ScriptDependencyAnalyzerTests.cs` for interactive-into variable definition semantics.
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` for conditional `shell_path` required validation.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~AnalyzePresets_LocalCmdInteractiveInto_DefinesOnlyExitCodeVariable|FullyQualifiedName~ExportGraphToYaml_LocalCmdCustomShellMissingShellPath_ReturnsRequiredOptionError" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`48/48`).
+
+## 198. Fix localcmd interactive keep_open working_dir propagation
+- [x] 198.1 Reproduce and isolate why `working_dir` was ignored for `interactive: true` + `keep_open: true`.
+- [x] 198.2 Patch interactive startup to set `ProcessStartInfo.WorkingDirectory` for interactive runs.
+- [x] 198.3 Add focused regression coverage for keep-open interactive working directory behavior.
+- [x] 198.4 Run focused runtime verification and capture results.
+
+### 198 Review
+- Root cause: `ExecuteInteractive(...)` did not set `ProcessStartInfo.WorkingDirectory`; non-keep-open paths could still work via Windows Terminal `-d`, but keep-open direct-shell launches ignored `working_dir`.
+- Runtime patch in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- interactive start now applies `startInfo.WorkingDirectory = Environment.ExpandEnvironmentVariables(workingDir)` when provided.
+- Added test in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `Interactive_KeepOpen_HonorsWorkingDirectory`
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`27/27`).
+
+## 197. Fix localcmd interactive keep_open capture regression
+- [x] 197.1 Reproduce and isolate why `interactive: true` + `keep_open: true` failed to preserve expected capture behavior.
+- [x] 197.2 Patch interactive launch path to avoid waiting on transient Windows Terminal launcher processes when keep-open is enabled.
+- [x] 197.3 Ensure non-keep-open fallback shells auto-close (`powershell -Command` / `cmd /c`) instead of always holding windows open.
+- [x] 197.4 Add focused command tests for keep-open interactive execution/capture and argument construction.
+- [x] 197.5 Run focused parser/runtime/bridge verification and document outcomes.
+
+### 197 Review
+- Root cause: with `keep_open: true`, interactive localcmd could run through `wt.exe`; waiting on that launcher process is not a reliable proxy for the real shell lifetime, so `into` capture expectations were inconsistent.
+- Runtime patch in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- `BuildInteractiveArgs(...)` now bypasses Windows Terminal for keep-open PowerShell/cmd runs and launches a directly tracked shell process (`powershell.exe -NoExit` / `cmd.exe /K`).
+- Non-keep-open fallback interactive args now auto-close correctly (`powershell.exe -Command` / `cmd.exe /c`).
+- Added focused regression coverage in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `Interactive_KeepOpen_CapturesExitCodeAndUsesDirectShellProcess`
+- `BuildInteractiveArgs_KeepOpen_Powershell_BypassesWindowsTerminalLauncher`
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~FlowCanvasBridgeTests" -v minimal -p:BaseOutputPath=artifacts/testbuild/ -p:BaseIntermediateOutputPath=artifacts/testobj/` passed (`98/98`).
+
+## 196. Add localcmd interactive keep-open option
+- [x] 196.1 Add `keep_open` to localcmd model/parser and command option catalogs.
+- [x] 196.2 Implement Windows Terminal keep-open behavior for interactive localcmd runs.
+- [x] 196.3 Expose `keep_open` in Flow Canvas localcmd properties and bridge round-trip/export ordering.
+- [x] 196.4 Add focused parser/runtime/bridge tests and run verification.
+
+### 196 Review
+- Added `localcmd.keep_open` (interactive-only behavior).
+- Runtime behavior:
+- When `interactive: true` and `keep_open: true` with Windows Terminal available, localcmd now launches PowerShell with `-NoExit` (or cmd with `/K`) so the terminal does not auto-close when the command exits.
+- Existing non-Windows-Terminal fallback behavior remains unchanged.
+- Added parser/model support:
+- `Services/Scripting/Models/ScriptStep.cs` (`LocalCmdOptions.KeepOpen`)
+- `Services/Scripting/ScriptParser.cs` (`keep_open` parse + option catalog)
+- Added Flow Canvas support:
+- `FlowCanvas/src/blockDefs/registry.ts` localcmd property `keep_open`
+- `Services/FlowCanvasBridge.cs` boolean normalization + localcmd export/order mapping for `keep_open`
+- Added/updated tests:
+- `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs` for keep-open shell arg construction (`-NoExit`/`/K`).
+- `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs` for `keep_open` parse coverage.
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` for `keep_open` export round-trip.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~FlowCanvasBridgeTests" -v minimal` passed (`96/96`).
+
+## 195. Add autocomplete required-tag coverage for localcmd
+- [x] 195.1 Add `localcmd.command` to autocomplete required-option metadata.
+- [x] 195.2 Extend autocomplete required-tag test matrix to include `localcmd`.
+- [x] 195.3 Run focused autocomplete verification and capture result.
+
+### 195 Review
+- Root cause: `ScriptAutocompleteProvider` required-option map did not include `localcmd`, so option completions did not show `command` as `required`.
+- Implementation:
+- `Services/Editor/ScriptAutocompleteProvider.cs` now includes `["localcmd"] = ["command"]` in `RequiredOptionKeysByCommand`.
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs` now validates `localcmd` in `GetRequiredOptionTagCases`.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptAutocompleteProviderTests" -v minimal` passed (`46/46`).
+
+## 194. Add localcmd quiet + suppress output controls
+- [x] 194.1 Add `quiet` and `suppress` options to localcmd runtime model/parser support.
+- [x] 194.2 Apply send-style suppression behavior in `LocalCmdCommand` (banner + live stream suppression).
+- [x] 194.3 Expose and round-trip localcmd `quiet`/`suppress` in Flow Canvas registry/bridge.
+- [x] 194.4 Add focused parser/runtime/bridge tests and run verification.
+
+### 194 Review
+- Added localcmd options:
+- `quiet`: suppresses only localcmd command-banner lines (`[localcmd] ...`, `[localcmd:background] ...`, `[localcmd:interactive] ...`).
+- `suppress`: send-style suppression for localcmd, hiding both command-banner lines and live stdout/stderr panel streaming while preserving capture/`into_*` values.
+- Runtime implementation (`LocalCmdCommand`) now resolves suppression as:
+- `suppressOutput = localcmd.suppress || step.suppress`
+- `suppressCommandEcho = suppressOutput || localcmd.quiet`
+- Flow Canvas:
+- `FlowCanvas/src/blockDefs/registry.ts` localcmd block now includes `quiet` and `suppress`.
+- `Services/FlowCanvasBridge.cs` now exports/imports these booleans and includes localcmd preferred export ordering for drift-guard parity.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~FlowCanvasBridgeTests" -v minimal` passed (`93/93`).
+
+## 193. Harden detached localcmd background startup against process-handle metadata faults
+- [x] 193.1 Patch detached background cleanup to ignore post-spawn process handle disposal failures.
+- [x] 193.2 Add regression coverage for detached background startup when PID access and handle disposal throw `InvalidOperationException`.
+- [x] 193.3 Run focused localcmd command tests and capture verification evidence.
+
+### 193 Review
+- Root cause: detached background mode can encounter process-handle metadata failures (`No process is associated with this object.`) after successful spawn, but background semantics require success unless spawn itself fails.
+- Implementation:
+- `Services/Scripting/Commands/LocalCmdCommand.cs` now uses best-effort dispose (`TryDispose`) in detached mode so non-spawn metadata/disposal failures do not fail the step.
+- `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs` adds `Background_Detached_IgnoresPidAndDisposeMetadataErrors`, forcing both PID access and dispose to throw while asserting startup still succeeds and `into_*` metadata degrades gracefully (`pid = -1`).
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -v minimal` passed (`20/20`).
+
+## 192. Close localcmd implementation gaps from spec review
+- [x] 192.1 Enforce confirmation provider behavior and wire default localcmd confirmation for all script execution paths.
+- [x] 192.2 Implement foreground `timeout` enforcement for localcmd (including interactive foreground behavior).
+- [x] 192.3 Implement background lifetime management (`detached|script|app`) and `kill_on_cancel` cleanup behavior.
+- [x] 192.4 Add captured-output truncation marker behavior for `max_output_bytes`.
+- [x] 192.5 Fix Flow Canvas localcmd option normalization (`args` list/scalar and `env` object JSON handling).
+- [x] 192.6 Add/extend focused tests for the above behavior and run verification.
+
+### 192 Review
+- Local command confirmation is now enforced when `confirm != never`; if no provider is configured, `localcmd` fails with `on_error` semantics instead of auto-running.
+- `SshExecutionService` now defaults to a concrete localcmd confirmation provider (`LocalCmdConfirmationDialog`) in all constructor paths, covering manual, Flow Canvas, and scheduler script execution.
+- Foreground localcmd now enforces step timeout (`step.Timeout`) for both normal and interactive foreground runs, returning `ApplyOnError(...)` with a timeout message when exceeded.
+- Background localcmd now implements lifetime tracking:
+- `lifetime: detached` disposes process handles immediately and leaves process running.
+- `lifetime: script` kills/disposes tracked background processes when the script run ends.
+- `lifetime: app` keeps processes alive until app shutdown (`ProcessExit` best-effort kill/dispose).
+- `kill_on_cancel` now applies during cancelled script cleanup for non-detached tracked background processes.
+- Captured foreground stdout/stderr now append a truncation marker when `max_output_bytes` is exceeded per stream.
+- Flow Canvas export normalization now handles localcmd options correctly:
+- `args` accepts JSON array text or scalar string and serializes to valid runtime YAML.
+- `env` accepts JSON object text and serializes as a mapping.
+- Added/updated focused tests:
+- `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs` for confirmation-required behavior, timeout, truncation marker, and background lifetime cleanup.
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` for localcmd `args` and `env` export normalization.
+- Verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~FlowCanvasBridgeTests"` passed (`89/89`).
+
 ## 191. Harden updater against transient file locks on relaunch
 - [x] 191.1 Add updater-script retry behavior for package copy and updated executable relaunch.
 - [x] 191.2 Isolate updater temp folder by executable path identity to avoid cross-copy collisions.
@@ -3255,3 +3842,78 @@
   - GREEN: `npx playwright test e2e/flow-canvas-properties-typing.spec.ts` (passed `11/11`).
   - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ImportExportRoundTrip_ChooseLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_MultiselectLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_ChooseOptionsSourceScalar_PreservesSource"` (passed `3/3`).
   - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~FlowCanvasBridgeTests"` (passed `48/48`).
+
+## 192. Fix review findings #2 and #3 (JSON exception type + branch first-child ordering)
+- [x] 192.1 Add failing regression coverage for imported-container branch ordering when `_stepPath` includes two-digit indices.
+- [x] 192.2 Patch FlowCanvas bridge branch-first-child selection to use numeric-aware step-path comparison.
+- [x] 192.3 Patch FlowCanvasParityCli invalid-JSON handling to catch Newtonsoft parse exceptions.
+- [x] 192.4 Run focused verification (new regression + related bridge test) and solution build; document outcomes.
+
+### 192 Review
+- Added RED regression in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`:
+  - `ExportGraphToYaml_ImportedIfWithTwoDigitThenIndex_UsesStoredSnippetWhenFirstChildEdgeExists`
+- RED evidence (before fix): targeted test failed because export regenerated YAML and dropped snippet marker comment (`# keep-imported-snippet`).
+- Patched branch-first-child selection in `Services/FlowCanvasBridge.cs`:
+  - replaced lexicographic `_stepPath` comparison with `CompareStepPathSegments(...)`, which compares numeric segments numerically (`.../10` > `.../2`).
+- Patched CLI invalid-JSON handling in `FlowCanvas/tools/FlowCanvasParityCli/Program.cs`:
+  - changed catch from `System.Text.Json.JsonException` to `Newtonsoft.Json.JsonReaderException` for `JObject.Parse(...)`.
+- Verification:
+  - `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_ImportedIfWithTwoDigitThenIndex_UsesStoredSnippetWhenFirstChildEdgeExists|FullyQualifiedName~ExportGraphToYaml_ImportedIfWithDeletedElseEdge_RegeneratesWithoutElse" -v minimal -p:UseAppHost=false -p:SkipFlowCanvasBuild=true` (passed `2/2`).
+  - `dotnet run --project FlowCanvas/tools/FlowCanvasParityCli/FlowCanvasParityCli.csproj -- evaluate-cases` with malformed stdin payload now prints `Invalid input JSON: ...` and exits with code `1`.
+  - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` (passed; existing warnings unchanged: `MSB3277`, `CS8602`, `xUnit1031`).
+
+## 209. Remove redundant Run All button from main execute bar
+- [x] 209.1 Remove `btnExecuteAll` from WinForms designer and control declarations.
+- [x] 209.2 Update `Form1.cs` runtime styling/layout/state logic to operate with `Run Selected` + `Stop` only.
+- [x] 209.3 Retarget legacy click forwarding that depended on `btnExecuteAll`.
+- [x] 209.4 Build solution and record verification results.
+
+### 209 Review
+- Removed `btnExecuteAll` from `Form1.Designer.cs` initialization, execute-panel control list, and private field declarations.
+- Updated execute-bar layout defaults to place `Stop` beside `Run Selected` and removed all runtime references to `btnExecuteAll` in:
+  - font/accent application,
+  - `UpdateRunButtonText()` width/position logic,
+  - `SetExecutionMode(...)` enable/disable handling.
+- Removed obsolete `btnExecuteAll_Click(...)` handler and changed deprecated FlowCanvas run-request forwarding to `btnExecuteSelected.PerformClick()`.
+- Verification:
+  - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` (failed due expected local lock: `SSH_Helper.exe` running and locking `bin\Debug\net8.0-windows\SSH_Helper.exe`).
+  - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/runall-removal-build/bin/ -p:BaseIntermediateOutputPath=artifacts/runall-removal-build/obj/ -v minimal` (passed; existing warnings remain: `MSB3277`, `CS8602`, `xUnit1031`).
+  - `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ApplyFontSettingsTests" -p:UseAppHost=false -p:BaseOutputPath=artifacts/runall-removal-tests/bin/ -p:BaseIntermediateOutputPath=artifacts/runall-removal-tests/obj/ -v minimal` (passed: `35/35`).
+
+## 210. Full README refresh for current app capabilities
+- [x] 210.1 Audit README claims against current code/docs (execution UI, shortcuts, scheduler, Flow Canvas, scripting).
+- [x] 210.2 Rewrite README sections to reflect current behavior and latest features.
+- [x] 210.3 Verify README wording against code paths and remove stale/incorrect statements.
+
+### 210 Review
+- Rewrote `README.md` to reflect current capabilities and removed stale execution/shortcut guidance:
+  - replaced old execute guidance with `Run Selected` + checked-host behavior,
+  - added explicit Scheduler and Flow Canvas usage sections,
+  - updated scripting summary to cover current command families and local command support,
+  - corrected source-build instructions to include `FlowCanvas` npm dependency setup.
+- Updated keyboard shortcuts to match actual bindings in `Form1.Designer.cs` and `Form1.cs`:
+  - removed stale `F5`/`F6`/`Alt+W`/`Alt+R` claims,
+  - added `Ctrl+Shift+V` (Validate Script), `Ctrl+Shift+F` (Flow Canvas), and current supported shortcuts.
+- Verification:
+  - `rg -n "Execute All|F5|F6|Alt\\+W|Alt\\+R|Escape \\| Stop|Execute on all hosts|Execute on selected hosts" README.md` (no matches).
+  - `rg -n "ShortcutKeys\\s*=|case Keys\\.|btnExecuteSelected|Run Selected|Flow Canvas" Form1.Designer.cs Form1.cs` (confirmed README shortcut/run wording parity).
+  - `rg -n "public enum StepType|LocalCmd|PlaySound|BrowserCallbackCapture|Parallel|Switch|Call|Return" Services/Scripting/Models/ScriptStep.cs` (confirmed scripting feature wording aligns with current step model).
+
+## 211. Complete SCRIPTING.md TOC coverage
+- [x] 211.1 Audit `SCRIPTING.md` TOC vs actual section headings and command entries.
+- [x] 211.2 Add missing command links and missing top-level sections to the TOC.
+- [x] 211.3 Verify TOC now covers all command sections and top-level sections.
+
+### 211 Review
+- Updated `SCRIPTING.md` TOC command list to include missing command sections:
+  - `exists`
+  - `playsound`
+  - `localcmd`
+- Added missing top-level TOC entries and renumbered:
+  - `Output Options`
+  - `Tips and Best Practices`
+- Verification:
+  - Coverage check script comparing command headings vs TOC command entries now reports:
+    - `missing-in-toc=` (empty)
+    - `extra-in-toc=` (empty)
+  - `rg -n "^## " SCRIPTING.md` confirms TOC now includes all major top-level sections, including `Output Options` and `Tips and Best Practices`.

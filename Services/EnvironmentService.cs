@@ -298,7 +298,7 @@ namespace SSH_Helper.Services
                 ResolveBaseName(baseEnvironment, activeEnvironment, environments));
         }
 
-        public void UpdateEnvironmentDetails(string name, string? description, int? labelColor, Dictionary<string, string> variables)
+        public void UpdateEnvironmentDetails(string name, string? description, int? labelColor, Dictionary<string, string> variables, string? vaultProfileName = null)
         {
             var environmentName = NormalizeName(name);
             var (environments, activeEnvironment, baseEnvironment) = _configService.LoadEnvironmentState();
@@ -313,6 +313,7 @@ namespace SSH_Helper.Services
 
             environment.Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
             environment.LabelColor = labelColor;
+            environment.VaultProfileName = vaultProfileName;
             environment.Variables = variables != null
                 ? new Dictionary<string, string>(variables, StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -377,6 +378,7 @@ namespace SSH_Helper.Services
                 SelectedHostIndices = selectedIndices?.ToList() ?? new List<int>(),
                 LastCsvPath = csvPath,
                 LastCsvFingerprint = csvFingerprint?.Clone(),
+                VaultProfileName = existing?.VaultProfileName,
                 Variables = existing?.Variables != null
                     ? new Dictionary<string, string>(existing.Variables, StringComparer.OrdinalIgnoreCase)
                     : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

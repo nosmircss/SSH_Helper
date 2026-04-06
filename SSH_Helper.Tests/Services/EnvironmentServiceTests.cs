@@ -245,6 +245,35 @@ public class EnvironmentServiceTests : IDisposable
     }
 
     [Fact]
+    public void SaveCurrentGridToEnvironment_PreservesVaultProfileName()
+    {
+        _environmentService.CreateEnvironment("prod");
+        _environmentService.UpdateEnvironmentDetails(
+            "prod",
+            description: "Production",
+            labelColor: null,
+            variables: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            vaultProfileName: "vault-prod");
+
+        _environmentService.SaveCurrentGridToEnvironment(
+            "prod",
+            new List<string> { CsvManager.HostColumnName, "username" },
+            new List<Dictionary<string, string>>
+            {
+                new()
+                {
+                    [CsvManager.HostColumnName] = "203.0.113.90",
+                    ["username"] = "admin"
+                }
+            },
+            new List<int> { 0 },
+            @"C:\tmp\prod.csv");
+
+        var environment = _environmentService.GetEnvironment("prod");
+        environment.VaultProfileName.Should().Be("vault-prod");
+    }
+
+    [Fact]
     public void ImportEnvironment_WhenEnvironmentExistsWithoutOverwrite_Throws()
     {
         _environmentService.CreateEnvironment("prod");
