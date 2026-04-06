@@ -3502,6 +3502,7 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         case "lifetime":
                             options.Lifetime = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            options.LifetimeSpecified = true;
                             break;
                         case "kill_on_cancel":
                             options.KillOnCancel = ParseBooleanOrDefault(parser, false);

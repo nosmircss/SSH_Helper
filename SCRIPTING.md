@@ -2637,7 +2637,7 @@ Runs a command on the local machine (not over SSH).
     interactive: false
     keep_open: false
     run_mode: foreground       # foreground | background
-    lifetime: detached         # detached | script | app (background only)
+    lifetime: detached         # interactive: detached returns immediately; background: detached | script | app
     kill_on_cancel: false      # background + non-detached only
     fail_on_nonzero: true
     success_codes: [0]
@@ -2654,12 +2654,14 @@ Runs a command on the local machine (not over SSH).
 **Important behavior:**
 - `interactive: true` and `run_mode: background` are mutually exclusive.
 - `keep_open: true` requires `interactive: true`.
+- Interactive + explicitly set `lifetime: detached` launches the terminal and returns immediately (script continues without waiting for window close).
 - Foreground (non-interactive) captures `<into>_stdout`, `<into>_stderr`, `<into>_exit_code`.
-- Interactive captures only `<into>_exit_code`.
+- Interactive (tracked/waited) captures `<into>_exit_code`.
+- Interactive detached captures startup metadata: `<into>_pid`, `<into>_started`, `<into>_start_error`.
 - Interactive runs are also recorded in history execution details under Interactive Sessions.
 - `shell: powershell` uses session transcripts for interactive audit capture, so `keep_open: true` includes follow-up user-entered commands until the shell closes.
 - Background captures startup metadata: `<into>_pid`, `<into>_started`, `<into>_start_error`.
-- `fail_on_nonzero` + `success_codes` apply to both foreground and interactive close exit code evaluation.
+- `fail_on_nonzero` + `success_codes` apply when an exit code is observed (foreground and tracked interactive). They cannot be evaluated for interactive detached launches.
 - `quiet: true` hides command banner lines only; `suppress: true` hides command banner + live output streaming.
 
 **Parameters:**
@@ -2675,7 +2677,7 @@ Runs a command on the local machine (not over SSH).
 | `interactive` | No | `false` | Launch in external terminal |
 | `keep_open` | No | `false` | Keep interactive shell open after command |
 | `run_mode` | No | `foreground` | `foreground` waits; `background` returns after spawn |
-| `lifetime` | No | `detached` | Background lifetime: `detached`, `script`, `app` |
+| `lifetime` | No | `detached` | Process lifetime behavior. For interactive: explicitly setting `detached` returns immediately; otherwise interactive waits for close. For background: `detached`, `script`, `app` |
 | `kill_on_cancel` | No | `false` | Background cancel cleanup for tracked processes |
 | `fail_on_nonzero` | No | `true` | Fail when exit code not in `success_codes` |
 | `success_codes` | No | `[0]` | Allowed exit codes |
