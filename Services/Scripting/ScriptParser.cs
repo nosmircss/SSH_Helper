@@ -70,6 +70,7 @@ namespace SSH_Helper.Services.Scripting
             "environment",
             "debug",
             "nobanner",
+            "compact_errors",
             "suppress_missing_column_warning",
             "library",
             "vars",
@@ -439,6 +440,9 @@ namespace SSH_Helper.Services.Scripting
                                 break;
                             case "nobanner":
                                 script.NoBanner = ParseBooleanOrDefault(parser, script.NoBanner);
+                                break;
+                            case "compact_errors":
+                                script.CompactErrors = ParseBooleanOrDefault(parser, script.CompactErrors);
                                 break;
                             case "suppress_missing_column_warning":
                                 script.SuppressMissingColumnWarning = ParseBooleanOrDefault(parser, script.SuppressMissingColumnWarning);
@@ -3907,6 +3911,7 @@ namespace SSH_Helper.Services.Scripting
             ValidateForbiddenLibraryKey(script, errors, "environment");
             ValidateForbiddenLibraryKey(script, errors, "debug");
             ValidateForbiddenLibraryKey(script, errors, "nobanner");
+            ValidateForbiddenLibraryKey(script, errors, "compact_errors");
             ValidateForbiddenLibraryKey(script, errors, "suppress_missing_column_warning");
         }
 

@@ -69,6 +69,7 @@ version: 1                       # Optional: script version (default: 1)
 environment: "prod"              # Optional: switch to this environment when the preset is loaded
 debug: false                     # Optional: enable debug output (default: false)
 nobanner: false                  # Optional: suppress script execution banner (default: false)
+compact_errors: false            # Optional: emit one-line SSH/script errors (default: false)
 suppress_missing_column_warning: false  # Optional: suppress missing-column preflight warning
 library: false                   # Optional: definition-only file for imports (default: false)
 
@@ -4654,6 +4655,36 @@ This is useful when:
 - You want cleaner output for reports or logs
 - You're processing many hosts and don't need the visual separators
 - You're using `writefile` to save output and don't want the banner included
+
+### Compact Errors
+
+By default, connection failures are shown as a multi-line banner block:
+
+```
+########################################################################
+#################### CONNECTION ERROR: 10.79.50.228 ####################
+########################################################################
+SshException: Connection attempt timed out.
+```
+
+To reduce noise, set `compact_errors: true` in your script header:
+
+```yaml
+---
+name: "Fast Checks"
+compact_errors: true
+
+steps:
+    - send:
+            command: show version
+```
+
+With this enabled, banner-style failures are emitted as single lines (for example authentication and connection failures):
+
+```
+AUTHENTICATION ERROR: 10.79.50.231: SshException: A supplied password or user name is incorrect.
+CONNECTION ERROR: 10.79.50.228: SshException: Connection attempt timed out.
+```
 
 ### Suppress Missing Column Warning
 

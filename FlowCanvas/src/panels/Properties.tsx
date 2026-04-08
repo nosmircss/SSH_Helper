@@ -1176,6 +1176,7 @@ function TestResultDisplay({ result, onDismiss }: { result: DataBlockTestResult;
 const START_BOOL_FIELDS: { key: string; label: string }[] = [
   { key: 'debug', label: 'Debug Mode' },
   { key: 'nobanner', label: 'No Banner' },
+  { key: 'compact_errors', label: 'Compact Errors' },
   { key: 'suppress_missing_column_warning', label: 'Suppress Missing Column Warning' },
   { key: 'library', label: 'Library (non-executable)' },
 ];

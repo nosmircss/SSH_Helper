@@ -4204,6 +4204,8 @@ namespace SSH_Helper.Services
                 props["debug"] = true;
             if (script.NoBanner)
                 props["nobanner"] = true;
+            if (script.CompactErrors)
+                props["compact_errors"] = true;
             if (script.SuppressMissingColumnWarning)
                 props["suppress_missing_column_warning"] = true;
             if (script.Library)
@@ -4262,6 +4264,7 @@ namespace SSH_Helper.Services
             var environment = props["environment"]?.ToString();
             var debug = props["debug"]?.Value<bool>() == true;
             var nobanner = props["nobanner"]?.Value<bool>() == true;
+            var compactErrors = props["compact_errors"]?.Value<bool>() == true;
             var suppressWarning = props["suppress_missing_column_warning"]?.Value<bool>() == true;
             var library = props["library"]?.Value<bool>() == true;
             var vars = props["vars"] as JObject;
@@ -4284,6 +4287,8 @@ namespace SSH_Helper.Services
                 sb.AppendLine("debug: true");
             if (nobanner)
                 sb.AppendLine("nobanner: true");
+            if (compactErrors)
+                sb.AppendLine("compact_errors: true");
             if (suppressWarning)
                 sb.AppendLine("suppress_missing_column_warning: true");
             if (library)
@@ -4465,7 +4470,7 @@ namespace SSH_Helper.Services
             var knownKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "name:", "description:", "version:", "environment:",
-                "debug:", "nobanner:", "suppress_missing_column_warning:", "library:",
+                "debug:", "nobanner:", "compact_errors:", "suppress_missing_column_warning:", "library:",
                 "vars:", "imports:", "subroutines:", "steps:",
             };
 

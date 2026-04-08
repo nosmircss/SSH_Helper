@@ -71,6 +71,8 @@ namespace SSH_Helper.Services
     /// </summary>
     public class SshExecutionService : IDisposable
     {
+        private const int MaxParallelHosts = 100;
+
         private const string SingleHostOnlyMessageSuffix =
             " not supported in folder or multi-host runs. Run the script against a single current host instead.";
 
@@ -575,8 +577,13 @@ namespace SSH_Helper.Services
             var results = new List<ExecutionResult>();
             var cancellationToken = BeginExecution();
 
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+
             var hostList = hosts.Where(h => h.IsValid()).ToList();
             var presetNames = options.SelectedPresets;
+            var parallelHostCount = Math.Clamp(options.ParallelHostCount, 1, MaxParallelHosts);
+            var runPresetsInParallel = options.RunPresetsInParallel && parallelHostCount == 1;
             int totalHosts = hostList.Count;
             int totalPresets = presetNames.Count;
             int totalOperations = totalHosts * totalPresets;
@@ -587,6 +594,20 @@ namespace SSH_Helper.Services
 
             try
             {
+                if (options.ParallelHostCount != parallelHostCount)
+                {
+                    OnOutputReceived(
+                        hostList.FirstOrDefault() ?? new HostConnection(),
+                        $"Parallel hosts value '{options.ParallelHostCount}' adjusted to {parallelHostCount}. Maximum supported value is {MaxParallelHosts}.\n");
+                }
+
+                if (options.RunPresetsInParallel && !runPresetsInParallel)
+                {
+                    OnOutputReceived(
+                        hostList.FirstOrDefault() ?? new HostConnection(),
+                        "Preset parallel mode is disabled when running multiple hosts in parallel. Falling back to sequential presets per host.\n");
+                }
+
                 var blockedPresetNames = FindSingleHostOnlyFolderPresets(presetNames, presets);
                 if (blockedPresetNames.Count > 0)
                 {
@@ -612,7 +633,7 @@ namespace SSH_Helper.Services
                 // Process hosts in batches based on ParallelHostCount
                 var hostBatches = hostList
                     .Select((host, index) => new { host, index })
-                    .GroupBy(x => x.index / options.ParallelHostCount)
+                    .GroupBy(x => x.index / parallelHostCount)
                     .Select(g => g.Select(x => x.host).ToList())
                     .ToList();
 
@@ -630,6 +651,7 @@ namespace SSH_Helper.Services
                             Timestamp = DateTime.Now,
                             Success = true
                         };
+                        var hostResultLock = new object();
 
                         var outputBuilder = new StringBuilder();
                         int completedPresets = 0;
@@ -637,7 +659,7 @@ namespace SSH_Helper.Services
                         bool isFirstPreset = true;
 
                         // Execute presets on this host
-                        if (options.RunPresetsInParallel)
+                        if (runPresetsInParallel)
                         {
                             // Parallel preset execution
                             var presetTasks = presetNames.Select(async presetName =>
@@ -675,23 +697,27 @@ namespace SSH_Helper.Services
 
                                 if (!presetResult.Success)
                                 {
+                                    lock (hostResultLock)
+                                    {
                                         hostResult.Success = false;
-                                        hostResult.ErrorMessage = presetResult.ErrorMessage;
-                                        if (options.StopOnFirstError && errorTracker.TrySignalError())
-                                        {
-                                            Interlocked.Exchange(ref stopOnFirstErrorTriggered, 1);
-                                            _stopOnFirstErrorCancellationRequested = true;
-                                            _cts?.Cancel();
-                                        }
-
-                                        // Mark failed preset in output
-                                        if (!options.SuppressPresetNames)
-                                        {
-                                            var failMarker = $"\r\n═══ {presetName} [FAILED] ═══\r\n";
-                                            lock (outputBuilder) { outputBuilder.Append(failMarker); }
-                                            OnOutputReceived(host, failMarker);
-                                        }
+                                        hostResult.ErrorMessage ??= presetResult.ErrorMessage;
                                     }
+
+                                    if (options.StopOnFirstError && errorTracker.TrySignalError())
+                                    {
+                                        Interlocked.Exchange(ref stopOnFirstErrorTriggered, 1);
+                                        _stopOnFirstErrorCancellationRequested = true;
+                                        _cts?.Cancel();
+                                    }
+
+                                    // Mark failed preset in output
+                                    if (!options.SuppressPresetNames)
+                                    {
+                                        var failMarker = $"\r\n═══ {presetName} [FAILED] ═══\r\n";
+                                        lock (outputBuilder) { outputBuilder.Append(failMarker); }
+                                        OnOutputReceived(host, failMarker);
+                                    }
+                                }
                                 var hostCompletedPresets = Interlocked.Increment(ref completedPresets);
                                 var operationCount = Interlocked.Increment(ref completedOperations);
                                 progress?.Report(new FolderExecutionProgress
@@ -1128,7 +1154,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Authentication failed";
                 result.Exception = ex;
-                var errorOutput = FormatError("AUTHENTICATION ERROR", host, ex, includeDebugDetails: effectiveDebugMode);
+                var errorOutput = FormatError(
+                    "AUTHENTICATION ERROR",
+                    host,
+                    ex,
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1137,7 +1168,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Connection failed";
                 result.Exception = ex;
-                var errorOutput = FormatError("CONNECTION ERROR", host, ex, includeDebugDetails: effectiveDebugMode);
+                var errorOutput = FormatError(
+                    "CONNECTION ERROR",
+                    host,
+                    ex,
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1146,7 +1182,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Operation timed out";
                 result.Exception = ex;
-                var errorOutput = FormatError("TIMEOUT ERROR", host, ex, includeDebugDetails: effectiveDebugMode);
+                var errorOutput = FormatError(
+                    "TIMEOUT ERROR",
+                    host,
+                    ex,
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1155,7 +1196,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Network error";
                 result.Exception = ex;
-                var errorOutput = FormatError("NETWORK ERROR", host, ex, includeDebugDetails: effectiveDebugMode);
+                var errorOutput = FormatError(
+                    "NETWORK ERROR",
+                    host,
+                    ex,
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1164,7 +1210,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.WasCancelled = !_stopOnFirstErrorCancellationRequested;
                 result.ErrorMessage = "Operation cancelled";
-                var errorOutput = FormatError("CANCELLED", host, new Exception("Operation was cancelled by user"), includeDebugDetails: effectiveDebugMode);
+                var errorOutput = FormatError(
+                    "CANCELLED",
+                    host,
+                    new Exception("Operation was cancelled by user"),
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
             }
             catch (Exception ex)
@@ -1172,7 +1223,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = ex.Message;
                 result.Exception = ex;
-                var errorOutput = FormatError("ERROR", host, ex, includeDebugDetails: effectiveDebugMode);
+                var errorOutput = FormatError(
+                    "ERROR",
+                    host,
+                    ex,
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -2071,8 +2127,18 @@ namespace SSH_Helper.Services
             return false;
         }
 
-        private string FormatError(string errorType, HostConnection host, Exception ex, bool includeDebugDetails = false)
+        private string FormatError(
+            string errorType,
+            HostConnection host,
+            Exception ex,
+            bool includeDebugDetails = false,
+            bool compactErrors = false)
         {
+            if (compactErrors)
+            {
+                return FormatCompactError(errorType, host, ex);
+            }
+
             var sb = new StringBuilder();
             string title = $"{new string('#', 20)} {errorType}: {host} {new string('#', 20)}";
             string separator = new string('#', title.Length);
@@ -2105,6 +2171,20 @@ namespace SSH_Helper.Services
             }
 
             return sb.ToString();
+        }
+
+        private static string FormatCompactError(string errorType, HostConnection host, Exception ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                var message = current.Message.Replace(" Make sure you are connecting to an SSH server.", "");
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    return $"{errorType}: {host}: {current.GetType().Name}: {message}";
+                }
+            }
+
+            return $"{errorType}: {host}: {ex.GetType().Name}: {ex.Message}";
         }
 
         private static SshException? FindSshException(Exception ex)

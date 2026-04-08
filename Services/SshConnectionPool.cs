@@ -46,10 +46,12 @@ namespace SSH_Helper.Services
     /// </remarks>
     public class SshConnectionPool : IDisposable
     {
+        private const int DefaultMaxConcurrentConnectionCreations = 12;
         private static readonly TimeSpan IdleKeepAliveSweepInterval = TimeSpan.FromSeconds(5);
         private readonly ConcurrentDictionary<string, PooledConnection> _connections = new();
         private readonly ConcurrentDictionary<string, bool> _leasedKeys = new();
-        private readonly SemaphoreSlim _creationLock = new(1, 1);
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _creationLocks = new();
+        private readonly SemaphoreSlim _globalCreationGate;
         private readonly SshTimeoutOptions _defaultTimeouts;
         private readonly TimeSpan _maxConnectionAge;
         private readonly TimeSpan _healthCheckInterval;
@@ -101,11 +103,16 @@ namespace SSH_Helper.Services
         public SshConnectionPool(
             SshTimeoutOptions? defaultTimeouts = null,
             TimeSpan? maxConnectionAge = null,
-            TimeSpan? healthCheckInterval = null)
+            TimeSpan? healthCheckInterval = null,
+            int maxConcurrentConnectionCreations = DefaultMaxConcurrentConnectionCreations)
         {
             _defaultTimeouts = defaultTimeouts ?? SshTimeoutOptions.Default;
             _maxConnectionAge = maxConnectionAge ?? TimeSpan.FromMinutes(30);
             _healthCheckInterval = healthCheckInterval ?? TimeSpan.FromSeconds(30);
+            var normalizedMaxConcurrentCreations = Math.Max(1, maxConcurrentConnectionCreations);
+            _globalCreationGate = new SemaphoreSlim(
+                normalizedMaxConcurrentCreations,
+                normalizedMaxConcurrentCreations);
             _idleKeepAliveTimer = new System.Threading.Timer(
                 _ => RunIdleKeepAliveSweep(),
                 null,
@@ -151,10 +158,14 @@ namespace SSH_Helper.Services
                 }
             }
 
-            // Create new connection
-            await _creationLock.WaitAsync(cancellationToken);
+            // Ensure connection creation is serialized per key, while allowing different keys in parallel.
+            var keyCreationLock = _creationLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+            await keyCreationLock.WaitAsync(cancellationToken);
             try
             {
+                await _globalCreationGate.WaitAsync(cancellationToken);
+                try
+                {
                 // Double-check after acquiring lock
                 if (_connections.TryGetValue(key, out pooled))
                 {
@@ -193,10 +204,15 @@ namespace SSH_Helper.Services
                 OnConnectionCreated(host, username);
 
                 return client;
+                }
+                finally
+                {
+                    _globalCreationGate.Release();
+                }
             }
             finally
             {
-                _creationLock.Release();
+                keyCreationLock.Release();
             }
         }
 
@@ -690,7 +706,12 @@ namespace SSH_Helper.Services
                 }
 
                 _connections.Clear();
-                _creationLock.Dispose();
+                foreach (var keyLock in _creationLocks.Values)
+                {
+                    keyLock.Dispose();
+                }
+                _creationLocks.Clear();
+                _globalCreationGate.Dispose();
             }
         }
 
