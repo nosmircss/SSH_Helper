@@ -1067,6 +1067,7 @@ namespace SSH_Helper.Services
             var interactiveSessions = new List<InteractiveTerminalSessionDetails>();
             string username = !string.IsNullOrWhiteSpace(host.Username) ? host.Username : defaultUsername;
             string password = !string.IsNullOrWhiteSpace(host.Password) ? host.Password : defaultPassword;
+            var effectiveDebugMode = DebugMode || script.Debug;
 
             try
             {
@@ -1090,7 +1091,7 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Authentication failed";
                 result.Exception = ex;
-                var errorOutput = FormatError("AUTHENTICATION ERROR", host, ex);
+                var errorOutput = FormatError("AUTHENTICATION ERROR", host, ex, includeDebugDetails: effectiveDebugMode);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1099,7 +1100,7 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Connection failed";
                 result.Exception = ex;
-                var errorOutput = FormatError("CONNECTION ERROR", host, ex);
+                var errorOutput = FormatError("CONNECTION ERROR", host, ex, includeDebugDetails: effectiveDebugMode);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1108,7 +1109,7 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Operation timed out";
                 result.Exception = ex;
-                var errorOutput = FormatError("TIMEOUT ERROR", host, ex);
+                var errorOutput = FormatError("TIMEOUT ERROR", host, ex, includeDebugDetails: effectiveDebugMode);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1117,7 +1118,7 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Network error";
                 result.Exception = ex;
-                var errorOutput = FormatError("NETWORK ERROR", host, ex);
+                var errorOutput = FormatError("NETWORK ERROR", host, ex, includeDebugDetails: effectiveDebugMode);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1126,7 +1127,7 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.WasCancelled = !_stopOnFirstErrorCancellationRequested;
                 result.ErrorMessage = "Operation cancelled";
-                var errorOutput = FormatError("CANCELLED", host, new Exception("Operation was cancelled by user"));
+                var errorOutput = FormatError("CANCELLED", host, new Exception("Operation was cancelled by user"), includeDebugDetails: effectiveDebugMode);
                 outputBuilder.AppendLine(errorOutput);
             }
             catch (Exception ex)
@@ -1134,7 +1135,7 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = ex.Message;
                 result.Exception = ex;
-                var errorOutput = FormatError("ERROR", host, ex);
+                var errorOutput = FormatError("ERROR", host, ex, includeDebugDetails: effectiveDebugMode);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1159,13 +1160,14 @@ namespace SSH_Helper.Services
             bool showHeader = true,
             bool allowFileSelectionDialogs = true)
         {
+            var effectiveDebugMode = DebugMode || script.Debug;
             var (client, session) = _connectionPool!.CreateSessionAsync(host, username, password, timeouts, cancellationToken)
                 .GetAwaiter().GetResult();
 
             try
             {
                 OnProgressChanged(host, $"Connected to {host} (pooled, script mode)", false, true);
-                session.DebugMode = DebugMode;
+                session.DebugMode = effectiveDebugMode;
                 session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
 
                 // Build header with script name (only if showHeader is true and script doesn't suppress it)
@@ -1186,7 +1188,7 @@ namespace SSH_Helper.Services
                 // Create script context with host variables
                 var context = new ScriptContext(host.Variables);
                 context.Session = session;
-                context.DebugMode = DebugMode;
+                context.DebugMode = effectiveDebugMode;
                 context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
                 context.VaultService = VaultService;
                 context.EnvironmentVaultProfile = EnvironmentVaultProfile;
@@ -1255,31 +1257,32 @@ namespace SSH_Helper.Services
             bool showHeader = true,
             bool allowFileSelectionDialogs = true)
         {
+            var effectiveDebugMode = DebugMode || script.Debug;
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            SshDebugLog(host, "SCRIPT", $"ExecuteScriptWithoutPool entered for {host.IpAddress}:{host.Port}");
+            SshDebugLog(host, "SCRIPT", $"ExecuteScriptWithoutPool entered for {host.IpAddress}:{host.Port}", debugEnabledOverride: effectiveDebugMode);
 
             // Create Rebex SSH client
             using var client = new Ssh();
             client.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
-            SshDebugLog(host, "SCRIPT", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
+            SshDebugLog(host, "SCRIPT", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw, effectiveDebugMode);
 
             // Apply algorithm preferences from SSH config (if any)
             ApplyAlgorithmSettings(client, host);
 
-            SshDebugLog(host, "SCRIPT", "Calling client.Connect()", sw);
+            SshDebugLog(host, "SCRIPT", "Calling client.Connect()", sw, effectiveDebugMode);
             var connectSw = System.Diagnostics.Stopwatch.StartNew();
             client.Connect(host.IpAddress, host.Port);
             connectSw.Stop();
-            SshDebugLog(host, "SCRIPT", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw);
+            SshDebugLog(host, "SCRIPT", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw, effectiveDebugMode);
 
-            SshDebugLog(host, "SCRIPT", "Calling client.Login()", sw);
+            SshDebugLog(host, "SCRIPT", "Calling client.Login()", sw, effectiveDebugMode);
 
             // SSH agent, key-based, or password authentication
             if (!TryLoginWithAgent(client, username, host, sw))
             {
                 if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
                 {
-                    SshDebugLog(host, "SCRIPT", $"Using key-based auth with: {host.IdentityFile}", sw);
+                    SshDebugLog(host, "SCRIPT", $"Using key-based auth with: {host.IdentityFile}", sw, effectiveDebugMode);
                     var passphrase = host.IdentityFilePassphrase ?? string.Empty;
                     client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
                 }
@@ -1289,11 +1292,11 @@ namespace SSH_Helper.Services
                 }
             }
 
-            SshDebugLog(host, "SCRIPT", "client.Login() completed", sw);
+            SshDebugLog(host, "SCRIPT", "client.Login() completed", sw, effectiveDebugMode);
 
             OnProgressChanged(host, $"Connected to {host} (script mode)", false, true);
 
-            SshDebugLog(host, "SCRIPT", "Starting scripting session", sw);
+            SshDebugLog(host, "SCRIPT", "Starting scripting session", sw, effectiveDebugMode);
             var terminalOptions = SshTerminalOptionsFactory.Create();
             var (scripting, terminal) = SshTerminalOptionsFactory.CreateScriptingWithHistory(
                 client,
@@ -1302,10 +1305,10 @@ namespace SSH_Helper.Services
                 SshTerminalOptionsFactory.DefaultRows,
                 SshTerminalOptionsFactory.DefaultHistoryMaxLength);
             scripting.Timeout = (int)timeouts.CommandTimeout.TotalMilliseconds;
-            SshDebugLog(host, "SCRIPT", "Scripting session created", sw);
+            SshDebugLog(host, "SCRIPT", "Scripting session created", sw, effectiveDebugMode);
 
             using var session = new SshShellSession(client, scripting, timeouts, terminal);
-            session.DebugMode = DebugMode;
+            session.DebugMode = effectiveDebugMode;
             session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
 
             // Subscribe to session debug output so we can see banner detection, prompt detection, etc.
@@ -1316,17 +1319,17 @@ namespace SSH_Helper.Services
             };
 
             // Initialize session (detect prompt)
-            SshDebugLog(host, "SCRIPT", "Calling session.InitializeAsync - waiting for prompt", sw);
+            SshDebugLog(host, "SCRIPT", "Calling session.InitializeAsync - waiting for prompt", sw, effectiveDebugMode);
             try
             {
                 var banner = session.InitializeAsync(cancellationToken).GetAwaiter().GetResult();
-                SshDebugLog(host, "SCRIPT", $"session.InitializeAsync completed. Prompt: {session.CurrentPrompt}", sw);
+                SshDebugLog(host, "SCRIPT", $"session.InitializeAsync completed. Prompt: {session.CurrentPrompt}", sw, effectiveDebugMode);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Provide more context about why the session might have failed
-                SshDebugLog(host, "SCRIPT", $"SESSION INIT FAILED during InitializeAsync: {ex.Message}", sw);
-                SshDebugLog(host, "SCRIPT", $"Client.IsConnected: {client.IsConnected}", sw);
+                SshDebugLog(host, "SCRIPT", $"SESSION INIT FAILED during InitializeAsync: {ex.Message}", sw, effectiveDebugMode);
+                SshDebugLog(host, "SCRIPT", $"Client.IsConnected: {client.IsConnected}", sw, effectiveDebugMode);
                 throw;
             }
 
@@ -1348,7 +1351,7 @@ namespace SSH_Helper.Services
             // Create script context with host variables
             var context = new ScriptContext(host.Variables);
             context.Session = session;
-            context.DebugMode = DebugMode;
+            context.DebugMode = effectiveDebugMode;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
             context.VaultService = VaultService;
             context.EnvironmentVaultProfile = EnvironmentVaultProfile;
@@ -1408,6 +1411,7 @@ namespace SSH_Helper.Services
             bool showHeader = true,
             bool allowFileSelectionDialogs = true)
         {
+            var effectiveDebugMode = DebugMode || script.Debug;
             OnProgressChanged(host, $"Running locally for {host} (no SSH required)", false, false);
 
             if (showHeader && !script.NoBanner)
@@ -1425,7 +1429,7 @@ namespace SSH_Helper.Services
 
             var context = new ScriptContext(host.Variables);
             context.Session = null;
-            context.DebugMode = DebugMode;
+            context.DebugMode = effectiveDebugMode;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
             context.VaultService = VaultService;
             context.EnvironmentVaultProfile = EnvironmentVaultProfile;
@@ -1862,7 +1866,7 @@ namespace SSH_Helper.Services
             return msg.Contains("timeout") || msg.Contains("time limit") || msg.Contains("timed out");
         }
 
-        private string FormatError(string errorType, HostConnection host, Exception ex)
+        private string FormatError(string errorType, HostConnection host, Exception ex, bool includeDebugDetails = false)
         {
             var sb = new StringBuilder();
             string title = $"{new string('#', 20)} {errorType}: {host} {new string('#', 20)}";
@@ -1886,7 +1890,85 @@ namespace SSH_Helper.Services
                 }
             }
 
+            if (DebugMode || includeDebugDetails)
+            {
+                var sshException = FindSshException(ex);
+                if (sshException != null)
+                {
+                    AppendSshNegotiationDiagnostics(sb, host, sshException);
+                }
+            }
+
             return sb.ToString();
+        }
+
+        private static SshException? FindSshException(Exception ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                if (current is SshException sshException)
+                    return sshException;
+            }
+
+            return null;
+        }
+
+        private static void AppendSshNegotiationDiagnostics(StringBuilder sb, HostConnection host, SshException sshException)
+        {
+            sb.AppendLine();
+            sb.AppendLine("SSH negotiation details (debug):");
+
+            try
+            {
+                var serverInfo = sshException.GetServerInfo();
+                if (serverInfo == null)
+                {
+                    sb.AppendLine("Server negotiation details: (not available from SSH library for this failure)");
+                    AppendAlgorithmsLine(sb, "Configured host key algorithms", host.HostKeyAlgorithms);
+                    AppendAlgorithmsLine(sb, "Configured ciphers", host.Ciphers);
+                    AppendSupportedClientAlgorithms(sb);
+                    return;
+                }
+
+                AppendAlgorithmsLine(sb, "Configured host key algorithms", host.HostKeyAlgorithms);
+                AppendAlgorithmsLine(sb, "Configured ciphers", host.Ciphers);
+                AppendAlgorithmsLine(sb, "Server host key algorithms", serverInfo.ServerHostKeyAlgorithms);
+                AppendAlgorithmsLine(sb, "Server key exchange algorithms", serverInfo.KeyExchangeAlgorithms);
+                AppendAlgorithmsLine(sb, "Server encryption algorithms (client->server)", serverInfo.EncryptionAlgorithmsClientToServer);
+                AppendAlgorithmsLine(sb, "Server encryption algorithms (server->client)", serverInfo.EncryptionAlgorithmsServerToClient);
+                AppendAlgorithmsLine(sb, "Server MAC algorithms (client->server)", serverInfo.MacAlgorithmsClientToServer);
+                AppendAlgorithmsLine(sb, "Server MAC algorithms (server->client)", serverInfo.MacAlgorithmsServerToClient);
+                AppendSupportedClientAlgorithms(sb);
+            }
+            catch (Exception debugEx)
+            {
+                sb.AppendLine($"SSH negotiation details unavailable (debug): {debugEx.Message}");
+                AppendAlgorithmsLine(sb, "Configured host key algorithms", host.HostKeyAlgorithms);
+                AppendAlgorithmsLine(sb, "Configured ciphers", host.Ciphers);
+                AppendSupportedClientAlgorithms(sb);
+            }
+        }
+
+        private static void AppendSupportedClientAlgorithms(StringBuilder sb)
+        {
+            AppendAlgorithmsLine(sb, "Client supported host key algorithms", SshParameters.GetSupportedHostKeyAlgorithms());
+            AppendAlgorithmsLine(sb, "Client supported key exchange algorithms", SshParameters.GetSupportedKeyExchangeAlgorithms());
+            AppendAlgorithmsLine(sb, "Client supported encryption algorithms", SshParameters.GetSupportedEncryptionAlgorithms());
+            AppendAlgorithmsLine(sb, "Client supported MAC algorithms", SshParameters.GetSupportedMacAlgorithms());
+        }
+
+        private static void AppendAlgorithmsLine(StringBuilder sb, string label, IEnumerable<string>? algorithms)
+        {
+            var values = algorithms?
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            var formatted = values is { Length: > 0 }
+                ? string.Join(", ", values)
+                : "(none reported)";
+
+            sb.AppendLine($"{label}: {formatted}");
         }
 
         protected virtual void OnProgressChanged(HostConnection host, string message, bool isError, bool isConnected)
@@ -2019,9 +2101,10 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Emits SSH debug timing information when DebugMode is enabled.
         /// </summary>
-        private void SshDebugLog(HostConnection host, string phase, string message, System.Diagnostics.Stopwatch? sw = null)
+        private void SshDebugLog(HostConnection host, string phase, string message, System.Diagnostics.Stopwatch? sw = null, bool? debugEnabledOverride = null)
         {
-            if (!DebugMode) return;
+            var debugEnabled = debugEnabledOverride ?? DebugMode;
+            if (!debugEnabled) return;
             var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
             var elapsed = sw != null ? $" (+{sw.ElapsedMilliseconds}ms)" : "";
             var output = $"[DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";

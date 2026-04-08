@@ -1,0 +1,179 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Rebex.Curve25519</name>
+    </assembly>
+    <members>
+        <member name="T:Rebex.Security.Cryptography.Curve25519">
+            <summary>
+            Elliptic curve Curve25519 with Diffie Hellman key exchange scheme.
+            </summary>
+        </member>
+        <member name="F:Rebex.Security.Cryptography.Curve25519.Curve25519Sha256">
+            <summary>
+            Elliptic curve Curve25519 with Diffie Hellman key exchange scheme.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Curve25519.Create(System.String)">
+            <summary>
+            Creates a new instance of <see cref="T:Rebex.Security.Cryptography.Curve25519"/> class.
+            </summary>
+            <param name="algorithmName">Algorithm name. Only <see cref="F:Rebex.Security.Cryptography.Curve25519.Curve25519Sha256"/> is supported.</param>
+        </member>
+        <member name="P:Rebex.Security.Cryptography.Curve25519.Name">
+            <summary>
+            Gets algorithm name.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Curve25519.GetPublicKey">
+            <summary>
+            Returns public key.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Curve25519.GetPrivateKey">
+            <summary>
+            Returns private key.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Curve25519.FromPublicKey(System.Byte[])">
+            <summary>
+            Initializes the algorithm from public key.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Curve25519.FromPrivateKey(System.Byte[])">
+            <summary>
+            Initializes the algorithm from private key.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Curve25519.GetSharedSecret(System.Byte[])">
+            <summary>
+            Returns shared secret for other party's public key and own private key.
+            </summary>
+        </member>
+        <member name="M:Elliptic.Curve25519.ClampPrivateKeyInline(System.Byte[])">
+            <summary>
+            Private key clamping (inline, for performance)
+            </summary>
+            <param name="key">[out] 32 random bytes</param>
+        </member>
+        <member name="M:Elliptic.Curve25519.ClampPrivateKey(System.Byte[])">
+            <summary>
+            Private key clamping
+            </summary>
+            <param name="rawKey">[out] 32 random bytes</param>
+        </member>
+        <member name="M:Elliptic.Curve25519.CreateRandomPrivateKey">
+            <summary>
+            Creates a random private key
+            </summary>
+            <returns>32 random bytes that are clamped to a suitable private key</returns>
+        </member>
+        <member name="M:Elliptic.Curve25519.KeyGenInline(System.Byte[],System.Byte[],System.Byte[])">
+            <summary>
+            Key-pair generation (inline, for performance)
+            </summary>
+            <param name="publicKey">[out] public key</param>
+            <param name="signingKey">[out] signing key (ignored if NULL)</param>
+            <param name="privateKey">[out] private key</param>
+            <remarks>WARNING: if signingKey is not NULL, this function has data-dependent timing</remarks>
+        </member>
+        <member name="M:Elliptic.Curve25519.GetPublicKey(System.Byte[])">
+            <summary>
+            Generates the public key out of the clamped private key
+            </summary>
+            <param name="privateKey">private key (must use ClampPrivateKey first!)</param>
+        </member>
+        <member name="M:Elliptic.Curve25519.GetSigningKey(System.Byte[])">
+            <summary>
+            Generates signing key out of the clamped private key
+            </summary>
+            <param name="privateKey">private key (must use ClampPrivateKey first!)</param>
+        </member>
+        <member name="M:Elliptic.Curve25519.GetSharedSecret(System.Byte[],System.Byte[])">
+            <summary>
+            Key agreement
+            </summary>
+            <param name="privateKey">[in] your private key for key agreement</param>
+            <param name="peerPublicKey">[in] peer's public key</param>
+            <returns>shared secret (needs hashing before use)</returns>
+        </member>
+        <member name="M:Elliptic.Curve25519.Egcd32(System.Byte[],System.Byte[],System.Byte[],System.Byte[])">
+            <summary>
+            Returns x if a contains the gcd, y if b.
+            </summary>
+            <param name="x">x and y must have 64 bytes space for temporary use.</param>
+            <param name="y">x and y must have 64 bytes space for temporary use.</param>
+            <param name="a">requires that a[-1] and b[-1] are valid memory locations</param>
+            <param name="b">requires that a[-1] and b[-1] are valid memory locations</param>
+            <returns>Also, the returned buffer contains the inverse of a mod b as 32-byte signed.</returns>
+        </member>
+        <member name="M:Elliptic.Curve25519.IsOverflow(Elliptic.Curve25519.Long10)">
+            <summary>
+            Check if reduced-form input >= 2^255-19
+            </summary>
+        </member>
+        <member name="M:Elliptic.Curve25519.Copy(Elliptic.Curve25519.Long10,Elliptic.Curve25519.Long10)">
+            <summary>
+            Copy a number
+            </summary>
+        </member>
+        <member name="M:Elliptic.Curve25519.Set(Elliptic.Curve25519.Long10,System.Int32)">
+            <summary>
+            Set a number to value, which must be in range -185861411 .. 185861411
+            </summary>
+        </member>
+        <member name="M:Elliptic.Curve25519.MulSmall(Elliptic.Curve25519.Long10,Elliptic.Curve25519.Long10,System.Int64)">
+            <summary>
+            Multiply a number by a small integer in range -185861411 .. 185861411.
+            The output is in reduced form, the input x need not be.  x and xy may point
+            to the same buffer.
+            </summary>
+        </member>
+        <member name="M:Elliptic.Curve25519.Multiply(Elliptic.Curve25519.Long10,Elliptic.Curve25519.Long10,Elliptic.Curve25519.Long10)">
+            <summary>
+            Multiply two numbers. The output is in reduced form, the inputs need not be.
+            </summary>
+        </member>
+        <member name="M:Elliptic.Curve25519.Square(Elliptic.Curve25519.Long10,Elliptic.Curve25519.Long10)">
+            <summary>
+            Square a number.  Optimization of  Multiply(x2, x, x)
+            </summary>
+        </member>
+        <member name="M:Elliptic.Curve25519.Reciprocal(Elliptic.Curve25519.Long10,Elliptic.Curve25519.Long10,System.Boolean)">
+            <summary>
+            Calculates a reciprocal.  The output is in reduced form, the inputs need not 
+            be.  Simply calculates  y = x^(p-2)  so it's not too fast. */
+            When sqrtassist is true, it instead calculates y = x^((p-5)/8)
+            </summary>
+        </member>
+        <member name="M:Elliptic.Curve25519.IsNegative(Elliptic.Curve25519.Long10)">
+            <summary>
+            Checks if x is "negative", requires reduced input
+            </summary>
+            <param name="x">must be reduced input</param>
+        </member>
+        <member name="M:Elliptic.Curve25519.CurveEquationInline(Elliptic.Curve25519.Long10,Elliptic.Curve25519.Long10,Elliptic.Curve25519.Long10)">
+            <summary>
+            Y^2 = X^3 + 486662 X^2 + X
+            </summary>
+            <param name="y2">output</param>
+            <param name="x">X</param>
+            <param name="temp">temporary</param>
+        </member>
+        <member name="M:Elliptic.Curve25519.Core(System.Byte[],System.Byte[],System.Byte[],System.Byte[])">
+            <summary>
+            P = kG   and  s = sign(P)/k
+            </summary>
+        </member>
+        <member name="F:Elliptic.Curve25519.OrderTimes8">
+            <summary>
+            Smallest multiple of the order that's >= 2^255
+            </summary>
+        </member>
+        <member name="F:Elliptic.Curve25519.BaseR2Y">
+            <summary>
+            Constant 1/(2Gy)
+            </summary>
+        </member>
+    </members>
+</doc>
