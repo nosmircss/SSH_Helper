@@ -3,6 +3,7 @@ using System.Windows.Forms;
 using FluentAssertions;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using SSH_Helper.Services.Scripting;
 using Xunit;
 
 namespace SSH_Helper.Tests.UI;
@@ -211,6 +212,37 @@ public class SettingsDialogVaultTests : IDisposable
         savedProfile.OidcTimeoutSeconds.Should().Be(240);
     }
 
+    [WinFormsFact]
+    public void SavingOidcProfile_WithNonLoopbackCallbackHost_ShowsValidationAndDoesNotPersist()
+    {
+        SeedVaultProfiles(defaultProfileName: "profile-a");
+        var promptService = new RecordingSettingsDialogPromptService(DialogResult.OK);
+
+        using var dialog = new SettingsDialog(
+            _configService,
+            presetManager: null,
+            darkMode: false,
+            browserCallbackProfileManager: new RecordingBrowserCallbackWebViewProfileManager(),
+            promptService: promptService);
+
+        var list = GetField<ListBox>(dialog, "_lstVaultProfiles");
+        var authMethod = GetField<ComboBox>(dialog, "_cmbVaultAuthMethod");
+        var oidcRole = GetField<TextBox>(dialog, "_txtVaultOidcRole");
+        var oidcHost = GetField<TextBox>(dialog, "_txtVaultOidcCallbackHost");
+
+        list.SelectedIndex = 0;
+        authMethod.SelectedIndex = (int)VaultAuthMethod.Oidc;
+        oidcRole.Text = "desktop-role";
+        oidcHost.Text = "vault.example.com";
+
+        InvokeMethod(dialog, "BtnSave_Click", null!, EventArgs.Empty);
+
+        var savedProfile = _configService.GetCurrent().Vault.Profiles.Single(p => p.Name == "profile-a");
+        savedProfile.OidcCallbackHost.Should().Be("127.0.0.1");
+        promptService.Messages.Should().Contain(message =>
+            message.Contains("loopback", StringComparison.OrdinalIgnoreCase));
+    }
+
     private void SeedVaultProfiles(string defaultProfileName)
     {
         _configService.Update(config =>
@@ -292,5 +324,38 @@ public class SettingsDialogVaultTests : IDisposable
         }
 
         public bool DeletePassword(string target) => _store.Remove(target);
+    }
+
+    private sealed class RecordingSettingsDialogPromptService : ISettingsDialogPromptService
+    {
+        private readonly DialogResult _nextResult;
+
+        public RecordingSettingsDialogPromptService(DialogResult nextResult)
+        {
+            _nextResult = nextResult;
+        }
+
+        public List<string> Messages { get; } = new();
+
+        public DialogResult Show(IWin32Window? owner, string message, string title, MessageBoxButtons buttons, MessageBoxIcon icon)
+        {
+            Messages.Add(message);
+            return _nextResult;
+        }
+    }
+
+    private sealed class RecordingBrowserCallbackWebViewProfileManager : IBrowserCallbackWebViewProfileManager
+    {
+        public string UserDataDirectory => Path.Combine(Path.GetTempPath(), "unused");
+
+        public IDisposable RegisterActiveSession()
+        {
+            throw new NotSupportedException();
+        }
+
+        public EmbeddedBrowserDataClearResult ClearEmbeddedBrowserData()
+        {
+            return EmbeddedBrowserDataClearResult.Cleared;
+        }
     }
 }

@@ -226,7 +226,7 @@ public class QaPresetExecutionTests
             return QaExpectedOutcome.IntentionalErrorExit;
         }
 
-        if (description.Contains("Expected: pass.", StringComparison.Ordinal))
+        if (description.Contains("Expected: pass", StringComparison.Ordinal))
         {
             return QaExpectedOutcome.Pass;
         }

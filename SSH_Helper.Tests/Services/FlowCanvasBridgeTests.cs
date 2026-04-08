@@ -1847,6 +1847,55 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - localcmd:
+                  command: "date"
+                  interactive: true
+                  lifetime: detached
+            """;
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var localCmdNode = nodes
+            .OfType<JObject>()
+            .Single(node => string.Equals(
+                node["data"]?["blockType"]?.ToString(),
+                "localcmd",
+                StringComparison.OrdinalIgnoreCase));
+
+        var props = localCmdNode["data"]?["props"] as JObject;
+        Assert.NotNull(props);
+        Assert.Equal("detached", props!["lifetime"]?.ToString());
+    }
+
+    [Fact]
+    public void ImportExportRoundTrip_LocalCmdInteractiveDetached_PreservesExplicitLifetime()
+    {
+        var result = RoundTripThroughBridge(
+            """
+            ---
+            steps:
+              - localcmd:
+                  command: "date"
+                  interactive: true
+                  lifetime: detached
+            """);
+
+        AssertExportSuccessWithCanonicalValidation(result);
+        Assert.Contains("lifetime: detached", result.Yaml, StringComparison.Ordinal);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        Assert.NotNull(script.Steps[0].LocalCmd);
+        Assert.True(script.Steps[0].LocalCmd!.LifetimeSpecified);
+    }
+
+    [Fact]
     public void ImportExportRoundTrip_ChooseLabelValueOptions_PreservesLabelValuePairs()
     {
         var result = RoundTripThroughBridge(

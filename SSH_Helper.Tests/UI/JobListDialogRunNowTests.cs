@@ -280,7 +280,7 @@ public class JobListDialogRunNowTests : IDisposable
         };
         jobStorage.Save(job);
 
-        var startedUtc = new DateTime(2026, 3, 8, 13, 15, 0, DateTimeKind.Utc);
+        var startedUtc = RecentUtc(13, 15);
         historyService.SaveRun(new JobRunResult
         {
             JobId = job.Id,
@@ -347,7 +347,7 @@ public class JobListDialogRunNowTests : IDisposable
         var job = CreateTestJob("Single Skipped Summary Job");
         jobStorage.Save(job);
 
-        var missedUtc = new DateTime(2026, 3, 8, 13, 5, 0, DateTimeKind.Utc);
+        var missedUtc = RecentUtc(13, 5);
         historyService.SaveSkippedRunSummary(new SkippedRunSummaryEntry
         {
             JobId = job.Id,
@@ -415,8 +415,8 @@ public class JobListDialogRunNowTests : IDisposable
         var job = CreateTestJob("Skipped Summary Job");
         jobStorage.Save(job);
 
-        var firstMissedUtc = new DateTime(2026, 3, 8, 12, 0, 0, DateTimeKind.Utc);
-        var lastMissedUtc = new DateTime(2026, 3, 8, 12, 10, 0, DateTimeKind.Utc);
+        var firstMissedUtc = RecentUtc(12, 0);
+        var lastMissedUtc = RecentUtc(12, 10);
         historyService.SaveSkippedRunSummary(new SkippedRunSummaryEntry
         {
             JobId = job.Id,
@@ -489,7 +489,7 @@ public class JobListDialogRunNowTests : IDisposable
         {
             JobId = job.Id,
             JobName = job.Name,
-            ScheduledTimeUtc = new DateTime(2026, 3, 8, 11, 55, 0, DateTimeKind.Utc)
+            ScheduledTimeUtc = RecentUtc(11, 55)
         }, errorMessage: "Missed while closed");
 
         using var executionService = new JobExecutionService(
@@ -548,8 +548,8 @@ public class JobListDialogRunNowTests : IDisposable
         {
             JobId = job.Id,
             JobName = job.Name,
-            StartedUtc = new DateTime(2026, 3, 8, 15, 0, 0, DateTimeKind.Utc),
-            CompletedUtc = new DateTime(2026, 3, 8, 15, 0, 30, DateTimeKind.Utc),
+            StartedUtc = RecentUtc(15, 0),
+            CompletedUtc = RecentUtc(15, 0, 30),
             Success = false,
             HostsSucceeded = 0,
             HostsFailed = 1,
@@ -570,8 +570,8 @@ public class JobListDialogRunNowTests : IDisposable
         {
             JobId = job.Id,
             JobName = job.Name,
-            StartedUtc = new DateTime(2026, 3, 8, 15, 5, 0, DateTimeKind.Utc),
-            CompletedUtc = new DateTime(2026, 3, 8, 15, 5, 20, DateTimeKind.Utc),
+            StartedUtc = RecentUtc(15, 5),
+            CompletedUtc = RecentUtc(15, 5, 20),
             Success = false,
             HostsSucceeded = 0,
             HostsFailed = 1,
@@ -646,8 +646,8 @@ public class JobListDialogRunNowTests : IDisposable
         {
             JobId = job.Id,
             JobName = job.Name,
-            StartedUtc = new DateTime(2026, 3, 12, 17, 0, 0, DateTimeKind.Utc),
-            CompletedUtc = new DateTime(2026, 3, 12, 17, 0, 10, DateTimeKind.Utc),
+            StartedUtc = RecentUtc(17, 0),
+            CompletedUtc = RecentUtc(17, 0, 10),
             Success = false,
             WasCancelled = true,
             HostsSucceeded = 0,
@@ -818,8 +818,8 @@ public class JobListDialogRunNowTests : IDisposable
         {
             JobId = job.Id,
             JobName = job.Name,
-            StartedUtc = new DateTime(2026, 3, 8, 14, 0, 0, DateTimeKind.Utc),
-            CompletedUtc = new DateTime(2026, 3, 8, 14, 1, 0, DateTimeKind.Utc),
+            StartedUtc = RecentUtc(14, 0),
+            CompletedUtc = RecentUtc(14, 1),
             Success = true,
             HostsSucceeded = 1,
             HostsFailed = 0,
@@ -883,8 +883,8 @@ public class JobListDialogRunNowTests : IDisposable
         {
             JobId = betaJob.Id,
             JobName = betaJob.Name,
-            StartedUtc = new DateTime(2026, 3, 8, 14, 0, 0, DateTimeKind.Utc),
-            CompletedUtc = new DateTime(2026, 3, 8, 14, 1, 0, DateTimeKind.Utc),
+            StartedUtc = RecentUtc(14, 0),
+            CompletedUtc = RecentUtc(14, 1),
             Success = true,
             HostsSucceeded = 1,
             HostsFailed = 0,
@@ -929,8 +929,8 @@ public class JobListDialogRunNowTests : IDisposable
         {
             JobId = betaJob.Id,
             JobName = betaJob.Name,
-            StartedUtc = new DateTime(2026, 3, 8, 15, 0, 0, DateTimeKind.Utc),
-            CompletedUtc = new DateTime(2026, 3, 8, 15, 2, 30, DateTimeKind.Utc),
+            StartedUtc = RecentUtc(15, 0),
+            CompletedUtc = RecentUtc(15, 2, 30),
             Success = true,
             HostsSucceeded = 1,
             HostsFailed = 0,
@@ -969,8 +969,8 @@ public class JobListDialogRunNowTests : IDisposable
         {
             JobId = job.Id,
             JobName = job.Name,
-            StartedUtc = new DateTime(2026, 3, 8, 14, 0, 0, DateTimeKind.Utc),
-            CompletedUtc = new DateTime(2026, 3, 8, 14, 1, 0, DateTimeKind.Utc),
+            StartedUtc = RecentUtc(14, 0),
+            CompletedUtc = RecentUtc(14, 1),
             Success = true,
             HostsSucceeded = 1,
             HostsFailed = 0,
@@ -981,8 +981,8 @@ public class JobListDialogRunNowTests : IDisposable
         {
             JobId = job.Id,
             JobName = job.Name,
-            StartedUtc = new DateTime(2026, 3, 8, 15, 0, 0, DateTimeKind.Utc),
-            CompletedUtc = new DateTime(2026, 3, 8, 15, 2, 0, DateTimeKind.Utc),
+            StartedUtc = RecentUtc(15, 0),
+            CompletedUtc = RecentUtc(15, 2),
             Success = true,
             HostsSucceeded = 1,
             HostsFailed = 0,
@@ -1128,8 +1128,8 @@ public class JobListDialogRunNowTests : IDisposable
         {
             JobId = job.Id,
             JobName = job.Name,
-            StartedUtc = new DateTime(2026, 3, 8, 14, 0, 0, DateTimeKind.Utc),
-            CompletedUtc = new DateTime(2026, 3, 8, 14, 1, 0, DateTimeKind.Utc),
+            StartedUtc = RecentUtc(14, 0),
+            CompletedUtc = RecentUtc(14, 1),
             Success = true,
             HostsSucceeded = 1,
             HostsFailed = 0,
@@ -1260,6 +1260,14 @@ public class JobListDialogRunNowTests : IDisposable
             }
         };
     }
+
+    private static readonly DateTime RecentReferenceUtc = DateTime.UtcNow.Date.AddDays(-1);
+
+    private static DateTime RecentUtc(int hour, int minute, int second = 0, int dayOffset = 0)
+        => RecentReferenceUtc.AddDays(dayOffset)
+            .AddHours(hour)
+            .AddMinutes(minute)
+            .AddSeconds(second);
 
     private static void SelectJobRow(DataGridView grid, string jobId)
     {

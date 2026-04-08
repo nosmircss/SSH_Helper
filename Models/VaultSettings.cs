@@ -81,8 +81,8 @@ namespace SSH_Helper.Models
         public string OidcRole { get; set; } = "";
 
         /// <summary>
-        /// Host component used for the local callback listener during OIDC login.
-        /// Default: "127.0.0.1".
+        /// Loopback host component used for the local callback listener during OIDC login.
+        /// Allowed values: "127.0.0.1", "localhost", or "::1". Default: "127.0.0.1".
         /// </summary>
         public string OidcCallbackHost { get; set; } = "127.0.0.1";
 

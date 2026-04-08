@@ -34,11 +34,12 @@ namespace SSH_Helper.Services.Vault
             CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(authUrl))
-                throw new VaultException("Vault OIDC login failed — auth URL was empty");
+                throw new VaultException("Vault OIDC login failed â€” auth URL was empty");
 
-            var normalizedPath = NormalizePath(callbackPath);
+            var callback = VaultOidcCallbackSettings.Create(callbackHost, callbackPort, callbackPath);
+            var normalizedPath = NormalizePath(callback.Path);
             using var listener = new HttpListener();
-            listener.Prefixes.Add($"http://{callbackHost}:{callbackPort}/");
+            listener.Prefixes.Add(callback.ListenerPrefix);
 
             try
             {
@@ -47,7 +48,7 @@ namespace SSH_Helper.Services.Vault
             catch (Exception ex)
             {
                 throw new VaultException(
-                    $"Vault OIDC login failed — cannot start local callback listener on {callbackHost}:{callbackPort}: {ex.Message}",
+                    $"Vault OIDC login failed â€” cannot start local callback listener on {callback.AuthorityHost}:{callback.Port}: {ex.Message}",
                     ex);
             }
 
@@ -61,7 +62,7 @@ namespace SSH_Helper.Services.Vault
             }
             catch (Exception ex)
             {
-                throw new VaultException($"Vault OIDC login failed — cannot open browser: {ex.Message}", ex);
+                throw new VaultException($"Vault OIDC login failed â€” cannot open browser: {ex.Message}", ex);
             }
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

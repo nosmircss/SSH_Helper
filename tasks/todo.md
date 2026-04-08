@@ -1,5 +1,78 @@
 # TODO
 
+## 223. Analyze full suite failures and restore the current test project to green
+- [x] 223.1 Run the full `SSH_Helper.Tests` suite in the current worktree and capture the exact failing tests/error signatures.
+- [x] 223.2 Classify the failures by subsystem and identify root causes before attempting fixes.
+- [x] 223.3 Add or tighten focused regression coverage for each real product bug exposed by the failing tests.
+- [x] 223.4 Implement the minimal production/test fixes needed to restore intended behavior without disturbing unrelated in-flight work.
+- [x] 223.5 Re-run targeted verification for each repaired slice, then re-run the full `SSH_Helper.Tests` suite.
+- [x] 223.6 Add a review summary with verification evidence below.
+
+### 223 Review
+- Full-suite reproduction initially failed `14/2069`.
+- Failure clusters:
+- QA preset expectation parsing: `QaPresetCatalogTests` and `QaPresetExecutionTests` rejected the new descriptive clause `Expected: pass (timeout branch observed).` because the helpers only accepted the exact literal `Expected: pass.`.
+- Job history persistence/UI: `JobHistoryServiceTests` and `JobListDialogRunNowTests` used fixed March 2026 timestamps. On April 8, 2026 those records were older than the default 30-day retention window, so `JobHistoryService.SaveRun(...)` immediately pruned them and the UI correctly rendered `Never run`.
+- Implemented minimal fixes:
+- Relaxed QA expected-outcome detection in:
+- `SSH_Helper.Tests/Scripting/QaPresetCatalogTests.cs`
+- `SSH_Helper.Tests/Scripting/QaPresetExecutionTests.cs`
+- Pass outcomes now match `Expected: pass` prefixes, preserving richer descriptive suffixes without weakening the failure/exit classifications.
+- Replaced brittle fixed UTC timestamps with recent relative UTC helpers in:
+- `SSH_Helper.Tests/Services/JobHistoryServiceTests.cs`
+- `SSH_Helper.Tests/UI/JobListDialogRunNowTests.cs`
+- This keeps persistence/UI assertions inside the service's default retention policy while preserving the same ordering/duration/skipped-summary behaviors under test.
+- Verification:
+- Focused repaired slices:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~QaPresetCatalogTests|FullyQualifiedName~QaPresetExecutionTests|FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~JobListDialogRunNowTests" -p:SkipFlowCanvasBuild=true -v minimal`
+- Result: passed `55/55`.
+- Full suite:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore -v minimal`
+- Result: passed `2069/2069`.
+- Existing warnings during verification remained non-blocking and unchanged in nature: `MSB3277` (`WindowsBase`/WebView2 conflict warnings), `CS8602` in existing test code, and `xUnit1031` analyzer warnings in `ExpressionParserTests`.
+
+## 222. Fix OIDC hardening and detached localcmd round-trip regressions
+- [x] 222.1 Add RED tests for Vault OIDC callback host validation in settings/runtime and for OIDC persisted-token reuse/fallback behavior.
+- [x] 222.2 Add RED FlowCanvasBridge regression tests proving explicit interactive `lifetime: detached` survives YAML -> canvas -> YAML and explicit detached presence is exported.
+- [x] 222.3 Implement Vault callback-host normalization/loopback-only validation in shared runtime helpers and settings validation.
+- [x] 222.4 Implement OIDC persisted-token reuse with lookup-self validation, browser fallback on missing/401 token only, and unchanged fresh-token persistence.
+- [x] 222.5 Implement Flow Canvas `localcmd` explicit-lifetime preservation end-to-end and update editor help text to match runtime semantics.
+- [x] 222.6 Run focused verification for Vault, FlowCanvasBridge, LocalCmd, and ScriptParser slices; then run the full suite and record unrelated existing failures separately if they remain.
+- [x] 222.7 Add a review summary with verification evidence below.
+
+### 222 Review
+- Added RED coverage in:
+- `SSH_Helper.Tests/Vault/VaultServiceTests.cs`
+- `OidcAuth_InvalidCallbackHost_ThrowsFriendlyErrorBeforeHttpCalls`
+- `OidcAuth_ValidPersistedToken_SkipsBrowserLogin`
+- `OidcAuth_UnauthorizedPersistedToken_FallsBackToBrowserLogin`
+- `OidcAuth_PersistedTokenValidationTransportError_DoesNotFallBackToBrowserLogin`
+- `OidcAuth_Ipv6LoopbackHost_NormalizesRedirectUri`
+- `SSH_Helper.Tests/UI/SettingsDialogVaultTests.cs`
+- `SavingOidcProfile_WithNonLoopbackCallbackHost_ShowsValidationAndDoesNotPersist`
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`
+- `TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp`
+- `ImportExportRoundTrip_LocalCmdInteractiveDetached_PreservesExplicitLifetime`
+- Implemented Vault hardening with shared callback normalization in `Services/Vault/VaultOidcCallbackSettings.cs`, runtime enforcement in `Services/Vault/VaultService.cs` and `Services/Vault/VaultOidcLoginFlow.cs`, and save-time validation through `SettingsDialog.cs`.
+- Runtime behavior now accepts only loopback callback hosts (`127.0.0.1`, `localhost`, `::1`, `[::1]`), normalizes IPv6 redirect URIs to bracketed form, and blocks invalid hosts before any Vault/OIDC HTTP calls.
+- OIDC auth now attempts persisted token reuse first via `auth/token/lookup-self`, skips browser login on success, falls back only on missing/401/403 tokens, and surfaces transport/status failures instead of silently dropping into interactive login.
+- Flow Canvas import now preserves explicit `localcmd.lifetime` presence when YAML explicitly sets `lifetime: detached`, and the block help text now documents the detached interactive behavior.
+- Additional code/docs alignment:
+- `Models/VaultSettings.cs` now documents the loopback-only callback-host constraint.
+- Focused RED verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~SettingsDialogVaultTests.SavingOidcProfile_WithNonLoopbackCallbackHost_ShowsValidationAndDoesNotPersist|FullyQualifiedName~VaultServiceTests.OidcAuth_InvalidCallbackHost_ThrowsFriendlyErrorBeforeHttpCalls|FullyQualifiedName~VaultServiceTests.OidcAuth_ValidPersistedToken_SkipsBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_UnauthorizedPersistedToken_FallsBackToBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_PersistedTokenValidationTransportError_DoesNotFallBackToBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_Ipv6LoopbackHost_NormalizesRedirectUri|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp|FullyQualifiedName~FlowCanvasBridgeTests.ImportExportRoundTrip_LocalCmdInteractiveDetached_PreservesExplicitLifetime" -p:SkipFlowCanvasBuild=true` (failed `7/8` before implementation as expected).
+- Focused GREEN verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~SettingsDialogVaultTests.SavingOidcProfile_WithNonLoopbackCallbackHost_ShowsValidationAndDoesNotPersist|FullyQualifiedName~VaultServiceTests.OidcAuth_InvalidCallbackHost_ThrowsFriendlyErrorBeforeHttpCalls|FullyQualifiedName~VaultServiceTests.OidcAuth_ValidPersistedToken_SkipsBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_UnauthorizedPersistedToken_FallsBackToBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_PersistedTokenValidationTransportError_DoesNotFallBackToBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_Ipv6LoopbackHost_NormalizesRedirectUri|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp|FullyQualifiedName~FlowCanvasBridgeTests.ImportExportRoundTrip_LocalCmdInteractiveDetached_PreservesExplicitLifetime" -p:SkipFlowCanvasBuild=true` (passed `8/8`).
+- Regression slice verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~VaultServiceTests|FullyQualifiedName~VaultSettingsTests|FullyQualifiedName~SettingsDialogVaultTests|FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~ScriptParserTests" -p:SkipFlowCanvasBuild=true` (passed `315/315`).
+- Flow Canvas build verification:
+- `npm run build` in `FlowCanvas` (passed).
+- Full suite verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore` rebuilt Flow Canvas and failed with `15` unrelated tests outside the touched Vault/Flow Canvas areas.
+- Concentrated failures remained in QA preset expectation parsing, job-history/job-list history rendering, and one aggregate-only `BrowserCallbackUiHostTests` failure.
+- Isolated follow-up:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~BrowserCallbackUiHostTests.LaunchAsync_WebView2_IgnoresActiveBrowserCallbackWindow_WhenSelectingOwner" -p:SkipFlowCanvasBuild=true` (passed `1/1`), indicating the extra browser-callback failure is not a deterministic regression from this change set.
+
 ## 221. Increase Vault settings field width for better text visibility
 - [x] 221.1 Identify Vault tab row/input sizing constraints in `SettingsDialog.cs`.
 - [x] 221.2 Increase minimum width of Vault text input and related combo fields while preserving existing behavior.

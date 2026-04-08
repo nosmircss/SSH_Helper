@@ -2200,7 +2200,7 @@ namespace SSH_Helper
             {
                 if (string.IsNullOrWhiteSpace(profile.Name))
                 {
-                    MessageBox.Show(this, "Vault profile name is required.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    _promptService.Show(this, "Vault profile name is required.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return false;
                 }
 
@@ -2209,25 +2209,24 @@ namespace SSH_Helper
 
                 if (string.IsNullOrWhiteSpace(profile.OidcRole))
                 {
-                    MessageBox.Show(this, $"Vault profile '{profile.Name}' requires an OIDC role.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    _promptService.Show(this, $"Vault profile '{profile.Name}' requires an OIDC role.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return false;
                 }
 
-                if (string.IsNullOrWhiteSpace(profile.OidcCallbackHost))
+                if (!VaultOidcCallbackSettings.TryCreate(
+                        profile.OidcCallbackHost,
+                        profile.OidcCallbackPort,
+                        profile.OidcCallbackPath,
+                        profile.Name,
+                        out _,
+                        out var validationError))
                 {
-                    MessageBox.Show(this, $"Vault profile '{profile.Name}' requires an OIDC callback host.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return false;
-                }
-
-                if (profile.OidcCallbackPort < 1 || profile.OidcCallbackPort > 65535)
-                {
-                    MessageBox.Show(this, $"Vault profile '{profile.Name}' has an invalid OIDC callback port.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return false;
-                }
-
-                if (string.IsNullOrWhiteSpace(profile.OidcCallbackPath))
-                {
-                    MessageBox.Show(this, $"Vault profile '{profile.Name}' requires an OIDC callback path.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    _promptService.Show(
+                        this,
+                        validationError ?? "Vault profile has invalid OIDC callback settings.",
+                        "Settings",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
                     return false;
                 }
             }

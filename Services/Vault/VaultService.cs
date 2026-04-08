@@ -319,29 +319,9 @@ namespace SSH_Helper.Services.Vault
                 throw new VaultException(
                     $"Vault authentication failed for profile '{profile.Config.Name}' — no token found in credential manager");
 
-            profile.ClientToken = token;
-
-            // Validate token and get TTL
-            var request = CreateRequest(HttpMethod.Post, "v1/auth/token/lookup-self", profile);
+            var request = CreateTokenLookupRequest(profile, token);
             var response = await SendWithErrorTranslationAsync(profile, request, "auth/token/lookup-self", "read", ct);
-            var body = await response.Content.ReadAsStringAsync(ct);
-            response.Dispose();
-
-            using var doc = JsonDocument.Parse(body);
-            var data = doc.RootElement.GetProperty("data");
-
-            if (data.TryGetProperty("ttl", out var ttlElement))
-            {
-                var ttl = ttlElement.GetInt64();
-                if (ttl > 0)
-                    profile.TokenExpiry = DateTime.UtcNow.AddSeconds(ttl * 0.75);
-                else
-                    profile.TokenExpiry = DateTime.MaxValue; // Non-expiring token
-            }
-            else
-            {
-                profile.TokenExpiry = DateTime.MaxValue;
-            }
+            await ApplyTokenLookupResponseAsync(profile, token, response, ct);
         }
 
         private async Task AuthenticateWithAppRoleAsync(VaultProfile profile, CancellationToken ct)
@@ -476,14 +456,16 @@ namespace SSH_Helper.Services.Vault
                 throw new VaultException(
                     $"Vault authentication failed for profile '{profile.Config.Name}' — no OIDC role configured");
 
-            var callbackHost = string.IsNullOrWhiteSpace(profile.Config.OidcCallbackHost)
-                ? "127.0.0.1"
-                : profile.Config.OidcCallbackHost.Trim();
-            var callbackPort = profile.Config.OidcCallbackPort <= 0 ? 8250 : profile.Config.OidcCallbackPort;
-            var callbackPath = NormalizeCallbackPath(profile.Config.OidcCallbackPath);
+            var callback = VaultOidcCallbackSettings.Create(
+                profile.Config.OidcCallbackHost,
+                profile.Config.OidcCallbackPort,
+                profile.Config.OidcCallbackPath,
+                profile.Config.Name);
             var timeoutSeconds = profile.Config.OidcTimeoutSeconds <= 0 ? 180 : profile.Config.OidcTimeoutSeconds;
 
-            var redirectUri = $"http://{callbackHost}:{callbackPort}{callbackPath}";
+            if (await TryAuthenticateWithPersistedOidcTokenAsync(profile, ct))
+                return;
+
             var state = CreateRandomToken(32);
             var nonce = CreateRandomToken(32);
             var verifier = CreateRandomToken(64);
@@ -495,7 +477,7 @@ namespace SSH_Helper.Services.Vault
                     JsonSerializer.Serialize(new
                     {
                         role,
-                        redirect_uri = redirectUri,
+                        redirect_uri = callback.RedirectUri,
                         state,
                         nonce,
                         code_challenge = challenge,
@@ -523,9 +505,9 @@ namespace SSH_Helper.Services.Vault
 
             var callbackResult = await _oidcLoginFlow.ExecuteAsync(
                 authUrl,
-                callbackHost,
-                callbackPort,
-                callbackPath,
+                callback.AuthorityHost,
+                callback.Port,
+                callback.Path,
                 timeoutSeconds,
                 ct);
 
@@ -552,7 +534,7 @@ namespace SSH_Helper.Services.Vault
                         code = callbackResult.Code,
                         nonce,
                         code_verifier = verifier,
-                        redirect_uri = redirectUri
+                        redirect_uri = callback.RedirectUri
                     }),
                     Encoding.UTF8,
                     "application/json")
@@ -840,6 +822,14 @@ namespace SSH_Helper.Services.Vault
             return request;
         }
 
+        private static HttpRequestMessage CreateTokenLookupRequest(VaultProfile profile, string token)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "v1/auth/token/lookup-self");
+            request.Headers.Add("X-Vault-Token", token);
+            ApplyNamespaceHeader(request, profile);
+            return request;
+        }
+
         private static void ApplyNamespaceHeader(HttpRequestMessage request, VaultProfile profile)
         {
             if (!string.IsNullOrEmpty(profile.Config.Namespace))
@@ -887,6 +877,75 @@ namespace SSH_Helper.Services.Vault
 
             // TranslateErrorResponse always throws, but compiler needs this
             throw new VaultException($"Unexpected Vault error: HTTP {(int)statusCode}");
+        }
+
+        private async Task<bool> TryAuthenticateWithPersistedOidcTokenAsync(VaultProfile profile, CancellationToken ct)
+        {
+            var token = _tokenProvider?.Invoke(profile.Config.Name, "token");
+            if (string.IsNullOrWhiteSpace(token))
+                return false;
+
+            using var request = CreateTokenLookupRequest(profile, token);
+            using var response = await profile.HttpClient.SendAsync(request, ct);
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized ||
+                response.StatusCode == HttpStatusCode.Forbidden)
+            {
+                profile.ClientToken = null;
+                profile.TokenExpiry = default;
+                return false;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = string.Empty;
+                try
+                {
+                    errorBody = await response.Content.ReadAsStringAsync(ct);
+                }
+                catch
+                {
+                    // Ignore response body read failures and translate from status alone.
+                }
+
+                TranslateErrorResponse(
+                    response.StatusCode,
+                    profile.Config.Name,
+                    "auth/token/lookup-self",
+                    "read",
+                    ExtractVaultErrors(errorBody));
+            }
+
+            await ApplyTokenLookupResponseAsync(profile, token, response, ct);
+            return true;
+        }
+
+        private static async Task ApplyTokenLookupResponseAsync(
+            VaultProfile profile,
+            string token,
+            HttpResponseMessage response,
+            CancellationToken ct)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            response.Dispose();
+
+            using var doc = JsonDocument.Parse(body);
+            var data = doc.RootElement.GetProperty("data");
+
+            profile.ClientToken = token;
+
+            if (data.TryGetProperty("ttl", out var ttlElement))
+            {
+                var ttl = ttlElement.GetInt64();
+                if (ttl > 0)
+                    profile.TokenExpiry = DateTime.UtcNow.AddSeconds(ttl * 0.75);
+                else
+                    profile.TokenExpiry = DateTime.MaxValue;
+            }
+            else
+            {
+                profile.TokenExpiry = DateTime.MaxValue;
+            }
         }
 
         private static string ExtractVaultErrors(string responseBody)
@@ -1055,18 +1114,6 @@ namespace SSH_Helper.Services.Vault
             }
 
             return handler;
-        }
-
-        private static string NormalizeCallbackPath(string callbackPath)
-        {
-            var normalized = string.IsNullOrWhiteSpace(callbackPath)
-                ? "/oidc/callback"
-                : callbackPath.Trim();
-
-            if (!normalized.StartsWith('/'))
-                normalized = "/" + normalized;
-
-            return normalized;
         }
 
         private static string CreateRandomToken(int byteCount)

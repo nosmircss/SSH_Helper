@@ -2672,7 +2672,8 @@ namespace SSH_Helper.Services
                         if (step.LocalCmd.KeepOpen) props["keep_open"] = true;
                         if (!string.Equals(step.LocalCmd.RunMode, "foreground", StringComparison.OrdinalIgnoreCase))
                             props["run_mode"] = step.LocalCmd.RunMode;
-                        if (!string.Equals(step.LocalCmd.Lifetime, "detached", StringComparison.OrdinalIgnoreCase))
+                        if (step.LocalCmd.LifetimeSpecified ||
+                            !string.Equals(step.LocalCmd.Lifetime, "detached", StringComparison.OrdinalIgnoreCase))
                             props["lifetime"] = step.LocalCmd.Lifetime;
                         if (step.LocalCmd.KillOnCancel) props["kill_on_cancel"] = true;
                         if (!step.LocalCmd.FailOnNonZero) props["fail_on_nonzero"] = false;

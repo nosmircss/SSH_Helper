@@ -614,7 +614,7 @@ export const blockDefs: BlockDef[] = [
         helpText: 'Foreground waits for completion; background returns after spawn', group: 'core' },
       { key: 'lifetime', label: 'Background Lifetime', type: 'select',
         options: ['detached', 'script', 'app'], defaultValue: 'detached',
-        helpText: 'Applies only when run_mode=background', group: 'advanced' },
+        helpText: 'Primarily for run_mode=background. Explicit detached also preserves detached interactive behavior.', group: 'advanced' },
       { key: 'kill_on_cancel', label: 'Kill On Cancel', type: 'boolean', defaultValue: false,
         helpText: 'Applies to non-detached background mode', group: 'advanced' },
       { key: 'fail_on_nonzero', label: 'Fail On Non-Zero', type: 'boolean', defaultValue: true,

@@ -965,4 +965,280 @@ public class VaultServiceTests
         await act.Should().ThrowAsync<VaultException>()
             .WithMessage("*callback state mismatch*");
     }
+
+    [Fact]
+    public async Task OidcAuth_InvalidCallbackHost_ThrowsFriendlyErrorBeforeHttpCalls()
+    {
+        var settings = CreateSettings(authMethod: VaultAuthMethod.Oidc);
+        settings.Profiles[0].OidcRole = "desktop-role";
+        settings.Profiles[0].OidcCallbackHost = "vault.example.com";
+
+        var httpCallCount = 0;
+        var handler = new DelegatingHandlerStub(_ =>
+        {
+            httpCallCount++;
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var oidcFlow = new StubVaultOidcLoginFlow((_, _, _, _, _, _) =>
+            throw new InvalidOperationException("OIDC browser flow should not start for invalid callback hosts."));
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => handler,
+            tokenProvider: null,
+            secretIdProvider: null,
+            ldapPasswordProvider: null,
+            userpassPasswordProvider: null,
+            tokenSaver: null,
+            oidcLoginFlow: oidcFlow);
+
+        var act = () => svc.ReadSecretAsync("test", "oidc/path", "password");
+        await act.Should().ThrowAsync<VaultException>()
+            .WithMessage("*loopback*");
+        httpCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OidcAuth_ValidPersistedToken_SkipsBrowserLogin()
+    {
+        var settings = CreateSettings(authMethod: VaultAuthMethod.Oidc);
+        settings.Profiles[0].OidcRole = "desktop-role";
+
+        var lookupSelfCount = 0;
+        var browserAuthStarted = false;
+        string? capturedSecretToken = null;
+
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+
+            if (path.Contains("auth/token/lookup-self", StringComparison.Ordinal))
+            {
+                lookupSelfCount++;
+                return TokenLookupResponse(7200);
+            }
+
+            if (path.Contains("auth/oidc/oidc/auth_url", StringComparison.Ordinal) ||
+                path.Contains("auth/oidc/oidc/callback", StringComparison.Ordinal))
+            {
+                browserAuthStarted = true;
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (path.Contains("secret/data/oidc/path", StringComparison.Ordinal))
+            {
+                capturedSecretToken = req.Headers.GetValues("X-Vault-Token").FirstOrDefault();
+                return KvV2ReadResponse(new Dictionary<string, string> { ["password"] = "cached-secret" });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var oidcFlow = new StubVaultOidcLoginFlow((_, _, _, _, _, _) =>
+            throw new InvalidOperationException("OIDC browser flow should not start when persisted token is valid."));
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => handler,
+            tokenProvider: (_, _) => "s.persisted-token",
+            secretIdProvider: null,
+            ldapPasswordProvider: null,
+            userpassPasswordProvider: null,
+            tokenSaver: null,
+            oidcLoginFlow: oidcFlow);
+
+        var value = await svc.ReadSecretAsync("test", "oidc/path", "password");
+
+        value.Should().Be("cached-secret");
+        lookupSelfCount.Should().Be(1);
+        browserAuthStarted.Should().BeFalse();
+        capturedSecretToken.Should().Be("s.persisted-token");
+    }
+
+    [Fact]
+    public async Task OidcAuth_UnauthorizedPersistedToken_FallsBackToBrowserLogin()
+    {
+        var settings = CreateSettings(authMethod: VaultAuthMethod.Oidc);
+        settings.Profiles[0].OidcRole = "desktop-role";
+        settings.Profiles[0].OidcAuthMountPath = "oidc";
+
+        var lookupSelfCount = 0;
+        var authUrlCount = 0;
+        string? generatedState = null;
+        string? capturedSecretToken = null;
+        string? persistedToken = null;
+
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+
+            if (path.Contains("auth/token/lookup-self", StringComparison.Ordinal))
+            {
+                lookupSelfCount++;
+                return new HttpResponseMessage(HttpStatusCode.Unauthorized);
+            }
+
+            if (path.Contains("auth/oidc/oidc/auth_url", StringComparison.Ordinal))
+            {
+                authUrlCount++;
+                var authUrlBody = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                using var doc = JsonDocument.Parse(authUrlBody!);
+                generatedState = doc.RootElement.GetProperty("state").GetString();
+                return JsonResponse(HttpStatusCode.OK, new
+                {
+                    data = new { auth_url = "https://idp.example.com/authorize" }
+                });
+            }
+
+            if (path.Contains("auth/oidc/oidc/callback", StringComparison.Ordinal))
+            {
+                return JsonResponse(HttpStatusCode.OK, new
+                {
+                    auth = new { client_token = "s.oidc-fresh", lease_duration = 3600 }
+                });
+            }
+
+            if (path.Contains("secret/data/oidc/path", StringComparison.Ordinal))
+            {
+                capturedSecretToken = req.Headers.GetValues("X-Vault-Token").FirstOrDefault();
+                return KvV2ReadResponse(new Dictionary<string, string> { ["password"] = "fresh-secret" });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var oidcFlow = new StubVaultOidcLoginFlow((_, _, _, _, _, _) =>
+            Task.FromResult(new VaultOidcLoginResult
+            {
+                State = generatedState ?? string.Empty,
+                Code = "auth-code"
+            }));
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => handler,
+            tokenProvider: (_, _) => "s.persisted-expired",
+            secretIdProvider: null,
+            ldapPasswordProvider: null,
+            userpassPasswordProvider: null,
+            tokenSaver: (_, token) => persistedToken = token,
+            oidcLoginFlow: oidcFlow);
+
+        var value = await svc.ReadSecretAsync("test", "oidc/path", "password");
+
+        value.Should().Be("fresh-secret");
+        lookupSelfCount.Should().Be(1);
+        authUrlCount.Should().Be(1);
+        capturedSecretToken.Should().Be("s.oidc-fresh");
+        persistedToken.Should().Be("s.oidc-fresh");
+    }
+
+    [Fact]
+    public async Task OidcAuth_PersistedTokenValidationTransportError_DoesNotFallBackToBrowserLogin()
+    {
+        var settings = CreateSettings(authMethod: VaultAuthMethod.Oidc);
+        settings.Profiles[0].OidcRole = "desktop-role";
+
+        var browserAuthStarted = false;
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+
+            if (path.Contains("auth/token/lookup-self", StringComparison.Ordinal))
+                throw new HttpRequestException("network down");
+
+            if (path.Contains("auth/oidc/oidc/auth_url", StringComparison.Ordinal) ||
+                path.Contains("auth/oidc/oidc/callback", StringComparison.Ordinal))
+            {
+                browserAuthStarted = true;
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var oidcFlow = new StubVaultOidcLoginFlow((_, _, _, _, _, _) =>
+        {
+            browserAuthStarted = true;
+            throw new InvalidOperationException("OIDC browser flow should not start when persisted token validation fails with transport error.");
+        });
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => handler,
+            tokenProvider: (_, _) => "s.persisted-token",
+            secretIdProvider: null,
+            ldapPasswordProvider: null,
+            userpassPasswordProvider: null,
+            tokenSaver: null,
+            oidcLoginFlow: oidcFlow);
+
+        var act = () => svc.ReadSecretAsync("test", "oidc/path", "password");
+        await act.Should().ThrowAsync<HttpRequestException>()
+            .WithMessage("*network down*");
+        browserAuthStarted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task OidcAuth_Ipv6LoopbackHost_NormalizesRedirectUri()
+    {
+        var settings = CreateSettings(authMethod: VaultAuthMethod.Oidc);
+        settings.Profiles[0].OidcRole = "desktop-role";
+        settings.Profiles[0].OidcCallbackHost = "::1";
+
+        string? generatedState = null;
+        string? redirectUri = null;
+
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+
+            if (path.Contains("auth/oidc/oidc/auth_url", StringComparison.Ordinal))
+            {
+                var authUrlBody = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                using var doc = JsonDocument.Parse(authUrlBody!);
+                generatedState = doc.RootElement.GetProperty("state").GetString();
+                redirectUri = doc.RootElement.GetProperty("redirect_uri").GetString();
+                return JsonResponse(HttpStatusCode.OK, new
+                {
+                    data = new { auth_url = "https://idp.example.com/authorize" }
+                });
+            }
+
+            if (path.Contains("auth/oidc/oidc/callback", StringComparison.Ordinal))
+            {
+                return JsonResponse(HttpStatusCode.OK, new
+                {
+                    auth = new { client_token = "s.oidc-token", lease_duration = 3600 }
+                });
+            }
+
+            if (path.Contains("secret/data/oidc/path", StringComparison.Ordinal))
+                return KvV2ReadResponse(new Dictionary<string, string> { ["password"] = "ipv6-secret" });
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var oidcFlow = new StubVaultOidcLoginFlow((_, _, _, _, _, _) =>
+            Task.FromResult(new VaultOidcLoginResult
+            {
+                State = generatedState ?? string.Empty,
+                Code = "auth-code"
+            }));
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => handler,
+            tokenProvider: null,
+            secretIdProvider: null,
+            ldapPasswordProvider: null,
+            userpassPasswordProvider: null,
+            tokenSaver: null,
+            oidcLoginFlow: oidcFlow);
+
+        var value = await svc.ReadSecretAsync("test", "oidc/path", "password");
+
+        value.Should().Be("ipv6-secret");
+        redirectUri.Should().Be("http://[::1]:8250/oidc/callback");
+    }
 }
