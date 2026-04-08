@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using Rebex.Net;
 using SSH_Helper.Models;
@@ -71,6 +72,34 @@ namespace SSH_Helper.Services
     {
         private const string SingleHostOnlyMessageSuffix =
             " not supported in folder or multi-host runs. Run the script against a single current host instead.";
+
+        private static readonly string[] NonRsaHostKeyFallbackAlgorithms =
+        {
+            "ssh-ed25519",
+            "ecdsa-sha2-nistp256",
+            "ecdsa-sha2-nistp384",
+            "ecdsa-sha2-nistp521"
+        };
+
+        private static readonly string[] Ed25519OnlyHostKeyAlgorithms =
+        {
+            "ssh-ed25519"
+        };
+
+        private static readonly string[] ConservativeEncryptionFallbackAlgorithms =
+        {
+            "aes256-ctr",
+            "aes128-ctr",
+            "aes256-cbc",
+            "aes128-cbc"
+        };
+
+        private static readonly string[] ConservativeMacFallbackAlgorithms =
+        {
+            "hmac-sha2-256",
+            "hmac-sha2-512",
+            "hmac-sha1"
+        };
 
         private readonly SshConnectionPool? _connectionPool;
         private readonly bool _ownsPool;
@@ -1261,19 +1290,7 @@ namespace SSH_Helper.Services
             var sw = System.Diagnostics.Stopwatch.StartNew();
             SshDebugLog(host, "SCRIPT", $"ExecuteScriptWithoutPool entered for {host.IpAddress}:{host.Port}", debugEnabledOverride: effectiveDebugMode);
 
-            // Create Rebex SSH client
-            using var client = new Ssh();
-            client.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
-            SshDebugLog(host, "SCRIPT", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw, effectiveDebugMode);
-
-            // Apply algorithm preferences from SSH config (if any)
-            ApplyAlgorithmSettings(client, host);
-
-            SshDebugLog(host, "SCRIPT", "Calling client.Connect()", sw, effectiveDebugMode);
-            var connectSw = System.Diagnostics.Stopwatch.StartNew();
-            client.Connect(host.IpAddress, host.Port);
-            connectSw.Stop();
-            SshDebugLog(host, "SCRIPT", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw, effectiveDebugMode);
+            using var client = CreateConnectedClientWithFallback(host, timeouts, sw, "SCRIPT", effectiveDebugMode);
 
             SshDebugLog(host, "SCRIPT", "Calling client.Login()", sw, effectiveDebugMode);
 
@@ -1683,19 +1700,7 @@ namespace SSH_Helper.Services
                 }
             }
 
-            // Create Rebex SSH client
-            using var client = new Ssh();
-            client.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
-            SshDebugLog(host, "SSH", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
-
-            // Apply algorithm preferences from SSH config (if any)
-            ApplyAlgorithmSettings(client, host);
-
-            SshDebugLog(host, "SSH", "Calling client.Connect() - TCP handshake + SSH negotiation starting", sw);
-            var connectSw = System.Diagnostics.Stopwatch.StartNew();
-            client.Connect(host.IpAddress, host.Port);
-            connectSw.Stop();
-            SshDebugLog(host, "SSH", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw);
+            using var client = CreateConnectedClientWithFallback(host, timeouts, sw, "SSH");
 
             SshDebugLog(host, "SSH", "Calling client.Login()", sw);
 
@@ -1864,6 +1869,149 @@ namespace SSH_Helper.Services
         {
             var msg = ex.Message.ToLowerInvariant();
             return msg.Contains("timeout") || msg.Contains("time limit") || msg.Contains("timed out");
+        }
+
+        private Ssh CreateConnectedClientWithFallback(
+            HostConnection host,
+            SshTimeoutOptions timeouts,
+            System.Diagnostics.Stopwatch? sw,
+            string phase,
+            bool? debugEnabledOverride = null)
+        {
+            Ssh CreateConfiguredClient(Action<Ssh>? additionalAlgorithmConfig = null)
+            {
+                var sshClient = new Ssh();
+                sshClient.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
+                ApplyAlgorithmSettings(sshClient, host);
+                additionalAlgorithmConfig?.Invoke(sshClient);
+                return sshClient;
+            }
+
+            SshDebugLog(host, phase, $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw, debugEnabledOverride);
+
+            var client = CreateConfiguredClient();
+            try
+            {
+                SshDebugLog(host, phase, "Calling client.Connect()", sw, debugEnabledOverride);
+                var connectSw = System.Diagnostics.Stopwatch.StartNew();
+                client.Connect(host.IpAddress, host.Port);
+                connectSw.Stop();
+                SshDebugLog(host, phase, $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw, debugEnabledOverride);
+                return client;
+            }
+            catch (Exception ex) when (ShouldRetryWithAlgorithmFallback(host, ex))
+            {
+                client.Dispose();
+
+                SshDebugLog(
+                    host,
+                    phase,
+                    "Negotiation failed due to unsupported key algorithm. Retrying with non-RSA host key algorithms (ed25519/ECDSA).",
+                    sw,
+                    debugEnabledOverride);
+
+                var retryClient = CreateConfiguredClient(ssh =>
+                    ssh.Settings.SshParameters.SetHostKeyAlgorithms(NonRsaHostKeyFallbackAlgorithms));
+
+                try
+                {
+                    SshDebugLog(
+                        host,
+                        phase,
+                        $"Fallback host key algorithms: {string.Join(", ", NonRsaHostKeyFallbackAlgorithms)}",
+                        sw,
+                        debugEnabledOverride);
+
+                    SshDebugLog(host, phase, "Calling client.Connect() (non-RSA fallback)", sw, debugEnabledOverride);
+                    var retrySw = System.Diagnostics.Stopwatch.StartNew();
+                    retryClient.Connect(host.IpAddress, host.Port);
+                    retrySw.Stop();
+                    SshDebugLog(host, phase, $"client.Connect() completed in {retrySw.ElapsedMilliseconds}ms (non-RSA fallback)", sw, debugEnabledOverride);
+                    return retryClient;
+                }
+                catch (Exception ex2) when (ShouldRetryWithAlgorithmFallback(host, ex2))
+                {
+                    retryClient.Dispose();
+
+                    SshDebugLog(
+                        host,
+                        phase,
+                        "Non-RSA retry still failed. Retrying with ed25519-only host key + conservative ciphers.",
+                        sw,
+                        debugEnabledOverride);
+
+                    var ed25519OnlyClient = CreateConfiguredClient(ssh =>
+                    {
+                        var parameters = ssh.Settings.SshParameters;
+                        parameters.SetHostKeyAlgorithms(Ed25519OnlyHostKeyAlgorithms);
+                        parameters.SetEncryptionAlgorithms(ConservativeEncryptionFallbackAlgorithms);
+
+                        var macApplied = TrySetSshParameterAlgorithms(parameters, "SetMacAlgorithms", ConservativeMacFallbackAlgorithms);
+
+                        if (DebugMode || (debugEnabledOverride ?? false))
+                        {
+                            var macStatus = macApplied ? "applied" : "not supported by this Rebex version";
+                            SshDebugLog(host, phase, $"Ed25519-only fallback MAC override: {macStatus}", sw, debugEnabledOverride);
+                        }
+                    });
+
+                    SshDebugLog(
+                        host,
+                        phase,
+                        $"Ed25519-only fallback host key algorithms: {string.Join(", ", Ed25519OnlyHostKeyAlgorithms)}",
+                        sw,
+                        debugEnabledOverride);
+
+                    SshDebugLog(host, phase, "Calling client.Connect() (ed25519-only fallback)", sw, debugEnabledOverride);
+                    var ed25519Sw = System.Diagnostics.Stopwatch.StartNew();
+                    ed25519OnlyClient.Connect(host.IpAddress, host.Port);
+                    ed25519Sw.Stop();
+                    SshDebugLog(host, phase, $"client.Connect() completed in {ed25519Sw.ElapsedMilliseconds}ms (ed25519-only fallback)", sw, debugEnabledOverride);
+
+                    return ed25519OnlyClient;
+                }
+            }
+        }
+
+        private static bool ShouldRetryWithAlgorithmFallback(HostConnection host, Exception ex)
+        {
+            // Respect explicit user/ssh-config host key settings and only auto-fallback when none were configured.
+            if (host.HostKeyAlgorithms is { Length: > 0 })
+                return false;
+
+            return HasUnsupportedKeyAlgorithmError(ex);
+        }
+
+        private static bool TrySetSshParameterAlgorithms(object sshParameters, string methodName, string[] algorithms)
+        {
+            var method = sshParameters
+                .GetType()
+                .GetMethod(methodName, new[] { typeof(string[]) });
+
+            if (method == null)
+                return false;
+
+            method.Invoke(sshParameters, new object[] { algorithms });
+            return true;
+        }
+
+        private static bool HasUnsupportedKeyAlgorithmError(Exception ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                if (current is CryptographicException cryptographicException &&
+                    cryptographicException.Message.Contains("key algorithm is not supported", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (current.Message.Contains("key algorithm is not supported", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private string FormatError(string errorType, HostConnection host, Exception ex, bool includeDebugDetails = false)
