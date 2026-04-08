@@ -329,36 +329,140 @@ namespace SSH_Helper.Services
             SshTimeoutOptions effectiveTimeouts,
             CancellationToken cancellationToken)
         {
+            var cacheKey = $"{host.IpAddress}:{host.Port}";
+            var canUseFallbackCache = host.HostKeyAlgorithms is not { Length: > 0 };
+
+            // Try cached algorithm tier first to avoid wasting a round-trip on the wrong algorithms
+            if (canUseFallbackCache
+                && SshExecutionService.HostAlgorithmCache.TryGetValue(cacheKey, out var cachedTier)
+                && cachedTier != SshExecutionService.HostKeyAlgorithmTier.Default)
+            {
+                var cachedClient = new Ssh();
+                cachedClient.Timeout = (int)effectiveTimeouts.ConnectionTimeout.TotalMilliseconds;
+                ApplyAlgorithmSettings(cachedClient, host);
+                ApplyAlgorithmTier(cachedClient, cachedTier);
+                try
+                {
+                    await Task.Run(() =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        cachedClient.Connect(host.IpAddress, host.Port);
+                        LoginClient(cachedClient, username, password, host);
+                    }, cancellationToken);
+                    return cachedClient;
+                }
+                catch (Exception)
+                {
+                    cachedClient.Dispose();
+                    SshExecutionService.HostAlgorithmCache.TryRemove(cacheKey, out _);
+                    // Fall through to full discovery
+                }
+            }
+
             var client = new Ssh();
             client.Timeout = (int)effectiveTimeouts.ConnectionTimeout.TotalMilliseconds;
-
-            // Apply algorithm preferences before connecting (from SSH config)
             ApplyAlgorithmSettings(client, host);
 
-            // Connect and authenticate
-            await Task.Run(() =>
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                client.Connect(host.IpAddress, host.Port);
-
-                // SSH agent, key-based, or password authentication
-                if (!TryLoginWithAgent(client, username, host))
+                await Task.Run(() =>
                 {
-                    if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
-                    {
-                        // Use key-based authentication
-                        var passphrase = host.IdentityFilePassphrase ?? string.Empty;
-                        client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
-                    }
-                    else
-                    {
-                        // Use password authentication
-                        client.Login(username, password);
-                    }
-                }
-            }, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    client.Connect(host.IpAddress, host.Port);
+                    LoginClient(client, username, password, host);
+                }, cancellationToken);
+                if (canUseFallbackCache)
+                    SshExecutionService.HostAlgorithmCache[cacheKey] = SshExecutionService.HostKeyAlgorithmTier.Default;
+                return client;
+            }
+            catch (Exception ex) when (canUseFallbackCache && HasUnsupportedKeyAlgorithmError(ex))
+            {
+                client.Dispose();
 
-            return client;
+                // Retry with non-RSA algorithms
+                var retryClient = new Ssh();
+                retryClient.Timeout = (int)effectiveTimeouts.ConnectionTimeout.TotalMilliseconds;
+                ApplyAlgorithmSettings(retryClient, host);
+                retryClient.Settings.SshParameters.SetHostKeyAlgorithms(SshExecutionService.NonRsaHostKeyFallbackAlgorithms);
+
+                try
+                {
+                    await Task.Run(() =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        retryClient.Connect(host.IpAddress, host.Port);
+                        LoginClient(retryClient, username, password, host);
+                    }, cancellationToken);
+                    SshExecutionService.HostAlgorithmCache[cacheKey] = SshExecutionService.HostKeyAlgorithmTier.NonRsa;
+                    return retryClient;
+                }
+                catch (Exception ex2) when (HasUnsupportedKeyAlgorithmError(ex2))
+                {
+                    retryClient.Dispose();
+
+                    // Retry with ed25519-only + conservative ciphers
+                    var ed25519Client = new Ssh();
+                    ed25519Client.Timeout = (int)effectiveTimeouts.ConnectionTimeout.TotalMilliseconds;
+                    ApplyAlgorithmSettings(ed25519Client, host);
+                    ApplyAlgorithmTier(ed25519Client, SshExecutionService.HostKeyAlgorithmTier.Ed25519Only);
+
+                    await Task.Run(() =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        ed25519Client.Connect(host.IpAddress, host.Port);
+                        LoginClient(ed25519Client, username, password, host);
+                    }, cancellationToken);
+                    SshExecutionService.HostAlgorithmCache[cacheKey] = SshExecutionService.HostKeyAlgorithmTier.Ed25519Only;
+                    return ed25519Client;
+                }
+            }
+        }
+
+        private void LoginClient(Ssh client, string username, string password, HostConnection host)
+        {
+            if (!TryLoginWithAgent(client, username, host))
+            {
+                if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
+                {
+                    var passphrase = host.IdentityFilePassphrase ?? string.Empty;
+                    client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
+                }
+                else
+                {
+                    client.Login(username, password);
+                }
+            }
+        }
+
+        private static void ApplyAlgorithmTier(Ssh ssh, SshExecutionService.HostKeyAlgorithmTier tier)
+        {
+            switch (tier)
+            {
+                case SshExecutionService.HostKeyAlgorithmTier.NonRsa:
+                    ssh.Settings.SshParameters.SetHostKeyAlgorithms(SshExecutionService.NonRsaHostKeyFallbackAlgorithms);
+                    break;
+                case SshExecutionService.HostKeyAlgorithmTier.Ed25519Only:
+                    ssh.Settings.SshParameters.SetHostKeyAlgorithms(SshExecutionService.Ed25519OnlyHostKeyAlgorithms);
+                    ssh.Settings.SshParameters.SetEncryptionAlgorithms(SshExecutionService.ConservativeEncryptionFallbackAlgorithms);
+                    TrySetMacAlgorithms(ssh.Settings.SshParameters, SshExecutionService.ConservativeMacFallbackAlgorithms);
+                    break;
+            }
+        }
+
+        private static bool HasUnsupportedKeyAlgorithmError(Exception ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                if (current.Message.Contains("key algorithm is not supported", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        private static void TrySetMacAlgorithms(object sshParameters, string[] algorithms)
+        {
+            var method = sshParameters.GetType().GetMethod("SetMacAlgorithms", new[] { typeof(string[]) });
+            method?.Invoke(sshParameters, new object[] { algorithms });
         }
 
         /// <summary>

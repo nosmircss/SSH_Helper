@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -73,7 +74,7 @@ namespace SSH_Helper.Services
         private const string SingleHostOnlyMessageSuffix =
             " not supported in folder or multi-host runs. Run the script against a single current host instead.";
 
-        private static readonly string[] NonRsaHostKeyFallbackAlgorithms =
+        internal static readonly string[] NonRsaHostKeyFallbackAlgorithms =
         {
             "ssh-ed25519",
             "ecdsa-sha2-nistp256",
@@ -81,12 +82,12 @@ namespace SSH_Helper.Services
             "ecdsa-sha2-nistp521"
         };
 
-        private static readonly string[] Ed25519OnlyHostKeyAlgorithms =
+        internal static readonly string[] Ed25519OnlyHostKeyAlgorithms =
         {
             "ssh-ed25519"
         };
 
-        private static readonly string[] ConservativeEncryptionFallbackAlgorithms =
+        internal static readonly string[] ConservativeEncryptionFallbackAlgorithms =
         {
             "aes256-ctr",
             "aes128-ctr",
@@ -94,12 +95,19 @@ namespace SSH_Helper.Services
             "aes128-cbc"
         };
 
-        private static readonly string[] ConservativeMacFallbackAlgorithms =
+        internal static readonly string[] ConservativeMacFallbackAlgorithms =
         {
             "hmac-sha2-256",
             "hmac-sha2-512",
             "hmac-sha1"
         };
+
+        /// <summary>
+        /// Tracks which algorithm tier succeeded for a given host:port, so subsequent
+        /// connections can skip failed tiers and connect faster.
+        /// </summary>
+        internal enum HostKeyAlgorithmTier { Default, NonRsa, Ed25519Only }
+        internal static readonly ConcurrentDictionary<string, HostKeyAlgorithmTier> HostAlgorithmCache = new();
 
         private readonly SshConnectionPool? _connectionPool;
         private readonly bool _ownsPool;
@@ -1889,6 +1897,30 @@ namespace SSH_Helper.Services
 
             SshDebugLog(host, phase, $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw, debugEnabledOverride);
 
+            // Check if we already know which algorithm tier works for this host
+            var cacheKey = $"{host.IpAddress}:{host.Port}";
+            var canUseFallbackCache = host.HostKeyAlgorithms is not { Length: > 0 };
+            if (canUseFallbackCache && HostAlgorithmCache.TryGetValue(cacheKey, out var cachedTier) && cachedTier != HostKeyAlgorithmTier.Default)
+            {
+                SshDebugLog(host, phase, $"Using cached algorithm tier: {cachedTier}", sw, debugEnabledOverride);
+                var cachedClient = CreateConfiguredClient(ssh => ApplyAlgorithmTier(ssh, cachedTier, host, phase, sw, debugEnabledOverride));
+                try
+                {
+                    var cachedSw = System.Diagnostics.Stopwatch.StartNew();
+                    cachedClient.Connect(host.IpAddress, host.Port);
+                    cachedSw.Stop();
+                    SshDebugLog(host, phase, $"client.Connect() completed in {cachedSw.ElapsedMilliseconds}ms (cached {cachedTier})", sw, debugEnabledOverride);
+                    return cachedClient;
+                }
+                catch (Exception)
+                {
+                    cachedClient.Dispose();
+                    // Cache miss — evict and fall through to full discovery
+                    HostAlgorithmCache.TryRemove(cacheKey, out _);
+                    SshDebugLog(host, phase, "Cached algorithm tier failed, falling back to full discovery", sw, debugEnabledOverride);
+                }
+            }
+
             var client = CreateConfiguredClient();
             try
             {
@@ -1897,6 +1929,8 @@ namespace SSH_Helper.Services
                 client.Connect(host.IpAddress, host.Port);
                 connectSw.Stop();
                 SshDebugLog(host, phase, $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw, debugEnabledOverride);
+                if (canUseFallbackCache)
+                    HostAlgorithmCache[cacheKey] = HostKeyAlgorithmTier.Default;
                 return client;
             }
             catch (Exception ex) when (ShouldRetryWithAlgorithmFallback(host, ex))
@@ -1927,6 +1961,7 @@ namespace SSH_Helper.Services
                     retryClient.Connect(host.IpAddress, host.Port);
                     retrySw.Stop();
                     SshDebugLog(host, phase, $"client.Connect() completed in {retrySw.ElapsedMilliseconds}ms (non-RSA fallback)", sw, debugEnabledOverride);
+                    HostAlgorithmCache[cacheKey] = HostKeyAlgorithmTier.NonRsa;
                     return retryClient;
                 }
                 catch (Exception ex2) when (ShouldRetryWithAlgorithmFallback(host, ex2))
@@ -1967,9 +2002,31 @@ namespace SSH_Helper.Services
                     ed25519OnlyClient.Connect(host.IpAddress, host.Port);
                     ed25519Sw.Stop();
                     SshDebugLog(host, phase, $"client.Connect() completed in {ed25519Sw.ElapsedMilliseconds}ms (ed25519-only fallback)", sw, debugEnabledOverride);
+                    HostAlgorithmCache[cacheKey] = HostKeyAlgorithmTier.Ed25519Only;
 
                     return ed25519OnlyClient;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Applies the algorithm configuration for a given tier to an SSH client.
+        /// Used when replaying a cached algorithm tier.
+        /// </summary>
+        private void ApplyAlgorithmTier(Ssh ssh, HostKeyAlgorithmTier tier, HostConnection host, string phase,
+            System.Diagnostics.Stopwatch? sw, bool? debugEnabledOverride)
+        {
+            switch (tier)
+            {
+                case HostKeyAlgorithmTier.NonRsa:
+                    ssh.Settings.SshParameters.SetHostKeyAlgorithms(NonRsaHostKeyFallbackAlgorithms);
+                    break;
+                case HostKeyAlgorithmTier.Ed25519Only:
+                    var parameters = ssh.Settings.SshParameters;
+                    parameters.SetHostKeyAlgorithms(Ed25519OnlyHostKeyAlgorithms);
+                    parameters.SetEncryptionAlgorithms(ConservativeEncryptionFallbackAlgorithms);
+                    TrySetSshParameterAlgorithms(parameters, "SetMacAlgorithms", ConservativeMacFallbackAlgorithms);
+                    break;
             }
         }
 
