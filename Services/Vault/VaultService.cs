@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
@@ -20,6 +21,8 @@ namespace SSH_Helper.Services.Vault
         private readonly Func<string, string, string?>? _secretIdProvider;
         private readonly Func<string, string, string?>? _ldapPasswordProvider;
         private readonly Func<string, string, string?>? _userpassPasswordProvider;
+        private readonly Action<string, string>? _tokenSaver;
+        private readonly IVaultOidcLoginFlow _oidcLoginFlow;
 
         private readonly Dictionary<string, VaultProfile> _profiles = new(StringComparer.OrdinalIgnoreCase);
         private readonly object _profilesLock = new();
@@ -33,7 +36,29 @@ namespace SSH_Helper.Services.Vault
             Func<string, string, string?>? tokenProvider = null,
             Func<string, string, string?>? secretIdProvider = null,
             Func<string, string, string?>? ldapPasswordProvider = null,
-            Func<string, string, string?>? userpassPasswordProvider = null)
+            Func<string, string, string?>? userpassPasswordProvider = null,
+            Action<string, string>? tokenSaver = null)
+            : this(
+                settings,
+                handlerFactory,
+                tokenProvider,
+                secretIdProvider,
+                ldapPasswordProvider,
+                userpassPasswordProvider,
+                tokenSaver,
+                null)
+        {
+        }
+
+        internal VaultService(
+            VaultSettings settings,
+            Func<VaultProfileConfig, HttpMessageHandler>? handlerFactory,
+            Func<string, string, string?>? tokenProvider,
+            Func<string, string, string?>? secretIdProvider,
+            Func<string, string, string?>? ldapPasswordProvider,
+            Func<string, string, string?>? userpassPasswordProvider,
+            Action<string, string>? tokenSaver,
+            IVaultOidcLoginFlow? oidcLoginFlow)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _handlerFactory = handlerFactory ?? CreateDefaultHandler;
@@ -41,6 +66,8 @@ namespace SSH_Helper.Services.Vault
             _secretIdProvider = secretIdProvider;
             _ldapPasswordProvider = ldapPasswordProvider;
             _userpassPasswordProvider = userpassPasswordProvider;
+            _tokenSaver = tokenSaver;
+            _oidcLoginFlow = oidcLoginFlow ?? new VaultOidcLoginFlow();
         }
 
         public bool IsEnabled => _settings.Enabled && _settings.Profiles.Count > 0;
@@ -273,6 +300,9 @@ namespace SSH_Helper.Services.Vault
                 case VaultAuthMethod.Userpass:
                     await AuthenticateWithUserpassAsync(profile, ct);
                     break;
+                case VaultAuthMethod.Oidc:
+                    await AuthenticateWithOidcAsync(profile, ct);
+                    break;
                 default:
                     throw new VaultException($"Unsupported auth method: {profile.Config.AuthMethod}");
             }
@@ -433,6 +463,131 @@ namespace SSH_Helper.Services.Vault
             {
                 profile.TokenExpiry = DateTime.MaxValue;
             }
+        }
+
+        private async Task AuthenticateWithOidcAsync(VaultProfile profile, CancellationToken ct)
+        {
+            var mount = string.IsNullOrWhiteSpace(profile.Config.OidcAuthMountPath)
+                ? "oidc"
+                : profile.Config.OidcAuthMountPath.Trim('/');
+
+            var role = profile.Config.OidcRole?.Trim();
+            if (string.IsNullOrWhiteSpace(role))
+                throw new VaultException(
+                    $"Vault authentication failed for profile '{profile.Config.Name}' — no OIDC role configured");
+
+            var callbackHost = string.IsNullOrWhiteSpace(profile.Config.OidcCallbackHost)
+                ? "127.0.0.1"
+                : profile.Config.OidcCallbackHost.Trim();
+            var callbackPort = profile.Config.OidcCallbackPort <= 0 ? 8250 : profile.Config.OidcCallbackPort;
+            var callbackPath = NormalizeCallbackPath(profile.Config.OidcCallbackPath);
+            var timeoutSeconds = profile.Config.OidcTimeoutSeconds <= 0 ? 180 : profile.Config.OidcTimeoutSeconds;
+
+            var redirectUri = $"http://{callbackHost}:{callbackPort}{callbackPath}";
+            var state = CreateRandomToken(32);
+            var nonce = CreateRandomToken(32);
+            var verifier = CreateRandomToken(64);
+            var challenge = CreatePkceChallenge(verifier);
+
+            var authUrlRequest = new HttpRequestMessage(HttpMethod.Post, $"v1/auth/{mount}/oidc/auth_url")
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new
+                    {
+                        role,
+                        redirect_uri = redirectUri,
+                        state,
+                        nonce,
+                        code_challenge = challenge,
+                        code_challenge_method = "S256"
+                    }),
+                    Encoding.UTF8,
+                    "application/json")
+            };
+
+            ApplyNamespaceHeader(authUrlRequest, profile);
+
+            var authUrlResponse = await SendWithErrorTranslationAsync(
+                profile,
+                authUrlRequest,
+                $"auth/{mount}/oidc/auth_url",
+                "write",
+                ct);
+            var authUrlBody = await authUrlResponse.Content.ReadAsStringAsync(ct);
+            authUrlResponse.Dispose();
+
+            using var authUrlDoc = JsonDocument.Parse(authUrlBody);
+            var authUrl = authUrlDoc.RootElement.GetProperty("data").GetProperty("auth_url").GetString();
+            if (string.IsNullOrWhiteSpace(authUrl))
+                throw new VaultException($"Vault OIDC login failed for profile '{profile.Config.Name}' — no auth URL returned");
+
+            var callbackResult = await _oidcLoginFlow.ExecuteAsync(
+                authUrl,
+                callbackHost,
+                callbackPort,
+                callbackPath,
+                timeoutSeconds,
+                ct);
+
+            if (!string.IsNullOrEmpty(callbackResult.Error))
+            {
+                var description = string.IsNullOrEmpty(callbackResult.ErrorDescription)
+                    ? string.Empty
+                    : $": {callbackResult.ErrorDescription}";
+                throw new VaultException($"Vault OIDC login failed for profile '{profile.Config.Name}' — {callbackResult.Error}{description}");
+            }
+
+            if (!string.Equals(callbackResult.State, state, StringComparison.Ordinal))
+                throw new VaultException($"Vault OIDC login failed for profile '{profile.Config.Name}' — callback state mismatch");
+
+            if (string.IsNullOrWhiteSpace(callbackResult.Code))
+                throw new VaultException($"Vault OIDC login failed for profile '{profile.Config.Name}' — callback did not include an authorization code");
+
+            var callbackRequest = new HttpRequestMessage(HttpMethod.Post, $"v1/auth/{mount}/oidc/callback")
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new
+                    {
+                        state = callbackResult.State,
+                        code = callbackResult.Code,
+                        nonce,
+                        code_verifier = verifier,
+                        redirect_uri = redirectUri
+                    }),
+                    Encoding.UTF8,
+                    "application/json")
+            };
+
+            ApplyNamespaceHeader(callbackRequest, profile);
+
+            var callbackResponse = await SendWithErrorTranslationAsync(
+                profile,
+                callbackRequest,
+                $"auth/{mount}/oidc/callback",
+                "write",
+                ct);
+            var callbackBody = await callbackResponse.Content.ReadAsStringAsync(ct);
+            callbackResponse.Dispose();
+
+            using var callbackDoc = JsonDocument.Parse(callbackBody);
+            var auth = callbackDoc.RootElement.GetProperty("auth");
+            profile.ClientToken = auth.GetProperty("client_token").GetString();
+            if (string.IsNullOrWhiteSpace(profile.ClientToken))
+                throw new VaultException($"Vault OIDC login failed for profile '{profile.Config.Name}' — callback did not return a client token");
+
+            if (auth.TryGetProperty("lease_duration", out var leaseDuration))
+            {
+                var ttl = leaseDuration.GetInt64();
+                profile.TokenExpiry = ttl > 0
+                    ? DateTime.UtcNow.AddSeconds(ttl * 0.75)
+                    : DateTime.MaxValue;
+            }
+            else
+            {
+                profile.TokenExpiry = DateTime.MaxValue;
+            }
+
+            _tokenSaver?.Invoke(profile.Config.Name, profile.ClientToken);
         }
 
         // --- KV Version Detection ---
@@ -766,7 +921,7 @@ namespace SSH_Helper.Services.Vault
                         $"Vault rejected the request for '{path}'{detail}");
                 case 401:
                     throw new VaultException(
-                        $"Vault authentication failed for profile '{profileName}'{detail} — check your token, AppRole, LDAP, or userpass credentials");
+                        $"Vault authentication failed for profile '{profileName}'{detail} — check your token, AppRole, LDAP, userpass, or OIDC settings");
                 case 403:
                     throw new VaultException(
                         $"Permission denied on '{path}'{detail} — check that your Vault policy grants '{capability}'");
@@ -900,6 +1055,36 @@ namespace SSH_Helper.Services.Vault
             }
 
             return handler;
+        }
+
+        private static string NormalizeCallbackPath(string callbackPath)
+        {
+            var normalized = string.IsNullOrWhiteSpace(callbackPath)
+                ? "/oidc/callback"
+                : callbackPath.Trim();
+
+            if (!normalized.StartsWith('/'))
+                normalized = "/" + normalized;
+
+            return normalized;
+        }
+
+        private static string CreateRandomToken(int byteCount)
+        {
+            var bytes = RandomNumberGenerator.GetBytes(byteCount);
+            return Convert.ToBase64String(bytes)
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_');
+        }
+
+        private static string CreatePkceChallenge(string verifier)
+        {
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(verifier));
+            return Convert.ToBase64String(hash)
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_');
         }
 
         // --- Cache Entry ---

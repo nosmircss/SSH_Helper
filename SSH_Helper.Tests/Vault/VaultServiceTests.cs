@@ -27,6 +27,25 @@ internal sealed class DelegatingHandlerStub : DelegatingHandler
     }
 }
 
+internal sealed class StubVaultOidcLoginFlow : IVaultOidcLoginFlow
+{
+    private readonly Func<string, string, int, string, int, CancellationToken, Task<VaultOidcLoginResult>> _handler;
+
+    public StubVaultOidcLoginFlow(Func<string, string, int, string, int, CancellationToken, Task<VaultOidcLoginResult>> handler)
+    {
+        _handler = handler;
+    }
+
+    public Task<VaultOidcLoginResult> ExecuteAsync(
+        string authUrl,
+        string callbackHost,
+        int callbackPort,
+        string callbackPath,
+        int timeoutSeconds,
+        CancellationToken cancellationToken)
+        => _handler(authUrl, callbackHost, callbackPort, callbackPath, timeoutSeconds, cancellationToken);
+}
+
 public class VaultServiceTests
 {
     private static VaultSettings CreateSettings(
@@ -824,5 +843,126 @@ public class VaultServiceTests
         };
 
         await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task OidcAuth_Success_PersistsTokenAndReadsSecret()
+    {
+        var settings = CreateSettings(authMethod: VaultAuthMethod.Oidc);
+        settings.Profiles[0].OidcRole = "desktop-role";
+        settings.Profiles[0].OidcAuthMountPath = "oidc";
+        settings.Profiles[0].OidcCallbackHost = "127.0.0.1";
+        settings.Profiles[0].OidcCallbackPort = 8250;
+        settings.Profiles[0].OidcCallbackPath = "/oidc/callback";
+        settings.Profiles[0].OidcTimeoutSeconds = 120;
+
+        string? persistedProfile = null;
+        string? persistedToken = null;
+        string? callbackBody = null;
+        string? generatedState = null;
+
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+
+            if (path.Contains("auth/oidc/oidc/auth_url", StringComparison.Ordinal))
+            {
+                var authUrlBody = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                if (!string.IsNullOrWhiteSpace(authUrlBody))
+                {
+                    using var doc = JsonDocument.Parse(authUrlBody);
+                    generatedState = doc.RootElement.GetProperty("state").GetString();
+                }
+
+                return JsonResponse(HttpStatusCode.OK, new
+                {
+                    data = new { auth_url = "https://idp.example.com/authorize" }
+                });
+            }
+
+            if (path.Contains("auth/oidc/oidc/callback", StringComparison.Ordinal))
+            {
+                callbackBody = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return JsonResponse(HttpStatusCode.OK, new
+                {
+                    auth = new { client_token = "s.oidc-token", lease_duration = 3600 }
+                });
+            }
+
+            if (path.Contains("secret/data/oidc/path", StringComparison.Ordinal))
+                return KvV2ReadResponse(new Dictionary<string, string> { ["password"] = "p@ss" });
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var oidcFlow = new StubVaultOidcLoginFlow((_, _, _, _, _, _) =>
+            Task.FromResult(new VaultOidcLoginResult
+            {
+                State = generatedState ?? string.Empty,
+                Code = "auth-code"
+            }));
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => handler,
+            tokenProvider: null,
+            secretIdProvider: null,
+            ldapPasswordProvider: null,
+            userpassPasswordProvider: null,
+            tokenSaver: (name, token) =>
+            {
+                persistedProfile = name;
+                persistedToken = token;
+            },
+            oidcLoginFlow: oidcFlow);
+
+        var value = await svc.ReadSecretAsync("test", "oidc/path", "password");
+
+        value.Should().Be("p@ss");
+        persistedProfile.Should().Be("test");
+        persistedToken.Should().Be("s.oidc-token");
+        callbackBody.Should().Contain("auth-code");
+    }
+
+    [Fact]
+    public async Task OidcAuth_StateMismatch_ThrowsFriendlyError()
+    {
+        var settings = CreateSettings(authMethod: VaultAuthMethod.Oidc);
+        settings.Profiles[0].OidcRole = "desktop-role";
+
+        var handler = new DelegatingHandlerStub(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (path.Contains("auth/oidc/oidc/auth_url", StringComparison.Ordinal))
+            {
+                return JsonResponse(HttpStatusCode.OK, new
+                {
+                    data = new { auth_url = "https://idp.example.com/authorize?state=expected" }
+                });
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var oidcFlow = new StubVaultOidcLoginFlow((_, _, _, _, _, _) =>
+            Task.FromResult(new VaultOidcLoginResult
+            {
+                State = "unexpected",
+                Code = "auth-code"
+            }));
+
+        using var svc = new VaultService(
+            settings,
+            handlerFactory: _ => handler,
+            tokenProvider: null,
+            secretIdProvider: null,
+            ldapPasswordProvider: null,
+            userpassPasswordProvider: null,
+            tokenSaver: null,
+            oidcLoginFlow: oidcFlow);
+
+        var act = () => svc.ReadSecretAsync("test", "oidc/path", "password");
+        await act.Should().ThrowAsync<VaultException>()
+            .WithMessage("*callback state mismatch*");
     }
 }

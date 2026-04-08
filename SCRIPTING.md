@@ -3378,6 +3378,12 @@ When using the `into` parameter, two variables are created:
 
 Reads and writes secrets from a HashiCorp Vault KV store. Supports KV v1 and KV v2, multiple profiles, version pinning, full-replace writes, and patch (merge) updates.
 
+**Vault profile auth methods:**
+- `Token`, `AppRole`, `LDAP`, `Userpass`, and `OIDC` are supported in Vault profile settings.
+- `OIDC` uses an interactive browser flow and a localhost callback.
+- Recommended OIDC defaults: callback host `127.0.0.1`, callback path `/oidc/callback`, and a dedicated callback port allowed by endpoint security policy.
+- On successful OIDC sign-in, SSH Helper stores the resulting Vault token in Windows Credential Manager (not in `config.json`).
+
 **Read a single key:**
 ```yaml
 - vault:

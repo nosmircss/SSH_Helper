@@ -1360,6 +1360,11 @@ namespace SSH_Helper
                 {
                     var target = CredentialTargets.VaultAuthTarget(profileName, "userpass_password");
                     return _credentialProvider?.TryGetPassword(target, out _, out var pass) == true ? pass : null;
+                },
+                tokenSaver: (profileName, token) =>
+                {
+                    var target = CredentialTargets.VaultAuthTarget(profileName, "token");
+                    _credentialProvider?.SavePassword(target, string.Empty, token);
                 });
 
             _sshService.VaultService = _vaultService;

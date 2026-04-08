@@ -63,7 +63,7 @@ A full HashiCorp Vault integration provides secret management across scripts, jo
 
 **VaultService** (`Services/Vault/VaultService.cs`) — Core service implementing:
 
-- **Authentication** — Four auth methods: `Token`, `AppRole`, `LDAP`, and `Userpass`. All secrets (tokens, secret IDs, passwords) are stored in Windows Credential Manager via `CredentialTargets.VaultAuthTarget(profileName, authType)`. Token TTL tracking with 75% expiry threshold for automatic re-authentication.
+- **Authentication** — Five auth methods: `Token`, `AppRole`, `LDAP`, `Userpass`, and `OIDC`. All secrets (tokens, secret IDs, passwords) are stored in Windows Credential Manager via `CredentialTargets.VaultAuthTarget(profileName, authType)`. Token TTL tracking with 75% expiry threshold for automatic re-authentication.
 - **KV v1/v2 support** — `AutoDetect` mode queries the Vault mount's `options.version` to determine the KV engine version. V2 paths are automatically adjusted to include `/data/` and `/metadata/` segments. Secret version pinning supported on V2 reads.
 - **Read/Write/Patch/List operations** — `ReadSecretAsync`, `ReadSecretKeysAsync`, `WriteSecretAsync`, `PatchSecretAsync`, `ListSecretsAsync`. Write and patch accept structured JSON values — `TryParseStructuredJson` detects JSON objects/arrays in value strings (including escaped payloads) and preserves their structure.
 - **Caching** — Per-profile TTL-based cache with `CacheTtlSeconds` (default 300s). Cache keys are scoped to `profile:path:key:version`. Path-level invalidation on writes/patches.
@@ -122,7 +122,7 @@ A full HashiCorp Vault integration provides secret management across scripts, jo
 
 - Profile list with add/remove
 - Connection details (address, namespace, mount path, KV version)
-- Auth method switcher with context-sensitive panels (Token, AppRole, LDAP, Userpass)
+- Auth method switcher with context-sensitive panels (Token, AppRole, LDAP, Userpass, OIDC)
 - Credentials stored/retrieved from Windows Credential Manager
 - CA certificate path browser and TLS skip toggle
 - Cache TTL configuration

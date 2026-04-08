@@ -70,6 +70,41 @@ namespace SSH_Helper.Models
         public string UserpassUsername { get; set; } = "";
 
         /// <summary>
+        /// OIDC auth mount path (used when <see cref="AuthMethod"/> is <see cref="VaultAuthMethod.Oidc"/>).
+        /// Default: "oidc".
+        /// </summary>
+        public string OidcAuthMountPath { get; set; } = "oidc";
+
+        /// <summary>
+        /// OIDC role name configured in Vault (used when <see cref="AuthMethod"/> is <see cref="VaultAuthMethod.Oidc"/>).
+        /// </summary>
+        public string OidcRole { get; set; } = "";
+
+        /// <summary>
+        /// Host component used for the local callback listener during OIDC login.
+        /// Default: "127.0.0.1".
+        /// </summary>
+        public string OidcCallbackHost { get; set; } = "127.0.0.1";
+
+        /// <summary>
+        /// Port used for the local callback listener during OIDC login.
+        /// Default: 8250.
+        /// </summary>
+        public int OidcCallbackPort { get; set; } = 8250;
+
+        /// <summary>
+        /// Callback path used for OIDC redirect handling.
+        /// Default: "/oidc/callback".
+        /// </summary>
+        public string OidcCallbackPath { get; set; } = "/oidc/callback";
+
+        /// <summary>
+        /// Maximum time in seconds to wait for the OIDC callback before failing.
+        /// Default: 180.
+        /// </summary>
+        public int OidcTimeoutSeconds { get; set; } = 180;
+
+        /// <summary>
         /// How long (in seconds) to cache retrieved secrets before re-fetching. Default: 300 (5 minutes).
         /// </summary>
         public int CacheTtlSeconds { get; set; } = 300;
@@ -105,7 +140,10 @@ namespace SSH_Helper.Models
         Ldap = 2,
 
         /// <summary>Userpass authentication. Username stored in config; password in Credential Manager.</summary>
-        Userpass = 3
+        Userpass = 3,
+
+        /// <summary>OIDC authentication. Browser-based sign-in exchanges callback for a Vault token.</summary>
+        Oidc = 4
     }
 
     /// <summary>
