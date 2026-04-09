@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using Rebex.Net;
 using SSH_Helper.Models;
@@ -69,8 +71,45 @@ namespace SSH_Helper.Services
     /// </summary>
     public class SshExecutionService : IDisposable
     {
+        private const int MaxParallelHosts = 100;
+
         private const string SingleHostOnlyMessageSuffix =
             " not supported in folder or multi-host runs. Run the script against a single current host instead.";
+
+        internal static readonly string[] NonRsaHostKeyFallbackAlgorithms =
+        {
+            "ssh-ed25519",
+            "ecdsa-sha2-nistp256",
+            "ecdsa-sha2-nistp384",
+            "ecdsa-sha2-nistp521"
+        };
+
+        internal static readonly string[] Ed25519OnlyHostKeyAlgorithms =
+        {
+            "ssh-ed25519"
+        };
+
+        internal static readonly string[] ConservativeEncryptionFallbackAlgorithms =
+        {
+            "aes256-ctr",
+            "aes128-ctr",
+            "aes256-cbc",
+            "aes128-cbc"
+        };
+
+        internal static readonly string[] ConservativeMacFallbackAlgorithms =
+        {
+            "hmac-sha2-256",
+            "hmac-sha2-512",
+            "hmac-sha1"
+        };
+
+        /// <summary>
+        /// Tracks which algorithm tier succeeded for a given host:port, so subsequent
+        /// connections can skip failed tiers and connect faster.
+        /// </summary>
+        internal enum HostKeyAlgorithmTier { Default, NonRsa, Ed25519Only }
+        internal static readonly ConcurrentDictionary<string, HostKeyAlgorithmTier> HostAlgorithmCache = new();
 
         private readonly SshConnectionPool? _connectionPool;
         private readonly bool _ownsPool;
@@ -468,6 +507,26 @@ namespace SSH_Helper.Services
 
             try
             {
+                if (TryBuildUnattendedLocalCmdPreflightMessage(script, allowFileSelectionDialogs, out var unattendedLocalCmdMessage))
+                {
+                    var errorOutput = $"Script preflight error: {unattendedLocalCmdMessage}\n";
+                    OnOutputReceived(hostList.FirstOrDefault() ?? new HostConnection(), errorOutput);
+
+                    foreach (var host in hostList)
+                    {
+                        results.Add(new ExecutionResult
+                        {
+                            Host = host,
+                            Success = false,
+                            ErrorMessage = unattendedLocalCmdMessage,
+                            Output = errorOutput,
+                            Timestamp = DateTime.Now
+                        });
+                    }
+
+                    return results;
+                }
+
                 var analyzer = new ScriptDependencyAnalyzer();
                 var sshRequirement = analyzer.AnalyzeSshRequirements(script);
 
@@ -538,8 +597,13 @@ namespace SSH_Helper.Services
             var results = new List<ExecutionResult>();
             var cancellationToken = BeginExecution();
 
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+
             var hostList = hosts.Where(h => h.IsValid()).ToList();
             var presetNames = options.SelectedPresets;
+            var parallelHostCount = Math.Clamp(options.ParallelHostCount, 1, MaxParallelHosts);
+            var runPresetsInParallel = options.RunPresetsInParallel && parallelHostCount == 1;
             int totalHosts = hostList.Count;
             int totalPresets = presetNames.Count;
             int totalOperations = totalHosts * totalPresets;
@@ -550,6 +614,20 @@ namespace SSH_Helper.Services
 
             try
             {
+                if (options.ParallelHostCount != parallelHostCount)
+                {
+                    OnOutputReceived(
+                        hostList.FirstOrDefault() ?? new HostConnection(),
+                        $"Parallel hosts value '{options.ParallelHostCount}' adjusted to {parallelHostCount}. Maximum supported value is {MaxParallelHosts}.\n");
+                }
+
+                if (options.RunPresetsInParallel && !runPresetsInParallel)
+                {
+                    OnOutputReceived(
+                        hostList.FirstOrDefault() ?? new HostConnection(),
+                        "Preset parallel mode is disabled when running multiple hosts in parallel. Falling back to sequential presets per host.\n");
+                }
+
                 var blockedPresetNames = FindSingleHostOnlyFolderPresets(presetNames, presets);
                 if (blockedPresetNames.Count > 0)
                 {
@@ -575,7 +653,7 @@ namespace SSH_Helper.Services
                 // Process hosts in batches based on ParallelHostCount
                 var hostBatches = hostList
                     .Select((host, index) => new { host, index })
-                    .GroupBy(x => x.index / options.ParallelHostCount)
+                    .GroupBy(x => x.index / parallelHostCount)
                     .Select(g => g.Select(x => x.host).ToList())
                     .ToList();
 
@@ -593,6 +671,7 @@ namespace SSH_Helper.Services
                             Timestamp = DateTime.Now,
                             Success = true
                         };
+                        var hostResultLock = new object();
 
                         var outputBuilder = new StringBuilder();
                         int completedPresets = 0;
@@ -600,7 +679,7 @@ namespace SSH_Helper.Services
                         bool isFirstPreset = true;
 
                         // Execute presets on this host
-                        if (options.RunPresetsInParallel)
+                        if (runPresetsInParallel)
                         {
                             // Parallel preset execution
                             var presetTasks = presetNames.Select(async presetName =>
@@ -638,23 +717,27 @@ namespace SSH_Helper.Services
 
                                 if (!presetResult.Success)
                                 {
+                                    lock (hostResultLock)
+                                    {
                                         hostResult.Success = false;
-                                        hostResult.ErrorMessage = presetResult.ErrorMessage;
-                                        if (options.StopOnFirstError && errorTracker.TrySignalError())
-                                        {
-                                            Interlocked.Exchange(ref stopOnFirstErrorTriggered, 1);
-                                            _stopOnFirstErrorCancellationRequested = true;
-                                            _cts?.Cancel();
-                                        }
-
-                                        // Mark failed preset in output
-                                        if (!options.SuppressPresetNames)
-                                        {
-                                            var failMarker = $"\r\n═══ {presetName} [FAILED] ═══\r\n";
-                                            lock (outputBuilder) { outputBuilder.Append(failMarker); }
-                                            OnOutputReceived(host, failMarker);
-                                        }
+                                        hostResult.ErrorMessage ??= presetResult.ErrorMessage;
                                     }
+
+                                    if (options.StopOnFirstError && errorTracker.TrySignalError())
+                                    {
+                                        Interlocked.Exchange(ref stopOnFirstErrorTriggered, 1);
+                                        _stopOnFirstErrorCancellationRequested = true;
+                                        _cts?.Cancel();
+                                    }
+
+                                    // Mark failed preset in output
+                                    if (!options.SuppressPresetNames)
+                                    {
+                                        var failMarker = $"\r\n═══ {presetName} [FAILED] ═══\r\n";
+                                        lock (outputBuilder) { outputBuilder.Append(failMarker); }
+                                        OnOutputReceived(host, failMarker);
+                                    }
+                                }
                                 var hostCompletedPresets = Interlocked.Increment(ref completedPresets);
                                 var operationCount = Interlocked.Increment(ref completedOperations);
                                 progress?.Report(new FolderExecutionProgress
@@ -809,7 +892,101 @@ namespace SSH_Helper.Services
                 }
             }
 
-            return blockedPresetNames;
+                return blockedPresetNames;
+            }
+
+        private static bool TryBuildUnattendedLocalCmdPreflightMessage(
+            Script script,
+            bool allowFileSelectionDialogs,
+            out string message)
+        {
+            if (allowFileSelectionDialogs ||
+                !ContainsConfirmedLocalCmd(
+                    script.Steps,
+                    script.SubroutineRegistry,
+                    currentSubroutine: null,
+                    visitedSubroutines: new HashSet<string>(StringComparer.OrdinalIgnoreCase)))
+            {
+                message = string.Empty;
+                return false;
+            }
+
+            message = "LocalCmd confirmation is only available during manual main-window runs. For scheduler or other unattended runs, set localcmd.confirm: never.";
+            return true;
+        }
+
+        private static bool ContainsConfirmedLocalCmd(
+            List<ScriptStep>? steps,
+            ScriptSubroutineRegistry? registry,
+            ScriptSubroutineDefinition? currentSubroutine,
+            HashSet<string> visitedSubroutines)
+        {
+            if (steps == null)
+                return false;
+
+            foreach (var step in steps)
+            {
+                var stepType = step.GetStepType();
+                if (stepType == StepType.LocalCmd && RequiresLocalCmdConfirmation(step.LocalCmd))
+                    return true;
+
+                if (stepType == StepType.Call &&
+                    step.Call != null &&
+                    registry != null &&
+                    registry.TryResolve(step.Call.Subroutine, currentSubroutine, out var definition) &&
+                    definition != null &&
+                    visitedSubroutines.Add(definition.QualifiedName) &&
+                    ContainsConfirmedLocalCmd(
+                        definition.Subroutine.Steps,
+                        registry,
+                        definition,
+                        visitedSubroutines))
+                {
+                    return true;
+                }
+
+                if (ContainsConfirmedLocalCmd(step.Then, registry, currentSubroutine, visitedSubroutines) ||
+                    ContainsConfirmedLocalCmd(step.Else, registry, currentSubroutine, visitedSubroutines) ||
+                    ContainsConfirmedLocalCmd(step.Do, registry, currentSubroutine, visitedSubroutines) ||
+                    ContainsConfirmedLocalCmd(step.Try, registry, currentSubroutine, visitedSubroutines) ||
+                    ContainsConfirmedLocalCmd(step.Catch, registry, currentSubroutine, visitedSubroutines) ||
+                    ContainsConfirmedLocalCmd(step.Finally, registry, currentSubroutine, visitedSubroutines))
+                {
+                    return true;
+                }
+
+                if (step.Elif != null)
+                {
+                    foreach (var branch in step.Elif)
+                    {
+                        if (ContainsConfirmedLocalCmd(branch.Then, registry, currentSubroutine, visitedSubroutines))
+                            return true;
+                    }
+                }
+
+                if (step.Cases != null)
+                {
+                    foreach (var switchCase in step.Cases)
+                    {
+                        if (ContainsConfirmedLocalCmd(switchCase.Do, registry, currentSubroutine, visitedSubroutines))
+                            return true;
+                    }
+                }
+
+                if (step.Parallel?.Steps != null &&
+                    ContainsConfirmedLocalCmd(step.Parallel.Steps, registry, currentSubroutine, visitedSubroutines))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool RequiresLocalCmdConfirmation(LocalCmdOptions? localCmd)
+        {
+            return localCmd != null &&
+                   !string.Equals(localCmd.Confirm, "never", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string BuildFolderSingleHostOnlyPreflightMessage(IReadOnlyList<string> blockedPresetNames)
@@ -914,6 +1091,21 @@ namespace SSH_Helper.Services
 
             var analyzer = new ScriptDependencyAnalyzer();
             var sshRequirement = analyzer.AnalyzeSshRequirements(script);
+
+            if (TryBuildUnattendedLocalCmdPreflightMessage(script, allowFileSelectionDialogs, out var unattendedLocalCmdMessage))
+            {
+                var errorOutput = $"Script preflight error: {unattendedLocalCmdMessage}\n";
+                OnOutputReceived(host, errorOutput);
+
+                return new ExecutionResult
+                {
+                    Host = host,
+                    Success = false,
+                    ErrorMessage = unattendedLocalCmdMessage,
+                    Output = errorOutput,
+                    Timestamp = DateTime.Now
+                };
+            }
 
             if (TryBuildSingleHostOnlyPreflightMessage(sshRequirement, out var preflightMessage))
             {
@@ -1067,6 +1259,7 @@ namespace SSH_Helper.Services
             var interactiveSessions = new List<InteractiveTerminalSessionDetails>();
             string username = !string.IsNullOrWhiteSpace(host.Username) ? host.Username : defaultUsername;
             string password = !string.IsNullOrWhiteSpace(host.Password) ? host.Password : defaultPassword;
+            var effectiveDebugMode = DebugMode || script.Debug;
 
             try
             {
@@ -1090,7 +1283,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Authentication failed";
                 result.Exception = ex;
-                var errorOutput = FormatError("AUTHENTICATION ERROR", host, ex);
+                var errorOutput = FormatError(
+                    "AUTHENTICATION ERROR",
+                    host,
+                    ex,
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1099,7 +1297,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Connection failed";
                 result.Exception = ex;
-                var errorOutput = FormatError("CONNECTION ERROR", host, ex);
+                var errorOutput = FormatError(
+                    "CONNECTION ERROR",
+                    host,
+                    ex,
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1108,7 +1311,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Operation timed out";
                 result.Exception = ex;
-                var errorOutput = FormatError("TIMEOUT ERROR", host, ex);
+                var errorOutput = FormatError(
+                    "TIMEOUT ERROR",
+                    host,
+                    ex,
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1117,7 +1325,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = "Network error";
                 result.Exception = ex;
-                var errorOutput = FormatError("NETWORK ERROR", host, ex);
+                var errorOutput = FormatError(
+                    "NETWORK ERROR",
+                    host,
+                    ex,
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1126,7 +1339,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.WasCancelled = !_stopOnFirstErrorCancellationRequested;
                 result.ErrorMessage = "Operation cancelled";
-                var errorOutput = FormatError("CANCELLED", host, new Exception("Operation was cancelled by user"));
+                var errorOutput = FormatError(
+                    "CANCELLED",
+                    host,
+                    new Exception("Operation was cancelled by user"),
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
             }
             catch (Exception ex)
@@ -1134,7 +1352,12 @@ namespace SSH_Helper.Services
                 result.Success = false;
                 result.ErrorMessage = ex.Message;
                 result.Exception = ex;
-                var errorOutput = FormatError("ERROR", host, ex);
+                var errorOutput = FormatError(
+                    "ERROR",
+                    host,
+                    ex,
+                    includeDebugDetails: effectiveDebugMode,
+                    compactErrors: script.CompactErrors);
                 outputBuilder.AppendLine(errorOutput);
                 OnOutputReceived(host, errorOutput + Environment.NewLine);
             }
@@ -1159,13 +1382,14 @@ namespace SSH_Helper.Services
             bool showHeader = true,
             bool allowFileSelectionDialogs = true)
         {
+            var effectiveDebugMode = DebugMode || script.Debug;
             var (client, session) = _connectionPool!.CreateSessionAsync(host, username, password, timeouts, cancellationToken)
                 .GetAwaiter().GetResult();
 
             try
             {
                 OnProgressChanged(host, $"Connected to {host} (pooled, script mode)", false, true);
-                session.DebugMode = DebugMode;
+                session.DebugMode = effectiveDebugMode;
                 session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
 
                 // Build header with script name (only if showHeader is true and script doesn't suppress it)
@@ -1186,7 +1410,7 @@ namespace SSH_Helper.Services
                 // Create script context with host variables
                 var context = new ScriptContext(host.Variables);
                 context.Session = session;
-                context.DebugMode = DebugMode;
+                context.DebugMode = effectiveDebugMode;
                 context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
                 context.VaultService = VaultService;
                 context.EnvironmentVaultProfile = EnvironmentVaultProfile;
@@ -1255,31 +1479,20 @@ namespace SSH_Helper.Services
             bool showHeader = true,
             bool allowFileSelectionDialogs = true)
         {
+            var effectiveDebugMode = DebugMode || script.Debug;
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            SshDebugLog(host, "SCRIPT", $"ExecuteScriptWithoutPool entered for {host.IpAddress}:{host.Port}");
+            SshDebugLog(host, "SCRIPT", $"ExecuteScriptWithoutPool entered for {host.IpAddress}:{host.Port}", debugEnabledOverride: effectiveDebugMode);
 
-            // Create Rebex SSH client
-            using var client = new Ssh();
-            client.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
-            SshDebugLog(host, "SCRIPT", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
+            using var client = CreateConnectedClientWithFallback(host, timeouts, sw, "SCRIPT", effectiveDebugMode);
 
-            // Apply algorithm preferences from SSH config (if any)
-            ApplyAlgorithmSettings(client, host);
-
-            SshDebugLog(host, "SCRIPT", "Calling client.Connect()", sw);
-            var connectSw = System.Diagnostics.Stopwatch.StartNew();
-            client.Connect(host.IpAddress, host.Port);
-            connectSw.Stop();
-            SshDebugLog(host, "SCRIPT", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw);
-
-            SshDebugLog(host, "SCRIPT", "Calling client.Login()", sw);
+            SshDebugLog(host, "SCRIPT", "Calling client.Login()", sw, effectiveDebugMode);
 
             // SSH agent, key-based, or password authentication
             if (!TryLoginWithAgent(client, username, host, sw))
             {
                 if (!string.IsNullOrEmpty(host.IdentityFile) && File.Exists(host.IdentityFile))
                 {
-                    SshDebugLog(host, "SCRIPT", $"Using key-based auth with: {host.IdentityFile}", sw);
+                    SshDebugLog(host, "SCRIPT", $"Using key-based auth with: {host.IdentityFile}", sw, effectiveDebugMode);
                     var passphrase = host.IdentityFilePassphrase ?? string.Empty;
                     client.Login(username, new SshPrivateKey(host.IdentityFile, passphrase));
                 }
@@ -1289,11 +1502,11 @@ namespace SSH_Helper.Services
                 }
             }
 
-            SshDebugLog(host, "SCRIPT", "client.Login() completed", sw);
+            SshDebugLog(host, "SCRIPT", "client.Login() completed", sw, effectiveDebugMode);
 
             OnProgressChanged(host, $"Connected to {host} (script mode)", false, true);
 
-            SshDebugLog(host, "SCRIPT", "Starting scripting session", sw);
+            SshDebugLog(host, "SCRIPT", "Starting scripting session", sw, effectiveDebugMode);
             var terminalOptions = SshTerminalOptionsFactory.Create();
             var (scripting, terminal) = SshTerminalOptionsFactory.CreateScriptingWithHistory(
                 client,
@@ -1302,10 +1515,10 @@ namespace SSH_Helper.Services
                 SshTerminalOptionsFactory.DefaultRows,
                 SshTerminalOptionsFactory.DefaultHistoryMaxLength);
             scripting.Timeout = (int)timeouts.CommandTimeout.TotalMilliseconds;
-            SshDebugLog(host, "SCRIPT", "Scripting session created", sw);
+            SshDebugLog(host, "SCRIPT", "Scripting session created", sw, effectiveDebugMode);
 
             using var session = new SshShellSession(client, scripting, timeouts, terminal);
-            session.DebugMode = DebugMode;
+            session.DebugMode = effectiveDebugMode;
             session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
 
             // Subscribe to session debug output so we can see banner detection, prompt detection, etc.
@@ -1316,17 +1529,17 @@ namespace SSH_Helper.Services
             };
 
             // Initialize session (detect prompt)
-            SshDebugLog(host, "SCRIPT", "Calling session.InitializeAsync - waiting for prompt", sw);
+            SshDebugLog(host, "SCRIPT", "Calling session.InitializeAsync - waiting for prompt", sw, effectiveDebugMode);
             try
             {
                 var banner = session.InitializeAsync(cancellationToken).GetAwaiter().GetResult();
-                SshDebugLog(host, "SCRIPT", $"session.InitializeAsync completed. Prompt: {session.CurrentPrompt}", sw);
+                SshDebugLog(host, "SCRIPT", $"session.InitializeAsync completed. Prompt: {session.CurrentPrompt}", sw, effectiveDebugMode);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Provide more context about why the session might have failed
-                SshDebugLog(host, "SCRIPT", $"SESSION INIT FAILED during InitializeAsync: {ex.Message}", sw);
-                SshDebugLog(host, "SCRIPT", $"Client.IsConnected: {client.IsConnected}", sw);
+                SshDebugLog(host, "SCRIPT", $"SESSION INIT FAILED during InitializeAsync: {ex.Message}", sw, effectiveDebugMode);
+                SshDebugLog(host, "SCRIPT", $"Client.IsConnected: {client.IsConnected}", sw, effectiveDebugMode);
                 throw;
             }
 
@@ -1348,7 +1561,7 @@ namespace SSH_Helper.Services
             // Create script context with host variables
             var context = new ScriptContext(host.Variables);
             context.Session = session;
-            context.DebugMode = DebugMode;
+            context.DebugMode = effectiveDebugMode;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
             context.VaultService = VaultService;
             context.EnvironmentVaultProfile = EnvironmentVaultProfile;
@@ -1408,6 +1621,7 @@ namespace SSH_Helper.Services
             bool showHeader = true,
             bool allowFileSelectionDialogs = true)
         {
+            var effectiveDebugMode = DebugMode || script.Debug;
             OnProgressChanged(host, $"Running locally for {host} (no SSH required)", false, false);
 
             if (showHeader && !script.NoBanner)
@@ -1425,7 +1639,7 @@ namespace SSH_Helper.Services
 
             var context = new ScriptContext(host.Variables);
             context.Session = null;
-            context.DebugMode = DebugMode;
+            context.DebugMode = effectiveDebugMode;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
             context.VaultService = VaultService;
             context.EnvironmentVaultProfile = EnvironmentVaultProfile;
@@ -1679,19 +1893,7 @@ namespace SSH_Helper.Services
                 }
             }
 
-            // Create Rebex SSH client
-            using var client = new Ssh();
-            client.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
-            SshDebugLog(host, "SSH", $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw);
-
-            // Apply algorithm preferences from SSH config (if any)
-            ApplyAlgorithmSettings(client, host);
-
-            SshDebugLog(host, "SSH", "Calling client.Connect() - TCP handshake + SSH negotiation starting", sw);
-            var connectSw = System.Diagnostics.Stopwatch.StartNew();
-            client.Connect(host.IpAddress, host.Port);
-            connectSw.Stop();
-            SshDebugLog(host, "SSH", $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw);
+            using var client = CreateConnectedClientWithFallback(host, timeouts, sw, "SSH");
 
             SshDebugLog(host, "SSH", "Calling client.Login()", sw);
 
@@ -1862,8 +2064,210 @@ namespace SSH_Helper.Services
             return msg.Contains("timeout") || msg.Contains("time limit") || msg.Contains("timed out");
         }
 
-        private string FormatError(string errorType, HostConnection host, Exception ex)
+        private Ssh CreateConnectedClientWithFallback(
+            HostConnection host,
+            SshTimeoutOptions timeouts,
+            System.Diagnostics.Stopwatch? sw,
+            string phase,
+            bool? debugEnabledOverride = null)
         {
+            Ssh CreateConfiguredClient(Action<Ssh>? additionalAlgorithmConfig = null)
+            {
+                var sshClient = new Ssh();
+                sshClient.Timeout = (int)timeouts.ConnectionTimeout.TotalMilliseconds;
+                ApplyAlgorithmSettings(sshClient, host);
+                additionalAlgorithmConfig?.Invoke(sshClient);
+                return sshClient;
+            }
+
+            SshDebugLog(host, phase, $"Ssh client created. Timeout: {timeouts.ConnectionTimeout.TotalSeconds}s", sw, debugEnabledOverride);
+
+            // Check if we already know which algorithm tier works for this host
+            var cacheKey = $"{host.IpAddress}:{host.Port}";
+            var canUseFallbackCache = host.HostKeyAlgorithms is not { Length: > 0 };
+            if (canUseFallbackCache && HostAlgorithmCache.TryGetValue(cacheKey, out var cachedTier) && cachedTier != HostKeyAlgorithmTier.Default)
+            {
+                SshDebugLog(host, phase, $"Using cached algorithm tier: {cachedTier}", sw, debugEnabledOverride);
+                var cachedClient = CreateConfiguredClient(ssh => ApplyAlgorithmTier(ssh, cachedTier, host, phase, sw, debugEnabledOverride));
+                try
+                {
+                    var cachedSw = System.Diagnostics.Stopwatch.StartNew();
+                    cachedClient.Connect(host.IpAddress, host.Port);
+                    cachedSw.Stop();
+                    SshDebugLog(host, phase, $"client.Connect() completed in {cachedSw.ElapsedMilliseconds}ms (cached {cachedTier})", sw, debugEnabledOverride);
+                    return cachedClient;
+                }
+                catch (Exception)
+                {
+                    cachedClient.Dispose();
+                    // Cache miss — evict and fall through to full discovery
+                    HostAlgorithmCache.TryRemove(cacheKey, out _);
+                    SshDebugLog(host, phase, "Cached algorithm tier failed, falling back to full discovery", sw, debugEnabledOverride);
+                }
+            }
+
+            var client = CreateConfiguredClient();
+            try
+            {
+                SshDebugLog(host, phase, "Calling client.Connect()", sw, debugEnabledOverride);
+                var connectSw = System.Diagnostics.Stopwatch.StartNew();
+                client.Connect(host.IpAddress, host.Port);
+                connectSw.Stop();
+                SshDebugLog(host, phase, $"client.Connect() completed in {connectSw.ElapsedMilliseconds}ms", sw, debugEnabledOverride);
+                if (canUseFallbackCache)
+                    HostAlgorithmCache[cacheKey] = HostKeyAlgorithmTier.Default;
+                return client;
+            }
+            catch (Exception ex) when (ShouldRetryWithAlgorithmFallback(host, ex))
+            {
+                client.Dispose();
+
+                SshDebugLog(
+                    host,
+                    phase,
+                    "Negotiation failed due to unsupported key algorithm. Retrying with non-RSA host key algorithms (ed25519/ECDSA).",
+                    sw,
+                    debugEnabledOverride);
+
+                var retryClient = CreateConfiguredClient(ssh =>
+                    ssh.Settings.SshParameters.SetHostKeyAlgorithms(NonRsaHostKeyFallbackAlgorithms));
+
+                try
+                {
+                    SshDebugLog(
+                        host,
+                        phase,
+                        $"Fallback host key algorithms: {string.Join(", ", NonRsaHostKeyFallbackAlgorithms)}",
+                        sw,
+                        debugEnabledOverride);
+
+                    SshDebugLog(host, phase, "Calling client.Connect() (non-RSA fallback)", sw, debugEnabledOverride);
+                    var retrySw = System.Diagnostics.Stopwatch.StartNew();
+                    retryClient.Connect(host.IpAddress, host.Port);
+                    retrySw.Stop();
+                    SshDebugLog(host, phase, $"client.Connect() completed in {retrySw.ElapsedMilliseconds}ms (non-RSA fallback)", sw, debugEnabledOverride);
+                    HostAlgorithmCache[cacheKey] = HostKeyAlgorithmTier.NonRsa;
+                    return retryClient;
+                }
+                catch (Exception ex2) when (ShouldRetryWithAlgorithmFallback(host, ex2))
+                {
+                    retryClient.Dispose();
+
+                    SshDebugLog(
+                        host,
+                        phase,
+                        "Non-RSA retry still failed. Retrying with ed25519-only host key + conservative ciphers.",
+                        sw,
+                        debugEnabledOverride);
+
+                    var ed25519OnlyClient = CreateConfiguredClient(ssh =>
+                    {
+                        var parameters = ssh.Settings.SshParameters;
+                        parameters.SetHostKeyAlgorithms(Ed25519OnlyHostKeyAlgorithms);
+                        parameters.SetEncryptionAlgorithms(ConservativeEncryptionFallbackAlgorithms);
+
+                        var macApplied = TrySetSshParameterAlgorithms(parameters, "SetMacAlgorithms", ConservativeMacFallbackAlgorithms);
+
+                        if (DebugMode || (debugEnabledOverride ?? false))
+                        {
+                            var macStatus = macApplied ? "applied" : "not supported by this Rebex version";
+                            SshDebugLog(host, phase, $"Ed25519-only fallback MAC override: {macStatus}", sw, debugEnabledOverride);
+                        }
+                    });
+
+                    SshDebugLog(
+                        host,
+                        phase,
+                        $"Ed25519-only fallback host key algorithms: {string.Join(", ", Ed25519OnlyHostKeyAlgorithms)}",
+                        sw,
+                        debugEnabledOverride);
+
+                    SshDebugLog(host, phase, "Calling client.Connect() (ed25519-only fallback)", sw, debugEnabledOverride);
+                    var ed25519Sw = System.Diagnostics.Stopwatch.StartNew();
+                    ed25519OnlyClient.Connect(host.IpAddress, host.Port);
+                    ed25519Sw.Stop();
+                    SshDebugLog(host, phase, $"client.Connect() completed in {ed25519Sw.ElapsedMilliseconds}ms (ed25519-only fallback)", sw, debugEnabledOverride);
+                    HostAlgorithmCache[cacheKey] = HostKeyAlgorithmTier.Ed25519Only;
+
+                    return ed25519OnlyClient;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Applies the algorithm configuration for a given tier to an SSH client.
+        /// Used when replaying a cached algorithm tier.
+        /// </summary>
+        private void ApplyAlgorithmTier(Ssh ssh, HostKeyAlgorithmTier tier, HostConnection host, string phase,
+            System.Diagnostics.Stopwatch? sw, bool? debugEnabledOverride)
+        {
+            switch (tier)
+            {
+                case HostKeyAlgorithmTier.NonRsa:
+                    ssh.Settings.SshParameters.SetHostKeyAlgorithms(NonRsaHostKeyFallbackAlgorithms);
+                    break;
+                case HostKeyAlgorithmTier.Ed25519Only:
+                    var parameters = ssh.Settings.SshParameters;
+                    parameters.SetHostKeyAlgorithms(Ed25519OnlyHostKeyAlgorithms);
+                    parameters.SetEncryptionAlgorithms(ConservativeEncryptionFallbackAlgorithms);
+                    TrySetSshParameterAlgorithms(parameters, "SetMacAlgorithms", ConservativeMacFallbackAlgorithms);
+                    break;
+            }
+        }
+
+        private static bool ShouldRetryWithAlgorithmFallback(HostConnection host, Exception ex)
+        {
+            // Respect explicit user/ssh-config host key settings and only auto-fallback when none were configured.
+            if (host.HostKeyAlgorithms is { Length: > 0 })
+                return false;
+
+            return HasUnsupportedKeyAlgorithmError(ex);
+        }
+
+        private static bool TrySetSshParameterAlgorithms(object sshParameters, string methodName, string[] algorithms)
+        {
+            var method = sshParameters
+                .GetType()
+                .GetMethod(methodName, new[] { typeof(string[]) });
+
+            if (method == null)
+                return false;
+
+            method.Invoke(sshParameters, new object[] { algorithms });
+            return true;
+        }
+
+        private static bool HasUnsupportedKeyAlgorithmError(Exception ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                if (current is CryptographicException cryptographicException &&
+                    cryptographicException.Message.Contains("key algorithm is not supported", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (current.Message.Contains("key algorithm is not supported", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private string FormatError(
+            string errorType,
+            HostConnection host,
+            Exception ex,
+            bool includeDebugDetails = false,
+            bool compactErrors = false)
+        {
+            if (compactErrors)
+            {
+                return FormatCompactError(errorType, host, ex);
+            }
+
             var sb = new StringBuilder();
             string title = $"{new string('#', 20)} {errorType}: {host} {new string('#', 20)}";
             string separator = new string('#', title.Length);
@@ -1886,7 +2290,99 @@ namespace SSH_Helper.Services
                 }
             }
 
+            if (DebugMode || includeDebugDetails)
+            {
+                var sshException = FindSshException(ex);
+                if (sshException != null)
+                {
+                    AppendSshNegotiationDiagnostics(sb, host, sshException);
+                }
+            }
+
             return sb.ToString();
+        }
+
+        private static string FormatCompactError(string errorType, HostConnection host, Exception ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                var message = current.Message.Replace(" Make sure you are connecting to an SSH server.", "");
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    return $"{errorType}: {host}: {current.GetType().Name}: {message}";
+                }
+            }
+
+            return $"{errorType}: {host}: {ex.GetType().Name}: {ex.Message}";
+        }
+
+        private static SshException? FindSshException(Exception ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                if (current is SshException sshException)
+                    return sshException;
+            }
+
+            return null;
+        }
+
+        private static void AppendSshNegotiationDiagnostics(StringBuilder sb, HostConnection host, SshException sshException)
+        {
+            sb.AppendLine();
+            sb.AppendLine("SSH negotiation details (debug):");
+
+            try
+            {
+                var serverInfo = sshException.GetServerInfo();
+                if (serverInfo == null)
+                {
+                    sb.AppendLine("Server negotiation details: (not available from SSH library for this failure)");
+                    AppendAlgorithmsLine(sb, "Configured host key algorithms", host.HostKeyAlgorithms);
+                    AppendAlgorithmsLine(sb, "Configured ciphers", host.Ciphers);
+                    AppendSupportedClientAlgorithms(sb);
+                    return;
+                }
+
+                AppendAlgorithmsLine(sb, "Configured host key algorithms", host.HostKeyAlgorithms);
+                AppendAlgorithmsLine(sb, "Configured ciphers", host.Ciphers);
+                AppendAlgorithmsLine(sb, "Server host key algorithms", serverInfo.ServerHostKeyAlgorithms);
+                AppendAlgorithmsLine(sb, "Server key exchange algorithms", serverInfo.KeyExchangeAlgorithms);
+                AppendAlgorithmsLine(sb, "Server encryption algorithms (client->server)", serverInfo.EncryptionAlgorithmsClientToServer);
+                AppendAlgorithmsLine(sb, "Server encryption algorithms (server->client)", serverInfo.EncryptionAlgorithmsServerToClient);
+                AppendAlgorithmsLine(sb, "Server MAC algorithms (client->server)", serverInfo.MacAlgorithmsClientToServer);
+                AppendAlgorithmsLine(sb, "Server MAC algorithms (server->client)", serverInfo.MacAlgorithmsServerToClient);
+                AppendSupportedClientAlgorithms(sb);
+            }
+            catch (Exception debugEx)
+            {
+                sb.AppendLine($"SSH negotiation details unavailable (debug): {debugEx.Message}");
+                AppendAlgorithmsLine(sb, "Configured host key algorithms", host.HostKeyAlgorithms);
+                AppendAlgorithmsLine(sb, "Configured ciphers", host.Ciphers);
+                AppendSupportedClientAlgorithms(sb);
+            }
+        }
+
+        private static void AppendSupportedClientAlgorithms(StringBuilder sb)
+        {
+            AppendAlgorithmsLine(sb, "Client supported host key algorithms", SshParameters.GetSupportedHostKeyAlgorithms());
+            AppendAlgorithmsLine(sb, "Client supported key exchange algorithms", SshParameters.GetSupportedKeyExchangeAlgorithms());
+            AppendAlgorithmsLine(sb, "Client supported encryption algorithms", SshParameters.GetSupportedEncryptionAlgorithms());
+            AppendAlgorithmsLine(sb, "Client supported MAC algorithms", SshParameters.GetSupportedMacAlgorithms());
+        }
+
+        private static void AppendAlgorithmsLine(StringBuilder sb, string label, IEnumerable<string>? algorithms)
+        {
+            var values = algorithms?
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            var formatted = values is { Length: > 0 }
+                ? string.Join(", ", values)
+                : "(none reported)";
+
+            sb.AppendLine($"{label}: {formatted}");
         }
 
         protected virtual void OnProgressChanged(HostConnection host, string message, bool isError, bool isConnected)
@@ -2019,9 +2515,10 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Emits SSH debug timing information when DebugMode is enabled.
         /// </summary>
-        private void SshDebugLog(HostConnection host, string phase, string message, System.Diagnostics.Stopwatch? sw = null)
+        private void SshDebugLog(HostConnection host, string phase, string message, System.Diagnostics.Stopwatch? sw = null, bool? debugEnabledOverride = null)
         {
-            if (!DebugMode) return;
+            var debugEnabled = debugEnabledOverride ?? DebugMode;
+            if (!debugEnabled) return;
             var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
             var elapsed = sw != null ? $" (+{sw.ElapsedMilliseconds}ms)" : "";
             var output = $"[DEBUG {timestamp}]{elapsed} {phase}: {message}\r\n";

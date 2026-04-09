@@ -1071,6 +1071,44 @@ public class JobExecutionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RunNowAsync_CustomPresetLocalCmdConfirmAlways_FailsWithoutPrompt()
+    {
+        SetupDefaultCredentials();
+
+        var job = CreateTestJob(name: "RunNowLocalCmdConfirmJob", schedule: ScheduleType.None);
+        job.TargetType = JobTargetType.CustomPreset;
+        job.TargetName = string.Empty;
+        job.CustomPresetCommands = """
+            ---
+            steps:
+              - localcmd:
+                  command: "Get-Date"
+                  confirm: always
+                  into: result
+            """;
+        _jobStorage.Save(job);
+
+        JobRunResult? receivedResult = null;
+        var states = new List<JobExecutionState>();
+
+        using var service = CreateService();
+        service.JobCompleted += (_, e) => receivedResult = e;
+        service.JobStateChanged += (_, e) => states.Add(e.State);
+
+        var result = await service.RunNowAsync(job.Id);
+
+        result.Should().BeTrue();
+        receivedResult.Should().NotBeNull();
+        receivedResult!.Success.Should().BeFalse();
+        receivedResult.WasCancelled.Should().BeFalse();
+        receivedResult.HostOutputs.Should().ContainSingle();
+        receivedResult.HostOutputs![0].Success.Should().BeFalse();
+        receivedResult.HostOutputs[0].ErrorMessage.Should().Contain("confirm: never");
+        states.Should().Contain(JobExecutionState.Started);
+        states.Should().Contain(JobExecutionState.Failed);
+    }
+
+    [Fact]
     public async Task ExecuteScheduledJobAsync_CustomPresetReadfileSelectFile_FailsWithoutPrompt()
     {
         SetupDefaultCredentials();
@@ -1105,6 +1143,46 @@ public class JobExecutionServiceTests : IDisposable
         receivedResult.HostOutputs.Should().ContainSingle();
         receivedResult.HostOutputs![0].Success.Should().BeFalse();
         receivedResult.HostOutputs[0].ErrorMessage.Should().Contain("manual");
+        states.Should().Contain(JobExecutionState.Started);
+        states.Should().Contain(JobExecutionState.Failed);
+    }
+
+    [Fact]
+    public async Task ExecuteScheduledJobAsync_CustomPresetLocalCmdConfirmAlways_FailsWithoutPrompt()
+    {
+        SetupDefaultCredentials();
+
+        var job = CreateTestJob(name: "ScheduledLocalCmdConfirmJob", schedule: ScheduleType.Recurring);
+        job.TargetType = JobTargetType.CustomPreset;
+        job.TargetName = string.Empty;
+        job.CustomPresetCommands = """
+            ---
+            steps:
+              - localcmd:
+                  command: "Get-Date"
+                  confirm: always
+                  into: result
+            """;
+        _jobStorage.Save(job);
+
+        JobRunResult? receivedResult = null;
+        var states = new List<JobExecutionState>();
+
+        using var service = CreateService();
+        service.JobCompleted += (_, e) => receivedResult = e;
+        service.JobStateChanged += (_, e) => states.Add(e.State);
+
+        var concurrencyGate = GetPrivateField<SemaphoreSlim>(service, "_concurrencyGate");
+        concurrencyGate.Wait(0).Should().BeTrue();
+
+        await InvokePrivateAsync(service, "ExecuteScheduledJobAsync", job);
+
+        receivedResult.Should().NotBeNull();
+        receivedResult!.Success.Should().BeFalse();
+        receivedResult.WasCancelled.Should().BeFalse();
+        receivedResult.HostOutputs.Should().ContainSingle();
+        receivedResult.HostOutputs![0].Success.Should().BeFalse();
+        receivedResult.HostOutputs[0].ErrorMessage.Should().Contain("confirm: never");
         states.Should().Contain(JobExecutionState.Started);
         states.Should().Contain(JobExecutionState.Failed);
     }

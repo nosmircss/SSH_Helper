@@ -66,7 +66,7 @@ public class QaPresetCatalogTests
                 continue;
             }
 
-            if (description.Contains("Expected: pass.", StringComparison.Ordinal))
+            if (description.Contains("Expected: pass", StringComparison.Ordinal))
             {
                 lastStep.Exit!.Should().StartWith("success PASS - ", $"{preset.Name} should terminate with an explicit pass marker");
                 continue;

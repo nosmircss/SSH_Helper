@@ -1,6 +1,16 @@
 # Lessons
 
+## 2026-04-08
+- When I add or run WinForms tests through a path that shows success/error dialogs, I must install or create a dialog seam first; otherwise the suite can hang behind a modal popup even if the underlying behavior is correct.
+- When a user reports WinForms test-time JIT exception popups after I said the tests passed, I must inspect deferred UI callbacks (`Application.Idle`, `BeginInvoke`, throttled UI writers) for disposal-safe teardown and add a regression that runs the callback after form disposal.
+- When a user corrects me from a generic shell explanation to project-specific `localcmd` behavior, I must inspect the repo implementation before answering and align the explanation with the exact runtime path.
+- When a user explicitly chooses capability removal over graceful fallback for an unreleased option, I must stop pushing compatibility-oriented fixes and align the implementation plan to the simpler product surface they asked for.
+- When a user narrows an editor UX fix from changing Enter behavior to suppressing autocomplete on a specific trigger key, I must update the plan to remove the broader interaction change and implement the smaller trigger-level rule they asked for.
+
 ## 2026-04-05
+- When a user says runtime noise should be hidden automatically, I must fix the product path that emits it instead of leaving a script-level workaround as the answer.
+- When debugging PowerShell startup noise, I must reproduce the exact launch flags used by the product; script-level `$ProgressPreference` changes do not suppress startup progress that happens before the encoded command runs, but `-NoProfile` can.
+- When wrapping a `cmd.exe` command with a nested PowerShell helper, I must not rely on single-quoted `-Command '...'` text to protect pipes or metacharacters; `cmd.exe` only honors double-quote grouping there, so encoded commands are the safer cross-shell wrapper.
 - When a user provides an explicit multi-finding implementation plan, I must mirror it as checkable `tasks/todo.md` items, complete all items end-to-end, and record both focused and broader verification evidence before marking the task done.
 - When sharing scripting recipes, I must verify every referenced function exists in `FunctionRegistry`/`SCRIPTING.md`; never use undocumented helpers like `random_string(...)` in runnable examples.
 - When users call out workaround-heavy docs for missing primitives, I should prefer implementing the missing first-class function (with tests/docs) over keeping complex recipe workarounds.
@@ -140,3 +150,4 @@
 - When adding a preset dirty indicator, I must place it in the active editor header the user sees while typing, not only in the presets tree pane.
 - When drafting new OpenSpec changes around already-implemented work, I should not anchor the proposal set to an older active change unless the user explicitly wants to keep that dependency; if the user wants fresh proposals, I should frame them as standalone changes.
 - When a user says parity should include the look-and-feel as well as behavior, I should extend the spec/tasks to include visual parity explicitly instead of assuming behavioral parity is enough.
+- When a user says a fix still reproduces, I must verify the actual default app build/output path and not rely only on isolated test artifacts before claiming the runtime is fixed.

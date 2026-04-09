@@ -69,6 +69,7 @@ version: 1                       # Optional: script version (default: 1)
 environment: "prod"              # Optional: switch to this environment when the preset is loaded
 debug: false                     # Optional: enable debug output (default: false)
 nobanner: false                  # Optional: suppress script execution banner (default: false)
+compact_errors: false            # Optional: emit one-line SSH/script errors (default: false)
 suppress_missing_column_warning: false  # Optional: suppress missing-column preflight warning
 library: false                   # Optional: definition-only file for imports (default: false)
 
@@ -2628,7 +2629,7 @@ Runs a command on the local machine (not over SSH).
 # Full form
 - localcmd:
     command: "dotnet build"
-    shell: powershell          # powershell | custom
+    shell: powershell          # powershell | cmd | custom
     shell_path: "python"       # required only when shell: custom
     args: ["-NoProfile"]
     env:
@@ -2637,7 +2638,7 @@ Runs a command on the local machine (not over SSH).
     interactive: false
     keep_open: false
     run_mode: foreground       # foreground | background
-    lifetime: detached         # detached | script | app (background only)
+    lifetime: detached         # interactive: detached returns immediately; background: detached | script | app
     kill_on_cancel: false      # background + non-detached only
     fail_on_nonzero: true
     success_codes: [0]
@@ -2654,12 +2655,15 @@ Runs a command on the local machine (not over SSH).
 **Important behavior:**
 - `interactive: true` and `run_mode: background` are mutually exclusive.
 - `keep_open: true` requires `interactive: true`.
+- Interactive + explicitly set `lifetime: detached` launches the terminal and returns immediately (script continues without waiting for window close).
 - Foreground (non-interactive) captures `<into>_stdout`, `<into>_stderr`, `<into>_exit_code`.
-- Interactive captures only `<into>_exit_code`.
+- Interactive (tracked/waited) captures `<into>_exit_code`.
+- Interactive detached captures startup metadata: `<into>_pid`, `<into>_started`, `<into>_start_error`.
 - Interactive runs are also recorded in history execution details under Interactive Sessions.
 - `shell: powershell` uses session transcripts for interactive audit capture, so `keep_open: true` includes follow-up user-entered commands until the shell closes.
 - Background captures startup metadata: `<into>_pid`, `<into>_started`, `<into>_start_error`.
-- `fail_on_nonzero` + `success_codes` apply to both foreground and interactive close exit code evaluation.
+- `fail_on_nonzero` + `success_codes` apply when an exit code is observed (foreground and tracked interactive). They cannot be evaluated for interactive detached launches.
+- Unattended scheduler runs require `confirm: never`; otherwise script preflight fails instead of blocking on a local confirmation dialog.
 - `quiet: true` hides command banner lines only; `suppress: true` hides command banner + live output streaming.
 
 **Parameters:**
@@ -2667,7 +2671,7 @@ Runs a command on the local machine (not over SSH).
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `command` | Yes | - | Command text after variable substitution |
-| `shell` | No | `powershell` | `powershell` or `custom` |
+| `shell` | No | `powershell` | `powershell`, `cmd`, or `custom` |
 | `shell_path` | Conditionally | - | Required when `shell: custom` |
 | `args` | No | `[]` | Shell arguments (sequence preferred; scalar accepted) |
 | `env` | No | - | Environment variables for launched process |
@@ -2675,7 +2679,7 @@ Runs a command on the local machine (not over SSH).
 | `interactive` | No | `false` | Launch in external terminal |
 | `keep_open` | No | `false` | Keep interactive shell open after command |
 | `run_mode` | No | `foreground` | `foreground` waits; `background` returns after spawn |
-| `lifetime` | No | `detached` | Background lifetime: `detached`, `script`, `app` |
+| `lifetime` | No | `detached` | Process lifetime behavior. For interactive: explicitly setting `detached` returns immediately; otherwise interactive waits for close. For background: `detached`, `script`, `app` |
 | `kill_on_cancel` | No | `false` | Background cancel cleanup for tracked processes |
 | `fail_on_nonzero` | No | `true` | Fail when exit code not in `success_codes` |
 | `success_codes` | No | `[0]` | Allowed exit codes |
@@ -2684,7 +2688,7 @@ Runs a command on the local machine (not over SSH).
 | `quiet` | No | `false` | Hide localcmd command banner lines |
 | `suppress` | No | `false` | Hide banner and live stdout/stderr output |
 | `title` | No | `Local Command` | Interactive terminal title |
-| `into` | No | - | Output variable prefix |
+| `into` | No | - | Output variable prefix. Foreground sets `_stdout`/`_stderr`/`_exit_code`; tracked interactive sets `_exit_code`; background and detached interactive set `_pid`/`_started`/`_start_error` |
 | `timeout` | No | - | Step timeout in seconds (ignored for background) |
 | `on_error` | No | `stop` | Error handling: `continue` or `stop` |
 
@@ -2710,6 +2714,14 @@ Runs a command on the local machine (not over SSH).
     run_mode: background
     lifetime: script
     into: np
+
+# Detached interactive launch that returns immediately
+- localcmd:
+    command: "ping 8.8.8.8"
+    shell: cmd
+    interactive: true
+    lifetime: detached
+    into: ping_window
 ```
 
 ---
@@ -3375,6 +3387,12 @@ When using the `into` parameter, two variables are created:
 ### vault - HashiCorp Vault Integration
 
 Reads and writes secrets from a HashiCorp Vault KV store. Supports KV v1 and KV v2, multiple profiles, version pinning, full-replace writes, and patch (merge) updates.
+
+**Vault profile auth methods:**
+- `Token`, `AppRole`, `LDAP`, `Userpass`, and `OIDC` are supported in Vault profile settings.
+- `OIDC` uses an interactive browser flow and a localhost callback.
+- Recommended OIDC defaults: callback host `127.0.0.1`, callback path `/oidc/callback`, and a dedicated callback port allowed by endpoint security policy.
+- On successful OIDC sign-in, SSH Helper stores the resulting Vault token in Windows Credential Manager (not in `config.json`).
 
 **Read a single key:**
 ```yaml
@@ -4646,6 +4664,36 @@ This is useful when:
 - You want cleaner output for reports or logs
 - You're processing many hosts and don't need the visual separators
 - You're using `writefile` to save output and don't want the banner included
+
+### Compact Errors
+
+By default, connection failures are shown as a multi-line banner block:
+
+```
+########################################################################
+#################### CONNECTION ERROR: 10.79.50.228 ####################
+########################################################################
+SshException: Connection attempt timed out.
+```
+
+To reduce noise, set `compact_errors: true` in your script header:
+
+```yaml
+---
+name: "Fast Checks"
+compact_errors: true
+
+steps:
+    - send:
+            command: show version
+```
+
+With this enabled, banner-style failures are emitted as single lines (for example authentication and connection failures):
+
+```
+AUTHENTICATION ERROR: 10.79.50.231: SshException: A supplied password or user name is incorrect.
+CONNECTION ERROR: 10.79.50.228: SshException: Connection attempt timed out.
+```
 
 ### Suppress Missing Column Warning
 

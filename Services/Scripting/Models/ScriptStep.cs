@@ -1463,6 +1463,8 @@ namespace SSH_Helper.Services.Scripting.Models
 
         public string Lifetime { get; set; } = "detached";
 
+        public bool LifetimeSpecified { get; set; }
+
         public bool KillOnCancel { get; set; }
 
         public bool FailOnNonZero { get; set; } = true;

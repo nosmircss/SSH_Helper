@@ -2672,7 +2672,8 @@ namespace SSH_Helper.Services
                         if (step.LocalCmd.KeepOpen) props["keep_open"] = true;
                         if (!string.Equals(step.LocalCmd.RunMode, "foreground", StringComparison.OrdinalIgnoreCase))
                             props["run_mode"] = step.LocalCmd.RunMode;
-                        if (!string.Equals(step.LocalCmd.Lifetime, "detached", StringComparison.OrdinalIgnoreCase))
+                        if (step.LocalCmd.LifetimeSpecified ||
+                            !string.Equals(step.LocalCmd.Lifetime, "detached", StringComparison.OrdinalIgnoreCase))
                             props["lifetime"] = step.LocalCmd.Lifetime;
                         if (step.LocalCmd.KillOnCancel) props["kill_on_cancel"] = true;
                         if (!step.LocalCmd.FailOnNonZero) props["fail_on_nonzero"] = false;
@@ -4204,6 +4205,8 @@ namespace SSH_Helper.Services
                 props["debug"] = true;
             if (script.NoBanner)
                 props["nobanner"] = true;
+            if (script.CompactErrors)
+                props["compact_errors"] = true;
             if (script.SuppressMissingColumnWarning)
                 props["suppress_missing_column_warning"] = true;
             if (script.Library)
@@ -4262,6 +4265,7 @@ namespace SSH_Helper.Services
             var environment = props["environment"]?.ToString();
             var debug = props["debug"]?.Value<bool>() == true;
             var nobanner = props["nobanner"]?.Value<bool>() == true;
+            var compactErrors = props["compact_errors"]?.Value<bool>() == true;
             var suppressWarning = props["suppress_missing_column_warning"]?.Value<bool>() == true;
             var library = props["library"]?.Value<bool>() == true;
             var vars = props["vars"] as JObject;
@@ -4284,6 +4288,8 @@ namespace SSH_Helper.Services
                 sb.AppendLine("debug: true");
             if (nobanner)
                 sb.AppendLine("nobanner: true");
+            if (compactErrors)
+                sb.AppendLine("compact_errors: true");
             if (suppressWarning)
                 sb.AppendLine("suppress_missing_column_warning: true");
             if (library)
@@ -4465,7 +4471,7 @@ namespace SSH_Helper.Services
             var knownKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "name:", "description:", "version:", "environment:",
-                "debug:", "nobanner:", "suppress_missing_column_warning:", "library:",
+                "debug:", "nobanner:", "compact_errors:", "suppress_missing_column_warning:", "library:",
                 "vars:", "imports:", "subroutines:", "steps:",
             };
 

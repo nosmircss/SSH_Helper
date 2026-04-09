@@ -117,6 +117,12 @@ namespace SSH_Helper
         private TextBox _txtVaultLdapPassword = null!;
         private TextBox _txtVaultUserpassUsername = null!;
         private TextBox _txtVaultUserpassPassword = null!;
+        private TextBox _txtVaultOidcAuthMountPath = null!;
+        private TextBox _txtVaultOidcRole = null!;
+        private TextBox _txtVaultOidcCallbackHost = null!;
+        private NumericUpDown _numVaultOidcCallbackPort = null!;
+        private TextBox _txtVaultOidcCallbackPath = null!;
+        private NumericUpDown _numVaultOidcTimeoutSeconds = null!;
         private TextBox _txtVaultCaCertPath = null!;
         private Button _btnVaultBrowseCaCert = null!;
         private CheckBox _chkVaultSkipTls = null!;
@@ -127,6 +133,7 @@ namespace SSH_Helper
         private Panel _pnlVaultAuthAppRole = null!;
         private Panel _pnlVaultAuthLdap = null!;
         private Panel _pnlVaultAuthUserpass = null!;
+        private Panel _pnlVaultAuthOidc = null!;
         private readonly List<VaultProfileConfig> _vaultProfiles = new();
         private bool _suppressVaultProfileSelection;
         private bool _suppressVaultDefaultToggle;
@@ -562,7 +569,7 @@ namespace SSH_Helper
             authMethodRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             authMethodRow.Controls.Add(new Label { Text = "Auth Method:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
             _cmbVaultAuthMethod = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, MinimumSize = new Size(vaultInputMinWidth, 0) };
-            _cmbVaultAuthMethod.Items.AddRange(new object[] { "Token", "AppRole", "LDAP", "Userpass" });
+            _cmbVaultAuthMethod.Items.AddRange(new object[] { "Token", "AppRole", "LDAP", "Userpass", "OIDC" });
             _cmbVaultAuthMethod.SelectedIndex = 0;
             _cmbVaultAuthMethod.SelectedIndexChanged += (_, _) => UpdateVaultAuthFieldVisibility();
             authMethodRow.Controls.Add(_cmbVaultAuthMethod, 1, 0);
@@ -598,6 +605,52 @@ namespace SSH_Helper
             userpassLayout.Controls.Add(LabeledTextBox("Password:", "txtVaultUserpassPassword", out _txtVaultUserpassPassword, isPassword: true));
             _pnlVaultAuthUserpass.Controls.Add(userpassLayout);
             rightFlow.Controls.Add(_pnlVaultAuthUserpass);
+
+            // OIDC auth panel
+            _pnlVaultAuthOidc = new Panel { AutoSize = true, Width = 430, Visible = false };
+            var oidcLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+            oidcLayout.Controls.Add(LabeledTextBox("Auth Mount:", "txtVaultOidcAuthMountPath", out _txtVaultOidcAuthMountPath));
+            oidcLayout.Controls.Add(LabeledTextBox("Role:", "txtVaultOidcRole", out _txtVaultOidcRole));
+            oidcLayout.Controls.Add(LabeledTextBox("Callback Host:", "txtVaultOidcCallbackHost", out _txtVaultOidcCallbackHost));
+
+            var oidcPortRow = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0, 2, 0, 2),
+                Width = 430
+            };
+            oidcPortRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, vaultLabelColumnWidth));
+            oidcPortRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            oidcPortRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            oidcPortRow.Controls.Add(new Label { Text = "Callback Port:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
+            _numVaultOidcCallbackPort = new NumericUpDown { Minimum = 1, Maximum = 65535, Value = 8250, Width = 100, TextAlign = HorizontalAlignment.Right };
+            oidcPortRow.Controls.Add(_numVaultOidcCallbackPort, 1, 0);
+            oidcLayout.Controls.Add(oidcPortRow);
+
+            oidcLayout.Controls.Add(LabeledTextBox("Callback Path:", "txtVaultOidcCallbackPath", out _txtVaultOidcCallbackPath));
+
+            var oidcTimeoutRow = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0, 2, 0, 2),
+                Width = 430
+            };
+            oidcTimeoutRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, vaultLabelColumnWidth));
+            oidcTimeoutRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            oidcTimeoutRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            oidcTimeoutRow.Controls.Add(new Label { Text = "Timeout (sec):", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
+            _numVaultOidcTimeoutSeconds = new NumericUpDown { Minimum = 15, Maximum = 3600, Value = 180, Width = 100, TextAlign = HorizontalAlignment.Right };
+            oidcTimeoutRow.Controls.Add(_numVaultOidcTimeoutSeconds, 1, 0);
+            oidcLayout.Controls.Add(oidcTimeoutRow);
+
+            _pnlVaultAuthOidc.Controls.Add(oidcLayout);
+            rightFlow.Controls.Add(_pnlVaultAuthOidc);
 
             // TLS
             rightFlow.Controls.Add(new Label { Text = "TLS", Font = sectionFont, AutoSize = true, Margin = new Padding(0, 10, 0, 4) });
@@ -678,6 +731,12 @@ namespace SSH_Helper
             _txtVaultLdapPassword.Enabled = enabled;
             _txtVaultUserpassUsername.Enabled = enabled;
             _txtVaultUserpassPassword.Enabled = enabled;
+            _txtVaultOidcAuthMountPath.Enabled = enabled;
+            _txtVaultOidcRole.Enabled = enabled;
+            _txtVaultOidcCallbackHost.Enabled = enabled;
+            _numVaultOidcCallbackPort.Enabled = enabled;
+            _txtVaultOidcCallbackPath.Enabled = enabled;
+            _numVaultOidcTimeoutSeconds.Enabled = enabled;
             _txtVaultCaCertPath.Enabled = enabled;
             _btnVaultBrowseCaCert.Enabled = enabled;
             _chkVaultSkipTls.Enabled = enabled;
@@ -693,6 +752,7 @@ namespace SSH_Helper
             _pnlVaultAuthAppRole.Visible = method == 1;
             _pnlVaultAuthLdap.Visible = method == 2;
             _pnlVaultAuthUserpass.Visible = method == 3;
+            _pnlVaultAuthOidc.Visible = method == 4;
         }
 
         private void LstVaultProfiles_SelectedIndexChanged(object? sender, EventArgs e)
@@ -804,6 +864,12 @@ namespace SSH_Helper
             _txtVaultAppRoleId.Text = profile.AppRoleRoleId;
             _txtVaultLdapUsername.Text = profile.LdapUsername;
             _txtVaultUserpassUsername.Text = profile.UserpassUsername;
+            _txtVaultOidcAuthMountPath.Text = string.IsNullOrWhiteSpace(profile.OidcAuthMountPath) ? "oidc" : profile.OidcAuthMountPath;
+            _txtVaultOidcRole.Text = profile.OidcRole;
+            _txtVaultOidcCallbackHost.Text = string.IsNullOrWhiteSpace(profile.OidcCallbackHost) ? "127.0.0.1" : profile.OidcCallbackHost;
+            _numVaultOidcCallbackPort.Value = Math.Clamp(profile.OidcCallbackPort <= 0 ? 8250 : profile.OidcCallbackPort, 1, 65535);
+            _txtVaultOidcCallbackPath.Text = string.IsNullOrWhiteSpace(profile.OidcCallbackPath) ? "/oidc/callback" : profile.OidcCallbackPath;
+            _numVaultOidcTimeoutSeconds.Value = Math.Clamp(profile.OidcTimeoutSeconds <= 0 ? 180 : profile.OidcTimeoutSeconds, 15, 3600);
             _numVaultCacheTtl.Value = Math.Clamp(profile.CacheTtlSeconds, 0, 86400);
             _txtVaultCaCertPath.Text = profile.CaCertificatePath;
             _chkVaultSkipTls.Checked = profile.SkipTlsVerification;
@@ -851,6 +917,12 @@ namespace SSH_Helper
             _txtVaultLdapPassword.Text = string.Empty;
             _txtVaultUserpassUsername.Text = string.Empty;
             _txtVaultUserpassPassword.Text = string.Empty;
+            _txtVaultOidcAuthMountPath.Text = "oidc";
+            _txtVaultOidcRole.Text = string.Empty;
+            _txtVaultOidcCallbackHost.Text = "127.0.0.1";
+            _numVaultOidcCallbackPort.Value = 8250;
+            _txtVaultOidcCallbackPath.Text = "/oidc/callback";
+            _numVaultOidcTimeoutSeconds.Value = 180;
             _txtVaultCaCertPath.Text = string.Empty;
             _chkVaultSkipTls.Checked = false;
             _numVaultCacheTtl.Value = 300;
@@ -879,6 +951,12 @@ namespace SSH_Helper
             profile.AppRoleRoleId = _txtVaultAppRoleId.Text.Trim();
             profile.LdapUsername = _txtVaultLdapUsername.Text.Trim();
             profile.UserpassUsername = _txtVaultUserpassUsername.Text.Trim();
+            profile.OidcAuthMountPath = string.IsNullOrWhiteSpace(_txtVaultOidcAuthMountPath.Text) ? "oidc" : _txtVaultOidcAuthMountPath.Text.Trim();
+            profile.OidcRole = _txtVaultOidcRole.Text.Trim();
+            profile.OidcCallbackHost = string.IsNullOrWhiteSpace(_txtVaultOidcCallbackHost.Text) ? "127.0.0.1" : _txtVaultOidcCallbackHost.Text.Trim();
+            profile.OidcCallbackPort = (int)_numVaultOidcCallbackPort.Value;
+            profile.OidcCallbackPath = string.IsNullOrWhiteSpace(_txtVaultOidcCallbackPath.Text) ? "/oidc/callback" : _txtVaultOidcCallbackPath.Text.Trim();
+            profile.OidcTimeoutSeconds = (int)_numVaultOidcTimeoutSeconds.Value;
             profile.CacheTtlSeconds = (int)_numVaultCacheTtl.Value;
             profile.CaCertificatePath = _txtVaultCaCertPath.Text.Trim();
             profile.SkipTlsVerification = _chkVaultSkipTls.Checked;
@@ -952,7 +1030,8 @@ namespace SSH_Helper
                     tokenProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultToken.Text) ? _txtVaultToken.Text : null,
                     secretIdProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultAppRoleSecret.Text) ? _txtVaultAppRoleSecret.Text : null,
                     ldapPasswordProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultLdapPassword.Text) ? _txtVaultLdapPassword.Text : null,
-                    userpassPasswordProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultUserpassPassword.Text) ? _txtVaultUserpassPassword.Text : null);
+                    userpassPasswordProvider: (name, _) => !string.IsNullOrEmpty(_txtVaultUserpassPassword.Text) ? _txtVaultUserpassPassword.Text : null,
+                    tokenSaver: (name, token) => SaveVaultCredential(name, "token", token));
 
                 await testService.TestConnectionAsync(profile.Name);
                 MessageBox.Show(this, "Connection successful.", "Vault Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -993,6 +1072,12 @@ namespace SSH_Helper
                     AppRoleRoleId = p.AppRoleRoleId,
                     LdapUsername = p.LdapUsername,
                     UserpassUsername = p.UserpassUsername,
+                    OidcAuthMountPath = p.OidcAuthMountPath,
+                    OidcRole = p.OidcRole,
+                    OidcCallbackHost = p.OidcCallbackHost,
+                    OidcCallbackPort = p.OidcCallbackPort,
+                    OidcCallbackPath = p.OidcCallbackPath,
+                    OidcTimeoutSeconds = p.OidcTimeoutSeconds,
                     CacheTtlSeconds = p.CacheTtlSeconds,
                     CaCertificatePath = p.CaCertificatePath,
                     SkipTlsVerification = p.SkipTlsVerification
@@ -1038,6 +1123,12 @@ namespace SSH_Helper
                 AppRoleRoleId = p.AppRoleRoleId,
                 LdapUsername = p.LdapUsername,
                 UserpassUsername = p.UserpassUsername,
+                OidcAuthMountPath = p.OidcAuthMountPath,
+                OidcRole = p.OidcRole,
+                OidcCallbackHost = p.OidcCallbackHost,
+                OidcCallbackPort = p.OidcCallbackPort,
+                OidcCallbackPath = p.OidcCallbackPath,
+                OidcTimeoutSeconds = p.OidcTimeoutSeconds,
                 CacheTtlSeconds = p.CacheTtlSeconds,
                 CaCertificatePath = p.CaCertificatePath,
                 SkipTlsVerification = p.SkipTlsVerification
@@ -2006,6 +2097,10 @@ namespace SSH_Helper
 
         private void BtnSave_Click(object? sender, EventArgs e)
         {
+            PersistCurrentVaultProfile();
+            if (!ValidateVaultProfiles())
+                return;
+
             _configService.Update(config =>
             {
                 // General
@@ -2095,6 +2190,50 @@ namespace SSH_Helper
                 SaveVaultSettings(config);
             });
         }
+
+        private bool ValidateVaultProfiles()
+        {
+            if (!_chkVaultEnabled.Checked)
+                return true;
+
+            foreach (var profile in _vaultProfiles)
+            {
+                if (string.IsNullOrWhiteSpace(profile.Name))
+                {
+                    _promptService.Show(this, "Vault profile name is required.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+
+                if (profile.AuthMethod != VaultAuthMethod.Oidc)
+                    continue;
+
+                if (string.IsNullOrWhiteSpace(profile.OidcRole))
+                {
+                    _promptService.Show(this, $"Vault profile '{profile.Name}' requires an OIDC role.", "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+
+                if (!VaultOidcCallbackSettings.TryCreate(
+                        profile.OidcCallbackHost,
+                        profile.OidcCallbackPort,
+                        profile.OidcCallbackPath,
+                        profile.Name,
+                        out _,
+                        out var validationError))
+                {
+                    _promptService.Show(
+                        this,
+                        validationError ?? "Vault profile has invalid OIDC callback settings.",
+                        "Settings",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)

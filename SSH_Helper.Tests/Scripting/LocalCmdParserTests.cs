@@ -319,7 +319,7 @@ public class LocalCmdParserTests
     }
 
     [Fact]
-    public void Validate_CmdShell_ReturnsShellValidationError()
+    public void Validate_CmdShell_DoesNotReturnShellValidationError()
     {
         var yaml = """
             ---
@@ -332,7 +332,26 @@ public class LocalCmdParserTests
         var script = _parser.Parse(yaml);
         var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
 
-        errors.Should().Contain(error => error.Contains("localcmd 'shell' must be one of powershell, custom", StringComparison.OrdinalIgnoreCase));
+        errors.Should().NotContain(error => error.Contains("shell", StringComparison.OrdinalIgnoreCase) &&
+                                             error.Contains("must be one of", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_PwshShell_ReturnsShellValidationError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - localcmd:
+                  command: "Get-Date"
+                  shell: pwsh
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(error => error.Contains("shell", StringComparison.OrdinalIgnoreCase) &&
+                                         error.Contains("must be one of powershell, cmd, custom", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

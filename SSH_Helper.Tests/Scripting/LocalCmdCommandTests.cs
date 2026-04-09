@@ -245,6 +245,49 @@ public class LocalCmdCommandTests
     }
 
     [Fact]
+    public async Task Interactive_Detached_ReturnsImmediatelyWithoutWaitingAndSetsStartupMetadata()
+    {
+        var runner = new StubProcessRunner(
+            stdout: "",
+            stderr: "",
+            exitCode: 0,
+            processId: 515,
+            waitForExit: _ => throw new InvalidOperationException("Detached interactive should not wait for exit."));
+        var command = new LocalCmdCommand(null, runner);
+
+        var step = new ScriptStep
+        {
+            LocalCmd = new LocalCmdOptions
+            {
+                Command = "date",
+                Confirm = "never",
+                Interactive = true,
+                KeepOpen = true,
+                Lifetime = "detached",
+                LifetimeSpecified = true,
+                FailOnNonZero = true,
+                Into = "session"
+            }
+        };
+
+        var context = new ScriptContext();
+        var outputs = new List<string>();
+        context.OutputReceived += (_, e) => outputs.Add(e.Message);
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Message.Should().ContainEquivalentOf("detached mode");
+        context.GetVariable("session_pid").Should().Be(515);
+        context.GetVariable("session_started").Should().Be(true);
+        context.GetVariableString("session_start_error").Should().BeEmpty();
+        context.GetVariable("session_exit_code").Should().BeNull();
+        outputs.Should().Contain(line => line.Contains("fail_on_nonzero", StringComparison.OrdinalIgnoreCase));
+        runner.LastHandle.Should().NotBeNull();
+        runner.LastHandle!.Disposed.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Interactive_KeepOpen_HonorsWorkingDirectory()
     {
         string? startedWorkingDirectory = null;
@@ -303,9 +346,10 @@ public class LocalCmdCommandTests
         var result = await command.ExecuteAsync(step, context, CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        startedArguments.Should().Contain("Start-Transcript");
-        startedArguments.Should().Contain("-Path");
-        startedArguments.Should().NotContain("Tee-Object");
+        var decoded = NormalizePowerShellCommandForAssertions(startedArguments);
+        decoded.Should().Contain("Start-Transcript");
+        decoded.Should().Contain("-Path");
+        decoded.Should().NotContain("Tee-Object");
     }
 
     [Fact]
@@ -442,6 +486,38 @@ public class LocalCmdCommandTests
     }
 
     [Fact]
+    public async Task Interactive_PowerShell_QuotedExecutablePath_UsesCallOperatorInAuditWrapper()
+    {
+        string? startedArguments = null;
+        var runner = new StubProcessRunner(
+            stdout: "",
+            stderr: "",
+            exitCode: 0,
+            onStart: info => startedArguments = info.Arguments);
+        var command = new LocalCmdCommand(null, runner);
+
+        var step = new ScriptStep
+        {
+            LocalCmd = new LocalCmdOptions
+            {
+                Command = "'C:\\Program Files\\Git\\usr\\bin\\bash.exe' -l -i -c 'echo hi'",
+                Confirm = "never",
+                Interactive = true,
+                KeepOpen = true,
+                Shell = "powershell",
+                Quiet = true
+            }
+        };
+
+        var context = new ScriptContext();
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var decoded = NormalizePowerShellCommandForAssertions(startedArguments);
+        decoded.Should().Contain("& { & 'C:\\Program Files\\Git\\usr\\bin\\bash.exe' -l -i -c 'echo hi' }");
+    }
+
+    [Fact]
     public async Task Interactive_Cmd_WrapsCommandForAuditCapture()
     {
         string? startedArguments = null;
@@ -468,8 +544,13 @@ public class LocalCmdCommandTests
         var result = await command.ExecuteAsync(step, context, CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        startedArguments.Should().Contain("Tee-Object");
-        startedArguments.Should().Contain("-FilePath");
+        startedArguments.Should().Contain("-EncodedCommand");
+        startedArguments.Should().NotContain("Tee-Object");
+
+        var decodedAuditCommand = DecodePowerShellEncodedCommand(startedArguments!);
+        decodedAuditCommand.Should().Contain("$ProgressPreference = 'SilentlyContinue';");
+        decodedAuditCommand.Should().Contain("Tee-Object");
+        decodedAuditCommand.Should().Contain("-FilePath");
     }
 
     [Fact]
@@ -517,6 +598,39 @@ public class LocalCmdCommandTests
 
         result.Success.Should().BeTrue();
         context.LocalCmdRunAllApproved.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Confirmation_CancelledByExecutionToken_ThrowsWithoutStartingProcess()
+    {
+        var runner = new StubProcessRunner(stdout: "ok", stderr: "", exitCode: 0);
+        var confirmationStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var confirmation = new StubConfirmation(async (_, _, _, cancellationToken) =>
+        {
+            confirmationStarted.TrySetResult(true);
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return LocalCmdConfirmResult.Run;
+        });
+        var command = new LocalCmdCommand(confirmation, runner);
+
+        var step = new ScriptStep
+        {
+            LocalCmd = new LocalCmdOptions
+            {
+                Command = "safe-cmd",
+                Confirm = "always"
+            }
+        };
+
+        var context = new ScriptContext();
+        using var cts = new CancellationTokenSource();
+        var executeTask = command.ExecuteAsync(step, context, cts.Token);
+
+        await confirmationStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await executeTask);
+        runner.StartCount.Should().Be(0);
     }
 
     [Fact]
@@ -752,14 +866,28 @@ public class LocalCmdCommandTests
     }
 
     [Fact]
-    public void BuildProcessArgs_Powershell()
+    public void BuildProcessArgs_Powershell_UsesNoProfileAndPrependsProgressSuppression()
     {
         var options = new LocalCmdOptions { Shell = "powershell" };
         var (fileName, args) = LocalCmdCommand.BuildProcessArgs("Get-Process", "powershell", options);
+        var decoded = DecodePowerShellEncodedCommand(args);
 
         fileName.Should().Be("powershell.exe");
-        args.Should().Contain("-Command");
-        args.Should().Contain("Get-Process");
+        args.Should().Contain("-NoProfile");
+        args.Should().Contain("-EncodedCommand");
+        decoded.Should().Be("$ProgressPreference = 'SilentlyContinue'; Get-Process");
+    }
+
+    [Fact]
+    public void BuildProcessArgs_Powershell_QuotedExecutablePath_ExecutesDirectly()
+    {
+        var options = new LocalCmdOptions { Shell = "powershell" };
+        var command = "'C:\\Program Files\\Git\\usr\\bin\\bash.exe' -l -i -c 'echo hi'";
+
+        var (fileName, args) = LocalCmdCommand.BuildProcessArgs(command, "powershell", options);
+
+        fileName.Should().Be("C:\\Program Files\\Git\\usr\\bin\\bash.exe");
+        args.Should().Be("-l -i -c 'echo hi'");
     }
 
     [Fact]
@@ -786,6 +914,39 @@ public class LocalCmdCommandTests
     }
 
     [Fact]
+    public void BuildProcessArgs_Powershell_QuotesArgsContainingSpaces()
+    {
+        var options = new LocalCmdOptions
+        {
+            Shell = "powershell",
+            Args = new List<string> { "-ExecutionPolicy", "Remote Signed" }
+        };
+
+        var (fileName, args) = LocalCmdCommand.BuildProcessArgs("Get-Date", "powershell", options);
+
+        fileName.Should().Be("powershell.exe");
+        args.Should().Contain("-ExecutionPolicy");
+        args.Should().Contain("\"Remote Signed\"");
+    }
+
+    [Fact]
+    public void BuildProcessArgs_Custom_QuotesArgsContainingSpaces()
+    {
+        var options = new LocalCmdOptions
+        {
+            Shell = "custom",
+            ShellPath = "python",
+            Args = new List<string> { "-m", "my module" }
+        };
+
+        var (fileName, args) = LocalCmdCommand.BuildProcessArgs("script.py", "custom", options);
+
+        fileName.Should().Be("python");
+        args.Should().Contain("-m");
+        args.Should().Contain("\"my module\"");
+    }
+
+    [Fact]
     public void BuildProcessArgs_Custom()
     {
         var options = new LocalCmdOptions { Shell = "custom", ShellPath = "python" };
@@ -800,10 +961,26 @@ public class LocalCmdCommandTests
     {
         var options = new LocalCmdOptions { Shell = "powershell" };
         var (fileName, args) = LocalCmdCommand.BuildInteractiveKeepOpenArgs("Get-Date", "powershell", options);
+        var decoded = DecodePowerShellEncodedCommand(args);
 
         fileName.Should().Be("powershell.exe");
         args.Should().Contain("-NoExit");
-        args.Should().Contain("-Command");
+        args.Should().Contain("-EncodedCommand");
+        decoded.Should().Be("Get-Date");
+    }
+
+    [Fact]
+    public void BuildInteractiveKeepOpenArgs_Powershell_QuotedExecutablePath_AddsCallOperator()
+    {
+        var options = new LocalCmdOptions { Shell = "powershell" };
+        var command = "'C:\\Program Files\\Git\\usr\\bin\\bash.exe' -l -i -c 'echo hi'";
+
+        var (fileName, args) = LocalCmdCommand.BuildInteractiveKeepOpenArgs(command, "powershell", options);
+        var decoded = DecodePowerShellEncodedCommand(args);
+
+        fileName.Should().Be("powershell.exe");
+        args.Should().Contain("-NoExit");
+        decoded.Should().Be("& 'C:\\Program Files\\Git\\usr\\bin\\bash.exe' -l -i -c 'echo hi'");
     }
 
     [Fact]
@@ -867,9 +1044,12 @@ public class LocalCmdCommandTests
             options,
             null,
             "Test Title");
+        var decoded = DecodePowerShellEncodedCommand(args);
 
         fileName.Should().Be("powershell.exe");
-        args.Should().Contain("-Command");
+        args.Should().Contain("-NoProfile");
+        args.Should().Contain("-EncodedCommand");
+        decoded.Should().Be("$ProgressPreference = 'SilentlyContinue'; Get-Date");
     }
 
     [Fact]
@@ -917,7 +1097,8 @@ public class LocalCmdCommandTests
         var result = await command.ExecuteAsync(step, context, CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        capturedCommand.Should().Contain("10.0.0.1");
+        var normalizedCommand = NormalizePowerShellCommandForAssertions(capturedCommand);
+        normalizedCommand.Should().Contain("10.0.0.1");
     }
 
     private static string? TryExtractInteractiveAuditTranscriptPath(string? arguments)
@@ -925,20 +1106,47 @@ public class LocalCmdCommandTests
         if (string.IsNullOrWhiteSpace(arguments))
             return null;
 
+        var normalizedArguments = NormalizePowerShellCommandForAssertions(arguments);
+
         foreach (var marker in new[] { "-FilePath ''", "-Path ''", "-FilePath '", "-Path '" })
         {
-            var markerIndex = arguments.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            var markerIndex = normalizedArguments.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
             if (markerIndex < 0)
                 continue;
 
             var start = markerIndex + marker.Length;
             var endToken = marker.EndsWith("''", StringComparison.Ordinal) ? "''" : "'";
-            var end = arguments.IndexOf(endToken, start, StringComparison.Ordinal);
+            var end = normalizedArguments.IndexOf(endToken, start, StringComparison.Ordinal);
             if (end > start)
-                return arguments[start..end].Replace("''", "'", StringComparison.Ordinal);
+                return normalizedArguments[start..end].Replace("''", "'", StringComparison.Ordinal);
         }
 
         return null;
+    }
+
+    private static string NormalizePowerShellCommandForAssertions(string? arguments)
+    {
+        if (string.IsNullOrWhiteSpace(arguments))
+            return string.Empty;
+
+        return arguments.Contains("-EncodedCommand", StringComparison.OrdinalIgnoreCase)
+            ? DecodePowerShellEncodedCommand(arguments)
+            : arguments;
+    }
+
+    private static string DecodePowerShellEncodedCommand(string arguments)
+    {
+        var marker = "-EncodedCommand ";
+        var markerIndex = arguments.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        markerIndex.Should().BeGreaterThanOrEqualTo(0);
+
+        var encoded = arguments[(markerIndex + marker.Length)..].TrimStart();
+        var terminatorIndex = encoded.IndexOfAny([' ', '"']);
+        if (terminatorIndex >= 0)
+            encoded = encoded[..terminatorIndex];
+
+        var bytes = Convert.FromBase64String(encoded);
+        return System.Text.Encoding.Unicode.GetString(bytes);
     }
 }
 
@@ -1093,15 +1301,20 @@ internal class StubProcessHandle : IProcessHandle
 
 internal class StubConfirmation : ILocalCmdConfirmation
 {
-    private readonly LocalCmdConfirmResult _result;
+    private readonly Func<string, string, string, CancellationToken, Task<LocalCmdConfirmResult>> _handler;
 
     public StubConfirmation(LocalCmdConfirmResult result)
     {
-        _result = result;
+        _handler = (_, _, _, _) => Task.FromResult(result);
     }
 
-    public Task<LocalCmdConfirmResult> ConfirmAsync(string resolvedCommand, string shell, string workingDir)
+    public StubConfirmation(Func<string, string, string, CancellationToken, Task<LocalCmdConfirmResult>> handler)
     {
-        return Task.FromResult(_result);
+        _handler = handler;
+    }
+
+    public Task<LocalCmdConfirmResult> ConfirmAsync(string resolvedCommand, string shell, string workingDir, CancellationToken cancellationToken)
+    {
+        return _handler(resolvedCommand, shell, workingDir, cancellationToken);
     }
 }

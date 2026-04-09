@@ -70,6 +70,7 @@ namespace SSH_Helper.Services.Scripting
             "environment",
             "debug",
             "nobanner",
+            "compact_errors",
             "suppress_missing_column_warning",
             "library",
             "vars",
@@ -439,6 +440,9 @@ namespace SSH_Helper.Services.Scripting
                                 break;
                             case "nobanner":
                                 script.NoBanner = ParseBooleanOrDefault(parser, script.NoBanner);
+                                break;
+                            case "compact_errors":
+                                script.CompactErrors = ParseBooleanOrDefault(parser, script.CompactErrors);
                                 break;
                             case "suppress_missing_column_warning":
                                 script.SuppressMissingColumnWarning = ParseBooleanOrDefault(parser, script.SuppressMissingColumnWarning);
@@ -3502,6 +3506,7 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         case "lifetime":
                             options.Lifetime = NormalizeLowerLiteralEnum(parser.Consume<Scalar>().Value);
+                            options.LifetimeSpecified = true;
                             break;
                         case "kill_on_cancel":
                             options.KillOnCancel = ParseBooleanOrDefault(parser, false);
@@ -3906,6 +3911,7 @@ namespace SSH_Helper.Services.Scripting
             ValidateForbiddenLibraryKey(script, errors, "environment");
             ValidateForbiddenLibraryKey(script, errors, "debug");
             ValidateForbiddenLibraryKey(script, errors, "nobanner");
+            ValidateForbiddenLibraryKey(script, errors, "compact_errors");
             ValidateForbiddenLibraryKey(script, errors, "suppress_missing_column_warning");
         }
 
@@ -4555,7 +4561,7 @@ namespace SSH_Helper.Services.Scripting
                         if (!IsDynamicValue(step.LocalCmd.Shell) && !IsValidLocalCmdShell(step.LocalCmd.Shell))
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'shell' must be one of powershell, custom{lineContent}");
+                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'shell' must be one of powershell, cmd, custom{lineContent}");
                         }
 
                         if (!IsDynamicValue(step.LocalCmd.Shell) &&
@@ -4820,11 +4826,15 @@ namespace SSH_Helper.Services.Scripting
                 return false;
 
             var normalized = shell.Trim();
-            return string.Equals(shell, "powershell", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(shell, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
+            return string.Equals(normalized, "powershell", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "cmd", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "cmd.exe", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith("\\cmd.exe", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith("/cmd.exe", StringComparison.OrdinalIgnoreCase) ||
                    normalized.EndsWith("\\powershell.exe", StringComparison.OrdinalIgnoreCase) ||
                    normalized.EndsWith("/powershell.exe", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(shell, "custom", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(normalized, "custom", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsValidLocalCmdRunMode(string runMode)

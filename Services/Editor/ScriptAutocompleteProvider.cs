@@ -163,6 +163,7 @@ namespace SSH_Helper.Services.Editor
             ["environment"] = "Target env",
             ["debug"] = "Debug mode",
             ["nobanner"] = "Hide banner",
+            ["compact_errors"] = "Compact errors",
             ["suppress_missing_column_warning"] = "Suppress warns",
             ["library"] = "Library import",
             ["vars"] = "Variables",

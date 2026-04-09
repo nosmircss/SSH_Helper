@@ -9,6 +9,7 @@ namespace SSH_Helper
     internal sealed class FolderExecutionDialog : Form
     {
         private const string UnsupportedInteractiveSuffix = " (unsupported interactive command)";
+        private const int MaxParallelHosts = 100;
 
         private readonly string _folderName;
         private readonly List<string> _presetNames;
@@ -185,6 +186,7 @@ namespace SSH_Helper
             };
             _txtParallelHosts.KeyPress += TxtParallelHosts_KeyPress;
             _txtParallelHosts.Leave += TxtParallelHosts_Leave;
+            _txtParallelHosts.TextChanged += TxtParallelHosts_TextChanged;
 
             // Buttons
             _btnRun = new Button
@@ -226,6 +228,7 @@ namespace SSH_Helper
             CancelButton = _btnCancel;
 
             UpdateRunButtonState(_lstPresets.CheckedItems.Count, _lstHosts.CheckedItems.Count);
+            UpdateExecutionModeConstraints(_lstHosts.CheckedItems.Count);
             ApplyTheme(darkMode);
         }
 
@@ -266,6 +269,7 @@ namespace SSH_Helper
             _lblHosts.Text = $"Target hosts ({hostCount} of {_hostAddresses.Count}):";
             UpdateRunButtonState(_lstPresets.CheckedItems.Count, hostCount);
             NormalizeParallelHosts(hostCount);
+            UpdateExecutionModeConstraints(hostCount);
         }
 
         private void TxtParallelHosts_KeyPress(object? sender, KeyPressEventArgs e)
@@ -280,11 +284,17 @@ namespace SSH_Helper
         private void TxtParallelHosts_Leave(object? sender, EventArgs e)
         {
             NormalizeParallelHosts(_lstHosts.CheckedItems.Count);
+            UpdateExecutionModeConstraints(_lstHosts.CheckedItems.Count);
+        }
+
+        private void TxtParallelHosts_TextChanged(object? sender, EventArgs e)
+        {
+            UpdateExecutionModeConstraints(_lstHosts.CheckedItems.Count);
         }
 
         private void NormalizeParallelHosts(int selectedHostCount)
         {
-            int maxParallelHosts = Math.Max(1, selectedHostCount);
+            int maxParallelHosts = Math.Max(1, Math.Min(selectedHostCount, MaxParallelHosts));
 
             if (!int.TryParse(_txtParallelHosts.Text, out int parallelHosts))
             {
@@ -295,11 +305,33 @@ namespace SSH_Helper
             _txtParallelHosts.Text = parallelHosts.ToString();
         }
 
+        private void UpdateExecutionModeConstraints(int selectedHostCount)
+        {
+            if (!int.TryParse(_txtParallelHosts.Text, out int parallelHosts))
+            {
+                parallelHosts = 1;
+            }
+
+            parallelHosts = Math.Clamp(parallelHosts, 1, Math.Max(1, Math.Min(selectedHostCount, MaxParallelHosts)));
+            var hostParallelEnabled = parallelHosts > 1;
+
+            _rbParallel.Enabled = !hostParallelEnabled;
+            if (hostParallelEnabled && _rbParallel.Checked)
+            {
+                _rbSequential.Checked = true;
+            }
+
+            _rbParallel.Text = hostParallelEnabled
+                ? "Parallel (disabled when running multiple hosts in parallel)"
+                : "Parallel (all presets simultaneously)";
+        }
+
         private void BtnRun_Click(object? sender, EventArgs e)
         {
             int selectedHostCount = _lstHosts.CheckedItems.Count;
             NormalizeParallelHosts(selectedHostCount);
             int parallelHosts = int.Parse(_txtParallelHosts.Text);
+            bool runPresetsInParallel = _rbParallel.Checked && parallelHosts == 1;
 
             // Build the options
             Options = new FolderExecutionOptions
@@ -309,7 +341,7 @@ namespace SSH_Helper
                     .Select(item => item.Name)
                     .ToList(),
                 SelectedHostIndices = _lstHosts.CheckedIndices.Cast<int>().ToList(),
-                RunPresetsInParallel = _rbParallel.Checked,
+                RunPresetsInParallel = runPresetsInParallel,
                 StopOnFirstError = _chkStopOnError.Checked,
                 ParallelHostCount = parallelHosts,
                 SuppressPresetNames = _chkSuppressPresetNames.Checked

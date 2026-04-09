@@ -701,6 +701,14 @@ namespace SSH_Helper.Services.Scripting
                                     definedVars.Add(into + "_started");
                                     definedVars.Add(into + "_start_error");
                                 }
+                                else if (step.LocalCmd.Interactive &&
+                                         step.LocalCmd.LifetimeSpecified &&
+                                         string.Equals(step.LocalCmd.Lifetime, "detached", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    definedVars.Add(into + "_pid");
+                                    definedVars.Add(into + "_started");
+                                    definedVars.Add(into + "_start_error");
+                                }
                                 else if (step.LocalCmd.Interactive)
                                 {
                                     definedVars.Add(into + "_exit_code");

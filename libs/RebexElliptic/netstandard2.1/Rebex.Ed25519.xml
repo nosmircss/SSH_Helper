@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Rebex.Ed25519</name>
+    </assembly>
+    <members>
+        <member name="P:Rebex.Security.Cryptography.Ed25519.Name">
+            <summary>
+            Gets algorithm name.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Ed25519.GetPublicKey">
+            <summary>
+            Returns public key.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Ed25519.GetPrivateKey">
+            <summary>
+            Returns private key.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Ed25519.FromPublicKey(System.Byte[])">
+            <summary>
+            Initializes the algorithm from public key.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Ed25519.FromSeed(System.Byte[])">
+            <summary>
+            Initializes the algorithm from private key seed.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Ed25519.FromPrivateKey(System.Byte[])">
+            <summary>
+            Initializes the algorithm from private key.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Ed25519.SignMessage(System.Byte[])">
+            <summary>
+            Signs the supplied <paramref name="message"/>.
+            </summary>
+        </member>
+        <member name="M:Rebex.Security.Cryptography.Ed25519.VerifyMessage(System.Byte[],System.Byte[])">
+            <summary>
+            Verifies the given signature matches the supplied message.
+            </summary>
+        </member>
+    </members>
+</doc>

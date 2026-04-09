@@ -68,6 +68,7 @@ steps:
     [InlineData("description: Uplink to core")]
     [InlineData("version: 1")]
     [InlineData("environment: prod")]
+    [InlineData("compact_errors: true")]
     [InlineData("suppress_missing_column_warning: true")]
     public void IsYamlScript_MetadataOnlyKeywords_ReturnsFalse(string input)
     {
@@ -233,6 +234,19 @@ steps:
         var script = _parser.Parse(yaml);
 
         script.SuppressMissingColumnWarning.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Parse_ScriptWithCompactErrors_ParsesFlag()
+    {
+        var yaml = @"---
+compact_errors: true
+steps:
+  - print: test";
+
+        var script = _parser.Parse(yaml);
+
+        script.CompactErrors.Should().BeTrue();
     }
 
     #endregion

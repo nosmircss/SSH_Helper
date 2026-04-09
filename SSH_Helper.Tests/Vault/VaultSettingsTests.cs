@@ -31,6 +31,12 @@ public class VaultSettingsTests
         profile.AppRoleRoleId.Should().BeEmpty();
         profile.LdapUsername.Should().BeEmpty();
         profile.UserpassUsername.Should().BeEmpty();
+        profile.OidcAuthMountPath.Should().Be("oidc");
+        profile.OidcRole.Should().BeEmpty();
+        profile.OidcCallbackHost.Should().Be("127.0.0.1");
+        profile.OidcCallbackPort.Should().Be(8250);
+        profile.OidcCallbackPath.Should().Be("/oidc/callback");
+        profile.OidcTimeoutSeconds.Should().Be(180);
         profile.CacheTtlSeconds.Should().Be(300);
         profile.CaCertificatePath.Should().BeEmpty();
         profile.SkipTlsVerification.Should().BeFalse();
@@ -56,6 +62,12 @@ public class VaultSettingsTests
                     AppRoleRoleId = "my-role-id",
                     LdapUsername = "svc-account",
                     UserpassUsername = "svc-userpass",
+                    OidcAuthMountPath = "oidc-custom",
+                    OidcRole = "desktop-app",
+                    OidcCallbackHost = "localhost",
+                    OidcCallbackPort = 8750,
+                    OidcCallbackPath = "/vault/callback",
+                    OidcTimeoutSeconds = 240,
                     CacheTtlSeconds = 600,
                     CaCertificatePath = "/etc/ssl/vault-ca.pem",
                     SkipTlsVerification = true,
@@ -80,6 +92,12 @@ public class VaultSettingsTests
         profile.AppRoleRoleId.Should().Be("my-role-id");
         profile.LdapUsername.Should().Be("svc-account");
         profile.UserpassUsername.Should().Be("svc-userpass");
+        profile.OidcAuthMountPath.Should().Be("oidc-custom");
+        profile.OidcRole.Should().Be("desktop-app");
+        profile.OidcCallbackHost.Should().Be("localhost");
+        profile.OidcCallbackPort.Should().Be(8750);
+        profile.OidcCallbackPath.Should().Be("/vault/callback");
+        profile.OidcTimeoutSeconds.Should().Be(240);
         profile.CacheTtlSeconds.Should().Be(600);
         profile.CaCertificatePath.Should().Be("/etc/ssl/vault-ca.pem");
         profile.SkipTlsVerification.Should().BeTrue();
@@ -177,12 +195,14 @@ public class VaultSettingsTests
         ((int)VaultAuthMethod.AppRole).Should().Be(1);
         ((int)VaultAuthMethod.Ldap).Should().Be(2);
         ((int)VaultAuthMethod.Userpass).Should().Be(3);
+        ((int)VaultAuthMethod.Oidc).Should().Be(4);
     }
 
     [Fact]
     public void VaultAuthMethod_UserpassValue_IsDefined()
     {
         Enum.IsDefined(typeof(VaultAuthMethod), 3).Should().BeTrue();
+        Enum.IsDefined(typeof(VaultAuthMethod), 4).Should().BeTrue();
     }
 
     [Fact]

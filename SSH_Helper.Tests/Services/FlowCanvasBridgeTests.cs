@@ -1847,6 +1847,92 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_LocalCmdCmdShell_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "dir",
+            ["shell"] = "cmd",
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var localCmd = script.Steps[0].LocalCmd;
+
+        Assert.NotNull(localCmd);
+        Assert.Equal("cmd", localCmd!.Shell);
+    }
+
+    [Fact]
+    public void Registry_LocalCmdShellOptions_ExcludePwsh()
+    {
+        _ = LoadRegistryBlockPropertyOrder(out var registryText);
+
+        var blockMatch = Regex.Match(
+            registryText,
+            @"type:\s*'localcmd'[\s\S]*?\{\s*key:\s*'shell'[\s\S]*?options:\s*\[(?<options>[^\]]+)\]",
+            RegexOptions.Multiline);
+
+        Assert.True(blockMatch.Success, "Unable to find localcmd shell options in registry.ts.");
+        var optionsText = blockMatch.Groups["options"].Value;
+        Assert.Contains("'powershell'", optionsText, StringComparison.Ordinal);
+        Assert.DoesNotContain("'pwsh'", optionsText, StringComparison.Ordinal);
+        Assert.Contains("'cmd'", optionsText, StringComparison.Ordinal);
+        Assert.Contains("'custom'", optionsText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - localcmd:
+                  command: "date"
+                  interactive: true
+                  lifetime: detached
+            """;
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var localCmdNode = nodes
+            .OfType<JObject>()
+            .Single(node => string.Equals(
+                node["data"]?["blockType"]?.ToString(),
+                "localcmd",
+                StringComparison.OrdinalIgnoreCase));
+
+        var props = localCmdNode["data"]?["props"] as JObject;
+        Assert.NotNull(props);
+        Assert.Equal("detached", props!["lifetime"]?.ToString());
+    }
+
+    [Fact]
+    public void ImportExportRoundTrip_LocalCmdInteractiveDetached_PreservesExplicitLifetime()
+    {
+        var result = RoundTripThroughBridge(
+            """
+            ---
+            steps:
+              - localcmd:
+                  command: "date"
+                  interactive: true
+                  lifetime: detached
+            """);
+
+        AssertExportSuccessWithCanonicalValidation(result);
+        Assert.Contains("lifetime: detached", result.Yaml, StringComparison.Ordinal);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        Assert.NotNull(script.Steps[0].LocalCmd);
+        Assert.True(script.Steps[0].LocalCmd!.LifetimeSpecified);
+    }
+
+    [Fact]
     public void ImportExportRoundTrip_ChooseLabelValueOptions_PreservesLabelValuePairs()
     {
         var result = RoundTripThroughBridge(

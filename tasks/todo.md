@@ -1,5 +1,365 @@
 # TODO
 
+## 235. Stop import-preset tests from blocking on modal dialogs
+- [x] 235.1 Add a RED WinForms regression that installs a test dialog override for `ImportPreset()` and proves import success is reported without opening a blocking modal.
+- [x] 235.2 Add a `Form1` message-dialog override seam and route `ImportPreset()` success messaging through it.
+- [x] 235.3 Run focused verification and record the outcome below.
+
+### 235 Review
+- Root cause:
+- `Form1.ImportPreset()` always ended with a real `DialogTheme.Show(...)` success modal, and the preset-tree WinForms regression suite runs `ImportPreset()` directly.
+- The tests already had an input-box override seam, but there was no equivalent message-dialog seam, so the import path could block the test runner behind the success popup until someone clicked `OK`.
+- RED verification:
+- Extended `ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt` in `SSH_Helper.Tests/UI/Form1PresetTreeIncrementalMutationTests.cs` to install a dialog override and assert the captured success message.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/import-preset-dialog-red/bin/ -p:BaseIntermediateOutputPath=artifacts/import-preset-dialog-red/obj/ -v minimal`
+- Result: failed as expected because `Form1` did not yet expose `_dialogPromptOverrideForTests`.
+- GREEN verification:
+- Added `_dialogPromptOverrideForTests` plus `ShowPromptDialog(...)` to `Form1`, and routed the `ImportPreset()` success/error dialogs through that seam.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/import-preset-dialog-green/bin/ -p:BaseIntermediateOutputPath=artifacts/import-preset-dialog-green/obj/ -v minimal`
+- Result: passed `1/1`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/import-preset-dialog-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/import-preset-dialog-regression/obj/ -v minimal`
+- Result: passed `12/12`.
+
+## 234. Prevent disposed-history popup during WinForms tests
+- [x] 234.1 Add a RED WinForms regression that reproduces startup-history idle hydration after `Form1` disposal and proves it does not touch disposed output controls.
+- [x] 234.2 Patch `Form1` teardown and history/output update guards so idle callbacks no-op cleanly once the form or output controls are disposing/disposed.
+- [x] 234.3 Run focused verification and record the outcome below.
+
+### 234 Review
+- Root cause:
+- `Application.Idle` could still invoke `ArmHistorySelectionOnIdle(...)` after `Form1` disposal, which let `ApplySelectedHistoryEntry()` drive `SetOutputText(...)` against a disposed `txtOutput`.
+- `SetOutputText(...)` forces `txtOutput.Handle` creation during redraw suspension, so once the `TextBox` was already disposed the callback raised the user-visible `ObjectDisposedException` popup.
+- RED verification:
+- Added `ArmHistorySelectionOnIdle_AfterFormDisposal_DoesNotTouchDisposedOutputControls` in `SSH_Helper.Tests/UI/Form1HistorySelectionLifecycleTests.cs`.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1HistorySelectionLifecycleTests.ArmHistorySelectionOnIdle_AfterFormDisposal_DoesNotTouchDisposedOutputControls" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-idle-dispose-red/bin/ -p:BaseIntermediateOutputPath=artifacts/history-idle-dispose-red/obj/ -v minimal`
+- Result: failed as expected because `ArmHistorySelectionOnIdle(...)` still reached `SetOutputText(...)` after disposal and threw `ObjectDisposedException`.
+- GREEN verification:
+- Updated `Form1.cs` to cancel pending history hydration on close and short-circuit history/output UI paths when the form or output controls are disposed.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1HistorySelectionLifecycleTests.ArmHistorySelectionOnIdle_AfterFormDisposal_DoesNotTouchDisposedOutputControls" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-idle-dispose-green/bin/ -p:BaseIntermediateOutputPath=artifacts/history-idle-dispose-green/obj/ -v minimal`
+- Result: passed `1/1`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1HistorySelectionLifecycleTests|FullyQualifiedName~Form1PresetTabSelectionTests|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-idle-dispose-regression3/bin/ -p:BaseIntermediateOutputPath=artifacts/history-idle-dispose-regression3/obj/ -v minimal`
+- Result: passed `14/14`.
+
+## 233. Place new presets directly below the current selection
+- [x] 233.1 Add RED UI regression coverage for add, duplicate, and import placing the created preset immediately below the selected preset and auto-selecting it.
+- [x] 233.2 Centralize preset insertion ordering in `Form1` so add, duplicate, and import insert after the selected preset in the same folder/root list.
+- [x] 233.3 Run focused verification and capture outcomes in the review section below.
+
+### 233 Review
+- Root cause:
+- In manual sort mode, `InsertPresetNode(...)` derives placement from `config.ManualPresetOrderByFolder`, but `AddPreset()`, `DuplicatePreset()`, and `ImportPreset()` were not inserting the new preset into that folder-scoped order relative to the selected preset. The tree therefore kept the old next sibling under the selection and appended the new preset later in the list.
+- `DuplicatePreset()` and `ImportPreset()` also skipped the explicit post-mutation visibility path that `AddPreset()` already used.
+- RED verification:
+- Added focused regressions in `SSH_Helper.Tests/UI/Form1PresetTreeIncrementalMutationTests.cs`:
+- `AddPreset_ManualSort_InsertsNewPresetBelowSelectedPresetAndSelectsIt`
+- `DuplicatePreset_ManualSort_InsertsDuplicateBelowSelectedPresetAndSelectsIt`
+- `ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt`
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.AddPreset_ManualSort_InsertsNewPresetBelowSelectedPresetAndSelectsIt|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.DuplicatePreset_ManualSort_InsertsDuplicateBelowSelectedPresetAndSelectsIt|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-insert-order-red/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-insert-order-red/obj/ -v minimal`
+- Result: failed `3/3` as expected because the created/imported preset was not placed directly below the selected preset.
+- GREEN verification:
+- Updated `Form1.cs` to:
+- reuse `InsertIntoPresetOrder(...)` through a new `PositionCreatedPresetAfterReference(...)` helper for add/import/duplicate in manual sort mode,
+- sync the legacy root `_manualPresetOrder` list from folder-key `""` manual order updates,
+- ensure duplicated/imported incremental nodes are also made fully visible and fallback selection uses `ensureVisible: true`.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.AddPreset_ManualSort_InsertsNewPresetBelowSelectedPresetAndSelectsIt|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.DuplicatePreset_ManualSort_InsertsDuplicateBelowSelectedPresetAndSelectsIt|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-insert-order-green/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-insert-order-green/obj/ -v minimal`
+- Result: passed `3/3`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-insert-order-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-insert-order-regression/obj/ -v minimal`
+- Result: passed `15/15`.
+
+## 232. Suppress autocomplete on Backspace key-up
+- [x] 232.1 Add a RED UI regression proving `Backspace` key-up does not auto-open the script editor autocomplete popup in a valid completion context.
+- [x] 232.2 Update the script editor key-up trigger filter so `Backspace` no longer requests autocomplete automatically.
+- [x] 232.3 Run focused verification for the new regression and record the outcome below.
+
+### 232 Review
+- Root cause:
+- `ScintillaScriptEditorControl.ShouldTriggerAutocompleteOnKeyUp(...)` excluded several non-text keys but not `Keys.Back`, so any backspace key-up in a valid completion context reopened the autocomplete popup immediately.
+- RED verification:
+- Added `CompletionPopup_BackspaceKeyUp_DoesNotTriggerSuggestions` to `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_BackspaceKeyUp_DoesNotTriggerSuggestions" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/backspace-autocomplete-red/bin/ -p:BaseIntermediateOutputPath=artifacts/backspace-autocomplete-red/obj/ -v minimal`
+- Result: failed as expected because the popup was still visible after `Backspace` key-up.
+- GREEN verification:
+- Updated `UI/ScintillaScriptEditorControl.cs` so `Keys.Back` is treated as a non-trigger in `ShouldTriggerAutocompleteOnKeyUp(...)`.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/backspace-autocomplete-green/bin/ -p:BaseIntermediateOutputPath=artifacts/backspace-autocomplete-green/obj/ -v minimal`
+- Result: passed `40/40`.
+
+## 231. Refresh existing Flow Canvas when reopened after preset changes
+- [x] 231.1 Capture the stale-state root cause in the existing `OpenFlowCanvas()` reuse branch.
+- [x] 231.2 Add RED UI regression coverage proving `Edit -> Flow Canvas` rehydrates the current preset when the canvas window is already open.
+- [x] 231.3 Patch the existing-window Flow Canvas open path to reload the current script and host state before focusing the window.
+- [x] 231.4 Run focused verification and record the outcome below.
+
+### 231 Review
+- Root cause:
+- `Form1.OpenFlowCanvas()` returned early when `_flowCanvasForm` already existed, so `Edit -> Flow Canvas` only focused the modeless window and never re-sent the current graph or host payload.
+- Preset selection already called `LoadCurrentScriptIntoCanvas()`, but if the user relied on reopening/focusing the existing canvas window to refresh what they were looking at, the reuse branch sent nothing.
+- RED verification:
+- Added `ReopeningExistingFlowCanvas_AfterPresetSwitch_QueuesCurrentPresetGraph` to `SSH_Helper.Tests/UI/Form1FlowCanvasPresetSyncTests.cs`.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasPresetSyncTests.ReopeningExistingFlowCanvas_AfterPresetSwitch_QueuesCurrentPresetGraph" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/flowcanvas-reopen-red/bin/ -p:BaseIntermediateOutputPath=artifacts/flowcanvas-reopen-red/obj/ -v minimal`
+- Result: failed as expected because `pendingMessages` was empty after reopening the existing Flow Canvas window.
+- GREEN verification:
+- Patched `Form1.OpenFlowCanvas()` to call `LoadCurrentScriptIntoCanvas()` and `SendTargetHostToCanvas()` before focusing the existing window.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasPresetSyncTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/flowcanvas-reopen-green/bin/ -p:BaseIntermediateOutputPath=artifacts/flowcanvas-reopen-green/obj/ -v minimal`
+- Result: passed `2/2`.
+
+## 230. Fix interactive localcmd cmd shell regression
+- [x] 230.1 Capture the exact root cause for the interactive `shell: cmd` failure introduced by the localcmd output cleanup work.
+- [x] 230.2 Add RED regression coverage proving the cmd interactive audit wrapper no longer relies on raw `-Command '...| Tee-Object ...'` quoting.
+- [x] 230.3 Patch cmd interactive audit capture to use a quoting-safe launch form.
+- [x] 230.4 Run focused `LocalCmdCommandTests` verification and rebuild the default debug output.
+
+### 230 Review
+- Root cause:
+- interactive `localcmd` for `shell: cmd` wrapped the command as:
+- `(...command...) 2>&1 | powershell.exe -NoLogo -NoProfile -NonInteractive -Command '$input | Tee-Object ...'`
+- `cmd.exe` does not treat single quotes as grouping characters, so the raw `| Tee-Object ...` leaked into cmd parsing and caused the interactive run to fail with exit code `255`.
+- External reproduction before the fix:
+- the generated wrapper failed with `ExitCode=255` and `Tee-Object is not recognized as an internal or external command`.
+- Added RED coverage in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- strengthened `Interactive_Cmd_WrapsCommandForAuditCapture` to require `-EncodedCommand` instead of raw `Tee-Object` text in the launched `cmd.exe` arguments, and to require `$ProgressPreference = 'SilentlyContinue';` inside the decoded helper command.
+- Implemented fix in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- changed the cmd interactive audit helper to use `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ...`
+- prepended `$ProgressPreference = 'SilentlyContinue';` to the tee helper itself so the transcript capture process does not inject its own CLIXML progress noise.
+- RED verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests.Interactive_Cmd_WrapsCommandForAuditCapture" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/localcmd-cmd-red/bin/ -p:BaseIntermediateOutputPath=artifacts/localcmd-cmd-red/obj/ -v minimal`
+- Result: failed as expected because args still used raw `-Command '$input | Tee-Object ...'`.
+- Additional RED verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests.Interactive_Cmd_WrapsCommandForAuditCapture" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/localcmd-cmd-progress-red/bin/ -p:BaseIntermediateOutputPath=artifacts/localcmd-cmd-progress-red/obj/ -v minimal`
+- Result: failed as expected because the decoded tee helper still lacked `$ProgressPreference = 'SilentlyContinue';`.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/localcmd-cmd-green/bin/ -p:BaseIntermediateOutputPath=artifacts/localcmd-cmd-green/obj/ -v minimal`
+- Result: passed `45/45`.
+- External verification after the fix:
+- equivalent `cmd -> powershell -EncodedCommand` wrapper now prints `hi`, exits `0`, and writes a clean transcript without CLIXML noise.
+- Default build verification:
+- `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal`
+- Result: succeeded and refreshed `bin\Debug\net8.0-windows`.
+
+## 228. Verify the actual default app build after user reported CLIXML still showing
+- [x] 228.1 Check whether the current `bin\Debug` output was rebuilt and contains the localcmd PowerShell suppression fix.
+- [x] 228.2 Reproduce the exact suppressed PowerShell launch string outside the app to confirm the command itself no longer emits CLIXML.
+- [x] 228.3 Record the likely remaining explanation for the user's observed output.
+
+### 228 Review
+- Verified the exact suppressed command outside the app:
+- `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand <"$ProgressPreference = 'SilentlyContinue'; date">`
+- Result: normal `date` output on stdout and empty stderr.
+- Rebuilt the default debug output successfully:
+- `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal`
+- Result: build succeeded with only the existing `MSB3277`, `CS8602`, and `xUnit1031` warnings.
+- Verified the default `bin\Debug` assembly contains the new suppression literal:
+- binary Unicode-string search for `SilentlyContinue` returned `default=True` for `bin\Debug\net8.0-windows\SSH_Helper.dll`.
+- Conclusion: the source fix and the current default debug build both contain the suppression behavior. The output the user pasted is therefore most likely from a run that occurred before the refreshed default build was launched, or from launching a different app output than the rebuilt `bin\Debug` instance.
+
+## 229. Eliminate PowerShell startup CLIXML by fixing localcmd launch flags
+- [x] 229.1 Add failing regressions proving non-interactive PowerShell localcmd launch args include `-NoProfile`.
+- [x] 229.2 Patch the non-interactive PowerShell launch path to include `-NoProfile` where localcmd expects headless/scripted behavior.
+- [x] 229.3 Run focused verification for `LocalCmdCommandTests` and record results below.
+
+### 229 Review
+- Root cause refinement:
+- the earlier `$ProgressPreference = 'SilentlyContinue'` change was not sufficient because PowerShell startup/module initialization progress can be emitted before the encoded command executes.
+- exact repro:
+- `powershell.exe -NoLogo -NonInteractive -EncodedCommand <"$ProgressPreference = 'SilentlyContinue'; date">` still emitted CLIXML progress.
+- `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand <"$ProgressPreference = 'SilentlyContinue'; date">` emitted normal stdout and empty stderr.
+- Added RED coverage in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `BuildProcessArgs_Powershell_UsesNoProfileAndPrependsProgressSuppression`
+- `BuildInteractiveArgs_NonKeepOpen_Powershell_UsesDirectShellProcessForReliableCapture`
+- Implemented fix in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- non-interactive PowerShell localcmd launches now use `-NoLogo -NoProfile -NonInteractive -EncodedCommand ...`
+- the same `-NoProfile` change was applied to the matching non-keep-open interactive fallback PowerShell encoded-command path for consistency.
+- RED verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests.BuildProcessArgs_Powershell_UsesNoProfileAndPrependsProgressSuppression|FullyQualifiedName~LocalCmdCommandTests.BuildInteractiveArgs_NonKeepOpen_Powershell_UsesDirectShellProcessForReliableCapture" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/localcmd-noprofile-red/bin/ -p:BaseIntermediateOutputPath=artifacts/localcmd-noprofile-red/obj/ -v minimal`
+- Result: failed `2/2` because args did not yet contain `-NoProfile`.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/localcmd-noprofile-green/bin/ -p:BaseIntermediateOutputPath=artifacts/localcmd-noprofile-green/obj/ -v minimal`
+- Result: passed `45/45`.
+- External verification:
+- exact expected startup command with `-NoProfile` produced normal `date` output and empty stderr.
+- Default build verification:
+- `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal`
+- Result: succeeded and refreshed `bin\Debug\net8.0-windows`.
+
+## 226. Explain `localcmd` PowerShell CLIXML/progress output
+- [x] 226.1 Inspect the current `localcmd` PowerShell launch path and stream capture behavior.
+- [x] 226.2 Reproduce the reported `CLIXML`/`Preparing modules for first use.` output outside the app to confirm the source.
+- [x] 226.3 Document the root cause, whether the output is expected, and the cleanest mitigation.
+
+### 226 Review
+- `localcmd` foreground PowerShell runs currently start `powershell.exe` with `-NoLogo -NonInteractive -EncodedCommand ...` in `Services/Scripting/Commands/LocalCmdCommand.cs`.
+- `localcmd` also forwards redirected PowerShell stderr lines directly into script output as warnings.
+- External reproduction matched the app exactly:
+- `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand <date>` produced normal `date` output on stdout plus `#< CLIXML ... Preparing modules for first use. ...` on stderr.
+- The same command invoked as `powershell.exe -NoLogo -NoProfile -NonInteractive -Command date` did not emit the CLIXML payload in this environment.
+- Root cause: the XML is coming from Windows PowerShell itself, not from YAML parsing or the `localcmd` output formatter. In this startup mode, PowerShell serializes progress records to CLIXML on stderr, and `localcmd` currently surfaces that stream verbatim.
+- Clean mitigations:
+- Best product fix: suppress PowerShell progress records for non-interactive `localcmd` PowerShell runs before executing the user command.
+- Possible implementation: prepend `$ProgressPreference = 'SilentlyContinue';` before encoding the command, or otherwise normalize/filter PowerShell CLIXML progress payloads before emitting them to the user.
+
+## 227. Suppress PowerShell CLIXML progress noise in localcmd output
+- [x] 227.1 Add a failing `LocalCmdCommand` regression proving non-interactive PowerShell `localcmd` commands prepend progress suppression before encoding.
+- [x] 227.2 Patch the non-interactive PowerShell `localcmd` launch path to suppress startup progress without affecting direct quoted executable invocations.
+- [x] 227.3 Run focused verification for `LocalCmdCommandTests` and record results below.
+
+### 227 Review
+- Added regression coverage in `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`:
+- `BuildProcessArgs_Powershell_PrependsProgressSuppression`
+- updated dependent expectation in `BuildInteractiveArgs_NonKeepOpen_Powershell_UsesDirectShellProcessForReliableCapture`, because that path intentionally reuses the same direct PowerShell encoded-command launch for capture reliability.
+- Implemented the fix in `Services/Scripting/Commands/LocalCmdCommand.cs`:
+- added `PrepareNonInteractivePowerShellCommand(...)`, which prepends `$ProgressPreference = 'SilentlyContinue';` after the existing PowerShell command normalization step.
+- wired the helper into non-keep-open PowerShell encoded-command launch paths, while leaving direct quoted executable invocations and keep-open shells unchanged.
+- RED verification:
+- Initial focused test run without isolated output paths was blocked by a live `SSH_Helper.exe` file lock in `bin\Debug`; this was an environment collision, not the product signal.
+- Isolated RED run:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests.BuildProcessArgs_Powershell_PrependsProgressSuppression" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/localcmd-clixml-red/bin/ -p:BaseIntermediateOutputPath=artifacts/localcmd-clixml-red/obj/ -v minimal`
+- Result: failed as expected because decoded command text was still `Get-Process`.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/localcmd-clixml-green/bin/ -p:BaseIntermediateOutputPath=artifacts/localcmd-clixml-green/obj/ -v minimal`
+- Result: passed `45/45`.
+
+## 225. Implement localcmd reliability and UX review fixes
+- [x] 225.1 Add RED tests for cancellation-aware localcmd confirmation and for scheduler handling of localcmd confirmation requirements.
+- [x] 225.2 Implement cancellation-aware `ILocalCmdConfirmation` plumbing and dialog behavior, and make scheduler runs fail clearly when a script/job uses `localcmd` without `confirm: never`.
+- [x] 225.3 Add RED tests for detached interactive `localcmd.into` metadata analysis, supported shell consistency, and argument/quoting behavior that currently relies on fragile string concatenation.
+- [x] 225.4 Implement localcmd metadata consistency across runtime/analyzer/Flow Canvas, align supported shell choices end-to-end, and harden process argument handling.
+- [x] 225.5 Update docs/help text/changelog to match the post-fix behavior.
+- [x] 225.6 Run focused verification for localcmd-related slices and record results in a `225 Review` section below.
+
+### 225 Review
+- Added regression coverage in:
+- `SSH_Helper.Tests/Scripting/LocalCmdCommandTests.cs`
+- confirmation cancellation propagation before process start
+- powershell/custom argument quoting with space-containing args
+- `SSH_Helper.Tests/Services/JobExecutionServiceTests.cs`
+- run-now and scheduled-job failures when `localcmd` would require an unattended confirmation prompt
+- `SSH_Helper.Tests/Scripting/ScriptDependencyAnalyzerTests.cs`
+- detached interactive `localcmd.into` metadata definitions
+- `SSH_Helper.Tests/Scripting/LocalCmdParserTests.cs`
+- parser acceptance for `cmd` and `pwsh` shells
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`
+- Flow Canvas export of `shell: cmd`
+- registry shell options include `powershell`, `pwsh`, `cmd`, `custom`
+- Implemented behavior changes:
+- `ILocalCmdConfirmation` now accepts a cancellation token, `LocalCmdCommand` passes the script execution token into confirmation, and `LocalCmdConfirmationDialog` now closes on cancellation through `ScriptPromptDialogRunner`.
+- Scheduler/unattended runs now preflight-fail scripts containing `localcmd` steps that do not explicitly set `confirm: never`, instead of risking a modal confirmation dialog.
+- `localcmd` detached interactive mode is now modeled consistently across runtime/analyzer/Flow Canvas help text and docs as producing `_pid`, `_started`, and `_start_error`.
+- `localcmd` shell support is now aligned end-to-end around `powershell`, `pwsh`, `cmd`, and `custom`, while still accepting executable/path variants in parser/runtime validation.
+- Local process argument handling now quotes space/quote-containing shell args instead of raw `string.Join(" ", ...)` concatenation.
+- Confirmation UX is less misleading: the dialog button now reads `Run Same Command`, with explanatory text about the scope.
+- Updated docs/help in:
+- `FlowCanvas/src/blockDefs/registry.ts`
+- `SCRIPTING.md`
+- `CHANGELOG.md`
+- `docs/superpowers/specs/2026-04-04-localcmd-command-design.md`
+- RED verification:
+- Initial focused `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~JobExecutionServiceTests.RunNowAsync_CustomPresetLocalCmdConfirmAlways_FailsWithoutPrompt|FullyQualifiedName~JobExecutionServiceTests.ExecuteScheduledJobAsync_CustomPresetLocalCmdConfirmAlways_FailsWithoutPrompt|FullyQualifiedName~ScriptDependencyAnalyzerTests.AnalyzePresets_LocalCmdInteractiveDetachedInto_DefinesStartupMetadataVariables|FullyQualifiedName~LocalCmdParserTests.Validate_CmdShell_DoesNotReturnShellValidationError|FullyQualifiedName~LocalCmdParserTests.Validate_PwshShell_DoesNotReturnShellValidationError|FullyQualifiedName~FlowCanvasBridgeTests.ExportGraphToYaml_LocalCmdCmdShell_ExportsSuccessfully" -p:SkipFlowCanvasBuild=true -v minimal` failed at compile as expected because the production confirmation interface had not yet been updated for cancellation-aware tests.
+- Additional RED verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~FlowCanvasBridgeTests.Registry_LocalCmdShellOptions_IncludePwshAndCmd" -p:SkipFlowCanvasBuild=true -v minimal` failed because the registry still exposed only `powershell` and `custom`.
+- GREEN verification:
+- `npm run build` in `FlowCanvas` (passed).
+- First combined verification attempt ran `.NET` tests in parallel with the Flow Canvas build and hit a transient stale-resource compile error for an old `dist/assets/index-*.js` filename while `dist` was being rewritten; this was a verification race, not a product failure.
+- Final focused regression slice:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~JobExecutionServiceTests" -p:SkipFlowCanvasBuild=true -v minimal`
+- Result: passed `227/227`.
+
+## 224. Full implementation review of `localcmd`
+- [x] 224.1 Audit `localcmd` runtime behavior in `LocalCmdCommand`, `ScriptContext`, and confirmation UI for reliability, safety, and confusing semantics.
+- [x] 224.2 Audit parser, dependency analysis, Flow Canvas, autocomplete, docs, and QA assets for `localcmd` drift or UX mismatches.
+- [x] 224.3 Run focused `localcmd` verification and note whether coverage matches the implementation surface.
+- [x] 224.4 Record prioritized findings, recommended changes, and verification evidence in a `224 Review` section below.
+
+### 224 Review
+- Focused verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~LocalCmdParserTests|FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~ScriptAutocompleteProviderTests" -p:SkipFlowCanvasBuild=true -v minimal`
+- Result: passed `206/206`.
+- High: `localcmd` confirmation is not cancellation-aware. `ILocalCmdConfirmation` has no cancellation token, `LocalCmdCommand` awaits confirmation before entering any cancellable execution path, and `LocalCmdConfirmationDialog` hard-codes `CancellationToken.None`. If the user stops execution while the prompt is open, the prompt will not dismiss itself and the run can remain blocked behind the dialog.
+- High: scheduler runs are not safe for the default confirmation model. `JobExecutionService` creates a fresh `SshExecutionService` for every job run, `SshExecutionService` always installs `LocalCmdConfirmationDialog`, and the job path only disables file-picker prompts. Because `localcmd` defaults to `confirm: always`, unattended jobs can still block on modal local-command confirmation instead of running headlessly or failing preflight with a clear message.
+- Medium: detached interactive `localcmd` output metadata is implemented but not modeled consistently. Runtime detached interactive mode sets `<into>_pid`, `<into>_started`, and `<into>_start_error`, but `ScriptDependencyAnalyzer` still treats every interactive `localcmd` as defining only `<into>_exit_code`, and Flow Canvas help text still says interactive mode sets only `<into>_exit_code`. This will create false missing-variable warnings and misleading authoring guidance for the detached-interactive path.
+- Medium: shell support is internally inconsistent. Runtime supports `cmd`, `cmd.exe`, `pwsh`, `pwsh.exe`, and path variants, but parser validation, Flow Canvas shell options, and scripting docs still describe `localcmd.shell` as `powershell|custom`, and the parser tests explicitly lock in `cmd` as invalid. The feature should either officially support the larger shell matrix end-to-end or remove the dead runtime branches.
+- Medium: process argument construction is fragile because it relies on raw string concatenation. `LocalCmdCommand` flattens `args` with `string.Join(" ", options.Args)` and builds `cmd` invocations as `"{modeFlag} \"{command}\""`, so arguments containing spaces or embedded quotes are not escaped robustly. This is likely to produce broken launches for real commands before release unless argument handling moves to `ProcessStartInfo.ArgumentList` or a dedicated Windows quoting helper.
+- Medium: the user-facing semantics are still confusing even where the code is intentional. The confirmation dialog button says `Run All`, but approval is still scoped to the same resolved command on the current host. Flow Canvas labels `lifetime` as `Background Lifetime`, while the interactive detached behavior also depends on explicitly setting `lifetime: detached`. Both cases encourage incorrect user expectations.
+- Medium: documentation drift remains. `CHANGELOG.md` still documents `localcmd.lifetime` defaulting to `script` and `kill_on_cancel` defaulting to `true`, which no longer matches the runtime or `SCRIPTING.md`. That increases confusion during pre-release review because users will see multiple conflicting descriptions of the same command.
+- Coverage gaps worth fixing with the next implementation pass:
+- Add `JobExecutionService` coverage for scheduled `localcmd` runs that verifies the approved headless behavior (`confirm: never` success or explicit preflight failure).
+- Add `ScriptDependencyAnalyzer` and Flow Canvas regression coverage for detached interactive `localcmd.into` metadata.
+- Add `LocalCmdCommand` quoting/spacing tests for `args` entries that contain spaces or embedded quotes.
+
+## 223. Analyze full suite failures and restore the current test project to green
+- [x] 223.1 Run the full `SSH_Helper.Tests` suite in the current worktree and capture the exact failing tests/error signatures.
+- [x] 223.2 Classify the failures by subsystem and identify root causes before attempting fixes.
+- [x] 223.3 Add or tighten focused regression coverage for each real product bug exposed by the failing tests.
+- [x] 223.4 Implement the minimal production/test fixes needed to restore intended behavior without disturbing unrelated in-flight work.
+- [x] 223.5 Re-run targeted verification for each repaired slice, then re-run the full `SSH_Helper.Tests` suite.
+- [x] 223.6 Add a review summary with verification evidence below.
+
+### 223 Review
+- Full-suite reproduction initially failed `14/2069`.
+- Failure clusters:
+- QA preset expectation parsing: `QaPresetCatalogTests` and `QaPresetExecutionTests` rejected the new descriptive clause `Expected: pass (timeout branch observed).` because the helpers only accepted the exact literal `Expected: pass.`.
+- Job history persistence/UI: `JobHistoryServiceTests` and `JobListDialogRunNowTests` used fixed March 2026 timestamps. On April 8, 2026 those records were older than the default 30-day retention window, so `JobHistoryService.SaveRun(...)` immediately pruned them and the UI correctly rendered `Never run`.
+- Implemented minimal fixes:
+- Relaxed QA expected-outcome detection in:
+- `SSH_Helper.Tests/Scripting/QaPresetCatalogTests.cs`
+- `SSH_Helper.Tests/Scripting/QaPresetExecutionTests.cs`
+- Pass outcomes now match `Expected: pass` prefixes, preserving richer descriptive suffixes without weakening the failure/exit classifications.
+- Replaced brittle fixed UTC timestamps with recent relative UTC helpers in:
+- `SSH_Helper.Tests/Services/JobHistoryServiceTests.cs`
+- `SSH_Helper.Tests/UI/JobListDialogRunNowTests.cs`
+- This keeps persistence/UI assertions inside the service's default retention policy while preserving the same ordering/duration/skipped-summary behaviors under test.
+- Verification:
+- Focused repaired slices:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~QaPresetCatalogTests|FullyQualifiedName~QaPresetExecutionTests|FullyQualifiedName~JobHistoryServiceTests|FullyQualifiedName~JobListDialogRunNowTests" -p:SkipFlowCanvasBuild=true -v minimal`
+- Result: passed `55/55`.
+- Full suite:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore -v minimal`
+- Result: passed `2069/2069`.
+- Existing warnings during verification remained non-blocking and unchanged in nature: `MSB3277` (`WindowsBase`/WebView2 conflict warnings), `CS8602` in existing test code, and `xUnit1031` analyzer warnings in `ExpressionParserTests`.
+
+## 222. Fix OIDC hardening and detached localcmd round-trip regressions
+- [x] 222.1 Add RED tests for Vault OIDC callback host validation in settings/runtime and for OIDC persisted-token reuse/fallback behavior.
+- [x] 222.2 Add RED FlowCanvasBridge regression tests proving explicit interactive `lifetime: detached` survives YAML -> canvas -> YAML and explicit detached presence is exported.
+- [x] 222.3 Implement Vault callback-host normalization/loopback-only validation in shared runtime helpers and settings validation.
+- [x] 222.4 Implement OIDC persisted-token reuse with lookup-self validation, browser fallback on missing/401 token only, and unchanged fresh-token persistence.
+- [x] 222.5 Implement Flow Canvas `localcmd` explicit-lifetime preservation end-to-end and update editor help text to match runtime semantics.
+- [x] 222.6 Run focused verification for Vault, FlowCanvasBridge, LocalCmd, and ScriptParser slices; then run the full suite and record unrelated existing failures separately if they remain.
+- [x] 222.7 Add a review summary with verification evidence below.
+
+### 222 Review
+- Added RED coverage in:
+- `SSH_Helper.Tests/Vault/VaultServiceTests.cs`
+- `OidcAuth_InvalidCallbackHost_ThrowsFriendlyErrorBeforeHttpCalls`
+- `OidcAuth_ValidPersistedToken_SkipsBrowserLogin`
+- `OidcAuth_UnauthorizedPersistedToken_FallsBackToBrowserLogin`
+- `OidcAuth_PersistedTokenValidationTransportError_DoesNotFallBackToBrowserLogin`
+- `OidcAuth_Ipv6LoopbackHost_NormalizesRedirectUri`
+- `SSH_Helper.Tests/UI/SettingsDialogVaultTests.cs`
+- `SavingOidcProfile_WithNonLoopbackCallbackHost_ShowsValidationAndDoesNotPersist`
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`
+- `TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp`
+- `ImportExportRoundTrip_LocalCmdInteractiveDetached_PreservesExplicitLifetime`
+- Implemented Vault hardening with shared callback normalization in `Services/Vault/VaultOidcCallbackSettings.cs`, runtime enforcement in `Services/Vault/VaultService.cs` and `Services/Vault/VaultOidcLoginFlow.cs`, and save-time validation through `SettingsDialog.cs`.
+- Runtime behavior now accepts only loopback callback hosts (`127.0.0.1`, `localhost`, `::1`, `[::1]`), normalizes IPv6 redirect URIs to bracketed form, and blocks invalid hosts before any Vault/OIDC HTTP calls.
+- OIDC auth now attempts persisted token reuse first via `auth/token/lookup-self`, skips browser login on success, falls back only on missing/401/403 tokens, and surfaces transport/status failures instead of silently dropping into interactive login.
+- Flow Canvas import now preserves explicit `localcmd.lifetime` presence when YAML explicitly sets `lifetime: detached`, and the block help text now documents the detached interactive behavior.
+- Additional code/docs alignment:
+- `Models/VaultSettings.cs` now documents the loopback-only callback-host constraint.
+- Focused RED verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~SettingsDialogVaultTests.SavingOidcProfile_WithNonLoopbackCallbackHost_ShowsValidationAndDoesNotPersist|FullyQualifiedName~VaultServiceTests.OidcAuth_InvalidCallbackHost_ThrowsFriendlyErrorBeforeHttpCalls|FullyQualifiedName~VaultServiceTests.OidcAuth_ValidPersistedToken_SkipsBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_UnauthorizedPersistedToken_FallsBackToBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_PersistedTokenValidationTransportError_DoesNotFallBackToBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_Ipv6LoopbackHost_NormalizesRedirectUri|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp|FullyQualifiedName~FlowCanvasBridgeTests.ImportExportRoundTrip_LocalCmdInteractiveDetached_PreservesExplicitLifetime" -p:SkipFlowCanvasBuild=true` (failed `7/8` before implementation as expected).
+- Focused GREEN verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~SettingsDialogVaultTests.SavingOidcProfile_WithNonLoopbackCallbackHost_ShowsValidationAndDoesNotPersist|FullyQualifiedName~VaultServiceTests.OidcAuth_InvalidCallbackHost_ThrowsFriendlyErrorBeforeHttpCalls|FullyQualifiedName~VaultServiceTests.OidcAuth_ValidPersistedToken_SkipsBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_UnauthorizedPersistedToken_FallsBackToBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_PersistedTokenValidationTransportError_DoesNotFallBackToBrowserLogin|FullyQualifiedName~VaultServiceTests.OidcAuth_Ipv6LoopbackHost_NormalizesRedirectUri|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp|FullyQualifiedName~FlowCanvasBridgeTests.ImportExportRoundTrip_LocalCmdInteractiveDetached_PreservesExplicitLifetime" -p:SkipFlowCanvasBuild=true` (passed `8/8`).
+- Regression slice verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~VaultServiceTests|FullyQualifiedName~VaultSettingsTests|FullyQualifiedName~SettingsDialogVaultTests|FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~LocalCmdCommandTests|FullyQualifiedName~ScriptParserTests" -p:SkipFlowCanvasBuild=true` (passed `315/315`).
+- Flow Canvas build verification:
+- `npm run build` in `FlowCanvas` (passed).
+- Full suite verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore` rebuilt Flow Canvas and failed with `15` unrelated tests outside the touched Vault/Flow Canvas areas.
+- Concentrated failures remained in QA preset expectation parsing, job-history/job-list history rendering, and one aggregate-only `BrowserCallbackUiHostTests` failure.
+- Isolated follow-up:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~BrowserCallbackUiHostTests.LaunchAsync_WebView2_IgnoresActiveBrowserCallbackWindow_WhenSelectingOwner" -p:SkipFlowCanvasBuild=true` (passed `1/1`), indicating the extra browser-callback failure is not a deterministic regression from this change set.
+
 ## 221. Increase Vault settings field width for better text visibility
 - [x] 221.1 Identify Vault tab row/input sizing constraints in `SettingsDialog.cs`.
 - [x] 221.2 Increase minimum width of Vault text input and related combo fields while preserving existing behavior.
@@ -3917,3 +4277,41 @@
     - `missing-in-toc=` (empty)
     - `extra-in-toc=` (empty)
   - `rg -n "^## " SCRIPTING.md` confirms TOC now includes all major top-level sections, including `Output Options` and `Tips and Best Practices`.
+
+## 212. Make execution-start debug logs reflect local-only scripts
+- [x] 212.1 Add a regression test that distinguishes local-only script execution from SSH-required script execution in the `Form1` execution-start debug message.
+- [x] 212.2 Update `Form1` to choose the execution-start debug message from script dependency analysis instead of always saying SSH is starting.
+- [x] 212.3 Run targeted verification for the new test coverage and a build, then record the review notes here.
+
+### 212 Review
+- Added `SSH_Helper.Tests/UI/Form1ExecutionStartDebugMessageTests.cs` to lock the execution-start debug wording to:
+  - `Calling ExecutePresetAsync - Local execution starting` for local-only YAML scripts
+  - `Calling ExecutePresetAsync - SSH connection starting` for SSH-required YAML scripts
+- Updated `Form1.cs` to route the existing debug log through a new private static helper that parses YAML presets, analyzes SSH requirements, and falls back to a generic execution-start message if script analysis fails.
+- Verification:
+  - RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionStartDebugMessageTests" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/form1-exec-debug-tests/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-exec-debug-tests/obj/ -v minimal` failed `2/2` before implementation because `Form1` did not yet expose `BuildExecutionStartDebugMessage`.
+  - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionStartDebugMessageTests" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/form1-exec-debug-tests/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-exec-debug-tests/obj/ -v minimal` passed `2/2`.
+  - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` passed; existing warnings remain (`MSB3277`, `CS8602`, `xUnit1031`).
+
+## 213. Remove built-in localcmd pwsh support
+- [x] 213.1 Add regression coverage for removing built-in `pwsh` support from parser, Flow Canvas shell options, and localcmd runtime expectations.
+- [x] 213.2 Remove built-in `pwsh` support from `localcmd` parser/runtime/docs/UI metadata while preserving `powershell`, `cmd`, and `custom`.
+- [x] 213.3 Run targeted verification for the updated localcmd coverage and a build, then record review notes here.
+
+### 213 Review
+- Removed built-in `pwsh` support end-to-end for `localcmd`:
+  - parser validation now accepts `powershell`, `cmd`, and `custom`,
+  - runtime PowerShell-shell detection no longer treats `pwsh` as a built-in alias,
+  - Flow Canvas shell dropdown no longer advertises `pwsh`,
+  - user-facing docs/changelog/spec notes now describe the reduced shell matrix.
+- Updated regression coverage to pin the new behavior:
+  - `LocalCmdParserTests.Validate_PwshShell_ReturnsShellValidationError`
+  - `FlowCanvasBridgeTests.Registry_LocalCmdShellOptions_ExcludePwsh`
+- Verification:
+  - RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Validate_PwshShell_ReturnsShellValidationError|FullyQualifiedName~Registry_LocalCmdShellOptions_ExcludePwsh" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/remove-pwsh-tests/bin/ -p:BaseIntermediateOutputPath=artifacts/remove-pwsh-tests/obj/ -v minimal` failed `2/2` before implementation because parser validation and Flow Canvas registry still exposed `pwsh`.
+  - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Validate_PwshShell_ReturnsShellValidationError|FullyQualifiedName~Registry_LocalCmdShellOptions_ExcludePwsh" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/remove-pwsh-tests/bin/ -p:BaseIntermediateOutputPath=artifacts/remove-pwsh-tests/obj/ -v minimal` passed `2/2`.
+  - `npm run build` in `FlowCanvas/` regenerated `dist/` without `pwsh` in the shipped bundle.
+  - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` initially failed with stale embedded-resource state for the old hashed Flow Canvas asset after the Vite rebuild.
+  - `dotnet clean SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` cleared the stale resource state.
+  - `dotnet build SSH_Helper.sln -v minimal` passed; existing warnings remain (`MSB3277`, `CS8602`, `xUnit1031`, Vite chunk-size warning).
+  - `rg -n "pwsh" FlowCanvas\\dist -S` returned no matches after the rebuild.

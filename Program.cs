@@ -1,4 +1,5 @@
 using System.Reflection;
+using Rebex.Security.Cryptography;
 using SSH_Helper.Utilities;
 
 namespace SSH_Helper
@@ -38,6 +39,8 @@ namespace SSH_Helper
                 Rebex.Licensing.Key = rebexKey;
             }
 
+            RegisterRebexEllipticPlugins();
+
             // To customize application configuration such as set high DPI settings or default font,
             // see https://aka.ms/applicationconfiguration.
             ApplicationConfiguration.Initialize();
@@ -54,6 +57,14 @@ namespace SSH_Helper
 
             ScintillaNativeBootstrap.ConfigureSatelliteDirectory();
             Application.Run(new Form1());
+        }
+
+        private static void RegisterRebexEllipticPlugins()
+        {
+            // Enable Rebex elliptic-curve plugins for Curve25519/Ed25519 when present.
+            AsymmetricKeyAlgorithm.Register(EllipticCurveAlgorithm.Create);
+            AsymmetricKeyAlgorithm.Register(Curve25519.Create);
+            AsymmetricKeyAlgorithm.Register(Ed25519.Create);
         }
     }
 }

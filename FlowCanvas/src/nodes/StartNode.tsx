@@ -11,6 +11,7 @@ export interface StartNodeData {
     version?: number;
     debug?: boolean;
     nobanner?: boolean;
+    compact_errors?: boolean;
     suppress_missing_column_warning?: boolean;
     library?: boolean;
     vars?: Record<string, unknown>;
@@ -23,6 +24,7 @@ export interface StartNodeData {
 const FLAG_KEYS: { key: string; label: string }[] = [
   { key: 'debug', label: 'debug' },
   { key: 'nobanner', label: 'nobanner' },
+  { key: 'compact_errors', label: 'compact-errors' },
   { key: 'suppress_missing_column_warning', label: 'no-warn' },
   { key: 'library', label: 'library' },
 ];

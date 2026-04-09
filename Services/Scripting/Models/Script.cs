@@ -50,6 +50,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public bool NoBanner { get; set; }
 
         /// <summary>
+        /// Emit compact single-line errors instead of banner-style blocks.
+        /// </summary>
+        public bool CompactErrors { get; set; }
+
+        /// <summary>
         /// Suppress the pre-execution warning when referenced grid columns are missing.
         /// Missing references still resolve to empty values at runtime.
         /// </summary>

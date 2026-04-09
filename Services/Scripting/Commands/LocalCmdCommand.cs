@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -64,7 +65,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             LocalCmdConfirmResult confirmResult;
             try
             {
-                confirmResult = await HandleConfirmation(options, command, shell, workingDir, context);
+                confirmResult = await HandleConfirmation(options, command, shell, workingDir, context, cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
@@ -101,7 +102,7 @@ namespace SSH_Helper.Services.Scripting.Commands
         }
 
         private async Task<LocalCmdConfirmResult> HandleConfirmation(
-            LocalCmdOptions options, string command, string shell, string? workingDir, ScriptContext context)
+            LocalCmdOptions options, string command, string shell, string? workingDir, ScriptContext context, CancellationToken cancellationToken)
         {
             var confirmPolicy = options.Confirm?.ToLowerInvariant() ?? "always";
 
@@ -127,7 +128,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 throw new InvalidOperationException(
                     "LocalCmd confirmation is required but no confirmation provider is configured");
 
-            var result = await _confirmation.ConfirmAsync(command, shell, workingDir ?? "(current directory)");
+            var result = await _confirmation.ConfirmAsync(command, shell, workingDir ?? "(current directory)", cancellationToken);
 
             if (result == LocalCmdConfirmResult.RunAll)
             {
@@ -368,7 +369,10 @@ namespace SSH_Helper.Services.Scripting.Commands
                 : context.SubstituteVariables(options.Title);
             var startedAtUtc = DateTime.UtcNow;
             var hostAddress = context.CurrentHost?.ToString() ?? string.Empty;
-            var auditCapture = PrepareInteractiveAuditCapture(command, shell, options.KeepOpen);
+            var lifetime = NormalizeLifetime(options.Lifetime);
+            var detachedInteractive = options.LifetimeSpecified &&
+                                      string.Equals(lifetime, "detached", StringComparison.OrdinalIgnoreCase);
+            var auditCapture = PrepareInteractiveAuditCapture(command, shell, options.KeepOpen, captureEnabled: !detachedInteractive);
 
             if (!suppressCommandEcho)
                 context.EmitOutput(
@@ -398,6 +402,37 @@ namespace SSH_Helper.Services.Scripting.Commands
             catch (Exception ex)
             {
                 return CommandResult.ApplyOnError(step, $"Failed to launch interactive terminal: {ex.Message}");
+            }
+
+            if (detachedInteractive)
+            {
+                int? processId = null;
+                try
+                {
+                    processId = process.Id;
+                }
+                catch
+                {
+                    // PID can be unavailable for some process handles; startup still succeeded.
+                }
+
+                if (!string.IsNullOrWhiteSpace(options.Into))
+                {
+                    context.SetVariable($"{options.Into}_pid", processId ?? -1);
+                    context.SetVariable($"{options.Into}_started", true);
+                    context.SetVariable($"{options.Into}_start_error", string.Empty);
+                }
+
+                if (options.FailOnNonZero)
+                {
+                    context.EmitOutput(
+                        "[localcmd:interactive] Detached session launched; fail_on_nonzero cannot be evaluated because exit code is not tracked.",
+                        ScriptOutputType.Warning);
+                }
+
+                TryDispose(process);
+                var pidLabel = processId?.ToString() ?? "unknown";
+                return CommandResult.Ok($"Interactive terminal launched in detached mode (PID: {pidLabel})");
             }
 
             try
@@ -490,12 +525,22 @@ namespace SSH_Helper.Services.Scripting.Commands
             string command, string shell, LocalCmdOptions options)
         {
             var extraArgs = options.Args != null && options.Args.Count > 0
-                ? string.Join(" ", options.Args)
+                ? JoinCommandLineArguments(options.Args)
                 : string.Empty;
 
             if (IsPowerShellShell(shell))
             {
-                var psArgs = $"-NoLogo -NonInteractive -Command \"{EscapeForShell(command)}\"";
+                if (TryParseQuotedExecutableInvocation(command, out var directFileName, out var directArguments))
+                {
+                    if (!string.IsNullOrWhiteSpace(extraArgs))
+                        directArguments = string.IsNullOrWhiteSpace(directArguments)
+                            ? extraArgs
+                            : $"{extraArgs} {directArguments}";
+
+                    return (directFileName, directArguments);
+                }
+
+                var psArgs = $"-NoLogo -NoProfile -NonInteractive -EncodedCommand {EncodePowerShellCommand(PrepareNonInteractivePowerShellCommand(command))}";
                 if (!string.IsNullOrWhiteSpace(extraArgs))
                     psArgs = $"{extraArgs} {psArgs}";
                 return (ResolvePowerShellExecutable(shell), psArgs);
@@ -554,7 +599,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             if (IsPowerShellShell(shell))
-                return (ResolvePowerShellExecutable(shell), $"-NoLogo -Command \"{EscapeForShell(command)}\"");
+                return (ResolvePowerShellExecutable(shell), $"-NoLogo -NoProfile -EncodedCommand {EncodePowerShellCommand(PrepareNonInteractivePowerShellCommand(command))}");
 
             if (IsCmdShell(shell))
                 return (ResolveCmdExecutable(shell), BuildCmdArguments(command, options.Args != null && options.Args.Count > 0
@@ -569,12 +614,13 @@ namespace SSH_Helper.Services.Scripting.Commands
             string command, string shell, LocalCmdOptions options)
         {
             var extraArgs = options.Args != null && options.Args.Count > 0
-                ? string.Join(" ", options.Args)
+                ? JoinCommandLineArguments(options.Args)
                 : string.Empty;
 
             if (IsPowerShellShell(shell))
             {
-                var psArgs = $"-NoLogo -NoExit -Command \"{EscapeForShell(command)}\"";
+                var normalizedCommand = PreparePowerShellCommand(command);
+                var psArgs = $"-NoLogo -NoExit -EncodedCommand {EncodePowerShellCommand(normalizedCommand)}";
                 if (!string.IsNullOrWhiteSpace(extraArgs))
                     psArgs = $"{extraArgs} {psArgs}";
                 return (ResolvePowerShellExecutable(shell), psArgs);
@@ -604,9 +650,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             return null;
         }
 
-        private static string EscapeForShell(string command)
+        private static string EncodePowerShellCommand(string command)
         {
-            return command.Replace("\"", "\\\"");
+            return Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
         }
 
         private static string FormatCommandForBanner(string command)
@@ -624,8 +670,15 @@ namespace SSH_Helper.Services.Scripting.Commands
             return exitCode == UserClosedInteractiveWindowExitCode;
         }
 
-        private static InteractiveAuditCapture PrepareInteractiveAuditCapture(string command, string shell, bool keepOpen)
+        private static InteractiveAuditCapture PrepareInteractiveAuditCapture(
+            string command,
+            string shell,
+            bool keepOpen,
+            bool captureEnabled)
         {
+            if (!captureEnabled)
+                return new InteractiveAuditCapture(command, null);
+
             if (IsPowerShellShell(shell))
             {
                 var transcriptPath = BuildInteractiveAuditTranscriptPath();
@@ -638,8 +691,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 var transcriptPath = BuildInteractiveAuditTranscriptPath();
                 var escapedPath = EscapeSingleQuotedPowerShellLiteral(transcriptPath);
+                var teeCommand = $"$ProgressPreference = 'SilentlyContinue'; $input | Tee-Object -FilePath '{escapedPath}' -Append";
                 var launchCommand =
-                    $"({command}) 2>&1 | powershell.exe -NoLogo -NoProfile -NonInteractive -Command '$input | Tee-Object -FilePath ''{escapedPath}'' -Append'";
+                    $"({command}) 2>&1 | powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand {EncodePowerShellCommand(teeCommand)}";
                 return new InteractiveAuditCapture(launchCommand, transcriptPath);
             }
 
@@ -659,12 +713,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             var normalized = shell.Trim();
             return string.Equals(normalized, "powershell", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(normalized, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(normalized, "pwsh", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(normalized, "pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
                    normalized.EndsWith("\\powershell.exe", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.EndsWith("/powershell.exe", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.EndsWith("\\pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.EndsWith("/pwsh.exe", StringComparison.OrdinalIgnoreCase);
+                   normalized.EndsWith("/powershell.exe", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsCmdShell(string shell)
@@ -682,14 +732,6 @@ namespace SSH_Helper.Services.Scripting.Commands
         private static string ResolvePowerShellExecutable(string shell)
         {
             var normalized = shell.Trim();
-            if (string.Equals(normalized, "pwsh", StringComparison.OrdinalIgnoreCase))
-                return "pwsh.exe";
-
-            if (string.Equals(normalized, "pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
-                normalized.EndsWith("\\pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
-                normalized.EndsWith("/pwsh.exe", StringComparison.OrdinalIgnoreCase))
-                return normalized;
-
             if (string.Equals(normalized, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
                 normalized.EndsWith("\\powershell.exe", StringComparison.OrdinalIgnoreCase) ||
                 normalized.EndsWith("/powershell.exe", StringComparison.OrdinalIgnoreCase))
@@ -717,18 +759,130 @@ namespace SSH_Helper.Services.Scripting.Commands
             string escapedTranscriptPath,
             bool keepOpen)
         {
+            var normalizedCommand = PreparePowerShellCommand(command);
+
             if (keepOpen)
             {
                 // Keep transcript active for the whole shell session so user-entered follow-up
                 // commands are included in execution-details interactive history.
                 return
-                    $"try {{ Start-Transcript -Path '{escapedTranscriptPath}' -Append | Out-Null }} catch {{ }}; & {{ {command} }}";
+                    $"try {{ Start-Transcript -Path '{escapedTranscriptPath}' -Append | Out-Null }} catch {{ }}; & {{ {normalizedCommand} }}";
             }
 
             return
                 $"$__sshHelperTranscriptActive = $false; " +
                 $"try {{ Start-Transcript -Path '{escapedTranscriptPath}' -Append | Out-Null; $__sshHelperTranscriptActive = $true }} catch {{ }}; " +
-                $"try {{ & {{ {command} }} }} finally {{ if ($__sshHelperTranscriptActive) {{ try {{ Stop-Transcript | Out-Null }} catch {{ }} }} }}";
+                $"try {{ & {{ {normalizedCommand} }} }} finally {{ if ($__sshHelperTranscriptActive) {{ try {{ Stop-Transcript | Out-Null }} catch {{ }} }} }}";
+        }
+
+        private static string PreparePowerShellCommand(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command))
+                return command;
+
+            var trimmed = command.TrimStart();
+            if (trimmed.StartsWith("&", StringComparison.Ordinal))
+                return command;
+
+            // Commands that start with a quoted executable path need a call operator in PowerShell.
+            if (!StartsWithQuotedToken(trimmed))
+                return command;
+
+            return $"& {trimmed}";
+        }
+
+        private static string PrepareNonInteractivePowerShellCommand(string command)
+        {
+            var normalizedCommand = PreparePowerShellCommand(command);
+
+            // Suppress startup/module initialization progress records so localcmd does not
+            // surface PowerShell CLIXML progress noise on stderr for normal commands.
+            return $"$ProgressPreference = 'SilentlyContinue'; {normalizedCommand}";
+        }
+
+        private static bool StartsWithQuotedToken(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return false;
+
+            var quote = value[0];
+            if (quote != '\'' && quote != '"')
+                return false;
+
+            for (var i = 1; i < value.Length; i++)
+            {
+                if (value[i] != quote)
+                    continue;
+
+                if (quote == '\'' && i + 1 < value.Length && value[i + 1] == '\'')
+                {
+                    i++;
+                    continue;
+                }
+
+                if (quote == '"' && i > 0 && value[i - 1] == '`')
+                    continue;
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryParseQuotedExecutableInvocation(
+            string command,
+            out string fileName,
+            out string arguments)
+        {
+            fileName = string.Empty;
+            arguments = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(command))
+                return false;
+
+            var trimmed = command.TrimStart();
+
+            if (trimmed.StartsWith("&", StringComparison.Ordinal))
+                trimmed = trimmed.Substring(1).TrimStart();
+
+            if (trimmed.Length < 3 || (trimmed[0] != '\'' && trimmed[0] != '"'))
+                return false;
+
+            var quote = trimmed[0];
+            var tokenEnd = -1;
+
+            for (var i = 1; i < trimmed.Length; i++)
+            {
+                if (trimmed[i] != quote)
+                    continue;
+
+                if (quote == '\'' && i + 1 < trimmed.Length && trimmed[i + 1] == '\'')
+                {
+                    i++;
+                    continue;
+                }
+
+                if (quote == '"' && i > 0 && trimmed[i - 1] == '`')
+                    continue;
+
+                tokenEnd = i;
+                break;
+            }
+
+            if (tokenEnd < 0)
+                return false;
+
+            var token = trimmed.Substring(1, tokenEnd - 1);
+            token = quote == '\''
+                ? token.Replace("''", "'", StringComparison.Ordinal)
+                : token.Replace("`\"", "\"", StringComparison.Ordinal);
+
+            if (!token.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            fileName = token;
+            arguments = trimmed.Substring(tokenEnd + 1).TrimStart();
+            return true;
         }
 
         private static string BuildInteractiveAuditTranscriptPath()
@@ -835,9 +989,58 @@ namespace SSH_Helper.Services.Scripting.Commands
         {
             var modeFlag = keepOpen ? "/K" : "/c";
             if (string.IsNullOrWhiteSpace(extraArgs))
-                return $"{modeFlag} \"{command}\"";
+                return $"{modeFlag} {QuoteCommandLineArgument(command)}";
 
-            return $"{extraArgs} {modeFlag} \"{command}\"";
+            return $"{extraArgs} {modeFlag} {QuoteCommandLineArgument(command)}";
+        }
+
+        private static string JoinCommandLineArguments(IEnumerable<string> arguments)
+        {
+            return string.Join(" ", arguments.Select(QuoteCommandLineArgument));
+        }
+
+        private static string QuoteCommandLineArgument(string argument)
+        {
+            if (string.IsNullOrEmpty(argument))
+                return "\"\"";
+
+            if (!argument.Any(ch => char.IsWhiteSpace(ch) || ch == '"'))
+                return argument;
+
+            var builder = new StringBuilder(argument.Length + 2);
+            builder.Append('"');
+            var pendingBackslashes = 0;
+
+            foreach (var ch in argument)
+            {
+                if (ch == '\\')
+                {
+                    pendingBackslashes++;
+                    continue;
+                }
+
+                if (ch == '"')
+                {
+                    builder.Append('\\', pendingBackslashes * 2 + 1);
+                    builder.Append('"');
+                    pendingBackslashes = 0;
+                    continue;
+                }
+
+                if (pendingBackslashes > 0)
+                {
+                    builder.Append('\\', pendingBackslashes);
+                    pendingBackslashes = 0;
+                }
+
+                builder.Append(ch);
+            }
+
+            if (pendingBackslashes > 0)
+                builder.Append('\\', pendingBackslashes * 2);
+
+            builder.Append('"');
+            return builder.ToString();
         }
 
         private static string NormalizeLifetime(string? lifetime)

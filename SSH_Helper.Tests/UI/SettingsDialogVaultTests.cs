@@ -3,6 +3,7 @@ using System.Windows.Forms;
 using FluentAssertions;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
+using SSH_Helper.Services.Scripting;
 using Xunit;
 
 namespace SSH_Helper.Tests.UI;
@@ -146,6 +147,102 @@ public class SettingsDialogVaultTests : IDisposable
         storedPassword.Should().Be("svc-password");
     }
 
+    [WinFormsFact]
+    public void SelectingOidcAuthMethod_ShowsOidcPanelAndHidesOthers()
+    {
+        SeedVaultProfiles(defaultProfileName: "profile-a");
+
+        using var dialog = new SettingsDialog(_configService);
+        dialog.Show();
+        Application.DoEvents();
+
+        var tabControl = GetField<TabControl>(dialog, "_tabControl");
+        var vaultTab = tabControl.TabPages.Cast<TabPage>().Single(p => p.Text == "Vault");
+        tabControl.SelectedTab = vaultTab;
+        Application.DoEvents();
+
+        var authMethod = GetField<ComboBox>(dialog, "_cmbVaultAuthMethod");
+        var oidcPanel = GetField<Panel>(dialog, "_pnlVaultAuthOidc");
+        var appRolePanel = GetField<Panel>(dialog, "_pnlVaultAuthAppRole");
+        var ldapPanel = GetField<Panel>(dialog, "_pnlVaultAuthLdap");
+        var userpassPanel = GetField<Panel>(dialog, "_pnlVaultAuthUserpass");
+
+        authMethod.SelectedIndex = (int)VaultAuthMethod.Oidc;
+        InvokeMethod(dialog, "UpdateVaultAuthFieldVisibility");
+
+        oidcPanel.Visible.Should().BeTrue();
+        appRolePanel.Visible.Should().BeFalse();
+        ldapPanel.Visible.Should().BeFalse();
+        userpassPanel.Visible.Should().BeFalse();
+    }
+
+    [WinFormsFact]
+    public void SavingOidcProfile_PersistsOidcConfiguration()
+    {
+        SeedVaultProfiles(defaultProfileName: "profile-a");
+
+        using var dialog = new SettingsDialog(_configService);
+        var list = GetField<ListBox>(dialog, "_lstVaultProfiles");
+        var authMethod = GetField<ComboBox>(dialog, "_cmbVaultAuthMethod");
+        var oidcRole = GetField<TextBox>(dialog, "_txtVaultOidcRole");
+        var oidcMount = GetField<TextBox>(dialog, "_txtVaultOidcAuthMountPath");
+        var oidcHost = GetField<TextBox>(dialog, "_txtVaultOidcCallbackHost");
+        var oidcPort = GetField<NumericUpDown>(dialog, "_numVaultOidcCallbackPort");
+        var oidcPath = GetField<TextBox>(dialog, "_txtVaultOidcCallbackPath");
+        var oidcTimeout = GetField<NumericUpDown>(dialog, "_numVaultOidcTimeoutSeconds");
+
+        list.SelectedIndex = 0;
+        authMethod.SelectedIndex = (int)VaultAuthMethod.Oidc;
+        oidcMount.Text = "oidc-custom";
+        oidcRole.Text = "desktop-role";
+        oidcHost.Text = "localhost";
+        oidcPort.Value = 8800;
+        oidcPath.Text = "/vault/callback";
+        oidcTimeout.Value = 240;
+
+        InvokeMethod(dialog, "BtnSave_Click", null!, EventArgs.Empty);
+
+        var savedProfile = _configService.GetCurrent().Vault.Profiles.Single(p => p.Name == "profile-a");
+        savedProfile.AuthMethod.Should().Be(VaultAuthMethod.Oidc);
+        savedProfile.OidcAuthMountPath.Should().Be("oidc-custom");
+        savedProfile.OidcRole.Should().Be("desktop-role");
+        savedProfile.OidcCallbackHost.Should().Be("localhost");
+        savedProfile.OidcCallbackPort.Should().Be(8800);
+        savedProfile.OidcCallbackPath.Should().Be("/vault/callback");
+        savedProfile.OidcTimeoutSeconds.Should().Be(240);
+    }
+
+    [WinFormsFact]
+    public void SavingOidcProfile_WithNonLoopbackCallbackHost_ShowsValidationAndDoesNotPersist()
+    {
+        SeedVaultProfiles(defaultProfileName: "profile-a");
+        var promptService = new RecordingSettingsDialogPromptService(DialogResult.OK);
+
+        using var dialog = new SettingsDialog(
+            _configService,
+            presetManager: null,
+            darkMode: false,
+            browserCallbackProfileManager: new RecordingBrowserCallbackWebViewProfileManager(),
+            promptService: promptService);
+
+        var list = GetField<ListBox>(dialog, "_lstVaultProfiles");
+        var authMethod = GetField<ComboBox>(dialog, "_cmbVaultAuthMethod");
+        var oidcRole = GetField<TextBox>(dialog, "_txtVaultOidcRole");
+        var oidcHost = GetField<TextBox>(dialog, "_txtVaultOidcCallbackHost");
+
+        list.SelectedIndex = 0;
+        authMethod.SelectedIndex = (int)VaultAuthMethod.Oidc;
+        oidcRole.Text = "desktop-role";
+        oidcHost.Text = "vault.example.com";
+
+        InvokeMethod(dialog, "BtnSave_Click", null!, EventArgs.Empty);
+
+        var savedProfile = _configService.GetCurrent().Vault.Profiles.Single(p => p.Name == "profile-a");
+        savedProfile.OidcCallbackHost.Should().Be("127.0.0.1");
+        promptService.Messages.Should().Contain(message =>
+            message.Contains("loopback", StringComparison.OrdinalIgnoreCase));
+    }
+
     private void SeedVaultProfiles(string defaultProfileName)
     {
         _configService.Update(config =>
@@ -160,7 +257,13 @@ public class SettingsDialogVaultTests : IDisposable
                     Address = "https://vault-a:8200",
                     MountPath = "secret",
                     AuthMethod = VaultAuthMethod.Token,
-                    KvVersion = VaultKvVersion.V2
+                    KvVersion = VaultKvVersion.V2,
+                    OidcAuthMountPath = "oidc",
+                    OidcRole = "",
+                    OidcCallbackHost = "127.0.0.1",
+                    OidcCallbackPort = 8250,
+                    OidcCallbackPath = "/oidc/callback",
+                    OidcTimeoutSeconds = 180
                 },
                 new()
                 {
@@ -168,7 +271,13 @@ public class SettingsDialogVaultTests : IDisposable
                     Address = "https://vault-b:8200",
                     MountPath = "secret",
                     AuthMethod = VaultAuthMethod.Token,
-                    KvVersion = VaultKvVersion.V2
+                    KvVersion = VaultKvVersion.V2,
+                    OidcAuthMountPath = "oidc",
+                    OidcRole = "",
+                    OidcCallbackHost = "127.0.0.1",
+                    OidcCallbackPort = 8250,
+                    OidcCallbackPath = "/oidc/callback",
+                    OidcTimeoutSeconds = 180
                 }
             };
         });
@@ -215,5 +324,38 @@ public class SettingsDialogVaultTests : IDisposable
         }
 
         public bool DeletePassword(string target) => _store.Remove(target);
+    }
+
+    private sealed class RecordingSettingsDialogPromptService : ISettingsDialogPromptService
+    {
+        private readonly DialogResult _nextResult;
+
+        public RecordingSettingsDialogPromptService(DialogResult nextResult)
+        {
+            _nextResult = nextResult;
+        }
+
+        public List<string> Messages { get; } = new();
+
+        public DialogResult Show(IWin32Window? owner, string message, string title, MessageBoxButtons buttons, MessageBoxIcon icon)
+        {
+            Messages.Add(message);
+            return _nextResult;
+        }
+    }
+
+    private sealed class RecordingBrowserCallbackWebViewProfileManager : IBrowserCallbackWebViewProfileManager
+    {
+        public string UserDataDirectory => Path.Combine(Path.GetTempPath(), "unused");
+
+        public IDisposable RegisterActiveSession()
+        {
+            throw new NotSupportedException();
+        }
+
+        public EmbeddedBrowserDataClearResult ClearEmbeddedBrowserData()
+        {
+            return EmbeddedBrowserDataClearResult.Cleared;
+        }
     }
 }

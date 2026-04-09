@@ -74,6 +74,14 @@ public sealed class JobHistoryServiceTests : IDisposable
         };
     }
 
+    private static readonly DateTime RecentReferenceUtc = DateTime.UtcNow.Date.AddDays(-1);
+
+    private static DateTime RecentUtc(int hour, int minute, int second = 0, int dayOffset = 0)
+        => RecentReferenceUtc.AddDays(dayOffset)
+            .AddHours(hour)
+            .AddMinutes(minute)
+            .AddSeconds(second);
+
     #endregion
 
     #region HIST-01: Run Record Persistence
@@ -168,7 +176,7 @@ public sealed class JobHistoryServiceTests : IDisposable
     [Fact]
     public void SaveRun_ConsecutiveMatchingFailures_CollapsesIntoSingleRecordWithIncrementedCount()
     {
-        var firstFailureUtc = new DateTime(2026, 3, 8, 14, 10, 0, DateTimeKind.Utc);
+        var firstFailureUtc = RecentUtc(14, 10);
         var secondFailureUtc = firstFailureUtc.AddMinutes(5);
 
         var firstFailure = CreateTestResult(
@@ -294,7 +302,7 @@ public sealed class JobHistoryServiceTests : IDisposable
                 }
             },
             errorMessage: "Cancelled by user.");
-        firstCancelled.CompletedUtc = new DateTime(2026, 3, 12, 16, 0, 0, DateTimeKind.Utc);
+        firstCancelled.CompletedUtc = RecentUtc(16, 0);
         firstCancelled.StartedUtc = firstCancelled.CompletedUtc.AddSeconds(-10);
 
         var secondCancelled = CreateTestResult(
@@ -398,7 +406,7 @@ public sealed class JobHistoryServiceTests : IDisposable
     [Fact]
     public void SaveSkippedRun_PersistsSkippedHistoryEntry()
     {
-        var scheduledUtc = new DateTime(2026, 3, 8, 12, 0, 0, DateTimeKind.Utc);
+        var scheduledUtc = RecentUtc(12, 0);
         var skipped = new SkippedRunEntry
         {
             JobId = "missed-job",
@@ -430,8 +438,8 @@ public sealed class JobHistoryServiceTests : IDisposable
     [Fact]
     public void SaveSkippedRunSummary_PersistsAggregatedSkippedHistoryEntry()
     {
-        var firstScheduledUtc = new DateTime(2026, 3, 8, 12, 0, 0, DateTimeKind.Utc);
-        var lastScheduledUtc = new DateTime(2026, 3, 8, 12, 10, 0, DateTimeKind.Utc);
+        var firstScheduledUtc = RecentUtc(12, 0);
+        var lastScheduledUtc = RecentUtc(12, 10);
         var summary = new SkippedRunSummaryEntry
         {
             JobId = "summary-job",
