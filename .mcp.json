@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "codex": {
-      "type": "stdio",
-      "command": "codex",
-      "args": ["-m", "gpt-5.2-codex", "mcp-server"]
-    }
-  }
-}
