@@ -238,14 +238,19 @@ namespace SSH_Helper.Services.Scripting
                 ["method"] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
                 ["auth"] = ["none", "basic", "bearer"],
                 ["content_type"] = ["json", "form", "text", "xml"],
-                ["type"] = ["A", "AAAA", "PTR"],
                 ["action"] = ["upload", "download"],
                 ["mode"] = ["overwrite", "append"],
                 ["format"] = ["text", "json", "jsonl", "csv"],
                 ["level"] = ["info", "debug", "warning", "error", "success"],
                 ["encoding"] = ["utf-8", "ascii", "utf-16", "utf-32"],
+                ["required"] = ["true", "false"],
                 ["select_file"] = ["true", "false"],
+                ["skip_empty_lines"] = ["true", "false"],
+                ["trim_lines"] = ["true", "false"],
+                ["pretty"] = ["true", "false"],
                 ["fail_on_nonzero"] = ["true", "false"],
+                ["suppress"] = ["true", "false"],
+                ["overwrite"] = ["true", "false"],
                 ["follow_redirects"] = ["true", "false"],
                 ["allow_failure"] = ["true", "false"],
                 ["verify_tls"] = ["true", "false"],
@@ -258,9 +263,42 @@ namespace SSH_Helper.Services.Scripting
                 ["mirror_output"] = ["true", "false"],
                 ["show_window"] = ["true", "false"],
                 ["wait"] = ["true", "false"],
+                ["shell"] = ["powershell", "cmd", "custom"],
+                ["interactive"] = ["true", "false"],
+                ["keep_open"] = ["true", "false"],
+                ["run_mode"] = ["foreground", "background"],
+                ["lifetime"] = ["detached", "script", "app"],
+                ["kill_on_cancel"] = ["true", "false"],
+                ["confirm"] = ["always", "once", "never"],
+                ["debug"] = ["true", "false"],
+                ["nobanner"] = ["true", "false"],
+                ["compact_errors"] = ["true", "false"],
+                ["suppress_missing_column_warning"] = ["true", "false"],
+                ["library"] = ["true", "false"],
                 ["severity"] = ["error", "warning"],
                 ["align"] = ["left", "right", "center"],
                 ["show_header"] = ["true", "false"]
+            };
+
+        private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string[]>> EnumLikeOptionValuesByCommand =
+            new Dictionary<string, IReadOnlyDictionary<string, string[]>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["dns"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["type"] = ["A", "AAAA", "PTR"]
+                },
+                ["exists"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["type"] = ["any", "file", "directory"]
+                },
+                ["input"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["password"] = ["true", "false"]
+                },
+                ["confirm"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["default"] = ["true", "false"]
+                }
             };
 
         /// <summary>
@@ -319,6 +357,17 @@ namespace SSH_Helper.Services.Scripting
             return EnumLikeOptionValues.ToDictionary(
                 pair => pair.Key,
                 pair => (IReadOnlyList<string>)pair.Value,
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        public static IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>> GetEnumLikeOptionValuesByCommand()
+        {
+            return EnumLikeOptionValuesByCommand.ToDictionary(
+                commandPair => commandPair.Key,
+                commandPair => (IReadOnlyDictionary<string, IReadOnlyList<string>>)commandPair.Value.ToDictionary(
+                    keyPair => keyPair.Key,
+                    keyPair => (IReadOnlyList<string>)keyPair.Value,
+                    StringComparer.OrdinalIgnoreCase),
                 StringComparer.OrdinalIgnoreCase);
         }
 
