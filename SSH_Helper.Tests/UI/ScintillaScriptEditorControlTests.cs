@@ -179,6 +179,20 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
+    public void CompletionPopup_BackspaceKeyUp_DoesNotTriggerSuggestions()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.SetAutocompleteProvider(new ScriptAutocompleteProvider(() => Array.Empty<string>()));
+        control.Text = "st";
+        control.SelectionStart = control.Text.Length;
+        control.SelectionLength = 0;
+
+        InvokeNonPublic(control, "Editor_KeyUp", null, new KeyEventArgs(Keys.Back));
+
+        GetCompletionPopup(control).Visible.Should().BeFalse();
+    }
+
+    [WinFormsFact]
     public void CompletionPopup_UpdateUISelection_HidesRootSuggestionsWhenCaretMovesBelowSteps()
     {
         using var control = new ScintillaScriptEditorControl();

@@ -1,5 +1,22 @@
 # TODO
 
+## 232. Suppress autocomplete on Backspace key-up
+- [x] 232.1 Add a RED UI regression proving `Backspace` key-up does not auto-open the script editor autocomplete popup in a valid completion context.
+- [x] 232.2 Update the script editor key-up trigger filter so `Backspace` no longer requests autocomplete automatically.
+- [x] 232.3 Run focused verification for the new regression and record the outcome below.
+
+### 232 Review
+- Root cause:
+- `ScintillaScriptEditorControl.ShouldTriggerAutocompleteOnKeyUp(...)` excluded several non-text keys but not `Keys.Back`, so any backspace key-up in a valid completion context reopened the autocomplete popup immediately.
+- RED verification:
+- Added `CompletionPopup_BackspaceKeyUp_DoesNotTriggerSuggestions` to `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests.CompletionPopup_BackspaceKeyUp_DoesNotTriggerSuggestions" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/backspace-autocomplete-red/bin/ -p:BaseIntermediateOutputPath=artifacts/backspace-autocomplete-red/obj/ -v minimal`
+- Result: failed as expected because the popup was still visible after `Backspace` key-up.
+- GREEN verification:
+- Updated `UI/ScintillaScriptEditorControl.cs` so `Keys.Back` is treated as a non-trigger in `ShouldTriggerAutocompleteOnKeyUp(...)`.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScintillaScriptEditorControlTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/backspace-autocomplete-green/bin/ -p:BaseIntermediateOutputPath=artifacts/backspace-autocomplete-green/obj/ -v minimal`
+- Result: passed `40/40`.
+
 ## 231. Refresh existing Flow Canvas when reopened after preset changes
 - [x] 231.1 Capture the stale-state root cause in the existing `OpenFlowCanvas()` reuse branch.
 - [x] 231.2 Add RED UI regression coverage proving `Edit -> Flow Canvas` rehydrates the current preset when the canvas window is already open.

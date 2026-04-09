@@ -918,6 +918,7 @@ namespace SSH_Helper.UI
             }
 
             if (e.KeyCode is
+                Keys.Back or
                 Keys.Left or
                 Keys.Right or
                 Keys.Up or
