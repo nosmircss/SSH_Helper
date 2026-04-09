@@ -591,7 +591,7 @@ export const blockDefs: BlockDef[] = [
         placeholder: 'Get-Process | Select-Object -First 5',
         helpText: 'The command to execute locally', group: 'core' },
       { key: 'shell', label: 'Shell', type: 'select',
-        options: ['powershell', 'cmd', 'custom'], defaultValue: 'powershell',
+        options: ['powershell', 'custom'], defaultValue: 'powershell',
         helpText: 'Shell to execute the command in. "custom" enables Shell Path.', group: 'core' },
       { key: 'shell_path', label: 'Shell Path', type: 'text',
         placeholder: 'python',
