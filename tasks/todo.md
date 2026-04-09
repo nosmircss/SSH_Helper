@@ -1,5 +1,24 @@
 # TODO
 
+## 231. Refresh existing Flow Canvas when reopened after preset changes
+- [x] 231.1 Capture the stale-state root cause in the existing `OpenFlowCanvas()` reuse branch.
+- [x] 231.2 Add RED UI regression coverage proving `Edit -> Flow Canvas` rehydrates the current preset when the canvas window is already open.
+- [x] 231.3 Patch the existing-window Flow Canvas open path to reload the current script and host state before focusing the window.
+- [x] 231.4 Run focused verification and record the outcome below.
+
+### 231 Review
+- Root cause:
+- `Form1.OpenFlowCanvas()` returned early when `_flowCanvasForm` already existed, so `Edit -> Flow Canvas` only focused the modeless window and never re-sent the current graph or host payload.
+- Preset selection already called `LoadCurrentScriptIntoCanvas()`, but if the user relied on reopening/focusing the existing canvas window to refresh what they were looking at, the reuse branch sent nothing.
+- RED verification:
+- Added `ReopeningExistingFlowCanvas_AfterPresetSwitch_QueuesCurrentPresetGraph` to `SSH_Helper.Tests/UI/Form1FlowCanvasPresetSyncTests.cs`.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasPresetSyncTests.ReopeningExistingFlowCanvas_AfterPresetSwitch_QueuesCurrentPresetGraph" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/flowcanvas-reopen-red/bin/ -p:BaseIntermediateOutputPath=artifacts/flowcanvas-reopen-red/obj/ -v minimal`
+- Result: failed as expected because `pendingMessages` was empty after reopening the existing Flow Canvas window.
+- GREEN verification:
+- Patched `Form1.OpenFlowCanvas()` to call `LoadCurrentScriptIntoCanvas()` and `SendTargetHostToCanvas()` before focusing the existing window.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FlowCanvasPresetSyncTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/flowcanvas-reopen-green/bin/ -p:BaseIntermediateOutputPath=artifacts/flowcanvas-reopen-green/obj/ -v minimal`
+- Result: passed `2/2`.
+
 ## 230. Fix interactive localcmd cmd shell regression
 - [x] 230.1 Capture the exact root cause for the interactive `shell: cmd` failure introduced by the localcmd output cleanup work.
 - [x] 230.2 Add RED regression coverage proving the cmd interactive audit wrapper no longer relies on raw `-Command '...| Tee-Object ...'` quoting.

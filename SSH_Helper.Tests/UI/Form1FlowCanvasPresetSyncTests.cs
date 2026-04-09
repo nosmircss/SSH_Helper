@@ -65,6 +65,53 @@ public sealed class Form1FlowCanvasPresetSyncTests : IDisposable
                 "switching presets while Flow Canvas is open should push the new preset graph into the existing canvas window");
     }
 
+    [WinFormsFact]
+    public void ReopeningExistingFlowCanvas_AfterPresetSwitch_QueuesCurrentPresetGraph()
+    {
+        using var form = new SSH_Helper.Form1();
+        _ = form.Handle;
+        form.PerformLayout();
+
+        var config = new AppConfiguration
+        {
+            Presets = new Dictionary<string, PresetInfo>
+            {
+                ["Alpha"] = new() { Commands = BuildYamlScript("alpha-reopen-token") },
+                ["Beta"] = new() { Commands = BuildYamlScript("beta-reopen-token") }
+            }
+        };
+
+        PointFormAtTemporaryConfig(form, config);
+
+        var presetsTree = GetField<TreeView>(form, "trvPresets");
+        var alphaNode = FindNodeByTag(presetsTree.Nodes, "Alpha", isFolder: false);
+        var betaNode = FindNodeByTag(presetsTree.Nodes, "Beta", isFolder: false);
+        alphaNode.Should().NotBeNull();
+        betaNode.Should().NotBeNull();
+
+        using var flowCanvas = new FlowCanvasForm(darkMode: false, configService: null);
+        SetField(form, "_flowCanvasForm", flowCanvas);
+
+        var pendingMessages = GetField<ConcurrentQueue<string>>(flowCanvas, "_pendingMessages");
+
+        presetsTree.SelectedNode = alphaNode;
+        InvokePrivateMethod(form, "trvPresets_AfterSelect", presetsTree, new TreeViewEventArgs(alphaNode!));
+        DrainQueue(pendingMessages);
+
+        presetsTree.SelectedNode = betaNode;
+        InvokePrivateMethod(form, "trvPresets_AfterSelect", presetsTree, new TreeViewEventArgs(betaNode!));
+        DrainQueue(pendingMessages);
+
+        InvokePrivateMethod(form, "OpenFlowCanvas");
+        Application.DoEvents();
+
+        pendingMessages
+            .ToArray()
+            .Should()
+            .Contain(message => IsLoadGraphMessageContaining(message, "beta-reopen-token"),
+                "reopening the existing Flow Canvas window should rehydrate the graph for the currently selected preset");
+    }
+
     public void Dispose()
     {
         try

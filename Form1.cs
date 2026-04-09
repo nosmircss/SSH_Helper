@@ -6404,6 +6404,8 @@ namespace SSH_Helper
             // Reuse existing window if still open
             if (_flowCanvasForm != null && !_flowCanvasForm.IsDisposed)
             {
+                LoadCurrentScriptIntoCanvas();
+                SendTargetHostToCanvas();
                 _flowCanvasForm.BringToFront();
                 _flowCanvasForm.Activate();
                 return;
