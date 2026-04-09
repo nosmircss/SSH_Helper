@@ -2,6 +2,7 @@
 
 ## 2026-04-08
 - When a user corrects me from a generic shell explanation to project-specific `localcmd` behavior, I must inspect the repo implementation before answering and align the explanation with the exact runtime path.
+- When a user explicitly chooses capability removal over graceful fallback for an unreleased option, I must stop pushing compatibility-oriented fixes and align the implementation plan to the simpler product surface they asked for.
 
 ## 2026-04-05
 - When a user says runtime noise should be hidden automatically, I must fix the product path that emits it instead of leaving a script-level workaround as the answer.

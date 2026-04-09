@@ -1866,7 +1866,7 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
-    public void Registry_LocalCmdShellOptions_IncludePwshAndCmd()
+    public void Registry_LocalCmdShellOptions_ExcludePwsh()
     {
         _ = LoadRegistryBlockPropertyOrder(out var registryText);
 
@@ -1878,7 +1878,7 @@ public class FlowCanvasBridgeTests
         Assert.True(blockMatch.Success, "Unable to find localcmd shell options in registry.ts.");
         var optionsText = blockMatch.Groups["options"].Value;
         Assert.Contains("'powershell'", optionsText, StringComparison.Ordinal);
-        Assert.Contains("'pwsh'", optionsText, StringComparison.Ordinal);
+        Assert.DoesNotContain("'pwsh'", optionsText, StringComparison.Ordinal);
         Assert.Contains("'cmd'", optionsText, StringComparison.Ordinal);
         Assert.Contains("'custom'", optionsText, StringComparison.Ordinal);
     }

@@ -2629,7 +2629,7 @@ Runs a command on the local machine (not over SSH).
 # Full form
 - localcmd:
     command: "dotnet build"
-    shell: powershell          # powershell | pwsh | cmd | custom
+    shell: powershell          # powershell | cmd | custom
     shell_path: "python"       # required only when shell: custom
     args: ["-NoProfile"]
     env:
@@ -2671,7 +2671,7 @@ Runs a command on the local machine (not over SSH).
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `command` | Yes | - | Command text after variable substitution |
-| `shell` | No | `powershell` | `powershell`, `pwsh`, `cmd`, or `custom` |
+| `shell` | No | `powershell` | `powershell`, `cmd`, or `custom` |
 | `shell_path` | Conditionally | - | Required when `shell: custom` |
 | `args` | No | `[]` | Shell arguments (sequence preferred; scalar accepted) |
 | `env` | No | - | Environment variables for launched process |

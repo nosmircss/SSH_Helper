@@ -21,7 +21,7 @@ Users need to run local commands as part of hybrid workflows: generate configs l
 ```yaml
 - localcmd:
     command: "dotnet build"
-    shell: powershell              # powershell (default), pwsh, cmd, or custom
+    shell: powershell              # powershell (default), cmd, or custom
     shell_path: "python"          # path to custom executable (only when shell: custom)
     args: ["-NoProfile"]          # preferred list form; scalar string also accepted
     env:
@@ -228,7 +228,7 @@ A new block definition in the `'io'` category in `FlowCanvas/src/blockDefs/regis
       placeholder: 'Get-Process | Select-Object -First 5',
       helpText: 'The command to execute locally', group: 'core' },
     { key: 'shell', label: 'Shell', type: 'select',
-      options: ['powershell', 'pwsh', 'cmd', 'custom'], defaultValue: 'powershell',
+      options: ['powershell', 'cmd', 'custom'], defaultValue: 'powershell',
       helpText: 'Shell to execute the command in. "custom" enables Shell Path.', group: 'core' },
     { key: 'shell_path', label: 'Shell Path', type: 'text',
       placeholder: 'python',
@@ -279,7 +279,7 @@ A new block definition in the `'io'` category in `FlowCanvas/src/blockDefs/regis
 public class LocalCmdOptions
 {
     public string? Command { get; set; }
-    public string Shell { get; set; } = "powershell";   // powershell | pwsh | cmd | custom
+    public string Shell { get; set; } = "powershell";   // powershell | cmd | custom
     public string? ShellPath { get; set; }               // required when Shell = custom
     public List<string> Args { get; set; } = new();      // scalar YAML normalized to one item
     public Dictionary<string, string>? Env { get; set; }

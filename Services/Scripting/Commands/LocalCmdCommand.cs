@@ -713,12 +713,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             var normalized = shell.Trim();
             return string.Equals(normalized, "powershell", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(normalized, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(normalized, "pwsh", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(normalized, "pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
                    normalized.EndsWith("\\powershell.exe", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.EndsWith("/powershell.exe", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.EndsWith("\\pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.EndsWith("/pwsh.exe", StringComparison.OrdinalIgnoreCase);
+                   normalized.EndsWith("/powershell.exe", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsCmdShell(string shell)
@@ -736,14 +732,6 @@ namespace SSH_Helper.Services.Scripting.Commands
         private static string ResolvePowerShellExecutable(string shell)
         {
             var normalized = shell.Trim();
-            if (string.Equals(normalized, "pwsh", StringComparison.OrdinalIgnoreCase))
-                return "pwsh.exe";
-
-            if (string.Equals(normalized, "pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
-                normalized.EndsWith("\\pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
-                normalized.EndsWith("/pwsh.exe", StringComparison.OrdinalIgnoreCase))
-                return normalized;
-
             if (string.Equals(normalized, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
                 normalized.EndsWith("\\powershell.exe", StringComparison.OrdinalIgnoreCase) ||
                 normalized.EndsWith("/powershell.exe", StringComparison.OrdinalIgnoreCase))

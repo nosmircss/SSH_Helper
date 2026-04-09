@@ -4187,3 +4187,26 @@
   - RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionStartDebugMessageTests" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/form1-exec-debug-tests/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-exec-debug-tests/obj/ -v minimal` failed `2/2` before implementation because `Form1` did not yet expose `BuildExecutionStartDebugMessage`.
   - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionStartDebugMessageTests" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/form1-exec-debug-tests/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-exec-debug-tests/obj/ -v minimal` passed `2/2`.
   - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` passed; existing warnings remain (`MSB3277`, `CS8602`, `xUnit1031`).
+
+## 213. Remove built-in localcmd pwsh support
+- [x] 213.1 Add regression coverage for removing built-in `pwsh` support from parser, Flow Canvas shell options, and localcmd runtime expectations.
+- [x] 213.2 Remove built-in `pwsh` support from `localcmd` parser/runtime/docs/UI metadata while preserving `powershell`, `cmd`, and `custom`.
+- [x] 213.3 Run targeted verification for the updated localcmd coverage and a build, then record review notes here.
+
+### 213 Review
+- Removed built-in `pwsh` support end-to-end for `localcmd`:
+  - parser validation now accepts `powershell`, `cmd`, and `custom`,
+  - runtime PowerShell-shell detection no longer treats `pwsh` as a built-in alias,
+  - Flow Canvas shell dropdown no longer advertises `pwsh`,
+  - user-facing docs/changelog/spec notes now describe the reduced shell matrix.
+- Updated regression coverage to pin the new behavior:
+  - `LocalCmdParserTests.Validate_PwshShell_ReturnsShellValidationError`
+  - `FlowCanvasBridgeTests.Registry_LocalCmdShellOptions_ExcludePwsh`
+- Verification:
+  - RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Validate_PwshShell_ReturnsShellValidationError|FullyQualifiedName~Registry_LocalCmdShellOptions_ExcludePwsh" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/remove-pwsh-tests/bin/ -p:BaseIntermediateOutputPath=artifacts/remove-pwsh-tests/obj/ -v minimal` failed `2/2` before implementation because parser validation and Flow Canvas registry still exposed `pwsh`.
+  - GREEN: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Validate_PwshShell_ReturnsShellValidationError|FullyQualifiedName~Registry_LocalCmdShellOptions_ExcludePwsh" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/remove-pwsh-tests/bin/ -p:BaseIntermediateOutputPath=artifacts/remove-pwsh-tests/obj/ -v minimal` passed `2/2`.
+  - `npm run build` in `FlowCanvas/` regenerated `dist/` without `pwsh` in the shipped bundle.
+  - `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` initially failed with stale embedded-resource state for the old hashed Flow Canvas asset after the Vite rebuild.
+  - `dotnet clean SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` cleared the stale resource state.
+  - `dotnet build SSH_Helper.sln -v minimal` passed; existing warnings remain (`MSB3277`, `CS8602`, `xUnit1031`, Vite chunk-size warning).
+  - `rg -n "pwsh" FlowCanvas\\dist -S` returned no matches after the rebuild.

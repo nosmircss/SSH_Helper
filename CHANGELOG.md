@@ -31,7 +31,6 @@
 **Shell support:**
 
 - `powershell` (default) — `powershell.exe -NoLogo -NonInteractive -EncodedCommand`
-- `pwsh` — `pwsh.exe -NoLogo -NonInteractive -EncodedCommand`
 - `cmd` — `cmd.exe /c`
 - `custom` — Uses `shell_path` for arbitrary executables with `args` passthrough
 - Custom `env` dictionary for injecting environment variables into the child process
@@ -39,7 +38,7 @@
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `command` | Yes | — | Command string to execute |
-| `shell` | No | `powershell` | Shell: `powershell`, `pwsh`, `cmd`, or `custom` |
+| `shell` | No | `powershell` | Shell: `powershell`, `cmd`, or `custom` |
 | `shell_path` | No | — | Executable path when `shell: custom` |
 | `args` | No | — | Extra CLI arguments for custom shell |
 | `env` | No | — | Environment variable key/value pairs |

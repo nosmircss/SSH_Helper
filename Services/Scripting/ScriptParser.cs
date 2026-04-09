@@ -4561,7 +4561,7 @@ namespace SSH_Helper.Services.Scripting
                         if (!IsDynamicValue(step.LocalCmd.Shell) && !IsValidLocalCmdShell(step.LocalCmd.Shell))
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'shell' must be one of powershell, pwsh, cmd, custom{lineContent}");
+                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'shell' must be one of powershell, cmd, custom{lineContent}");
                         }
 
                         if (!IsDynamicValue(step.LocalCmd.Shell) &&
@@ -4828,10 +4828,6 @@ namespace SSH_Helper.Services.Scripting
             var normalized = shell.Trim();
             return string.Equals(normalized, "powershell", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(normalized, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(normalized, "pwsh", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(normalized, "pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.EndsWith("\\pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.EndsWith("/pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(normalized, "cmd", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(normalized, "cmd.exe", StringComparison.OrdinalIgnoreCase) ||
                    normalized.EndsWith("\\cmd.exe", StringComparison.OrdinalIgnoreCase) ||
