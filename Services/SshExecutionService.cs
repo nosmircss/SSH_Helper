@@ -1783,7 +1783,10 @@ namespace SSH_Helper.Services
             }
 
             OnProgressChanged(host, $"Running preconnect for {host}", false, false);
-            OnOutputReceived(host, FormatScriptOutput($"Preconnect started for {host}", ScriptOutputType.Info));
+            if (effectiveDebugMode)
+            {
+                OnOutputReceived(host, FormatScriptOutput($"Preconnect started for {host}", ScriptOutputType.Info));
+            }
 
             var context = new ScriptContext(host.Variables)
             {
@@ -1851,8 +1854,11 @@ namespace SSH_Helper.Services
                         : preconnectResult.Message);
             }
 
-            OnProgressChanged(host, $"Preconnect completed for {host}", false, false);
-            OnOutputReceived(host, FormatScriptOutput($"Preconnect completed for {host}", ScriptOutputType.Info));
+            if (effectiveDebugMode)
+            {
+                OnProgressChanged(host, $"Preconnect completed for {host}", false, false);
+                OnOutputReceived(host, FormatScriptOutput($"Preconnect completed for {host}", ScriptOutputType.Info));
+            }
 
             var effectiveHost = new HostConnection
             {
