@@ -57,6 +57,7 @@ steps:
     [Theory]
     [InlineData("vars:\n  test: value")]
     [InlineData("steps:\n  - send: test")]
+    [InlineData("preconnect:\n  - set: bootstrap = ready")]
     public void IsYamlScript_ScriptSections_ReturnsTrue(string input)
     {
         var result = ScriptParser.IsYamlScript(input);
@@ -247,6 +248,24 @@ steps:
         var script = _parser.Parse(yaml);
 
         script.CompactErrors.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Parse_ScriptWithPreconnect_ParsesPreconnectSteps()
+    {
+        var yaml = """
+            ---
+            preconnect:
+              - set: bootstrap = "ready"
+            steps:
+              - print: "${bootstrap}"
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Preconnect.Should().HaveCount(1);
+        script.Preconnect[0].Set.Should().Be("bootstrap = \"ready\"");
+        script.Steps.Should().HaveCount(1);
     }
 
     #endregion
@@ -2160,6 +2179,39 @@ steps:
 
         script.Steps.Should().HaveCount(1);
         script.Steps[0].If.Should().Be("\"alice\" in allowed_names");
+    }
+
+    [Fact]
+    public void Validate_PreconnectAsScalar_ReturnsError()
+    {
+        var yaml = """
+            ---
+            preconnect: true
+            steps:
+              - print: ok
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(e => e.Contains("preconnect must be a sequence", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_PreconnectSendStep_ReturnsError()
+    {
+        var yaml = """
+            ---
+            preconnect:
+              - send: echo should_fail
+            steps:
+              - print: ok
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml, enforceCanonicalSyntax: true);
+
+        errors.Should().Contain(e => e.Contains("not allowed in preconnect", StringComparison.OrdinalIgnoreCase));
     }
 
     #endregion

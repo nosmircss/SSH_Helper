@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using Rebex.Net;
 using Rebex.TerminalEmulation;
 using SSH_Helper.Models;
@@ -137,7 +139,7 @@ namespace SSH_Helper.Services
         {
             ThrowIfDisposed();
 
-            var key = CreateConnectionKey(host, username);
+            var key = CreateConnectionKey(host, username, password);
             var effectiveTimeouts = timeouts ?? _defaultTimeouts;
 
             // Try to get existing connection
@@ -235,7 +237,7 @@ namespace SSH_Helper.Services
             CancellationToken cancellationToken = default)
         {
             var effectiveTimeouts = timeouts ?? _defaultTimeouts;
-            var key = CreateConnectionKey(host, username);
+            var key = CreateConnectionKey(host, username, password);
 
             Ssh client;
             // Try to lease an existing pooled connection; if already leased, create a fresh one
@@ -267,9 +269,9 @@ namespace SSH_Helper.Services
         /// <summary>
         /// Releases a leased session, making the pooled connection available for reuse.
         /// </summary>
-        public void ReleaseSession(HostConnection host, string username)
+        public void ReleaseSession(HostConnection host, string username, string password)
         {
-            var key = CreateConnectionKey(host, username);
+            var key = CreateConnectionKey(host, username, password);
             _leasedKeys.TryRemove(key, out _);
             if (_connections.TryGetValue(key, out var pooled))
             {
@@ -277,15 +279,27 @@ namespace SSH_Helper.Services
             }
         }
 
+        [Obsolete("Use ReleaseSession overload with password to avoid ambiguous pooled key resolution.")]
+        public void ReleaseSession(HostConnection host, string username)
+        {
+            ReleaseSession(host, username, string.Empty);
+        }
+
         /// <summary>
         /// Removes a connection from the pool.
         /// </summary>
         /// <param name="host">Host to disconnect from</param>
         /// <param name="username">Username used for the connection</param>
+        public async Task RemoveAsync(HostConnection host, string username, string password)
+        {
+            var key = CreateConnectionKey(host, username, password);
+            await RemoveConnectionAsync(key);
+        }
+
+        [Obsolete("Use RemoveAsync overload with password to avoid ambiguous pooled key resolution.")]
         public async Task RemoveAsync(HostConnection host, string username)
         {
-            var key = CreateConnectionKey(host, username);
-            await RemoveConnectionAsync(key);
+            await RemoveAsync(host, username, string.Empty);
         }
 
         /// <summary>
@@ -636,9 +650,21 @@ namespace SSH_Helper.Services
             }
         }
 
-        private static string CreateConnectionKey(HostConnection host, string username)
+        internal static string CreateConnectionKey(HostConnection host, string username, string password)
         {
-            return $"{host.IpAddress}:{host.Port}:{username}";
+            var identityFile = host.IdentityFile ?? string.Empty;
+            var passphraseHash = HashSecret(host.IdentityFilePassphrase ?? string.Empty);
+            var passwordHash = HashSecret(password ?? string.Empty);
+            return $"{host.IpAddress}:{host.Port}:{username}:{passwordHash}:{identityFile}:{passphraseHash}";
+        }
+
+        private static string HashSecret(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "-";
+
+            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+            return Convert.ToHexString(bytes);
         }
 
         private bool TryLoginWithAgent(Ssh client, string username, HostConnection host)

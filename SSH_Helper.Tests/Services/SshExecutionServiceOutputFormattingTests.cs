@@ -48,6 +48,17 @@ public class SshExecutionServiceOutputFormattingTests
     }
 
     [Fact]
+    public void FormatScriptOutput_RedactsSensitivePreconnectVariables()
+    {
+        var output = SshExecutionService.FormatScriptOutput(
+            "Set _ssh_password = super-secret",
+            ScriptOutputType.Debug);
+
+        output.Should().Contain("Set _ssh_password = [REDACTED]");
+        output.Should().NotContain("super-secret");
+    }
+
+    [Fact]
     public void NormalizeScriptOutputBoundary_NonRawAfterRawWithoutLineBreak_PrependsBoundaryNewLine()
     {
         var result = SshExecutionService.NormalizeScriptOutputBoundary(
