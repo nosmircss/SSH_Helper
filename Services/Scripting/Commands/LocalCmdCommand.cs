@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -64,7 +65,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             LocalCmdConfirmResult confirmResult;
             try
             {
-                confirmResult = await HandleConfirmation(options, command, shell, workingDir, context);
+                confirmResult = await HandleConfirmation(options, command, shell, workingDir, context, cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
@@ -101,7 +102,7 @@ namespace SSH_Helper.Services.Scripting.Commands
         }
 
         private async Task<LocalCmdConfirmResult> HandleConfirmation(
-            LocalCmdOptions options, string command, string shell, string? workingDir, ScriptContext context)
+            LocalCmdOptions options, string command, string shell, string? workingDir, ScriptContext context, CancellationToken cancellationToken)
         {
             var confirmPolicy = options.Confirm?.ToLowerInvariant() ?? "always";
 
@@ -127,7 +128,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 throw new InvalidOperationException(
                     "LocalCmd confirmation is required but no confirmation provider is configured");
 
-            var result = await _confirmation.ConfirmAsync(command, shell, workingDir ?? "(current directory)");
+            var result = await _confirmation.ConfirmAsync(command, shell, workingDir ?? "(current directory)", cancellationToken);
 
             if (result == LocalCmdConfirmResult.RunAll)
             {
@@ -524,7 +525,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             string command, string shell, LocalCmdOptions options)
         {
             var extraArgs = options.Args != null && options.Args.Count > 0
-                ? string.Join(" ", options.Args)
+                ? JoinCommandLineArguments(options.Args)
                 : string.Empty;
 
             if (IsPowerShellShell(shell))
@@ -539,8 +540,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                     return (directFileName, directArguments);
                 }
 
-                var normalizedCommand = PreparePowerShellCommand(command);
-                var psArgs = $"-NoLogo -NonInteractive -EncodedCommand {EncodePowerShellCommand(normalizedCommand)}";
+                var psArgs = $"-NoLogo -NoProfile -NonInteractive -EncodedCommand {EncodePowerShellCommand(PrepareNonInteractivePowerShellCommand(command))}";
                 if (!string.IsNullOrWhiteSpace(extraArgs))
                     psArgs = $"{extraArgs} {psArgs}";
                 return (ResolvePowerShellExecutable(shell), psArgs);
@@ -599,7 +599,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
 
             if (IsPowerShellShell(shell))
-                return (ResolvePowerShellExecutable(shell), $"-NoLogo -EncodedCommand {EncodePowerShellCommand(command)}");
+                return (ResolvePowerShellExecutable(shell), $"-NoLogo -NoProfile -EncodedCommand {EncodePowerShellCommand(PrepareNonInteractivePowerShellCommand(command))}");
 
             if (IsCmdShell(shell))
                 return (ResolveCmdExecutable(shell), BuildCmdArguments(command, options.Args != null && options.Args.Count > 0
@@ -614,7 +614,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             string command, string shell, LocalCmdOptions options)
         {
             var extraArgs = options.Args != null && options.Args.Count > 0
-                ? string.Join(" ", options.Args)
+                ? JoinCommandLineArguments(options.Args)
                 : string.Empty;
 
             if (IsPowerShellShell(shell))
@@ -691,8 +691,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 var transcriptPath = BuildInteractiveAuditTranscriptPath();
                 var escapedPath = EscapeSingleQuotedPowerShellLiteral(transcriptPath);
+                var teeCommand = $"$ProgressPreference = 'SilentlyContinue'; $input | Tee-Object -FilePath '{escapedPath}' -Append";
                 var launchCommand =
-                    $"({command}) 2>&1 | powershell.exe -NoLogo -NoProfile -NonInteractive -Command '$input | Tee-Object -FilePath ''{escapedPath}'' -Append'";
+                    $"({command}) 2>&1 | powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand {EncodePowerShellCommand(teeCommand)}";
                 return new InteractiveAuditCapture(launchCommand, transcriptPath);
             }
 
@@ -800,6 +801,15 @@ namespace SSH_Helper.Services.Scripting.Commands
                 return command;
 
             return $"& {trimmed}";
+        }
+
+        private static string PrepareNonInteractivePowerShellCommand(string command)
+        {
+            var normalizedCommand = PreparePowerShellCommand(command);
+
+            // Suppress startup/module initialization progress records so localcmd does not
+            // surface PowerShell CLIXML progress noise on stderr for normal commands.
+            return $"$ProgressPreference = 'SilentlyContinue'; {normalizedCommand}";
         }
 
         private static bool StartsWithQuotedToken(string value)
@@ -991,9 +1001,58 @@ namespace SSH_Helper.Services.Scripting.Commands
         {
             var modeFlag = keepOpen ? "/K" : "/c";
             if (string.IsNullOrWhiteSpace(extraArgs))
-                return $"{modeFlag} \"{command}\"";
+                return $"{modeFlag} {QuoteCommandLineArgument(command)}";
 
-            return $"{extraArgs} {modeFlag} \"{command}\"";
+            return $"{extraArgs} {modeFlag} {QuoteCommandLineArgument(command)}";
+        }
+
+        private static string JoinCommandLineArguments(IEnumerable<string> arguments)
+        {
+            return string.Join(" ", arguments.Select(QuoteCommandLineArgument));
+        }
+
+        private static string QuoteCommandLineArgument(string argument)
+        {
+            if (string.IsNullOrEmpty(argument))
+                return "\"\"";
+
+            if (!argument.Any(ch => char.IsWhiteSpace(ch) || ch == '"'))
+                return argument;
+
+            var builder = new StringBuilder(argument.Length + 2);
+            builder.Append('"');
+            var pendingBackslashes = 0;
+
+            foreach (var ch in argument)
+            {
+                if (ch == '\\')
+                {
+                    pendingBackslashes++;
+                    continue;
+                }
+
+                if (ch == '"')
+                {
+                    builder.Append('\\', pendingBackslashes * 2 + 1);
+                    builder.Append('"');
+                    pendingBackslashes = 0;
+                    continue;
+                }
+
+                if (pendingBackslashes > 0)
+                {
+                    builder.Append('\\', pendingBackslashes);
+                    pendingBackslashes = 0;
+                }
+
+                builder.Append(ch);
+            }
+
+            if (pendingBackslashes > 0)
+                builder.Append('\\', pendingBackslashes * 2);
+
+            builder.Append('"');
+            return builder.ToString();
         }
 
         private static string NormalizeLifetime(string? lifetime)

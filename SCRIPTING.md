@@ -2629,7 +2629,7 @@ Runs a command on the local machine (not over SSH).
 # Full form
 - localcmd:
     command: "dotnet build"
-    shell: powershell          # powershell | custom
+    shell: powershell          # powershell | pwsh | cmd | custom
     shell_path: "python"       # required only when shell: custom
     args: ["-NoProfile"]
     env:
@@ -2663,6 +2663,7 @@ Runs a command on the local machine (not over SSH).
 - `shell: powershell` uses session transcripts for interactive audit capture, so `keep_open: true` includes follow-up user-entered commands until the shell closes.
 - Background captures startup metadata: `<into>_pid`, `<into>_started`, `<into>_start_error`.
 - `fail_on_nonzero` + `success_codes` apply when an exit code is observed (foreground and tracked interactive). They cannot be evaluated for interactive detached launches.
+- Unattended scheduler runs require `confirm: never`; otherwise script preflight fails instead of blocking on a local confirmation dialog.
 - `quiet: true` hides command banner lines only; `suppress: true` hides command banner + live output streaming.
 
 **Parameters:**
@@ -2670,7 +2671,7 @@ Runs a command on the local machine (not over SSH).
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `command` | Yes | - | Command text after variable substitution |
-| `shell` | No | `powershell` | `powershell` or `custom` |
+| `shell` | No | `powershell` | `powershell`, `pwsh`, `cmd`, or `custom` |
 | `shell_path` | Conditionally | - | Required when `shell: custom` |
 | `args` | No | `[]` | Shell arguments (sequence preferred; scalar accepted) |
 | `env` | No | - | Environment variables for launched process |
@@ -2687,7 +2688,7 @@ Runs a command on the local machine (not over SSH).
 | `quiet` | No | `false` | Hide localcmd command banner lines |
 | `suppress` | No | `false` | Hide banner and live stdout/stderr output |
 | `title` | No | `Local Command` | Interactive terminal title |
-| `into` | No | - | Output variable prefix |
+| `into` | No | - | Output variable prefix. Foreground sets `_stdout`/`_stderr`/`_exit_code`; tracked interactive sets `_exit_code`; background and detached interactive set `_pid`/`_started`/`_start_error` |
 | `timeout` | No | - | Step timeout in seconds (ignored for background) |
 | `on_error` | No | `stop` | Error handling: `continue` or `stop` |
 
@@ -2713,6 +2714,14 @@ Runs a command on the local machine (not over SSH).
     run_mode: background
     lifetime: script
     into: np
+
+# Detached interactive launch that returns immediately
+- localcmd:
+    command: "ping 8.8.8.8"
+    shell: cmd
+    interactive: true
+    lifetime: detached
+    into: ping_window
 ```
 
 ---

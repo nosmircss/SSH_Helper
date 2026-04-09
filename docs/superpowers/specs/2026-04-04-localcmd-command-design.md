@@ -21,7 +21,7 @@ Users need to run local commands as part of hybrid workflows: generate configs l
 ```yaml
 - localcmd:
     command: "dotnet build"
-    shell: powershell              # powershell (default) or custom
+    shell: powershell              # powershell (default), pwsh, cmd, or custom
     shell_path: "python"          # path to custom executable (only when shell: custom)
     args: ["-NoProfile"]          # preferred list form; scalar string also accepted
     env:
@@ -30,7 +30,7 @@ Users need to run local commands as part of hybrid workflows: generate configs l
     interactive: false             # true = launch external terminal window
     keep_open: false               # interactive only: keeps terminal open after command exits
     run_mode: foreground           # foreground (default) or background
-    lifetime: detached             # background only: detached (default), script, app
+    lifetime: detached             # background: detached (default), script, app; interactive explicit detached returns immediately
     kill_on_cancel: false          # background only, applies when lifetime != detached
     fail_on_nonzero: true          # default true
     success_codes: [0]             # default [0]
@@ -167,6 +167,7 @@ Confirmation policy is controlled by `confirm`:
 - `always` (default): prompt for every `localcmd` step.
 - `once`: prompt once, then auto-approve subsequent `localcmd` steps in the same script execution and current host scope.
 - `never`: no prompt.
+- Unattended scheduler runs require `confirm: never`; otherwise preflight fails instead of blocking on a confirmation dialog.
 
 Dialog content:
 - Fully resolved command text (after variable substitution)
@@ -175,7 +176,7 @@ Dialog content:
 
 Dialog actions:
 - **Run** - execute this command
-- **Run All** - execute this and suppress further prompts in scope
+- **Run Same Command** - execute this and suppress further prompts for the same resolved command in scope
 - **Cancel** - abort the script
 
 Run All scope rule:
@@ -227,7 +228,7 @@ A new block definition in the `'io'` category in `FlowCanvas/src/blockDefs/regis
       placeholder: 'Get-Process | Select-Object -First 5',
       helpText: 'The command to execute locally', group: 'core' },
     { key: 'shell', label: 'Shell', type: 'select',
-      options: ['powershell', 'custom'], defaultValue: 'powershell',
+      options: ['powershell', 'pwsh', 'cmd', 'custom'], defaultValue: 'powershell',
       helpText: 'Shell to execute the command in. "custom" enables Shell Path.', group: 'core' },
     { key: 'shell_path', label: 'Shell Path', type: 'text',
       placeholder: 'python',
@@ -248,9 +249,9 @@ A new block definition in the `'io'` category in `FlowCanvas/src/blockDefs/regis
     { key: 'run_mode', label: 'Run Mode', type: 'select',
       options: ['foreground', 'background'], defaultValue: 'foreground',
       helpText: 'Foreground waits for completion; background returns after spawn', group: 'core' },
-    { key: 'lifetime', label: 'Background Lifetime', type: 'select',
+    { key: 'lifetime', label: 'Process Lifetime', type: 'select',
       options: ['detached', 'script', 'app'], defaultValue: 'detached',
-      helpText: 'Applies only when run_mode=background', group: 'advanced' },
+      helpText: 'Background uses detached/script/app. Explicit detached on interactive launches and returns immediately.', group: 'advanced' },
     { key: 'kill_on_cancel', label: 'Kill On Cancel', type: 'boolean', defaultValue: false,
       helpText: 'Applies to non-detached background mode', group: 'advanced' },
     { key: 'fail_on_nonzero', label: 'Fail On Non-Zero', type: 'boolean', defaultValue: true,
@@ -265,7 +266,7 @@ A new block definition in the `'io'` category in `FlowCanvas/src/blockDefs/regis
       helpText: 'Prompt policy before execution', group: 'advanced' },
     { key: 'into', label: 'Into Prefix', type: 'text',
       placeholder: 'result',
-      helpText: 'Prefix for stdout/stderr/exit_code (or pid/start metadata)', group: 'core' },
+      helpText: 'Foreground sets stdout/stderr/exit_code. Tracked interactive sets exit_code. Background and detached interactive set pid/start metadata.', group: 'core' },
     timeoutProp,
     onErrorProp,
   ],
@@ -278,7 +279,7 @@ A new block definition in the `'io'` category in `FlowCanvas/src/blockDefs/regis
 public class LocalCmdOptions
 {
     public string? Command { get; set; }
-    public string Shell { get; set; } = "powershell";   // powershell | custom
+    public string Shell { get; set; } = "powershell";   // powershell | pwsh | cmd | custom
     public string? ShellPath { get; set; }               // required when Shell = custom
     public List<string> Args { get; set; } = new();      // scalar YAML normalized to one item
     public Dictionary<string, string>? Env { get; set; }

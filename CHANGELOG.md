@@ -18,7 +18,7 @@
 
 - **Foreground** (default) — Captures stdout and stderr into `${into}_stdout`, `${into}_stderr`, and `${into}_exit_code`. Output is streamed to the script output panel in real time. Supports `timeout` and `max_output_bytes` (default 1 MB) with truncation markers.
 - **Background** (`run_mode: background`) — Starts the process detached from the script's execution flow. Populates `${into}_pid`, `${into}_started`, and `${into}_start_error`. Lifetime management via `lifetime` (`script`, `app`, `detached`) and `kill_on_cancel` options. Background processes registered against the `ScriptContext` are cleaned up on script completion; app-lifetime processes are cleaned up on `AppDomain.ProcessExit`.
-- **Interactive** (`interactive: true`) — Opens a visible terminal window via `powershell -NoExit`. Supports `keep_open` to leave the window open after the command completes. Exit code is captured into `${into}_exit_code`. Mutually exclusive with background mode.
+- **Interactive** (`interactive: true`) — Opens a visible terminal window. Supports `keep_open` to leave the window open after the command completes. Tracked interactive runs capture `${into}_exit_code`; explicitly setting `lifetime: detached` returns immediately and captures `${into}_pid`, `${into}_started`, and `${into}_start_error`. Mutually exclusive with background mode.
 
 **Confirmation system:**
 
@@ -26,17 +26,20 @@
 - `LocalCmdConfirmationDialog` (`UI/LocalCmdConfirmationDialog.cs`) shows the resolved command, shell, and working directory before execution
 - `confirm` policy: `always` (default), `once` (per command+host), or `never`
 - `RunAll` approval persists per-host across subsequent commands within the same script execution via `ScriptContext.LocalCmdRunAllApproved`
+- Unattended scheduler runs require `localcmd.confirm: never`; otherwise script preflight fails with a clear message instead of blocking on a modal prompt
 
 **Shell support:**
 
-- `powershell` (default) — `powershell.exe -NoProfile -NonInteractive -Command`
+- `powershell` (default) — `powershell.exe -NoLogo -NonInteractive -EncodedCommand`
+- `pwsh` — `pwsh.exe -NoLogo -NonInteractive -EncodedCommand`
+- `cmd` — `cmd.exe /c`
 - `custom` — Uses `shell_path` for arbitrary executables with `args` passthrough
 - Custom `env` dictionary for injecting environment variables into the child process
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `command` | Yes | — | Command string to execute |
-| `shell` | No | `powershell` | Shell: `powershell`, or `custom` |
+| `shell` | No | `powershell` | Shell: `powershell`, `pwsh`, `cmd`, or `custom` |
 | `shell_path` | No | — | Executable path when `shell: custom` |
 | `args` | No | — | Extra CLI arguments for custom shell |
 | `env` | No | — | Environment variable key/value pairs |
@@ -44,8 +47,8 @@
 | `interactive` | No | `false` | Open a visible terminal window |
 | `keep_open` | No | `false` | Keep interactive terminal open after command completes |
 | `run_mode` | No | `foreground` | `foreground` or `background` |
-| `lifetime` | No | `script` | Background process lifetime: `script`, `app`, or `detached` |
-| `kill_on_cancel` | No | `true` | Kill background process on script cancellation |
+| `lifetime` | No | `detached` | Background process lifetime: `script`, `app`, or `detached`; explicit detached also enables fire-and-forget interactive launch |
+| `kill_on_cancel` | No | `false` | Kill tracked background process on script cancellation |
 | `fail_on_nonzero` | No | `true` | Fail step on non-zero exit code |
 | `success_codes` | No | `[0]` | List of acceptable exit codes |
 | `max_output_bytes` | No | `1048576` | Max captured output size before truncation |

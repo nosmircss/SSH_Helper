@@ -544,8 +544,13 @@ public class LocalCmdCommandTests
         var result = await command.ExecuteAsync(step, context, CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        startedArguments.Should().Contain("Tee-Object");
-        startedArguments.Should().Contain("-FilePath");
+        startedArguments.Should().Contain("-EncodedCommand");
+        startedArguments.Should().NotContain("Tee-Object");
+
+        var decodedAuditCommand = DecodePowerShellEncodedCommand(startedArguments!);
+        decodedAuditCommand.Should().Contain("$ProgressPreference = 'SilentlyContinue';");
+        decodedAuditCommand.Should().Contain("Tee-Object");
+        decodedAuditCommand.Should().Contain("-FilePath");
     }
 
     [Fact]
@@ -593,6 +598,39 @@ public class LocalCmdCommandTests
 
         result.Success.Should().BeTrue();
         context.LocalCmdRunAllApproved.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Confirmation_CancelledByExecutionToken_ThrowsWithoutStartingProcess()
+    {
+        var runner = new StubProcessRunner(stdout: "ok", stderr: "", exitCode: 0);
+        var confirmationStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var confirmation = new StubConfirmation(async (_, _, _, cancellationToken) =>
+        {
+            confirmationStarted.TrySetResult(true);
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return LocalCmdConfirmResult.Run;
+        });
+        var command = new LocalCmdCommand(confirmation, runner);
+
+        var step = new ScriptStep
+        {
+            LocalCmd = new LocalCmdOptions
+            {
+                Command = "safe-cmd",
+                Confirm = "always"
+            }
+        };
+
+        var context = new ScriptContext();
+        using var cts = new CancellationTokenSource();
+        var executeTask = command.ExecuteAsync(step, context, cts.Token);
+
+        await confirmationStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await executeTask);
+        runner.StartCount.Should().Be(0);
     }
 
     [Fact]
@@ -828,15 +866,16 @@ public class LocalCmdCommandTests
     }
 
     [Fact]
-    public void BuildProcessArgs_Powershell()
+    public void BuildProcessArgs_Powershell_UsesNoProfileAndPrependsProgressSuppression()
     {
         var options = new LocalCmdOptions { Shell = "powershell" };
         var (fileName, args) = LocalCmdCommand.BuildProcessArgs("Get-Process", "powershell", options);
         var decoded = DecodePowerShellEncodedCommand(args);
 
         fileName.Should().Be("powershell.exe");
+        args.Should().Contain("-NoProfile");
         args.Should().Contain("-EncodedCommand");
-        decoded.Should().Be("Get-Process");
+        decoded.Should().Be("$ProgressPreference = 'SilentlyContinue'; Get-Process");
     }
 
     [Fact]
@@ -872,6 +911,39 @@ public class LocalCmdCommandTests
         args.Should().Contain("/d /q");
         args.Should().Contain("/c");
         args.Should().Contain("dir");
+    }
+
+    [Fact]
+    public void BuildProcessArgs_Powershell_QuotesArgsContainingSpaces()
+    {
+        var options = new LocalCmdOptions
+        {
+            Shell = "powershell",
+            Args = new List<string> { "-ExecutionPolicy", "Remote Signed" }
+        };
+
+        var (fileName, args) = LocalCmdCommand.BuildProcessArgs("Get-Date", "powershell", options);
+
+        fileName.Should().Be("powershell.exe");
+        args.Should().Contain("-ExecutionPolicy");
+        args.Should().Contain("\"Remote Signed\"");
+    }
+
+    [Fact]
+    public void BuildProcessArgs_Custom_QuotesArgsContainingSpaces()
+    {
+        var options = new LocalCmdOptions
+        {
+            Shell = "custom",
+            ShellPath = "python",
+            Args = new List<string> { "-m", "my module" }
+        };
+
+        var (fileName, args) = LocalCmdCommand.BuildProcessArgs("script.py", "custom", options);
+
+        fileName.Should().Be("python");
+        args.Should().Contain("-m");
+        args.Should().Contain("\"my module\"");
     }
 
     [Fact]
@@ -975,8 +1047,9 @@ public class LocalCmdCommandTests
         var decoded = DecodePowerShellEncodedCommand(args);
 
         fileName.Should().Be("powershell.exe");
+        args.Should().Contain("-NoProfile");
         args.Should().Contain("-EncodedCommand");
-        decoded.Should().Be("Get-Date");
+        decoded.Should().Be("$ProgressPreference = 'SilentlyContinue'; Get-Date");
     }
 
     [Fact]
@@ -1067,9 +1140,10 @@ public class LocalCmdCommandTests
         var markerIndex = arguments.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
         markerIndex.Should().BeGreaterThanOrEqualTo(0);
 
-        var encoded = arguments[(markerIndex + marker.Length)..].Trim();
-        if (encoded.Contains(' '))
-            encoded = encoded[..encoded.IndexOf(' ')];
+        var encoded = arguments[(markerIndex + marker.Length)..].TrimStart();
+        var terminatorIndex = encoded.IndexOfAny([' ', '"']);
+        if (terminatorIndex >= 0)
+            encoded = encoded[..terminatorIndex];
 
         var bytes = Convert.FromBase64String(encoded);
         return System.Text.Encoding.Unicode.GetString(bytes);
@@ -1227,15 +1301,20 @@ internal class StubProcessHandle : IProcessHandle
 
 internal class StubConfirmation : ILocalCmdConfirmation
 {
-    private readonly LocalCmdConfirmResult _result;
+    private readonly Func<string, string, string, CancellationToken, Task<LocalCmdConfirmResult>> _handler;
 
     public StubConfirmation(LocalCmdConfirmResult result)
     {
-        _result = result;
+        _handler = (_, _, _, _) => Task.FromResult(result);
     }
 
-    public Task<LocalCmdConfirmResult> ConfirmAsync(string resolvedCommand, string shell, string workingDir)
+    public StubConfirmation(Func<string, string, string, CancellationToken, Task<LocalCmdConfirmResult>> handler)
     {
-        return Task.FromResult(_result);
+        _handler = handler;
+    }
+
+    public Task<LocalCmdConfirmResult> ConfirmAsync(string resolvedCommand, string shell, string workingDir, CancellationToken cancellationToken)
+    {
+        return _handler(resolvedCommand, shell, workingDir, cancellationToken);
     }
 }

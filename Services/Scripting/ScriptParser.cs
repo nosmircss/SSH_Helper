@@ -4561,7 +4561,7 @@ namespace SSH_Helper.Services.Scripting
                         if (!IsDynamicValue(step.LocalCmd.Shell) && !IsValidLocalCmdShell(step.LocalCmd.Shell))
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
-                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'shell' must be one of powershell, custom{lineContent}");
+                            errors.Add($"{prefix}Line {step.LineNumber}: localcmd 'shell' must be one of powershell, pwsh, cmd, custom{lineContent}");
                         }
 
                         if (!IsDynamicValue(step.LocalCmd.Shell) &&
@@ -4826,11 +4826,19 @@ namespace SSH_Helper.Services.Scripting
                 return false;
 
             var normalized = shell.Trim();
-            return string.Equals(shell, "powershell", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(shell, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
+            return string.Equals(normalized, "powershell", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "pwsh", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith("\\pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith("/pwsh.exe", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "cmd", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, "cmd.exe", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith("\\cmd.exe", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith("/cmd.exe", StringComparison.OrdinalIgnoreCase) ||
                    normalized.EndsWith("\\powershell.exe", StringComparison.OrdinalIgnoreCase) ||
                    normalized.EndsWith("/powershell.exe", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(shell, "custom", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(normalized, "custom", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsValidLocalCmdRunMode(string runMode)

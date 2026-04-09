@@ -11801,7 +11801,7 @@ namespace SSH_Helper
             try
             {
                 List<ExecutionResult> results;
-                SshDebugLog("EXEC", "Calling ExecutePresetAsync - SSH connection starting", sw);
+                SshDebugLog("EXEC", BuildExecutionStartDebugMessage(preset), sw);
                 results = await _executionCoordinator.ExecutePresetAsync(
                     hosts,
                     preparation,
@@ -11848,6 +11848,32 @@ namespace SSH_Helper
                 SshDebugLog("EXEC", "Execution complete, calling SetExecutionMode(false)", sw);
                 CleanupFlowCanvasExecutionStateAfterRun();
                 SetExecutionMode(false);
+            }
+        }
+
+        /// <summary>
+        /// Builds the execution-start debug message based on whether the preset requires an SSH session.
+        /// </summary>
+        private static string BuildExecutionStartDebugMessage(PresetInfo preset)
+        {
+            const string sshMessage = "Calling ExecutePresetAsync - SSH connection starting";
+            const string localMessage = "Calling ExecutePresetAsync - Local execution starting";
+            const string genericMessage = "Calling ExecutePresetAsync - Execution starting";
+
+            if (!preset.IsScript)
+                return sshMessage;
+
+            try
+            {
+                var parser = new ScriptParser();
+                var script = parser.Parse(preset.Commands);
+                var analyzer = new ScriptDependencyAnalyzer();
+                var sshRequirement = analyzer.AnalyzeSshRequirements(script);
+                return sshRequirement.RequiresSshSession ? sshMessage : localMessage;
+            }
+            catch
+            {
+                return genericMessage;
             }
         }
 

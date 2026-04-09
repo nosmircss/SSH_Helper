@@ -8,12 +8,12 @@ namespace SSH_Helper.UI
 {
     internal sealed class LocalCmdConfirmationDialog : ILocalCmdConfirmation
     {
-        public Task<LocalCmdConfirmResult> ConfirmAsync(string resolvedCommand, string shell, string workingDir)
+        public Task<LocalCmdConfirmResult> ConfirmAsync(string resolvedCommand, string shell, string workingDir, CancellationToken cancellationToken)
         {
             return ScriptPromptDialogRunner.ShowAsync<LocalCmdConfirmationForm, LocalCmdConfirmResult>(
                 () => new LocalCmdConfirmationForm(resolvedCommand, shell, workingDir),
                 dialog => dialog.SelectedResult,
-                CancellationToken.None);
+                cancellationToken);
         }
     }
 
@@ -68,11 +68,20 @@ namespace SSH_Helper.UI
             };
             Controls.Add(dirLabel);
 
+            var scopeLabel = new Label
+            {
+                Text = "Run Same Command approves this resolved command for the current host for the rest of this run.",
+                AutoSize = false,
+                Location = new Point(16, 220),
+                Size = new Size(492, 32),
+            };
+            Controls.Add(scopeLabel);
+
             var btnRun = new Button
             {
                 Text = "Run",
                 Size = new Size(90, 32),
-                Location = new Point(200, 266),
+                Location = new Point(90, 266),
                 DialogResult = DialogResult.OK,
             };
             btnRun.Click += (_, _) =>
@@ -84,9 +93,9 @@ namespace SSH_Helper.UI
 
             var btnRunAll = new Button
             {
-                Text = "Run All",
-                Size = new Size(90, 32),
-                Location = new Point(300, 266),
+                Text = "Run Same Command",
+                Size = new Size(140, 32),
+                Location = new Point(195, 266),
                 DialogResult = DialogResult.Yes,
             };
             btnRunAll.Click += (_, _) =>
@@ -100,7 +109,7 @@ namespace SSH_Helper.UI
             {
                 Text = "Cancel",
                 Size = new Size(90, 32),
-                Location = new Point(400, 266),
+                Location = new Point(350, 266),
                 DialogResult = DialogResult.Cancel,
             };
             btnCancel.Click += (_, _) =>

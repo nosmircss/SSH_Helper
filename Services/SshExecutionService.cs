@@ -507,6 +507,26 @@ namespace SSH_Helper.Services
 
             try
             {
+                if (TryBuildUnattendedLocalCmdPreflightMessage(script, allowFileSelectionDialogs, out var unattendedLocalCmdMessage))
+                {
+                    var errorOutput = $"Script preflight error: {unattendedLocalCmdMessage}\n";
+                    OnOutputReceived(hostList.FirstOrDefault() ?? new HostConnection(), errorOutput);
+
+                    foreach (var host in hostList)
+                    {
+                        results.Add(new ExecutionResult
+                        {
+                            Host = host,
+                            Success = false,
+                            ErrorMessage = unattendedLocalCmdMessage,
+                            Output = errorOutput,
+                            Timestamp = DateTime.Now
+                        });
+                    }
+
+                    return results;
+                }
+
                 var analyzer = new ScriptDependencyAnalyzer();
                 var sshRequirement = analyzer.AnalyzeSshRequirements(script);
 
@@ -872,7 +892,101 @@ namespace SSH_Helper.Services
                 }
             }
 
-            return blockedPresetNames;
+                return blockedPresetNames;
+            }
+
+        private static bool TryBuildUnattendedLocalCmdPreflightMessage(
+            Script script,
+            bool allowFileSelectionDialogs,
+            out string message)
+        {
+            if (allowFileSelectionDialogs ||
+                !ContainsConfirmedLocalCmd(
+                    script.Steps,
+                    script.SubroutineRegistry,
+                    currentSubroutine: null,
+                    visitedSubroutines: new HashSet<string>(StringComparer.OrdinalIgnoreCase)))
+            {
+                message = string.Empty;
+                return false;
+            }
+
+            message = "LocalCmd confirmation is only available during manual main-window runs. For scheduler or other unattended runs, set localcmd.confirm: never.";
+            return true;
+        }
+
+        private static bool ContainsConfirmedLocalCmd(
+            List<ScriptStep>? steps,
+            ScriptSubroutineRegistry? registry,
+            ScriptSubroutineDefinition? currentSubroutine,
+            HashSet<string> visitedSubroutines)
+        {
+            if (steps == null)
+                return false;
+
+            foreach (var step in steps)
+            {
+                var stepType = step.GetStepType();
+                if (stepType == StepType.LocalCmd && RequiresLocalCmdConfirmation(step.LocalCmd))
+                    return true;
+
+                if (stepType == StepType.Call &&
+                    step.Call != null &&
+                    registry != null &&
+                    registry.TryResolve(step.Call.Subroutine, currentSubroutine, out var definition) &&
+                    definition != null &&
+                    visitedSubroutines.Add(definition.QualifiedName) &&
+                    ContainsConfirmedLocalCmd(
+                        definition.Subroutine.Steps,
+                        registry,
+                        definition,
+                        visitedSubroutines))
+                {
+                    return true;
+                }
+
+                if (ContainsConfirmedLocalCmd(step.Then, registry, currentSubroutine, visitedSubroutines) ||
+                    ContainsConfirmedLocalCmd(step.Else, registry, currentSubroutine, visitedSubroutines) ||
+                    ContainsConfirmedLocalCmd(step.Do, registry, currentSubroutine, visitedSubroutines) ||
+                    ContainsConfirmedLocalCmd(step.Try, registry, currentSubroutine, visitedSubroutines) ||
+                    ContainsConfirmedLocalCmd(step.Catch, registry, currentSubroutine, visitedSubroutines) ||
+                    ContainsConfirmedLocalCmd(step.Finally, registry, currentSubroutine, visitedSubroutines))
+                {
+                    return true;
+                }
+
+                if (step.Elif != null)
+                {
+                    foreach (var branch in step.Elif)
+                    {
+                        if (ContainsConfirmedLocalCmd(branch.Then, registry, currentSubroutine, visitedSubroutines))
+                            return true;
+                    }
+                }
+
+                if (step.Cases != null)
+                {
+                    foreach (var switchCase in step.Cases)
+                    {
+                        if (ContainsConfirmedLocalCmd(switchCase.Do, registry, currentSubroutine, visitedSubroutines))
+                            return true;
+                    }
+                }
+
+                if (step.Parallel?.Steps != null &&
+                    ContainsConfirmedLocalCmd(step.Parallel.Steps, registry, currentSubroutine, visitedSubroutines))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool RequiresLocalCmdConfirmation(LocalCmdOptions? localCmd)
+        {
+            return localCmd != null &&
+                   !string.Equals(localCmd.Confirm, "never", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string BuildFolderSingleHostOnlyPreflightMessage(IReadOnlyList<string> blockedPresetNames)
@@ -977,6 +1091,21 @@ namespace SSH_Helper.Services
 
             var analyzer = new ScriptDependencyAnalyzer();
             var sshRequirement = analyzer.AnalyzeSshRequirements(script);
+
+            if (TryBuildUnattendedLocalCmdPreflightMessage(script, allowFileSelectionDialogs, out var unattendedLocalCmdMessage))
+            {
+                var errorOutput = $"Script preflight error: {unattendedLocalCmdMessage}\n";
+                OnOutputReceived(host, errorOutput);
+
+                return new ExecutionResult
+                {
+                    Host = host,
+                    Success = false,
+                    ErrorMessage = unattendedLocalCmdMessage,
+                    Output = errorOutput,
+                    Timestamp = DateTime.Now
+                };
+            }
 
             if (TryBuildSingleHostOnlyPreflightMessage(sshRequirement, out var preflightMessage))
             {

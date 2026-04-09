@@ -1847,6 +1847,43 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_LocalCmdCmdShell_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("localcmd", new JObject
+        {
+            ["command"] = "dir",
+            ["shell"] = "cmd",
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        var localCmd = script.Steps[0].LocalCmd;
+
+        Assert.NotNull(localCmd);
+        Assert.Equal("cmd", localCmd!.Shell);
+    }
+
+    [Fact]
+    public void Registry_LocalCmdShellOptions_IncludePwshAndCmd()
+    {
+        _ = LoadRegistryBlockPropertyOrder(out var registryText);
+
+        var blockMatch = Regex.Match(
+            registryText,
+            @"type:\s*'localcmd'[\s\S]*?\{\s*key:\s*'shell'[\s\S]*?options:\s*\[(?<options>[^\]]+)\]",
+            RegexOptions.Multiline);
+
+        Assert.True(blockMatch.Success, "Unable to find localcmd shell options in registry.ts.");
+        var optionsText = blockMatch.Groups["options"].Value;
+        Assert.Contains("'powershell'", optionsText, StringComparison.Ordinal);
+        Assert.Contains("'pwsh'", optionsText, StringComparison.Ordinal);
+        Assert.Contains("'cmd'", optionsText, StringComparison.Ordinal);
+        Assert.Contains("'custom'", optionsText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp()
     {
         var bridge = new FlowCanvasBridge();

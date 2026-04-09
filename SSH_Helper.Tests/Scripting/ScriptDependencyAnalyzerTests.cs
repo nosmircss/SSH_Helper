@@ -161,6 +161,33 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_LocalCmdInteractiveDetachedInto_DefinesStartupMetadataVariables()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - localcmd:
+                      command: "date"
+                      interactive: true
+                      lifetime: detached
+                      into: session
+                  - print:
+                      message: "pid=${session_pid} started=${session_started} err=${session_start_error} exit=${session_exit_code}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().NotContain("session_pid");
+        result.ReferencedColumns.Should().NotContain("session_started");
+        result.ReferencedColumns.Should().NotContain("session_start_error");
+        result.ReferencedColumns.Should().Contain("session_exit_code");
+    }
+
+    [Fact]
     public void AnalyzePresets_ForeachCollectionExpression_DoesNotReportFunctionCallAsMissingColumn()
     {
         var analyzer = new ScriptDependencyAnalyzer();
