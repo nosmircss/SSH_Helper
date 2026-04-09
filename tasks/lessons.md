@@ -1,6 +1,8 @@
 # Lessons
 
 ## 2026-04-08
+- When I add or run WinForms tests through a path that shows success/error dialogs, I must install or create a dialog seam first; otherwise the suite can hang behind a modal popup even if the underlying behavior is correct.
+- When a user reports WinForms test-time JIT exception popups after I said the tests passed, I must inspect deferred UI callbacks (`Application.Idle`, `BeginInvoke`, throttled UI writers) for disposal-safe teardown and add a regression that runs the callback after form disposal.
 - When a user corrects me from a generic shell explanation to project-specific `localcmd` behavior, I must inspect the repo implementation before answering and align the explanation with the exact runtime path.
 - When a user explicitly chooses capability removal over graceful fallback for an unreleased option, I must stop pushing compatibility-oriented fixes and align the implementation plan to the simpler product surface they asked for.
 - When a user narrows an editor UX fix from changing Enter behavior to suppressing autocomplete on a specific trigger key, I must update the plan to remove the broader interaction change and implement the smaller trigger-level rule they asked for.

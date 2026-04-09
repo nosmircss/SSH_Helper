@@ -1,5 +1,74 @@
 # TODO
 
+## 235. Stop import-preset tests from blocking on modal dialogs
+- [x] 235.1 Add a RED WinForms regression that installs a test dialog override for `ImportPreset()` and proves import success is reported without opening a blocking modal.
+- [x] 235.2 Add a `Form1` message-dialog override seam and route `ImportPreset()` success messaging through it.
+- [x] 235.3 Run focused verification and record the outcome below.
+
+### 235 Review
+- Root cause:
+- `Form1.ImportPreset()` always ended with a real `DialogTheme.Show(...)` success modal, and the preset-tree WinForms regression suite runs `ImportPreset()` directly.
+- The tests already had an input-box override seam, but there was no equivalent message-dialog seam, so the import path could block the test runner behind the success popup until someone clicked `OK`.
+- RED verification:
+- Extended `ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt` in `SSH_Helper.Tests/UI/Form1PresetTreeIncrementalMutationTests.cs` to install a dialog override and assert the captured success message.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/import-preset-dialog-red/bin/ -p:BaseIntermediateOutputPath=artifacts/import-preset-dialog-red/obj/ -v minimal`
+- Result: failed as expected because `Form1` did not yet expose `_dialogPromptOverrideForTests`.
+- GREEN verification:
+- Added `_dialogPromptOverrideForTests` plus `ShowPromptDialog(...)` to `Form1`, and routed the `ImportPreset()` success/error dialogs through that seam.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/import-preset-dialog-green/bin/ -p:BaseIntermediateOutputPath=artifacts/import-preset-dialog-green/obj/ -v minimal`
+- Result: passed `1/1`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/import-preset-dialog-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/import-preset-dialog-regression/obj/ -v minimal`
+- Result: passed `12/12`.
+
+## 234. Prevent disposed-history popup during WinForms tests
+- [x] 234.1 Add a RED WinForms regression that reproduces startup-history idle hydration after `Form1` disposal and proves it does not touch disposed output controls.
+- [x] 234.2 Patch `Form1` teardown and history/output update guards so idle callbacks no-op cleanly once the form or output controls are disposing/disposed.
+- [x] 234.3 Run focused verification and record the outcome below.
+
+### 234 Review
+- Root cause:
+- `Application.Idle` could still invoke `ArmHistorySelectionOnIdle(...)` after `Form1` disposal, which let `ApplySelectedHistoryEntry()` drive `SetOutputText(...)` against a disposed `txtOutput`.
+- `SetOutputText(...)` forces `txtOutput.Handle` creation during redraw suspension, so once the `TextBox` was already disposed the callback raised the user-visible `ObjectDisposedException` popup.
+- RED verification:
+- Added `ArmHistorySelectionOnIdle_AfterFormDisposal_DoesNotTouchDisposedOutputControls` in `SSH_Helper.Tests/UI/Form1HistorySelectionLifecycleTests.cs`.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1HistorySelectionLifecycleTests.ArmHistorySelectionOnIdle_AfterFormDisposal_DoesNotTouchDisposedOutputControls" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-idle-dispose-red/bin/ -p:BaseIntermediateOutputPath=artifacts/history-idle-dispose-red/obj/ -v minimal`
+- Result: failed as expected because `ArmHistorySelectionOnIdle(...)` still reached `SetOutputText(...)` after disposal and threw `ObjectDisposedException`.
+- GREEN verification:
+- Updated `Form1.cs` to cancel pending history hydration on close and short-circuit history/output UI paths when the form or output controls are disposed.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1HistorySelectionLifecycleTests.ArmHistorySelectionOnIdle_AfterFormDisposal_DoesNotTouchDisposedOutputControls" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-idle-dispose-green/bin/ -p:BaseIntermediateOutputPath=artifacts/history-idle-dispose-green/obj/ -v minimal`
+- Result: passed `1/1`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1HistorySelectionLifecycleTests|FullyQualifiedName~Form1PresetTabSelectionTests|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-idle-dispose-regression3/bin/ -p:BaseIntermediateOutputPath=artifacts/history-idle-dispose-regression3/obj/ -v minimal`
+- Result: passed `14/14`.
+
+## 233. Place new presets directly below the current selection
+- [x] 233.1 Add RED UI regression coverage for add, duplicate, and import placing the created preset immediately below the selected preset and auto-selecting it.
+- [x] 233.2 Centralize preset insertion ordering in `Form1` so add, duplicate, and import insert after the selected preset in the same folder/root list.
+- [x] 233.3 Run focused verification and capture outcomes in the review section below.
+
+### 233 Review
+- Root cause:
+- In manual sort mode, `InsertPresetNode(...)` derives placement from `config.ManualPresetOrderByFolder`, but `AddPreset()`, `DuplicatePreset()`, and `ImportPreset()` were not inserting the new preset into that folder-scoped order relative to the selected preset. The tree therefore kept the old next sibling under the selection and appended the new preset later in the list.
+- `DuplicatePreset()` and `ImportPreset()` also skipped the explicit post-mutation visibility path that `AddPreset()` already used.
+- RED verification:
+- Added focused regressions in `SSH_Helper.Tests/UI/Form1PresetTreeIncrementalMutationTests.cs`:
+- `AddPreset_ManualSort_InsertsNewPresetBelowSelectedPresetAndSelectsIt`
+- `DuplicatePreset_ManualSort_InsertsDuplicateBelowSelectedPresetAndSelectsIt`
+- `ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt`
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.AddPreset_ManualSort_InsertsNewPresetBelowSelectedPresetAndSelectsIt|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.DuplicatePreset_ManualSort_InsertsDuplicateBelowSelectedPresetAndSelectsIt|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-insert-order-red/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-insert-order-red/obj/ -v minimal`
+- Result: failed `3/3` as expected because the created/imported preset was not placed directly below the selected preset.
+- GREEN verification:
+- Updated `Form1.cs` to:
+- reuse `InsertIntoPresetOrder(...)` through a new `PositionCreatedPresetAfterReference(...)` helper for add/import/duplicate in manual sort mode,
+- sync the legacy root `_manualPresetOrder` list from folder-key `""` manual order updates,
+- ensure duplicated/imported incremental nodes are also made fully visible and fallback selection uses `ensureVisible: true`.
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.AddPreset_ManualSort_InsertsNewPresetBelowSelectedPresetAndSelectsIt|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.DuplicatePreset_ManualSort_InsertsDuplicateBelowSelectedPresetAndSelectsIt|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-insert-order-green/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-insert-order-green/obj/ -v minimal`
+- Result: passed `3/3`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-insert-order-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-insert-order-regression/obj/ -v minimal`
+- Result: passed `15/15`.
+
 ## 232. Suppress autocomplete on Backspace key-up
 - [x] 232.1 Add a RED UI regression proving `Backspace` key-up does not auto-open the script editor autocomplete popup in a valid completion context.
 - [x] 232.2 Update the script editor key-up trigger filter so `Backspace` no longer requests autocomplete automatically.

@@ -114,6 +114,91 @@ public sealed class Form1PresetTreeIncrementalMutationTests : IDisposable
     }
 
     [WinFormsFact]
+    public void AddPreset_ManualSort_InsertsNewPresetBelowSelectedPresetAndSelectsIt()
+    {
+        using var form = CreateLoadedForm(CreateSimpleManualPresetConfig());
+        var visibleOpenFormsBefore = SnapshotVisibleOpenForms();
+
+        var presetsTree = GetField<TreeView>(form, "trvPresets");
+        var configService = GetField<ConfigurationService>(form, "_configService");
+        var selectedNode = FindNodeByTag(presetsTree.Nodes, "Bravo", isFolder: false);
+        selectedNode.Should().NotBeNull();
+
+        SetInputBoxResponse(form, "Zulu");
+        presetsTree.SelectedNode = selectedNode;
+        InvokeMethod(form, "trvPresets_AfterSelect", presetsTree, new TreeViewEventArgs(selectedNode!));
+
+        InvokeMethod(form, "AddPreset");
+
+        var insertedNode = FindNodeByTag(presetsTree.Nodes, "Zulu", isFolder: false);
+        insertedNode.Should().NotBeNull();
+        selectedNode!.NextNode.Should().BeSameAs(insertedNode,
+            "manual add should place the new preset directly after the selected preset instead of appending it elsewhere");
+        presetsTree.SelectedNode.Should().BeSameAs(insertedNode,
+            "the new preset should become the active tree selection immediately after it is created");
+        configService.GetCurrent().ManualPresetOrderByFolder[""].Should().Equal("Alpha", "Bravo", "Zulu", "Charlie");
+        AssertNoNewVisibleOpenForms(visibleOpenFormsBefore);
+    }
+
+    [WinFormsFact]
+    public void DuplicatePreset_ManualSort_InsertsDuplicateBelowSelectedPresetAndSelectsIt()
+    {
+        using var form = CreateLoadedForm(CreateSimpleManualPresetConfig());
+        var visibleOpenFormsBefore = SnapshotVisibleOpenForms();
+
+        var presetsTree = GetField<TreeView>(form, "trvPresets");
+        var configService = GetField<ConfigurationService>(form, "_configService");
+        var selectedNode = FindNodeByTag(presetsTree.Nodes, "Bravo", isFolder: false);
+        selectedNode.Should().NotBeNull();
+
+        SetInputBoxResponse(form, "Bravo Copy");
+        presetsTree.SelectedNode = selectedNode;
+        InvokeMethod(form, "trvPresets_AfterSelect", presetsTree, new TreeViewEventArgs(selectedNode!));
+
+        InvokeMethod(form, "DuplicatePreset", false);
+
+        var duplicatedNode = FindNodeByTag(presetsTree.Nodes, "Bravo Copy", isFolder: false);
+        duplicatedNode.Should().NotBeNull();
+        selectedNode!.NextNode.Should().BeSameAs(duplicatedNode,
+            "manual duplicate should land immediately below the source preset");
+        presetsTree.SelectedNode.Should().BeSameAs(duplicatedNode,
+            "duplicating a preset should switch selection to the duplicate");
+        configService.GetCurrent().ManualPresetOrderByFolder[""].Should().Equal("Alpha", "Bravo", "Bravo Copy", "Charlie");
+        AssertNoNewVisibleOpenForms(visibleOpenFormsBefore);
+    }
+
+    [WinFormsFact]
+    public void ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt()
+    {
+        using var form = CreateLoadedForm(CreateSimpleManualPresetConfig());
+        var visibleOpenFormsBefore = SnapshotVisibleOpenForms();
+        var shownMessages = new List<string>();
+
+        var presetsTree = GetField<TreeView>(form, "trvPresets");
+        var configService = GetField<ConfigurationService>(form, "_configService");
+        var presetManager = GetField<PresetManager>(form, "_presetManager");
+        var selectedNode = FindNodeByTag(presetsTree.Nodes, "Bravo", isFolder: false);
+        selectedNode.Should().NotBeNull();
+
+        SetInputBoxResponse(form, presetManager.Export("Alpha"));
+        SetDialogResponse(form, shownMessages);
+        presetsTree.SelectedNode = selectedNode;
+        InvokeMethod(form, "trvPresets_AfterSelect", presetsTree, new TreeViewEventArgs(selectedNode!));
+
+        InvokeMethod(form, "ImportPreset");
+
+        var importedNode = FindNodeByTag(presetsTree.Nodes, "Alpha_1", isFolder: false);
+        importedNode.Should().NotBeNull();
+        selectedNode!.NextNode.Should().BeSameAs(importedNode,
+            "manual import should place the imported preset directly after the current selection");
+        presetsTree.SelectedNode.Should().BeSameAs(importedNode,
+            "importing a preset should switch selection to the imported preset");
+        configService.GetCurrent().ManualPresetOrderByFolder[""].Should().Equal("Alpha", "Bravo", "Alpha_1", "Charlie");
+        shownMessages.Should().ContainSingle().Which.Should().Be("Preset 'Alpha_1' imported.");
+        AssertNoNewVisibleOpenForms(visibleOpenFormsBefore);
+    }
+
+    [WinFormsFact]
     public void UndoLatestPresetDelete_PreservesViewportAndExistingNodeInstances()
     {
         using var form = CreateLoadedForm(CreatePresetConfig());
@@ -386,11 +471,44 @@ public sealed class Form1PresetTreeIncrementalMutationTests : IDisposable
         return config;
     }
 
+    private static AppConfiguration CreateSimpleManualPresetConfig()
+    {
+        return new AppConfiguration
+        {
+            Presets = new Dictionary<string, PresetInfo>
+            {
+                ["Alpha"] = new() { Commands = "echo alpha" },
+                ["Bravo"] = new() { Commands = "echo bravo" },
+                ["Charlie"] = new() { Commands = "echo charlie" }
+            },
+            PresetSortMode = PresetSortMode.Manual,
+            ManualPresetOrder = new List<string> { "Alpha", "Bravo", "Charlie" },
+            ManualPresetOrderByFolder = new Dictionary<string, List<string>>
+            {
+                [""] = new() { "Alpha", "Bravo", "Charlie" }
+            }
+        };
+    }
+
     private static void SetInputBoxResponse(SSH_Helper.Form1 form, string response)
     {
         var field = typeof(SSH_Helper.Form1).GetField("_inputBoxPromptOverrideForTests", BindingFlags.Instance | BindingFlags.NonPublic);
         field.Should().NotBeNull("Form1 should expose an input-box override seam for WinForms regression tests");
         field!.SetValue(form, new Func<string, string, string, string>((_, __, ___) => response));
+    }
+
+    private static void SetDialogResponse(SSH_Helper.Form1 form, List<string> shownMessages)
+    {
+        var field = typeof(SSH_Helper.Form1).GetField("_dialogPromptOverrideForTests", BindingFlags.Instance | BindingFlags.NonPublic);
+        field.Should().NotBeNull("Form1 should expose a dialog override seam for WinForms regression tests");
+        field!.SetValue(
+            form,
+            new Func<IWin32Window?, string, string, MessageBoxButtons, MessageBoxIcon, DialogResult>(
+                (_, message, _, _, _) =>
+                {
+                    shownMessages.Add(message);
+                    return DialogResult.OK;
+                }));
     }
 
     private static T GetField<T>(object instance, string fieldName) where T : class
