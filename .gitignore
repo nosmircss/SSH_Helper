@@ -379,3 +379,4 @@ tools/
 !FlowCanvas/tools/
 FlowCanvas/tools/*
 !FlowCanvas/tools/FlowCanvasParityCli/
+FlowCanvas/dist/*
