@@ -1,5 +1,227 @@
 # Changelog
 
+## Changes Since `c350105` (0.51.15)
+
+### Vault OIDC Authentication
+
+`VaultAuthMethod.Oidc` is added as a fifth authentication method for Vault profiles (`Models/VaultSettings.cs`). OIDC uses a browser-based sign-in with PKCE and a local loopback callback listener; the resulting Vault token is persisted in Windows Credential Manager and reused until it expires.
+
+**`VaultOidcLoginFlow`** (`Services/Vault/VaultOidcLoginFlow.cs`) — Orchestrates the browser handshake:
+
+- Starts an `HttpListener` bound to the configured loopback host and port
+- Opens the Vault-provided `auth_url` via `Process.Start` with `UseShellExecute`
+- Waits for the IdP redirect on the callback path, returning the `state`, `code`, `error`, and `error_description` query parameters
+- Writes a small HTML completion page to the browser tab on success or failure
+- Honors the configured timeout (15 second minimum) and propagates script cancellation
+
+**`VaultOidcCallbackSettings`** (`Services/Vault/VaultOidcCallbackSettings.cs`) — Normalizes and validates callback bindings:
+
+- Allowed loopback hosts: `127.0.0.1`, `localhost`, `::1` (any other host is rejected with a friendly error before HTTP calls begin)
+- Port range validated to 1-65535 (default `8250`)
+- Path defaults to `/oidc/callback`; leading slash is added if missing
+- Generates the `RedirectUri` (wrapping IPv6 hosts in brackets) and `ListenerPrefix` for `HttpListener`
+
+**`VaultService.AuthenticateWithOidcAsync`** — Full OIDC flow:
+
+1. Attempt `TryAuthenticateWithPersistedOidcTokenAsync` first — runs `auth/token/lookup-self` against any previously saved token; valid tokens skip the browser entirely. HTTP 401/403 falls back to fresh login; transport errors (e.g. `HttpRequestException`) propagate without starting a new browser flow.
+2. Generate random `state` (32 bytes), `nonce` (32 bytes), and PKCE `verifier` (64 bytes); derive the SHA-256 `code_challenge` with `S256` method.
+3. POST to `auth/<mount>/oidc/auth_url` with `role`, `redirect_uri`, `state`, `nonce`, `code_challenge`.
+4. Delegate to `IVaultOidcLoginFlow` to open the browser and capture the callback.
+5. Validate `state` matches; surface `error`/`error_description` from the callback as `VaultException`.
+6. POST to `auth/<mount>/oidc/callback` with the code and verifier; extract `client_token` and `lease_duration` (TTL refreshes at 75% of lease).
+7. Invoke the `tokenSaver` callback so the main form can persist the token to `CredentialTargets.VaultAuthTarget(profileName, "token")`.
+
+**Settings UI** — `SettingsDialog` gains an OIDC auth panel (`_pnlVaultAuthOidc`) with fields for Auth Mount (default `oidc`), Role, Callback Host (default `127.0.0.1`), Callback Port (default `8250`), Callback Path (default `/oidc/callback`), and Timeout in seconds (default `180`, range 15-3600). `ValidateVaultProfiles` runs on save and blocks persistence when OIDC role is empty or when the callback host is not a loopback address. `Test Connection` uses the in-memory `tokenSaver` so a test login can complete without persisting until the user clicks Save.
+
+**Form1 integration** — `Form1` wires a `tokenSaver` delegate into `VaultService` construction that routes saved tokens to `CredentialTargets.VaultAuthTarget(profileName, "token")` via the shared `_credentialProvider`.
+
+### SSH Algorithm Fallback with Caching
+
+`SshConnectionPool.CreateConnectionAsync` gains a multi-tier algorithm fallback strategy for endpoints that reject the default Rebex algorithm set. Each tier is tried in order and the successful tier is cached per `host:port` so subsequent connections skip straight to the known-good tier.
+
+**Tiers:**
+
+| Tier | Host key algorithms | Encryption | MAC |
+|------|---------------------|------------|-----|
+| `Default` | Rebex defaults | Rebex defaults | Rebex defaults |
+| `NonRsa` | `ssh-ed25519`, `ecdsa-sha2-nistp256/384/521` | Rebex defaults | Rebex defaults |
+| `Ed25519Only` | `ssh-ed25519` | `aes256-ctr`, `aes128-ctr`, `aes256-cbc`, `aes128-cbc` | `hmac-sha2-256`, `hmac-sha2-512`, `hmac-sha1` |
+
+**Detection** — `HasUnsupportedKeyAlgorithmError` walks the exception chain looking for the literal string `"key algorithm is not supported"`. Only this specific failure class triggers the fallback ladder; all other connection errors bubble up unchanged.
+
+**Cache** — `SshExecutionService.HostAlgorithmCache` is a static `ConcurrentDictionary<string, HostKeyAlgorithmTier>` keyed by `ip:port`. A cache hit performs a single connection attempt with the cached tier; if that attempt fails the cache entry is removed and full discovery resumes. Hosts with explicit `HostKeyAlgorithms` from SSH config bypass the cache entirely.
+
+**Ed25519 support** — Adds `libs/RebexElliptic/net8.0/Rebex.Castle.dll`, `Rebex.Curve25519.dll`, and `Rebex.Ed25519.dll` as conditional references in `SSH_Helper.csproj`. `Program.RegisterRebexEllipticPlugins` registers `EllipticCurveAlgorithm`, `Curve25519`, and `Ed25519` with Rebex's `AsymmetricKeyAlgorithm` at startup. The full NuGet package layout (`libs/RebexElliptic/{monoandroid40,net20,net40,net6.0,net8.0,netcf35,netstandard1.5,netstandard2.0,netstandard2.1,xamarinios10}/`) is committed so the project builds without requiring the companion NuGet feed.
+
+**Connection pool concurrency** — `SshConnectionPool` now uses a per-key creation lock (`_creationLocks` keyed by `user@host:port`) plus a global throttle (`_globalCreationGate`, default 12 concurrent creations via `DefaultMaxConcurrentConnectionCreations`). Previously a single `_creationLock` serialized all connection creations across the pool.
+
+**Rebex.SshShell upgraded** from `7.0.9448` to `7.0.9561`.
+
+### `compact_errors` Script Flag
+
+A new top-level `compact_errors: true` flag on `Script` (`Services/Scripting/Models/Script.cs`) switches connection/authentication/timeout/network/cancellation/generic error output from multi-line banner blocks to single lines.
+
+```yaml
+---
+name: "Fast Checks"
+compact_errors: true
+
+steps:
+  - send:
+      command: show version
+```
+
+Banner output:
+
+```
+########################################################################
+#################### CONNECTION ERROR: 10.79.50.228 ####################
+########################################################################
+SshException: Connection attempt timed out.
+```
+
+Compact output:
+
+```
+AUTHENTICATION ERROR: 10.79.50.231: SshException: A supplied password or user name is incorrect.
+CONNECTION ERROR: 10.79.50.228: SshException: Connection attempt timed out.
+```
+
+`SshExecutionService.FormatError` accepts `compactErrors` and renders a one-line `"{category}: {host}: {exception}"` string when enabled. The effective debug flag (`DebugMode || script.Debug`) still controls whether full stack traces are appended.
+
+**Integration points:**
+
+- `ScriptParser` reserves `compact_errors` as a known top-level key, parses it via `ParseBooleanOrDefault`, and validates it cannot appear in `library:` imports (`ValidateForbiddenLibraryKey`)
+- `FlowCanvasBridge` serializes the flag in the YAML preamble during export and reads it back on import
+- `FlowCanvas/src/nodes/StartNode.tsx` adds a `compact-errors` flag badge
+- `FlowCanvas/src/panels/Properties.tsx` adds a "Compact Errors" boolean field under Start block properties
+- `ScriptAutocompleteProvider` adds `compact_errors` to the top-level key completion list
+
+### LocalCmd Command Hardening
+
+The `localcmd` command shipped in 0.51.14 receives significant behavioral fixes:
+
+**Interactive detached launch** — When `interactive: true` is combined with an **explicit** `lifetime: detached`, the terminal window is started and the script continues immediately without waiting for the window to close. A new `LocalCmdOptions.LifetimeSpecified` flag distinguishes explicit from default `detached` values so the implicit default (unspecified) preserves the prior behavior of waiting for the window.
+
+```yaml
+- localcmd:
+    command: "ping 8.8.8.8"
+    shell: cmd
+    interactive: true
+    lifetime: detached
+    into: ping_window
+```
+
+For detached interactive launches the `into` prefix captures startup metadata (`_pid`, `_started`, `_start_error`) and does not capture `_exit_code`. `fail_on_nonzero` cannot be evaluated and emits a warning to the output stream. `ScriptDependencyAnalyzer` recognizes this variant and declares the correct variable set for cross-step reference checking.
+
+**Cancellation-aware confirmation** — `ILocalCmdConfirmation.ConfirmAsync` now takes a `CancellationToken` parameter that is threaded through from the script's execution token. Cancelling the running script while the confirmation dialog is open throws `OperationCanceledException` from the confirmation task and no process is launched. `LocalCmdConfirmationDialog` forwards the token to `ScriptPromptDialogRunner.ShowAsync` instead of the previous `CancellationToken.None`.
+
+**Unattended preflight** — `SshExecutionService.TryBuildUnattendedLocalCmdPreflightMessage` walks the script tree (including nested `then`/`else`/`do`/`try`/`catch`/`finally`/`cases`/`elif`/`parallel` branches and `call`-resolved subroutines via `ScriptSubroutineRegistry`) and fails the script before execution if any `localcmd` step has a confirm policy other than `never` while `allowFileSelectionDialogs: false`. The error points the user at `localcmd.confirm: never`. This applies to scheduler runs (`JobExecutionService`) and any other unattended execution path.
+
+**PowerShell EncodedCommand** — Replaces the previous `-Command "escaped string"` path with `-EncodedCommand <Base64 UTF-16>`. `EncodePowerShellCommand` uses `Convert.ToBase64String(Encoding.Unicode.GetBytes(command))`. `PrepareNonInteractivePowerShellCommand` prepends `$ProgressPreference = 'SilentlyContinue';` to suppress PowerShell CLIXML progress records on stderr. Adds `-NoProfile` to non-interactive invocations. Interactive audit capture (Tee-Object wrapper for `cmd` shell) also uses `-EncodedCommand`.
+
+**Quoted executable passthrough** — `TryParseQuotedExecutableInvocation` detects commands starting with a quoted `.exe` path (e.g. `'C:\Program Files\Git\usr\bin\bash.exe' -l -i -c 'echo hi'`) and launches the executable directly with the remaining tokens as arguments, bypassing the PowerShell interpreter entirely when possible. When PowerShell is still needed (e.g. interactive keep-open), `PreparePowerShellCommand` adds a `&` call operator so quoted paths are invoked rather than parsed as strings.
+
+**Argument quoting** — `QuoteCommandLineArgument` implements full Windows command-line escaping: arguments containing whitespace or `"` are wrapped in double quotes; embedded backslashes preceding a quote are doubled; trailing backslashes are escaped to avoid breaking the closing quote. `JoinCommandLineArguments` replaces the previous `string.Join(" ", args)` for all shells.
+
+**Shell allow-list change** — `cmd` / `cmd.exe` is now accepted by `ScriptParser.IsValidLocalCmdShell`. `pwsh` and `pwsh.exe` are **no longer** recognized as PowerShell variants — only `powershell` / `powershell.exe`. This matches the Flow Canvas block registry (`FlowCanvas/src/blockDefs/registry.ts`), which lists `['powershell', 'cmd', 'custom']` as the shell options. The parser error now reads `localcmd 'shell' must be one of powershell, cmd, custom`.
+
+**Confirmation dialog labels** — `LocalCmdConfirmationDialog` renames the middle button from "Run All" to "Run Same Command" (140px wide) and adds a scope explanation label: _"Run Same Command approves this resolved command for the current host for the rest of this run."_ Buttons repositioned to (90, 195, 350).
+
+**Flow Canvas bridge** — `FlowCanvasBridge` exports `lifetime` whenever `LifetimeSpecified` is true (or the value is not the default `detached`), so the explicit flag round-trips through YAML → graph → YAML without collapsing back to the default. The registry field label changes from "Background Lifetime" to "Process Lifetime" with updated help text covering both interactive and background semantics.
+
+### Folder Execution Concurrency Limits
+
+- **Hard cap** — `SshExecutionService.MaxParallelHosts = 100`. Both `SshExecutionService.ExecuteFolderAsync` and `FolderExecutionDialog` clamp `ParallelHostCount` to `[1, 100]`. Values exceeding the cap are adjusted at runtime with a warning printed to the first host's output: `"Parallel hosts value 'X' adjusted to 100. Maximum supported value is 100."`
+- **Parallel preset mode gate** — When `ParallelHostCount > 1`, the option `RunPresetsInParallel` is forced off and a warning is emitted: `"Preset parallel mode is disabled when running multiple hosts in parallel. Falling back to sequential presets per host."` The `FolderExecutionDialog` radio button relabels to `"Parallel (disabled when running multiple hosts in parallel)"` and disables when the parallel host count exceeds 1. `UpdateExecutionModeConstraints` enforces this in the dialog on both text-change and blur events.
+- **Host-result thread safety** — Parallel preset execution now acquires `hostResultLock` before mutating `hostResult.Success` / `hostResult.ErrorMessage`. The previous code wrote to the shared `ExecutionResult` from multiple preset tasks without synchronization. The error message is also preserved on a `??=` basis (first error wins) instead of being overwritten by each subsequent failure.
+
+### Manual Sort Preset Insertion Positioning
+
+Add, Duplicate, and Import Preset now insert the new preset directly below the currently selected preset when the preset tree is in manual sort mode, instead of appending at the end.
+
+- **`PositionCreatedPresetAfterReference`** in `Form1` picks a reference preset (explicit parameter or the current tree selection, provided it's in the same folder) and calls `InsertIntoPresetOrder(presetName, folder, referenceName, DropPosition.Below)`.
+- **Add Preset** captures the selected preset name as `insertAfterPresetName` before calling `PresetManager.AddOrUpdate`, then positions the new preset.
+- **Duplicate Preset** uses the source preset name as the reference and now calls `SelectPresetByName(finalName, ensureVisible: true)` + `EnsureTreeNodeFullyVisible` so the duplicate is scrolled into view.
+- **Import Preset** positions the imported preset after the selection and scrolls into view.
+- **`SyncLegacyRootPresetOrder`** keeps the legacy `_manualPresetOrder` list in sync with `config.ManualPresetOrderByFolder[""]` so the two code paths don't drift. Called from `HandlePresetReorderRequest` and `HandleManualReorder`.
+
+### Flow Canvas Reopen Refresh
+
+`Form1.OpenFlowCanvas` now calls `LoadCurrentScriptIntoCanvas()` and `SendTargetHostToCanvas()` when reusing an existing `_flowCanvasForm` instance. Previously, switching presets while the Flow Canvas was closed and then reopening the existing window would show a stale graph. The canvas now rehydrates with the currently selected preset's YAML on every reopen.
+
+### History UI Disposal Safety
+
+Race conditions during form close that could throw `ObjectDisposedException` on `lstOutput`, `txtOutput`, or `historySplitContainer` are closed:
+
+- **`IsHistoryUiUnavailable`** — Returns true when the form or any of the history-related controls are disposed. Checked by `ArmHistorySelectionOnIdle` and `ApplySelectedHistoryEntry`.
+- **`CancelPendingHistorySelectionHydration`** — Clears `_historySelectionArmPending` and detaches `Application.Idle -= ArmHistorySelectionOnIdle`. Called from both `IsHistoryUiUnavailable` guard paths and from the `FormClosed` handler.
+- **`IsOutputTextBoxUnavailable`** — Guards `AppendOutputToUi`, `SetOutputText`, `ClearOutput`, `ScrollOutputToEnd`, and `RecreateOutputTextBoxIfNeeded` so output events arriving after form close become no-ops. `RecreateOutputTextBoxIfNeeded` also checks `parent.IsDisposed`.
+- **`FormClosed`** — Now detaches `Application.Idle -= BootstrapSchedulerAfterStartupRestoreOnIdle` alongside the existing `_uiOutputThrottler` disposal.
+
+### Execution Start Debug Message
+
+`Form1.BuildExecutionStartDebugMessage` inspects the preset before execution and emits one of three debug log strings depending on whether the script actually needs an SSH session:
+
+- `"Calling ExecutePresetAsync - SSH connection starting"` — legacy command presets or YAML scripts that analyze as requiring SSH
+- `"Calling ExecutePresetAsync - Local execution starting"` — YAML scripts where `ScriptDependencyAnalyzer.AnalyzeSshRequirements(script).RequiresSshSession` is false
+- `"Calling ExecutePresetAsync - Execution starting"` — fallback if parsing throws
+
+This clarifies debug logs for scripts composed entirely of `localcmd`, `exists`, `playsound`, `set`, and similar local-only commands.
+
+### Dialog Seam for Import Preset
+
+`Form1.ShowPromptDialog` wraps `DialogTheme.Show` with a test-override hook (`_dialogPromptOverrideForTests`). `ImportPreset` now routes its three message boxes (success, `FormatException`, generic failure) through the seam so tests can intercept the dialogs without ShowDialog blocking.
+
+### Script Editor Autocomplete on Backspace
+
+`ScintillaScriptEditorControl` adds `Keys.Back` to the navigation-key list that suppresses autocomplete popup re-triggering on key-up. Without this fix, pressing Backspace after accepting an autocomplete suggestion would immediately reopen the popup.
+
+### Job History Tests — Relative Timestamps
+
+`JobHistoryServiceTests.RecentUtc(hour, minute, second, dayOffset)` helper replaces hardcoded `new DateTime(2026, 3, 8, ...)` literals in retention/cancellation/skipped-run tests. Timestamps are now anchored to `DateTime.UtcNow.Date.AddDays(-1)` so tests keep passing as retention policy windows roll forward over time.
+
+### QA Preset Expected Marker
+
+`QaPresetCatalogTests` and `QaPresetExecutionTests` now match `"Expected: pass"` instead of `"Expected: pass."`. The trailing period is no longer required in the QA preset description convention.
+
+### Dependency Changes
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `Rebex.SshShell` | `7.0.9448` → `7.0.9561` | Rebex SSH shell update |
+| `Rebex.Castle` | bundled (`libs/RebexElliptic/net8.0/`) | Required for `Rebex.Ed25519` |
+| `Rebex.Curve25519` | bundled (`libs/RebexElliptic/net8.0/`) | Curve25519 key exchange plugin |
+| `Rebex.Ed25519` | bundled (`libs/RebexElliptic/net8.0/`) | Ed25519 host key signing/verification plugin |
+
+### Documentation
+
+`SCRIPTING.md` updated with:
+
+- **Vault profile auth methods** — OIDC listed alongside Token/AppRole/LDAP/Userpass, with notes on the browser flow, recommended callback defaults, and Windows Credential Manager token storage
+- **`localcmd` shell option** — `cmd` added to the allowed values; table and comments updated
+- **`localcmd` lifetime semantics** — Interactive + explicit `lifetime: detached` documented as fire-and-forget, with captured variable lists for foreground / tracked interactive / interactive detached / background modes
+- **`localcmd` unattended guidance** — Scheduler runs require `confirm: never`; preflight failure behavior noted
+- **`compact_errors` section** — New header section under "Script Preamble" showing before/after output
+- **`localcmd` detached interactive example** — Added ping example under the localcmd examples block
+
+### Test Coverage
+
+New tests added:
+
+- **Vault** — `VaultServiceTests` (OIDC success flow with persisted token, state mismatch detection, invalid callback host rejection before any HTTP call, persisted-token fast path, 401 fallback to browser login, transport-error propagation without fallback, IPv6 loopback redirect URI normalization), `VaultSettingsTests` (OIDC default fields, OIDC profile round-trip serialization, `VaultAuthMethod.Oidc` enum value)
+- **UI — SettingsDialog** — `SettingsDialogVaultTests.SelectingOidcAuthMethod_ShowsOidcPanelAndHidesOthers`, `SavingOidcProfile_PersistsOidcConfiguration`, `SavingOidcProfile_WithNonLoopbackCallbackHost_ShowsValidationAndDoesNotPersist` (with `RecordingSettingsDialogPromptService`)
+- **Scripting — LocalCmd** — `Interactive_Detached_ReturnsImmediatelyWithoutWaitingAndSetsStartupMetadata`, `Confirmation_CancelledByExecutionToken_ThrowsWithoutStartingProcess`, `Interactive_PowerShell_QuotedExecutablePath_UsesCallOperatorInAuditWrapper`, `BuildProcessArgs_Powershell_QuotedExecutablePath_ExecutesDirectly`, `BuildProcessArgs_Powershell_QuotesArgsContainingSpaces`, `BuildProcessArgs_Custom_QuotesArgsContainingSpaces`, `BuildProcessArgs_Powershell_UsesNoProfileAndPrependsProgressSuppression`, `BuildInteractiveKeepOpenArgs_Powershell_QuotedExecutablePath_AddsCallOperator`, `Interactive_Cmd_WrapsCommandForAuditCapture` (updated for EncodedCommand). Adds `DecodePowerShellEncodedCommand` / `NormalizePowerShellCommandForAssertions` helpers.
+- **Scripting — Parser** — `LocalCmdParserTests.Validate_CmdShell_DoesNotReturnShellValidationError`, `Validate_PwshShell_ReturnsShellValidationError`, `ScriptParserTests.Parse_ScriptWithCompactErrors_ParsesFlag`
+- **Scripting — Dependency analyzer** — `ScriptDependencyAnalyzerTests.AnalyzePresets_LocalCmdInteractiveDetachedInto_DefinesStartupMetadataVariables`
+- **Services — FlowCanvasBridge** — `ExportGraphToYaml_LocalCmdCmdShell_ExportsSuccessfully`, `Registry_LocalCmdShellOptions_ExcludePwsh`, `TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp`, `ImportExportRoundTrip_LocalCmdInteractiveDetached_PreservesExplicitLifetime`
+- **Services — Job execution** — `RunNowAsync_CustomPresetLocalCmdConfirmAlways_FailsWithoutPrompt`, `ExecuteScheduledJobAsync_CustomPresetLocalCmdConfirmAlways_FailsWithoutPrompt`
+- **Services — Job history** — Retention/cancellation/skipped-run tests converted to `RecentUtc` helper
+- **UI — Form1** — `Form1ExecutionStartDebugMessageTests` (SSH vs local vs fallback messages), `Form1FlowCanvasPresetSyncTests.ReopeningExistingFlowCanvas_AfterPresetSwitch_QueuesCurrentPresetGraph`, `Form1HistorySelectionLifecycleTests.ArmHistorySelectionOnIdle_AfterFormDisposal_DoesNotTouchDisposedOutputControls`, `Form1PresetTreeIncrementalMutationTests.AddPreset_ManualSort_InsertsNewPresetBelowSelectedPresetAndSelectsIt`, `DuplicatePreset_ManualSort_InsertsDuplicateBelowSelectedPresetAndSelectsIt`, `ImportPreset_ManualSort_InsertsImportedPresetBelowSelectedPresetAndSelectsIt`
+- **UI — Scintilla** — `ScintillaScriptEditorControlTests` autocomplete Backspace suppression case
+
+---
+
 ## Changes Since `fe629ed` (0.51.14)
 
 ### `localcmd` Command — Local Process Execution
