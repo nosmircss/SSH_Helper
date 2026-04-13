@@ -113,6 +113,7 @@ namespace SSH_Helper.Services.Scripting
             foreach (var key in script.Vars.Keys)
                 globalDefinedVars.Add(key);
 
+            AnalyzeSteps(script.Preconnect, globalDefinedVars, rootReferencedVars);
             AnalyzeSteps(script.Steps, globalDefinedVars, rootReferencedVars);
 
             rootReferencedVars.ExceptWith(globalDefinedVars);

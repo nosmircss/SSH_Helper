@@ -73,6 +73,7 @@ namespace SSH_Helper.Services.Scripting
             "compact_errors",
             "suppress_missing_column_warning",
             "library",
+            "preconnect",
             "vars",
             "imports",
             "subroutines",
@@ -238,14 +239,19 @@ namespace SSH_Helper.Services.Scripting
                 ["method"] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
                 ["auth"] = ["none", "basic", "bearer"],
                 ["content_type"] = ["json", "form", "text", "xml"],
-                ["type"] = ["A", "AAAA", "PTR"],
                 ["action"] = ["upload", "download"],
                 ["mode"] = ["overwrite", "append"],
                 ["format"] = ["text", "json", "jsonl", "csv"],
                 ["level"] = ["info", "debug", "warning", "error", "success"],
                 ["encoding"] = ["utf-8", "ascii", "utf-16", "utf-32"],
+                ["required"] = ["true", "false"],
                 ["select_file"] = ["true", "false"],
+                ["skip_empty_lines"] = ["true", "false"],
+                ["trim_lines"] = ["true", "false"],
+                ["pretty"] = ["true", "false"],
                 ["fail_on_nonzero"] = ["true", "false"],
+                ["suppress"] = ["true", "false"],
+                ["overwrite"] = ["true", "false"],
                 ["follow_redirects"] = ["true", "false"],
                 ["allow_failure"] = ["true", "false"],
                 ["verify_tls"] = ["true", "false"],
@@ -258,9 +264,42 @@ namespace SSH_Helper.Services.Scripting
                 ["mirror_output"] = ["true", "false"],
                 ["show_window"] = ["true", "false"],
                 ["wait"] = ["true", "false"],
+                ["shell"] = ["powershell", "cmd", "custom"],
+                ["interactive"] = ["true", "false"],
+                ["keep_open"] = ["true", "false"],
+                ["run_mode"] = ["foreground", "background"],
+                ["lifetime"] = ["detached", "script", "app"],
+                ["kill_on_cancel"] = ["true", "false"],
+                ["confirm"] = ["always", "once", "never"],
+                ["debug"] = ["true", "false"],
+                ["nobanner"] = ["true", "false"],
+                ["compact_errors"] = ["true", "false"],
+                ["suppress_missing_column_warning"] = ["true", "false"],
+                ["library"] = ["true", "false"],
                 ["severity"] = ["error", "warning"],
                 ["align"] = ["left", "right", "center"],
                 ["show_header"] = ["true", "false"]
+            };
+
+        private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string[]>> EnumLikeOptionValuesByCommand =
+            new Dictionary<string, IReadOnlyDictionary<string, string[]>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["dns"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["type"] = ["A", "AAAA", "PTR"]
+                },
+                ["exists"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["type"] = ["any", "file", "directory"]
+                },
+                ["input"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["password"] = ["true", "false"]
+                },
+                ["confirm"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["default"] = ["true", "false"]
+                }
             };
 
         /// <summary>
@@ -322,6 +361,17 @@ namespace SSH_Helper.Services.Scripting
                 StringComparer.OrdinalIgnoreCase);
         }
 
+        public static IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>> GetEnumLikeOptionValuesByCommand()
+        {
+            return EnumLikeOptionValuesByCommand.ToDictionary(
+                commandPair => commandPair.Key,
+                commandPair => (IReadOnlyDictionary<string, IReadOnlyList<string>>)commandPair.Value.ToDictionary(
+                    keyPair => keyPair.Key,
+                    keyPair => (IReadOnlyList<string>)keyPair.Value,
+                    StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
+        }
+
         public ScriptParser()
         {
             _deserializer = new DeserializerBuilder()
@@ -357,6 +407,7 @@ namespace SSH_Helper.Services.Scripting
 
                 // Distinctive top-level script sections
                 if (trimmedLine.StartsWith("steps:", StringComparison.OrdinalIgnoreCase) ||
+                    trimmedLine.StartsWith("preconnect:", StringComparison.OrdinalIgnoreCase) ||
                     trimmedLine.StartsWith("vars:", StringComparison.OrdinalIgnoreCase) ||
                     trimmedLine.StartsWith("imports:", StringComparison.OrdinalIgnoreCase) ||
                     trimmedLine.StartsWith("subroutines:", StringComparison.OrdinalIgnoreCase))
@@ -449,6 +500,17 @@ namespace SSH_Helper.Services.Scripting
                                 break;
                             case "library":
                                 script.Library = ParseBooleanOrDefault(parser, script.Library);
+                                break;
+                            case "preconnect":
+                                if (parser.Accept<SequenceStart>(out _))
+                                {
+                                    script.Preconnect = ParseSteps(parser);
+                                }
+                                else
+                                {
+                                    AddScriptParseError(script, "preconnect must be a sequence of steps");
+                                    SkipValue(parser);
+                                }
                                 break;
                             case "vars":
                                 script.Vars = ParseVars(parser);
@@ -3886,6 +3948,19 @@ namespace SSH_Helper.Services.Scripting
             }
             else
             {
+                if (script.Preconnect != null && script.Preconnect.Count > 0)
+                {
+                    ValidateSteps(
+                        script.Preconnect,
+                        errors,
+                        "Preconnect: ",
+                        lines,
+                        loopDepth: 0,
+                        enforceCanonicalSyntax,
+                        insideSubroutine: false,
+                        insidePreconnect: true);
+                }
+
                 ValidateSteps(script.Steps, errors, "", lines, 0, enforceCanonicalSyntax, insideSubroutine: false);
             }
 
@@ -3906,6 +3981,7 @@ namespace SSH_Helper.Services.Scripting
         private void ValidateLibraryTopLevel(Script script, List<string> errors)
         {
             ValidateForbiddenLibraryKey(script, errors, "steps");
+            ValidateForbiddenLibraryKey(script, errors, "preconnect");
             ValidateForbiddenLibraryKey(script, errors, "vars");
             ValidateForbiddenLibraryKey(script, errors, "imports");
             ValidateForbiddenLibraryKey(script, errors, "environment");
@@ -3993,11 +4069,19 @@ namespace SSH_Helper.Services.Scripting
             string[]? lines,
             int loopDepth,
             bool enforceCanonicalSyntax,
-            bool insideSubroutine)
+            bool insideSubroutine,
+            bool insidePreconnect = false)
         {
             foreach (var step in steps)
             {
                 var stepType = step.GetStepType();
+
+                if (insidePreconnect && RequiresSshShellSession(stepType))
+                {
+                    var lineContent = GetLineContent(lines, step.LineNumber);
+                    errors.Add(
+                        $"{prefix}Line {step.LineNumber}: {stepType.ToString().ToLowerInvariant()} is not allowed in preconnect because it requires an active SSH session{lineContent}");
+                }
 
                 if ((enforceCanonicalSyntax || stepType == StepType.Interactive) && step.ParseErrors.Count > 0)
                 {
@@ -4071,7 +4155,7 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: If requires 'then' block{lineContent}");
                         }
                         if (step.Then != null)
-                            ValidateSteps(step.Then, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
+                            ValidateSteps(step.Then, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         if (step.Elif != null)
                         {
                             foreach (var branch in step.Elif)
@@ -4088,12 +4172,12 @@ namespace SSH_Helper.Services.Scripting
                                 }
                                 else
                                 {
-                                    ValidateSteps(branch.Then, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
+                                    ValidateSteps(branch.Then, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                                 }
                             }
                         }
                         if (step.Else != null)
-                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
+                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         break;
 
                     case StepType.Foreach:
@@ -4103,7 +4187,7 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: Foreach requires 'do' block{lineContent}");
                         }
                         if (step.Do != null)
-                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine);
+                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         break;
 
                     case StepType.While:
@@ -4118,7 +4202,7 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: max_iterations must be greater than 0{lineContent}");
                         }
                         if (step.Do != null)
-                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine);
+                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         break;
 
                     case StepType.Try:
@@ -4128,11 +4212,11 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: Try requires 'do' block{lineContent}");
                         }
                         if (step.Try != null)
-                            ValidateSteps(step.Try, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
+                            ValidateSteps(step.Try, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         if (step.Catch != null)
-                            ValidateSteps(step.Catch, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
+                            ValidateSteps(step.Catch, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         if (step.Finally != null)
-                            ValidateSteps(step.Finally, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
+                            ValidateSteps(step.Finally, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         break;
 
                     case StepType.Break:
@@ -4719,11 +4803,11 @@ namespace SSH_Helper.Services.Scripting
                             foreach (var switchCase in step.Cases)
                             {
                                 if (switchCase.Do != null)
-                                    ValidateSteps(switchCase.Do, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
+                                    ValidateSteps(switchCase.Do, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                             }
                         }
                         if (step.Else != null)
-                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
+                            ValidateSteps(step.Else, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         break;
 
                     case StepType.Parallel:
@@ -4733,7 +4817,7 @@ namespace SSH_Helper.Services.Scripting
                             errors.Add($"{prefix}Line {step.LineNumber}: Parallel requires at least one step{lineContent}");
                         }
                         if (step.Parallel?.Steps != null)
-                            ValidateSteps(step.Parallel.Steps, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine);
+                            ValidateSteps(step.Parallel.Steps, errors, prefix + "  ", lines, loopDepth, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         break;
 
                     case StepType.Call:
@@ -4771,6 +4855,11 @@ namespace SSH_Helper.Services.Scripting
         {
             return string.Equals(value, "continue", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(value, "stop", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool RequiresSshShellSession(StepType stepType)
+        {
+            return stepType == StepType.Send || stepType == StepType.Interactive;
         }
 
         private static bool IsDynamicValue(string? value)

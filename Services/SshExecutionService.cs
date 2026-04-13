@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Rebex.Net;
 using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
@@ -76,6 +77,15 @@ namespace SSH_Helper.Services
         private const string SingleHostOnlyMessageSuffix =
             " not supported in folder or multi-host runs. Run the script against a single current host instead.";
 
+        private const string PreconnectIdentityFileVariable = "_ssh_identity_file";
+        private const string PreconnectIdentityPassphraseVariable = "_ssh_identity_passphrase";
+        private const string PreconnectUsernameVariable = "_ssh_username";
+        private const string PreconnectPasswordVariable = "_ssh_password";
+
+        private static readonly Regex SensitiveSetOutputRegex = new(
+            @"(?im)(Set\s+(_ssh_password|_ssh_identity_passphrase)\s*=\s*).*?$",
+            RegexOptions.Compiled);
+
         internal static readonly string[] NonRsaHostKeyFallbackAlgorithms =
         {
             "ssh-ed25519",
@@ -134,6 +144,13 @@ namespace SSH_Helper.Services
         private volatile ScriptContext? _activeScriptContext;
         private readonly object _flowCanvasDebugBootstrapLock = new();
         private FlowCanvasDebugBootstrapState? _pendingFlowCanvasDebugBootstrapState;
+
+        private sealed class EffectiveScriptAuthContext
+        {
+            public HostConnection Host { get; init; } = new();
+            public string Username { get; init; } = string.Empty;
+            public string Password { get; init; } = string.Empty;
+        }
 
         public bool IsRunning => _isRunning;
 
@@ -1257,23 +1274,60 @@ namespace SSH_Helper.Services
 
             var outputBuilder = new StringBuilder();
             var interactiveSessions = new List<InteractiveTerminalSessionDetails>();
-            string username = !string.IsNullOrWhiteSpace(host.Username) ? host.Username : defaultUsername;
-            string password = !string.IsNullOrWhiteSpace(host.Password) ? host.Password : defaultPassword;
+            var baseUsername = !string.IsNullOrWhiteSpace(host.Username) ? host.Username : defaultUsername;
+            var basePassword = !string.IsNullOrWhiteSpace(host.Password) ? host.Password : defaultPassword;
             var effectiveDebugMode = DebugMode || script.Debug;
 
             try
             {
+                var effectiveAuth = ResolveEffectiveScriptAuthContext(
+                    host,
+                    script,
+                    baseUsername,
+                    basePassword,
+                    timeouts,
+                    outputBuilder,
+                    cancellationToken,
+                    allowFileSelectionDialogs,
+                    effectiveDebugMode);
+
                 if (sshRequirement != null && !sshRequirement.RequiresSshSession)
                 {
-                    interactiveSessions = ExecuteScriptLocal(host, script, username, password, outputBuilder, cancellationToken, showHeader, allowFileSelectionDialogs);
+                    interactiveSessions = ExecuteScriptLocal(
+                        effectiveAuth.Host,
+                        script,
+                        effectiveAuth.Username,
+                        effectiveAuth.Password,
+                        outputBuilder,
+                        cancellationToken,
+                        showHeader,
+                        allowFileSelectionDialogs);
                 }
                 else if (UseConnectionPooling && _connectionPool != null)
                 {
-                    interactiveSessions = ExecuteScriptWithPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader, allowFileSelectionDialogs);
+                    interactiveSessions = ExecuteScriptWithPool(
+                        effectiveAuth.Host,
+                        script,
+                        effectiveAuth.Username,
+                        effectiveAuth.Password,
+                        timeouts,
+                        outputBuilder,
+                        cancellationToken,
+                        showHeader,
+                        allowFileSelectionDialogs);
                 }
                 else
                 {
-                    interactiveSessions = ExecuteScriptWithoutPool(host, script, username, password, timeouts, outputBuilder, cancellationToken, showHeader, allowFileSelectionDialogs);
+                    interactiveSessions = ExecuteScriptWithoutPool(
+                        effectiveAuth.Host,
+                        script,
+                        effectiveAuth.Username,
+                        effectiveAuth.Password,
+                        timeouts,
+                        outputBuilder,
+                        cancellationToken,
+                        showHeader,
+                        allowFileSelectionDialogs);
                 }
 
                 result.Success = true;
@@ -1460,7 +1514,7 @@ namespace SSH_Helper.Services
             finally
             {
                 session.Dispose();
-                _connectionPool!.ReleaseSession(host, username);
+                _connectionPool!.ReleaseSession(host, username, password);
             }
         }
 
@@ -1707,6 +1761,181 @@ namespace SSH_Helper.Services
             }
         }
 
+        private EffectiveScriptAuthContext ResolveEffectiveScriptAuthContext(
+            HostConnection host,
+            Script script,
+            string baseUsername,
+            string basePassword,
+            SshTimeoutOptions timeouts,
+            StringBuilder outputBuilder,
+            CancellationToken cancellationToken,
+            bool allowFileSelectionDialogs,
+            bool effectiveDebugMode)
+        {
+            if (script.Preconnect == null || script.Preconnect.Count == 0)
+            {
+                return new EffectiveScriptAuthContext
+                {
+                    Host = host,
+                    Username = baseUsername,
+                    Password = basePassword
+                };
+            }
+
+            OnProgressChanged(host, $"Running preconnect for {host}", false, false);
+            if (effectiveDebugMode)
+            {
+                OnOutputReceived(host, FormatScriptOutput($"Preconnect started for {host}", ScriptOutputType.Info));
+            }
+
+            var context = new ScriptContext(host.Variables)
+            {
+                Session = null,
+                DebugMode = effectiveDebugMode,
+                AllowFileSelectionDialogs = allowFileSelectionDialogs,
+                VaultService = VaultService,
+                EnvironmentVaultProfile = EnvironmentVaultProfile
+            };
+
+            context.ActiveScript = script;
+            context.SubroutineRegistry = script.SubroutineRegistry;
+            if (script.Vars.Count > 0)
+                context.ImportScriptVars(script.Vars);
+
+            _activeScriptContext = context;
+            ApplyConfiguredFlowCanvasDebugState(context);
+            SeedConnectionVariables(context, host, baseUsername, basePassword, timeouts);
+
+            var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
+
+            context.OutputReceived += (s, e) =>
+            {
+                var output = FormatScriptOutput(e.Message, e.Type);
+                var boundaryAdjusted = NormalizeScriptOutputBoundary(
+                    output,
+                    e.Type,
+                    previousOutputEndedWithLineTerminator);
+                output = boundaryAdjusted.Output;
+                previousOutputEndedWithLineTerminator = boundaryAdjusted.EndsWithLineTerminator;
+                if (string.IsNullOrEmpty(output))
+                    return;
+
+                outputBuilder.Append(output);
+                OnOutputReceived(host, output);
+            };
+
+            context.ColumnUpdateRequested += (s, e) =>
+            {
+                OnColumnUpdateRequested(host, e.ColumnName, e.Value);
+            };
+
+            context.EnvironmentUpdateRequested += (s, e) =>
+            {
+                OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
+            };
+
+            var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
+            executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
+            executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
+            executor.DebugPauseStateChanged += (s, e) => DebugPauseStateChanged?.Invoke(this, e);
+            var preconnectResult = executor.ExecuteStepsAsync(script.Preconnect, context, cancellationToken)
+                .GetAwaiter().GetResult();
+
+            if (preconnectResult.IsControlFlow)
+            {
+                throw new InvalidOperationException("Preconnect does not support exit/break/continue/return control flow");
+            }
+
+            if (!preconnectResult.Success)
+            {
+                throw new InvalidOperationException(
+                    string.IsNullOrWhiteSpace(preconnectResult.Message)
+                        ? "Preconnect failed"
+                        : preconnectResult.Message);
+            }
+
+            if (effectiveDebugMode)
+            {
+                OnProgressChanged(host, $"Preconnect completed for {host}", false, false);
+                OnOutputReceived(host, FormatScriptOutput($"Preconnect completed for {host}", ScriptOutputType.Info));
+            }
+
+            var effectiveHost = new HostConnection
+            {
+                IpAddress = host.IpAddress,
+                Port = host.Port,
+                Username = host.Username,
+                Password = host.Password,
+                IdentityFile = host.IdentityFile,
+                IdentityFilePassphrase = host.IdentityFilePassphrase,
+                HostKeyAlgorithms = host.HostKeyAlgorithms,
+                Ciphers = host.Ciphers,
+                Variables = BuildEffectiveHostVariables(host, context)
+            };
+
+            var effectiveUsername = baseUsername;
+            var effectivePassword = basePassword;
+
+            if (context.HasVariable(PreconnectUsernameVariable))
+            {
+                var usernameOverride = context.GetVariableString(PreconnectUsernameVariable).Trim();
+                if (!string.IsNullOrWhiteSpace(usernameOverride))
+                    effectiveUsername = usernameOverride;
+            }
+
+            if (context.HasVariable(PreconnectPasswordVariable))
+            {
+                var passwordOverride = context.GetVariableString(PreconnectPasswordVariable);
+                if (!string.IsNullOrWhiteSpace(passwordOverride))
+                    effectivePassword = passwordOverride;
+            }
+
+            if (context.HasVariable(PreconnectIdentityFileVariable))
+            {
+                var identityFileOverride = context.GetVariableString(PreconnectIdentityFileVariable).Trim();
+                effectiveHost.IdentityFile = string.IsNullOrWhiteSpace(identityFileOverride)
+                    ? null
+                    : identityFileOverride;
+            }
+
+            if (context.HasVariable(PreconnectIdentityPassphraseVariable))
+            {
+                var passphraseOverride = context.GetVariableString(PreconnectIdentityPassphraseVariable);
+                effectiveHost.IdentityFilePassphrase = passphraseOverride;
+            }
+
+            return new EffectiveScriptAuthContext
+            {
+                Host = effectiveHost,
+                Username = effectiveUsername,
+                Password = effectivePassword
+            };
+        }
+
+        private static Dictionary<string, string> BuildEffectiveHostVariables(
+            HostConnection host,
+            ScriptContext context)
+        {
+            var merged = new Dictionary<string, string>(host.Variables, StringComparer.OrdinalIgnoreCase);
+            foreach (var variable in context.GetAllVariables())
+            {
+                if (string.Equals(variable.Key, "_timestamp", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(variable.Key, "_output", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string value = variable.Value switch
+                {
+                    List<string> list => string.Join(", ", list),
+                    null => string.Empty,
+                    _ => variable.Value.ToString() ?? string.Empty
+                };
+
+                merged[variable.Key] = value;
+            }
+
+            return merged;
+        }
+
         private static void SeedConnectionVariables(
             ScriptContext context,
             HostConnection host,
@@ -1853,7 +2082,7 @@ namespace SSH_Helper.Services
             finally
             {
                 session.Dispose();
-                _connectionPool!.ReleaseSession(host, username);
+                _connectionPool!.ReleaseSession(host, username, password);
                 // Note: Connection stays in pool for reuse
             }
         }
@@ -2427,7 +2656,15 @@ namespace SSH_Helper.Services
                 return message ?? string.Empty;
             }
 
-            return EnsureTrailingNewLine(message);
+            return EnsureTrailingNewLine(RedactSensitiveScriptOutput(message));
+        }
+
+        private static string RedactSensitiveScriptOutput(string? message)
+        {
+            if (string.IsNullOrEmpty(message))
+                return message ?? string.Empty;
+
+            return SensitiveSetOutputRegex.Replace(message, "$1[REDACTED]");
         }
 
         internal static (string Output, bool EndsWithLineTerminator) NormalizeScriptOutputBoundary(

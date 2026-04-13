@@ -111,7 +111,7 @@ namespace SSH_Helper
 
         #region Constants
 
-        private const string ApplicationVersion = "0.51.15";
+        private const string ApplicationVersion = "0.51.16";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -420,10 +420,17 @@ namespace SSH_Helper
             Application.Idle += BootstrapSchedulerAfterStartupRestoreOnIdle;
 
             var config = _configService.GetCurrent();
-            if (config.UpdateSettings.CheckOnStartup)
+            if (config.UpdateSettings.CheckOnStartup && !IsRunningUnderTestHost())
             {
                 await CheckForUpdatesAsync(silent: true);
             }
+        }
+
+        private static bool IsRunningUnderTestHost()
+        {
+            var processName = Process.GetCurrentProcess().ProcessName;
+            return processName.Contains("testhost", StringComparison.OrdinalIgnoreCase) ||
+                   processName.Contains("vstest", StringComparison.OrdinalIgnoreCase);
         }
 
         private void BootstrapSchedulerAfterStartupRestoreOnIdle(object? sender, EventArgs e)
@@ -4969,6 +4976,31 @@ namespace SSH_Helper
             }
 
             InsertIntoPresetOrder(presetName, folder, referenceName, DropPosition.Below);
+        }
+
+        private void RenamePresetInFolderOrder(string oldPresetName, string newPresetName, string? folder)
+        {
+            var config = _configService.Load();
+            var folderKey = folder ?? string.Empty;
+
+            if (!config.ManualPresetOrderByFolder.TryGetValue(folderKey, out var presetOrder))
+            {
+                presetOrder = _presetManager.GetPresetsInFolder(folder).ToList();
+            }
+
+            var oldIndex = presetOrder.IndexOf(oldPresetName);
+            if (oldIndex >= 0)
+            {
+                presetOrder[oldIndex] = newPresetName;
+            }
+            else if (!presetOrder.Contains(newPresetName))
+            {
+                presetOrder.Add(newPresetName);
+            }
+
+            config.ManualPresetOrderByFolder[folderKey] = presetOrder;
+            SyncLegacyRootPresetOrder(folderKey, presetOrder);
+            _configService.Save(config);
         }
 
         #endregion
@@ -9666,12 +9698,7 @@ namespace SSH_Helper
                     }
 
                     renamedNode = FindPresetNodeByName(trvPresets.Nodes, originalPresetName!);
-
-                    int orderIndex = _manualPresetOrder.IndexOf(originalPresetName!);
-                    if (orderIndex >= 0)
-                    {
-                        _manualPresetOrder[orderIndex] = presetName;
-                    }
+                    RenamePresetInFolderOrder(originalPresetName!, presetName, originalFolder);
 
                     refreshPresetList = true;
                 }
@@ -10045,12 +10072,7 @@ namespace SSH_Helper
                 return;
             }
 
-            // Update manual order list
-            int orderIndex = _manualPresetOrder.IndexOf(selectedPreset);
-            if (orderIndex >= 0)
-            {
-                _manualPresetOrder[orderIndex] = newName;
-            }
+            RenamePresetInFolderOrder(selectedPreset, newName, originalFolder);
 
             bool usedIncrementalMutation = false;
             if (CanMutatePresetTreeIncrementally() && renamedNode != null)
@@ -10967,6 +10989,16 @@ namespace SSH_Helper
             {
                 tag.Name = presetName;
                 tag.IsFolder = false;
+            }
+
+            var currentFolder = node.Parent?.Tag is PresetNodeTag parentTag && parentTag.IsFolder
+                ? parentTag.Name
+                : null;
+
+            if (string.Equals(currentFolder ?? string.Empty, preset.Folder ?? string.Empty, StringComparison.Ordinal))
+            {
+                UpdatePresetTreeNodeDisplay(node);
+                return true;
             }
 
             DetachTreeNode(node);

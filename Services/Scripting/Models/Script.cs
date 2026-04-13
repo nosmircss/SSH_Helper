@@ -82,6 +82,12 @@ namespace SSH_Helper.Services.Scripting.Models
             new(System.StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
+        /// Optional host-scoped bootstrap steps that run before main steps.
+        /// Used for local pre-connection setup such as fetching ephemeral SSH credentials.
+        /// </summary>
+        public List<ScriptStep> Preconnect { get; set; } = new();
+
+        /// <summary>
         /// The execution steps of the script.
         /// </summary>
         public List<ScriptStep> Steps { get; set; } = new();

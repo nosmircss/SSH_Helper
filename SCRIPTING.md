@@ -73,6 +73,15 @@ compact_errors: false            # Optional: emit one-line SSH/script errors (de
 suppress_missing_column_warning: false  # Optional: suppress missing-column preflight warning
 library: false                   # Optional: definition-only file for imports (default: false)
 
+preconnect:                      # Optional: host-scoped local bootstrap steps run before SSH login
+  - localcmd:
+      command: "Get-CertForHost {{Host_IP}}"
+      into: cert_bootstrap
+  - set:
+      expression: _ssh_identity_file = cert_bootstrap_stdout
+  - set:
+      expression: _ssh_identity_passphrase = cert_bootstrap_stderr
+
 vars:                            # Optional: variable declarations
   variable_name: "default_value"
   timeout: 30
@@ -106,11 +115,15 @@ steps:                           # Required: list of execution steps
 `vars:` accepts both scalar values and YAML sequences. Prefer YAML lists for fixed collections instead of building them one `json.push()` call at a time.
 Executable scripts may also declare `imports:` and `subroutines:`. Library files set `library: true` and may contain `subroutines:` only; they are meant to be imported, not executed directly.
 
+`preconnect:` runs once per host before SSH authentication and is intended for local bootstrap work (for example issuing short-lived certs/credentials).
+Supported SSH override variables set from preconnect are `_ssh_identity_file`, `_ssh_identity_passphrase`, `_ssh_username`, and `_ssh_password`.
+Commands that require an active SSH shell (such as `send` and `interactive`) are not allowed inside `preconnect`.
+
 ### Auto-Detection
 
 The system automatically detects YAML scripts by looking for:
 - Document marker `---` at the start
-- Distinctive top-level sections: `vars:`, `imports:`, `subroutines:`, `steps:`
+- Distinctive top-level sections: `preconnect:`, `vars:`, `imports:`, `subroutines:`, `steps:`
 - Step keywords: `- send:`, `- print:`, `- wait:`, `- set:`, `- exit:`, `- extract:`, `- if:`, `- break:`, `- continue:`, `- foreach:`, `- while:`, `- try:`, `- call:`, `- return:`, `- readfile:`, `- writefile:`, `- exists:`, `- input:`, `- choose:`, `- multiselect:`, `- confirm:`, `- interactive:`, `- localcmd:`, `- updatecolumn:`, `- updateenvironment:`, `- log:`, `- http:`, `- browser_callback_capture:`, `- ping:`, `- dns:`, `- portcheck:`, `- sftp:`, `- webhook:`, `- assert:`, `- switch:`, `- parallel:`, `- table:`, `- parse:`, `- vault:`
 
 Metadata-only keys (for example `name:`, `description:`, or `environment:`) are not treated as strong YAML indicators by themselves.

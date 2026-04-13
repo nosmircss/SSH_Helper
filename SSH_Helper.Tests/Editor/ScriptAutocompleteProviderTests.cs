@@ -146,6 +146,91 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_DnsTypeValue_SuggestsDnsTypeValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - dns:\n      type: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["A", "AAAA", "PTR"]);
+        completion.Items.Select(item => item.Label).Should().NotContain("directory");
+    }
+
+    [Fact]
+    public void GetCompletion_ExistsTypeValue_SuggestsExistsTypeValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - exists:\n      type: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["any", "file", "directory"]);
+        completion.Items.Select(item => item.Label).Should().NotContain("AAAA");
+    }
+
+    [Fact]
+    public void GetCompletion_InputPasswordValue_SuggestsBooleanValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - input:\n      password: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["true", "false"]);
+    }
+
+    [Fact]
+    public void GetCompletion_SftpPasswordValue_DoesNotSuggestBooleanValues()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - sftp:\n      password: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.None);
+        completion.Items.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("extract", "required")]
+    [InlineData("send", "suppress")]
+    [InlineData("readfile", "skip_empty_lines")]
+    [InlineData("readfile", "trim_lines")]
+    [InlineData("writefile", "pretty")]
+    [InlineData("sftp", "overwrite")]
+    public void GetCompletion_BooleanLikeOptionValues_SuggestsTrueFalse(string command, string key)
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = $"steps:\n  - {command}:\n      {key}: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["true", "false"]);
+    }
+
+    [Theory]
+    [InlineData("debug")]
+    [InlineData("nobanner")]
+    [InlineData("compact_errors")]
+    [InlineData("suppress_missing_column_warning")]
+    [InlineData("library")]
+    public void GetCompletion_TopLevelBooleanKeys_SuggestsTrueFalse(string key)
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = $"{key}: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["true", "false"]);
+    }
+
+    [Fact]
     public void GetCompletion_StepPrefix_IncludesNewCommandKeywords()
     {
         var provider = new ScriptAutocompleteProvider();
@@ -219,6 +304,30 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.OptionValue);
         completion.Items.Select(item => item.Label).Should().Contain(["true", "false"]);
+    }
+
+    [Fact]
+    public void GetCompletion_LocalCmdRunModeValue_SuggestsForegroundAndBackground()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - localcmd:\n      run_mode: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["foreground", "background"]);
+    }
+
+    [Fact]
+    public void GetCompletion_LocalCmdConfirmValue_SuggestsAllowedConfirmModes()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - localcmd:\n      confirm: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["always", "once", "never"]);
     }
 
     [Fact]

@@ -229,6 +229,7 @@ namespace SSH_Helper.Services.Editor
         private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _stepOptionKeysByCommand;
         private readonly IReadOnlyList<string> _stepOptionKeys;
         private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _enumLikeOptionValues;
+        private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<string>>> _enumLikeOptionValuesByCommand;
 
         public ScriptAutocompleteProvider(Func<IReadOnlyCollection<string>>? getHostColumns = null)
         {
@@ -274,6 +275,19 @@ namespace SSH_Helper.Services.Editor
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
                         .ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            _enumLikeOptionValuesByCommand = ScriptParser.GetEnumLikeOptionValuesByCommand()
+                .ToDictionary(
+                    commandPair => CanonicalizeKey(commandPair.Key),
+                    commandPair => (IReadOnlyDictionary<string, IReadOnlyList<string>>)commandPair.Value
+                        .ToDictionary(
+                            keyPair => CanonicalizeKey(keyPair.Key),
+                            keyPair => (IReadOnlyList<string>)keyPair.Value
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+                                .ToList(),
+                            StringComparer.OrdinalIgnoreCase),
                     StringComparer.OrdinalIgnoreCase);
         }
 
@@ -325,6 +339,18 @@ namespace SSH_Helper.Services.Editor
             {
                 var key = CanonicalizeKey(optionValueMatch.Groups["key"].Value);
                 var token = optionValueMatch.Groups["token"].Value;
+                var parentCommand = FindEnclosingCommandName(text, lineStart, currentIndent);
+                if (!string.IsNullOrWhiteSpace(parentCommand) &&
+                    _enumLikeOptionValuesByCommand.TryGetValue(CanonicalizeKey(parentCommand), out var scopedKeys) &&
+                    scopedKeys.TryGetValue(key, out var scopedValues))
+                {
+                    return BuildCompletion(
+                        CompletionContextKind.OptionValue,
+                        safeCaret - token.Length,
+                        token.Length,
+                        FilterValues(scopedValues, token, kind: "value"));
+                }
+
                 if (_enumLikeOptionValues.TryGetValue(key, out var values))
                 {
                     return BuildCompletion(

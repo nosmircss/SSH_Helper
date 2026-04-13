@@ -333,6 +333,35 @@ public sealed class Form1PresetTreeIncrementalMutationTests : IDisposable
     }
 
     [WinFormsFact]
+    public void RenamePreset_ManualSort_KeepsPresetAtSameTreePosition()
+    {
+        using var form = CreateLoadedForm(CreateSimpleManualPresetConfig());
+        var visibleOpenFormsBefore = SnapshotVisibleOpenForms();
+
+        var presetsTree = GetField<TreeView>(form, "trvPresets");
+        var configService = GetField<ConfigurationService>(form, "_configService");
+        SetInputBoxResponse(form, "Bravo Renamed");
+
+        var originalNode = FindNodeByTag(presetsTree.Nodes, "Bravo", isFolder: false);
+        originalNode.Should().NotBeNull();
+        var previousNode = originalNode!.PrevNode;
+        var nextNode = originalNode.NextNode;
+
+        presetsTree.SelectedNode = originalNode;
+        InvokeMethod(form, "trvPresets_AfterSelect", presetsTree, new TreeViewEventArgs(originalNode));
+
+        InvokeMethod(form, "RenamePreset", false);
+
+        var renamedNode = FindNodeByTag(presetsTree.Nodes, "Bravo Renamed", isFolder: false);
+        renamedNode.Should().BeSameAs(originalNode,
+            "manual rename should relabel the existing node without moving it among siblings");
+        renamedNode!.PrevNode.Should().BeSameAs(previousNode);
+        renamedNode.NextNode.Should().BeSameAs(nextNode);
+        configService.GetCurrent().ManualPresetOrderByFolder[""].Should().Equal("Alpha", "Bravo Renamed", "Charlie");
+        AssertNoNewVisibleOpenForms(visibleOpenFormsBefore);
+    }
+
+    [WinFormsFact]
     public void RenamePreset_WhenPresetIsFavorite_RefreshesFavoritesTreeLabel()
     {
         var config = CreatePresetConfig();
