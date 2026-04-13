@@ -1,5 +1,123 @@
 # Changelog
 
+## Changes Since `e1efcd7` (0.51.16)
+
+### Preconnect Phase for Host-Scoped Auth Bootstrap
+
+Scripts gain an optional top-level `preconnect:` section that runs **once per host before SSH authentication**. The phase is intended for local bootstrap work that must complete before the SSH login can succeed — for example, fetching an ephemeral certificate, requesting a short-lived password from a secrets backend, or provisioning a per-host identity file.
+
+```yaml
+---
+preconnect:
+  - localcmd:
+      command: "Get-CertForHost {{Host_IP}}"
+      into: cert_bootstrap
+  - set:
+      expression: _ssh_identity_file = cert_bootstrap_stdout
+  - set:
+      expression: _ssh_identity_passphrase = cert_bootstrap_stderr
+
+steps:
+  - send: whoami
+```
+
+**Reserved override variables** — Setting any of these inside `preconnect` redirects the resolved value into the SSH login that follows for the same host:
+
+| Variable | Effect on SSH login |
+|----------|---------------------|
+| `_ssh_username` | Replaces base username for this host only |
+| `_ssh_password` | Replaces base password for this host only |
+| `_ssh_identity_file` | Sets the private key path used for key-based auth |
+| `_ssh_identity_passphrase` | Sets the passphrase decrypting the identity file |
+
+Overrides are scoped to the current host execution and never persist across hosts.
+
+**`SshExecutionService.ResolveEffectiveScriptAuthContext`** — New per-host orchestration step that runs before `ExecuteScriptLocal` / `ExecuteScriptWithPool` / `ExecuteScriptWithoutPool`:
+
+1. If `script.Preconnect` is empty, returns the base `HostConnection` / username / password unchanged.
+2. Otherwise builds a fresh `ScriptContext` with `Session = null`, seeds connection variables, imports `script.Vars`, and executes `script.Preconnect` via `ScriptExecutor.ExecuteStepsAsync`.
+3. Cancellation (`Operation cancelled`) and validation failures abort the host run before any SSH connect is attempted.
+4. `IsControlFlow` results from preconnect (exit/break/continue/return) throw `InvalidOperationException` — control flow is not allowed in preconnect.
+5. Reads the four reserved override variables back from the context and constructs a new `HostConnection` with the effective `IdentityFile`, `IdentityFilePassphrase`, and merged `Variables` dictionary, plus effective username/password strings.
+
+**Pooled session keying** — `SshConnectionPool.CreateConnectionKey` now incorporates password, identity file, and identity passphrase so that a host with overridden auth never reuses a session authenticated with different effective credentials.
+
+```
+Old key:  "{ip}:{port}:{username}"
+New key:  "{ip}:{port}:{username}:{passwordHash}:{identityFile}:{passphraseHash}"
+```
+
+Secrets are SHA-256 hashed (`HashSecret`) before being embedded in the key so leased session bookkeeping never holds raw passwords. Empty values become `-`. `ReleaseSession` and `RemoveAsync` gain a `password` parameter; the previous two-argument overloads are marked `[Obsolete]` and forward to the new ones with empty-string passwords for backward compatibility.
+
+**Validation** — `ScriptParser` reserves `preconnect` as a known top-level key and parses it via `ParseSteps`. New validation rules:
+
+- `preconnect` must be a YAML sequence — scalar / mapping values produce `"preconnect must be a sequence of steps"`.
+- `send` and `interactive` are rejected inside `preconnect` (and inside any nested `then`/`else`/`do`/`try`/`catch`/`finally`/`cases`/`elif`/`parallel.steps` inherited via the new `insidePreconnect` flag) with: `"<command> is not allowed in preconnect because it requires an active SSH session"`.
+- `preconnect` is added to the forbidden-key list for `library: true` files (alongside `steps`, `vars`, `imports`, `environment`).
+- Reserved override variable names (`_ssh_*`) are preserved verbatim — typos like `_ssh_identitty_file` are not silently mapped to the correct name.
+
+**Auto-detection** — `IsYamlScript` now treats a `preconnect:` top-level section as a positive YAML script indicator (alongside `steps:`, `vars:`, `imports:`, `subroutines:`).
+
+**Sensitive value redaction** — `SshExecutionService.FormatScriptOutput` applies a new compiled regex (`SensitiveSetOutputRegex`) to every emitted message. The pattern matches `Set _ssh_password = ...` and `Set _ssh_identity_passphrase = ...` and replaces the value with `[REDACTED]` so debug traces and history payloads never contain raw secrets.
+
+**Progress and output messaging** — `OnProgressChanged` emits `"Running preconnect for {host}"` and `"Preconnect completed for {host}"` for the status bar. The matching `"Preconnect started for {host}"` / `"Preconnect completed for {host}"` info-level output lines are gated by the effective debug flag (`DebugMode || script.Debug`) so non-debug runs stay quiet.
+
+**`ScriptDependencyAnalyzer.AnalyzeReferences`** — Now walks `script.Preconnect` in addition to `script.Steps` so any host columns or vars referenced from preconnect contribute to the cross-step reference set used for missing-column preflight warnings.
+
+### Manual Sort Position Preserved on Preset Rename
+
+Renaming a preset while the tree is in manual sort mode now keeps the preset at its existing position among siblings instead of falling back to alphabetical insertion or losing its slot in the order list.
+
+- **`Form1.RenamePresetInFolderOrder(string oldPresetName, string newPresetName, string? folder)`** replaces the previous direct mutation of `_manualPresetOrder`. It loads the per-folder order list (`config.ManualPresetOrderByFolder[folderKey]`) — falling back to the live preset enumeration if no entry exists — replaces `oldPresetName` with `newPresetName` in place, appends if not present, then calls `SyncLegacyRootPresetOrder` to keep the legacy root-folder order list in sync. Both inline rename (`trvPresets_AfterLabelEdit`) and dialog rename now route through this helper.
+- **`MovePresetTreeNode` short-circuit** — When a tree node is being updated and the preset's `Folder` is unchanged from the parent node's folder, the method now calls `UpdatePresetTreeNodeDisplay(node)` and returns without `DetachTreeNode` + `InsertPresetNode`. This preserves both the visual selection and the sibling order during an in-place rename.
+- New regression test `Form1PresetTreeIncrementalMutationTests.RenamePreset_ManualSort_KeepsPresetAtSameTreePosition` asserts the renamed node has the same `PrevNode` / `NextNode` references and that `ManualPresetOrderByFolder[""]` reads `["Alpha", "Bravo Renamed", "Charlie"]` after renaming `Bravo`.
+
+### Script Editor Autocomplete Enhancements
+
+`ScriptParser` now exposes a second tier of enum-like option value suggestions that are scoped per-command, plus a broader set of boolean-valued option keys for the global tier.
+
+**Command-scoped option values** — `ScriptParser.GetEnumLikeOptionValuesByCommand` returns a `Dictionary<command, Dictionary<key, values>>`. The autocomplete provider checks the enclosing command via `FindEnclosingCommandName(text, lineStart, currentIndent)` first and falls back to the global enum-like map only when no scoped entry matches. Initial command-scoped registrations:
+
+| Command | Option key | Suggested values |
+|---------|------------|------------------|
+| `dns` | `type` | `A`, `AAAA`, `PTR` |
+| `exists` | `type` | `any`, `file`, `directory` |
+| `input` | `password` | `true`, `false` |
+| `confirm` | `default` | `true`, `false` |
+
+The previous global `type` entry (which always suggested DNS values) is removed from the global map so `exists.type:` no longer offers `AAAA` and `dns.type:` no longer offers `directory`.
+
+**Global boolean-valued option keys** — Added: `required`, `skip_empty_lines`, `trim_lines`, `pretty`, `suppress`, `overwrite`, plus the top-level script flags `debug`, `nobanner`, `compact_errors`, `suppress_missing_column_warning`, `library`. Typing any of these followed by `: ` now suggests `true` / `false`.
+
+**Localcmd option values** — Added enum-like suggestions for `shell` (`powershell`, `custom`), `interactive` / `keep_open` / `kill_on_cancel` (`true` / `false`), `run_mode` (`foreground`, `background`), `lifetime` (`detached`, `script`, `app`), `confirm` (`always`, `once`, `never`).
+
+`ScriptAutocompleteProvider` consumes the new map via `_enumLikeOptionValuesByCommand` and routes scoped lookups through canonicalized keys. New tests cover each command-scoped scenario and assert that boolean suggestions don't bleed across commands (e.g. `sftp.password:` is a free-text field and intentionally returns `CompletionContextKind.None`).
+
+### Flow Canvas Local Command Block — `cmd` Shell Option Removed
+
+`FlowCanvas/src/blockDefs/registry.ts` now lists `['powershell', 'custom']` for the local command block's `shell` field (default still `powershell`). Authors who want the `cmd` shell can still enter `cmd` via raw YAML — the parser allow-list is unchanged — but the visual block dropdown no longer offers it.
+
+### Test Coverage
+
+| Test class | Coverage |
+|------------|----------|
+| `SSH_Helper.Tests/Services/SshExecutionServicePreconnectTests.cs` | Local-only script with preconnect succeeds; `send` inside preconnect fails validation with `"not allowed in preconnect"`; preconnect emits start/completion progress + output messages; preconnect assertion failure aborts before SSH; cancellation during a `wait:` step inside preconnect marks the result `WasCancelled` with `"Operation cancelled"`. |
+| `SSH_Helper.Tests/Services/SshConnectionPoolKeyTests.cs` | `CreateConnectionKey` is deterministic for identical inputs; differing identity file, passphrase, password, or username produce distinct keys; secrets are hashed (no raw values appear in keys). |
+| `SSH_Helper.Tests/Services/SshExecutionServiceOutputFormattingTests.cs` | `FormatScriptOutput` redacts `_ssh_password` / `_ssh_identity_passphrase` Set lines to `[REDACTED]`. |
+| `SSH_Helper.Tests/Scripting/ScriptParserTests.cs` | `IsYamlScript` recognizes `preconnect:` as a YAML indicator; `Parse` accepts `preconnect` as a sequence of steps; `Validate` rejects scalar `preconnect` and `send` inside `preconnect`. |
+| `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs` | DNS/exists/input/confirm command-scoped option values; cross-command isolation (`sftp.password` returns nothing); boolean values for `extract.required`, `send.suppress`, `readfile.skip_empty_lines`/`trim_lines`, `writefile.pretty`, `sftp.overwrite`; top-level boolean keys (`debug`, `nobanner`, `compact_errors`, `suppress_missing_column_warning`, `library`); `localcmd.run_mode` and `localcmd.confirm`. |
+| `SSH_Helper.Tests/UI/Form1PresetTreeIncrementalMutationTests.cs` | `RenamePreset_ManualSort_KeepsPresetAtSameTreePosition` asserts the renamed node retains its `PrevNode` / `NextNode` neighbors and that `ManualPresetOrderByFolder[""]` reflects the relabeled position. |
+
+### Documentation
+
+`SCRIPTING.md` updated with:
+
+- New `preconnect:` example in the top-level script anatomy block (cert bootstrap pattern using `localcmd` + `set _ssh_identity_file` / `_ssh_identity_passphrase`).
+- Explanatory paragraph: preconnect runs once per host before SSH authentication; supported override variables are `_ssh_identity_file`, `_ssh_identity_passphrase`, `_ssh_username`, `_ssh_password`; `send` and `interactive` are not allowed inside preconnect.
+- `preconnect:` added to the auto-detection top-level section list.
+
+---
+
 ## Changes Since `c350105` (0.51.15)
 
 ### Vault OIDC Authentication
