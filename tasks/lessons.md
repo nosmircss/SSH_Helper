@@ -1,5 +1,8 @@
 # Lessons
 
+## 2026-04-13
+- When the user says a value should remain valid in raw YAML/runtime but be removed from visual suggestions, I must align autocomplete and UI suggestion tests with that intended product surface instead of preserving stale compatibility expectations in editor/Flow Canvas tests.
+
 ## 2026-04-08
 - When I add or run WinForms tests through a path that shows success/error dialogs, I must install or create a dialog seam first; otherwise the suite can hang behind a modal popup even if the underlying behavior is correct.
 - When a user reports WinForms test-time JIT exception popups after I said the tests passed, I must inspect deferred UI callbacks (`Application.Idle`, `BeginInvoke`, throttled UI writers) for disposal-safe teardown and add a regression that runs the callback after form disposal.

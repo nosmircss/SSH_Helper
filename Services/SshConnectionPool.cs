@@ -282,7 +282,14 @@ namespace SSH_Helper.Services
         [Obsolete("Use ReleaseSession overload with password to avoid ambiguous pooled key resolution.")]
         public void ReleaseSession(HostConnection host, string username)
         {
-            ReleaseSession(host, username, string.Empty);
+            foreach (var key in FindLegacyCompatibleKeys(host, username))
+            {
+                _leasedKeys.TryRemove(key, out _);
+                if (_connections.TryGetValue(key, out var pooled))
+                {
+                    pooled.LastUsed = DateTime.UtcNow;
+                }
+            }
         }
 
         /// <summary>
@@ -299,7 +306,10 @@ namespace SSH_Helper.Services
         [Obsolete("Use RemoveAsync overload with password to avoid ambiguous pooled key resolution.")]
         public async Task RemoveAsync(HostConnection host, string username)
         {
-            await RemoveAsync(host, username, string.Empty);
+            foreach (var key in FindLegacyCompatibleKeys(host, username))
+            {
+                await RemoveConnectionAsync(key);
+            }
         }
 
         /// <summary>
@@ -585,6 +595,15 @@ namespace SSH_Helper.Services
                     // Ignore cleanup errors
                 }
             }
+        }
+
+        private IEnumerable<string> FindLegacyCompatibleKeys(HostConnection host, string username)
+        {
+            var prefix = $"{host.IpAddress}:{host.Port}:{username}:";
+            return _connections.Keys
+                .Concat(_leasedKeys.Keys)
+                .Where(key => key.StartsWith(prefix, StringComparison.Ordinal))
+                .Distinct(StringComparer.Ordinal);
         }
 
         private void RunIdleKeepAliveSweep()

@@ -264,13 +264,6 @@ namespace SSH_Helper.Services.Scripting
                 ["mirror_output"] = ["true", "false"],
                 ["show_window"] = ["true", "false"],
                 ["wait"] = ["true", "false"],
-                ["shell"] = ["powershell", "cmd", "custom"],
-                ["interactive"] = ["true", "false"],
-                ["keep_open"] = ["true", "false"],
-                ["run_mode"] = ["foreground", "background"],
-                ["lifetime"] = ["detached", "script", "app"],
-                ["kill_on_cancel"] = ["true", "false"],
-                ["confirm"] = ["always", "once", "never"],
                 ["debug"] = ["true", "false"],
                 ["nobanner"] = ["true", "false"],
                 ["compact_errors"] = ["true", "false"],
@@ -299,6 +292,16 @@ namespace SSH_Helper.Services.Scripting
                 ["confirm"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["default"] = ["true", "false"]
+                },
+                ["localcmd"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["shell"] = ["powershell", "custom"],
+                    ["interactive"] = ["true", "false"],
+                    ["keep_open"] = ["true", "false"],
+                    ["run_mode"] = ["foreground", "background"],
+                    ["lifetime"] = ["detached", "script", "app"],
+                    ["kill_on_cancel"] = ["true", "false"],
+                    ["confirm"] = ["always", "once", "never"]
                 }
             };
 

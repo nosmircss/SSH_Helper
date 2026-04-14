@@ -66,7 +66,7 @@ public class SshExecutionServicePreconnectTests
     }
 
     [Fact]
-    public async Task ExecuteScriptAsync_Preconnect_EmitsStartAndCompletionMessages()
+    public async Task ExecuteScriptAsync_Preconnect_EmitsProgressMessagesInNonDebugRuns()
     {
         using var service = new SshExecutionService();
         var hosts = new[]
@@ -99,8 +99,85 @@ public class SshExecutionServicePreconnectTests
         results[0].Success.Should().BeTrue();
         progressMessages.Should().Contain(m => m.Contains("Running preconnect", StringComparison.OrdinalIgnoreCase));
         progressMessages.Should().Contain(m => m.Contains("Preconnect completed", StringComparison.OrdinalIgnoreCase));
+        outputMessages.Should().NotContain(m => m.Contains("Preconnect started", StringComparison.OrdinalIgnoreCase));
+        outputMessages.Should().NotContain(m => m.Contains("Preconnect completed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteScriptAsync_Preconnect_EmitsStartAndCompletionOutputWhenDebugEnabled()
+    {
+        using var service = new SshExecutionService
+        {
+            DebugMode = true
+        };
+        var hosts = new[]
+        {
+            new HostConnection { IpAddress = "batch-001", Port = 22 }
+        };
+
+        var progressMessages = new List<string>();
+        var outputMessages = new List<string>();
+
+        service.ProgressChanged += (_, e) => progressMessages.Add(e.Message);
+        service.OutputReceived += (_, e) => outputMessages.Add(e.Output);
+
+        var script = """
+            ---
+            preconnect:
+              - set: bootstrap = "ready"
+            steps:
+              - print: "state={{bootstrap}}"
+            """;
+
+        var results = await service.ExecuteScriptAsync(
+            hosts,
+            script,
+            defaultUsername: string.Empty,
+            defaultPassword: string.Empty,
+            timeouts: SshTimeoutOptions.Default);
+
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeTrue();
+        progressMessages.Should().Contain(m => m.Contains("Running preconnect", StringComparison.OrdinalIgnoreCase));
+        progressMessages.Should().Contain(m => m.Contains("Preconnect completed", StringComparison.OrdinalIgnoreCase));
         outputMessages.Should().Contain(m => m.Contains("Preconnect started", StringComparison.OrdinalIgnoreCase));
         outputMessages.Should().Contain(m => m.Contains("Preconnect completed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ExecuteScriptAsync_Preconnect_PreservesStructuredVariablesIntoMainSteps()
+    {
+        using var service = new SshExecutionService();
+        var hosts = new[]
+        {
+            new HostConnection { IpAddress = "batch-001", Port = 22 }
+        };
+
+        var script = """
+            ---
+            preconnect:
+              - set: items = push(items, "alpha")
+              - set: items = push(items, "beta")
+            steps:
+              - foreach: item in items
+                do:
+                  - print: "item={{item}}"
+              - print: "count=${items.length}"
+            """;
+
+        var results = await service.ExecuteScriptAsync(
+            hosts,
+            script,
+            defaultUsername: string.Empty,
+            defaultPassword: string.Empty,
+            timeouts: SshTimeoutOptions.Default);
+
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeTrue();
+        results[0].Output.Should().Contain("item=alpha");
+        results[0].Output.Should().Contain("item=beta");
+        results[0].Output.Should().Contain("count=2");
+        results[0].Output.Should().NotContain("item=alpha, beta");
     }
 
     [Fact]

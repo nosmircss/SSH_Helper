@@ -1866,7 +1866,7 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
-    public void Registry_LocalCmdShellOptions_ExcludePwsh()
+    public void Registry_LocalCmdShellOptions_ExcludePwshAndCmd()
     {
         _ = LoadRegistryBlockPropertyOrder(out var registryText);
 
@@ -1879,7 +1879,7 @@ public class FlowCanvasBridgeTests
         var optionsText = blockMatch.Groups["options"].Value;
         Assert.Contains("'powershell'", optionsText, StringComparison.Ordinal);
         Assert.DoesNotContain("'pwsh'", optionsText, StringComparison.Ordinal);
-        Assert.Contains("'cmd'", optionsText, StringComparison.Ordinal);
+        Assert.DoesNotContain("'cmd'", optionsText, StringComparison.Ordinal);
         Assert.Contains("'custom'", optionsText, StringComparison.Ordinal);
     }
 

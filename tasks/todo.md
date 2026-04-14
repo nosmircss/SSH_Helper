@@ -1,5 +1,45 @@
 # TODO
 
+## 236. Fix preconnect follow-through and localcmd shell suggestion drift
+- [x] 236.1 Add or correct focused red tests for:
+- [x] preconnect completion progress being emitted in non-debug runs
+- [x] structured preconnect variables surviving into main steps without string-flattening
+- [x] obsolete pooled session release/removal overloads handling non-empty-password leases
+- [x] localcmd shell suggestions/tests matching the intended visual surface (`powershell`, `custom`; raw `cmd` still valid)
+- [x] 236.2 Run the focused red tests and capture the failing evidence.
+- [x] 236.3 Implement the runtime/editor fixes with the minimal coherent design.
+- [x] 236.4 Run focused green verification for the touched areas.
+- [x] 236.5 Run broader regression/build verification and record results below.
+
+### 236 Review
+- Root cause:
+- `ResolveEffectiveScriptAuthContext(...)` emitted preconnect completion progress only inside the debug-gated branch, so non-debug runs never surfaced the completion status.
+- Preconnect rebuilt the main execution `ScriptContext` from `HostConnection.Variables`, and `BuildEffectiveHostVariables(...)` flattened lists into comma-joined strings. Structured values created in preconnect therefore lost collection semantics before `steps:` executed.
+- The obsolete `SshConnectionPool.ReleaseSession(host, username)` and `RemoveAsync(host, username)` overloads still resolved only the empty-password key even though pooled keys now include password/auth material.
+- `localcmd.shell` suggestions still came from the global enum-like value map, so editor autocomplete offered `cmd` even though the intended visual surface had removed it.
+- RED verification:
+- Added/updated focused tests in:
+- `SSH_Helper.Tests/Services/SshExecutionServicePreconnectTests.cs`
+- `SSH_Helper.Tests/Services/SshConnectionPoolCompatibilityTests.cs`
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServicePreconnectTests.ExecuteScriptAsync_Preconnect_EmitsProgressMessagesInNonDebugRuns|FullyQualifiedName~SshExecutionServicePreconnectTests.ExecuteScriptAsync_Preconnect_PreservesStructuredVariablesIntoMainSteps|FullyQualifiedName~SshConnectionPoolCompatibilityTests|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_LocalCmdShellValue_SuggestsPowershellAndCustomOnly|FullyQualifiedName~FlowCanvasBridgeTests.Registry_LocalCmdShellOptions_ExcludePwshAndCmd" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: failed `5/6` for the expected reasons:
+- missing non-debug `"Preconnect completed"` progress message
+- structured preconnect list flattened to `"alpha, beta"` and `count=11`
+- obsolete pool overloads left matching leased/pooled entries in place
+- autocomplete still suggested `cmd`
+- GREEN verification:
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServicePreconnectTests.ExecuteScriptAsync_Preconnect_EmitsProgressMessagesInNonDebugRuns|FullyQualifiedName~SshExecutionServicePreconnectTests.ExecuteScriptAsync_Preconnect_EmitsStartAndCompletionOutputWhenDebugEnabled|FullyQualifiedName~SshExecutionServicePreconnectTests.ExecuteScriptAsync_Preconnect_PreservesStructuredVariablesIntoMainSteps|FullyQualifiedName~SshConnectionPoolCompatibilityTests|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_LocalCmdShellValue_SuggestsPowershellAndCustomOnly|FullyQualifiedName~FlowCanvasBridgeTests.Registry_LocalCmdShellOptions_ExcludePwshAndCmd" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: passed `7/7`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServicePreconnectTests|FullyQualifiedName~SshConnectionPool|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~LocalCmdParserTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: passed `164/164`.
+- `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal`
+- Result: build succeeded with the existing `MSB3277`, `CS8602`, and `xUnit1031` warnings.
+
 ## 235. Stop import-preset tests from blocking on modal dialogs
 - [x] 235.1 Add a RED WinForms regression that installs a test dialog override for `ImportPreset()` and proves import success is reported without opening a blocking modal.
 - [x] 235.2 Add a `Form1` message-dialog override seam and route `ImportPreset()` success messaging through it.

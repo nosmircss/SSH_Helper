@@ -331,6 +331,19 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_LocalCmdShellValue_SuggestsPowershellAndCustomOnly()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - localcmd:\n      shell: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["powershell", "custom"]);
+        completion.Items.Select(item => item.Label).Should().NotContain("cmd");
+    }
+
+    [Fact]
     public void GetCompletion_SendRespondNestedOptionKey_SuggestsExpectAndReply()
     {
         var provider = new ScriptAutocompleteProvider();
