@@ -60,7 +60,8 @@ namespace SSH_Helper.Services.Scripting
             "return",
             "table",
             "localcmd",
-            "vault"
+            "vault",
+            "sethistorylabel"
         };
         private static readonly string[] KnownTopLevelKeys =
         {
@@ -137,7 +138,8 @@ namespace SSH_Helper.Services.Scripting
                 ["call"] = ["subroutine", "args", "out", "on_error"],
                 ["table"] = ["data", "columns", "into", "align", "show_header"],
                 ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "fail_on_nonzero", "success_codes", "max_output_bytes", "confirm", "quiet", "suppress", "title", "into", "timeout", "on_error"],
-                ["vault"] = ["path", "key", "keys", "into", "write", "patch", "profile", "version", "on_error"]
+                ["vault"] = ["path", "key", "keys", "into", "write", "patch", "profile", "version", "on_error"],
+                ["sethistorylabel"] = ["value", "replace", "mode", "separator"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -181,7 +183,8 @@ namespace SSH_Helper.Services.Scripting
                 ["return"] = [],
                 ["table"] = [],
                 ["localcmd"] = [],
-                ["vault"] = []
+                ["vault"] = [],
+                ["sethistorylabel"] = []
             };
         private static readonly HashSet<string> CanonicalMapCommands = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -302,6 +305,10 @@ namespace SSH_Helper.Services.Scripting
                     ["lifetime"] = ["detached", "script", "app"],
                     ["kill_on_cancel"] = ["true", "false"],
                     ["confirm"] = ["always", "once", "never"]
+                },
+                ["sethistorylabel"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["mode"] = HistoryLabelOperation.KnownModes
                 }
             };
 
@@ -560,7 +567,7 @@ namespace SSH_Helper.Services.Scripting
         {
             // Step keys that accept inline expression/string scalars
             "set", "print", "send", "exit", "if", "while", "when", "assert",
-            "call", "return", "foreach",
+            "call", "return", "foreach", "sethistorylabel",
             // Expanded-form sub-keys that accept expression scalars
             "expression", "condition", "message", "command", "expect",
             "format", "value", "source", "pattern", "url", "body", "path"
@@ -1090,6 +1097,10 @@ namespace SSH_Helper.Services.Scripting
                     case "vault":
                         step.DeclaredStepType = StepType.Vault;
                         step.Vault = ParseVaultOptions(parser, step);
+                        break;
+                    case "sethistorylabel":
+                        step.DeclaredStepType = StepType.SetHistoryLabel;
+                        step.SetHistoryLabel = ParseSetHistoryLabelValue(parser);
                         break;
                     case "cases":
                         step.Cases = ParseSwitchCases(parser);
@@ -2700,6 +2711,80 @@ namespace SSH_Helper.Services.Scripting
                 SkipValue(parser);
                 return null;
             }
+        }
+
+        private object? ParseSetHistoryLabelValue(IParser parser)
+        {
+            if (parser.Accept<Scalar>(out _))
+            {
+                return parser.Consume<Scalar>().Value;
+            }
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var options = new SetHistoryLabelOptions();
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "value":
+                            if (parser.Accept<Scalar>(out _))
+                            {
+                                options.Value = parser.Consume<Scalar>().Value;
+                            }
+                            else
+                            {
+                                SkipValue(parser);
+                            }
+                            break;
+                        case "replace":
+                            if (TryParseBooleanStrict(parser, out var replace))
+                            {
+                                options.Replace = replace;
+                            }
+                            else
+                            {
+                                options.Replace = null;
+                            }
+                            break;
+                        case "mode":
+                            if (parser.Accept<Scalar>(out _))
+                            {
+                                options.Mode = parser.Consume<Scalar>().Value;
+                            }
+                            else
+                            {
+                                SkipValue(parser);
+                            }
+                            break;
+                        case "separator":
+                            if (parser.Accept<Scalar>(out _))
+                            {
+                                options.Separator = parser.Consume<Scalar>().Value;
+                            }
+                            else
+                            {
+                                SkipValue(parser);
+                            }
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown sethistorylabel key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                return options;
+            }
+
+            SkipValue(parser);
+            return null;
         }
 
         private HttpOptions ParseHttpOptions(IParser parser, ScriptStep step)
@@ -4628,6 +4713,16 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Parse requires 'into' variable{lineContent}");
+                        }
+                        break;
+
+                    case StepType.SetHistoryLabel:
+                        if (step.SetHistoryLabel is SetHistoryLabelOptions setHistoryLabelOptions &&
+                            !IsDynamicValue(setHistoryLabelOptions.Mode) &&
+                            !HistoryLabelOperation.IsValidMode(setHistoryLabelOptions.Mode))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: sethistorylabel 'mode' must be one of replace, append, prepend, clear{lineContent}");
                         }
                         break;
 

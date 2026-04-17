@@ -373,7 +373,9 @@ namespace SSH_Helper.Services
                     Output = TruncateOutput(ho.Output, maxOutputChars),
                     Success = ho.Success,
                     WasCancelled = ho.WasCancelled,
-                    ErrorMessage = ho.ErrorMessage
+                    ErrorMessage = ho.ErrorMessage,
+                    Label = ho.Label,
+                    LabelReplacesAddress = ho.LabelReplacesAddress
                 });
             }
             return result;

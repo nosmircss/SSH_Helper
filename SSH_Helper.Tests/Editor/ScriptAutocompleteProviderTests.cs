@@ -257,6 +257,44 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_StepPrefix_SetHistoryLabel_ShowsDetailText()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - seth";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Should().Contain(item =>
+            item.Label == "sethistorylabel" &&
+            item.Detail == "Label history entry. Scalar 'sethistorylabel: name' or object form { value, replace, mode, separator }");
+    }
+
+    [Fact]
+    public void GetCompletion_SetHistoryLabelStepOptionKey_SuggestsValueReplaceModeAndSeparator()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - sethistorylabel:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["value", "replace", "mode", "separator"]);
+    }
+
+    [Fact]
+    public void GetCompletion_SetHistoryLabelModeValue_SuggestsKnownModes()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - sethistorylabel:\n      mode: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["replace", "append", "prepend", "clear"]);
+    }
+
+    [Fact]
     public void GetCompletion_LogBlockOptionKey_SuggestsOnlyLogOptions()
     {
         var provider = new ScriptAutocompleteProvider();

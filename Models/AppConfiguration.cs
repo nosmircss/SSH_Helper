@@ -420,6 +420,8 @@ namespace SSH_Helper.Models
         public bool Success { get; set; } = true;
         public bool WasCancelled { get; set; }
         public DateTime Timestamp { get; set; }
+        public string? Label { get; set; }
+        public bool LabelReplacesAddress { get; set; }
     }
 
     /// <summary>

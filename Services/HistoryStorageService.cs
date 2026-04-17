@@ -177,6 +177,8 @@ namespace SSH_Helper.Services
                     var isSuccess = reader.ValueTextEquals("Success") || reader.ValueTextEquals("success");
                     var isWasCancelled = reader.ValueTextEquals("WasCancelled") || reader.ValueTextEquals("wasCancelled");
                     var isTimestamp = reader.ValueTextEquals("Timestamp") || reader.ValueTextEquals("timestamp");
+                    var isLabel = reader.ValueTextEquals("Label") || reader.ValueTextEquals("label");
+                    var isLabelReplacesAddress = reader.ValueTextEquals("LabelReplacesAddress") || reader.ValueTextEquals("labelReplacesAddress");
 
                     if (!reader.Read())
                         break;
@@ -196,6 +198,15 @@ namespace SSH_Helper.Services
                     else if (isTimestamp)
                     {
                         host.Timestamp = ReadDateTimeValue(ref reader);
+                    }
+                    else if (isLabel)
+                    {
+                        var labelValue = ReadStringValue(ref reader);
+                        host.Label = string.IsNullOrEmpty(labelValue) ? null : labelValue;
+                    }
+                    else if (isLabelReplacesAddress)
+                    {
+                        host.LabelReplacesAddress = ReadBooleanValue(ref reader);
                     }
                     else
                     {

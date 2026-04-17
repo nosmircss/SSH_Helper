@@ -1,5 +1,105 @@
 # TODO
 
+## 237. Restore sethistorylabel parser/editor wiring
+- [x] 237.1 Add RED coverage proving `sethistorylabel` is recognized as a step command and supports scalar/object option suggestions.
+- [x] 237.2 Run the focused RED tests and capture the failure evidence.
+- [x] 237.3 Wire `ScriptParser` and related command metadata so `sethistorylabel` parses and autocompletes correctly.
+- [x] 237.4 Run focused GREEN verification and record the outcome below.
+
+### 237 Review
+- Root cause:
+- `SetHistoryLabelCommand` and `StepType.SetHistoryLabel` were added to the runtime model/executor, but `ScriptParser` still omitted `sethistorylabel` from `KnownStepKeys`, command option metadata, scalar-preprocess keys, and the `ParseStep(...)` dispatch switch.
+- Because `ScriptAutocompleteProvider` sources its step command and option-key catalogs from `ScriptParser`, the editor never surfaced `sethistorylabel` even though a description string had been added locally.
+- RED verification:
+- Added focused regressions in:
+- `SSH_Helper.Tests/Scripting/ScriptParserTests.cs`
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelScalarStep_ParsesCorrectly|FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelMappingStep_ParsesValueAndReplace|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_SetHistoryLabel_ShowsDetailText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelStepOptionKey_SuggestsValueAndReplace" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: failed `4/4` as expected because `sethistorylabel` still parsed as `StepType.Unknown` and autocomplete fell back to generic step-root keys.
+- GREEN verification:
+- Updated `Services/Scripting/ScriptParser.cs` to:
+- register `sethistorylabel` as a known step command,
+- expose `{ value, replace }` command option metadata for autocomplete,
+- parse scalar and mapping forms into `ScriptStep.SetHistoryLabel`,
+- treat inline scalar `sethistorylabel:` values like other scalar-style commands during YAML preprocess quoting.
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelScalarStep_ParsesCorrectly|FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelMappingStep_ParsesValueAndReplace|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_SetHistoryLabel_ShowsDetailText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelStepOptionKey_SuggestsValueAndReplace" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: passed `4/4`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests|FullyQualifiedName~ScriptAutocompleteProviderTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: passed `230/230` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+
+## 238. Make history-label aggregation deterministic and clearable across folder runs
+- [x] 238.1 Add RED coverage proving a later preset can explicitly clear an earlier history label in sequential folder execution.
+- [x] 238.2 Add RED coverage proving parallel preset execution resolves history labels by selected preset order, not completion order.
+- [x] 238.3 Propagate explicit history-label touch state through script context/results and use it in folder host-result aggregation.
+- [x] 238.4 Run focused GREEN verification and record the outcome below.
+
+### 238 Review
+- Root cause:
+- `sethistorylabel` supported explicit clear semantics inside one script, but folder aggregation only copied non-empty labels, so a later preset could not clear an earlier label.
+- In folder runs with `RunPresetsInParallel`, the host-level label was being overwritten directly from each completed preset task, so the final label depended on task completion timing rather than the user-selected preset order.
+- RED verification:
+- Added focused regressions in:
+- `SSH_Helper.Tests/Services/SshExecutionServiceHistoryLabelTests.cs`
+- Initial command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceHistoryLabelTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: build blocked by the existing local `SSH_Helper.exe` file lock on `bin\Debug\net8.0-windows\SSH_Helper.dll`.
+- Isolated-output RED command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceHistoryLabelTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-red/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-red/obj/ -v minimal`
+- Result: failed at compile time as expected because `ExecutionResult` did not yet expose `HistoryLabelTouched`, confirming the new touched-state contract was missing.
+- GREEN verification:
+- Updated:
+- `Services/Scripting/ScriptContext.cs` to track `HistoryLabelTouched` in shared execution state,
+- `Models/ExecutionResult.cs` to carry the touched flag out of script execution,
+- `Services/Scripting/Commands/SetHistoryLabelCommand.cs` to mark any invocation, including explicit clears, as a history-label touch,
+- `Services/SshExecutionService.cs` to:
+- apply sequential folder label updates only when a preset explicitly touched the label,
+- collect parallel preset results by selected preset index and merge label state after `Task.WhenAll` in deterministic preset order.
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceHistoryLabelTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-green/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-green/obj/ -v minimal`
+- Result: passed `2/2`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceHistoryLabelTests|FullyQualifiedName~SshExecutionServiceProgressTests|FullyQualifiedName~SshExecutionServiceCancellationTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-regression/obj/ -v minimal`
+- Result: passed `12/12` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+
+## 239. Add append/prepend/clear history-label modes
+- [x] 239.1 Add RED coverage for parser/autocomplete support and command runtime semantics for `sethistorylabel.mode` and `separator`.
+- [x] 239.2 Add RED folder-execution coverage proving append/prepend combine deterministically across presets.
+- [x] 239.3 Implement operation-based history-label accumulation for single scripts and folder runs.
+- [x] 239.4 Run focused GREEN verification and record the outcome below.
+
+### 239 Review
+- Root cause:
+- The first history-label fix only propagated a final `HistoryLabel` string plus a touched bit. That was enough for replace/clear behavior, but it discarded the sequence of mutations, so later presets had no way to append/prepend onto earlier preset labels during folder aggregation.
+- Autocomplete also reused the global `mode` enum catalog (`overwrite`, `append`), so even after adding a `mode` field the editor would have suggested the wrong values unless `sethistorylabel` got a command-specific override.
+- RED verification:
+- Added focused regressions in:
+- `SSH_Helper.Tests/Scripting/ScriptParserTests.cs`
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`
+- `SSH_Helper.Tests/Scripting/SetHistoryLabelCommandTests.cs`
+- `SSH_Helper.Tests/Services/SshExecutionServiceHistoryLabelTests.cs`
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelMappingStep_ParsesModeAndSeparator|FullyQualifiedName~ScriptParserTests.Validate_SetHistoryLabelInvalidMode_ReturnsError|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelStepOptionKey_SuggestsValueReplaceModeAndSeparator|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelModeValue_SuggestsKnownModes|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_SetHistoryLabel_ShowsDetailText|FullyQualifiedName~SetHistoryLabelCommandTests|FullyQualifiedName~SshExecutionServiceHistoryLabelTests.ExecuteFolderAsync_SequentialLaterPresetCanAppendEarlierHistoryLabel|FullyQualifiedName~SshExecutionServiceHistoryLabelTests.ExecuteFolderAsync_ParallelPresetsAppendHistoryLabelBySelectedOrder" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-modes-red/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-modes-red/obj/ -v minimal`
+- Result: failed at compile time as expected because `SetHistoryLabelOptions` did not yet expose `Mode`/`Separator`, `ScriptContext` had no history-label operation snapshot, and `Replace` was still modeled as a non-nullable boolean.
+- GREEN verification:
+- Implemented `HistoryLabelOperation` replay semantics and threaded them through:
+- `Services/Scripting/Models/HistoryLabelOperation.cs`
+- `Services/Scripting/Models/ScriptStep.cs`
+- `Services/Scripting/ScriptContext.cs`
+- `Models/ExecutionResult.cs`
+- `Services/Scripting/Commands/SetHistoryLabelCommand.cs`
+- `Services/Scripting/ScriptParser.cs`
+- `Services/Editor/ScriptAutocompleteProvider.cs`
+- `Services/SshExecutionService.cs`
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelMappingStep_ParsesModeAndSeparator|FullyQualifiedName~ScriptParserTests.Validate_SetHistoryLabelInvalidMode_ReturnsError|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelStepOptionKey_SuggestsValueReplaceModeAndSeparator|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelModeValue_SuggestsKnownModes|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_SetHistoryLabel_ShowsDetailText|FullyQualifiedName~SetHistoryLabelCommandTests|FullyQualifiedName~SshExecutionServiceHistoryLabelTests.ExecuteFolderAsync_SequentialLaterPresetCanAppendEarlierHistoryLabel|FullyQualifiedName~SshExecutionServiceHistoryLabelTests.ExecuteFolderAsync_ParallelPresetsAppendHistoryLabelBySelectedOrder" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-modes-green/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-modes-green/obj/ -v minimal`
+- Result: passed `10/10`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~SetHistoryLabelCommandTests|FullyQualifiedName~SshExecutionServiceHistoryLabelTests|FullyQualifiedName~SshExecutionServiceProgressTests|FullyQualifiedName~SshExecutionServiceCancellationTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-modes-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-modes-regression/obj/ -v minimal`
+- Result: passed `250/250` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+
 ## 236. Fix preconnect follow-through and localcmd shell suggestion drift
 - [x] 236.1 Add or correct focused red tests for:
 - [x] preconnect completion progress being emitted in non-debug runs

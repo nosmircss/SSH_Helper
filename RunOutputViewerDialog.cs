@@ -230,7 +230,12 @@ namespace SSH_Helper
                 var statusIndicator = hostOutput.WasCancelled
                     ? "CANCELLED"
                     : hostOutput.Success ? "OK" : "FAIL";
-                _cboHost.Items.Add(new HostOutputItem(hostOutput, $"{hostOutput.HostAddress} ({statusIndicator})"));
+                var hostDisplay = string.IsNullOrWhiteSpace(hostOutput.Label)
+                    ? hostOutput.HostAddress
+                    : hostOutput.LabelReplacesAddress
+                        ? hostOutput.Label
+                        : $"{hostOutput.HostAddress} - {hostOutput.Label}";
+                _cboHost.Items.Add(new HostOutputItem(hostOutput, $"{hostDisplay} ({statusIndicator})"));
             }
 
             if (_cboHost.Items.Count > 0)

@@ -362,6 +362,63 @@ steps:
     }
 
     [Fact]
+    public void Parse_SetHistoryLabelScalarStep_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - sethistorylabel: Core Router";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.SetHistoryLabel);
+        script.Steps[0].SetHistoryLabel.Should().Be("Core Router");
+    }
+
+    [Fact]
+    public void Parse_SetHistoryLabelMappingStep_ParsesValueAndReplace()
+    {
+        var yaml = @"---
+steps:
+  - sethistorylabel:
+      value: Distribution Switch
+      replace: true";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.SetHistoryLabel);
+        script.Steps[0].SetHistoryLabel.Should().BeEquivalentTo(new SetHistoryLabelOptions
+        {
+            Value = "Distribution Switch",
+            Replace = true
+        });
+    }
+
+    [Fact]
+    public void Parse_SetHistoryLabelMappingStep_ParsesModeAndSeparator()
+    {
+        var yaml = @"---
+steps:
+  - sethistorylabel:
+      value: Router
+      mode: append
+      separator: ' / '";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.SetHistoryLabel);
+        script.Steps[0].SetHistoryLabel.Should().BeEquivalentTo(new SetHistoryLabelOptions
+        {
+            Value = "Router",
+            Mode = "append",
+            Separator = " / ",
+            Replace = null
+        });
+    }
+
+    [Fact]
     public void Parse_ExitStep_ParsesCorrectly()
     {
         var yaml = @"---
@@ -1190,6 +1247,23 @@ steps:
         playSound!.MaxSeconds.HasValue.Should().BeTrue();
         playSound.MaxSeconds!.Value.Should().BeApproximately(0.25, 0.0001);
         errors.Should().NotContain(error => error.Contains("playsound.max_seconds"));
+    }
+
+    [Fact]
+    public void Validate_SetHistoryLabelInvalidMode_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - sethistorylabel:
+                  value: Router
+                  mode: sideways
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(error => error.Contains("sethistorylabel 'mode' must be one of replace, append, prepend, clear"));
     }
 
     #endregion

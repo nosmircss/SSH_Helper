@@ -706,7 +706,8 @@ namespace SSH_Helper.Services
                         if (runPresetsInParallel)
                         {
                             // Parallel preset execution
-                            var presetTasks = presetNames.Select(async presetName =>
+                            var presetResultsByOrder = new ExecutionResult?[presetNames.Count];
+                            var presetTasks = presetNames.Select(async (presetName, presetIndex) =>
                             {
                                 if (cancellationToken.IsCancellationRequested || (options.StopOnFirstError && errorTracker.HasError))
                                     return;
@@ -731,6 +732,7 @@ namespace SSH_Helper.Services
                                     cancellationToken,
                                     showHeader: false,
                                     allowFileSelectionDialogs: allowFileSelectionDialogs);
+                                presetResultsByOrder[presetIndex] = presetResult;
 
                                 lock (outputBuilder) { outputBuilder.Append(presetResult.Output); }
 
@@ -778,6 +780,10 @@ namespace SSH_Helper.Services
                             });
 
                             await Task.WhenAll(presetTasks);
+                            lock (hostResultLock)
+                            {
+                                ApplyHistoryLabelResults(hostResult, presetResultsByOrder);
+                            }
                         }
                         else
                         {
@@ -816,6 +822,8 @@ namespace SSH_Helper.Services
                                 {
                                     hostCancellationObserved = 1;
                                 }
+
+                                ApplyHistoryLabelResults(hostResult, new[] { presetResult });
 
                                 if (!presetResult.Success)
                                 {
@@ -1284,6 +1292,7 @@ namespace SSH_Helper.Services
             var baseUsername = !string.IsNullOrWhiteSpace(host.Username) ? host.Username : defaultUsername;
             var basePassword = !string.IsNullOrWhiteSpace(host.Password) ? host.Password : defaultPassword;
             var effectiveDebugMode = DebugMode || script.Debug;
+            ScriptContext? finalContext = null;
 
             try
             {
@@ -1307,6 +1316,7 @@ namespace SSH_Helper.Services
                         effectiveAuth.Password,
                         outputBuilder,
                         cancellationToken,
+                        out finalContext,
                         showHeader,
                         allowFileSelectionDialogs,
                         effectiveAuth.Context,
@@ -1322,6 +1332,7 @@ namespace SSH_Helper.Services
                         timeouts,
                         outputBuilder,
                         cancellationToken,
+                        out finalContext,
                         showHeader,
                         allowFileSelectionDialogs,
                         effectiveAuth.Context,
@@ -1337,6 +1348,7 @@ namespace SSH_Helper.Services
                         timeouts,
                         outputBuilder,
                         cancellationToken,
+                        out finalContext,
                         showHeader,
                         allowFileSelectionDialogs,
                         effectiveAuth.Context,
@@ -1431,7 +1443,48 @@ namespace SSH_Helper.Services
 
             result.Output = outputBuilder.ToString();
             result.InteractiveSessions = interactiveSessions;
+            if (finalContext != null)
+            {
+                result.HistoryLabel = finalContext.HistoryLabel;
+                result.HistoryLabelReplacesAddress = finalContext.HistoryLabelReplacesAddress;
+                result.HistoryLabelTouched = finalContext.HistoryLabelTouched;
+                result.HistoryLabelOperations = finalContext
+                    .GetHistoryLabelOperationsSnapshot()
+                    .Select(operation => operation.Clone())
+                    .ToList();
+            }
             return result;
+        }
+
+        private static void ApplyHistoryLabelResults(
+            ExecutionResult aggregateResult,
+            IReadOnlyList<ExecutionResult?> presetResultsByOrder)
+        {
+            foreach (var presetResult in presetResultsByOrder)
+            {
+                if (presetResult == null || !presetResult.HistoryLabelTouched)
+                    continue;
+
+                aggregateResult.HistoryLabelTouched = true;
+                if (presetResult.HistoryLabelOperations.Count == 0)
+                {
+                    aggregateResult.HistoryLabel = presetResult.HistoryLabel;
+                    aggregateResult.HistoryLabelReplacesAddress = presetResult.HistoryLabelReplacesAddress;
+                    continue;
+                }
+
+                foreach (var operation in presetResult.HistoryLabelOperations)
+                {
+                    var operationCopy = operation.Clone();
+                    aggregateResult.HistoryLabelOperations.Add(operationCopy);
+
+                    var historyLabel = aggregateResult.HistoryLabel;
+                    var replacesAddress = aggregateResult.HistoryLabelReplacesAddress;
+                    operationCopy.ApplyTo(ref historyLabel, ref replacesAddress);
+                    aggregateResult.HistoryLabel = historyLabel;
+                    aggregateResult.HistoryLabelReplacesAddress = replacesAddress;
+                }
+            }
         }
 
         /// <summary>
@@ -1446,11 +1499,13 @@ namespace SSH_Helper.Services
             SshTimeoutOptions timeouts,
             StringBuilder outputBuilder,
             CancellationToken cancellationToken,
+            out ScriptContext? executedContext,
             bool showHeader = true,
             bool allowFileSelectionDialogs = true,
             ScriptContext? initialContext = null,
             ScriptOutputRelayState? outputRelayState = null)
         {
+            executedContext = null;
             var effectiveDebugMode = DebugMode || script.Debug;
             var (client, session) = _connectionPool!.CreateSessionAsync(host, username, password, timeouts, cancellationToken)
                 .GetAwaiter().GetResult();
@@ -1478,6 +1533,7 @@ namespace SSH_Helper.Services
                 }
 
                 var context = initialContext ?? new ScriptContext(host.Variables);
+                executedContext = context;
                 context.Session = session;
                 ConfigureScriptExecutionContext(
                     context,
@@ -1519,11 +1575,13 @@ namespace SSH_Helper.Services
             SshTimeoutOptions timeouts,
             StringBuilder outputBuilder,
             CancellationToken cancellationToken,
+            out ScriptContext? executedContext,
             bool showHeader = true,
             bool allowFileSelectionDialogs = true,
             ScriptContext? initialContext = null,
             ScriptOutputRelayState? outputRelayState = null)
         {
+            executedContext = null;
             var effectiveDebugMode = DebugMode || script.Debug;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             SshDebugLog(host, "SCRIPT", $"ExecuteScriptWithoutPool entered for {host.IpAddress}:{host.Port}", debugEnabledOverride: effectiveDebugMode);
@@ -1606,6 +1664,7 @@ namespace SSH_Helper.Services
             }
 
             var context = initialContext ?? new ScriptContext(host.Variables);
+            executedContext = context;
             context.Session = session;
             ConfigureScriptExecutionContext(
                 context,
@@ -1638,11 +1697,13 @@ namespace SSH_Helper.Services
             string password,
             StringBuilder outputBuilder,
             CancellationToken cancellationToken,
+            out ScriptContext? executedContext,
             bool showHeader = true,
             bool allowFileSelectionDialogs = true,
             ScriptContext? initialContext = null,
             ScriptOutputRelayState? outputRelayState = null)
         {
+            executedContext = null;
             var effectiveDebugMode = DebugMode || script.Debug;
             OnProgressChanged(host, $"Running locally for {host} (no SSH required)", false, false);
 
@@ -1661,6 +1722,7 @@ namespace SSH_Helper.Services
             }
 
             var context = initialContext ?? new ScriptContext(host.Variables);
+            executedContext = context;
             context.Session = null;
             ConfigureScriptExecutionContext(
                 context,

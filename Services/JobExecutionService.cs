@@ -450,7 +450,9 @@ namespace SSH_Helper.Services
                     Output = r.Output ?? string.Empty,
                     Success = r.Success,
                     WasCancelled = r.WasCancelled,
-                    ErrorMessage = r.ErrorMessage
+                    ErrorMessage = r.ErrorMessage,
+                    Label = r.HistoryLabel,
+                    LabelReplacesAddress = r.HistoryLabelReplacesAddress
                 }).ToList()
             };
 

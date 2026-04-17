@@ -30,5 +30,15 @@ namespace SSH_Helper.Models
         /// Optional error message if execution on this host failed.
         /// </summary>
         public string? ErrorMessage { get; set; }
+
+        /// <summary>
+        /// Optional label attached via the sethistorylabel script command.
+        /// </summary>
+        public string? Label { get; set; }
+
+        /// <summary>
+        /// When true, display should show only Label (hide HostAddress).
+        /// </summary>
+        public bool LabelReplacesAddress { get; set; }
     }
 }

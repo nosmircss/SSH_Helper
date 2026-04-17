@@ -152,7 +152,8 @@ namespace SSH_Helper.Services.Editor
             ["call"] = "Call sub",
             ["return"] = "Return value",
             ["table"] = "Data table",
-            ["vault"] = "Read, write, or patch secrets from HashiCorp Vault"
+            ["vault"] = "Read, write, or patch secrets from HashiCorp Vault",
+            ["sethistorylabel"] = "Label history entry. Scalar 'sethistorylabel: name' or object form { value, replace, mode, separator }"
         };
 
         private static readonly Dictionary<string, string> TopLevelKeyDescriptions = new(StringComparer.OrdinalIgnoreCase)

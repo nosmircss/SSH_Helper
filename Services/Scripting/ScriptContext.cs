@@ -112,6 +112,10 @@ namespace SSH_Helper.Services.Scripting
             public HostConnection? CurrentHost { get; set; }
             public string? ResolvedUsername { get; set; }
             public string? ResolvedPassword { get; set; }
+            public string? HistoryLabel { get; set; }
+            public bool HistoryLabelReplacesAddress { get; set; }
+            public bool HistoryLabelTouched { get; set; }
+            public List<HistoryLabelOperation> HistoryLabelOperations { get; } = new();
             public SshTimeoutOptions? Timeouts { get; set; }
             public DebugState DebugState { get; } = new();
             public bool AllowFileSelectionDialogs { get; set; } = true;
@@ -158,6 +162,61 @@ namespace SSH_Helper.Services.Scripting
         {
             get => _sharedState.ResolvedPassword;
             set => _sharedState.ResolvedPassword = value;
+        }
+
+        /// <summary>
+        /// Optional label attached to this host's history entry via the sethistorylabel command.
+        /// Null means no label was set.
+        /// </summary>
+        public string? HistoryLabel
+        {
+            get => _sharedState.HistoryLabel;
+            set => _sharedState.HistoryLabel = value;
+        }
+
+        /// <summary>
+        /// When true, the history entry for this host displays only HistoryLabel (IP hidden).
+        /// When false, it displays "IP - HistoryLabel" (or plain IP if HistoryLabel is null).
+        /// </summary>
+        public bool HistoryLabelReplacesAddress
+        {
+            get => _sharedState.HistoryLabelReplacesAddress;
+            set => _sharedState.HistoryLabelReplacesAddress = value;
+        }
+
+        /// <summary>
+        /// Tracks whether sethistorylabel executed for this host, including explicit clears.
+        /// </summary>
+        public bool HistoryLabelTouched
+        {
+            get => _sharedState.HistoryLabelTouched;
+            set => _sharedState.HistoryLabelTouched = value;
+        }
+
+        /// <summary>
+        /// Records a sethistorylabel operation for deterministic replay outside the current script context.
+        /// </summary>
+        public void AddHistoryLabelOperation(HistoryLabelOperation operation)
+        {
+            ArgumentNullException.ThrowIfNull(operation);
+
+            lock (_sharedState.StateLock)
+            {
+                _sharedState.HistoryLabelOperations.Add(operation.Clone());
+            }
+        }
+
+        /// <summary>
+        /// Returns a defensive copy of the recorded sethistorylabel operations.
+        /// </summary>
+        public IReadOnlyList<HistoryLabelOperation> GetHistoryLabelOperationsSnapshot()
+        {
+            lock (_sharedState.StateLock)
+            {
+                return _sharedState.HistoryLabelOperations
+                    .Select(operation => operation.Clone())
+                    .ToList();
+            }
         }
 
         /// <summary>

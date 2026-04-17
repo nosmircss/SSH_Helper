@@ -130,6 +130,13 @@ namespace SSH_Helper.Services.Scripting.Models
         public object? Log { get; set; }
 
         /// <summary>
+        /// SetHistoryLabel command - attaches a label to this host's history entry.
+        /// Simple form: "sethistorylabel: text"
+        /// Options form: sethistorylabel: { value: "text", replace: true, mode: append, separator: " " }
+        /// </summary>
+        public object? SetHistoryLabel { get; set; }
+
+        /// <summary>
         /// Http command - makes HTTP requests with auth, headers, and response capture.
         /// </summary>
         public HttpOptions? Http { get; set; }
@@ -370,6 +377,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (UpdateColumn != null) return StepType.UpdateColumn;
             if (UpdateEnvironment != null) return StepType.UpdateEnvironment;
             if (Log != null) return StepType.Log;
+            if (SetHistoryLabel != null) return StepType.SetHistoryLabel;
             if (Http != null) return StepType.Http;
             if (BrowserCallbackCapture != null) return StepType.BrowserCallbackCapture;
             if (Ping != null) return StepType.Ping;
@@ -887,6 +895,36 @@ namespace SSH_Helper.Services.Scripting.Models
     }
 
     /// <summary>
+    /// Options for the sethistorylabel command.
+    /// </summary>
+    public class SetHistoryLabelOptions
+    {
+        /// <summary>
+        /// The label text to attach. Supports {{variable}} substitution.
+        /// Empty or whitespace clears the label.
+        /// </summary>
+        public string Value { get; set; } = string.Empty;
+
+        /// <summary>
+        /// How the label change is applied.
+        /// Supported values: replace, append, prepend, clear.
+        /// </summary>
+        public string Mode { get; set; } = HistoryLabelOperation.ReplaceMode;
+
+        /// <summary>
+        /// Separator inserted between labels when using append or prepend.
+        /// </summary>
+        public string Separator { get; set; } = string.Empty;
+
+        /// <summary>
+        /// When true, the history entry shows only the label (IP hidden).
+        /// When false, it shows "IP - Label".
+        /// When omitted for append/prepend, the current replace-address state is preserved.
+        /// </summary>
+        public bool? Replace { get; set; }
+    }
+
+    /// <summary>
     /// Options for the http command.
     /// </summary>
     public class HttpOptions
@@ -1286,7 +1324,8 @@ namespace SSH_Helper.Services.Scripting.Models
         Return,
         Table,
         LocalCmd,
-        Vault
+        Vault,
+        SetHistoryLabel
     }
 
     /// <summary>

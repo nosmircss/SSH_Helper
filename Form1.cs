@@ -8353,7 +8353,7 @@ namespace SSH_Helper
                 var textRect = new Rectangle(e.Bounds.Left + 24, e.Bounds.Top, e.Bounds.Width - 28, e.Bounds.Height);
                 var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
                 using var textBrush = new SolidBrush(textColor);
-                SafeDrawString(e.Graphics, hostEntry.HostAddress, e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
+                SafeDrawString(e.Graphics, FormatHostHistoryDisplay(hostEntry), e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
             }
         }
 
@@ -12700,6 +12700,17 @@ namespace SSH_Helper
             return sb.ToString();
         }
 
+        internal static string FormatHostHistoryDisplay(HostHistoryEntry entry)
+        {
+            if (entry == null)
+                return string.Empty;
+            if (string.IsNullOrWhiteSpace(entry.Label))
+                return entry.HostAddress;
+            return entry.LabelReplacesAddress
+                ? entry.Label
+                : $"{entry.HostAddress} - {entry.Label}";
+        }
+
         private static List<HostHistoryEntry> BuildHostHistoryEntries(List<ExecutionResult> results)
         {
             var hostResults = new List<HostHistoryEntry>();
@@ -12719,7 +12730,9 @@ namespace SSH_Helper
                     Output = output,
                     Success = result.Success,
                     WasCancelled = result.WasCancelled,
-                    Timestamp = result.Timestamp
+                    Timestamp = result.Timestamp,
+                    Label = result.HistoryLabel,
+                    LabelReplacesAddress = result.HistoryLabelReplacesAddress
                 });
             }
 
