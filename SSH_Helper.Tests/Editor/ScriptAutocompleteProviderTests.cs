@@ -667,10 +667,23 @@ public class ScriptAutocompleteProviderTests
 
         var symbols = provider.GetInterpolationSymbols("steps:\n  - print: test");
 
+        symbols.Should().Contain("_prompt");
         symbols.Should().Contain("_timestamp");
         symbols.Should().Contain("_output");
         symbols.Should().Contain("hostname");
         symbols.Should().Contain("port");
+    }
+
+    [Fact]
+    public void GetCompletion_InterpolationPrefix_SuggestsPromptBuiltInWithDescription()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - print:\n      message: \"${_pr\"";
+
+        var completion = provider.GetCompletion(text, text.Length - 1);
+
+        completion.Context.Should().Be(CompletionContextKind.Interpolation);
+        completion.Items.Should().Contain(item => item.Label == "_prompt" && item.Detail == "Current SSH prompt");
     }
 
     public static IEnumerable<object[]> GetRequiredOptionTagCases()

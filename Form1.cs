@@ -709,6 +709,7 @@ namespace SSH_Helper
         {
             value = key.ToLowerInvariant() switch
             {
+                "_prompt" => "[runtime SSH prompt]",
                 "_timestamp" => DateTime.Now.ToString("O"),
                 "_iteration" => "0",
                 "_last_error" => string.Empty,

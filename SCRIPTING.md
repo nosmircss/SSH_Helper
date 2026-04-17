@@ -4077,6 +4077,7 @@ These are accessible via nested paths:
 
 | Variable | Description | Available |
 |----------|-------------|-----------|
+| `${_prompt}` | Current detected SSH shell prompt | During SSH-backed execution after prompt detection; empty otherwise |
 | `${_output}` | Last command output | After any `send` command |
 | `${_timestamp}` | Current timestamp at substitution time (yyyy-MM-dd HH:mm:ss) | Always |
 | `${_iteration}` | Current iteration count (0-based) | Inside `while` loops |
@@ -4084,7 +4085,7 @@ These are accessible via nested paths:
 | `${Host_IP}` | Current host IP address | Always (from grid) |
 | `${port}` | SSH port for current host | Always (from grid, default 22) |
 
-**Note:** Any column in the host grid becomes available as a variable. For example, if you have a column named `location`, you can use `${location}` in your scripts.
+**Note:** `${_prompt}` reflects the current SSH shell prompt only. It does not expose `input`, `choose`, `confirm`, or file-picker dialog prompt text. Any column in the host grid becomes available as a variable. For example, if you have a column named `location`, you can use `${location}` in your scripts.
 
 ### Special Grid Columns
 

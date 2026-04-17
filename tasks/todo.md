@@ -1,5 +1,69 @@
 # TODO
 
+## 241. Archive completed OpenSpec changes
+- [x] 241.1 Confirm the archive set from `openspec list` and exclude incomplete proposals.
+- [x] 241.2 Archive `add-portable-release-build`, `add-vault-oidc-auth`, and `add-prompt-built-in-variable` with the OpenSpec CLI.
+- [x] 241.3 Validate the resulting OpenSpec state and record the outcome below.
+
+### 241 Review
+- Archive set confirmation:
+- `openspec list` showed these completed active changes at archive time:
+  - `add-portable-release-build`
+  - `add-vault-oidc-auth`
+  - `add-prompt-built-in-variable`
+- Left `add-preconnect-auth-bootstrap` active because it was still `15/16 tasks`.
+- Archive results:
+- `cmd /c openspec archive add-portable-release-build --yes`
+  - Archived as `openspec/changes/archive/2026-04-17-add-portable-release-build/`
+  - Updated `openspec/specs/scripting-runtime/spec.md`
+- `cmd /c openspec archive add-vault-oidc-auth --yes`
+  - Archived as `openspec/changes/archive/2026-04-17-add-vault-oidc-auth/`
+  - Updated `openspec/specs/credentials/spec.md`
+- `cmd /c openspec archive add-prompt-built-in-variable --yes`
+  - Archived as `openspec/changes/archive/2026-04-17-add-prompt-built-in-variable/`
+  - Updated `openspec/specs/script-editor/spec.md`
+  - Updated `openspec/specs/scripting-runtime/spec.md`
+- Validation:
+- `cmd /c openspec validate --strict --no-interactive`
+  - Returned `Nothing to validate` because there were no remaining active completed changes for that mode after archiving.
+- `cmd /c openspec validate --specs --strict --no-interactive`
+  - Passed `21/21` specs.
+- Final OpenSpec state:
+- `openspec list` now shows only `add-preconnect-auth-bootstrap` as the remaining active change.
+
+## 240. Expose `_prompt` as a dynamic built-in script variable
+- [x] 240.1 Confirm the change contract in OpenSpec: `${_prompt}` means the current detected remote SSH shell prompt, not UI/input prompt text.
+- [x] 240.2 Add RED runtime coverage in `SSH_Helper.Tests/Scripting/ScriptContextTests.cs` and targeted executor/command tests proving `_prompt` is available when `context.Session.CurrentPrompt` exists, resolves dynamically as the prompt changes, and falls back safely when no prompt is available.
+- [x] 240.3 Add RED editor/analyzer coverage in `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs` and `SSH_Helper.Tests/Scripting/ScriptDependencyAnalyzerTests.cs` proving `_prompt` is suggested in interpolation completion and never treated as a missing host-column dependency.
+- [x] 240.4 Implement runtime resolution in `Services/Scripting/ScriptContext.cs` so `_prompt` is a dynamic built-in surfaced through `GetVariable(...)`, `HasVariable(...)`, and `GetAllVariables()`.
+- [x] 240.5 Wire the authoring/debug surfaces in `Services/Editor/ScriptAutocompleteProvider.cs`, `Form1.cs`, and related tooltip plumbing so `_prompt` is visible and described during editing.
+- [x] 240.6 Decide snapshot/history behavior and align the supporting code: either persist `_prompt` for debug/history inspection or explicitly filter it out alongside `_timestamp` and `_output` in `Services/SshExecutionService.cs` and any replay paths.
+- [x] 240.7 Update docs and spec artifacts (`SCRIPTING.md`, OpenSpec deltas for `scripting-runtime` and `script-editor`) to define availability, meaning, and no-session behavior.
+- [x] 240.8 Run focused verification plus broader regression/build coverage and record results below.
+
+### 240 Review
+- Implemented behavior:
+- `${_prompt}` now resolves from `SshShellSession.CurrentPrompt` in `Services/Scripting/ScriptContext.cs`.
+- It is dynamic like `${_timestamp}` and returns an empty string when no SSH prompt is available.
+- `_prompt` is exposed in interpolation autocomplete, editor built-in hover preview, and script variable snapshots, but it is explicitly filtered out of `BuildEffectiveHostVariables(...)` so preconnect host-variable propagation does not persist it as a regular host variable.
+- Docs/spec updates:
+- Updated `SCRIPTING.md` built-in variable docs.
+- Added OpenSpec change bundle `openspec/changes/add-prompt-built-in-variable/` with validated deltas for `scripting-runtime` and `script-editor`.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~ScriptContextTests.PromptVariable_|FullyQualifiedName~SendCommandTests.ExecuteAsync_SubstitutesPromptBuiltInIntoCommandText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetInterpolationSymbols_IncludesBuiltInsAndHostColumns|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_InterpolationPrefix_SuggestsPromptBuiltInWithDescription|FullyQualifiedName~Form1BuiltInEditorVariableTests.ResolveEditorVariableValue_PromptBuiltIn_ReturnsEditorPreviewValue" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/prompt-builtin-red/bin/ -v minimal`
+- Result: failed `6/7` for the expected reasons: `_prompt` was absent from `ScriptContext`, autocomplete, `send` substitution, and `Form1` editor preview.
+- Focused GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~ScriptContextTests.PromptVariable_|FullyQualifiedName~SendCommandTests.ExecuteAsync_SubstitutesPromptBuiltInIntoCommandText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetInterpolationSymbols_IncludesBuiltInsAndHostColumns|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_InterpolationPrefix_SuggestsPromptBuiltInWithDescription|FullyQualifiedName~Form1BuiltInEditorVariableTests.ResolveEditorVariableValue_PromptBuiltIn_ReturnsEditorPreviewValue" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/prompt-builtin-green/bin/ -v minimal`
+- Result: passed `7/7`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~ScriptContextTests|FullyQualifiedName~SendCommandTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServicePreconnectTests|FullyQualifiedName~Form1BuiltInEditorVariableTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/prompt-builtin-regression/bin/ -v minimal`
+- Result: passed `131/131` with existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Build/spec verification:
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/prompt-builtin-build-app/bin/ -v minimal`
+- Result: build succeeded with the existing `MSB3277` warning.
+- `cmd /c openspec validate add-prompt-built-in-variable --strict --no-interactive`
+- Result: change validated successfully; the tool emitted expected PostHog network-flush noise afterward due sandboxed network restrictions.
+
 ## 237. Restore sethistorylabel parser/editor wiring
 - [x] 237.1 Add RED coverage proving `sethistorylabel` is recognized as a step command and supports scalar/object option suggestions.
 - [x] 237.2 Run the focused RED tests and capture the failure evidence.

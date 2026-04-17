@@ -1971,7 +1971,8 @@ namespace SSH_Helper.Services
             foreach (var variable in context.GetAllVariables())
             {
                 if (string.Equals(variable.Key, "_timestamp", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(variable.Key, "_output", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(variable.Key, "_output", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(variable.Key, "_prompt", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 string value = variable.Value switch

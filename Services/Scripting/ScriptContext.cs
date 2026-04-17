@@ -455,6 +455,8 @@ namespace SSH_Helper.Services.Scripting
                 return DateTime.Now.ToString(TimestampFormat);
             if (string.Equals(name, "_output", StringComparison.OrdinalIgnoreCase))
                 return LastCommandOutput;
+            if (string.Equals(name, "_prompt", StringComparison.OrdinalIgnoreCase))
+                return Session?.CurrentPrompt ?? string.Empty;
 
             lock (_sharedState.StateLock)
             {
@@ -487,7 +489,8 @@ namespace SSH_Helper.Services.Scripting
         public bool HasVariable(string name)
         {
             if (string.Equals(name, "_timestamp", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(name, "_output", StringComparison.OrdinalIgnoreCase))
+                string.Equals(name, "_output", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "_prompt", StringComparison.OrdinalIgnoreCase))
                 return true;
 
             lock (_sharedState.StateLock)
@@ -520,6 +523,7 @@ namespace SSH_Helper.Services.Scripting
 
             snapshot["_timestamp"] = DateTime.Now.ToString(TimestampFormat);
             snapshot["_output"] = LastCommandOutput;
+            snapshot["_prompt"] = Session?.CurrentPrompt ?? string.Empty;
             return snapshot;
         }
 

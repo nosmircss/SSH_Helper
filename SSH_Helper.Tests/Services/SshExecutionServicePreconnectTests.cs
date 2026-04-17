@@ -2,11 +2,43 @@ using FluentAssertions;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
 using Xunit;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace SSH_Helper.Tests.Services;
 
 public class SshExecutionServicePreconnectTests
 {
+    [Fact]
+    public void BuildEffectiveHostVariables_PromptBuiltIn_IsNotPropagatedToMergedHostVariables()
+    {
+        var host = new HostConnection
+        {
+            IpAddress = "batch-001",
+            Port = 22,
+            Variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["existing"] = "value"
+            }
+        };
+        var context = new SSH_Helper.Services.Scripting.ScriptContext(host.Variables)
+        {
+            Session = CreateSessionWithPrompt("router#")
+        };
+        context.SetVariable("bootstrap", "ready");
+
+        var method = typeof(SshExecutionService).GetMethod(
+            "BuildEffectiveHostVariables",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        method.Should().NotBeNull();
+        var merged = (Dictionary<string, string>)method!.Invoke(null, new object[] { host, context })!;
+
+        merged.Should().Contain(new KeyValuePair<string, string>("existing", "value"));
+        merged.Should().Contain(new KeyValuePair<string, string>("bootstrap", "ready"));
+        merged.Should().NotContainKey("_prompt");
+    }
+
     [Fact]
     public async Task ExecuteScriptAsync_LocalScriptWithPreconnect_RunsSuccessfully()
     {
@@ -242,5 +274,14 @@ public class SshExecutionServicePreconnectTests
         results[0].Success.Should().BeFalse();
         results[0].WasCancelled.Should().BeTrue();
         results[0].ErrorMessage.Should().Be("Operation cancelled");
+    }
+
+    private static SshShellSession CreateSessionWithPrompt(string prompt)
+    {
+        var session = (SshShellSession)RuntimeHelpers.GetUninitializedObject(typeof(SshShellSession));
+        var field = typeof(SshShellSession).GetField("_currentPrompt", BindingFlags.Instance | BindingFlags.NonPublic);
+        field.Should().NotBeNull();
+        field!.SetValue(session, prompt);
+        return session;
     }
 }

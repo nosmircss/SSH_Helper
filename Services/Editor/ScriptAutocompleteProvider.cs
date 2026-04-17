@@ -91,6 +91,7 @@ namespace SSH_Helper.Services.Editor
 
         private static readonly HashSet<string> BuiltInSymbols = new(StringComparer.OrdinalIgnoreCase)
         {
+            "_prompt",
             "_output",
             "_timestamp",
             "_iteration",
@@ -212,6 +213,7 @@ namespace SSH_Helper.Services.Editor
 
         private static readonly Dictionary<string, string> BuiltInSymbolDescriptions = new(StringComparer.OrdinalIgnoreCase)
         {
+            ["_prompt"] = "Current SSH prompt",
             ["_output"] = "Last output",
             ["_timestamp"] = "Timestamp",
             ["_iteration"] = "Loop counter",

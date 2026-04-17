@@ -29,11 +29,24 @@ The scripting runtime SHALL retain suppressed error details for downstream logic
 - **THEN** `_last_error` is cleared
 
 ### Requirement: Dynamic built-in variables
-Built-in timestamp variables SHALL be resolved dynamically at substitution time.
+Built-in runtime variables SHALL be resolved dynamically at substitution time.
+
+- `${_timestamp}` SHALL resolve to the current time at substitution time.
+- `${_prompt}` SHALL resolve to the current detected SSH shell prompt when an SSH shell session is active.
+- `${_prompt}` SHALL resolve to an empty string when no SSH shell prompt is available.
 
 #### Scenario: timestamp changes during long script
 - **WHEN** `${_timestamp}` is substituted in two different steps at different times
 - **THEN** the values reflect current execution time at each substitution point
+
+#### Scenario: prompt tracks current SSH shell prompt
+- **WHEN** `${_prompt}` is substituted during SSH-backed execution
+- **AND** the detected shell prompt changes during that session
+- **THEN** the substituted value reflects the current detected prompt at each substitution point
+
+#### Scenario: prompt is unavailable without SSH session
+- **WHEN** `${_prompt}` is substituted before an SSH shell prompt is available
+- **THEN** the substituted value is an empty string
 
 ### Requirement: While iteration controls
 While loops SHALL support per-step iteration caps.
@@ -385,9 +398,19 @@ If a delayed WebView2 session never became visible because callback completion h
 - **THEN** SSH Helper disposes the hidden embedded session instead of leaving it open invisibly
 
 ### Requirement: Persistent embedded browser profile
-The embedded browser mode SHALL use a shared app-owned WebView2 user-data folder under `%LocalAppData%\\SSH_Helper`.
+The embedded browser mode SHALL use a shared app-owned WebView2 user-data folder under the application storage root.
+
+The application storage root SHALL be `%LocalAppData%\\SSH_Helper` for standard builds and the executable directory for portable builds.
 
 The embedded profile SHALL persist across runs until the operator explicitly clears it from Settings.
+
+#### Scenario: Standard build stores embedded browser data under LocalAppData
+- **WHEN** SSH Helper runs as a standard build
+- **THEN** embedded browser profile data is persisted under `%LocalAppData%\\SSH_Helper`
+
+#### Scenario: Portable build stores embedded browser data beside executable
+- **WHEN** SSH Helper runs as a portable build
+- **THEN** embedded browser profile data is persisted under the executable directory
 
 #### Scenario: Embedded browser reuses prior site data
 - **WHEN** an operator runs two `browser_callback_capture` steps with `browser_mode: webview2` across separate app sessions

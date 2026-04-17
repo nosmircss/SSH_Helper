@@ -1,7 +1,10 @@
 using System.Collections.Generic;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
@@ -101,6 +104,27 @@ public class SendCommandTests
         context.FullOutput.Should().NotContain("Command exited with status");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_SubstitutesPromptBuiltInIntoCommandText()
+    {
+        var session = new FakeSendSession(command => $"{command}\r\nprompt seen\r\ntester$");
+        var command = new SendCommand(_ => session);
+        var step = new ScriptStep
+        {
+            Send = "echo ${_prompt}"
+        };
+
+        var context = new ScriptContext
+        {
+            Session = CreateSessionWithPrompt("tester$")
+        };
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        session.LastCommand.Should().Be("echo tester$");
+    }
+
     private sealed class FakeSendSession : SendCommand.ISendCommandSession
     {
         private readonly System.Func<string, string> _execute;
@@ -133,5 +157,14 @@ public class SendCommandTests
             LastCommand = command;
             return Task.FromResult(_execute(command));
         }
+    }
+
+    private static SshShellSession CreateSessionWithPrompt(string prompt)
+    {
+        var session = (SshShellSession)RuntimeHelpers.GetUninitializedObject(typeof(SshShellSession));
+        var field = typeof(SshShellSession).GetField("_currentPrompt", BindingFlags.Instance | BindingFlags.NonPublic);
+        field.Should().NotBeNull();
+        field!.SetValue(session, prompt);
+        return session;
     }
 }

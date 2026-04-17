@@ -73,6 +73,25 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_WithPromptBuiltIn_ExcludesPromptFromMissingDependencies()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - print:
+                      message: "${_prompt}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().BeEmpty();
+    }
+
+    [Fact]
     public void AnalyzePresets_UpdateEnvironmentDefinesVariableForLaterSteps()
     {
         var analyzer = new ScriptDependencyAnalyzer();
