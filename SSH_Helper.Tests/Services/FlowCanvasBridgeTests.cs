@@ -1564,6 +1564,70 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_ScriptPromptFontSizeOptions_AreSerializedInPropertiesPanelOrder()
+    {
+        var inputResult = ExportSingleBlock("input", new JObject
+        {
+            ["on_error"] = "continue",
+            ["font_size"] = 14.5,
+            ["into"] = "answer"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(inputResult);
+        Assert.Equal(
+            new[] { "into", "font_size", "on_error" },
+            GetSingleStepOptionOrder(inputResult.Yaml, "input"));
+
+        var chooseResult = ExportSingleBlock("choose", new JObject
+        {
+            ["on_error"] = "continue",
+            ["font_size"] = 16.5,
+            ["default"] = "core",
+            ["into"] = "selected",
+            ["options"] = new JArray("core", "edge"),
+            ["prompt"] = "Pick one",
+            ["title"] = "Select interface role"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(chooseResult);
+        Assert.Equal(
+            new[] { "title", "prompt", "options", "into", "default", "font_size", "on_error" },
+            GetSingleStepOptionOrder(chooseResult.Yaml, "choose"));
+
+        var multiselectResult = ExportSingleBlock("multiselect", new JObject
+        {
+            ["on_error"] = "continue",
+            ["font_size"] = 18,
+            ["max"] = 2,
+            ["min"] = 1,
+            ["into"] = "selected_list",
+            ["options"] = new JArray("core", "edge"),
+            ["prompt"] = "Pick interfaces",
+            ["title"] = "Select interfaces"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(multiselectResult);
+        Assert.Equal(
+            new[] { "title", "prompt", "options", "into", "min", "max", "font_size", "on_error" },
+            GetSingleStepOptionOrder(multiselectResult.Yaml, "multiselect"));
+
+        var confirmResult = ExportSingleBlock("confirm", new JObject
+        {
+            ["on_error"] = "continue",
+            ["font_size"] = 20,
+            ["default"] = true,
+            ["into"] = "confirmed",
+            ["prompt"] = "Proceed?",
+            ["title"] = "Confirm"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(confirmResult);
+        Assert.Equal(
+            new[] { "title", "prompt", "into", "default", "font_size", "on_error" },
+            GetSingleStepOptionOrder(confirmResult.Yaml, "confirm"));
+    }
+
+    [Fact]
     public void ExportGraphToYaml_SendOptions_AreSerializedInPropertiesPanelOrder()
     {
         var result = ExportSingleBlock("send", new JObject
@@ -1968,6 +2032,27 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void Registry_ScriptPromptBlocks_ExposeFontSizeInAdvancedPanel()
+    {
+        var registryBlocks = LoadRegistryBlockPropertyOrder(out _);
+        var advancedKeys = LoadPropertiesPanelAdvancedKeys(out _);
+
+        Assert.Contains("font_size", advancedKeys);
+        Assert.Equal(
+            new[] { "title", "prompt", "into", "default", "password", "validate", "validation_error", "font_size", "on_error" },
+            ToPropertiesPanelDisplayOrder(registryBlocks["input"], advancedKeys));
+        Assert.Equal(
+            new[] { "title", "prompt", "options", "into", "default", "font_size", "on_error" },
+            ToPropertiesPanelDisplayOrder(registryBlocks["choose"], advancedKeys));
+        Assert.Equal(
+            new[] { "title", "prompt", "options", "into", "min", "max", "font_size", "on_error" },
+            ToPropertiesPanelDisplayOrder(registryBlocks["multiselect"], advancedKeys));
+        Assert.Equal(
+            new[] { "title", "prompt", "into", "default", "font_size", "on_error" },
+            ToPropertiesPanelDisplayOrder(registryBlocks["confirm"], advancedKeys));
+    }
+
+    [Fact]
     public void TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp()
     {
         var bridge = new FlowCanvasBridge();
@@ -1992,6 +2077,49 @@ public class FlowCanvasBridgeTests
         var props = localCmdNode["data"]?["props"] as JObject;
         Assert.NotNull(props);
         Assert.Equal("detached", props!["lifetime"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_ScriptPromptSteps_ImportFontSizeIntoProps()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - input:
+                  into: answer
+                  font_size: 14.5
+              - choose:
+                  into: choice
+                  options: [core, edge]
+                  font_size: 15
+              - multiselect:
+                  into: choices
+                  options: [core, edge]
+                  font_size: 16
+              - confirm:
+                  into: confirmed
+                  font_size: 17.5
+            """;
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        JObject GetProps(string blockType)
+        {
+            var node = nodes
+                .OfType<JObject>()
+                .Single(item => string.Equals(
+                    item["data"]?["blockType"]?.ToString(),
+                    blockType,
+                    StringComparison.OrdinalIgnoreCase));
+
+            return Assert.IsType<JObject>(node["data"]?["props"]);
+        }
+
+        Assert.Equal("14.5", GetProps("input")["font_size"]?.ToString());
+        Assert.Equal("15", GetProps("choose")["font_size"]?.ToString());
+        Assert.Equal("16", GetProps("multiselect")["font_size"]?.ToString());
+        Assert.Equal("17.5", GetProps("confirm")["font_size"]?.ToString());
     }
 
     [Fact]

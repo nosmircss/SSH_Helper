@@ -3056,6 +3056,10 @@ namespace SSH_Helper
             _dialogFont = new Font(uiFont, Scaled(fontSettings.DialogFontSize));
             _managedFonts.Add(_dialogFont);
 
+            // Publish the script prompt default font size so script-thread dialog factories can read it.
+            Services.Scripting.Commands.ScriptPromptDialogRunner.DefaultPromptFontSize =
+                Scaled(fontSettings.ScriptPromptFontSize);
+
             // Apply accent color if custom
             ApplyAccentColor(fontSettings.CustomAccentColor);
 

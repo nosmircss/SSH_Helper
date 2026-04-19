@@ -44,9 +44,11 @@ namespace SSH_Helper.Services.Scripting.Commands
                     return CommandResult.Fail(error);
                 }
 
+                var fontSize = step.Multiselect.FontSize ?? ScriptPromptDialogRunner.DefaultPromptFontSize ?? 9f;
+
                 var selectedValues = await ScriptPromptDialogRunner
                     .ShowAsync<ScriptMultiselectDialog, List<string>?>(
-                        () => new ScriptMultiselectDialog(prompt, resolvedOptions, step.Multiselect.Min, step.Multiselect.Max, title),
+                        () => new ScriptMultiselectDialog(prompt, resolvedOptions, step.Multiselect.Min, step.Multiselect.Max, title, fontSize),
                         dialog => dialog.DialogResult == DialogResult.OK ? dialog.SelectedValues : null,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -102,18 +104,29 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
         }
 
-        public ScriptMultiselectDialog(string prompt, List<ChoiceOption> options, int? min, int? max, string? title = null)
+        public ScriptMultiselectDialog(string prompt, List<ChoiceOption> options, int? min, int? max, string? title = null, float fontSize = 9f)
         {
             _options = options;
             _min = min;
             _max = max;
 
+            var clampedFontSize = Math.Clamp(fontSize, 7f, 36f);
+            var scale = Math.Max(1f, clampedFontSize / 9f);
+            int S(int v) => (int)Math.Round(v * scale);
+
+            var ambientForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
+            var baseFontFamily = ambientForm?.Font.FontFamily.Name ?? "Segoe UI";
+            var scriptFont = new Font(baseFontFamily, clampedFontSize);
+            int rowHeight;
+            try { rowHeight = scriptFont.Height + 2; }
+            catch (ArgumentException) { rowHeight = (int)Math.Ceiling(clampedFontSize * 2.2f); }
+
             var visibleItems = Math.Min(options.Count, 10);
-            var listHeight = Math.Max(visibleItems * 20, 40);
-            var formHeight = 165 + listHeight;
+            var listHeight = Math.Max(visibleItems * rowHeight, S(40));
+            var formHeight = S(165) + listHeight;
 
             Text = string.IsNullOrWhiteSpace(title) ? "Script Selection" : title.Trim();
-            Size = new Size(400, formHeight);
+            Size = new Size(S(400), formHeight);
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
@@ -121,20 +134,23 @@ namespace SSH_Helper.Services.Scripting.Commands
             MinimizeBox = false;
             ShowInTaskbar = false;
 
+            DialogTheme.SetDialogFont(this, scriptFont);
+
             var lblPrompt = new Label
             {
                 Text = prompt,
-                Location = new Point(15, 15),
-                Size = new Size(355, 40),
+                Location = new Point(S(15), S(15)),
+                Size = new Size(S(355), S(40)),
                 AutoSize = false
             };
 
             _checkedListBox = new ThemedCheckedListBox
             {
-                Location = new Point(15, 58),
-                Size = new Size(355, listHeight),
+                Location = new Point(S(15), S(58)),
+                Size = new Size(S(355), listHeight),
                 CheckOnClick = true,
-                IntegralHeight = false
+                IntegralHeight = false,
+                ItemHeight = rowHeight
             };
 
             foreach (var opt in options)
@@ -145,16 +161,16 @@ namespace SSH_Helper.Services.Scripting.Commands
             _lblCount = new Label
             {
                 Text = BuildCountText(0),
-                Location = new Point(15, 62 + listHeight),
-                Size = new Size(170, 20),
+                Location = new Point(S(15), S(62) + listHeight),
+                Size = new Size(S(170), S(20)),
                 ForeColor = SystemColors.GrayText
             };
 
             _lblError = new Label
             {
                 Text = string.Empty,
-                Location = new Point(185, 62 + listHeight),
-                Size = new Size(185, 20),
+                Location = new Point(S(185), S(62) + listHeight),
+                Size = new Size(S(185), S(20)),
                 ForeColor = Color.Red,
                 TextAlign = ContentAlignment.TopRight,
                 Visible = false
@@ -163,16 +179,16 @@ namespace SSH_Helper.Services.Scripting.Commands
             var btnOk = new Button
             {
                 Text = "OK",
-                Size = new Size(80, 28),
-                Location = new Point(205, formHeight - 70)
+                Size = new Size(S(80), S(28)),
+                Location = new Point(S(205), formHeight - S(70))
             };
             btnOk.Click += BtnOk_Click;
 
             var btnCancel = new Button
             {
                 Text = "Cancel",
-                Size = new Size(80, 28),
-                Location = new Point(290, formHeight - 70),
+                Size = new Size(S(80), S(28)),
+                Location = new Point(S(290), formHeight - S(70)),
                 DialogResult = DialogResult.Cancel
             };
 

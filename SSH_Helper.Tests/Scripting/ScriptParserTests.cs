@@ -1463,6 +1463,82 @@ steps:
     }
 
     [Fact]
+    public void Parse_InputStep_FontSize_ParsesAsFloat()
+    {
+        var yaml = @"---
+steps:
+  - input:
+      prompt: ""Enter value:""
+      into: v
+      font_size: 14";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Input!.FontSize.Should().Be(14f);
+    }
+
+    [Fact]
+    public void Parse_InputStep_FontSizeOmitted_IsNull()
+    {
+        var yaml = @"---
+steps:
+  - input:
+      prompt: ""Enter value:""
+      into: v";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Input!.FontSize.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_ChooseStep_FontSize_ParsesAsFloat()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      prompt: ""Pick:""
+      into: pick
+      options: [a, b]
+      font_size: 16.5";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Choose!.FontSize.Should().Be(16.5f);
+    }
+
+    [Fact]
+    public void Parse_MultiselectStep_FontSize_ParsesAsFloat()
+    {
+        var yaml = @"---
+steps:
+  - multiselect:
+      prompt: ""Pick many:""
+      into: picks
+      options: [a, b, c]
+      font_size: 12";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Multiselect!.FontSize.Should().Be(12f);
+    }
+
+    [Fact]
+    public void Parse_ConfirmStep_FontSize_ParsesAsFloat()
+    {
+        var yaml = @"---
+steps:
+  - confirm:
+      prompt: ""Are you sure?""
+      into: answer
+      font_size: 18";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Confirm!.FontSize.Should().Be(18f);
+    }
+
+    [Fact]
     public void Parse_InputOnErrorInsideMap_ParsesOnError()
     {
         var yaml = """

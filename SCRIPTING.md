@@ -2198,6 +2198,7 @@ Prompts the user for input during script execution with optional validation.
     password: false            # Optional (default: false)
     validate: "^regex$"        # Optional regex validation
     validation_error: "Error"  # Optional custom error message
+    font_size: 14              # Optional per-prompt font size in points
 ```
 
 **Parameters:**
@@ -2211,6 +2212,7 @@ Prompts the user for input during script execution with optional validation.
 | `password` | No | `false` | Mask input for sensitive data |
 | `validate` | No | - | Regex pattern to validate input |
 | `validation_error` | No | `"Input does not match required format."` | Error message when validation fails |
+| `font_size` | No | Settings → Fonts → Script prompts | Font size for this prompt in points. Dialog grows proportionally. |
 
 **Features:**
 - Dialog appears during script execution
@@ -2283,6 +2285,7 @@ Prompts the user to select one option from a list during script execution.
     # or: options: interface_list
     # or: options: ${interface_list}
     default: "option1"             # Optional
+    font_size: 14                  # Optional per-prompt font size in points
 ```
 
 **With Label/Value Pairs:**
@@ -2307,6 +2310,7 @@ Prompts the user to select one option from a list during script execution.
 | `into` | Yes | - | Variable name to store the selected value |
 | `options` | Yes | - | Inline list of options OR a variable/expression that resolves to a list |
 | `default` | No | - | Pre-selected option (matched against values) |
+| `font_size` | No | Settings → Fonts → Script prompts | Font size for this prompt in points. Dialog grows proportionally. |
 
 **Features:**
 - Options can be simple strings (label and value are the same) or label/value pairs
@@ -2383,6 +2387,7 @@ Prompts the user to select multiple options from a checklist during script execu
     # or: options: ${interface_list}
     min: 1                         # Optional: minimum selections
     max: 3                         # Optional: maximum selections
+    font_size: 14                  # Optional per-prompt font size in points
 ```
 
 **Parameters:**
@@ -2395,6 +2400,7 @@ Prompts the user to select multiple options from a checklist during script execu
 | `options` | Yes | - | Inline list of options OR a variable/expression that resolves to a list |
 | `min` | No | - | Minimum number of selections required |
 | `max` | No | - | Maximum number of selections allowed |
+| `font_size` | No | Settings → Fonts → Script prompts | Font size for this prompt in points. Dialog grows proportionally. |
 
 **Features:**
 - Stores result as a list: use `${into[0]}`, `${into[1]}`, `${into.length}` for indexing
@@ -2462,6 +2468,7 @@ Prompts the user with a yes/no confirmation dialog during script execution.
     prompt: "Are you sure?"
     into: variable_name
     default: false                 # Optional (default: false)
+    font_size: 14                  # Optional per-prompt font size in points
 ```
 
 **Parameters:**
@@ -2472,6 +2479,7 @@ Prompts the user with a yes/no confirmation dialog during script execution.
 | `prompt` | No | `"Are you sure?"` | Text to display to the user |
 | `into` | Yes | - | Variable name to store result (`"true"` or `"false"`) |
 | `default` | No | `false` | Which button is focused: `true` = Yes, `false` = No |
+| `font_size` | No | Settings → Fonts → Script prompts | Font size for this prompt in points. Dialog grows proportionally. |
 
 **Features:**
 - Stores `"true"` (Yes) or `"false"` (No/Escape) as a string

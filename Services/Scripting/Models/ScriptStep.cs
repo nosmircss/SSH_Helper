@@ -645,6 +645,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Error message to show when validation fails.
         /// </summary>
         public string? ValidationError { get; set; }
+
+        /// <summary>
+        /// Optional per-prompt font size override (in points).
+        /// Falls back to FontSettings.ScriptPromptFontSize when unset.
+        /// </summary>
+        public float? FontSize { get; set; }
     }
 
     /// <summary>
@@ -699,6 +705,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Default selection (matched against option values).
         /// </summary>
         public string? Default { get; set; }
+
+        /// <summary>
+        /// Optional per-prompt font size override (in points).
+        /// Falls back to FontSettings.ScriptPromptFontSize when unset.
+        /// </summary>
+        public float? FontSize { get; set; }
     }
 
     /// <summary>
@@ -741,6 +753,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Maximum number of selections allowed.
         /// </summary>
         public int? Max { get; set; }
+
+        /// <summary>
+        /// Optional per-prompt font size override (in points).
+        /// Falls back to FontSettings.ScriptPromptFontSize when unset.
+        /// </summary>
+        public float? FontSize { get; set; }
     }
 
     /// <summary>
@@ -767,6 +785,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Default button: true = Yes focused, false = No focused.
         /// </summary>
         public bool Default { get; set; }
+
+        /// <summary>
+        /// Optional per-prompt font size override (in points).
+        /// Falls back to FontSettings.ScriptPromptFontSize when unset.
+        /// </summary>
+        public float? FontSize { get; set; }
     }
 
     /// <summary>

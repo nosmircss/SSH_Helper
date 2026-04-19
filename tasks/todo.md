@@ -4809,3 +4809,24 @@
   - `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NotifyCommandTests|FullyQualifiedName~ScriptContextTests|FullyQualifiedName~SshExecutionServiceOutputWindowTests|FullyQualifiedName~SshExecutionServicePreconnectTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~Form1BuiltInEditorVariableTests|FullyQualifiedName~ScriptDependencyAnalyzerTests" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -v minimal` passed with 150 tests.
   - `openspec validate add-outputwindow-built-in-variable --strict --no-interactive` passed.
   - `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -v minimal` passed after restore access was available; existing `MSB3277` `WindowsBase` warning remains.
+
+## 215. Expose script prompt `font_size` in Flow Canvas
+- [x] 215.1 Add RED coverage for Flow Canvas prompt block metadata, bridge import, and export ordering for `font_size`.
+- [x] 215.2 Wire `font_size` through Flow Canvas registry, properties grouping, and bridge property extraction/order for `input`, `choose`, `multiselect`, and `confirm`.
+- [x] 215.3 Run targeted verification for the new Flow Canvas bridge coverage and document results.
+
+### 215 Review
+- Added RED coverage in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` for three failure modes:
+  - registry/properties-panel metadata missing `font_size`,
+  - `TextToGraph(...)` not extracting `font_size` into prompt block props,
+  - choose/multiselect export ordering placing `font_size` after `on_error`.
+- Wired Flow Canvas prompt-font support end-to-end:
+  - added `font_size` property definitions to `input`, `choose`, `multiselect`, and `confirm` in `FlowCanvas/src/blockDefs/registry.ts`,
+  - added `font_size` to `ADVANCED_PROPERTY_KEYS` in `FlowCanvas/src/panels/Properties.tsx`,
+  - updated `Services/FlowCanvasBridge.cs` to extract/import `font_size`, treat it as an advanced-panel option, and serialize it in properties-panel order for choose/multiselect exports.
+- Verification:
+  - RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_ScriptPromptFontSizeOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~Registry_ScriptPromptBlocks_ExposeFontSizeInAdvancedPanel|FullyQualifiedName~TextToGraph_ScriptPromptSteps_ImportFontSizeIntoProps" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseIntermediateOutputPath=obj/isolated/ -p:BaseOutputPath=obj/isolated_bin/ -v minimal` failed `3/3` before implementation on missing registry/import/order wiring.
+  - GREEN: the same targeted command passed `3/3` after the implementation.
+  - Broader bridge coverage: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~DriftGuard_RegistryPanelOrder_MatchesBridgePreferredExportOrder_ForAllBlocks|FullyQualifiedName~ExportGraphToYaml_ScriptPromptFontSizeOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~Registry_ScriptPromptBlocks_ExposeFontSizeInAdvancedPanel|FullyQualifiedName~TextToGraph_ScriptPromptSteps_ImportFontSizeIntoProps|FullyQualifiedName~ImportExportRoundTrip_ChooseLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_MultiselectLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_ChooseOptionsSourceScalar_PreservesSource" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseIntermediateOutputPath=obj/isolated/ -p:BaseOutputPath=obj/isolated_bin/ -v minimal` passed `7/7`.
+  - `npm.cmd run build` in `FlowCanvas/` passed after rerunning outside the sandbox due a Vite `spawn EPERM` sandbox restriction; existing Vite chunk-size warning remains.
+  - `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:BaseIntermediateOutputPath=obj/isolated_build/ -p:BaseOutputPath=obj/isolated_build_bin/ -v minimal` passed; existing warnings remain (`NU1900`, `MSB3277`).

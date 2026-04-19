@@ -252,8 +252,8 @@ namespace SSH_Helper.Services
                 // Properties panel order differs from parser option-key catalog for these blocks.
                 ["send"] = ["command", "capture", "suppress", "expect", "timeout", "retry", "retry_delay", "fail_on_nonzero", "on_error"],
                 ["extract"] = ["pattern", "into", "from", "match", "required"],
-                ["choose"] = ["title", "prompt", "options", "into", "default", "on_error"],
-                ["multiselect"] = ["title", "prompt", "options", "into", "min", "max", "on_error"],
+                ["choose"] = ["title", "prompt", "options", "into", "default", "font_size", "on_error"],
+                ["multiselect"] = ["title", "prompt", "options", "into", "min", "max", "font_size", "on_error"],
                 ["playsound"] = ["path", "max_seconds", "into", "wait", "volume", "on_error"],
                 ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "success_codes", "max_output_bytes", "confirm", "quiet", "into", "fail_on_nonzero", "suppress", "title", "timeout", "on_error"],
                 ["vault"] = ["profile", "path", "key", "keys", "into", "version", "write", "patch", "on_error"],
@@ -264,6 +264,7 @@ namespace SSH_Helper.Services
             "default",
             "validate",
             "validation_error",
+            "font_size",
             "min",
             "max",
             "timeout",
@@ -2448,6 +2449,7 @@ namespace SSH_Helper.Services
                         SetIfBoolTrue(props, "password", step.Input.Password);
                         SetIfNotNull(props, "validate", step.Input.Validate);
                         SetIfNotNull(props, "validation_error", step.Input.ValidationError);
+                        SetIfDouble(props, "font_size", step.Input.FontSize);
                     }
                     break;
 
@@ -2458,6 +2460,7 @@ namespace SSH_Helper.Services
                         SetIfNotNull(props, "prompt", step.Choose.Prompt);
                         SetIfNotNull(props, "into", step.Choose.Into);
                         SetIfNotNull(props, "default", step.Choose.Default);
+                        SetIfDouble(props, "font_size", step.Choose.FontSize);
                         if (!string.IsNullOrWhiteSpace(step.Choose.OptionsFrom))
                         {
                             props["options"] = step.Choose.OptionsFrom;
@@ -2477,6 +2480,7 @@ namespace SSH_Helper.Services
                         SetIfNotNull(props, "into", step.Multiselect.Into);
                         SetIfNumber(props, "min", step.Multiselect.Min);
                         SetIfNumber(props, "max", step.Multiselect.Max);
+                        SetIfDouble(props, "font_size", step.Multiselect.FontSize);
                         if (!string.IsNullOrWhiteSpace(step.Multiselect.OptionsFrom))
                         {
                             props["options"] = step.Multiselect.OptionsFrom;
@@ -2495,6 +2499,7 @@ namespace SSH_Helper.Services
                         SetIfNotNull(props, "prompt", step.Confirm.Prompt);
                         SetIfNotNull(props, "into", step.Confirm.Into);
                         if (step.Confirm.Default) props["default"] = true;
+                        SetIfDouble(props, "font_size", step.Confirm.FontSize);
                     }
                     break;
 

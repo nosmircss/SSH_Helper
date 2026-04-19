@@ -76,6 +76,7 @@ namespace SSH_Helper
         private NumericUpDown _numMenuFontSize = null!;
         private NumericUpDown _numStatusBarFontSize = null!;
         private NumericUpDown _numDialogFontSize = null!;
+        private NumericUpDown _numScriptPromptFontSize = null!;
 
         // Appearance tab controls - Global Scale
         private TrackBar _trkGlobalScale = null!;
@@ -2040,7 +2041,7 @@ namespace SSH_Helper
             scrollPanel.Controls.Add(lblSizesSection);
             y += 25;
 
-            var fontSizesTable = CreateLabelSpinnerTable(6, scrollPanel.ClientSize.Width - 30);
+            var fontSizesTable = CreateLabelSpinnerTable(7, scrollPanel.ClientSize.Width - 30);
             fontSizesTable.Location = new Point(15, y);
             AddTableRow(fontSizesTable, 0, "Section titles:", out _numSectionTitleSize, 9.5m, "Tree views:", out _numTreeViewSize, 9.5m);
             AddTableRow(fontSizesTable, 1, "Empty labels:", out _numEmptyLabelSize, 9.5m, "Execute buttons:", out _numExecuteButtonSize, 9.5m);
@@ -2048,6 +2049,14 @@ namespace SSH_Helper
             AddTableRow(fontSizesTable, 3, "Tab headers:", out _numTabFontSize, 9m, "Buttons:", out _numButtonFontSize, 9m);
             AddTableRow(fontSizesTable, 4, "Host list:", out _numHostListFontSize, 9m, "Menus:", out _numMenuFontSize, 9m);
             AddTableRow(fontSizesTable, 5, "Status bar:", out _numStatusBarFontSize, 9m, "Dialogs:", out _numDialogFontSize, 9m);
+
+            // Script prompt font size (left column only; right column empty)
+            var lblScriptPrompt = new Label { Text = "Script prompts:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 0, 0) };
+            _numScriptPromptFontSize = CreateNumericUpDown(0, 0, 9m, 7, 24, 0.5m, 1);
+            _numScriptPromptFontSize.ValueChanged += (s, e) => UpdatePreview();
+            fontSizesTable.Controls.Add(lblScriptPrompt, 0, 6);
+            fontSizesTable.Controls.Add(_numScriptPromptFontSize, 1, 6);
+
             scrollPanel.Controls.Add(fontSizesTable);
             y += fontSizesTable.PreferredSize.Height + 10;
 
@@ -2509,6 +2518,7 @@ namespace SSH_Helper
             _numMenuFontSize.Value = (decimal)settings.MenuFontSize;
             _numStatusBarFontSize.Value = (decimal)settings.StatusBarFontSize;
             _numDialogFontSize.Value = (decimal)settings.DialogFontSize;
+            _numScriptPromptFontSize.Value = (decimal)Math.Clamp(settings.ScriptPromptFontSize, 7f, 24f);
 
             _trkGlobalScale.Value = (int)(settings.GlobalScaleFactor * 100);
             _lblGlobalScaleValue.Text = $"{_trkGlobalScale.Value}%";
@@ -2720,6 +2730,7 @@ namespace SSH_Helper
                 config.FontSettings.MenuFontSize = (float)_numMenuFontSize.Value;
                 config.FontSettings.StatusBarFontSize = (float)_numStatusBarFontSize.Value;
                 config.FontSettings.DialogFontSize = (float)_numDialogFontSize.Value;
+                config.FontSettings.ScriptPromptFontSize = (float)_numScriptPromptFontSize.Value;
 
                 // Appearance - Global Scale
                 config.FontSettings.GlobalScaleFactor = _trkGlobalScale.Value / 100f;

@@ -288,6 +288,13 @@ namespace SSH_Helper.Models
         /// </summary>
         public float DialogFontSize { get; set; } = 9f;
 
+        /// <summary>
+        /// Font size for script prompt dialogs (input, choose, multiselect, confirm).
+        /// Independent of DialogFontSize so script prompts can be enlarged without
+        /// resizing every other app dialog. Can be overridden per-step in YAML via font_size:.
+        /// </summary>
+        public float ScriptPromptFontSize { get; set; } = 9f;
+
         // === Global Scaling ===
 
         /// <summary>

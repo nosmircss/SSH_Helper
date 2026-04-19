@@ -117,7 +117,7 @@ namespace SSH_Helper.Services.Scripting
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
                 ["exists"] = ["path", "into", "type", "on_error"],
                 ["playsound"] = ["path", "wait", "volume", "max_seconds", "into", "on_error"],
-                ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error", "on_error"],
+                ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error", "font_size", "on_error"],
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
                 ["log"] = ["message", "level"],
@@ -129,9 +129,9 @@ namespace SSH_Helper.Services.Scripting
                 ["sftp"] = ["action", "local_path", "remote_path", "host", "port", "username", "password", "overwrite", "timeout", "into", "on_error"],
                 ["webhook"] = ["url", "method", "body", "headers", "into", "timeout", "on_error"],
                 ["parse"] = ["format", "from", "into", "sections"],
-                ["choose"] = ["title", "prompt", "into", "options", "default", "on_error"],
-                ["multiselect"] = ["title", "prompt", "into", "options", "min", "max", "on_error"],
-                ["confirm"] = ["title", "prompt", "into", "default", "on_error"],
+                ["choose"] = ["title", "prompt", "into", "options", "default", "font_size", "on_error"],
+                ["multiselect"] = ["title", "prompt", "into", "options", "min", "max", "font_size", "on_error"],
+                ["confirm"] = ["title", "prompt", "into", "default", "font_size", "on_error"],
                 ["interactive"] = ["session", "title", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"],
                 ["assert"] = ["condition", "message", "severity"],
                 ["switch"] = ["value", "cases", "default"],
@@ -2243,6 +2243,11 @@ namespace SSH_Helper.Services.Scripting
                         case "validationerror":
                             options.ValidationError = parser.Consume<Scalar>().Value;
                             break;
+                        case "font_size":
+                        case "fontsize":
+                            if (float.TryParse(parser.Consume<Scalar>().Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var inputFont))
+                                options.FontSize = inputFont;
+                            break;
                         case "on_error":
                         case "onerror":
                             ApplyNestedOnErrorAlias(step, parser);
@@ -2293,6 +2298,11 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         case "default":
                             options.Default = parser.Consume<Scalar>().Value;
+                            break;
+                        case "font_size":
+                        case "fontsize":
+                            if (float.TryParse(parser.Consume<Scalar>().Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var chooseFont))
+                                options.FontSize = chooseFont;
                             break;
                         case "on_error":
                         case "onerror":
@@ -2350,6 +2360,11 @@ namespace SSH_Helper.Services.Scripting
                             if (int.TryParse(parser.Consume<Scalar>().Value, out var max))
                                 options.Max = max;
                             break;
+                        case "font_size":
+                        case "fontsize":
+                            if (float.TryParse(parser.Consume<Scalar>().Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var multiFont))
+                                options.FontSize = multiFont;
+                            break;
                         case "on_error":
                         case "onerror":
                             ApplyNestedOnErrorAlias(step, parser);
@@ -2398,6 +2413,11 @@ namespace SSH_Helper.Services.Scripting
                         case "default":
                             var defVal = parser.Consume<Scalar>().Value.ToLowerInvariant();
                             options.Default = defVal == "true" || defVal == "yes" || defVal == "1";
+                            break;
+                        case "font_size":
+                        case "fontsize":
+                            if (float.TryParse(parser.Consume<Scalar>().Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var confirmFont))
+                                options.FontSize = confirmFont;
                             break;
                         case "on_error":
                         case "onerror":
