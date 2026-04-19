@@ -33,6 +33,7 @@ SSH Helper supports a powerful YAML-based scripting language for automating comp
    - [updatecolumn](#updatecolumn---update-host-table-column)
    - [updateenvironment](#updateenvironment---update-active-environment-variable)
    - [log](#log---output-with-log-level)
+   - [notify](#notify---send-notifications)
    - [http](#http---http-requests-preferred)
    - [browser_callback_capture](#browser_callback_capture---capture-browser-callback-values)
    - [ping](#ping---icmp-reachability-checks)
@@ -2923,6 +2924,160 @@ Outputs a message with a specific log level for categorized output. Unlike `prin
 ```
 
 **Note:** The `log` command always succeeds and never causes script failure, similar to `print`.
+
+---
+
+### notify - Send Notifications
+
+Sends a notification via Slack, Microsoft Teams, or Discord webhook, a Windows desktop toast, or SMTP email. Profile-backed channels are configured under **Settings → Notifications** and their secrets are stored in Windows Credential Manager. `channel: toast` is app-local and does not require a profile.
+
+**Syntax:**
+```yaml
+- notify:
+    profile: <profile-name>     # Optional. Channel inferred from profile.Kind.
+    channel: <channel>           # Optional override: slack | teams | discord | toast | smtp
+    title: <title>               # Optional. Prominent for toast/email; folded into body for webhooks.
+    message: <message>           # Required.
+    level: <level>               # Optional. info (default) | warn | error | success
+    mention: [<mention>, ...]    # Optional. Webhook channels only; Slack/Discord accept shorthand, Teams accepts typed upn:/entra: forms.
+    into: <variable>             # Optional. Captures {sent, channel, status_code, error}.
+    on_error: <mode>             # Optional. stop (default) | continue
+```
+
+**Channel / profile resolution rules:**
+
+| profile: | channel: | Behavior |
+|----------|----------|----------|
+| set | not set | Channel inferred from the profile's kind. |
+| set | set | `channel` must match `profile.Kind`; otherwise the step fails. |
+| not set | `toast` | Toast dispatch; no profile needed. |
+| not set | not set | Falls back to `DefaultProfileName` if configured; otherwise the step fails. |
+| not set | webhook/smtp | Error — those channels require a profile. |
+
+**Setup rules:**
+- Slack, Teams, Discord, and SMTP require **Settings → Notifications** to be enabled because they depend on saved profiles/secrets.
+- `channel: toast` works without a notification profile and does not require the Notifications settings to be enabled.
+
+**Slack mention rules:**
+- For a real Slack user mention, use the member ID form, for example `<@U12345678>`.
+- SSH Helper also accepts safe Slack shorthand in `mention:` and normalizes it for Slack payloads:
+  - `U12345678` or `@U12345678` -> `<@U12345678>`
+  - `here` or `@here` -> `<!here>`
+  - `channel` or `@channel` -> `<!channel>`
+  - `everyone` or `@everyone` -> `<!everyone>`
+- Display names such as `@Bob` remain plain text. SSH Helper does not call Slack APIs to resolve names into member IDs.
+
+**Teams mention rules:**
+- SSH Helper sends Teams notifications as an Incoming Webhook Adaptive Card.
+- Teams live mentions require explicit typed `mention:` entries using either a Microsoft Entra UPN or Microsoft Entra Object ID:
+  - `upn:alice@contoso.com|Alice` -> visible Teams mention `<at>Alice</at>` backed by UPN `alice@contoso.com`
+  - `entra:87d349ed-44d7-43e1-9a83-5f2406dee5bd|Adele` -> visible Teams mention `<at>Adele</at>` backed by that Entra Object ID
+- If the `|display` segment is omitted, SSH Helper uses the identifier itself as the visible mention label.
+- Invalid or unsupported Teams mention entries are not fatal: SSH Helper leaves them as literal text in the mention line and emits a runtime warning instead of creating a live mention entity.
+- Display-name-only values such as `@Bob` remain plain text. SSH Helper does not call Microsoft Graph or other Teams APIs to resolve names into identifiers.
+
+**Discord mention rules:**
+- Discord joins normalized `mention:` values into the top-level message `content`.
+- SSH Helper accepts these explicit Discord shorthand forms:
+  - `user:123456789012345678` -> `<@123456789012345678>`
+  - `role:123456789012345678` -> `<@&123456789012345678>`
+  - `channel:123456789012345678` -> `<#123456789012345678>`
+  - `here` or `@here` -> `@here`
+  - `everyone` or `@everyone` -> `@everyone`
+- Existing raw Discord mention markup is also preserved as-is, for example `<@123456789012345678>`, `<@&123456789012345678>`, and `<#123456789012345678>`.
+- Bare numeric IDs such as `123456789012345678` remain literal text because SSH Helper does not guess whether the ID is a user, role, or channel.
+- Plain display names remain literal text unless Discord itself recognizes the exact content you provide.
+
+**Level → channel-native styling:**
+
+| Level | Slack color | Teams title color | Discord embed | SMTP subject prefix |
+|-------|-------------|-------------------|---------------|---------------------|
+| `info` | `#2196F3` | `Accent` | `3447003` | `[INFO]` |
+| `warn` | `#FFC107` | `Warning` | `16776960` | `[WARN]` |
+| `error` | `#F44336` | `Attention` | `15158332` | `[ERROR]` |
+| `success` | `#4CAF50` | `Good` | `3066993` | `[OK]` |
+
+**Examples:**
+
+```yaml
+# Profile implies channel — one-line job-done ping
+- notify:
+    profile: ops-alerts
+    title: "Backup complete"
+    message: "{{ hosts_ok }}/{{ hosts_total }} hosts succeeded"
+    level: success
+
+# Slack mention using member-ID shorthand
+- notify:
+    profile: ops-alerts
+    title: "Script finished"
+    mention:
+      - U12345678
+      - here
+    message: "${_output}"
+    level: success
+
+# Discord mention using explicit Discord shorthand
+- notify:
+    profile: discord-alerts
+    title: "Script finished"
+    mention:
+      - "user:123456789012345678"
+      - "role:234567890123456789"
+      - "channel:345678901234567890"
+      - "here"
+    message: "${_output}"
+    level: success
+
+# Teams mention using typed UPN / Entra identifier forms
+- notify:
+    profile: teams-alerts
+    title: "Script finished"
+    mention:
+      - "upn:alice@contoso.com|Alice"
+      - "entra:87d349ed-44d7-43e1-9a83-5f2406dee5bd|Adele"
+      - "@Bob"   # invalid for live Teams mention -> sent as literal text with a warning
+    message: "${_output}"
+    level: success
+
+# Discord also accepts raw literal mention markup unchanged
+- notify:
+    profile: discord-alerts
+    title: "Script finished"
+    mention:
+      - "<@123456789012345678>"
+      - "@here"
+    message: "${_output}"
+    level: success
+
+# Windows toast — no profile required
+- notify:
+    channel: toast
+    title: "Script finished"
+    message: "See the output panel for details"
+    level: success
+
+# SMTP email with mentions ignored, into capture, continue on failure
+- notify:
+    profile: ops-mail
+    title: "Compliance scan"
+    message: "Found {{ violations }} violations on {{ now() }}"
+    level: error
+    into: mail_result
+    on_error: continue
+
+- if: "{{ mail_result.sent }} == false"
+  then:
+    - log:
+        message: "Email dispatch failed: {{ mail_result.error }}"
+        level: warn
+```
+
+**`into:` captures a structured result:**
+- `<name>.sent` — `"true"` / `"false"`
+- `<name>.channel` — `"slack"`, `"teams"`, `"discord"`, `"toast"`, or `"smtp"`
+- `<name>.status_code` — HTTP status code for webhook channels (absent for toast/smtp)
+- `<name>.error` — error message when `sent` is `false` (absent on success)
 
 ---
 

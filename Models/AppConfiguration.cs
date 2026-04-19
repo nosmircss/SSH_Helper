@@ -111,6 +111,11 @@ namespace SSH_Helper.Models
         /// </summary>
         public VaultSettings Vault { get; set; } = new();
 
+        /// <summary>
+        /// Notification profiles and defaults for the notify scripting command.
+        /// </summary>
+        public NotificationSettings Notifications { get; set; } = new();
+
         // Recent files
         /// <summary>
         /// Most recently opened CSV file paths, newest first.

@@ -172,6 +172,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public WebhookOptions? Webhook { get; set; }
 
         /// <summary>
+        /// Notify command - sends a notification via Slack/Teams/Discord webhook, Windows toast, or SMTP email.
+        /// </summary>
+        public NotifyOptions? Notify { get; set; }
+
+        /// <summary>
         /// Parse command - parses device configuration text into structured JSON data.
         /// </summary>
         public ParseOptions? Parse { get; set; }
@@ -385,6 +390,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Portcheck != null) return StepType.Portcheck;
             if (Sftp != null) return StepType.Sftp;
             if (Webhook != null) return StepType.Webhook;
+            if (Notify != null) return StepType.Notify;
             if (Parse != null) return StepType.Parse;
             if (Choose != null) return StepType.Choose;
             if (Multiselect != null) return StepType.Multiselect;
@@ -1253,6 +1259,57 @@ namespace SSH_Helper.Services.Scripting.Models
     }
 
     /// <summary>
+    /// Options for the notify command. Channel is inferred from the referenced profile's Kind
+    /// unless an explicit <see cref="Channel"/> override is set.
+    /// </summary>
+    public class NotifyOptions
+    {
+        /// <summary>
+        /// Named notification profile (e.g. "ops-alerts"). Required for webhook and SMTP channels.
+        /// </summary>
+        public string? Profile { get; set; }
+
+        /// <summary>
+        /// Explicit channel override: "slack", "teams", "discord", "toast", "smtp".
+        /// Must match the profile's kind when both are set. Required for "toast" (no profile exists).
+        /// </summary>
+        public string? Channel { get; set; }
+
+        /// <summary>
+        /// Notification title. Optional — toast/email render it prominently; webhook channels fold it in.
+        /// </summary>
+        public string? Title { get; set; }
+
+        /// <summary>
+        /// Notification message body. Required.
+        /// </summary>
+        public string Message { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Severity level: "info" (default), "warn", "error", "success".
+        /// Maps to channel-native color/icon/subject-prefix.
+        /// </summary>
+        public string Level { get; set; } = "info";
+
+        /// <summary>
+        /// Optional mentions for webhook channels. Slack and Discord accept channel-specific shorthand;
+        /// Teams accepts typed forms such as "upn:user@contoso.com|User" and "entra:<guid>|User".
+        /// Ignored for toast/smtp.
+        /// </summary>
+        public List<string>? Mention { get; set; }
+
+        /// <summary>
+        /// Variable name to capture the notification result ({sent, channel, status_code, error}).
+        /// </summary>
+        public string? Into { get; set; }
+
+        /// <summary>
+        /// Error handling: "stop" (default) aborts the script on failure; "continue" logs and proceeds.
+        /// </summary>
+        public string? OnError { get; set; }
+    }
+
+    /// <summary>
     /// Options for the parse command.
     /// </summary>
     public class ParseOptions
@@ -1325,7 +1382,8 @@ namespace SSH_Helper.Services.Scripting.Models
         Table,
         LocalCmd,
         Vault,
-        SetHistoryLabel
+        SetHistoryLabel,
+        Notify
     }
 
     /// <summary>

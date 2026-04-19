@@ -1,5 +1,164 @@
 # TODO
 
+## 246. Switch Teams notify to Adaptive Cards with typed mention support
+- [x] 246.1 Scaffold the OpenSpec change `update-teams-notify-adaptive-card` with proposal, tasks, design, and `scripting-notifications` delta spec.
+- [x] 246.2 Add RED coverage for Teams Adaptive Card payload shape, level mapping, typed mention parsing, and malformed-mention degradation.
+- [x] 246.3 Add RED notify-command coverage proving Teams typed mention strings still honor variable substitution and surface degradation diagnostics.
+- [x] 246.4 Implement the Teams Adaptive Card payload builder and typed mention parsing without changing Slack, Discord, toast, or SMTP behavior.
+- [x] 246.5 Update `SCRIPTING.md`, autocomplete/help text, and any user-facing notify descriptions for the new Teams behavior.
+- [x] 246.6 Run focused verification, broader notification regressions, strict OpenSpec validation, and record the outcome below.
+
+### 246 Review
+- Scope decision:
+- Switched Teams `notify` to Adaptive Card delivery by default and kept the existing `notify` surface (`profile`, `channel`, `title`, `message`, `level`, `mention`, `into`, `on_error`) unchanged.
+- Kept Teams mention support additive and explicit: only typed `upn:` / `entra:` string forms create live Teams mention entities; unsupported entries degrade to literal text with warnings.
+- Implementation:
+- Added `Services/Notifications/TeamsAdaptiveCardPayloadBuilder.cs` to generate the Teams Incoming Webhook envelope (`type: message` + Adaptive Card attachment), map notify levels to Adaptive Card title colors, and parse Teams typed mention strings into visible `<at>...</at>` text plus `msteams.entities`.
+- Updated `Services/Notifications/WebhookDispatcher.cs` so the Teams branch now uses that Adaptive Card builder instead of the legacy MessageCard payload.
+- Updated `Services/Scripting/Commands/NotifyCommand.cs` so it resolves the effective Teams route early enough to emit `ScriptOutputType.Warning` diagnostics for invalid Teams mention entries while still sending the notification.
+- Left Slack, Discord, toast, and SMTP behavior unchanged.
+- Documentation / help text:
+- Updated `SCRIPTING.md` to document Teams Adaptive Card delivery, `upn:` / `entra:` mention forms, degradation semantics, revised level styling, and a concrete Teams example.
+- Updated `FlowCanvas/src/blockDefs/registry.ts`, `Services/Editor/ScriptAutocompleteProvider.cs`, and `Services/Scripting/Models/ScriptStep.cs` so authoring help text matches the new Teams behavior.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~TeamsPayload_IsAdaptiveCardEnvelopeWithSeverityStyledTitle|FullyQualifiedName~TeamsPayload_NormalizesTypedMentionsIntoAdaptiveCardEntities|FullyQualifiedName~TeamsPayload_UsesIdentifierAsDisplayWhenTypedMentionLabelIsOmitted|FullyQualifiedName~TeamsPayload_InvalidMentionEntriesRemainLiteralAlongsideValidMentions|FullyQualifiedName~TeamsTypedMentions_ApplyVariableSubstitutionBeforePayloadGeneration|FullyQualifiedName~InvalidTeamsMention_EmitsWarningButStillSends" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/teams-notify-red/bin/ -v minimal`
+  - Result: failed `9/9` as expected.
+  - Representative failures:
+    - Teams payload still lacked top-level `type: "message"` because runtime still emitted MessageCard.
+    - Invalid Teams mention coverage saw no warnings because the runtime had no degradation path yet.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~TeamsPayload_IsAdaptiveCardEnvelopeWithSeverityStyledTitle|FullyQualifiedName~TeamsPayload_NormalizesTypedMentionsIntoAdaptiveCardEntities|FullyQualifiedName~TeamsPayload_UsesIdentifierAsDisplayWhenTypedMentionLabelIsOmitted|FullyQualifiedName~TeamsPayload_InvalidMentionEntriesRemainLiteralAlongsideValidMentions|FullyQualifiedName~TeamsTypedMentions_ApplyVariableSubstitutionBeforePayloadGeneration|FullyQualifiedName~InvalidTeamsMention_EmitsWarningButStillSends" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/teams-notify-green/bin/ -v minimal`
+  - Result: passed `9/9` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~NotifyCommandTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/teams-notify-regression/bin/ -v minimal`
+  - Result: passed `38/38` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Build verification:
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/teams-notify-build/bin/ -v minimal`
+  - Result: build succeeded with the existing `MSB3277` warning.
+- OpenSpec validation:
+- `cmd /c openspec validate update-teams-notify-adaptive-card --strict --no-interactive`
+  - Result: `Change 'update-teams-notify-adaptive-card' is valid`.
+  - Note: `openspec` printed PostHog telemetry flush errors afterward because outbound network is blocked in the sandbox, but validation itself completed successfully with exit code `0`.
+
+## 245. Add explicit Discord mention shorthand for notify
+- [x] 245.1 Add RED coverage proving Discord notify normalizes explicit typed shorthand while preserving raw markup and leaving ambiguous bare IDs literal.
+- [x] 245.2 Implement Discord-only mention normalization in the webhook payload builder without adding any ID-type inference or lookup behavior.
+- [x] 245.3 Update `SCRIPTING.md` so Discord notify docs describe the typed shorthand, preserved literal markup, and ambiguity of bare numeric IDs.
+- [x] 245.4 Run focused verification plus notification regression/build coverage and record the outcome below.
+
+### 245 Review
+- Scope decision:
+- Added explicit Discord shorthand only for syntactically unambiguous forms.
+- Did not auto-wrap bare numeric IDs because Discord IDs are ambiguous across users, roles, and channels.
+- Did not add any Discord API lookup or display-name resolution.
+- Implementation:
+- Updated `Services/Notifications/WebhookDispatcher.cs` so Discord mention values are normalized as follows before being joined into webhook `content`:
+  - `user:123...` -> `<@123...>`
+  - `role:123...` -> `<@&123...>`
+  - `channel:123...` -> `<#123...>`
+  - `here` or `@here` -> `@here`
+  - `everyone` or `@everyone` -> `@everyone`
+  - Existing raw Discord markup such as `<@123...>`, `<@&123...>`, and `<#123...>` is preserved as-is.
+  - Bare numeric IDs and display names remain literal text.
+- Updated `SCRIPTING.md` notify docs to:
+  - describe the explicit Discord shorthand forms,
+  - state that raw Discord markup still works unchanged,
+  - state that bare numeric IDs remain literal because SSH Helper does not infer user vs. role vs. channel,
+  - add concrete Discord shorthand and raw-markup examples.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.DiscordPayload_NormalizesTypedMentionShorthand|FullyQualifiedName~NotificationServiceTests.DiscordPayload_PreservesLiteralMentionMarkup|FullyQualifiedName~NotificationServiceTests.DiscordPayload_LeavesBareIdsAndDisplayNamesLiteral" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/discord-mention-red/bin/ -v minimal`
+  - Result: failed `1/3` as expected.
+  - `DiscordPayload_NormalizesTypedMentionShorthand` failed because Discord still received the literal `user:... role:... channel:...` text.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.DiscordPayload_NormalizesTypedMentionShorthand|FullyQualifiedName~NotificationServiceTests.DiscordPayload_PreservesLiteralMentionMarkup|FullyQualifiedName~NotificationServiceTests.DiscordPayload_LeavesBareIdsAndDisplayNamesLiteral" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/discord-mention-green/bin/ -v minimal`
+  - Result: passed `3/3`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~NotifyCommandTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/discord-mention-regression/bin/ -v minimal`
+  - Result: passed `33/33` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Build verification:
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/discord-mention-build/bin/ -v minimal`
+  - Result: build succeeded with the existing `MSB3277` warning.
+
+## 244. Document Teams and Discord mention behavior for notify
+- [x] 244.1 Inspect the Teams and Discord webhook payload builders to confirm current mention behavior.
+- [x] 244.2 Update `SCRIPTING.md` so channel-specific mention behavior is explicit for Teams and Discord.
+
+### 244 Review
+- Verified current runtime behavior in `Services/Notifications/WebhookDispatcher.cs`:
+  - Slack normalizes safe shorthand and supports member-ID-based mentions.
+  - Teams does not consume the `mention` list at all in the current MessageCard payload builder.
+  - Discord passes `mention` values through literally by joining them into the top-level `content` field.
+- Updated `SCRIPTING.md` to document that:
+  - Teams currently ignores `mention`.
+  - Discord requires valid Discord mention tokens or special mentions to be supplied directly by the script author.
+
+## 243. Normalize safe Slack mention shorthand and document member-ID usage
+- [x] 243.1 Add RED coverage proving Slack notify normalizes safe shorthand (`here`, `channel`, bare user IDs) while leaving unsupported display-name text untouched.
+- [x] 243.2 Implement the minimal Slack-only mention normalization in the notification payload path without adding any display-name lookup behavior.
+- [x] 243.3 Update `SCRIPTING.md` so the notify docs are explicit that Slack user mentions need the member ID form and describe the accepted shorthand.
+- [x] 243.4 Run focused verification and record the outcome below.
+
+### 243 Review
+- Scope decision:
+- Implemented safe Slack-only shorthand normalization for values that can be inferred locally from syntax alone.
+- Did not add any Slack API lookup or display-name resolution. Inputs like `@Thomas Farral` still remain literal text because incoming webhooks do not resolve names to member IDs.
+- Implementation:
+- Updated `Services/Notifications/WebhookDispatcher.cs` so Slack mentions are normalized as follows before payload assembly:
+  - `U12345678` or `@U12345678` -> `<@U12345678>`
+  - `here` or `@here` -> `<!here>`
+  - `channel` or `@channel` -> `<!channel>`
+  - `everyone` or `@everyone` -> `<!everyone>`
+  - Already wrapped Slack markup (for example `<@U12345678>` or `<!here>`) is preserved as-is.
+  - Non-matching text remains literal.
+- Updated `SCRIPTING.md` notify docs to:
+  - state clearly that real Slack user mentions require the member-ID form,
+  - document the accepted shorthand forms,
+  - explicitly note that display names are not resolved,
+  - add a concrete Slack notify example using member-ID shorthand.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.SlackPayload_NormalizesSafeMentionShorthand|FullyQualifiedName~NotificationServiceTests.SlackPayload_LeavesDisplayNameMentionLiteral" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-mention-red/bin/ -v minimal`
+  - Result: failed `1/2` as expected.
+  - `SlackPayload_NormalizesSafeMentionShorthand` failed because Slack still received literal `U12345678 @here channel` text.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.SlackPayload_NormalizesSafeMentionShorthand|FullyQualifiedName~NotificationServiceTests.SlackPayload_LeavesDisplayNameMentionLiteral" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-mention-green/bin/ -v minimal`
+  - Result: passed `2/2`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~NotifyCommandTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-mention-regression/bin/ -v minimal`
+  - Result: passed `30/30` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+  - Note: an initial parallel regression/build attempt produced an `obj\...\SSH_Helper.dll` lock; rerunning the regression serially passed cleanly.
+- Build verification:
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/notify-mention-build/bin/ -v minimal`
+  - Result: build succeeded with the existing `MSB3277` warning.
+
+## 242. Make `notify.channel: toast` work without profile notification setup
+- [x] 242.1 Add RED coverage proving disabled notification settings still wire toast-capable runtime service, while non-toast channels remain disabled.
+- [x] 242.2 Implement the minimal runtime fix so `channel: toast` works without profile setup and non-toast channels still require notification profiles to be enabled.
+- [x] 242.3 Update `SCRIPTING.md` to document the exact setup rules for toast vs. profile-backed notifications.
+- [x] 242.4 Run focused verification and record the outcome below.
+
+### 242 Review
+- Root cause:
+- `Form1.InitializeNotifications()` returned early when `config.Notifications.Enabled` was false, so script execution never received a `NotificationService` instance and `notify` failed immediately with `Notifications are not configured`, even for `channel: toast`.
+- `NotificationService.SendAsync(...)` already supported toast without a profile, but because it ignored the disabled flag for non-toast channels, simply wiring the service all the time would also have unintentionally enabled Slack/Teams/Discord/SMTP when the user had disabled notification profiles.
+- Implementation:
+- Updated `Form1.InitializeNotifications()` to always construct and wire `NotificationService` into the main SSH execution service and job execution service.
+- Updated `Services/Notifications/NotificationService.cs` so `channel: toast` remains allowed when notifications are disabled, while Slack/Teams/Discord/SMTP return a disabled-settings failure unless **Settings → Notifications** is enabled.
+- Updated `SCRIPTING.md` to explicitly state that toast is app-local and profile-free, while profile-backed channels depend on the Notifications settings.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.ToastChannel_WhenNotificationsDisabled_StillDispatches|FullyQualifiedName~NotificationServiceTests.NonToastProfile_WhenNotificationsDisabled_ReturnsDisabledFailure|FullyQualifiedName~Form1NotificationInitializationTests.InitializeNotifications_WhenProfileNotificationsAreDisabled_StillWiresToastCapableService" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-toast-red/bin/ -v minimal`
+  - Result: failed `2/3` as expected.
+  - `NotificationServiceTests.NonToastProfile_WhenNotificationsDisabled_ReturnsDisabledFailure` failed because disabled non-toast delivery still sent successfully.
+  - `Form1NotificationInitializationTests.InitializeNotifications_WhenProfileNotificationsAreDisabled_StillWiresToastCapableService` failed because `_notificationService` was still null.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.ToastChannel_WhenNotificationsDisabled_StillDispatches|FullyQualifiedName~NotificationServiceTests.NonToastProfile_WhenNotificationsDisabled_ReturnsDisabledFailure|FullyQualifiedName~Form1NotificationInitializationTests.InitializeNotifications_WhenProfileNotificationsAreDisabled_StillWiresToastCapableService" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-toast-green/bin/ -v minimal`
+  - Result: passed `3/3`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~NotifyCommandTests|FullyQualifiedName~Form1NotificationInitializationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-toast-regression/bin/ -v minimal`
+  - Result: passed `29/29` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Build verification:
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/notify-toast-build/bin/ -v minimal`
+  - Result: build succeeded with the existing `MSB3277` warning and one transient `MSB3026` retry due a locked intermediate DLL.
+
 ## 241. Archive completed OpenSpec changes
 - [x] 241.1 Confirm the archive set from `openspec list` and exclude incomplete proposals.
 - [x] 241.2 Archive `add-portable-release-build`, `add-vault-oidc-auth`, and `add-prompt-built-in-variable` with the OpenSpec CLI.

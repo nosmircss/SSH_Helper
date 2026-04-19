@@ -154,7 +154,8 @@ namespace SSH_Helper.Services.Editor
             ["return"] = "Return value",
             ["table"] = "Data table",
             ["vault"] = "Read, write, or patch secrets from HashiCorp Vault",
-            ["sethistorylabel"] = "Label history entry. Scalar 'sethistorylabel: name' or object form { value, replace, mode, separator }"
+            ["sethistorylabel"] = "Label history entry. Scalar 'sethistorylabel: name' or object form { value, replace, mode, separator }",
+            ["notify"] = "Send a notification via Slack/Teams/Discord webhook, Teams Adaptive Card, Windows toast, or SMTP email"
         };
 
         private static readonly Dictionary<string, string> TopLevelKeyDescriptions = new(StringComparer.OrdinalIgnoreCase)
@@ -208,7 +209,8 @@ namespace SSH_Helper.Services.Editor
             ["confirm"] = ["into"],
             ["assert"] = ["condition"],
             ["browser_callback_capture"] = ["start_url", "callback_path", "into"],
-            ["localcmd"] = ["command"]
+            ["localcmd"] = ["command"],
+            ["notify"] = ["message"]
         };
 
         private static readonly Dictionary<string, string> BuiltInSymbolDescriptions = new(StringComparer.OrdinalIgnoreCase)

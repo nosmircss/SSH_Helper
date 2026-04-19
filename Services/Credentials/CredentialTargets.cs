@@ -27,6 +27,16 @@ namespace SSH_Helper.Services
             return BuildVaultAuthTarget(AppDataPaths.IsPortableBuild, profileName, authType);
         }
 
+        public static string NotifyWebhookTarget(string profileName)
+        {
+            return BuildNotifyTarget(AppDataPaths.IsPortableBuild, profileName, "webhook_url");
+        }
+
+        public static string NotifySmtpPasswordTarget(string profileName)
+        {
+            return BuildNotifyTarget(AppDataPaths.IsPortableBuild, profileName, "smtp_password");
+        }
+
         internal static string BuildDefaultPasswordTarget(bool portableBuild)
         {
             var prefix = GetPrefix(portableBuild);
@@ -52,6 +62,14 @@ namespace SSH_Helper.Services
         {
             var prefix = GetPrefix(portableBuild);
             return $"{prefix}:vault:{profileName}:{authType}";
+        }
+
+        internal static string BuildNotifyTarget(bool portableBuild, string profileName, string secretType)
+        {
+            var prefix = GetPrefix(portableBuild);
+            var safeName = (profileName ?? string.Empty).Trim();
+            var safeType = (secretType ?? string.Empty).Trim();
+            return $"{prefix}:notify:{safeName}:{safeType}";
         }
 
         private static string GetPrefix(bool portableBuild)

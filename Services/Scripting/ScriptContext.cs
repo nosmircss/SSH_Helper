@@ -304,6 +304,11 @@ namespace SSH_Helper.Services.Scripting
         public string? EnvironmentVaultProfile { get; set; }
 
         /// <summary>
+        /// Notification service for the notify command. Null when notifications are not wired up.
+        /// </summary>
+        public Notifications.NotificationService? NotificationService { get; set; }
+
+        /// <summary>
         /// Active root script for this execution context.
         /// </summary>
         public Script? ActiveScript { get; set; }

@@ -14,6 +14,7 @@ using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.Services.Notifications;
 using SSH_Helper.Services.Vault;
 using SSH_Helper.UI;
 using SSH_Helper.Utilities;
@@ -269,6 +270,9 @@ namespace SSH_Helper
         // Vault service
         private VaultService? _vaultService;
 
+        // Notification service
+        private NotificationService? _notificationService;
+
         // Track which TreeView triggered the context menu
         private TreeView? _contextMenuSourceTreeView;
         private readonly ToolStripMenuItem _ctxFolderBaseEnvironment = new();
@@ -323,6 +327,7 @@ namespace SSH_Helper
                 _uiOutputThrottler.Dispose();
                 _scriptValidationService.Dispose();
                 _vaultService?.Dispose();
+                _notificationService?.Dispose();
             };
 
             // Initialize services
@@ -364,6 +369,7 @@ namespace SSH_Helper
             InitializeFromConfiguration(config);
             InitializeCredentials();
             InitializeVault();
+            InitializeNotifications();
             InitializeDataGridView();
             InitializeScriptEditor();
             InitializeOutputHistory();
@@ -1402,6 +1408,33 @@ namespace SSH_Helper
             _sshService.VaultService = _vaultService;
             if (_jobExecutionService != null)
                 _jobExecutionService.VaultCredentialProvider = new VaultCredentialProvider(_vaultService);
+        }
+
+        private void InitializeNotifications()
+        {
+            _notificationService?.Dispose();
+            _notificationService = null;
+            _sshService.NotificationService = null;
+            if (_jobExecutionService != null)
+                _jobExecutionService.NotificationService = null;
+
+            var config = _configService.GetCurrent();
+            _notificationService = new NotificationService(
+                config.Notifications,
+                webhookUrlProvider: profileName =>
+                {
+                    var target = CredentialTargets.NotifyWebhookTarget(profileName);
+                    return _credentialProvider?.TryGetPassword(target, out _, out var url) == true ? url : null;
+                },
+                smtpPasswordProvider: profileName =>
+                {
+                    var target = CredentialTargets.NotifySmtpPasswordTarget(profileName);
+                    return _credentialProvider?.TryGetPassword(target, out _, out var pw) == true ? pw : null;
+                });
+
+            _sshService.NotificationService = _notificationService;
+            if (_jobExecutionService != null)
+                _jobExecutionService.NotificationService = _notificationService;
         }
 
         private void TryLoadDefaultPassword()
@@ -5644,6 +5677,7 @@ namespace SSH_Helper
                 }
 
                 InitializeVault();
+                InitializeNotifications();
             }
 
             // A timeout reset is persisted immediately in the settings dialog.
@@ -6985,6 +7019,7 @@ namespace SSH_Helper
                 var context = new Services.Scripting.ScriptContext(initialVars);
                 context.DebugMode = true; // Capture debug-level output (e.g., "Extract: var = 'value'")
                 context.VaultService = _vaultService;
+                context.NotificationService = _notificationService;
                 context.EnvironmentVaultProfile = _environmentService.GetEnvironment(
                     _environmentService.GetActiveEnvironmentName()).VaultProfileName;
 
@@ -14429,6 +14464,7 @@ namespace SSH_Helper
             _jobExecutionService.VaultCredentialProvider = _vaultService != null
                 ? new VaultCredentialProvider(_vaultService)
                 : null;
+            _jobExecutionService.NotificationService = _notificationService;
             _jobExecutionService.EnvironmentVaultProfile = _environmentService.GetEnvironment(
                 _environmentService.GetActiveEnvironmentName()).VaultProfileName;
             _jobHistoryService = new JobHistoryService();

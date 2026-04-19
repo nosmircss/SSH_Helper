@@ -8,6 +8,7 @@ using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.Services.Notifications;
 using SSH_Helper.Services.Vault;
 using SSH_Helper.UI;
 using SSH_Helper.Utilities;
@@ -211,6 +212,11 @@ namespace SSH_Helper.Services
         /// Optional VaultService for resolving vault:// variable references during script execution.
         /// </summary>
         public VaultService? VaultService { get; set; }
+
+        /// <summary>
+        /// Optional NotificationService for dispatching notify-command notifications during script execution.
+        /// </summary>
+        public NotificationService? NotificationService { get; set; }
 
         /// <summary>
         /// Optional environment-specific Vault profile override.
@@ -1757,6 +1763,7 @@ namespace SSH_Helper.Services
             context.DebugMode = effectiveDebugMode;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
             context.VaultService = VaultService;
+            context.NotificationService = NotificationService;
             context.EnvironmentVaultProfile = EnvironmentVaultProfile;
             _activeScriptContext = context;
             ApplyConfiguredFlowCanvasDebugState(context);

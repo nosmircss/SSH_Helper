@@ -185,6 +185,7 @@ namespace SSH_Helper.Services
             "required_fields",
             "sections",
             "success_codes",
+            "mention",
         };
 
         private static readonly HashSet<string> DictionaryOptionKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -242,6 +243,7 @@ namespace SSH_Helper.Services
                 ["log"] = ["message"],
                 ["localcmd"] = ["command"],
                 ["vault"] = ["path"],
+                ["notify"] = ["message"],
             };
 
         private static readonly IReadOnlyDictionary<string, string[]> PreferredOptionOrderOverridesByCommand =
@@ -2561,6 +2563,21 @@ namespace SSH_Helper.Services
                     }
                     break;
 
+                case StepType.Notify:
+                    if (step.Notify != null)
+                    {
+                        SetIfNotNull(props, "profile", step.Notify.Profile);
+                        SetIfNotNull(props, "channel", step.Notify.Channel);
+                        SetIfNotNull(props, "title", step.Notify.Title);
+                        SetIfNotNull(props, "message", step.Notify.Message);
+                        if (!string.Equals(step.Notify.Level, "info", StringComparison.OrdinalIgnoreCase))
+                            props["level"] = step.Notify.Level;
+                        if (step.Notify.Mention != null && step.Notify.Mention.Count > 0)
+                            props["mention"] = JArray.FromObject(step.Notify.Mention);
+                        SetIfNotNull(props, "into", step.Notify.Into);
+                    }
+                    break;
+
                 case StepType.Sftp:
                     if (step.Sftp != null)
                     {
@@ -4039,6 +4056,7 @@ namespace SSH_Helper.Services
                 StepType.UpdateEnvironment => ("updateenvironment", step.UpdateEnvironment?.Variable),
                 StepType.LocalCmd => ("localcmd", step.LocalCmd?.Command),
                 StepType.Vault => ("vault", step.Vault?.Path),
+                StepType.Notify => ("notify", step.Notify?.Title ?? step.Notify?.Message),
                 _ => ("unknown", null),
             };
         }

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using SSH_Helper.Models;
+using SSH_Helper.Services.Notifications;
 
 namespace SSH_Helper.Services
 {
@@ -67,6 +68,11 @@ namespace SSH_Helper.Services
         /// Optional Vault credential provider. Set after construction when VaultService becomes available.
         /// </summary>
         public VaultCredentialProvider? VaultCredentialProvider { get; set; }
+
+        /// <summary>
+        /// Optional notification service for dispatching notify-command notifications during scheduled job runs.
+        /// </summary>
+        public NotificationService? NotificationService { get; set; }
 
         /// <summary>
         /// Optional active-environment Vault profile name used as a scheduler default when jobs do not specify one.
@@ -401,6 +407,7 @@ namespace SSH_Helper.Services
                 sshService.VaultService = VaultCredentialProvider.VaultService;
                 sshService.EnvironmentVaultProfile = defaultVaultProfileOverride;
             }
+            sshService.NotificationService = NotificationService;
 
             // Scheduler cancellation for both single-preset and folder jobs flows through
             // the per-run SSH service via Stop(), which cancels its internal execution token.

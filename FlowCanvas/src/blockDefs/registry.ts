@@ -577,6 +577,32 @@ export const blockDefs: BlockDef[] = [
       { key: 'level', label: 'Level', type: 'select', options: ['info', 'debug', 'warning', 'error', 'success'], defaultValue: 'info' },
     ],
   },
+  {
+    type: 'notify',
+    label: 'Notify',
+    category: 'io',
+    icon: 'notify',
+    description: 'Send a notification via Slack/Teams/Discord webhook, Teams Adaptive Card, Windows toast, or SMTP email',
+    previewKey: 'message',
+    properties: [
+      { key: 'profile', label: 'Profile', type: 'text', placeholder: 'ops-alerts',
+        helpText: 'Named notification profile. Required for webhook and email channels.' },
+      { key: 'channel', label: 'Channel', type: 'select',
+        options: ['', 'slack', 'teams', 'discord', 'toast', 'smtp'], defaultValue: '',
+        helpText: 'Override channel. Required for toast (no profile). Must match profile kind when both set.' },
+      { key: 'title', label: 'Title', type: 'text' },
+      { key: 'message', label: 'Message', type: 'textarea', required: true },
+      { key: 'level', label: 'Level', type: 'select',
+        options: ['info', 'warn', 'error', 'success'], defaultValue: 'info',
+        helpText: 'Maps to channel-native color/icon/subject-prefix.' },
+      { key: 'mention', label: 'Mentions', type: 'textarea',
+        placeholder: '["upn:alice@contoso.com|Alice"]',
+        helpText: 'JSON array of mentions. Slack/Discord accept shorthand; Teams accepts upn:<id>|<display> or entra:<id>|<display>.' },
+      { key: 'into', label: 'Into Variable', type: 'text',
+        helpText: 'Captures {sent, channel, status_code, error}.' },
+      onErrorProp,
+    ],
+  },
 
   // Local Command
   {

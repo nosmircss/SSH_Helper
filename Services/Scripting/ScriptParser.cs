@@ -61,7 +61,8 @@ namespace SSH_Helper.Services.Scripting
             "table",
             "localcmd",
             "vault",
-            "sethistorylabel"
+            "sethistorylabel",
+            "notify"
         };
         private static readonly string[] KnownTopLevelKeys =
         {
@@ -139,7 +140,8 @@ namespace SSH_Helper.Services.Scripting
                 ["table"] = ["data", "columns", "into", "align", "show_header"],
                 ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "fail_on_nonzero", "success_codes", "max_output_bytes", "confirm", "quiet", "suppress", "title", "into", "timeout", "on_error"],
                 ["vault"] = ["path", "key", "keys", "into", "write", "patch", "profile", "version", "on_error"],
-                ["sethistorylabel"] = ["value", "replace", "mode", "separator"]
+                ["sethistorylabel"] = ["value", "replace", "mode", "separator"],
+                ["notify"] = ["profile", "channel", "title", "message", "level", "mention", "into", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -184,7 +186,8 @@ namespace SSH_Helper.Services.Scripting
                 ["table"] = [],
                 ["localcmd"] = [],
                 ["vault"] = [],
-                ["sethistorylabel"] = []
+                ["sethistorylabel"] = [],
+                ["notify"] = []
             };
         private static readonly HashSet<string> CanonicalMapCommands = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -221,7 +224,8 @@ namespace SSH_Helper.Services.Scripting
             StepType.Confirm,
             StepType.Interactive,
             StepType.Call,
-            StepType.Assert
+            StepType.Assert,
+            StepType.Notify
         ];
         private static readonly HashSet<string> ExitStatusTokens = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -309,6 +313,11 @@ namespace SSH_Helper.Services.Scripting
                 ["sethistorylabel"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["mode"] = HistoryLabelOperation.KnownModes
+                },
+                ["notify"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["channel"] = ["slack", "teams", "discord", "toast", "smtp"],
+                    ["level"] = ["info", "warn", "error", "success"]
                 }
             };
 
@@ -1045,6 +1054,10 @@ namespace SSH_Helper.Services.Scripting
                     case "webhook":
                         step.DeclaredStepType = StepType.Webhook;
                         step.Webhook = ParseWebhookOptions(parser, step);
+                        break;
+                    case "notify":
+                        step.DeclaredStepType = StepType.Notify;
+                        step.Notify = ParseNotifyOptions(parser, step);
                         break;
                     case "parse":
                         step.DeclaredStepType = StepType.Parse;
@@ -3249,6 +3262,63 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown webhook key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private NotifyOptions ParseNotifyOptions(IParser parser, ScriptStep step)
+        {
+            var options = new NotifyOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "profile":
+                            options.Profile = parser.Consume<Scalar>().Value;
+                            break;
+                        case "channel":
+                            options.Channel = parser.Consume<Scalar>().Value;
+                            break;
+                        case "title":
+                            options.Title = parser.Consume<Scalar>().Value;
+                            break;
+                        case "message":
+                            options.Message = parser.Consume<Scalar>().Value;
+                            break;
+                        case "level":
+                            options.Level = parser.Consume<Scalar>().Value;
+                            break;
+                        case "mention":
+                            options.Mention = ParseStringList(parser);
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown notify key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }

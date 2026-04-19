@@ -138,6 +138,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.LocalCmd, new LocalCmdCommand(localCmdConfirmation) },
                 { StepType.Vault, new VaultCommand() },
                 { StepType.SetHistoryLabel, new SetHistoryLabelCommand() },
+                { StepType.Notify, new NotifyCommand() },
             };
         }
 
