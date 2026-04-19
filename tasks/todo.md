@@ -1,5 +1,63 @@
 # TODO
 
+## 256. Keep the disabled `Canceling...` stop button visually consistent
+- [x] 256.1 Add RED coverage proving the cancellation state uses `btnStopAll.Enabled = false`, expands wide enough for `Canceling...`, and renders disabled text with the same centered white styling as the active stop button.
+- [x] 256.2 Implement the minimal stop-button rendering/layout fix while restoring the disabled cancellation state.
+- [x] 256.3 Run focused verification, document the review notes below, and capture the lesson from the user correction.
+
+### 256 Review
+- Root cause:
+- The previous fix kept `btnStopAll` enabled, which preserved the white text but violated the actual interaction requirement that the button become disabled during cancellation.
+- A plain disabled WinForms button re-rendered the caption in black, and the fixed `80px` stop-button width clipped `Canceling...`.
+- Implementation:
+- Updated `SSH_Helper.Tests/UI/Form1StopButtonStateTests.cs` so the regression now asserts the corrected product surface:
+  - `StopExecution()` sets `btnStopAll.Enabled = false`,
+  - the caption changes to `Canceling...`,
+  - the stop button widens enough for the full label,
+  - the disabled rendering bitmap matches the enabled reference rendering for the same control.
+- Added `UI/FlatVisualButton.cs`, a small user-painted flat button that preserves the configured red background, white centered text, and flat hover/pressed colors even when the control is disabled.
+- Swapped `btnStopAll` to `SSH_Helper.UI.FlatVisualButton` in `Form1.Designer.cs`.
+- Updated `Form1.cs` to restore `btnStopAll.Enabled = false`, rename the label to `Canceling...`, track the default stop-button width, and measure/reapply the stop-button width and position through `UpdateStopButtonLayout()`.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1StopButtonStateTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-red2/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-red2/obj/ -v minimal`
+  - Result: failed `1/1` as expected before the fix.
+  - Representative failure: the button text was still `Cancelling...` instead of the required `Canceling...`.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1StopButtonStateTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-green2/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-green2/obj/ -v minimal`
+  - Result: passed `1/1`.
+- `dotnet build SSH_Helper.csproj -nologo -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-build2/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-build2/obj/`
+  - Result: build succeeded.
+- Notes:
+- The isolated-output build also completed the FlowCanvas `npm run build` step successfully.
+- Existing `MSB3277` warnings remain unchanged.
+
+## 255. Keep the Stop button styling consistent while cancellation is pending
+- [x] 255.1 Confirm the cancellation-state approach, then add RED coverage proving the `Stop` button keeps its white, centered flat-button presentation when its text changes to `Cancelling...`.
+- [x] 255.2 Implement the minimal `Form1` change so the button remains visually consistent during cancellation without allowing repeated stop requests.
+- [x] 255.3 Run focused verification, document the review notes below, and capture the lesson from the user correction.
+
+### 255 Review
+- Root cause:
+- `Form1.StopExecution()` disabled `btnStopAll` as soon as the caption changed to `Cancelling...`.
+- On WinForms, that disabled state stopped using the active flat-button presentation, so the dark-theme button no longer rendered like the normal red `Stop` state.
+- Implementation:
+- Added `SSH_Helper.Tests/UI/Form1StopButtonStateTests.cs` with a dark-theme WinForms regression that forces the form into a running state, invokes `StopExecution()`, and asserts the stop button stays in its active rendering state while showing `Cancelling...`.
+- Updated `Form1.StopExecution()` to keep `btnStopAll` enabled and rely on the existing `_manualCancellationRequested` guard to ignore repeat stop requests.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1StopButtonStateTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-red/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-red/obj/ -v minimal`
+  - Result: failed `1/1` as expected before the fix.
+  - Representative failure: `stopButton.Enabled` was `False`, proving the cancellation transition still dropped the button into disabled rendering.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1StopButtonStateTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-green/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-green/obj/ -v minimal`
+  - Result: passed `1/1`.
+- `dotnet build SSH_Helper.csproj -nologo`
+  - Result: completed the FlowCanvas `npm run build` step outside the sandbox, then failed because `bin\Debug\net8.0-windows10.0.17763.0\SSH_Helper.exe` was locked by a running local `SSH_Helper` process (`PID 45120`).
+- `dotnet build SSH_Helper.csproj -nologo -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-build/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-build/obj/`
+  - Result: build succeeded.
+- Notes:
+- Test/build commands used `DOTNET_CLI_HOME=.\.dotnet` to keep first-run writes inside the workspace.
+- Existing `NU1900` and `MSB3277` warnings remain unchanged.
+
 ## 254. Make commented script text color fully green with quote-aware `#` handling
 - [x] 254.1 Add RED coverage proving unquoted `#` makes the rest of the line comment-green while quoted `#` stays part of the string literal.
 - [x] 254.2 Update `YamlSshSyntaxHighlighter` so token highlighting stops at the first unquoted `#`, then applies a single comment span through end-of-line.

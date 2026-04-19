@@ -127,7 +127,7 @@ namespace SSH_Helper
             lblScriptTitle = new Label();
             executePanel = new BufferedPanel();
             btnExecuteSelected = new Button();
-            btnStopAll = new Button();
+            btnStopAll = new SSH_Helper.UI.FlatVisualButton();
             outputPanel = new BufferedPanel();
             outputSplitContainer = new BufferedSplitContainer();
             outputRightPanel = new BufferedPanel();
@@ -1862,7 +1862,7 @@ namespace SSH_Helper
         // Execute panel
         private BufferedPanel executePanel;
         private Button btnExecuteSelected;
-        private Button btnStopAll;
+        private SSH_Helper.UI.FlatVisualButton btnStopAll;
 
         // Output panel
         private BufferedPanel outputPanel;

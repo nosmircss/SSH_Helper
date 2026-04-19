@@ -263,6 +263,8 @@ namespace SSH_Helper
         private readonly object _outputBufferLock = new();
         private readonly OutputThrottler _uiOutputThrottler;
         private bool _manualCancellationRequested;
+        private const int StopButtonHorizontalPadding = 20;
+        private int _defaultStopButtonWidth;
 
         // Credential provider
         private ICredentialProvider? _credentialProvider;
@@ -309,6 +311,7 @@ namespace SSH_Helper
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
             InitializeComponent();
+            _defaultStopButtonWidth = btnStopAll.Width;
             InitializeFlowCanvasMenuItem();
             _hostGridRestoreBatcher = new HostGridRestoreBatcher(
                 onScrollbarRefresh: UpdateDataGridViewScrollbars,
@@ -10847,10 +10850,7 @@ namespace SSH_Helper
                 using var g = btnExecuteSelected.CreateGraphics();
                 var selectedSize = g.MeasureString(btnExecuteSelected.Text, btnExecuteSelected.Font);
                 btnExecuteSelected.Width = (int)selectedSize.Width + 40;
-
-                // Position Stop button with same spacing and ensure matching height
-                btnStopAll.Left = btnExecuteSelected.Right + 8;
-                btnStopAll.Height = btnExecuteSelected.Height;
+                UpdateStopButtonLayout();
             }
             catch (ArgumentException)
             {
@@ -12819,9 +12819,10 @@ namespace SSH_Helper
             if (!_sshService.IsRunning || _manualCancellationRequested)
                 return;
 
-            // Immediate visual feedback - disable button and change text
+            // Immediate visual feedback while keeping the button disabled against repeat clicks.
+            btnStopAll.Text = "Canceling...";
             btnStopAll.Enabled = false;
-            btnStopAll.Text = "Cancelling...";
+            UpdateStopButtonLayout();
             UpdateStatusBar("Cancellation requested...");
             _manualCancellationRequested = true;
 
@@ -13031,17 +13032,34 @@ namespace SSH_Helper
                 _manualCancellationRequested = false;
                 btnStopAll.Enabled = true;
                 btnStopAll.Text = "Stop";
+                UpdateStopButtonLayout();
             }
             else
             {
                 _manualCancellationRequested = false;
                 btnStopAll.Enabled = true;
                 btnStopAll.Text = "Stop";
+                UpdateStopButtonLayout();
                 statusProgress.Visible = false;
                 EndManualExecutionProgress();
             }
 
             SshDebugLog("UI", $"SetExecutionMode({executing}) completed", sw);
+        }
+
+        private void UpdateStopButtonLayout()
+        {
+            try
+            {
+                var requiredWidth = TextRenderer.MeasureText(btnStopAll.Text, btnStopAll.Font).Width + StopButtonHorizontalPadding;
+                btnStopAll.Width = Math.Max(_defaultStopButtonWidth, requiredWidth);
+                btnStopAll.Left = btnExecuteSelected.Right + 8;
+                btnStopAll.Height = btnExecuteSelected.Height;
+            }
+            catch (ArgumentException)
+            {
+                // Font may have an invalidated GDI+ handle during transitions; layout will correct on the next stable call.
+            }
         }
 
         private void SshService_OutputReceived(object? sender, SshOutputEventArgs e)

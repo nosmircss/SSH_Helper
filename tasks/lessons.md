@@ -4,6 +4,8 @@
 - When a user points out delimiter-sensitive editor coloring rules, I must turn that into quote-aware regression coverage instead of assuming a simple token search is safe for syntax highlighting.
 - When a user extends an editor convenience request with paired reverse behavior and exact formatting rules, I must update the implementation plan before coding and lock those specifics into regression tests instead of treating them as minor follow-up details.
 - When I finish an OpenSpec-backed change, I must update both `tasks/todo.md` and the change-local `openspec/changes/.../tasks.md` checklist before I hand off; implementation is not complete until both tracking surfaces reflect the finished work.
+- When a user reports a dark-theme WinForms button state looks wrong after a caption change, I must verify whether I accidentally switched the control into disabled rendering; disabled buttons can ignore the active white/centered styling even when the logical `ForeColor` setup looks correct.
+- When a user corrects a UI requirement from “keep the style” to “keep the style while truly disabled,” I must not stop at an interaction workaround like leaving the control enabled; I need to preserve the requested disabled state and fix rendering/layout at the control layer instead.
 
 ## 2026-04-13
 - When the user says a value should remain valid in raw YAML/runtime but be removed from visual suggestions, I must align autocomplete and UI suggestion tests with that intended product surface instead of preserving stale compatibility expectations in editor/Flow Canvas tests.
