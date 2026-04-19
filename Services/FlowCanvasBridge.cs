@@ -2725,6 +2725,23 @@ namespace SSH_Helper.Services
                     }
                     break;
 
+                case StepType.SetHistoryLabel:
+                    switch (step.SetHistoryLabel)
+                    {
+                        case string label:
+                            SetIfNotNull(props, "value", label);
+                            break;
+                        case SetHistoryLabelOptions options:
+                            SetIfNotNull(props, "value", options.Value);
+                            if (options.Replace.HasValue)
+                                props["replace"] = options.Replace.Value ? "true" : "false";
+                            if (!string.Equals(options.Mode, HistoryLabelOperation.ReplaceMode, StringComparison.OrdinalIgnoreCase))
+                                props["mode"] = HistoryLabelOperation.NormalizeMode(options.Mode);
+                            SetIfNotNull(props, "separator", options.Separator);
+                            break;
+                    }
+                    break;
+
                 case StepType.Log:
                     switch (step.Log)
                     {
@@ -3574,6 +3591,9 @@ namespace SSH_Helper.Services
                 case "log":
                     options["message"] = commandValue;
                     return true;
+                case "sethistorylabel":
+                    options["value"] = commandValue;
+                    return true;
                 case "exit":
                 {
                     if (TrySplitExitStatusAndMessage(commandValue.ToString(), out var status, out var message))
@@ -4012,6 +4032,16 @@ namespace SSH_Helper.Services
             };
         }
 
+        private static string? GetSetHistoryLabelPreview(object? setHistoryLabelValue)
+        {
+            return setHistoryLabelValue switch
+            {
+                SetHistoryLabelOptions options => options.Value,
+                string value => value,
+                _ => setHistoryLabelValue?.ToString(),
+            };
+        }
+
         private static (string blockType, string? preview) GetStepPreview(ScriptStep step, StepType stepType)
         {
             return stepType switch
@@ -4056,6 +4086,7 @@ namespace SSH_Helper.Services
                 StepType.UpdateEnvironment => ("updateenvironment", step.UpdateEnvironment?.Variable),
                 StepType.LocalCmd => ("localcmd", step.LocalCmd?.Command),
                 StepType.Vault => ("vault", step.Vault?.Path),
+                StepType.SetHistoryLabel => ("sethistorylabel", GetSetHistoryLabelPreview(step.SetHistoryLabel)),
                 StepType.Notify => ("notify", step.Notify?.Title ?? step.Notify?.Message),
                 _ => ("unknown", null),
             };

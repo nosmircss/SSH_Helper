@@ -50,6 +50,74 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void TextToGraph_SetHistoryLabelScalarStep_ImportsAsSetHistoryLabelBlock_WithPreviewAndExtractedProps()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - sethistorylabel: Core Router
+            """;
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var labelNode = nodes
+            .OfType<JObject>()
+            .FirstOrDefault(node =>
+                string.Equals(
+                    node["data"]?["blockType"]?.ToString(),
+                    "sethistorylabel",
+                    StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotNull(labelNode);
+
+        var props = labelNode!["data"]?["props"] as JObject;
+        Assert.NotNull(props);
+        Assert.Equal("Core Router", props!["value"]?.ToString());
+        Assert.Equal("Core Router", props["_preview"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_NotifyStep_ImportsAsNotifyBlock_WithExtractedProps()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - notify:
+                  profile: ops
+                  title: Deployment done
+                  message: "Build finished"
+                  level: success
+                  mention:
+                    - here
+                    - user:123456789
+                  into: notify_result
+            """;
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var notifyNode = nodes
+            .OfType<JObject>()
+            .FirstOrDefault(node =>
+                string.Equals(
+                    node["data"]?["blockType"]?.ToString(),
+                    "notify",
+                    StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotNull(notifyNode);
+
+        var props = notifyNode!["data"]?["props"] as JObject;
+        Assert.NotNull(props);
+        Assert.Equal("ops", props!["profile"]?.ToString());
+        Assert.Equal("Deployment done", props["title"]?.ToString());
+        Assert.Equal("Build finished", props["message"]?.ToString());
+        Assert.Equal("success", props["level"]?.ToString());
+        Assert.Equal("notify_result", props["into"]?.ToString());
+        Assert.Equal(JTokenType.Array, props["mention"]?.Type);
+    }
+
+    [Fact]
     public void ExportGraphToYaml_MixedGeneratedAndContainerSteps_ProducesParsableYaml()
     {
         var bridge = new FlowCanvasBridge();
@@ -1884,6 +1952,22 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void Registry_SetHistoryLabelAndNotifyBlocks_ExposeExpectedPropertySurface()
+    {
+        var registryBlocks = LoadRegistryBlockPropertyOrder(out _);
+
+        Assert.True(
+            registryBlocks.ContainsKey("sethistorylabel"),
+            "Flow Canvas registry is missing a sethistorylabel block.");
+        Assert.Equal(
+            new[] { "value", "replace", "mode", "separator" },
+            registryBlocks["sethistorylabel"]);
+        Assert.Equal(
+            new[] { "profile", "channel", "title", "message", "level", "mention", "into", "on_error" },
+            registryBlocks["notify"]);
+    }
+
+    [Fact]
     public void TextToGraph_LocalCmdInteractiveDetached_PreservesExplicitLifetimeProp()
     {
         var bridge = new FlowCanvasBridge();
@@ -1930,6 +2014,35 @@ public class FlowCanvasBridgeTests
         var script = parser.Parse(result.Yaml);
         Assert.NotNull(script.Steps[0].LocalCmd);
         Assert.True(script.Steps[0].LocalCmd!.LifetimeSpecified);
+    }
+
+    [Fact]
+    public void ImportExportRoundTrip_SetHistoryLabelScalar_PreservesEditableValue()
+    {
+        var result = RoundTripThroughBridge(
+            """
+            ---
+            steps:
+              - sethistorylabel: Core Router
+            """);
+
+        AssertExportSuccessWithCanonicalValidation(result);
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(result.Yaml);
+        Assert.Single(script.Steps);
+        Assert.Equal(StepType.SetHistoryLabel, script.Steps[0].GetStepType());
+        switch (script.Steps[0].SetHistoryLabel)
+        {
+            case string scalarValue:
+                Assert.Equal("Core Router", scalarValue);
+                break;
+            case SetHistoryLabelOptions options:
+                Assert.Equal("Core Router", options.Value);
+                break;
+            default:
+                throw new Xunit.Sdk.XunitException("sethistorylabel value was not preserved through the Flow Canvas bridge.");
+        }
     }
 
     [Fact]

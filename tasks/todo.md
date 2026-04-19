@@ -1,5 +1,46 @@
 # TODO
 
+## 247. Finish `sethistorylabel` and `notify` authoring/Flow Canvas wiring
+- [x] 247.1 Add RED coverage proving `sethistorylabel` and `notify` show up with the expected autocomplete detail/option metadata and Flow Canvas export/import metadata.
+- [x] 247.2 Patch the editor/Flow Canvas metadata so both commands are available and correctly configured.
+- [x] 247.3 Run focused verification and record the outcome below.
+
+### 247 Review
+- Root cause:
+- `notify` was already present in parser-driven autocomplete and Flow Canvas bridge/registry metadata, but it lacked direct regression coverage.
+- `sethistorylabel` had parser/autocomplete coverage from earlier work, yet Flow Canvas still missed the block definition entirely and the bridge treated imported `sethistorylabel: value` steps as `unknown` because it had no preview mapping or scalar-snippet option conversion for that command.
+- Implementation:
+- Added focused autocomplete coverage for `notify` detail text, option keys, and `level` enum suggestions.
+- Added Flow Canvas bridge coverage proving:
+  - `sethistorylabel` imports as a real block with extracted props and round-trips through the bridge,
+  - `notify` imports with the expected props,
+  - the Flow Canvas registry exposes both blocks with the expected property surface.
+- Updated `FlowCanvas/src/blockDefs/registry.ts` to add the `sethistorylabel` block to the Data palette with `value`, `replace`, `mode`, and `separator` properties.
+- Updated `Services/FlowCanvasBridge.cs` to:
+  - extract `sethistorylabel` props during YAML -> graph import,
+  - map `StepType.SetHistoryLabel` previews to the real Flow Canvas block type,
+  - convert scalar `sethistorylabel: label` snippets into editable `{ value: ... }` bridge options during export.
+- RED verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_Notify_ShowsDetailText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_NotifyStepOptionKey_SuggestsNotifyFields|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_NotifyLevelValue_SuggestsKnownLevels|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_SetHistoryLabelScalarStep_ImportsAsSetHistoryLabelBlock_WithPreviewAndExtractedProps|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_NotifyStep_ImportsAsNotifyBlock_WithExtractedProps|FullyQualifiedName~FlowCanvasBridgeTests.Registry_SetHistoryLabelAndNotifyBlocks_ExposeExpectedPropertySurface|FullyQualifiedName~FlowCanvasBridgeTests.ImportExportRoundTrip_SetHistoryLabelScalar_PreservesEditableValue" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/sethistorylabel-notify-red/bin/ -v minimal`
+  - Result: failed `3/7` as expected.
+  - Representative failures:
+    - `TextToGraph_SetHistoryLabelScalarStep_ImportsAsSetHistoryLabelBlock_WithPreviewAndExtractedProps` could not find a `sethistorylabel` block because the bridge still imported it as `unknown`.
+    - `ImportExportRoundTrip_SetHistoryLabelScalar_PreservesEditableValue` failed with `Unsupported block type 'unknown'`.
+    - `Registry_SetHistoryLabelAndNotifyBlocks_ExposeExpectedPropertySurface` reported the missing Flow Canvas `sethistorylabel` block.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_Notify_ShowsDetailText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_NotifyStepOptionKey_SuggestsNotifyFields|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_NotifyLevelValue_SuggestsKnownLevels|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_SetHistoryLabelScalarStep_ImportsAsSetHistoryLabelBlock_WithPreviewAndExtractedProps|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_NotifyStep_ImportsAsNotifyBlock_WithExtractedProps|FullyQualifiedName~FlowCanvasBridgeTests.Registry_SetHistoryLabelAndNotifyBlocks_ExposeExpectedPropertySurface|FullyQualifiedName~FlowCanvasBridgeTests.ImportExportRoundTrip_SetHistoryLabelScalar_PreservesEditableValue" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/sethistorylabel-notify-green/bin/ -v minimal`
+  - Result: passed `7/7` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "(FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~FlowCanvasBridgeTests)&FullyQualifiedName!=SSH_Helper.Tests.Services.FlowCanvasBridgeTests.ExportGraphToYaml_StartAdvancedSectionsFromEditors_AreSerializedInPreamble" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/sethistorylabel-notify-regression2/bin/ -v minimal`
+  - Result: passed `142/142` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+  - Note: the first unfiltered broader pass hit `FlowCanvasBridgeTests.ExportGraphToYaml_StartAdvancedSectionsFromEditors_AreSerializedInPreamble`, which failed with `Access denied: Cannot read from other user` while validating an imported temp-file path outside the sandboxed user context. That failure was unrelated to the touched `sethistorylabel` / `notify` paths.
+- Build verification:
+- `npm.cmd run build` (from `FlowCanvas/`)
+  - Result: Flow Canvas production bundle rebuilt successfully.
+  - Note: Vite emitted its existing large-chunk warning for the main JS bundle.
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/sethistorylabel-notify-build/bin/ -v minimal`
+  - Result: build succeeded with the existing `MSB3277` warning.
+
 ## 246. Switch Teams notify to Adaptive Cards with typed mention support
 - [x] 246.1 Scaffold the OpenSpec change `update-teams-notify-adaptive-card` with proposal, tasks, design, and `scripting-notifications` delta spec.
 - [x] 246.2 Add RED coverage for Teams Adaptive Card payload shape, level mapping, typed mention parsing, and malformed-mention degradation.

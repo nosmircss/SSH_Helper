@@ -295,6 +295,44 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_StepPrefix_Notify_ShowsDetailText()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - not";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Should().Contain(item =>
+            item.Label == "notify" &&
+            item.Detail == "Send a notification via Slack/Teams/Discord webhook, Teams Adaptive Card, Windows toast, or SMTP email");
+    }
+
+    [Fact]
+    public void GetCompletion_NotifyStepOptionKey_SuggestsNotifyFields()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - notify:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["profile", "channel", "title", "message", "level", "mention", "into", "on_error"]);
+    }
+
+    [Fact]
+    public void GetCompletion_NotifyLevelValue_SuggestsKnownLevels()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - notify:\n      level: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["info", "warn", "error", "success"]);
+    }
+
+    [Fact]
     public void GetCompletion_LogBlockOptionKey_SuggestsOnlyLogOptions()
     {
         var provider = new ScriptAutocompleteProvider();

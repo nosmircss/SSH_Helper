@@ -1,5 +1,5 @@
 /**
- * Block type definitions for all 35 SSH Helper script commands.
+ * Block type definitions for all 36 SSH Helper script commands.
  * Each definition includes category, color, icon, default properties, and property schema.
  */
 
@@ -230,6 +230,26 @@ export const blockDefs: BlockDef[] = [
     description: 'Set a variable value (format: varname = expression)',
     previewKey: 'expression',
     properties: [{ key: 'expression', label: 'Expression', type: 'code', required: true, placeholder: 'varname = value' }],
+  },
+  {
+    type: 'sethistorylabel',
+    label: 'Set History Label',
+    category: 'data',
+    icon: 'set',
+    description: 'Set or compose the execution history label',
+    previewKey: 'value',
+    properties: [
+      { key: 'value', label: 'Value', type: 'text', placeholder: 'Core Router',
+        helpText: 'Label text. Leave blank or use clear mode to remove the label.' },
+      { key: 'replace', label: 'Replace Address', type: 'select',
+        options: ['true', 'false'], defaultValue: '',
+        helpText: 'Blank preserves the current address-vs-label display state for append/prepend.' },
+      { key: 'mode', label: 'Mode', type: 'select',
+        options: ['replace', 'append', 'prepend', 'clear'], defaultValue: 'replace',
+        helpText: 'replace overwrites, append/prepend compose, clear removes the label.' },
+      { key: 'separator', label: 'Separator', type: 'text', placeholder: ' / ',
+        helpText: 'Inserted between labels when using append or prepend.' },
+    ],
   },
   {
     type: 'parse',
