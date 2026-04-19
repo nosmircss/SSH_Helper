@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using SSH_Helper.Models;
 using SSH_Helper.Services.Editor;
@@ -363,6 +364,45 @@ namespace SSH_Helper.UI
         public void Cut() => _editor.Cut();
 
         public void Paste() => _editor.Paste();
+
+        public void CommentSelectedLines()
+        {
+            TransformSelectedLines(static lineText =>
+            {
+                if (string.IsNullOrWhiteSpace(lineText))
+                {
+                    return lineText;
+                }
+
+                var indentLength = GetLeadingIndentLength(lineText);
+                return lineText.Insert(indentLength, "#");
+            });
+        }
+
+        public void UncommentSelectedLines()
+        {
+            TransformSelectedLines(static lineText =>
+            {
+                if (string.IsNullOrWhiteSpace(lineText))
+                {
+                    return lineText;
+                }
+
+                var indentLength = GetLeadingIndentLength(lineText);
+                if (indentLength >= lineText.Length || lineText[indentLength] != '#')
+                {
+                    return lineText;
+                }
+
+                var uncommented = lineText.Remove(indentLength, 1);
+                if (indentLength < uncommented.Length && uncommented[indentLength] == ' ')
+                {
+                    uncommented = uncommented.Remove(indentLength, 1);
+                }
+
+                return uncommented;
+            });
+        }
 
         public int GetLineFromCharIndex(int charIndex)
         {
@@ -1498,11 +1538,102 @@ namespace SSH_Helper.UI
             RequestValidationOrClear();
         }
 
+        private void TransformSelectedLines(Func<string, string> transformLine)
+        {
+            if (ReadOnly || _editor.Lines.Count == 0)
+            {
+                return;
+            }
+
+            var selectionStart = Math.Clamp(SelectionStart, 0, _editor.TextLength);
+            var selectionLength = Math.Clamp(SelectionLength, 0, _editor.TextLength - selectionStart);
+            var selectionEndExclusive = selectionStart + selectionLength;
+            var startLine = _editor.LineFromPosition(selectionStart);
+            var endReferencePosition = selectionLength > 0
+                ? Math.Max(selectionStart, selectionEndExclusive - 1)
+                : selectionStart;
+            var endLine = _editor.LineFromPosition(endReferencePosition);
+            if (startLine < 0 || endLine < startLine)
+            {
+                return;
+            }
+
+            var replaceStart = _editor.Lines[startLine].Position;
+            var replaceEnd = endLine + 1 < _editor.Lines.Count
+                ? _editor.Lines[endLine + 1].Position
+                : _editor.TextLength;
+
+            var replacement = new StringBuilder();
+            for (var lineIndex = startLine; lineIndex <= endLine; lineIndex++)
+            {
+                var rawLine = _editor.Lines[lineIndex].Text ?? string.Empty;
+                SplitLineEnding(rawLine, out var lineText, out var lineEnding);
+                replacement.Append(transformLine(lineText));
+                replacement.Append(lineEnding);
+            }
+
+            _suppressTextProcessing = true;
+            _editor.BeginUndoAction();
+            try
+            {
+                _editor.TargetStart = replaceStart;
+                _editor.TargetEnd = replaceEnd;
+                _editor.ReplaceTarget(replacement.ToString());
+                SetSelectionRange(replaceStart, replacement.Length);
+                _editor.ScrollCaret();
+            }
+            finally
+            {
+                _editor.EndUndoAction();
+                _suppressTextProcessing = false;
+            }
+
+            RefreshEditorVisuals();
+            RequestValidationOrClear();
+        }
+
         private void SetSelectionRange(int selectionStart, int selectionLength)
         {
             var safeStart = Math.Clamp(selectionStart, 0, _editor.TextLength);
             var safeEnd = Math.Clamp(safeStart + Math.Max(0, selectionLength), 0, _editor.TextLength);
             _editor.SetSelection(safeEnd, safeStart);
+        }
+
+        private static int GetLeadingIndentLength(string text)
+        {
+            var index = 0;
+            while (index < text.Length)
+            {
+                var current = text[index];
+                if (current != ' ' && current != '\t')
+                {
+                    break;
+                }
+
+                index++;
+            }
+
+            return index;
+        }
+
+        private static void SplitLineEnding(string rawLine, out string lineText, out string lineEnding)
+        {
+            if (rawLine.EndsWith("\r\n", StringComparison.Ordinal))
+            {
+                lineText = rawLine[..^2];
+                lineEnding = "\r\n";
+                return;
+            }
+
+            if (rawLine.EndsWith('\n'))
+            {
+                lineText = rawLine[..^1];
+                lineEnding = "\n";
+                return;
+            }
+
+            lineText = rawLine;
+            lineEnding = string.Empty;
         }
 
         private void RefreshEditorVisuals()

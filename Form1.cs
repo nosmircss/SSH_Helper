@@ -5761,6 +5761,16 @@ namespace SSH_Helper
             InsertSelectedFilePathAtCaret();
         }
 
+        private void ctxCommentSelectedLines_Click(object? sender, EventArgs e)
+        {
+            txtCommand.CommentSelectedLines();
+        }
+
+        private void ctxUncommentSelectedLines_Click(object? sender, EventArgs e)
+        {
+            txtCommand.UncommentSelectedLines();
+        }
+
         private void InsertSelectedFilePathAtCaret()
         {
             var selectedPath = SelectPathForScriptEditor();

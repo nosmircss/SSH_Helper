@@ -717,6 +717,36 @@ public class ScintillaScriptEditorControlTests
     }
 
     [WinFormsFact]
+    public void CommentSelectedLines_PreservesIndentation_AndCommentsNoIndentLinesWithoutSpace()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "steps:\n  - send:\n      command: hi\nprint: done\n";
+        var selectionStart = control.Text.IndexOf("- send:", StringComparison.Ordinal);
+        var selectionEnd = control.Text.IndexOf("done", StringComparison.Ordinal) + "done".Length;
+        control.SelectionStart = selectionStart;
+        control.SelectionLength = selectionEnd - selectionStart;
+
+        InvokePublic(control, "CommentSelectedLines");
+
+        NormalizeLineEndings(control.Text).Should().Be("steps:\n  #- send:\n      #command: hi\n#print: done\n");
+    }
+
+    [WinFormsFact]
+    public void UncommentSelectedLines_RemovesIndentAwareHashes_AndOptionalSingleSpace()
+    {
+        using var control = new ScintillaScriptEditorControl();
+        control.Text = "steps:\n  #send: hi\n    # command: hi\n# print: done\n";
+        var selectionStart = control.Text.IndexOf("#send", StringComparison.Ordinal);
+        var selectionEnd = control.Text.IndexOf("done", StringComparison.Ordinal) + "done".Length;
+        control.SelectionStart = selectionStart;
+        control.SelectionLength = selectionEnd - selectionStart;
+
+        InvokePublic(control, "UncommentSelectedLines");
+
+        NormalizeLineEndings(control.Text).Should().Be("steps:\n  send: hi\n    command: hi\nprint: done\n");
+    }
+
+    [WinFormsFact]
     public void GetCaretPosition_ReturnsOneBasedLineAndColumn()
     {
         using var control = new ScintillaScriptEditorControl();
@@ -755,6 +785,13 @@ public class ScintillaScriptEditorControlTests
     {
         var method = instance.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
         method.Should().NotBeNull($"private method '{methodName}' should exist for this test");
+        return method!.Invoke(instance, parameters);
+    }
+
+    private static object? InvokePublic(object instance, string methodName, params object?[]? parameters)
+    {
+        var method = instance.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public);
+        method.Should().NotBeNull($"public method '{methodName}' should exist for this test");
         return method!.Invoke(instance, parameters);
     }
 

@@ -111,6 +111,8 @@ namespace SSH_Helper
             ctxCopy = new ToolStripMenuItem();
             ctxPaste = new ToolStripMenuItem();
             ctxSelectAll = new ToolStripMenuItem();
+            ctxCommentSelectedLines = new ToolStripMenuItem();
+            ctxUncommentSelectedLines = new ToolStripMenuItem();
             ctxPathBrowser = new ToolStripMenuItem();
             ctxSeparator1 = new ToolStripSeparator();
             ctxValidateScript = new ToolStripMenuItem();
@@ -828,9 +830,9 @@ namespace SSH_Helper
             //
             // contextCommandBox
             //
-            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxPathBrowser, ctxSeparator1, ctxValidateScript });
+            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxCommentSelectedLines, ctxUncommentSelectedLines, ctxPathBrowser, ctxSeparator1, ctxValidateScript });
             contextCommandBox.Name = "contextCommandBox";
-            contextCommandBox.Size = new Size(201, 164);
+            contextCommandBox.Size = new Size(212, 208);
             //
             // ctxCut
             //
@@ -864,22 +866,36 @@ namespace SSH_Helper
             ctxSelectAll.Text = "Select &All";
             ctxSelectAll.Click += (s, e) => txtCommand.SelectAll();
             //
+            // ctxCommentSelectedLines
+            //
+            ctxCommentSelectedLines.Name = "ctxCommentSelectedLines";
+            ctxCommentSelectedLines.Size = new Size(211, 22);
+            ctxCommentSelectedLines.Text = "C&omment Selected Lines";
+            ctxCommentSelectedLines.Click += ctxCommentSelectedLines_Click;
+            //
+            // ctxUncommentSelectedLines
+            //
+            ctxUncommentSelectedLines.Name = "ctxUncommentSelectedLines";
+            ctxUncommentSelectedLines.Size = new Size(211, 22);
+            ctxUncommentSelectedLines.Text = "&Uncomment Selected Lines";
+            ctxUncommentSelectedLines.Click += ctxUncommentSelectedLines_Click;
+            //
             // ctxPathBrowser
             //
             ctxPathBrowser.Name = "ctxPathBrowser";
-            ctxPathBrowser.Size = new Size(200, 22);
+            ctxPathBrowser.Size = new Size(211, 22);
             ctxPathBrowser.Text = "&Path Browser...";
             ctxPathBrowser.Click += ctxPathBrowser_Click;
             //
             // ctxSeparator1
             //
             ctxSeparator1.Name = "ctxSeparator1";
-            ctxSeparator1.Size = new Size(197, 6);
+            ctxSeparator1.Size = new Size(208, 6);
             //
             // ctxValidateScript
             //
             ctxValidateScript.Name = "ctxValidateScript";
-            ctxValidateScript.Size = new Size(200, 22);
+            ctxValidateScript.Size = new Size(211, 22);
             ctxValidateScript.Text = "&Validate Script";
             ctxValidateScript.Click += validateScriptToolStripMenuItem_Click;
             //
@@ -1837,6 +1853,8 @@ namespace SSH_Helper
         private ToolStripMenuItem ctxCopy;
         private ToolStripMenuItem ctxPaste;
         private ToolStripMenuItem ctxSelectAll;
+        private ToolStripMenuItem ctxCommentSelectedLines;
+        private ToolStripMenuItem ctxUncommentSelectedLines;
         private ToolStripMenuItem ctxPathBrowser;
         private ToolStripSeparator ctxSeparator1;
         private ToolStripMenuItem ctxValidateScript;

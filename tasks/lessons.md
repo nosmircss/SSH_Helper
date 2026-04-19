@@ -1,6 +1,7 @@
 # Lessons
 
 ## 2026-04-19
+- When a user extends an editor convenience request with paired reverse behavior and exact formatting rules, I must update the implementation plan before coding and lock those specifics into regression tests instead of treating them as minor follow-up details.
 - When I finish an OpenSpec-backed change, I must update both `tasks/todo.md` and the change-local `openspec/changes/.../tasks.md` checklist before I hand off; implementation is not complete until both tracking surfaces reflect the finished work.
 
 ## 2026-04-13

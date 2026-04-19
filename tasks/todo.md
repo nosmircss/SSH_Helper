@@ -1,5 +1,34 @@
 # TODO
 
+## 253. Add comment and uncomment actions to the commands editor context menu
+- [x] 253.1 Add RED coverage proving the commands editor context menu can comment and uncomment every selected line while preserving indentation and using `#` with no trailing space.
+- [x] 253.2 Implement editor helpers plus context-menu items for `Comment Selected Lines` and `Uncomment Selected Lines`.
+- [x] 253.3 Run focused verification, then record the review notes below.
+
+### 253 Review
+- Implementation:
+- Added two public editor actions on `UI/ScintillaScriptEditorControl.cs`: `CommentSelectedLines()` and `UncommentSelectedLines()`.
+- Both actions operate on every line touched by the current selection, preserve leading indentation, leave blank/whitespace-only lines unchanged, and run as a single undoable edit.
+- Commenting inserts `#` immediately after indentation with no trailing space.
+- Uncommenting removes one leading `#` after indentation and also removes one optional following space so it works on both `#comment` and existing `# comment` lines.
+- Added `Comment Selected Lines` and `Uncomment Selected Lines` to the `txtCommand` context menu in `Form1.Designer.cs`, wired through `Form1.cs` click handlers to the editor helpers.
+- Added focused regression coverage in:
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`
+- `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs`
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests.CommentAndUncommentMenuClick_MultiLineSelection_TogglesIndentAwareHashPrefixes|FullyQualifiedName~ScintillaScriptEditorControlTests.CommentSelectedLines_PreservesIndentation_AndCommentsNoIndentLinesWithoutSpace|FullyQualifiedName~ScintillaScriptEditorControlTests.UncommentSelectedLines_RemovesIndentAwareHashes_AndOptionalSingleSpace" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/comment-menu-red/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-menu-red/obj/ -v minimal`
+  - Result: failed `3/3` as expected before the implementation.
+  - Representative failures: missing `CommentSelectedLines`, missing `UncommentSelectedLines`, and missing `ctxCommentSelectedLines`.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests.CommentAndUncommentMenuClick_MultiLineSelection_TogglesIndentAwareHashPrefixes|FullyQualifiedName~ScintillaScriptEditorControlTests.CommentSelectedLines_PreservesIndentation_AndCommentsNoIndentLinesWithoutSpace|FullyQualifiedName~ScintillaScriptEditorControlTests.UncommentSelectedLines_RemovesIndentAwareHashes_AndOptionalSingleSpace" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/comment-menu-green/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-menu-green/obj/ -v minimal`
+  - Result: passed `3/3`.
+- Build verification:
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/comment-menu-build/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-menu-build/obj/ -v minimal`
+  - Result: build succeeded.
+- Notes:
+- Test/build commands were run with `DOTNET_CLI_HOME` redirected into `.\.dotnet` so first-time-use writes stayed inside the workspace.
+- The focused verification and build still emit the repo’s existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings; this change did not add new warning classes.
+
 ## 252. Move Flow Canvas to top-level menu before Scheduler
 - [x] 252.1 Add RED coverage proving `Flow Canvas...` appears as a top-level menu item immediately before `Scheduler`.
 - [x] 252.2 Update `Form1` menu initialization so `Flow Canvas...` is added to the main menu strip before `Scheduler` instead of under `Edit`.
