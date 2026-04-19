@@ -93,6 +93,7 @@ namespace SSH_Helper.Services.Editor
         {
             "_prompt",
             "_output",
+            "_outputwindow",
             "_timestamp",
             "_iteration",
             "_last_error",
@@ -217,6 +218,7 @@ namespace SSH_Helper.Services.Editor
         {
             ["_prompt"] = "Current SSH prompt",
             ["_output"] = "Last output",
+            ["_outputwindow"] = "Output window transcript",
             ["_timestamp"] = "Timestamp",
             ["_iteration"] = "Loop counter",
             ["_last_error"] = "Last error",

@@ -92,6 +92,25 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_WithOutputWindowBuiltIn_ExcludesOutputWindowFromMissingDependencies()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - print:
+                      message: "${_outputwindow}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().BeEmpty();
+    }
+
+    [Fact]
     public void AnalyzePresets_UpdateEnvironmentDefinesVariableForLaterSteps()
     {
         var analyzer = new ScriptDependencyAnalyzer();

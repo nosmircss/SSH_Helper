@@ -708,6 +708,7 @@ public class ScriptAutocompleteProviderTests
         symbols.Should().Contain("_prompt");
         symbols.Should().Contain("_timestamp");
         symbols.Should().Contain("_output");
+        symbols.Should().Contain("_outputwindow");
         symbols.Should().Contain("hostname");
         symbols.Should().Contain("port");
     }
@@ -722,6 +723,18 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.Interpolation);
         completion.Items.Should().Contain(item => item.Label == "_prompt" && item.Detail == "Current SSH prompt");
+    }
+
+    [Fact]
+    public void GetCompletion_InterpolationPrefix_SuggestsOutputWindowBuiltInWithDescription()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - print:\n      message: \"${_outputw\"";
+
+        var completion = provider.GetCompletion(text, text.Length - 1);
+
+        completion.Context.Should().Be(CompletionContextKind.Interpolation);
+        completion.Items.Should().Contain(item => item.Label == "_outputwindow" && item.Detail == "Output window transcript");
     }
 
     public static IEnumerable<object[]> GetRequiredOptionTagCases()

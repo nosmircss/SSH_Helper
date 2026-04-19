@@ -1551,6 +1551,7 @@ namespace SSH_Helper.Services
                     allowFileSelectionDialogs);
 
                 outputRelayState ??= AttachScriptExecutionEventHandlers(context, host, outputBuilder);
+                context.SetOutputWindowText(outputBuilder.ToString());
 
                 // Execute the script
                 var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
@@ -1629,11 +1630,13 @@ namespace SSH_Helper.Services
             using var session = new SshShellSession(client, scripting, timeouts, terminal);
             session.DebugMode = effectiveDebugMode;
             session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
+            ScriptContext? outputWindowContext = null;
 
             // Subscribe to session debug output so we can see banner detection, prompt detection, etc.
             session.DebugOutput += (s, e) =>
             {
                 outputBuilder.Append(e.Output);
+                outputWindowContext?.AppendOutputWindowText(e.Output);
                 OnOutputReceived(host, e.Output);
                 SyncOutputRelayState(outputRelayState, outputBuilder);
             };
@@ -1672,18 +1675,20 @@ namespace SSH_Helper.Services
             var context = initialContext ?? new ScriptContext(host.Variables);
             executedContext = context;
             context.Session = session;
-            ConfigureScriptExecutionContext(
-                context,
-                host,
-                username,
+                ConfigureScriptExecutionContext(
+                    context,
+                    host,
+                    username,
                 password,
                 timeouts,
-                effectiveDebugMode,
-                allowFileSelectionDialogs);
+                    effectiveDebugMode,
+                    allowFileSelectionDialogs);
 
-            outputRelayState ??= AttachScriptExecutionEventHandlers(context, host, outputBuilder);
+                outputRelayState ??= AttachScriptExecutionEventHandlers(context, host, outputBuilder);
+                context.SetOutputWindowText(outputBuilder.ToString());
+                outputWindowContext = context;
 
-            // Execute the script
+                // Execute the script
             var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
             executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
             executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
@@ -1740,6 +1745,7 @@ namespace SSH_Helper.Services
                 allowFileSelectionDialogs);
 
             outputRelayState ??= AttachScriptExecutionEventHandlers(context, host, outputBuilder);
+            context.SetOutputWindowText(outputBuilder.ToString());
 
             var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
             executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
@@ -1793,6 +1799,7 @@ namespace SSH_Helper.Services
                     return;
 
                 outputBuilder.Append(output);
+                context.AppendOutputWindowText(output);
                 OnOutputReceived(host, output);
             };
 
@@ -1889,6 +1896,7 @@ namespace SSH_Helper.Services
                 allowFileSelectionDialogs);
 
             var outputRelayState = AttachScriptExecutionEventHandlers(context, host, outputBuilder);
+            context.SetOutputWindowText(outputBuilder.ToString());
 
             var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
             executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
@@ -1979,6 +1987,7 @@ namespace SSH_Helper.Services
             {
                 if (string.Equals(variable.Key, "_timestamp", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(variable.Key, "_output", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(variable.Key, "_outputwindow", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(variable.Key, "_prompt", StringComparison.OrdinalIgnoreCase))
                     continue;
 

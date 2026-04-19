@@ -57,7 +57,7 @@ When autocomplete is enabled in Command Editor settings, the editor SHALL provid
 
 Interpolation symbol suggestions SHALL include:
 - names discovered from current script text (`vars`, `set`, `capture`, and `into` outputs)
-- runtime built-ins (`_prompt`, `_output`, `_timestamp`, `_iteration`, `_last_error`)
+- runtime built-ins (`_prompt`, `_output`, `_outputwindow`, `_timestamp`, `_iteration`, `_last_error`)
 - host-grid column placeholders.
 
 The symmetric interpolation behavior SHALL remain the forward-compatible default for new editor iterations.
@@ -204,7 +204,7 @@ Missing variables or columns SHALL be shown as unresolved in tooltip content.
 - **THEN** tooltip preview uses that selected row value
 
 #### Scenario: Runtime built-in hover preview
-- **WHEN** the operator hovers `${_prompt}` in the editor without an active SSH session
+- **WHEN** the operator hovers `${_outputwindow}` in the editor without an active execution relay
 - **THEN** the tooltip shows a deterministic built-in preview value instead of unresolved content
 
 ### Requirement: Theme and font integration

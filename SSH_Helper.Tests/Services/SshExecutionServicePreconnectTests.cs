@@ -26,6 +26,7 @@ public class SshExecutionServicePreconnectTests
             Session = CreateSessionWithPrompt("router#")
         };
         context.SetVariable("bootstrap", "ready");
+        context.SetOutputWindowText("header\r\nline");
 
         var method = typeof(SshExecutionService).GetMethod(
             "BuildEffectiveHostVariables",
@@ -37,6 +38,7 @@ public class SshExecutionServicePreconnectTests
         merged.Should().Contain(new KeyValuePair<string, string>("existing", "value"));
         merged.Should().Contain(new KeyValuePair<string, string>("bootstrap", "ready"));
         merged.Should().NotContainKey("_prompt");
+        merged.Should().NotContainKey("_outputwindow");
     }
 
     [Fact]

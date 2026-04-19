@@ -34,6 +34,9 @@ Built-in runtime variables SHALL be resolved dynamically at substitution time.
 - `${_timestamp}` SHALL resolve to the current time at substitution time.
 - `${_prompt}` SHALL resolve to the current detected SSH shell prompt when an SSH shell session is active.
 - `${_prompt}` SHALL resolve to an empty string when no SSH shell prompt is available.
+- `${_outputwindow}` SHALL resolve to the current host's pane-formatted transcript accumulated so far for the active run.
+- `${_outputwindow}` SHALL use the same per-host formatted text that is appended to the operator-facing output pane, including script headers, separators, warnings, debug lines, mirrored interactive output, and command output.
+- `${_outputwindow}` SHALL resolve to an empty string when no live per-host output relay is attached.
 
 #### Scenario: timestamp changes during long script
 - **WHEN** `${_timestamp}` is substituted in two different steps at different times
@@ -46,6 +49,15 @@ Built-in runtime variables SHALL be resolved dynamically at substitution time.
 
 #### Scenario: prompt is unavailable without SSH session
 - **WHEN** `${_prompt}` is substituted before an SSH shell prompt is available
+- **THEN** the substituted value is an empty string
+
+#### Scenario: outputwindow uses per-host pane transcript
+- **WHEN** a script step substitutes `${_outputwindow}` during a multi-host run
+- **THEN** the substituted value contains only the current host's pane-formatted transcript accumulated so far
+- **AND** it excludes output from other hosts in the same run
+
+#### Scenario: outputwindow is unavailable without live relay
+- **WHEN** `${_outputwindow}` is substituted outside a live execution relay
 - **THEN** the substituted value is an empty string
 
 ### Requirement: While iteration controls
@@ -556,4 +568,29 @@ Operational errors include invalid path normalization failures and I/O exception
 - **AND** `${into}` is set to `false`
 - **AND** `${into}_meta.error` contains the error summary
 - **AND** `_last_error` is set according to suppressed-error behavior
+
+### Requirement: Two-phase script runtime execution
+The scripting runtime SHALL support two ordered phases per host: `preconnect` then `steps`.
+
+When a script does not define `preconnect`, the runtime SHALL execute only the `steps` phase.
+
+#### Scenario: Ordered phase execution
+- **WHEN** a script defines both `preconnect` and `steps`
+- **THEN** `preconnect` executes fully before `steps`
+- **AND** variables set in `preconnect` are available to `steps` for that host
+
+### Requirement: Preconnect output and cancellation semantics
+Preconnect phase execution SHALL follow existing command result semantics for success, failure, `on_error`, and cancellation.
+
+#### Scenario: Preconnect cancelled by operator
+- **WHEN** execution is cancelled during preconnect
+- **THEN** host execution ends as cancelled
+- **AND** main steps do not start for that host
+
+### Requirement: Sensitive override value handling
+The runtime SHALL treat reserved SSH override variables as sensitive and SHALL avoid emitting their raw values in normal script output or debug traces.
+
+#### Scenario: Override variable is set in preconnect
+- **WHEN** preconnect sets `_ssh_password` or `_ssh_identity_passphrase`
+- **THEN** output/debug streams do not include the raw secret value
 

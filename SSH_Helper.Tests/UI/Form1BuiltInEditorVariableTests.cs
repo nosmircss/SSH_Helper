@@ -21,4 +21,20 @@ public sealed class Form1BuiltInEditorVariableTests
 
         value.Should().NotBeNull();
     }
+
+    [WinFormsFact]
+    public void ResolveEditorVariableValue_OutputWindowBuiltIn_ReturnsEditorPreviewValue()
+    {
+        using var form = new global::SSH_Helper.Form1();
+        _ = form.Handle;
+
+        var method = typeof(global::SSH_Helper.Form1).GetMethod(
+            "ResolveEditorVariableValue",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        method.Should().NotBeNull();
+        var value = (string?)method!.Invoke(form, new object?[] { "_outputwindow" });
+
+        value.Should().Be("[runtime output window transcript]");
+    }
 }

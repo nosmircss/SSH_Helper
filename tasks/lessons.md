@@ -1,5 +1,8 @@
 # Lessons
 
+## 2026-04-19
+- When I finish an OpenSpec-backed change, I must update both `tasks/todo.md` and the change-local `openspec/changes/.../tasks.md` checklist before I hand off; implementation is not complete until both tracking surfaces reflect the finished work.
+
 ## 2026-04-13
 - When the user says a value should remain valid in raw YAML/runtime but be removed from visual suggestions, I must align autocomplete and UI suggestion tests with that intended product surface instead of preserving stale compatibility expectations in editor/Flow Canvas tests.
 - When a user points out that a scripting field is semantically dedicated to a narrow intent like mentions, I should evaluate ergonomic normalization at that boundary instead of defending raw transport syntax; but I must still separate what can be implied safely (Slack token wrappers) from what cannot (display-name to user-ID resolution).

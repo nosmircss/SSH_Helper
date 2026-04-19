@@ -129,6 +129,38 @@ public class ScriptContextTests
     }
 
     [Fact]
+    public void OutputWindowVariable_IsAvailableThroughHasVariable()
+    {
+        var context = new ScriptContext();
+
+        context.HasVariable("_outputwindow").Should().BeTrue();
+    }
+
+    [Fact]
+    public void OutputWindowVariable_WithoutRelay_ResolvesToEmptyString()
+    {
+        var context = new ScriptContext();
+
+        context.GetVariableString("_outputwindow").Should().BeEmpty();
+        context.SubstituteVariables("window=${_outputwindow}").Should().Be("window=");
+    }
+
+    [Fact]
+    public void OutputWindowVariable_SetAndAppend_UpdatesSnapshotAndInterpolation()
+    {
+        var context = new ScriptContext();
+
+        context.SetOutputWindowText("header");
+        context.AppendOutputWindowText("\r\nline-1");
+        var snapshot = context.GetAllVariables();
+
+        context.GetVariableString("_outputwindow").Should().Be("header\r\nline-1");
+        snapshot.Should().ContainKey("_outputwindow");
+        snapshot["_outputwindow"].Should().Be("header\r\nline-1");
+        context.SubstituteVariables("snapshot=${_outputwindow}").Should().Be("snapshot=header\r\nline-1");
+    }
+
+    [Fact]
     public void InteractiveSessions_AddAndSnapshot_PreservesOrderAndNumbering()
     {
         var context = new ScriptContext();

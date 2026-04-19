@@ -3019,6 +3019,13 @@ Sends a notification via Slack, Microsoft Teams, or Discord webhook, a Windows d
     message: "${_output}"
     level: success
 
+# Include the accumulated per-host output pane transcript in a completion notification
+- notify:
+    channel: toast
+    title: "Run summary"
+    message: "${_outputwindow}"
+    level: info
+
 # Discord mention using explicit Discord shorthand
 - notify:
     profile: discord-alerts
@@ -4236,13 +4243,14 @@ These are accessible via nested paths:
 |----------|-------------|-----------|
 | `${_prompt}` | Current detected SSH shell prompt | During SSH-backed execution after prompt detection; empty otherwise |
 | `${_output}` | Last command output | After any `send` command |
+| `${_outputwindow}` | Current host's output-window transcript so far | During live execution after the host relay is attached; empty otherwise |
 | `${_timestamp}` | Current timestamp at substitution time (yyyy-MM-dd HH:mm:ss) | Always |
 | `${_iteration}` | Current iteration count (0-based) | Inside `while` loops |
 | `${item_index}` | Current item index (0-based) | Inside `foreach` loops |
 | `${Host_IP}` | Current host IP address | Always (from grid) |
 | `${port}` | SSH port for current host | Always (from grid, default 22) |
 
-**Note:** `${_prompt}` reflects the current SSH shell prompt only. It does not expose `input`, `choose`, `confirm`, or file-picker dialog prompt text. Any column in the host grid becomes available as a variable. For example, if you have a column named `location`, you can use `${location}` in your scripts.
+**Note:** `${_prompt}` reflects the current SSH shell prompt only. It does not expose `input`, `choose`, `confirm`, or file-picker dialog prompt text. `${_outputwindow}` is host-scoped during multi-host runs and contains the pane-formatted transcript accumulated for that host so far, not the globally merged pane. Any column in the host grid becomes available as a variable. For example, if you have a column named `location`, you can use `${location}` in your scripts.
 
 ### Special Grid Columns
 

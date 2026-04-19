@@ -105,6 +105,7 @@ namespace SSH_Helper.Services.Scripting
         {
             public object StateLock { get; } = new();
             public StringBuilder Output { get; } = new();
+            public StringBuilder OutputWindow { get; } = new();
             public List<InteractiveTerminalSessionDetails> InteractiveSessions { get; } = new();
             public object InteractiveSessionsLock { get; } = new();
             public string LastCommandOutput { get; set; } = string.Empty;
@@ -415,6 +416,20 @@ namespace SSH_Helper.Services.Scripting
         }
 
         /// <summary>
+        /// Gets the pane-formatted output transcript accumulated for the current host so far.
+        /// </summary>
+        public string OutputWindowText
+        {
+            get
+            {
+                lock (_sharedState.StateLock)
+                {
+                    return _sharedState.OutputWindow.ToString();
+                }
+            }
+        }
+
+        /// <summary>
         /// Creates a new script context with optional initial variables.
         /// </summary>
         /// <param name="initialVariables">Variables from CSV columns or other sources.</param>
@@ -460,6 +475,8 @@ namespace SSH_Helper.Services.Scripting
                 return DateTime.Now.ToString(TimestampFormat);
             if (string.Equals(name, "_output", StringComparison.OrdinalIgnoreCase))
                 return LastCommandOutput;
+            if (string.Equals(name, "_outputwindow", StringComparison.OrdinalIgnoreCase))
+                return OutputWindowText;
             if (string.Equals(name, "_prompt", StringComparison.OrdinalIgnoreCase))
                 return Session?.CurrentPrompt ?? string.Empty;
 
@@ -495,6 +512,7 @@ namespace SSH_Helper.Services.Scripting
         {
             if (string.Equals(name, "_timestamp", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(name, "_output", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "_outputwindow", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(name, "_prompt", StringComparison.OrdinalIgnoreCase))
                 return true;
 
@@ -528,6 +546,7 @@ namespace SSH_Helper.Services.Scripting
 
             snapshot["_timestamp"] = DateTime.Now.ToString(TimestampFormat);
             snapshot["_output"] = LastCommandOutput;
+            snapshot["_outputwindow"] = OutputWindowText;
             snapshot["_prompt"] = Session?.CurrentPrompt ?? string.Empty;
             return snapshot;
         }
@@ -542,13 +561,16 @@ namespace SSH_Helper.Services.Scripting
                 return input;
 
             string lastOutput;
+            string outputWindowText;
             lock (_sharedState.StateLock)
             {
                 lastOutput = _sharedState.LastCommandOutput;
+                outputWindowText = _sharedState.OutputWindow.ToString();
             }
 
             // Handle special _output variable
             var result = input.Replace("${_output}", lastOutput);
+            result = result.Replace("${_outputwindow}", outputWindowText);
 
             // Replace ${variable} and {{variable}} patterns with support for nested ${...} expressions.
             return SubstituteVariableTokens(result);
@@ -793,6 +815,36 @@ namespace SSH_Helper.Services.Scripting
             lock (_sharedState.StateLock)
             {
                 _sharedState.Output.Clear();
+                _sharedState.OutputWindow.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Replaces the current pane-formatted host transcript for this execution context.
+        /// </summary>
+        internal void SetOutputWindowText(string? output)
+        {
+            lock (_sharedState.StateLock)
+            {
+                _sharedState.OutputWindow.Clear();
+                if (!string.IsNullOrEmpty(output))
+                {
+                    _sharedState.OutputWindow.Append(output);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Appends pane-formatted host output to the current execution transcript.
+        /// </summary>
+        internal void AppendOutputWindowText(string? output)
+        {
+            if (string.IsNullOrEmpty(output))
+                return;
+
+            lock (_sharedState.StateLock)
+            {
+                _sharedState.OutputWindow.Append(output);
             }
         }
 

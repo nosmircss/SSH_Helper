@@ -720,6 +720,7 @@ namespace SSH_Helper
                 "_iteration" => "0",
                 "_last_error" => string.Empty,
                 "_output" => string.Empty,
+                "_outputwindow" => "[runtime output window transcript]",
                 "_host" => ResolveEditorColumnValue(CsvManager.HostColumnName),
                 "_port" => ResolveEditorColumnValue("port"),
                 "_username" => ResolveEditorColumnValue("username") ?? tsbUsername.Text,
@@ -7023,11 +7024,14 @@ namespace SSH_Helper
                 context.EnvironmentVaultProfile = _environmentService.GetEnvironment(
                     _environmentService.GetActiveEnvironmentName()).VaultProfileName;
 
-                // Special handling for _output: GetVariable("_output") reads from LastCommandOutput,
-                // not the dictionary, so we must hydrate it via RecordCommandOutput.
+                // Special handling for built-ins backed by ScriptContext runtime state rather than the raw dictionary.
                 if (variables != null && variables["_output"] != null)
                 {
                     context.RecordCommandOutput(variables["_output"]!.ToString());
+                }
+                if (variables != null && variables["_outputwindow"] != null)
+                {
+                    context.SetOutputWindowText(variables["_outputwindow"]!.ToString());
                 }
 
                 // Capture emitted output
