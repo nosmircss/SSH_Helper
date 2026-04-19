@@ -2978,6 +2978,7 @@ Sends a notification via Slack, Microsoft Teams, or Discord webhook, a Windows d
 
 **Discord mention rules:**
 - Discord joins normalized `mention:` values into the top-level message `content`.
+- To see/copy the underlying user, role, or channel IDs from Discord in the right click menu, enable Developer Mode first so Discord exposes the copy-ID actions. this is found under User Settings -> Developer -> Developer Mode toggle
 - SSH Helper accepts these explicit Discord shorthand forms:
   - `user:123456789012345678` -> `<@123456789012345678>`
   - `role:123456789012345678` -> `<@&123456789012345678>`
@@ -2985,6 +2986,7 @@ Sends a notification via Slack, Microsoft Teams, or Discord webhook, a Windows d
   - `here` or `@here` -> `@here`
   - `everyone` or `@everyone` -> `@everyone`
 - Existing raw Discord mention markup is also preserved as-is, for example `<@123456789012345678>`, `<@&123456789012345678>`, and `<#123456789012345678>`.
+
 - Bare numeric IDs such as `123456789012345678` remain literal text because SSH Helper does not guess whether the ID is a user, role, or channel.
 - Plain display names remain literal text unless Discord itself recognizes the exact content you provide.
 

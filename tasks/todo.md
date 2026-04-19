@@ -1,5 +1,16 @@
 # TODO
 
+## 248. Add Discord Developer Mode note to mention docs
+- [x] 248.1 Update `SCRIPTING.md` Discord mention rules to note that copying user, role, and channel IDs from Discord requires Developer Mode.
+
+### 248 Review
+- Scope:
+- Documentation-only clarification for existing Discord mention syntax. No runtime behavior changed.
+- Implementation:
+- Added a Discord mention-rules note explaining that users must enable Discord Developer Mode before the copy-ID actions are available for user, role, and channel IDs.
+- Verification:
+- `rg -n "Discord mention rules|Developer Mode" SCRIPTING.md` confirms the new note is present in the Discord section.
+
 ## 247. Finish `sethistorylabel` and `notify` authoring/Flow Canvas wiring
 - [x] 247.1 Add RED coverage proving `sethistorylabel` and `notify` show up with the expected autocomplete detail/option metadata and Flow Canvas export/import metadata.
 - [x] 247.2 Patch the editor/Flow Canvas metadata so both commands are available and correctly configured.
