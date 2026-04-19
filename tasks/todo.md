@@ -1,5 +1,41 @@
 # TODO
 
+## 254. Make commented script text color fully green with quote-aware `#` handling
+- [x] 254.1 Add RED coverage proving unquoted `#` makes the rest of the line comment-green while quoted `#` stays part of the string literal.
+- [x] 254.2 Update `YamlSshSyntaxHighlighter` so token highlighting stops at the first unquoted `#`, then applies a single comment span through end-of-line.
+- [x] 254.3 Run focused verification, then record the review notes below.
+
+### 254 Review
+- Root cause:
+- `YamlSshSyntaxHighlighter.BuildLineHighlights(...)` highlighted strings, numbers, booleans, and variables across the entire raw line, then added the comment span afterward.
+- Because Scintilla applies later spans directly to their ranges, quoted text inside a commented region still kept its string-literal color instead of staying fully comment green.
+- Implementation:
+- Added focused regression coverage in `SSH_Helper.Tests/Editor/YamlSshSyntaxHighlighterTests.cs` for:
+- fully commented lines containing quoted text,
+- a quoted `#` inside a real string followed by a later unquoted comment marker,
+- a line where the only `#` is inside quotes and therefore must not create a comment span.
+- Updated `Services/Editor/YamlSshSyntaxHighlighter.cs` to:
+- find the first unquoted `#` with a quote-aware scanner,
+- restrict key/string/number/variable/boolean tokenization to the code region before that comment marker,
+- apply a single comment span from the real `#` through end-of-line.
+- The quote-aware scanner ignores `#` inside both double-quoted and single-quoted strings, handles backslash-escaped double quotes, and treats doubled single quotes inside single-quoted YAML strings as escaped content instead of closing the string early.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~YamlSshSyntaxHighlighterTests.BuildLineHighlights_FullyCommentedLine_WithQuotedText_UsesOnlyCommentColor|FullyQualifiedName~YamlSshSyntaxHighlighterTests.BuildLineHighlights_QuotedHashDoesNotStartComment_ButLaterUnquotedHashDoes" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/comment-color-red/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-color-red/obj/ -v minimal`
+  - Result: failed `2/2` as expected before the fix.
+  - Representative failures:
+    - fully commented lines still produced a separate string-literal span inside the comment region,
+    - the comment span for `prompt: "Select #interfaces" # "comment text"` started at the `#` inside the string instead of the later real comment marker.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~YamlSshSyntaxHighlighterTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/comment-color-green/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-color-green/obj/ -v minimal`
+  - Result: passed `8/8`.
+- Build verification:
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/comment-color-build/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-color-build/obj/ -v minimal`
+  - Result: build succeeded.
+- Notes:
+- Commands were run with `DOTNET_CLI_HOME` redirected into `.\.dotnet`.
+- The repo’s existing `MSB3277` warnings remain unchanged.
+- Restore/build in the sandbox also emitted `NU1900` warnings because vulnerability metadata could not be fetched from `https://api.nuget.org/v3/index.json`; that was a network limitation, not a compile or test failure.
+
 ## 253. Add comment and uncomment actions to the commands editor context menu
 - [x] 253.1 Add RED coverage proving the commands editor context menu can comment and uncomment every selected line while preserving indentation and using `#` with no trailing space.
 - [x] 253.2 Implement editor helpers plus context-menu items for `Comment Selected Lines` and `Uncomment Selected Lines`.

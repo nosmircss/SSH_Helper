@@ -47,9 +47,6 @@ namespace SSH_Helper.Services.Editor
         private static readonly Regex BooleanRegex =
             new(@"\b(true|false|yes|no|null)\b", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
-        private static readonly Regex CommentRegex =
-            new(@"#.*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
         private readonly HashSet<string> _topLevelKeys;
         private readonly HashSet<string> _stepCommands;
         private readonly HashSet<string> _highlightedOptionKeys;
@@ -87,8 +84,10 @@ namespace SSH_Helper.Services.Editor
                 return spans;
 
             var palette = darkMode ? ColorPalette.Dark : ColorPalette.Light;
+            var commentStart = FindCommentStartIndex(lineText);
+            var codeText = commentStart >= 0 ? lineText[..commentStart] : lineText;
 
-            var topLevelMatch = TopLevelRegex.Match(lineText);
+            var topLevelMatch = TopLevelRegex.Match(codeText);
             if (topLevelMatch.Success && _topLevelKeys.Contains(topLevelMatch.Groups["key"].Value))
             {
                 spans.Add(new EditorHighlightSpan(
@@ -97,7 +96,7 @@ namespace SSH_Helper.Services.Editor
                     palette.TopLevelKey));
             }
 
-            var stepMatch = StepCommandRegex.Match(lineText);
+            var stepMatch = StepCommandRegex.Match(codeText);
             var stepKey = stepMatch.Success ? stepMatch.Groups["key"].Value : string.Empty;
             var isRecognizedStepCommand = stepMatch.Success && _stepCommands.Contains(stepKey);
 
@@ -116,7 +115,7 @@ namespace SSH_Helper.Services.Editor
                     palette.StepOption));
             }
 
-            var optionMatch = OptionKeyRegex.Match(lineText);
+            var optionMatch = OptionKeyRegex.Match(codeText);
             if (optionMatch.Success &&
                 _highlightedOptionKeys.Contains(optionMatch.Groups["key"].Value))
             {
@@ -126,33 +125,93 @@ namespace SSH_Helper.Services.Editor
                     palette.StepOption));
             }
 
-            foreach (Match match in VariableRegex.Matches(lineText))
+            foreach (Match match in VariableRegex.Matches(codeText))
             {
                 spans.Add(new EditorHighlightSpan(lineStartIndex + match.Index, match.Length, palette.Variable));
             }
 
-            foreach (Match match in StringRegex.Matches(lineText))
+            foreach (Match match in StringRegex.Matches(codeText))
             {
                 spans.Add(new EditorHighlightSpan(lineStartIndex + match.Index, match.Length, palette.StringLiteral));
             }
 
-            foreach (Match match in NumberRegex.Matches(lineText))
+            foreach (Match match in NumberRegex.Matches(codeText))
             {
                 spans.Add(new EditorHighlightSpan(lineStartIndex + match.Index, match.Length, palette.Number));
             }
 
-            foreach (Match match in BooleanRegex.Matches(lineText))
+            foreach (Match match in BooleanRegex.Matches(codeText))
             {
                 spans.Add(new EditorHighlightSpan(lineStartIndex + match.Index, match.Length, palette.BooleanOrNull));
             }
 
-            var commentMatch = CommentRegex.Match(lineText);
-            if (commentMatch.Success)
+            if (commentStart >= 0)
             {
-                spans.Add(new EditorHighlightSpan(lineStartIndex + commentMatch.Index, commentMatch.Length, palette.Comment));
+                spans.Add(new EditorHighlightSpan(lineStartIndex + commentStart, lineText.Length - commentStart, palette.Comment));
             }
 
             return spans;
+        }
+
+        private static int FindCommentStartIndex(string lineText)
+        {
+            var inSingleQuote = false;
+            var inDoubleQuote = false;
+
+            for (var i = 0; i < lineText.Length; i++)
+            {
+                var current = lineText[i];
+
+                if (current == '"' && !inSingleQuote)
+                {
+                    if (!inDoubleQuote)
+                    {
+                        inDoubleQuote = true;
+                    }
+                    else if (!IsEscapedByBackslash(lineText, i))
+                    {
+                        inDoubleQuote = false;
+                    }
+
+                    continue;
+                }
+
+                if (current == '\'' && !inDoubleQuote)
+                {
+                    if (!inSingleQuote)
+                    {
+                        inSingleQuote = true;
+                        continue;
+                    }
+
+                    if (i + 1 < lineText.Length && lineText[i + 1] == '\'')
+                    {
+                        i++;
+                        continue;
+                    }
+
+                    inSingleQuote = false;
+                    continue;
+                }
+
+                if (current == '#' && !inSingleQuote && !inDoubleQuote)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static bool IsEscapedByBackslash(string text, int index)
+        {
+            var backslashCount = 0;
+            for (var i = index - 1; i >= 0 && text[i] == '\\'; i--)
+            {
+                backslashCount++;
+            }
+
+            return backslashCount % 2 == 1;
         }
 
         private static string[] SplitLines(string text)
