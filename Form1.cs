@@ -6526,13 +6526,18 @@ namespace SSH_Helper
 
         private void InitializeFlowCanvasMenuItem()
         {
-            var flowCanvasItem = new ToolStripMenuItem("Flow Canvas...");
+            var flowCanvasItem = new ToolStripMenuItem("Flow Canvas")
+            {
+                Name = "_menuFlowCanvas"
+            };
             flowCanvasItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.F;
             flowCanvasItem.Click += (_, _) => OpenFlowCanvas();
-            // Insert before the last item (Debug Mode) with a separator
-            var editMenu = editToolStripMenuItem;
-            editMenu.DropDownItems.Add(new ToolStripSeparator());
-            editMenu.DropDownItems.Add(flowCanvasItem);
+
+            var helpIndex = menuStrip1.Items.IndexOf(helpToolStripMenuItem);
+            if (helpIndex >= 0)
+                menuStrip1.Items.Insert(helpIndex, flowCanvasItem);
+            else
+                menuStrip1.Items.Add(flowCanvasItem);
         }
 
         private void OpenFlowCanvas()

@@ -1,5 +1,26 @@
 # TODO
 
+## 252. Move Flow Canvas to top-level menu before Scheduler
+- [x] 252.1 Add RED coverage proving `Flow Canvas...` appears as a top-level menu item immediately before `Scheduler`.
+- [x] 252.2 Update `Form1` menu initialization so `Flow Canvas...` is added to the main menu strip before `Scheduler` instead of under `Edit`.
+- [x] 252.3 Run focused verification and capture the review notes below.
+
+### 252 Review
+- Added `SSH_Helper.Tests/UI/Form1MenuInitializationTests.cs` with a WinForms regression that asserts:
+- `Flow Canvas...` exists as a top-level menu item on `menuStrip1`,
+- it appears before `&Scheduler`,
+- it no longer appears under `Edit`.
+- Updated `Form1.InitializeFlowCanvasMenuItem()` to insert `Flow Canvas...` into the main menu strip immediately before `Help` instead of appending it to `editToolStripMenuItem`. Because `InitializeSchedulerStatusBar()` still inserts `Scheduler` before `Help`, the final top-level order is now `File`, `Edit`, `Flow Canvas...`, `Scheduler`, `Help`.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1MenuInitializationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-menu-red/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-menu-red/obj/ -v minimal`
+  - Result: failed `1/1` as expected because `flowCanvasIndex` was `-1`, confirming `Flow Canvas...` was not a top-level menu item before the fix.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1MenuInitializationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-menu-green/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-menu-green/obj/ -v minimal`
+  - Result: passed `1/1`.
+- Notes:
+- The focused green run completed inside the workspace with `DOTNET_CLI_HOME` redirected to `.\.dotnet`.
+- Existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings remain unchanged from the broader test baseline.
+
 ## 251. Archive `add-preconnect-auth-bootstrap`
 - [x] 251.1 Confirm `add-preconnect-auth-bootstrap` is still active and ready to archive via OpenSpec CLI.
 - [x] 251.2 Run the OpenSpec archive command and verify the change moved under `openspec/changes/archive/` with spec updates applied.
