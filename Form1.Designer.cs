@@ -86,6 +86,7 @@ namespace SSH_Helper
             ctxToggleFavorite = new ToolStripMenuItem();
             toolStripSeparator7 = new ToolStripSeparator();
             ctxExportPreset = new ToolStripMenuItem();
+            ctxExportFolder = new ToolStripMenuItem();
             ctxImportPreset = new ToolStripMenuItem();
             ctxToggleSorting = new ToolStripMenuItem();
             toolStripSeparatorFolders = new ToolStripSeparator();
@@ -599,9 +600,9 @@ namespace SSH_Helper
             // 
             // contextPresetLst
             // 
-            contextPresetLst.Items.AddRange(new ToolStripItem[] { ctxAddPreset, ctxDuplicatePreset, ctxRenamePreset, ctxDeletePreset, toolStripSeparator6, ctxToggleFavorite, ctxMoveToFolder, toolStripSeparator7, ctxExportPreset, ctxImportPreset, toolStripSeparatorFolders, ctxAddFolder, ctxRenameFolder, ctxDeleteFolder });
+            contextPresetLst.Items.AddRange(new ToolStripItem[] { ctxAddPreset, ctxDuplicatePreset, ctxRenamePreset, ctxDeletePreset, toolStripSeparator6, ctxToggleFavorite, ctxMoveToFolder, toolStripSeparator7, ctxExportPreset, ctxExportFolder, ctxImportPreset, toolStripSeparatorFolders, ctxAddFolder, ctxRenameFolder, ctxDeleteFolder });
             contextPresetLst.Name = "contextPresetLst";
-            contextPresetLst.Size = new Size(160, 192);
+            contextPresetLst.Size = new Size(160, 214);
             // 
             // ctxAddPreset
             // 
@@ -654,6 +655,13 @@ namespace SSH_Helper
             ctxExportPreset.Size = new Size(159, 22);
             ctxExportPreset.Text = "&Export Preset";
             ctxExportPreset.Click += ExportPreset_Click;
+            // 
+            // ctxExportFolder
+            // 
+            ctxExportFolder.Name = "ctxExportFolder";
+            ctxExportFolder.Size = new Size(159, 22);
+            ctxExportFolder.Text = "E&xport Folder...";
+            ctxExportFolder.Click += ExportFolder_Click;
             // 
             // ctxImportPreset
             // 
@@ -1941,6 +1949,7 @@ namespace SSH_Helper
         private ToolStripMenuItem ctxDeletePreset;
         private ToolStripSeparator toolStripSeparator6;
         private ToolStripMenuItem ctxExportPreset;
+        private ToolStripMenuItem ctxExportFolder;
         private ToolStripMenuItem ctxImportPreset;
         private ToolStripSeparator toolStripSeparator7;
         private ToolStripMenuItem ctxToggleFavorite;

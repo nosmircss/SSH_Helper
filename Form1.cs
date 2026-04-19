@@ -237,6 +237,7 @@ namespace SSH_Helper
         private Func<string, string, string, string>? _inputBoxPromptOverrideForTests = null;
         private Func<IWin32Window?, string, string, MessageBoxButtons, MessageBoxIcon, DialogResult>? _dialogPromptOverrideForTests = null;
         private Func<IWin32Window?, string?>? _filePathPickerOverrideForTests = null;
+        private Func<IWin32Window?, string, string, string?>? _saveFilePathPickerOverrideForTests = null;
 
         // Track selected folder for Run button (TreeView selection can be unreliable on button click)
         private string? _selectedFolderName;
@@ -7576,6 +7577,11 @@ namespace SSH_Helper
             ExportPreset(preferContextSource: sender == ctxExportPreset);
         }
 
+        private void ExportFolder_Click(object? sender, EventArgs e)
+        {
+            ExportFolder(preferContextSource: sender == ctxExportFolder);
+        }
+
         private void ImportPreset_Click(object? sender, EventArgs e)
         {
             ImportPreset();
@@ -7629,6 +7635,7 @@ namespace SSH_Helper
                 ctxDeletePreset.Visible = false;
                 ctxToggleFavorite.Visible = showToggleFavorite;
                 ctxExportPreset.Visible = false;
+                ctxExportFolder.Visible = false;
                 ctxImportPreset.Visible = false;
                 ctxToggleSorting.Visible = false;
                 ctxAddFolder.Visible = false;
@@ -7655,6 +7662,7 @@ namespace SSH_Helper
             ctxDeletePreset.Visible = isPreset;
             ctxToggleFavorite.Visible = hasSelection;
             ctxExportPreset.Visible = isPreset;
+            ctxExportFolder.Visible = isFolder;
             ctxImportPreset.Visible = true;
             ctxToggleSorting.Visible = true;
 
@@ -9988,6 +9996,39 @@ namespace SSH_Helper
             return null;
         }
 
+        private string? ResolveFolderPathForActions(bool preferContextSource)
+        {
+            if (preferContextSource &&
+                _contextMenuSourceTreeView?.SelectedNode?.Tag is PresetNodeTag contextTag &&
+                contextTag.IsFolder)
+            {
+                return contextTag.Name;
+            }
+
+            if (presetsTabControl.SelectedTab == tabFavorites)
+            {
+                if (trvFavorites.SelectedNode?.Tag is PresetNodeTag favoritesTag && favoritesTag.IsFolder)
+                {
+                    return favoritesTag.Name;
+                }
+            }
+            else
+            {
+                if (trvPresets.SelectedNode?.Tag is PresetNodeTag presetsTag && presetsTag.IsFolder)
+                {
+                    return presetsTag.Name;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(_selectedFolderName) &&
+                _presetManager.Folders.ContainsKey(_selectedFolderName))
+            {
+                return _selectedFolderName;
+            }
+
+            return null;
+        }
+
         private TreeView ResolvePresetTreeViewForActions(bool preferContextSource)
         {
             if (preferContextSource && _contextMenuSourceTreeView != null)
@@ -10272,6 +10313,42 @@ namespace SSH_Helper
             catch (Exception ex)
             {
                 DialogTheme.Show(this, $"Failed to export preset: {ex.Message}", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ExportFolder(bool preferContextSource = false)
+        {
+            string? folderPath = ResolveFolderPathForActions(preferContextSource);
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                ShowPromptDialog(this, "No folder selected to export.", "Export Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string folderName = FolderPathUtility.GetFolderName(folderPath);
+            string? exportPath = ShowJsonSaveFileDialog(this, "Export Folder", $"{folderName}_presets.json");
+            if (string.IsNullOrWhiteSpace(exportPath))
+                return;
+
+            try
+            {
+                int presetCount = _presetManager.CountPresetsInFolderAndDescendants(folderPath);
+                _presetManager.ExportFolderSubtreeToFile(folderPath, exportPath);
+                ShowPromptDialog(
+                    this,
+                    $"Exported folder '{folderPath}' with {presetCount} preset(s) to:\n{exportPath}",
+                    "Export Folder",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                ShowPromptDialog(
+                    this,
+                    $"Failed to export folder: {ex.Message}",
+                    "Export Folder",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
         }
 
@@ -10899,6 +10976,27 @@ namespace SSH_Helper
             }
 
             return DialogTheme.Show(owner, message, title, buttons, icon);
+        }
+
+        private string? ShowJsonSaveFileDialog(IWin32Window? owner, string title, string defaultFileName)
+        {
+            var pickerOverride = _saveFilePathPickerOverrideForTests;
+            if (pickerOverride != null)
+            {
+                return pickerOverride(owner, title, defaultFileName);
+            }
+
+            using var dialog = new SaveFileDialog
+            {
+                Title = title,
+                Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                DefaultExt = "json",
+                FileName = defaultFileName
+            };
+
+            return dialog.ShowDialog(owner ?? this) == DialogResult.OK
+                ? dialog.FileName
+                : null;
         }
 
         private bool CanMutatePresetTreeIncrementally()

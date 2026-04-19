@@ -4971,6 +4971,78 @@
   - `dotnet build SSH_Helper.sln -v minimal` passed; existing warnings remain (`MSB3277`, `CS8602`, `xUnit1031`, Vite chunk-size warning).
   - `rg -n "pwsh" FlowCanvas\\dist -S` returned no matches after the rebuild.
 
+## 258. Export a selected preset folder subtree to a JSON file
+- [x] 258.1 Review the existing preset/folder export-import behavior, relevant OpenSpec requirements, and repo workflow constraints.
+- [x] 258.2 Confirm the expected subtree export semantics with the user.
+- [x] 258.3 Write the design summary and required OpenSpec change for folder-subtree export.
+- [x] 258.4 Add RED coverage for the folder-subtree export path in `PresetManager` and the folder export UI surface in `Form1`.
+- [x] 258.5 Implement the minimal folder-subtree JSON export flow, including the save dialog from the preset tree.
+- [x] 258.6 Run focused verification, capture review notes below, and update the checklist to reflect reality.
+
+### 258 Review
+- Confirmed with the user that folder export should preserve the selected folder itself as the subtree root so import can recreate that same hierarchy.
+- Wrote the approved design note to `docs/superpowers/specs/2026-04-19-preset-folder-subtree-export-design.md`.
+- Created OpenSpec change `add-preset-folder-subtree-export` with proposal/tasks/spec delta under `openspec/changes/add-preset-folder-subtree-export/`.
+- Wrote the execution plan to `docs/superpowers/plans/2026-04-19-preset-folder-subtree-export.md`.
+- Implementation:
+- Added subtree export support to `Services/PresetManager.cs`:
+  - new `ExportFolderSubtreeToFile(...)` entry point,
+  - subtree-only folder/preset filtering,
+  - nested-folder rebasing through `RebaseFolderPathForExport(...)` so the selected folder becomes the bundle root in the exported JSON.
+- Added the folder export UI in `Form1` / `Form1.Designer.cs`:
+  - new `ctxExportFolder` context-menu item,
+  - folder-only visibility on the Presets tree,
+  - `ResolveFolderPathForActions(...)`,
+  - `ExportFolder(...)`,
+  - `_saveFilePathPickerOverrideForTests` + `ShowJsonSaveFileDialog(...)` test seam for save-path selection without a real dialog.
+- Added RED/GREEN coverage in:
+  - `SSH_Helper.Tests/Services/PresetManagerTests.cs`
+  - `SSH_Helper.Tests/UI/Form1FolderExportTests.cs`
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportFolderSubtreeToFile" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-folder-export-red/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-folder-export-red/obj/ -v minimal`
+  - Result: failed at compile as expected because `PresetManager.ExportFolderSubtreeToFile(...)` did not exist yet.
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FolderExportTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-folder-export-green1/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-folder-export-green1/obj/ -v minimal`
+  - Result: failed `1/2` after the first UI pass, proving the context-menu visibility path still needed real `SourceControl`-driven coverage.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportFolderSubtreeToFile" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-folder-export-green1/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-folder-export-green1/obj/ -v minimal`
+  - Result: passed `3/3`.
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FolderExportTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-folder-export-green3/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-folder-export-green3/obj/ -v minimal`
+  - Result: passed `2/2`.
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportFolderSubtreeToFile|FullyQualifiedName~Form1FolderExportTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-folder-export-green/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-folder-export-green/obj/ -v minimal`
+  - Result: passed `5/5`.
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-folder-export-build/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-folder-export-build/obj/ -v minimal`
+  - Result: build succeeded.
+- `cmd /c openspec validate add-preset-folder-subtree-export --strict --no-interactive`
+  - Result: passed after implementation; the trailing PostHog flush errors were sandboxed network failures after validation, not spec validation failures.
+- Notes:
+- Test/build commands used `DOTNET_CLI_HOME=.\.dotnet` so first-use writes stayed inside the workspace.
+- Existing `NU1900` and `MSB3277` warnings remain unchanged.
+
+## 259. Archive `add-preset-folder-subtree-export`
+- [x] 259.1 Confirm `add-preset-folder-subtree-export` is still active and ready to archive via OpenSpec CLI.
+- [x] 259.2 Run the OpenSpec archive command and verify the change moved under `openspec/changes/archive/` with spec updates applied.
+- [x] 259.3 Run strict OpenSpec validation plus post-archive inspection and capture the review notes below.
+
+### 259 Review
+- Validation:
+- `cmd /c openspec list` showed `add-preset-folder-subtree-export` as an active complete change before archival.
+- `cmd /c openspec show add-preset-folder-subtree-export` confirmed the change updates `preset-organization`.
+- Archive result:
+- `cmd /c openspec archive add-preset-folder-subtree-export --yes` succeeded.
+- OpenSpec reported:
+  - `preset-organization: update`
+  - `+ 1 added`
+- The change was archived as `openspec/changes/archive/2026-04-19-add-preset-folder-subtree-export`.
+- Post-archive inspection:
+- `cmd /c openspec list` now reports `No active changes found.`
+- `cmd /c openspec list --specs` now shows `preset-organization requirements 7`, reflecting the archived folder-subtree export requirement.
+- `Get-ChildItem openspec\changes\archive | Where-Object { $_.Name -like '*add-preset-folder-subtree-export' }` confirmed the archived directory exists.
+- Validation:
+- `cmd /c openspec validate --strict --no-interactive` on this OpenSpec CLI returned `Nothing to validate` once no active changes remained.
+- Reran the equivalent post-archive strict spec validation via `cmd /c openspec validate --specs --strict --no-interactive`, which passed `23/23` specs.
+- Notes:
+- The repeated PostHog flush errors after OpenSpec commands were sandboxed network failures after command completion, not archive or validation failures.
+
 ## 214. Add `_outputwindow` built-in variable
 - [x] 214.1 Create the OpenSpec change for `${_outputwindow}` and mirror the implementation checklist here.
 - [x] 214.2 Add RED coverage for ScriptContext, relay/runtime, notify substitution, editor metadata, and preconnect propagation rules.
