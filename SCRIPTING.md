@@ -4830,9 +4830,9 @@ For more complex retry logic (e.g., conditional retries), use a `while` loop:
 By default, script execution displays a banner header showing the host, prompt, and script name:
 
 ```
-############################################################################################################
-#################### SCRIPT: 192.168.1.1 FortiGate-VM64-KVM # My Script Name ###############################
-############################################################################################################
+#############################################################################
+########## SCRIPT: 192.168.1.1 FortiGate-VM64-KVM # My Script Name ##########
+#############################################################################
 ```
 
 To suppress this banner, set `nobanner: true` in your script header:
@@ -4857,9 +4857,9 @@ This is useful when:
 By default, connection failures are shown as a multi-line banner block:
 
 ```
-########################################################################
-#################### CONNECTION ERROR: 10.79.50.228 ####################
-########################################################################
+####################################################
+########## CONNECTION ERROR: 10.79.50.228 ##########
+####################################################
 SshException: Connection attempt timed out.
 ```
 

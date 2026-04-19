@@ -1,5 +1,42 @@
 # TODO
 
+## 258. Reduce SSH output banner side padding
+- [x] 258.1 Add RED coverage proving the local-script banner and shared error banner use 10 `#` characters of side padding instead of 20.
+- [x] 258.2 Update `SshExecutionService` so framed `SCRIPT`, `LOCAL SCRIPT`, `CONNECTED TO`, and error banners all use the reduced side padding.
+- [x] 258.3 Update banner examples/docs, run focused verification plus a build, and capture the review notes below.
+
+### 258 Review
+- Scope:
+- Reduce the framed SSH output banner side padding from `20` to `10` hash characters without changing the banner labels or the separator-line behavior.
+- Root cause:
+- `SshExecutionService` hard-coded `new string('#', 20)` in each framed banner path, so every script, connection, and full-width error banner carried twice as much side padding as desired.
+- Implementation:
+- Added focused regression coverage in `SSH_Helper.Tests/Services/SshExecutionServiceBannerFormattingTests.cs` for:
+  - the `LOCAL SCRIPT` header emitted by local script execution,
+  - the shared `FormatError(...)` banner title path via reflection.
+- Added `BannerSidePadding = 10` in `Services/SshExecutionService.cs` and replaced the hard-coded `20` in all framed banner outputs:
+  - `SCRIPT`
+  - `LOCAL SCRIPT`
+  - `CONNECTED TO`
+  - full-width error banners from `FormatError(...)`
+- Updated the banner examples in `SCRIPTING.md` so the sample script and connection-error blocks reflect the new side padding.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceBannerFormattingTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/banner-padding-red/bin/ -p:BaseIntermediateOutputPath=artifacts/banner-padding-red/obj/ -v minimal`
+  - Result: failed `2/2` as expected before the implementation.
+  - Representative failures:
+    - `ExecuteScriptAsync_LocalScript_HeaderUsesTenHashSidePadding` still saw `#################### LOCAL SCRIPT: batch-001 ####################`
+    - `FormatError_DefaultBanner_UsesTenHashSidePadding` still saw `#################### ERROR: 10.0.0.1 ####################`
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceBannerFormattingTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/banner-padding-green/bin/ -p:BaseIntermediateOutputPath=artifacts/banner-padding-green/obj/ -v minimal`
+  - Result: passed `2/2`.
+- `dotnet build SSH_Helper.csproj -nologo`
+  - First sandboxed attempt failed in the existing FlowCanvas build step with `spawn EPERM` while Vite loaded `vite.config.ts`.
+  - Rerun outside the sandbox with the same command succeeded and produced `Build succeeded.` after the FlowCanvas build completed.
+- Notes:
+- Test/build commands used `DOTNET_CLI_HOME=.\.dotnet` to keep first-run writes inside the workspace.
+- Existing `NU1900` and `MSB3277` warnings remain unchanged.
+- The successful normal build also emitted the existing FlowCanvas chunk-size warning from Vite; this change did not modify that output.
+
 ## 257. Confirm preset deletion from the preset tree
 - [x] 257.1 Confirm whether the preset-delete confirmation should apply only to the preset tree context-menu delete entry point or to every preset-delete entry point that routes through `DeletePreset(...)`.
 - [x] 257.2 Add RED WinForms coverage proving preset deletion requires confirmation and that canceling the dialog leaves the preset library and undo state unchanged.

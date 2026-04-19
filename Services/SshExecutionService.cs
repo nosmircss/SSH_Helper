@@ -74,6 +74,7 @@ namespace SSH_Helper.Services
     public class SshExecutionService : IDisposable
     {
         private const int MaxParallelHosts = 100;
+        private const int BannerSidePadding = 10;
 
         private const string SingleHostOnlyMessageSuffix =
             " not supported in folder or multi-host runs. Run the script against a single current host instead.";
@@ -1527,7 +1528,7 @@ namespace SSH_Helper.Services
                 {
                     var prompt = session.CurrentPrompt;
                     var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
-                    string header = $"{new string('#', 20)} {host} {prompt} SCRIPT: {scriptName} {new string('#', 20)}";
+                    string header = $"{new string('#', BannerSidePadding)} {host} {prompt} SCRIPT: {scriptName} {new string('#', BannerSidePadding)}";
                     string separator = new string('#', header.Length);
 
                     outputBuilder.AppendLine(separator);
@@ -1661,7 +1662,7 @@ namespace SSH_Helper.Services
             {
                 var prompt = session.CurrentPrompt;
                 var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
-                string header = $"{new string('#', 20)} SCRIPT: {host} {prompt}{scriptName} {new string('#', 20)}";
+                string header = $"{new string('#', BannerSidePadding)} SCRIPT: {host} {prompt}{scriptName} {new string('#', BannerSidePadding)}";
                 string separator = new string('#', header.Length);
 
                 outputBuilder.AppendLine(separator);
@@ -1721,7 +1722,7 @@ namespace SSH_Helper.Services
             if (showHeader && !script.NoBanner)
             {
                 var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : string.Empty;
-                string header = $"{new string('#', 20)} LOCAL SCRIPT: {host}{scriptName} {new string('#', 20)}";
+                string header = $"{new string('#', BannerSidePadding)} LOCAL SCRIPT: {host}{scriptName} {new string('#', BannerSidePadding)}";
                 string separator = new string('#', header.Length);
 
                 outputBuilder.AppendLine(separator);
@@ -2130,7 +2131,7 @@ namespace SSH_Helper.Services
                 if (showHeader)
                 {
                     var prompt = session.CurrentPrompt;
-                    string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
+                    string header = $"{new string('#', BannerSidePadding)} CONNECTED TO {host} {prompt} {new string('#', BannerSidePadding)}";
                     string separator = new string('#', header.Length);
 
                     outputBuilder.AppendLine("\r\n" + separator);
@@ -2272,7 +2273,7 @@ namespace SSH_Helper.Services
             if (showHeader)
             {
                 var prompt = session.CurrentPrompt;
-                string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
+                string header = $"{new string('#', BannerSidePadding)} CONNECTED TO {host} {prompt} {new string('#', BannerSidePadding)}";
                 string separator = new string('#', header.Length);
 
                 outputBuilder.AppendLine("\r\n" + separator);
@@ -2566,7 +2567,7 @@ namespace SSH_Helper.Services
             }
 
             var sb = new StringBuilder();
-            string title = $"{new string('#', 20)} {errorType}: {host} {new string('#', 20)}";
+            string title = $"{new string('#', BannerSidePadding)} {errorType}: {host} {new string('#', BannerSidePadding)}";
             string separator = new string('#', title.Length);
 
             sb.AppendLine(separator);
