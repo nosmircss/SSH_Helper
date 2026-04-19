@@ -10167,6 +10167,9 @@ namespace SSH_Helper
             if (string.IsNullOrWhiteSpace(selectedPreset))
                 return;
 
+            if (!ConfirmPresetDeletion(selectedPreset))
+                return;
+
             var deleteNode = FindPresetNodeByName(trvPresets.Nodes, selectedPreset);
             var preActionExpandState = CapturePresetTreeExpandState();
             var selectionTargetPresetName = GetSelectionTargetAfterDeletedPreset(selectedPreset, preferContextSource);
@@ -10237,6 +10240,18 @@ namespace SSH_Helper
                     }
                 }
             }
+        }
+
+        private bool ConfirmPresetDeletion(string presetName)
+        {
+            var result = ShowPromptDialog(
+                this,
+                $"Are you sure you want to delete the preset '{presetName}'?",
+                "Delete Preset",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            return result == DialogResult.Yes;
         }
 
         private void ExportPreset(bool preferContextSource = false)

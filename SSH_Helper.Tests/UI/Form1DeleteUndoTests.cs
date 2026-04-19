@@ -24,19 +24,50 @@ public sealed class Form1DeleteUndoTests : IDisposable
     {
         var visibleOpenFormsBefore = SnapshotVisibleOpenForms();
         using var form = CreateLoadedForm(CreatePresetConfig());
+        var shownPrompts = new List<(string Message, string Title, MessageBoxButtons Buttons, MessageBoxIcon Icon)>();
 
         var presetsTree = GetField<TreeView>(form, "trvPresets");
         var undoMenuItem = GetField<ToolStripMenuItem>(form, "undoDeleteToolStripMenuItem");
         SelectPreset(form, presetsTree, "Alpha");
+        SetDialogResponse(form, DialogResult.Yes, shownPrompts);
 
         undoMenuItem.Enabled.Should().BeFalse();
         undoMenuItem.Text.Should().Be("Undo Delete");
 
         InvokeMethod(form, "DeletePreset", false);
 
+        shownPrompts.Should().ContainSingle();
+        shownPrompts[0].Title.Should().Be("Delete Preset");
+        shownPrompts[0].Message.Should().Contain("Alpha");
+        shownPrompts[0].Buttons.Should().Be(MessageBoxButtons.YesNo);
+        shownPrompts[0].Icon.Should().Be(MessageBoxIcon.Warning);
         undoMenuItem.Enabled.Should().BeTrue("deleting a preset should create a pending session-scoped undo step");
         undoMenuItem.Text.Should().Be("Undo Delete Preset 'Alpha'");
         GetField<PresetManager>(form, "_presetManager").Presets.Should().NotContainKey("Alpha");
+        AssertNoNewVisibleOpenForms(visibleOpenFormsBefore);
+    }
+
+    [WinFormsFact]
+    public void DeletePreset_WhenConfirmationDeclined_LeavesPresetAndUndoStateUnchanged()
+    {
+        var visibleOpenFormsBefore = SnapshotVisibleOpenForms();
+        using var form = CreateLoadedForm(CreatePresetConfig());
+        var shownPrompts = new List<(string Message, string Title, MessageBoxButtons Buttons, MessageBoxIcon Icon)>();
+
+        var presetsTree = GetField<TreeView>(form, "trvPresets");
+        var undoMenuItem = GetField<ToolStripMenuItem>(form, "undoDeleteToolStripMenuItem");
+        SelectPreset(form, presetsTree, "Alpha");
+        SetDialogResponse(form, DialogResult.No, shownPrompts);
+
+        InvokeMethod(form, "DeletePreset", false);
+
+        shownPrompts.Should().ContainSingle();
+        shownPrompts[0].Title.Should().Be("Delete Preset");
+        shownPrompts[0].Message.Should().Contain("Alpha");
+        GetField<PresetManager>(form, "_presetManager").Presets.Should().ContainKey("Alpha");
+        ((PresetNodeTag)presetsTree.SelectedNode!.Tag!).Name.Should().Be("Alpha");
+        undoMenuItem.Enabled.Should().BeFalse();
+        undoMenuItem.Text.Should().Be("Undo Delete");
         AssertNoNewVisibleOpenForms(visibleOpenFormsBefore);
     }
 
@@ -167,6 +198,7 @@ public sealed class Form1DeleteUndoTests : IDisposable
         _ = form.Handle;
         form.PerformLayout();
         PointFormAtTemporaryConfig(form, config);
+        SetDialogResponse(form, DialogResult.Yes);
         form.Show();
         Application.DoEvents();
         return form;
@@ -208,6 +240,23 @@ public sealed class Form1DeleteUndoTests : IDisposable
         node.Should().NotBeNull($"the Presets tree should contain preset '{presetName}'");
         treeView.SelectedNode = node;
         InvokeMethod(form, "trvPresets_AfterSelect", treeView, new TreeViewEventArgs(node!));
+    }
+
+    private static void SetDialogResponse(
+        SSH_Helper.Form1 form,
+        DialogResult result,
+        List<(string Message, string Title, MessageBoxButtons Buttons, MessageBoxIcon Icon)>? shownPrompts = null)
+    {
+        var field = typeof(SSH_Helper.Form1).GetField("_dialogPromptOverrideForTests", BindingFlags.Instance | BindingFlags.NonPublic);
+        field.Should().NotBeNull("Form1 should expose a dialog override seam for WinForms regression tests");
+        field!.SetValue(
+            form,
+            new Func<IWin32Window?, string, string, MessageBoxButtons, MessageBoxIcon, DialogResult>(
+                (_, message, title, buttons, icon) =>
+                {
+                    shownPrompts?.Add((message, title, buttons, icon));
+                    return result;
+                }));
     }
 
     private static bool InvokeProcessCmdKey(SSH_Helper.Form1 form, Keys keyData)

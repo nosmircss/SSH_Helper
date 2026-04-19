@@ -1,5 +1,40 @@
 # TODO
 
+## 257. Confirm preset deletion from the preset tree
+- [x] 257.1 Confirm whether the preset-delete confirmation should apply only to the preset tree context-menu delete entry point or to every preset-delete entry point that routes through `DeletePreset(...)`.
+- [x] 257.2 Add RED WinForms coverage proving preset deletion requires confirmation and that canceling the dialog leaves the preset library and undo state unchanged.
+- [x] 257.3 Implement the minimal `Form1` confirmation flow while preserving the existing preset delete, replacement selection, and undo behavior.
+- [x] 257.4 Run focused verification, document the review notes below, and capture any new lesson if the scope changes during review.
+
+### 257 Review
+- Scope:
+- Confirmed the dialog should cover all preset-delete entry points that route through the shared `DeletePreset(...)` path, not only the right-click context menu.
+- Root cause:
+- `Form1.DeletePreset(...)` deleted immediately once a preset name resolved, so neither the context-menu delete nor the shared toolbar/menu delete path gave the user a chance to back out.
+- Implementation:
+- Added confirmation coverage to `SSH_Helper.Tests/UI/Form1DeleteUndoTests.cs`, including:
+  - a positive-path assertion that a `Delete Preset` warning dialog is shown before delete/undo state changes,
+  - a cancel-path regression proving `DialogResult.No` leaves the preset, selection, and undo menu state unchanged.
+- Updated `SSH_Helper.Tests/UI/Form1PresetTreeIncrementalMutationTests.cs` to auto-accept the new confirmation in the existing delete/undo tree-mutation regressions so they continue exercising the underlying viewport-preservation behavior.
+- Updated `Form1.cs` so `DeletePreset(...)` now calls a new shared `ConfirmPresetDeletion(...)` helper before capturing delete state or mutating the preset library. The prompt uses:
+  - title: `Delete Preset`
+  - buttons: `YesNo`
+  - icon: `Warning`
+  - message: `Are you sure you want to delete the preset '<name>'?`
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1DeleteUndoTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-delete-confirm-red/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-delete-confirm-red/obj/ -v minimal`
+  - Result: failed `2/7` as expected before the fix.
+  - Representative failure: the new prompt-capture assertions failed because `shownPrompts` was still empty, proving the delete path never asked for confirmation.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1DeleteUndoTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-delete-confirm-green/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-delete-confirm-green/obj/ -v minimal`
+  - Result: passed `7/7`.
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.UndoLatestPresetDelete|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-delete-tree-green/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-delete-tree-green/obj/ -v minimal`
+  - Result: passed `13/13`.
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-delete-confirm-build/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-delete-confirm-build/obj/ -v minimal`
+  - Result: build succeeded.
+- Notes:
+- Restore/build still emitted the repo’s existing `NU1900` and `MSB3277` warnings; this change did not add new warning classes.
+
 ## 256. Keep the disabled `Canceling...` stop button visually consistent
 - [x] 256.1 Add RED coverage proving the cancellation state uses `btnStopAll.Enabled = false`, expands wide enough for `Canceling...`, and renders disabled text with the same centered white styling as the active stop button.
 - [x] 256.2 Implement the minimal stop-button rendering/layout fix while restoring the disabled cancellation state.

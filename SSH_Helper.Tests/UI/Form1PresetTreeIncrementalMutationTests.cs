@@ -436,6 +436,7 @@ public sealed class Form1PresetTreeIncrementalMutationTests : IDisposable
         _ = form.Handle;
         form.PerformLayout();
         PointFormAtTemporaryConfig(form, config);
+        SetDialogResponse(form, DialogResult.Yes);
         form.Show();
         Application.DoEvents();
         return form;
@@ -538,6 +539,16 @@ public sealed class Form1PresetTreeIncrementalMutationTests : IDisposable
                     shownMessages.Add(message);
                     return DialogResult.OK;
                 }));
+    }
+
+    private static void SetDialogResponse(SSH_Helper.Form1 form, DialogResult result)
+    {
+        var field = typeof(SSH_Helper.Form1).GetField("_dialogPromptOverrideForTests", BindingFlags.Instance | BindingFlags.NonPublic);
+        field.Should().NotBeNull("Form1 should expose a dialog override seam for WinForms regression tests");
+        field!.SetValue(
+            form,
+            new Func<IWin32Window?, string, string, MessageBoxButtons, MessageBoxIcon, DialogResult>(
+                (_, _, _, _, _) => result));
     }
 
     private static T GetField<T>(object instance, string fieldName) where T : class
