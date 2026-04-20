@@ -1,5 +1,242 @@
 # Changelog
 
+## Changes Since `2fc99ed` (0.51.17)
+
+### `notify` Scripting Command
+
+A new `notify` command dispatches a single message to Slack, Microsoft Teams, Discord, a Windows desktop toast, or SMTP email. Secrets (webhook URLs, SMTP passwords) are stored in Windows Credential Manager; per-channel payload shape, color, and mention handling are selected automatically from the resolved profile or `channel:` override.
+
+```yaml
+- notify:
+    profile: ops-alerts          # Optional. Channel inferred from profile.Kind.
+    channel: <channel>           # Optional override: slack | teams | discord | toast | smtp
+    title: "Backup complete"
+    message: "{{ hosts_ok }}/{{ hosts_total }} hosts succeeded"
+    level: success               # info (default) | warn | error | success
+    mention:
+      - "upn:alice@contoso.com|Alice"
+    into: result
+    on_error: continue           # stop (default) | continue
+```
+
+**Channel / profile resolution** — Implemented in `NotificationService.SendAsync` (`Services/Notifications/NotificationService.cs`):
+
+| `profile:` | `channel:` | Behavior |
+|------------|------------|----------|
+| set | unset | Channel inferred from `profile.Kind`. |
+| set | set | Override must match `profile.Kind`; mismatch returns `"Channel 'x' does not match profile 'y' kind 'z'"`. |
+| unset | `toast` | No profile needed; dispatched via `ToastDispatcher`. |
+| unset | unset | Falls back to `NotificationSettings.DefaultProfileName`; fails if unset. |
+| unset | webhook/smtp | Fails — those channels require a profile. |
+
+Toast is the only channel that works with `NotificationSettings.Enabled = false`; all other channels are gated on the Notifications settings being enabled.
+
+**Channel dispatchers** — Separate classes under `Services/Notifications/`:
+
+- `WebhookDispatcher` (Slack / Teams / Discord) — POSTs JSON to an incoming webhook.
+  - Slack: colored `attachment` block, member-ID mention normalization (`U12345678` → `<@U12345678>`, `here` → `<!here>`, `channel` → `<!channel>`, `everyone` → `<!everyone>`).
+  - Discord: embed with `color` int, plus `content` line built from normalized mentions (`user:ID` → `<@ID>`, `role:ID` → `<@&ID>`, `channel:ID` → `<#ID>`, `here`, `everyone`). Existing raw mention markup (`<@123>`, `<@&123>`, `<#123>`) passes through unchanged.
+  - Teams: full Adaptive Card envelope (`application/vnd.microsoft.card.adaptive`, schema version `1.2`) with `msteams.entities` for typed mentions — see below.
+- `ToastDispatcher` — Windows 10/11 toast via `Microsoft.Toolkit.Uwp.Notifications.ToastContentBuilder`. Adds a level-based attribution line ("Info", "Warning", "Error", "Success").
+- `SmtpDispatcher` — `System.Net.Mail.SmtpClient` with optional STARTTLS (`UseStartTls`) and level-prefixed subject (`[INFO]`, `[WARN]`, `[ERROR]`, `[OK]`).
+
+**Teams Adaptive Cards with typed mentions** — `TeamsAdaptiveCardPayloadBuilder` replaces the legacy MessageCard JSON. Typed mention strings:
+
+| Form | Meaning | Entity written |
+|------|---------|----------------|
+| `upn:alice@contoso.com\|Alice` | User by Microsoft Entra UPN | `<at>Alice</at>` → `mentioned.id = alice@contoso.com` |
+| `entra:87d349ed-...|Adele` | User by Entra Object ID (GUID validation) | `<at>Adele</at>` → `mentioned.id = 87d349ed-...` |
+
+If the `|display` segment is omitted, the identifier itself becomes the visible label. Invalid typed strings (e.g. missing `@` in a UPN, non-GUID Entra ID, bare `@Bob`) are emitted as literal text and surface a runtime warning via `context.EmitOutput(..., ScriptOutputType.Warning)` instead of failing the step.
+
+**Level → channel-native styling:**
+
+| Level | Slack color | Teams title color | Discord embed | SMTP subject prefix |
+|-------|-------------|-------------------|---------------|---------------------|
+| `info` | `#2196F3` | `Accent` | `3447003` | `[INFO]` |
+| `warn` | `#FFC107` | `Warning` | `16776960` | `[WARN]` |
+| `error` | `#F44336` | `Attention` | `15158332` | `[ERROR]` |
+| `success` | `#4CAF50` | `Good` | `3066993` | `[OK]` |
+
+**`into:` capture** — Stores four script variables:
+
+- `<name>.sent` — `"true"` / `"false"`
+- `<name>.channel` — `"slack"`, `"teams"`, `"discord"`, `"toast"`, or `"smtp"`
+- `<name>.status_code` — webhook HTTP status (absent for toast/smtp)
+- `<name>.error` — error message when `sent` is false
+
+**Parser** — `ScriptParser` registers `notify` in the known-command list with option keys `profile, channel, title, message, level, mention, into, on_error`. `NotifyCommand` is added to the set of commands that participate in YAML flow analysis. A new `NotificationSettings` model (`Models/NotificationSettings.cs`) on `AppConfiguration` holds `Enabled`, `Profiles` (list of `NotificationProfile` with Name/Kind/DefaultTitle/SMTP fields), and `DefaultProfileName`. Secrets are keyed via `CredentialTargets` (`NotifyWebhookTarget`, `NotifySmtpPasswordTarget`).
+
+**Flow Canvas block** — `FlowCanvas/src/blockDefs/registry.ts` registers the `notify` block in the `io` category with properties `profile, channel, title, message, level, mention, into, on_error`.
+
+### `sethistorylabel` Scripting Command
+
+A new command attaches a label to the current host's history entry, enabling friendlier identifiers than raw IPs in the run history dashboard. Supports scalar shorthand and an options object.
+
+```yaml
+# Scalar form - replaces the label
+- sethistorylabel: "Core Router"
+
+# Options form - compose an existing label
+- sethistorylabel:
+    value: "{{ site_code }}"
+    mode: append          # replace (default) | append | prepend | clear
+    separator: " / "
+    replace: true          # When true, history shows only the label (hides IP)
+```
+
+**`HistoryLabelOperation`** (`Services/Scripting/Models/HistoryLabelOperation.cs`) — Encapsulates a single mutation so it can be replayed deterministically across parallel preset runs:
+
+- `Mode` normalized through `NormalizeMode` to one of `replace` / `append` / `prepend` / `clear`. Unknown values fall back to `replace`.
+- `ApplyTo(ref label, ref replacesAddress)` — `clear` or empty `Value` nulls the label and clears `replacesAddress`. `append` / `prepend` compose via `Separator`. `replace` also writes `ReplaceAddress ?? false` into `replacesAddress`; compose modes only touch `replacesAddress` when `ReplaceAddress` is explicitly set.
+
+**Multi-preset aggregation** — `SshExecutionService` now threads a `finalContext` out of each preset run and accumulates operations in a shared list. When multiple presets target the same host:
+
+- **Sequential**: `ApplyHistoryLabelResults` folds each preset's operations into the aggregate `ExecutionResult` in preset-order.
+- **Parallel**: Preset results are captured into a position-indexed `ExecutionResult?[]` during `Task.WhenAll`; aggregation then replays operations in their original preset order so the final label is deterministic regardless of completion order.
+
+**History plumbing** — `ExecutionResult` gains `HistoryLabel`, `HistoryLabelReplacesAddress`, `HistoryLabelTouched`, and `HistoryLabelOperations` (`Models/ExecutionResult.cs`). `JobHostOutput` gains `Label` and `LabelReplacesAddress` so scheduled job runs persist and display the same label. `HistoryStorageService` and `JobHistoryService` carry the new fields through serialization; `RunOutputViewerDialog` reads `LabelReplacesAddress` to decide between `"IP"`, `"IP - Label"`, and `"Label"` display.
+
+**Autocomplete and Flow Canvas** — `ScriptAutocompleteProvider` suggests `value, replace, mode, separator` under `sethistorylabel`, plus enum-like values `replace | append | prepend | clear` for `mode:`. `FlowCanvasBridge` exports both scalar and options forms and registers a `Set History Label` block in the `data` category (36 total commands).
+
+### `${_outputwindow}` Built-in Variable
+
+A new built-in variable returns the pane-formatted transcript accumulated for the current host so far.
+
+```yaml
+- notify:
+    channel: toast
+    title: "Run summary"
+    message: "${_outputwindow}"
+    level: info
+```
+
+**`ScriptContext.OutputWindowText`** (`Services/Scripting/ScriptContext.cs`) — Reads from a new `StringBuilder` inside `SharedScriptExecutionState.OutputWindow`. Writes happen via `SetOutputWindowText` / `AppendOutputWindowText`, which are invoked by the per-host output relay in `SshExecutionService` after the relay is attached. The variable is:
+
+- **Host-scoped** during multi-host runs — multi-host aggregations never contaminate each other.
+- **Empty before relay attach** — local-only scripts with no SSH session still receive any output produced after relay wiring.
+- Accessible via both `${_outputwindow}` direct replacement and `context.GetVariable("_outputwindow")`. Added to `HasVariable` and variable-snapshot helpers so condition checks (`is defined`) and logging surfaces see it.
+- Recognized by `ScriptAutocompleteProvider` and treated as a positive reference in `ScriptDependencyAnalyzer` so preflight warnings never flag it as missing.
+
+### Script Prompt Font Size
+
+Interactive prompts (`input`, `choose`, `multiselect`, `confirm`) now honor a `font_size:` override that scales the dialog text without resizing the rest of the app.
+
+```yaml
+- input:
+    prompt: "Enter password"
+    into: pw
+    password: true
+    font_size: 14
+```
+
+**`AppConfiguration.FontSettings.ScriptPromptFontSize`** (new, default `9f`) provides the baseline when a step omits `font_size:`. Each prompt options class (`InputOptions`, `ChooseOptions`, `MultiselectOptions`, `ConfirmOptions`) gains a nullable `FontSize` (points). `ScriptPromptDialogRunner` resolves the effective size per prompt and applies it to the constructed WinForms dialog. `SettingsDialog` exposes a matching "Script prompt font size" spinner under the Fonts tab.
+
+**Flow Canvas** — `FlowCanvas/src/blockDefs/registry.ts` inserts `font_size` into the properties panel for the four prompt blocks; `FlowCanvasBridge` serializes it via `SetIfDouble` so import/export round-trips preserve the per-step value.
+
+### Preset Folder Subtree Export
+
+A new context menu action "Export Folder..." exports a selected folder and every descendant preset as a standalone JSON bundle, rebased so the selected folder becomes the bundle root.
+
+**`PresetManager.ExportFolderSubtreeToFile(string folderPath, string filePath)`** — Enumerates presets whose `Folder` equals `folderPath` or starts with `folderPath + "/"`, clones each preset, and calls `RebaseFolderPathForExport(originalPath, sourceRoot, exportRoot)` (via `FolderPathUtility.RenamePath`) so bundled folder paths strip the ancestor chain. Emits the standard `{ version: 2, exportDate, presets, folders }` envelope.
+
+**Form1** — `ExportFolder(bool preferContextSource)` resolves the target folder from the context menu, active preset tree, or last-selected folder; opens a `SaveFileDialog` seeded with `{FolderName}_presets.json`; and displays a post-export summary showing the bundled preset count from `PresetManager.CountPresetsInFolderAndDescendants`. The context menu shows `ctxExportFolder` only when the right-click target is a folder node.
+
+### Preset Deletion Confirmation
+
+Deleting a preset now surfaces a Yes/No prompt (`"Are you sure you want to delete the preset '<name>'?"` with `MessageBoxIcon.Warning`) through the shared `ShowPromptDialog` helper. Cancelling aborts the delete before any tree mutation, history-label scrubbing, or undo bookkeeping runs.
+
+### Flow Canvas Moved to Top-Level Menu
+
+Flow Canvas is promoted out of the Edit submenu into its own top-level menu item (`"Flow Canvas"`, `Name = "_menuFlowCanvas"`) inserted immediately before the Help menu. The existing `Ctrl+Shift+F` shortcut is preserved. The old separator + Edit submenu entry is removed.
+
+### Commands Editor Comment / Uncomment
+
+The script editor right-click menu gains **"Comment Selected Lines"** and **"Uncomment Selected Lines"** (`ctxCommentSelectedLines` / `ctxUncommentSelectedLines`).
+
+**`ScintillaScriptEditorControl.CommentSelectedLines` / `UncommentSelectedLines`** — Both route through a shared `TransformSelectedLines(Func<string,string>)` helper that:
+
+- Expands the selection to full lines by resolving `startLine` from `SelectionStart` and `endLine` from `SelectionStart + SelectionLength - 1`.
+- Preserves each line's original line ending (`\r\n` vs `\n` vs none) via `SplitLineEnding`.
+- Inserts or removes a single `#` at the first non-whitespace position so indentation is never disturbed. Uncomment also strips a single trailing space after the `#` (the common "`# `" form).
+- Skips whitespace-only lines to avoid polluting blank separators.
+- Runs inside `BeginUndoAction` / `EndUndoAction` for single-undo toggle, and suspends `_suppressTextProcessing` so autocomplete and diagnostics do not fire on the in-progress edit.
+
+### Quote-Aware YAML Comment Highlighting
+
+`YamlSshSyntaxHighlighter` no longer treats `#` inside quoted strings as a comment start.
+
+**`FindCommentStartIndex`** scans each line left-to-right tracking `inSingleQuote` / `inDoubleQuote` state. Double-quote state flips on unescaped `"` (escape via `IsEscapedByBackslash`); single-quote state flips on `'` and is immune to backslash escapes (YAML single-quoted scalars don't process escapes). Only `#` outside any quote starts a comment. The entire line is then split at `commentStart`, and keyword / option / variable / string / number / boolean matchers run against the pre-comment prefix only. Post-comment text is emitted as a single `Comment` span.
+
+### SSH Output Banner Side-Padding Reduced
+
+Script output banner side padding drops from twenty `#` characters to ten on each side (`Services/SshExecutionService.cs` `BannerSidePadding = 10`). Affects the script-connected-to-host, SCRIPT, LOCAL SCRIPT, CONNECTED TO, and error-title banners. The horizontal separator still matches header length, so framing stays symmetric.
+
+### Busy Cursor During Execution
+
+`Form1.SetExecutionMode` now drives a whole-window busy cursor while a script or command runs.
+
+**`ApplyExecutionCursorState(bool executing)`** — Walks the control tree with `SetUseWaitCursorRecursive` to set `UseWaitCursor` on every descendant, then forces `Cursor.Current = WaitCursor` to flip the currently-hovered control immediately without waiting for a mouse move. On completion, unwinds recursively so no child control is left stuck on `WaitCursor`.
+
+**Scintilla integration** — The Scintilla control draws its own text-caret cursor via native messaging and ignores `UseWaitCursor`. A new nested `ExecutionCursorAwareScintilla : Scintilla` uses `DirectMessage(SCI_SETCURSOR, ScCursorWait)` to temporarily force the wait cursor and `SCI_GETCURSOR` to capture / restore the prior Scintilla cursor ID. `ScintillaScriptEditorControl.SetExecutionCursorOverride(bool)` routes the outer busy-state toggle into the nested control.
+
+### Stop Button Visual Refinement
+
+`btnStopAll` is replaced with a new `SSH_Helper.UI.FlatVisualButton` (`UI/FlatVisualButton.cs`) — a `Button` subclass that paints its own flat background / hover / pressed states and respects `FlatAppearance.MouseOverBackColor` / `MouseDownBackColor` / `BorderColor`. It uses `TextRenderer.DrawText` with end-ellipsis truncation and single-line rendering so the "Cancelling..." state always fits the button. `UpdateStopButtonLayout()` centralizes layout during Execute / Stop / Cancel transitions; the default width is captured once in the constructor and restored after cancellation.
+
+### Dependency Changes
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `Microsoft.Toolkit.Uwp.Notifications` | 7.1.3 | Windows 10/11 toast notification builder for the `notify` command `channel: toast` path |
+
+**Target framework bumped** — `TargetFramework` upgraded from `net8.0-windows` to `net8.0-windows10.0.17763.0` and `SupportedOSPlatformVersion` set to `10.0.17763.0` (Windows 10 1809) so `ToastContentBuilder` is available at build time.
+
+### Test Coverage
+
+| Test class | Coverage |
+|------------|----------|
+| `SSH_Helper.Tests/Scripting/NotifyCommandTests.cs` | Channel / profile resolution matrix, typed Teams mention emission, Slack member-ID and special-mention normalization, Discord `user:` / `role:` / `channel:` / raw markup pass-through, `into:` capture keys, `on_error: continue` vs `stop`, toast success without profile, dispatch failure when notifications disabled. |
+| `SSH_Helper.Tests/Services/NotificationServiceTests.cs` | Profile not found, channel/profile kind mismatch, default profile fallback, toast-only path when `Enabled=false`, credential provider invocation, Adaptive Card shape assertions (schema URL, `msteams.entities`), SMTP subject prefix per level. |
+| `SSH_Helper.Tests/UI/Form1NotificationInitializationTests.cs` | `NotificationService` wiring in Form1 startup, credential provider hookup, default-profile resolution from `AppConfiguration`. |
+| `SSH_Helper.Tests/Scripting/SetHistoryLabelCommandTests.cs` | Scalar form, options form, replace / append / prepend / clear semantics, separator handling, `ReplaceAddress` tri-state, history-label-touched flag propagation. |
+| `SSH_Helper.Tests/Services/SshExecutionServiceHistoryLabelTests.cs` | Sequential multi-preset aggregation preserves preset order, parallel multi-preset aggregation replays operations in definition order regardless of completion order, `JobHostOutput.Label` round-trip, folder-run label retention. |
+| `SSH_Helper.Tests/Services/SshExecutionServiceOutputWindowTests.cs` | `${_outputwindow}` empty before relay attach, accumulates after relay attach on local and SSH runs, host-scoped isolation in multi-host runs, survives cross-step `send` + `extract` invocations. |
+| `SSH_Helper.Tests/Services/SshExecutionServiceBannerFormattingTests.cs` | `BannerSidePadding = 10` applied to script / local-script / error banners, separator length matches header length. |
+| `SSH_Helper.Tests/Services/SshConnectionPoolCompatibilityTests.cs` | Legacy two-argument `ReleaseSession` / `RemoveAsync` overloads still function; key derivation remains stable for hosts without identity overrides. |
+| `SSH_Helper.Tests/Editor/YamlSshSyntaxHighlighterTests.cs` | `#` inside `"..."` is not a comment; `#` inside `'...'` is not a comment; `\"` escapes inside double quotes; `#` after a closed string remains a comment; mixed-quote lines highlight keyword + comment correctly. |
+| `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs` | `sethistorylabel` option keys + `mode` enum values; `notify` option keys; `_outputwindow` emitted as a built-in variable; prompt-step `font_size:` emitted as a numeric option hint. |
+| `SSH_Helper.Tests/Scripting/ScriptContextTests.cs` | `OutputWindowText` accumulation and isolation per context; `${_outputwindow}` substitution in `SubstituteVariables`. |
+| `SSH_Helper.Tests/Scripting/ScriptDependencyAnalyzerTests.cs` | `_outputwindow` treated as a built-in reference (not a missing column). |
+| `SSH_Helper.Tests/Scripting/ScriptParserTests.cs` | `sethistorylabel` scalar and options forms; `notify` option validation; `font_size` parsed to `float?` on prompt options. |
+| `SSH_Helper.Tests/Scripting/SendCommandTests.cs` | Extended to cover `${_outputwindow}` substitution in send command text. |
+| `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` | `sethistorylabel` round-trip (scalar and options), `notify` block properties including mention JSON array, prompt `font_size` export ordering in the properties panel. |
+| `SSH_Helper.Tests/Services/PresetManagerTests.cs` | `ExportFolderSubtreeToFile` rebases folder paths, bundles only descendants, `CountPresetsInFolderAndDescendants` returns correct counts including nested folders. |
+| `SSH_Helper.Tests/UI/Form1FolderExportTests.cs` | "Export Folder..." context menu visibility on folder vs preset nodes, save-file dialog injection via `_saveFilePathPickerOverrideForTests`, success / no-selection / exception paths display the correct prompt dialog. |
+| `SSH_Helper.Tests/UI/Form1DeleteUndoTests.cs` | Yes-vs-No paths through the new `ConfirmPresetDeletion` dialog; cancelling the confirm leaves the preset, tree, and undo stack untouched. |
+| `SSH_Helper.Tests/UI/Form1MenuInitializationTests.cs` | Flow Canvas menu item is a top-level `MenuStrip` item named `_menuFlowCanvas`, placed immediately before the Help menu; `Ctrl+Shift+F` shortcut preserved. |
+| `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs` | `ctxCommentSelectedLines` / `ctxUncommentSelectedLines` appear in the command-box context menu and invoke the editor's transform helpers. |
+| `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs` | Comment preserves indentation, uncomment removes leading `#` and optional trailing space, transform skips whitespace-only lines, undo toggles as a single action, line-ending round-trip. |
+| `SSH_Helper.Tests/UI/Form1StopButtonStateTests.cs` | `btnStopAll` rendered as `FlatVisualButton`, default width restored after cancellation, "Cancelling..." label does not resize the button past its default width, layout updates run on Execute / Stop / Cancel transitions. |
+| `SSH_Helper.Tests/UI/Form1ExecutionCursorTests.cs` | `SetExecutionMode(true)` sets `UseWaitCursor` on the form and all descendants including the Scintilla editor; `SetExecutionMode(false)` restores the default cursor everywhere; nested control children are walked recursively. |
+| `SSH_Helper.Tests/UI/Form1BuiltInEditorVariableTests.cs` | Built-in variable insertion dialog lists `_outputwindow` alongside `_output`, `_timestamp`, and `_prompt`. |
+| `SSH_Helper.Tests/UI/ScriptPromptDialogFontTests.cs` | Per-step `font_size` override wins over `FontSettings.ScriptPromptFontSize`; fallback uses `ScriptPromptFontSize` when the step omits `font_size`; dialog font assigned in points. |
+| `SSH_Helper.Tests/Models/FontSettingsTests.cs` / `ConfigurationServiceFontSettingsTests.cs` | `ScriptPromptFontSize` default value and persistence round-trip through `config.json`. |
+| `SSH_Helper.Tests/UI/Form1PresetTreeIncrementalMutationTests.cs` | Extended to cover delete-confirm cancellation path. |
+
+### Documentation
+
+`SCRIPTING.md` updated with:
+
+- Full **notify** reference section: syntax, channel / profile resolution table, Slack / Teams / Discord mention rules, level styling table, `into:` result structure, and multiple worked examples (profile-implied channel, Slack member-ID shorthand, Discord typed shorthand, Teams typed UPN / Entra mentions, raw Discord markup pass-through, toast without profile, SMTP with `on_error: continue`).
+- **Teams mention rules** explicitly call out that SSH Helper sends Adaptive Cards, accepts only `upn:` / `entra:` typed strings for live mentions, and downgrades invalid mentions to literal text with a runtime warning.
+- **Discord Developer Mode note** under mention rules explaining that Discord user / role / channel IDs require enabling "Developer Mode" in Discord settings before right-click -> "Copy ID" is available.
+- New `${_outputwindow}` entry in the built-in variables table, with a host-scoping note clarifying that the transcript is per-host during multi-host runs rather than the merged global pane.
+- New **sethistorylabel** example demonstrating scalar, options, append/prepend, and clear forms.
+- `font_size:` listed under the per-step options for `input`, `choose`, `multiselect`, and `confirm`.
+
+---
+
 ## Changes Since `e1efcd7` (0.51.16)
 
 ### Preconnect Phase for Host-Scoped Auth Bootstrap
