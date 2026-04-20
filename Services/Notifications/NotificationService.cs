@@ -33,7 +33,7 @@ namespace SSH_Helper.Services.Notifications
 
             if (httpHandler != null)
             {
-                _httpClient = new HttpClient(httpHandler, disposeHandler: false)
+                _httpClient = new HttpClient(httpHandler, disposeHandler: true)
                 {
                     Timeout = TimeSpan.FromSeconds(30)
                 };

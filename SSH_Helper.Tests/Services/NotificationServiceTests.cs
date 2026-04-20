@@ -34,6 +34,7 @@ public class NotificationServiceTests
     {
         public string? LastBody { get; private set; }
         public Uri? LastUri { get; private set; }
+        public bool IsDisposed { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
@@ -42,6 +43,12 @@ public class NotificationServiceTests
             if (request.Content != null)
                 LastBody = await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            IsDisposed = true;
+            base.Dispose(disposing);
         }
     }
 
@@ -378,6 +385,16 @@ public class NotificationServiceTests
         result.Sent.Should().BeFalse();
         result.StatusCode.Should().Be(400);
         result.ErrorMessage.Should().Contain("invalid channel");
+    }
+
+    [Fact]
+    public void Dispose_WithInjectedHttpHandler_DisposesHandler()
+    {
+        var (service, handler) = Build(NotificationChannelKind.Slack);
+
+        service.Dispose();
+
+        handler.IsDisposed.Should().BeTrue();
     }
 
     [Fact]

@@ -1,5 +1,33 @@
 # TODO
 
+## 262. Align `NotificationService` handler ownership with disposal
+- [x] 262.1 Add RED coverage proving a supplied `HttpMessageHandler` is disposed when `NotificationService` is disposed.
+- [x] 262.2 Update `NotificationService` so the handler ownership semantics match the service-owned `HttpClient`.
+- [x] 262.3 Run focused verification, then capture the review notes below.
+
+### 262 Review
+- Scope:
+- Ensure `NotificationService` disposes an injected `HttpMessageHandler` when it constructs and owns the wrapping `HttpClient`.
+- Root cause:
+- `NotificationService` built `HttpClient(httpHandler, disposeHandler: false)` even though the service treats that `HttpClient` as owned and disposes it in `Dispose()`, leaving the injected handler undisposed.
+- Implementation:
+- Updated `SSH_Helper.Tests/Services/NotificationServiceTests.cs` so the existing `CapturingHandler` records whether it was disposed, then added `Dispose_WithInjectedHttpHandler_DisposesHandler()` as the regression.
+- Updated `Services/Notifications/NotificationService.cs` so the handler-backed client is created with `disposeHandler: true`, matching the service-owned lifetime.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests.Dispose_WithInjectedHttpHandler_DisposesHandler" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-handler-red/bin/ -p:BaseIntermediateOutputPath=artifacts/notify-handler-red/obj/ -v minimal`
+  - Result: failed `1/1` as expected before the fix.
+  - Representative failure: `Expected handler.IsDisposed to be true, but found False.`
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests.Dispose_WithInjectedHttpHandler_DisposesHandler" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-handler-green/bin/ -p:BaseIntermediateOutputPath=artifacts/notify-handler-green/obj/ -v minimal`
+  - Result: passed `1/1`.
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notification-service-suite/bin/ -p:BaseIntermediateOutputPath=artifacts/notification-service-suite/obj/ -v minimal`
+  - Result: passed `27/27`.
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-handler-build/bin/ -p:BaseIntermediateOutputPath=artifacts/notify-handler-build/obj/ -v minimal`
+  - Result: build succeeded.
+- Notes:
+- Verification used `DOTNET_CLI_HOME=.\.dotnet` to keep first-run writes inside the workspace.
+- Existing `NU1900`, `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings remain unchanged.
+
 ## 258. Reduce SSH output banner side padding
 - [x] 258.1 Add RED coverage proving the local-script banner and shared error banner use 10 `#` characters of side padding instead of 20.
 - [x] 258.2 Update `SshExecutionService` so framed `SCRIPT`, `LOCAL SCRIPT`, `CONNECTED TO`, and error banners all use the reduced side padding.
