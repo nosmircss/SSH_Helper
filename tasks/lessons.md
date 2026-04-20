@@ -148,6 +148,7 @@
 - Before saying testing is complete, I must run at least one normal `dotnet build` for the touched project, not only a workaround-based test command.
 - If verification required special build flags, I must say that explicitly and explain whether the normal build path also passes.
 - When a user corrects UI indicator behavior, I must capture the exact visibility rule instead of assuming the indicator should always be visible.
+- When I fix a busy cursor in a WinForms surface backed by a custom native editor control, I must verify the actual editor control's cursor behavior, not just the parent form and wrapper `UseWaitCursor` state.
 - When I add a nested context-menu command in WinForms, I should verify primary click behavior explicitly instead of assuming submenu expansion works acceptably by default.
 - When a user reports a WinForms menu still does nothing after a UI patch, I should replace the fragile interaction model instead of iterating on the same submenu assumption.
 - When I launch follow-up UI from a WinForms context-menu command, I should use a regular dialog or another non-menu surface instead of opening a second `ContextMenuStrip` inside the active menu lifecycle.

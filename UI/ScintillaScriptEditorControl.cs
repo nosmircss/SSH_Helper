@@ -14,6 +14,39 @@ namespace SSH_Helper.UI
 {
     internal sealed class ScintillaScriptEditorControl : UserControl, IScriptEditor
     {
+        private sealed class ExecutionCursorAwareScintilla : Scintilla
+        {
+            private const int SciSetCursor = 2386;
+            private const int SciGetCursor = 2387;
+            private const int ScCursorNormal = -1;
+            private const int ScCursorWait = 4;
+
+            private int _cursorBeforeExecution = ScCursorNormal;
+            private bool _executionCursorOverrideActive;
+
+            public void SetExecutionCursorOverride(bool executing)
+            {
+                if (executing)
+                {
+                    if (!_executionCursorOverrideActive)
+                    {
+                        _cursorBeforeExecution = DirectMessage(SciGetCursor).ToInt32();
+                        _executionCursorOverrideActive = true;
+                    }
+
+                    DirectMessage(SciSetCursor, (IntPtr)ScCursorWait);
+                    return;
+                }
+
+                if (!_executionCursorOverrideActive)
+                    return;
+
+                DirectMessage(SciSetCursor, (IntPtr)_cursorBeforeExecution);
+                _cursorBeforeExecution = ScCursorNormal;
+                _executionCursorOverrideActive = false;
+            }
+        }
+
         private static readonly Regex VariableTokenRegex =
             new(@"\$\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}|\{\{(?<column>[^}\s]+)\}\}",
                 RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -55,7 +88,7 @@ namespace SSH_Helper.UI
         private static readonly Color DarkBraceMismatchBackColor = Color.FromArgb(90, 43, 43);
         private static readonly Color LightBraceMismatchBackColor = Color.FromArgb(255, 233, 233);
 
-        private readonly Scintilla _editor;
+        private readonly ExecutionCursorAwareScintilla _editor;
         private readonly ToolTip _toolTip;
         private readonly NonFocusableCompletionListBox _completionList;
         private readonly Panel _completionPopup;
@@ -92,7 +125,7 @@ namespace SSH_Helper.UI
                 ControlStyles.ResizeRedraw,
                 true);
 
-            _editor = new Scintilla
+            _editor = new ExecutionCursorAwareScintilla
             {
                 Dock = DockStyle.Fill,
                 WrapMode = WrapMode.None,
@@ -290,6 +323,11 @@ namespace SSH_Helper.UI
         {
             get => true;
             set { }
+        }
+
+        internal void SetExecutionCursorOverride(bool executing)
+        {
+            _editor.SetExecutionCursorOverride(executing);
         }
 
         public ScrollBars ScrollBars

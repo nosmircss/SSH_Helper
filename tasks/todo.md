@@ -5116,5 +5116,52 @@
   - RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_ScriptPromptFontSizeOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~Registry_ScriptPromptBlocks_ExposeFontSizeInAdvancedPanel|FullyQualifiedName~TextToGraph_ScriptPromptSteps_ImportFontSizeIntoProps" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseIntermediateOutputPath=obj/isolated/ -p:BaseOutputPath=obj/isolated_bin/ -v minimal` failed `3/3` before implementation on missing registry/import/order wiring.
   - GREEN: the same targeted command passed `3/3` after the implementation.
   - Broader bridge coverage: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~DriftGuard_RegistryPanelOrder_MatchesBridgePreferredExportOrder_ForAllBlocks|FullyQualifiedName~ExportGraphToYaml_ScriptPromptFontSizeOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~Registry_ScriptPromptBlocks_ExposeFontSizeInAdvancedPanel|FullyQualifiedName~TextToGraph_ScriptPromptSteps_ImportFontSizeIntoProps|FullyQualifiedName~ImportExportRoundTrip_ChooseLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_MultiselectLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_ChooseOptionsSourceScalar_PreservesSource" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseIntermediateOutputPath=obj/isolated/ -p:BaseOutputPath=obj/isolated_bin/ -v minimal` passed `7/7`.
-  - `npm.cmd run build` in `FlowCanvas/` passed after rerunning outside the sandbox due a Vite `spawn EPERM` sandbox restriction; existing Vite chunk-size warning remains.
-  - `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:BaseIntermediateOutputPath=obj/isolated_build/ -p:BaseOutputPath=obj/isolated_build_bin/ -v minimal` passed; existing warnings remain (`NU1900`, `MSB3277`).
+- `npm.cmd run build` in `FlowCanvas/` passed after rerunning outside the sandbox due a Vite `spawn EPERM` sandbox restriction; existing Vite chunk-size warning remains.
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:BaseIntermediateOutputPath=obj/isolated_build/ -p:BaseOutputPath=obj/isolated_build_bin/ -v minimal` passed; existing warnings remain (`NU1900`, `MSB3277`).
+
+## 260. Keep the busy cursor visible over the editor and output panes during preset execution
+- [x] 260.1 Add RED WinForms coverage proving `SetExecutionMode(...)` applies the busy cursor state to the command editor, its inner Scintilla control, and the output textbox, then clears it when execution ends.
+- [x] 260.2 Update `Form1` execution-mode cursor handling so manual preset runs propagate the wait cursor through nested child controls instead of only the top-level form.
+- [x] 260.3 Run focused verification and capture the results below.
+
+### 260 Review
+- Added `SSH_Helper.Tests/UI/Form1ExecutionCursorTests.cs` with a focused WinForms regression that drives `SetExecutionMode(true/false)` and asserts the busy cursor state reaches `Form1`, `txtCommand`, the inner Scintilla editor, and `txtOutput`, then clears when execution ends.
+- Updated `Form1.SetExecutionMode(...)` to call a new shared cursor helper that recursively sets `UseWaitCursor` across the form's child-control tree before preserving the existing top-level wait/default cursor behavior. That keeps the busy cursor visible over the command editor and output pane while a preset is running instead of falling back to the text-edit `IBeam`.
+- Verification:
+  - RED: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-execution-cursor-red/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-execution-cursor-red/obj/ -v minimal`
+    - Result: failed `1/1` as expected on `form.UseWaitCursor` staying `False`, confirming the busy cursor state was not propagated into execution mode.
+  - GREEN: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-execution-cursor-green/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-execution-cursor-green/obj/ -v minimal`
+    - Result: passed `1/1`.
+  - Regression: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests|FullyQualifiedName~Form1StopButtonStateTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-execution-cursor-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-execution-cursor-regression/obj/ -v minimal`
+    - Result: passed `2/2`.
+  - Build: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-execution-cursor-build/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-execution-cursor-build/obj/ -v minimal`
+    - Result: build succeeded.
+- Notes:
+  - Commands used `DOTNET_CLI_HOME=.\.dotnet` so first-run SDK writes stayed inside the workspace under sandbox restrictions.
+  - Existing `NU1900` and `MSB3277` warnings remain unchanged.
+
+## 261. Keep the busy cursor visible over the Scintilla command editor during execution
+- [x] 261.1 Add RED coverage proving the command editor's inner Scintilla control switches to a wait cursor during execution and restores its text-edit cursor afterward.
+- [x] 261.2 Patch the command editor execution-state cursor behavior without regressing its normal editing cursor.
+- [x] 261.3 Run focused verification and capture the results below.
+
+### 261 Review
+- Root cause: the main-form cursor fix only touched managed WinForms cursor state. The command editor is Scintilla-based, and local package docs plus focused probing showed the editor's effective cursor is controlled by Scintilla's native cursor mode, not by `Control.Cursor` or the wrapper's `UseWaitCursor` alone.
+- Added a follow-up regression in `SSH_Helper.Tests/UI/Form1ExecutionCursorTests.cs` that creates the inner Scintilla handle and asserts `SetExecutionMode(true/false)` flips the editor's native cursor mode using `SCI_GETCURSOR`.
+- Updated `UI/ScintillaScriptEditorControl.cs` so the inner Scintilla instance is an execution-cursor-aware subclass that uses Scintilla direct messages:
+  - `SCI_GETCURSOR` (`2387`) to capture the prior cursor mode,
+  - `SCI_SETCURSOR` (`2386`) with `SC_CURSORWAIT` (`4`) while execution is active,
+  - restore of the prior cursor mode when execution ends.
+- `Form1.ApplyExecutionCursorState(...)` now calls `txtCommand.SetExecutionCursorOverride(executing)` in addition to the existing form-wide wait-cursor propagation.
+- Verification:
+  - Investigation/RED: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests.SetExecutionMode_OverridesInnerCommandEditorDefaultCursorWhileRunning_AndRestoresItAfterward" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-command-default-cursor-red/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-command-default-cursor-red/obj/ -v minimal`
+    - Result: failed `1/1` with the inner editor still reporting `IBeam`, which exposed that the Scintilla-native cursor path was not being changed.
+  - GREEN: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests.SetExecutionMode_OverridesInnerCommandEditorCursorTypeWhileRunning_AndRestoresItAfterward" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-command-cursor-type-green/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-command-cursor-type-green/obj/ -v minimal`
+    - Result: passed `1/1`.
+  - Regression: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests|FullyQualifiedName~Form1StopButtonStateTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-command-cursor-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-command-cursor-regression/obj/ -v minimal`
+    - Result: passed `45/45`.
+  - Build: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-command-cursor-build/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-command-cursor-build/obj/ -v minimal`
+    - Result: build succeeded.
+- Notes:
+  - Commands used `DOTNET_CLI_HOME=.\.dotnet` so SDK first-run writes stayed inside the workspace.
+  - Existing `NU1900` and `MSB3277` warnings remain unchanged.

@@ -13117,9 +13117,7 @@ namespace SSH_Helper
             executePanel.SuspendLayout();
             try
             {
-                var targetCursor = executing ? Cursors.WaitCursor : Cursors.Default;
-                if (Cursor != targetCursor)
-                    Cursor = targetCursor;
+                ApplyExecutionCursorState(executing);
 
                 var runButtonsEnabled = !executing;
                 if (btnExecuteSelected.Enabled != runButtonsEnabled)
@@ -13158,6 +13156,27 @@ namespace SSH_Helper
             }
 
             SshDebugLog("UI", $"SetExecutionMode({executing}) completed", sw);
+        }
+
+        private void ApplyExecutionCursorState(bool executing)
+        {
+            SetUseWaitCursorRecursive(this, executing);
+            txtCommand.SetExecutionCursorOverride(executing);
+
+            var targetCursor = executing ? Cursors.WaitCursor : Cursors.Default;
+            if (Cursor != targetCursor)
+                Cursor = targetCursor;
+
+            if (executing)
+                Cursor.Current = Cursors.WaitCursor;
+        }
+
+        private static void SetUseWaitCursorRecursive(Control control, bool useWaitCursor)
+        {
+            control.UseWaitCursor = useWaitCursor;
+
+            foreach (Control child in control.Controls)
+                SetUseWaitCursorRecursive(child, useWaitCursor);
         }
 
         private void UpdateStopButtonLayout()
