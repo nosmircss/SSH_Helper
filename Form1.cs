@@ -14,6 +14,7 @@ using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.Services.Notifications;
 using SSH_Helper.Services.Vault;
 using SSH_Helper.UI;
 using SSH_Helper.Utilities;
@@ -111,7 +112,7 @@ namespace SSH_Helper
 
         #region Constants
 
-        private const string ApplicationVersion = "0.51.16";
+        private const string ApplicationVersion = "0.51.17";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -236,6 +237,7 @@ namespace SSH_Helper
         private Func<string, string, string, string>? _inputBoxPromptOverrideForTests = null;
         private Func<IWin32Window?, string, string, MessageBoxButtons, MessageBoxIcon, DialogResult>? _dialogPromptOverrideForTests = null;
         private Func<IWin32Window?, string?>? _filePathPickerOverrideForTests = null;
+        private Func<IWin32Window?, string, string, string?>? _saveFilePathPickerOverrideForTests = null;
 
         // Track selected folder for Run button (TreeView selection can be unreliable on button click)
         private string? _selectedFolderName;
@@ -262,12 +264,17 @@ namespace SSH_Helper
         private readonly object _outputBufferLock = new();
         private readonly OutputThrottler _uiOutputThrottler;
         private bool _manualCancellationRequested;
+        private const int StopButtonHorizontalPadding = 20;
+        private int _defaultStopButtonWidth;
 
         // Credential provider
         private ICredentialProvider? _credentialProvider;
 
         // Vault service
         private VaultService? _vaultService;
+
+        // Notification service
+        private NotificationService? _notificationService;
 
         // Track which TreeView triggered the context menu
         private TreeView? _contextMenuSourceTreeView;
@@ -305,6 +312,7 @@ namespace SSH_Helper
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
             InitializeComponent();
+            _defaultStopButtonWidth = btnStopAll.Width;
             InitializeFlowCanvasMenuItem();
             _hostGridRestoreBatcher = new HostGridRestoreBatcher(
                 onScrollbarRefresh: UpdateDataGridViewScrollbars,
@@ -323,6 +331,7 @@ namespace SSH_Helper
                 _uiOutputThrottler.Dispose();
                 _scriptValidationService.Dispose();
                 _vaultService?.Dispose();
+                _notificationService?.Dispose();
             };
 
             // Initialize services
@@ -364,6 +373,7 @@ namespace SSH_Helper
             InitializeFromConfiguration(config);
             InitializeCredentials();
             InitializeVault();
+            InitializeNotifications();
             InitializeDataGridView();
             InitializeScriptEditor();
             InitializeOutputHistory();
@@ -709,10 +719,12 @@ namespace SSH_Helper
         {
             value = key.ToLowerInvariant() switch
             {
+                "_prompt" => "[runtime SSH prompt]",
                 "_timestamp" => DateTime.Now.ToString("O"),
                 "_iteration" => "0",
                 "_last_error" => string.Empty,
                 "_output" => string.Empty,
+                "_outputwindow" => "[runtime output window transcript]",
                 "_host" => ResolveEditorColumnValue(CsvManager.HostColumnName),
                 "_port" => ResolveEditorColumnValue("port"),
                 "_username" => ResolveEditorColumnValue("username") ?? tsbUsername.Text,
@@ -1401,6 +1413,33 @@ namespace SSH_Helper
             _sshService.VaultService = _vaultService;
             if (_jobExecutionService != null)
                 _jobExecutionService.VaultCredentialProvider = new VaultCredentialProvider(_vaultService);
+        }
+
+        private void InitializeNotifications()
+        {
+            _notificationService?.Dispose();
+            _notificationService = null;
+            _sshService.NotificationService = null;
+            if (_jobExecutionService != null)
+                _jobExecutionService.NotificationService = null;
+
+            var config = _configService.GetCurrent();
+            _notificationService = new NotificationService(
+                config.Notifications,
+                webhookUrlProvider: profileName =>
+                {
+                    var target = CredentialTargets.NotifyWebhookTarget(profileName);
+                    return _credentialProvider?.TryGetPassword(target, out _, out var url) == true ? url : null;
+                },
+                smtpPasswordProvider: profileName =>
+                {
+                    var target = CredentialTargets.NotifySmtpPasswordTarget(profileName);
+                    return _credentialProvider?.TryGetPassword(target, out _, out var pw) == true ? pw : null;
+                });
+
+            _sshService.NotificationService = _notificationService;
+            if (_jobExecutionService != null)
+                _jobExecutionService.NotificationService = _notificationService;
         }
 
         private void TryLoadDefaultPassword()
@@ -3020,6 +3059,10 @@ namespace SSH_Helper
             // Dialog font (used by themed confirmation dialogs)
             _dialogFont = new Font(uiFont, Scaled(fontSettings.DialogFontSize));
             _managedFonts.Add(_dialogFont);
+
+            // Publish the script prompt default font size so script-thread dialog factories can read it.
+            Services.Scripting.Commands.ScriptPromptDialogRunner.DefaultPromptFontSize =
+                Scaled(fontSettings.ScriptPromptFontSize);
 
             // Apply accent color if custom
             ApplyAccentColor(fontSettings.CustomAccentColor);
@@ -5643,6 +5686,7 @@ namespace SSH_Helper
                 }
 
                 InitializeVault();
+                InitializeNotifications();
             }
 
             // A timeout reset is persisted immediately in the settings dialog.
@@ -5719,6 +5763,16 @@ namespace SSH_Helper
         private void ctxPathBrowser_Click(object? sender, EventArgs e)
         {
             InsertSelectedFilePathAtCaret();
+        }
+
+        private void ctxCommentSelectedLines_Click(object? sender, EventArgs e)
+        {
+            txtCommand.CommentSelectedLines();
+        }
+
+        private void ctxUncommentSelectedLines_Click(object? sender, EventArgs e)
+        {
+            txtCommand.UncommentSelectedLines();
         }
 
         private void InsertSelectedFilePathAtCaret()
@@ -6486,13 +6540,18 @@ namespace SSH_Helper
 
         private void InitializeFlowCanvasMenuItem()
         {
-            var flowCanvasItem = new ToolStripMenuItem("Flow Canvas...");
+            var flowCanvasItem = new ToolStripMenuItem("Flow Canvas")
+            {
+                Name = "_menuFlowCanvas"
+            };
             flowCanvasItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.F;
             flowCanvasItem.Click += (_, _) => OpenFlowCanvas();
-            // Insert before the last item (Debug Mode) with a separator
-            var editMenu = editToolStripMenuItem;
-            editMenu.DropDownItems.Add(new ToolStripSeparator());
-            editMenu.DropDownItems.Add(flowCanvasItem);
+
+            var helpIndex = menuStrip1.Items.IndexOf(helpToolStripMenuItem);
+            if (helpIndex >= 0)
+                menuStrip1.Items.Insert(helpIndex, flowCanvasItem);
+            else
+                menuStrip1.Items.Add(flowCanvasItem);
         }
 
         private void OpenFlowCanvas()
@@ -6984,14 +7043,18 @@ namespace SSH_Helper
                 var context = new Services.Scripting.ScriptContext(initialVars);
                 context.DebugMode = true; // Capture debug-level output (e.g., "Extract: var = 'value'")
                 context.VaultService = _vaultService;
+                context.NotificationService = _notificationService;
                 context.EnvironmentVaultProfile = _environmentService.GetEnvironment(
                     _environmentService.GetActiveEnvironmentName()).VaultProfileName;
 
-                // Special handling for _output: GetVariable("_output") reads from LastCommandOutput,
-                // not the dictionary, so we must hydrate it via RecordCommandOutput.
+                // Special handling for built-ins backed by ScriptContext runtime state rather than the raw dictionary.
                 if (variables != null && variables["_output"] != null)
                 {
                     context.RecordCommandOutput(variables["_output"]!.ToString());
+                }
+                if (variables != null && variables["_outputwindow"] != null)
+                {
+                    context.SetOutputWindowText(variables["_outputwindow"]!.ToString());
                 }
 
                 // Capture emitted output
@@ -7514,6 +7577,11 @@ namespace SSH_Helper
             ExportPreset(preferContextSource: sender == ctxExportPreset);
         }
 
+        private void ExportFolder_Click(object? sender, EventArgs e)
+        {
+            ExportFolder(preferContextSource: sender == ctxExportFolder);
+        }
+
         private void ImportPreset_Click(object? sender, EventArgs e)
         {
             ImportPreset();
@@ -7567,6 +7635,7 @@ namespace SSH_Helper
                 ctxDeletePreset.Visible = false;
                 ctxToggleFavorite.Visible = showToggleFavorite;
                 ctxExportPreset.Visible = false;
+                ctxExportFolder.Visible = false;
                 ctxImportPreset.Visible = false;
                 ctxToggleSorting.Visible = false;
                 ctxAddFolder.Visible = false;
@@ -7593,6 +7662,7 @@ namespace SSH_Helper
             ctxDeletePreset.Visible = isPreset;
             ctxToggleFavorite.Visible = hasSelection;
             ctxExportPreset.Visible = isPreset;
+            ctxExportFolder.Visible = isFolder;
             ctxImportPreset.Visible = true;
             ctxToggleSorting.Visible = true;
 
@@ -8353,7 +8423,7 @@ namespace SSH_Helper
                 var textRect = new Rectangle(e.Bounds.Left + 24, e.Bounds.Top, e.Bounds.Width - 28, e.Bounds.Height);
                 var textColor = _isDarkMode ? DarkTextPrimary : (isSelected ? Color.White : e.ForeColor);
                 using var textBrush = new SolidBrush(textColor);
-                SafeDrawString(e.Graphics, hostEntry.HostAddress, e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
+                SafeDrawString(e.Graphics, FormatHostHistoryDisplay(hostEntry), e.Font ?? lstHosts.Font, textBrush, textRect, StringFormat.GenericDefault);
             }
         }
 
@@ -9926,6 +9996,39 @@ namespace SSH_Helper
             return null;
         }
 
+        private string? ResolveFolderPathForActions(bool preferContextSource)
+        {
+            if (preferContextSource &&
+                _contextMenuSourceTreeView?.SelectedNode?.Tag is PresetNodeTag contextTag &&
+                contextTag.IsFolder)
+            {
+                return contextTag.Name;
+            }
+
+            if (presetsTabControl.SelectedTab == tabFavorites)
+            {
+                if (trvFavorites.SelectedNode?.Tag is PresetNodeTag favoritesTag && favoritesTag.IsFolder)
+                {
+                    return favoritesTag.Name;
+                }
+            }
+            else
+            {
+                if (trvPresets.SelectedNode?.Tag is PresetNodeTag presetsTag && presetsTag.IsFolder)
+                {
+                    return presetsTag.Name;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(_selectedFolderName) &&
+                _presetManager.Folders.ContainsKey(_selectedFolderName))
+            {
+                return _selectedFolderName;
+            }
+
+            return null;
+        }
+
         private TreeView ResolvePresetTreeViewForActions(bool preferContextSource)
         {
             if (preferContextSource && _contextMenuSourceTreeView != null)
@@ -10105,6 +10208,9 @@ namespace SSH_Helper
             if (string.IsNullOrWhiteSpace(selectedPreset))
                 return;
 
+            if (!ConfirmPresetDeletion(selectedPreset))
+                return;
+
             var deleteNode = FindPresetNodeByName(trvPresets.Nodes, selectedPreset);
             var preActionExpandState = CapturePresetTreeExpandState();
             var selectionTargetPresetName = GetSelectionTargetAfterDeletedPreset(selectedPreset, preferContextSource);
@@ -10177,6 +10283,18 @@ namespace SSH_Helper
             }
         }
 
+        private bool ConfirmPresetDeletion(string presetName)
+        {
+            var result = ShowPromptDialog(
+                this,
+                $"Are you sure you want to delete the preset '{presetName}'?",
+                "Delete Preset",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            return result == DialogResult.Yes;
+        }
+
         private void ExportPreset(bool preferContextSource = false)
         {
             string? presetName = ResolvePresetNameForActions(preferContextSource);
@@ -10195,6 +10313,42 @@ namespace SSH_Helper
             catch (Exception ex)
             {
                 DialogTheme.Show(this, $"Failed to export preset: {ex.Message}", "Export Preset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ExportFolder(bool preferContextSource = false)
+        {
+            string? folderPath = ResolveFolderPathForActions(preferContextSource);
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                ShowPromptDialog(this, "No folder selected to export.", "Export Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string folderName = FolderPathUtility.GetFolderName(folderPath);
+            string? exportPath = ShowJsonSaveFileDialog(this, "Export Folder", $"{folderName}_presets.json");
+            if (string.IsNullOrWhiteSpace(exportPath))
+                return;
+
+            try
+            {
+                int presetCount = _presetManager.CountPresetsInFolderAndDescendants(folderPath);
+                _presetManager.ExportFolderSubtreeToFile(folderPath, exportPath);
+                ShowPromptDialog(
+                    this,
+                    $"Exported folder '{folderPath}' with {presetCount} preset(s) to:\n{exportPath}",
+                    "Export Folder",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                ShowPromptDialog(
+                    this,
+                    $"Failed to export folder: {ex.Message}",
+                    "Export Folder",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
         }
 
@@ -10788,10 +10942,7 @@ namespace SSH_Helper
                 using var g = btnExecuteSelected.CreateGraphics();
                 var selectedSize = g.MeasureString(btnExecuteSelected.Text, btnExecuteSelected.Font);
                 btnExecuteSelected.Width = (int)selectedSize.Width + 40;
-
-                // Position Stop button with same spacing and ensure matching height
-                btnStopAll.Left = btnExecuteSelected.Right + 8;
-                btnStopAll.Height = btnExecuteSelected.Height;
+                UpdateStopButtonLayout();
             }
             catch (ArgumentException)
             {
@@ -10825,6 +10976,27 @@ namespace SSH_Helper
             }
 
             return DialogTheme.Show(owner, message, title, buttons, icon);
+        }
+
+        private string? ShowJsonSaveFileDialog(IWin32Window? owner, string title, string defaultFileName)
+        {
+            var pickerOverride = _saveFilePathPickerOverrideForTests;
+            if (pickerOverride != null)
+            {
+                return pickerOverride(owner, title, defaultFileName);
+            }
+
+            using var dialog = new SaveFileDialog
+            {
+                Title = title,
+                Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                DefaultExt = "json",
+                FileName = defaultFileName
+            };
+
+            return dialog.ShowDialog(owner ?? this) == DialogResult.OK
+                ? dialog.FileName
+                : null;
         }
 
         private bool CanMutatePresetTreeIncrementally()
@@ -12700,6 +12872,17 @@ namespace SSH_Helper
             return sb.ToString();
         }
 
+        internal static string FormatHostHistoryDisplay(HostHistoryEntry entry)
+        {
+            if (entry == null)
+                return string.Empty;
+            if (string.IsNullOrWhiteSpace(entry.Label))
+                return entry.HostAddress;
+            return entry.LabelReplacesAddress
+                ? entry.Label
+                : $"{entry.HostAddress} - {entry.Label}";
+        }
+
         private static List<HostHistoryEntry> BuildHostHistoryEntries(List<ExecutionResult> results)
         {
             var hostResults = new List<HostHistoryEntry>();
@@ -12719,7 +12902,9 @@ namespace SSH_Helper
                     Output = output,
                     Success = result.Success,
                     WasCancelled = result.WasCancelled,
-                    Timestamp = result.Timestamp
+                    Timestamp = result.Timestamp,
+                    Label = result.HistoryLabel,
+                    LabelReplacesAddress = result.HistoryLabelReplacesAddress
                 });
             }
 
@@ -12747,9 +12932,10 @@ namespace SSH_Helper
             if (!_sshService.IsRunning || _manualCancellationRequested)
                 return;
 
-            // Immediate visual feedback - disable button and change text
+            // Immediate visual feedback while keeping the button disabled against repeat clicks.
+            btnStopAll.Text = "Canceling...";
             btnStopAll.Enabled = false;
-            btnStopAll.Text = "Cancelling...";
+            UpdateStopButtonLayout();
             UpdateStatusBar("Cancellation requested...");
             _manualCancellationRequested = true;
 
@@ -12931,9 +13117,7 @@ namespace SSH_Helper
             executePanel.SuspendLayout();
             try
             {
-                var targetCursor = executing ? Cursors.WaitCursor : Cursors.Default;
-                if (Cursor != targetCursor)
-                    Cursor = targetCursor;
+                ApplyExecutionCursorState(executing);
 
                 var runButtonsEnabled = !executing;
                 if (btnExecuteSelected.Enabled != runButtonsEnabled)
@@ -12959,17 +13143,55 @@ namespace SSH_Helper
                 _manualCancellationRequested = false;
                 btnStopAll.Enabled = true;
                 btnStopAll.Text = "Stop";
+                UpdateStopButtonLayout();
             }
             else
             {
                 _manualCancellationRequested = false;
                 btnStopAll.Enabled = true;
                 btnStopAll.Text = "Stop";
+                UpdateStopButtonLayout();
                 statusProgress.Visible = false;
                 EndManualExecutionProgress();
             }
 
             SshDebugLog("UI", $"SetExecutionMode({executing}) completed", sw);
+        }
+
+        private void ApplyExecutionCursorState(bool executing)
+        {
+            SetUseWaitCursorRecursive(this, executing);
+            txtCommand.SetExecutionCursorOverride(executing);
+
+            var targetCursor = executing ? Cursors.WaitCursor : Cursors.Default;
+            if (Cursor != targetCursor)
+                Cursor = targetCursor;
+
+            if (executing)
+                Cursor.Current = Cursors.WaitCursor;
+        }
+
+        private static void SetUseWaitCursorRecursive(Control control, bool useWaitCursor)
+        {
+            control.UseWaitCursor = useWaitCursor;
+
+            foreach (Control child in control.Controls)
+                SetUseWaitCursorRecursive(child, useWaitCursor);
+        }
+
+        private void UpdateStopButtonLayout()
+        {
+            try
+            {
+                var requiredWidth = TextRenderer.MeasureText(btnStopAll.Text, btnStopAll.Font).Width + StopButtonHorizontalPadding;
+                btnStopAll.Width = Math.Max(_defaultStopButtonWidth, requiredWidth);
+                btnStopAll.Left = btnExecuteSelected.Right + 8;
+                btnStopAll.Height = btnExecuteSelected.Height;
+            }
+            catch (ArgumentException)
+            {
+                // Font may have an invalidated GDI+ handle during transitions; layout will correct on the next stable call.
+            }
         }
 
         private void SshService_OutputReceived(object? sender, SshOutputEventArgs e)
@@ -14415,6 +14637,7 @@ namespace SSH_Helper
             _jobExecutionService.VaultCredentialProvider = _vaultService != null
                 ? new VaultCredentialProvider(_vaultService)
                 : null;
+            _jobExecutionService.NotificationService = _notificationService;
             _jobExecutionService.EnvironmentVaultProfile = _environmentService.GetEnvironment(
                 _environmentService.GetActiveEnvironmentName()).VaultProfileName;
             _jobHistoryService = new JobHistoryService();

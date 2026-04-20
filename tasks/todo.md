@@ -1,5 +1,725 @@
 # TODO
 
+## 262. Align `NotificationService` handler ownership with disposal
+- [x] 262.1 Add RED coverage proving a supplied `HttpMessageHandler` is disposed when `NotificationService` is disposed.
+- [x] 262.2 Update `NotificationService` so the handler ownership semantics match the service-owned `HttpClient`.
+- [x] 262.3 Run focused verification, then capture the review notes below.
+
+### 262 Review
+- Scope:
+- Ensure `NotificationService` disposes an injected `HttpMessageHandler` when it constructs and owns the wrapping `HttpClient`.
+- Root cause:
+- `NotificationService` built `HttpClient(httpHandler, disposeHandler: false)` even though the service treats that `HttpClient` as owned and disposes it in `Dispose()`, leaving the injected handler undisposed.
+- Implementation:
+- Updated `SSH_Helper.Tests/Services/NotificationServiceTests.cs` so the existing `CapturingHandler` records whether it was disposed, then added `Dispose_WithInjectedHttpHandler_DisposesHandler()` as the regression.
+- Updated `Services/Notifications/NotificationService.cs` so the handler-backed client is created with `disposeHandler: true`, matching the service-owned lifetime.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests.Dispose_WithInjectedHttpHandler_DisposesHandler" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-handler-red/bin/ -p:BaseIntermediateOutputPath=artifacts/notify-handler-red/obj/ -v minimal`
+  - Result: failed `1/1` as expected before the fix.
+  - Representative failure: `Expected handler.IsDisposed to be true, but found False.`
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests.Dispose_WithInjectedHttpHandler_DisposesHandler" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-handler-green/bin/ -p:BaseIntermediateOutputPath=artifacts/notify-handler-green/obj/ -v minimal`
+  - Result: passed `1/1`.
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notification-service-suite/bin/ -p:BaseIntermediateOutputPath=artifacts/notification-service-suite/obj/ -v minimal`
+  - Result: passed `27/27`.
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-handler-build/bin/ -p:BaseIntermediateOutputPath=artifacts/notify-handler-build/obj/ -v minimal`
+  - Result: build succeeded.
+- Notes:
+- Verification used `DOTNET_CLI_HOME=.\.dotnet` to keep first-run writes inside the workspace.
+- Existing `NU1900`, `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings remain unchanged.
+
+## 258. Reduce SSH output banner side padding
+- [x] 258.1 Add RED coverage proving the local-script banner and shared error banner use 10 `#` characters of side padding instead of 20.
+- [x] 258.2 Update `SshExecutionService` so framed `SCRIPT`, `LOCAL SCRIPT`, `CONNECTED TO`, and error banners all use the reduced side padding.
+- [x] 258.3 Update banner examples/docs, run focused verification plus a build, and capture the review notes below.
+
+### 258 Review
+- Scope:
+- Reduce the framed SSH output banner side padding from `20` to `10` hash characters without changing the banner labels or the separator-line behavior.
+- Root cause:
+- `SshExecutionService` hard-coded `new string('#', 20)` in each framed banner path, so every script, connection, and full-width error banner carried twice as much side padding as desired.
+- Implementation:
+- Added focused regression coverage in `SSH_Helper.Tests/Services/SshExecutionServiceBannerFormattingTests.cs` for:
+  - the `LOCAL SCRIPT` header emitted by local script execution,
+  - the shared `FormatError(...)` banner title path via reflection.
+- Added `BannerSidePadding = 10` in `Services/SshExecutionService.cs` and replaced the hard-coded `20` in all framed banner outputs:
+  - `SCRIPT`
+  - `LOCAL SCRIPT`
+  - `CONNECTED TO`
+  - full-width error banners from `FormatError(...)`
+- Updated the banner examples in `SCRIPTING.md` so the sample script and connection-error blocks reflect the new side padding.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceBannerFormattingTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/banner-padding-red/bin/ -p:BaseIntermediateOutputPath=artifacts/banner-padding-red/obj/ -v minimal`
+  - Result: failed `2/2` as expected before the implementation.
+  - Representative failures:
+    - `ExecuteScriptAsync_LocalScript_HeaderUsesTenHashSidePadding` still saw `#################### LOCAL SCRIPT: batch-001 ####################`
+    - `FormatError_DefaultBanner_UsesTenHashSidePadding` still saw `#################### ERROR: 10.0.0.1 ####################`
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceBannerFormattingTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/banner-padding-green/bin/ -p:BaseIntermediateOutputPath=artifacts/banner-padding-green/obj/ -v minimal`
+  - Result: passed `2/2`.
+- `dotnet build SSH_Helper.csproj -nologo`
+  - First sandboxed attempt failed in the existing FlowCanvas build step with `spawn EPERM` while Vite loaded `vite.config.ts`.
+  - Rerun outside the sandbox with the same command succeeded and produced `Build succeeded.` after the FlowCanvas build completed.
+- Notes:
+- Test/build commands used `DOTNET_CLI_HOME=.\.dotnet` to keep first-run writes inside the workspace.
+- Existing `NU1900` and `MSB3277` warnings remain unchanged.
+- The successful normal build also emitted the existing FlowCanvas chunk-size warning from Vite; this change did not modify that output.
+
+## 257. Confirm preset deletion from the preset tree
+- [x] 257.1 Confirm whether the preset-delete confirmation should apply only to the preset tree context-menu delete entry point or to every preset-delete entry point that routes through `DeletePreset(...)`.
+- [x] 257.2 Add RED WinForms coverage proving preset deletion requires confirmation and that canceling the dialog leaves the preset library and undo state unchanged.
+- [x] 257.3 Implement the minimal `Form1` confirmation flow while preserving the existing preset delete, replacement selection, and undo behavior.
+- [x] 257.4 Run focused verification, document the review notes below, and capture any new lesson if the scope changes during review.
+
+### 257 Review
+- Scope:
+- Confirmed the dialog should cover all preset-delete entry points that route through the shared `DeletePreset(...)` path, not only the right-click context menu.
+- Root cause:
+- `Form1.DeletePreset(...)` deleted immediately once a preset name resolved, so neither the context-menu delete nor the shared toolbar/menu delete path gave the user a chance to back out.
+- Implementation:
+- Added confirmation coverage to `SSH_Helper.Tests/UI/Form1DeleteUndoTests.cs`, including:
+  - a positive-path assertion that a `Delete Preset` warning dialog is shown before delete/undo state changes,
+  - a cancel-path regression proving `DialogResult.No` leaves the preset, selection, and undo menu state unchanged.
+- Updated `SSH_Helper.Tests/UI/Form1PresetTreeIncrementalMutationTests.cs` to auto-accept the new confirmation in the existing delete/undo tree-mutation regressions so they continue exercising the underlying viewport-preservation behavior.
+- Updated `Form1.cs` so `DeletePreset(...)` now calls a new shared `ConfirmPresetDeletion(...)` helper before capturing delete state or mutating the preset library. The prompt uses:
+  - title: `Delete Preset`
+  - buttons: `YesNo`
+  - icon: `Warning`
+  - message: `Are you sure you want to delete the preset '<name>'?`
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1DeleteUndoTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-delete-confirm-red/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-delete-confirm-red/obj/ -v minimal`
+  - Result: failed `2/7` as expected before the fix.
+  - Representative failure: the new prompt-capture assertions failed because `shownPrompts` was still empty, proving the delete path never asked for confirmation.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1DeleteUndoTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-delete-confirm-green/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-delete-confirm-green/obj/ -v minimal`
+  - Result: passed `7/7`.
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1PresetTreeIncrementalMutationTests.UndoLatestPresetDelete|FullyQualifiedName~Form1PresetTreeIncrementalMutationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-delete-tree-green/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-delete-tree-green/obj/ -v minimal`
+  - Result: passed `13/13`.
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-delete-confirm-build/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-delete-confirm-build/obj/ -v minimal`
+  - Result: build succeeded.
+- Notes:
+- Restore/build still emitted the repo’s existing `NU1900` and `MSB3277` warnings; this change did not add new warning classes.
+
+## 256. Keep the disabled `Canceling...` stop button visually consistent
+- [x] 256.1 Add RED coverage proving the cancellation state uses `btnStopAll.Enabled = false`, expands wide enough for `Canceling...`, and renders disabled text with the same centered white styling as the active stop button.
+- [x] 256.2 Implement the minimal stop-button rendering/layout fix while restoring the disabled cancellation state.
+- [x] 256.3 Run focused verification, document the review notes below, and capture the lesson from the user correction.
+
+### 256 Review
+- Root cause:
+- The previous fix kept `btnStopAll` enabled, which preserved the white text but violated the actual interaction requirement that the button become disabled during cancellation.
+- A plain disabled WinForms button re-rendered the caption in black, and the fixed `80px` stop-button width clipped `Canceling...`.
+- Implementation:
+- Updated `SSH_Helper.Tests/UI/Form1StopButtonStateTests.cs` so the regression now asserts the corrected product surface:
+  - `StopExecution()` sets `btnStopAll.Enabled = false`,
+  - the caption changes to `Canceling...`,
+  - the stop button widens enough for the full label,
+  - the disabled rendering bitmap matches the enabled reference rendering for the same control.
+- Added `UI/FlatVisualButton.cs`, a small user-painted flat button that preserves the configured red background, white centered text, and flat hover/pressed colors even when the control is disabled.
+- Swapped `btnStopAll` to `SSH_Helper.UI.FlatVisualButton` in `Form1.Designer.cs`.
+- Updated `Form1.cs` to restore `btnStopAll.Enabled = false`, rename the label to `Canceling...`, track the default stop-button width, and measure/reapply the stop-button width and position through `UpdateStopButtonLayout()`.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1StopButtonStateTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-red2/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-red2/obj/ -v minimal`
+  - Result: failed `1/1` as expected before the fix.
+  - Representative failure: the button text was still `Cancelling...` instead of the required `Canceling...`.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1StopButtonStateTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-green2/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-green2/obj/ -v minimal`
+  - Result: passed `1/1`.
+- `dotnet build SSH_Helper.csproj -nologo -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-build2/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-build2/obj/`
+  - Result: build succeeded.
+- Notes:
+- The isolated-output build also completed the FlowCanvas `npm run build` step successfully.
+- Existing `MSB3277` warnings remain unchanged.
+
+## 255. Keep the Stop button styling consistent while cancellation is pending
+- [x] 255.1 Confirm the cancellation-state approach, then add RED coverage proving the `Stop` button keeps its white, centered flat-button presentation when its text changes to `Cancelling...`.
+- [x] 255.2 Implement the minimal `Form1` change so the button remains visually consistent during cancellation without allowing repeated stop requests.
+- [x] 255.3 Run focused verification, document the review notes below, and capture the lesson from the user correction.
+
+### 255 Review
+- Root cause:
+- `Form1.StopExecution()` disabled `btnStopAll` as soon as the caption changed to `Cancelling...`.
+- On WinForms, that disabled state stopped using the active flat-button presentation, so the dark-theme button no longer rendered like the normal red `Stop` state.
+- Implementation:
+- Added `SSH_Helper.Tests/UI/Form1StopButtonStateTests.cs` with a dark-theme WinForms regression that forces the form into a running state, invokes `StopExecution()`, and asserts the stop button stays in its active rendering state while showing `Cancelling...`.
+- Updated `Form1.StopExecution()` to keep `btnStopAll` enabled and rely on the existing `_manualCancellationRequested` guard to ignore repeat stop requests.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1StopButtonStateTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-red/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-red/obj/ -v minimal`
+  - Result: failed `1/1` as expected before the fix.
+  - Representative failure: `stopButton.Enabled` was `False`, proving the cancellation transition still dropped the button into disabled rendering.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1StopButtonStateTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-green/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-green/obj/ -v minimal`
+  - Result: passed `1/1`.
+- `dotnet build SSH_Helper.csproj -nologo`
+  - Result: completed the FlowCanvas `npm run build` step outside the sandbox, then failed because `bin\Debug\net8.0-windows10.0.17763.0\SSH_Helper.exe` was locked by a running local `SSH_Helper` process (`PID 45120`).
+- `dotnet build SSH_Helper.csproj -nologo -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-stop-button-build/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-stop-button-build/obj/`
+  - Result: build succeeded.
+- Notes:
+- Test/build commands used `DOTNET_CLI_HOME=.\.dotnet` to keep first-run writes inside the workspace.
+- Existing `NU1900` and `MSB3277` warnings remain unchanged.
+
+## 254. Make commented script text color fully green with quote-aware `#` handling
+- [x] 254.1 Add RED coverage proving unquoted `#` makes the rest of the line comment-green while quoted `#` stays part of the string literal.
+- [x] 254.2 Update `YamlSshSyntaxHighlighter` so token highlighting stops at the first unquoted `#`, then applies a single comment span through end-of-line.
+- [x] 254.3 Run focused verification, then record the review notes below.
+
+### 254 Review
+- Root cause:
+- `YamlSshSyntaxHighlighter.BuildLineHighlights(...)` highlighted strings, numbers, booleans, and variables across the entire raw line, then added the comment span afterward.
+- Because Scintilla applies later spans directly to their ranges, quoted text inside a commented region still kept its string-literal color instead of staying fully comment green.
+- Implementation:
+- Added focused regression coverage in `SSH_Helper.Tests/Editor/YamlSshSyntaxHighlighterTests.cs` for:
+- fully commented lines containing quoted text,
+- a quoted `#` inside a real string followed by a later unquoted comment marker,
+- a line where the only `#` is inside quotes and therefore must not create a comment span.
+- Updated `Services/Editor/YamlSshSyntaxHighlighter.cs` to:
+- find the first unquoted `#` with a quote-aware scanner,
+- restrict key/string/number/variable/boolean tokenization to the code region before that comment marker,
+- apply a single comment span from the real `#` through end-of-line.
+- The quote-aware scanner ignores `#` inside both double-quoted and single-quoted strings, handles backslash-escaped double quotes, and treats doubled single quotes inside single-quoted YAML strings as escaped content instead of closing the string early.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~YamlSshSyntaxHighlighterTests.BuildLineHighlights_FullyCommentedLine_WithQuotedText_UsesOnlyCommentColor|FullyQualifiedName~YamlSshSyntaxHighlighterTests.BuildLineHighlights_QuotedHashDoesNotStartComment_ButLaterUnquotedHashDoes" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/comment-color-red/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-color-red/obj/ -v minimal`
+  - Result: failed `2/2` as expected before the fix.
+  - Representative failures:
+    - fully commented lines still produced a separate string-literal span inside the comment region,
+    - the comment span for `prompt: "Select #interfaces" # "comment text"` started at the `#` inside the string instead of the later real comment marker.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~YamlSshSyntaxHighlighterTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/comment-color-green/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-color-green/obj/ -v minimal`
+  - Result: passed `8/8`.
+- Build verification:
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/comment-color-build/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-color-build/obj/ -v minimal`
+  - Result: build succeeded.
+- Notes:
+- Commands were run with `DOTNET_CLI_HOME` redirected into `.\.dotnet`.
+- The repo’s existing `MSB3277` warnings remain unchanged.
+- Restore/build in the sandbox also emitted `NU1900` warnings because vulnerability metadata could not be fetched from `https://api.nuget.org/v3/index.json`; that was a network limitation, not a compile or test failure.
+
+## 253. Add comment and uncomment actions to the commands editor context menu
+- [x] 253.1 Add RED coverage proving the commands editor context menu can comment and uncomment every selected line while preserving indentation and using `#` with no trailing space.
+- [x] 253.2 Implement editor helpers plus context-menu items for `Comment Selected Lines` and `Uncomment Selected Lines`.
+- [x] 253.3 Run focused verification, then record the review notes below.
+
+### 253 Review
+- Implementation:
+- Added two public editor actions on `UI/ScintillaScriptEditorControl.cs`: `CommentSelectedLines()` and `UncommentSelectedLines()`.
+- Both actions operate on every line touched by the current selection, preserve leading indentation, leave blank/whitespace-only lines unchanged, and run as a single undoable edit.
+- Commenting inserts `#` immediately after indentation with no trailing space.
+- Uncommenting removes one leading `#` after indentation and also removes one optional following space so it works on both `#comment` and existing `# comment` lines.
+- Added `Comment Selected Lines` and `Uncomment Selected Lines` to the `txtCommand` context menu in `Form1.Designer.cs`, wired through `Form1.cs` click handlers to the editor helpers.
+- Added focused regression coverage in:
+- `SSH_Helper.Tests/UI/ScintillaScriptEditorControlTests.cs`
+- `SSH_Helper.Tests/UI/Form1ScriptContextMenuTests.cs`
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests.CommentAndUncommentMenuClick_MultiLineSelection_TogglesIndentAwareHashPrefixes|FullyQualifiedName~ScintillaScriptEditorControlTests.CommentSelectedLines_PreservesIndentation_AndCommentsNoIndentLinesWithoutSpace|FullyQualifiedName~ScintillaScriptEditorControlTests.UncommentSelectedLines_RemovesIndentAwareHashes_AndOptionalSingleSpace" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/comment-menu-red/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-menu-red/obj/ -v minimal`
+  - Result: failed `3/3` as expected before the implementation.
+  - Representative failures: missing `CommentSelectedLines`, missing `UncommentSelectedLines`, and missing `ctxCommentSelectedLines`.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ScriptContextMenuTests.CommentAndUncommentMenuClick_MultiLineSelection_TogglesIndentAwareHashPrefixes|FullyQualifiedName~ScintillaScriptEditorControlTests.CommentSelectedLines_PreservesIndentation_AndCommentsNoIndentLinesWithoutSpace|FullyQualifiedName~ScintillaScriptEditorControlTests.UncommentSelectedLines_RemovesIndentAwareHashes_AndOptionalSingleSpace" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/comment-menu-green/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-menu-green/obj/ -v minimal`
+  - Result: passed `3/3`.
+- Build verification:
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/comment-menu-build/bin/ -p:BaseIntermediateOutputPath=artifacts/comment-menu-build/obj/ -v minimal`
+  - Result: build succeeded.
+- Notes:
+- Test/build commands were run with `DOTNET_CLI_HOME` redirected into `.\.dotnet` so first-time-use writes stayed inside the workspace.
+- The focused verification and build still emit the repo’s existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings; this change did not add new warning classes.
+
+## 252. Move Flow Canvas to top-level menu before Scheduler
+- [x] 252.1 Add RED coverage proving `Flow Canvas...` appears as a top-level menu item immediately before `Scheduler`.
+- [x] 252.2 Update `Form1` menu initialization so `Flow Canvas...` is added to the main menu strip before `Scheduler` instead of under `Edit`.
+- [x] 252.3 Run focused verification and capture the review notes below.
+
+### 252 Review
+- Added `SSH_Helper.Tests/UI/Form1MenuInitializationTests.cs` with a WinForms regression that asserts:
+- `Flow Canvas...` exists as a top-level menu item on `menuStrip1`,
+- it appears before `&Scheduler`,
+- it no longer appears under `Edit`.
+- Updated `Form1.InitializeFlowCanvasMenuItem()` to insert `Flow Canvas...` into the main menu strip immediately before `Help` instead of appending it to `editToolStripMenuItem`. Because `InitializeSchedulerStatusBar()` still inserts `Scheduler` before `Help`, the final top-level order is now `File`, `Edit`, `Flow Canvas...`, `Scheduler`, `Help`.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1MenuInitializationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-menu-red/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-menu-red/obj/ -v minimal`
+  - Result: failed `1/1` as expected because `flowCanvasIndex` was `-1`, confirming `Flow Canvas...` was not a top-level menu item before the fix.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1MenuInitializationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-menu-green/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-menu-green/obj/ -v minimal`
+  - Result: passed `1/1`.
+- Notes:
+- The focused green run completed inside the workspace with `DOTNET_CLI_HOME` redirected to `.\.dotnet`.
+- Existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings remain unchanged from the broader test baseline.
+
+## 251. Archive `add-preconnect-auth-bootstrap`
+- [x] 251.1 Confirm `add-preconnect-auth-bootstrap` is still active and ready to archive via OpenSpec CLI.
+- [x] 251.2 Run the OpenSpec archive command and verify the change moved under `openspec/changes/archive/` with spec updates applied.
+- [x] 251.3 Run strict OpenSpec validation plus post-archive inspection and capture the review notes below.
+
+### 251 Review
+- Validation:
+- `cmd /c openspec list` showed `add-preconnect-auth-bootstrap` as an active complete change before archival, and `openspec/changes/add-preconnect-auth-bootstrap/tasks.md` was fully checked.
+- `cmd /c openspec show add-preconnect-auth-bootstrap` confirmed the change adds `script-preconnect-bootstrap` and updates `ssh-execution`, `scripting-runtime`, and `scripting-validation`.
+- `cmd /c openspec archive add-preconnect-auth-bootstrap --yes` succeeded, created `openspec/specs/script-preconnect-bootstrap/spec.md`, updated `openspec/specs/scripting-runtime/spec.md`, `openspec/specs/scripting-validation/spec.md`, and `openspec/specs/ssh-execution/spec.md`, and archived the change as `openspec/changes/archive/2026-04-19-add-preconnect-auth-bootstrap`.
+- Post-archive inspection:
+- `cmd /c openspec list` now reports `No active changes found.`
+- `cmd /c openspec list --specs` now includes `script-preconnect-bootstrap` with `requirements 3`, and shows the expected requirement-count increases for `scripting-runtime`, `scripting-validation`, and `ssh-execution`.
+- `rg -n "preconnect|auth override|identity file|certificate" openspec/specs/script-preconnect-bootstrap/spec.md openspec/specs/scripting-runtime/spec.md openspec/specs/scripting-validation/spec.md openspec/specs/ssh-execution/spec.md` confirms the archived preconnect and auth-override requirements now live in the current specs.
+- Strict verification:
+- `cmd /c openspec validate --strict --no-interactive` returned `Nothing to validate` after the change was archived, so the repo-level equivalent verification was rerun with `cmd /c openspec validate --all --strict --no-interactive`.
+- `cmd /c openspec validate --all --strict --no-interactive` passed with `23 passed, 0 failed`.
+- Notes:
+- `openspec archive` emitted a non-blocking proposal warning: `Consider splitting changes with more than 10 deltas`.
+- The new `openspec/specs/script-preconnect-bootstrap/spec.md` file contains the autogenerated placeholder purpose line `TBD - created by archiving change add-preconnect-auth-bootstrap. Update Purpose after archive.`
+- OpenSpec emitted PostHog telemetry flush network errors after successful commands because outbound network is blocked in the sandbox; those messages did not change the zero exit codes for the successful archive/list/validate runs.
+
+## 250. Archive `update-teams-notify-adaptive-card`
+- [x] 250.1 Confirm `update-teams-notify-adaptive-card` is still active and ready to archive via OpenSpec CLI.
+- [x] 250.2 Run the OpenSpec archive command and verify the change moved under `openspec/changes/archive/` with spec updates applied.
+- [x] 250.3 Run strict OpenSpec validation plus post-archive inspection and capture the review notes below.
+
+### 250 Review
+- Validation:
+- `cmd /c openspec list` showed `update-teams-notify-adaptive-card` as an active complete change before archival, and `openspec/changes/update-teams-notify-adaptive-card/tasks.md` was fully checked.
+- `cmd /c openspec show update-teams-notify-adaptive-card` confirmed the change targets the `scripting-notifications` spec.
+- `cmd /c openspec archive update-teams-notify-adaptive-card --yes` succeeded, created `openspec/specs/scripting-notifications/spec.md`, and archived the change as `openspec/changes/archive/2026-04-19-update-teams-notify-adaptive-card`.
+- Post-archive inspection:
+- `cmd /c openspec list` no longer lists `update-teams-notify-adaptive-card` as an active change.
+- `cmd /c openspec list --specs` now includes `scripting-notifications` with `requirements 3`.
+- `rg -n "Adaptive Card|upn:|entra:|Teams" openspec/specs/scripting-notifications/spec.md` confirms the archived Teams Adaptive Card and typed-mention requirements now live in the current spec.
+- Strict verification:
+- `cmd /c openspec validate --strict --no-interactive` returned `Nothing to validate` after the change was archived, so the repo-level equivalent verification was rerun with `cmd /c openspec validate --all --strict --no-interactive`.
+- `cmd /c openspec validate --all --strict --no-interactive` passed with `23 passed, 0 failed`.
+- Note:
+- OpenSpec emitted PostHog telemetry flush network errors after successful commands because outbound network is blocked in the sandbox; those messages did not change the zero exit codes for the successful archive/list/validate runs.
+
+## 249. Archive `add-outputwindow-built-in-variable`
+- [x] 249.1 Confirm `add-outputwindow-built-in-variable` is still active and ready to archive via OpenSpec CLI.
+- [x] 249.2 Run the OpenSpec archive command and verify the change moved under `openspec/changes/archive/` with spec updates applied.
+- [x] 249.3 Run strict OpenSpec validation plus post-archive inspection and capture the review notes below.
+
+### 249 Review
+- Validation:
+- `cmd /c openspec list` showed `add-outputwindow-built-in-variable` as an active complete change before archival, and `openspec/changes/add-outputwindow-built-in-variable/tasks.md` was fully checked.
+- `cmd /c openspec archive add-outputwindow-built-in-variable --yes` succeeded, updated `openspec/specs/script-editor/spec.md` and `openspec/specs/scripting-runtime/spec.md`, and archived the change as `openspec/changes/archive/2026-04-19-add-outputwindow-built-in-variable`.
+- Post-archive inspection:
+- `cmd /c openspec list` no longer lists `add-outputwindow-built-in-variable` as an active change.
+- `cmd /c openspec list --specs` completed successfully after archival.
+- `rg -n "_outputwindow" openspec/specs/script-editor/spec.md openspec/specs/scripting-runtime/spec.md` confirms the archived requirements now live in the current specs.
+- Strict verification:
+- `cmd /c openspec validate --strict --no-interactive` returned `Nothing to validate` after the change was archived, so the repo-level equivalent verification was rerun with `cmd /c openspec validate --all --strict --no-interactive`.
+- `cmd /c openspec validate --all --strict --no-interactive` passed with `23 passed, 0 failed`.
+- Note:
+- OpenSpec emitted PostHog telemetry flush network errors after successful commands because outbound network is blocked in the sandbox; those messages did not change the zero exit codes for the successful archive/list/validate runs.
+
+## 248. Add Discord Developer Mode note to mention docs
+- [x] 248.1 Update `SCRIPTING.md` Discord mention rules to note that copying user, role, and channel IDs from Discord requires Developer Mode.
+
+### 248 Review
+- Scope:
+- Documentation-only clarification for existing Discord mention syntax. No runtime behavior changed.
+- Implementation:
+- Added a Discord mention-rules note explaining that users must enable Discord Developer Mode before the copy-ID actions are available for user, role, and channel IDs.
+- Verification:
+- `rg -n "Discord mention rules|Developer Mode" SCRIPTING.md` confirms the new note is present in the Discord section.
+
+## 247. Finish `sethistorylabel` and `notify` authoring/Flow Canvas wiring
+- [x] 247.1 Add RED coverage proving `sethistorylabel` and `notify` show up with the expected autocomplete detail/option metadata and Flow Canvas export/import metadata.
+- [x] 247.2 Patch the editor/Flow Canvas metadata so both commands are available and correctly configured.
+- [x] 247.3 Run focused verification and record the outcome below.
+
+### 247 Review
+- Root cause:
+- `notify` was already present in parser-driven autocomplete and Flow Canvas bridge/registry metadata, but it lacked direct regression coverage.
+- `sethistorylabel` had parser/autocomplete coverage from earlier work, yet Flow Canvas still missed the block definition entirely and the bridge treated imported `sethistorylabel: value` steps as `unknown` because it had no preview mapping or scalar-snippet option conversion for that command.
+- Implementation:
+- Added focused autocomplete coverage for `notify` detail text, option keys, and `level` enum suggestions.
+- Added Flow Canvas bridge coverage proving:
+  - `sethistorylabel` imports as a real block with extracted props and round-trips through the bridge,
+  - `notify` imports with the expected props,
+  - the Flow Canvas registry exposes both blocks with the expected property surface.
+- Updated `FlowCanvas/src/blockDefs/registry.ts` to add the `sethistorylabel` block to the Data palette with `value`, `replace`, `mode`, and `separator` properties.
+- Updated `Services/FlowCanvasBridge.cs` to:
+  - extract `sethistorylabel` props during YAML -> graph import,
+  - map `StepType.SetHistoryLabel` previews to the real Flow Canvas block type,
+  - convert scalar `sethistorylabel: label` snippets into editable `{ value: ... }` bridge options during export.
+- RED verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_Notify_ShowsDetailText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_NotifyStepOptionKey_SuggestsNotifyFields|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_NotifyLevelValue_SuggestsKnownLevels|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_SetHistoryLabelScalarStep_ImportsAsSetHistoryLabelBlock_WithPreviewAndExtractedProps|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_NotifyStep_ImportsAsNotifyBlock_WithExtractedProps|FullyQualifiedName~FlowCanvasBridgeTests.Registry_SetHistoryLabelAndNotifyBlocks_ExposeExpectedPropertySurface|FullyQualifiedName~FlowCanvasBridgeTests.ImportExportRoundTrip_SetHistoryLabelScalar_PreservesEditableValue" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/sethistorylabel-notify-red/bin/ -v minimal`
+  - Result: failed `3/7` as expected.
+  - Representative failures:
+    - `TextToGraph_SetHistoryLabelScalarStep_ImportsAsSetHistoryLabelBlock_WithPreviewAndExtractedProps` could not find a `sethistorylabel` block because the bridge still imported it as `unknown`.
+    - `ImportExportRoundTrip_SetHistoryLabelScalar_PreservesEditableValue` failed with `Unsupported block type 'unknown'`.
+    - `Registry_SetHistoryLabelAndNotifyBlocks_ExposeExpectedPropertySurface` reported the missing Flow Canvas `sethistorylabel` block.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_Notify_ShowsDetailText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_NotifyStepOptionKey_SuggestsNotifyFields|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_NotifyLevelValue_SuggestsKnownLevels|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_SetHistoryLabelScalarStep_ImportsAsSetHistoryLabelBlock_WithPreviewAndExtractedProps|FullyQualifiedName~FlowCanvasBridgeTests.TextToGraph_NotifyStep_ImportsAsNotifyBlock_WithExtractedProps|FullyQualifiedName~FlowCanvasBridgeTests.Registry_SetHistoryLabelAndNotifyBlocks_ExposeExpectedPropertySurface|FullyQualifiedName~FlowCanvasBridgeTests.ImportExportRoundTrip_SetHistoryLabelScalar_PreservesEditableValue" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/sethistorylabel-notify-green/bin/ -v minimal`
+  - Result: passed `7/7` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --no-restore --filter "(FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~FlowCanvasBridgeTests)&FullyQualifiedName!=SSH_Helper.Tests.Services.FlowCanvasBridgeTests.ExportGraphToYaml_StartAdvancedSectionsFromEditors_AreSerializedInPreamble" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/sethistorylabel-notify-regression2/bin/ -v minimal`
+  - Result: passed `142/142` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+  - Note: the first unfiltered broader pass hit `FlowCanvasBridgeTests.ExportGraphToYaml_StartAdvancedSectionsFromEditors_AreSerializedInPreamble`, which failed with `Access denied: Cannot read from other user` while validating an imported temp-file path outside the sandboxed user context. That failure was unrelated to the touched `sethistorylabel` / `notify` paths.
+- Build verification:
+- `npm.cmd run build` (from `FlowCanvas/`)
+  - Result: Flow Canvas production bundle rebuilt successfully.
+  - Note: Vite emitted its existing large-chunk warning for the main JS bundle.
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/sethistorylabel-notify-build/bin/ -v minimal`
+  - Result: build succeeded with the existing `MSB3277` warning.
+
+## 246. Switch Teams notify to Adaptive Cards with typed mention support
+- [x] 246.1 Scaffold the OpenSpec change `update-teams-notify-adaptive-card` with proposal, tasks, design, and `scripting-notifications` delta spec.
+- [x] 246.2 Add RED coverage for Teams Adaptive Card payload shape, level mapping, typed mention parsing, and malformed-mention degradation.
+- [x] 246.3 Add RED notify-command coverage proving Teams typed mention strings still honor variable substitution and surface degradation diagnostics.
+- [x] 246.4 Implement the Teams Adaptive Card payload builder and typed mention parsing without changing Slack, Discord, toast, or SMTP behavior.
+- [x] 246.5 Update `SCRIPTING.md`, autocomplete/help text, and any user-facing notify descriptions for the new Teams behavior.
+- [x] 246.6 Run focused verification, broader notification regressions, strict OpenSpec validation, and record the outcome below.
+
+### 246 Review
+- Scope decision:
+- Switched Teams `notify` to Adaptive Card delivery by default and kept the existing `notify` surface (`profile`, `channel`, `title`, `message`, `level`, `mention`, `into`, `on_error`) unchanged.
+- Kept Teams mention support additive and explicit: only typed `upn:` / `entra:` string forms create live Teams mention entities; unsupported entries degrade to literal text with warnings.
+- Implementation:
+- Added `Services/Notifications/TeamsAdaptiveCardPayloadBuilder.cs` to generate the Teams Incoming Webhook envelope (`type: message` + Adaptive Card attachment), map notify levels to Adaptive Card title colors, and parse Teams typed mention strings into visible `<at>...</at>` text plus `msteams.entities`.
+- Updated `Services/Notifications/WebhookDispatcher.cs` so the Teams branch now uses that Adaptive Card builder instead of the legacy MessageCard payload.
+- Updated `Services/Scripting/Commands/NotifyCommand.cs` so it resolves the effective Teams route early enough to emit `ScriptOutputType.Warning` diagnostics for invalid Teams mention entries while still sending the notification.
+- Left Slack, Discord, toast, and SMTP behavior unchanged.
+- Documentation / help text:
+- Updated `SCRIPTING.md` to document Teams Adaptive Card delivery, `upn:` / `entra:` mention forms, degradation semantics, revised level styling, and a concrete Teams example.
+- Updated `FlowCanvas/src/blockDefs/registry.ts`, `Services/Editor/ScriptAutocompleteProvider.cs`, and `Services/Scripting/Models/ScriptStep.cs` so authoring help text matches the new Teams behavior.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~TeamsPayload_IsAdaptiveCardEnvelopeWithSeverityStyledTitle|FullyQualifiedName~TeamsPayload_NormalizesTypedMentionsIntoAdaptiveCardEntities|FullyQualifiedName~TeamsPayload_UsesIdentifierAsDisplayWhenTypedMentionLabelIsOmitted|FullyQualifiedName~TeamsPayload_InvalidMentionEntriesRemainLiteralAlongsideValidMentions|FullyQualifiedName~TeamsTypedMentions_ApplyVariableSubstitutionBeforePayloadGeneration|FullyQualifiedName~InvalidTeamsMention_EmitsWarningButStillSends" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/teams-notify-red/bin/ -v minimal`
+  - Result: failed `9/9` as expected.
+  - Representative failures:
+    - Teams payload still lacked top-level `type: "message"` because runtime still emitted MessageCard.
+    - Invalid Teams mention coverage saw no warnings because the runtime had no degradation path yet.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~TeamsPayload_IsAdaptiveCardEnvelopeWithSeverityStyledTitle|FullyQualifiedName~TeamsPayload_NormalizesTypedMentionsIntoAdaptiveCardEntities|FullyQualifiedName~TeamsPayload_UsesIdentifierAsDisplayWhenTypedMentionLabelIsOmitted|FullyQualifiedName~TeamsPayload_InvalidMentionEntriesRemainLiteralAlongsideValidMentions|FullyQualifiedName~TeamsTypedMentions_ApplyVariableSubstitutionBeforePayloadGeneration|FullyQualifiedName~InvalidTeamsMention_EmitsWarningButStillSends" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/teams-notify-green/bin/ -v minimal`
+  - Result: passed `9/9` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~NotifyCommandTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/teams-notify-regression/bin/ -v minimal`
+  - Result: passed `38/38` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Build verification:
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/teams-notify-build/bin/ -v minimal`
+  - Result: build succeeded with the existing `MSB3277` warning.
+- OpenSpec validation:
+- `cmd /c openspec validate update-teams-notify-adaptive-card --strict --no-interactive`
+  - Result: `Change 'update-teams-notify-adaptive-card' is valid`.
+  - Note: `openspec` printed PostHog telemetry flush errors afterward because outbound network is blocked in the sandbox, but validation itself completed successfully with exit code `0`.
+
+## 245. Add explicit Discord mention shorthand for notify
+- [x] 245.1 Add RED coverage proving Discord notify normalizes explicit typed shorthand while preserving raw markup and leaving ambiguous bare IDs literal.
+- [x] 245.2 Implement Discord-only mention normalization in the webhook payload builder without adding any ID-type inference or lookup behavior.
+- [x] 245.3 Update `SCRIPTING.md` so Discord notify docs describe the typed shorthand, preserved literal markup, and ambiguity of bare numeric IDs.
+- [x] 245.4 Run focused verification plus notification regression/build coverage and record the outcome below.
+
+### 245 Review
+- Scope decision:
+- Added explicit Discord shorthand only for syntactically unambiguous forms.
+- Did not auto-wrap bare numeric IDs because Discord IDs are ambiguous across users, roles, and channels.
+- Did not add any Discord API lookup or display-name resolution.
+- Implementation:
+- Updated `Services/Notifications/WebhookDispatcher.cs` so Discord mention values are normalized as follows before being joined into webhook `content`:
+  - `user:123...` -> `<@123...>`
+  - `role:123...` -> `<@&123...>`
+  - `channel:123...` -> `<#123...>`
+  - `here` or `@here` -> `@here`
+  - `everyone` or `@everyone` -> `@everyone`
+  - Existing raw Discord markup such as `<@123...>`, `<@&123...>`, and `<#123...>` is preserved as-is.
+  - Bare numeric IDs and display names remain literal text.
+- Updated `SCRIPTING.md` notify docs to:
+  - describe the explicit Discord shorthand forms,
+  - state that raw Discord markup still works unchanged,
+  - state that bare numeric IDs remain literal because SSH Helper does not infer user vs. role vs. channel,
+  - add concrete Discord shorthand and raw-markup examples.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.DiscordPayload_NormalizesTypedMentionShorthand|FullyQualifiedName~NotificationServiceTests.DiscordPayload_PreservesLiteralMentionMarkup|FullyQualifiedName~NotificationServiceTests.DiscordPayload_LeavesBareIdsAndDisplayNamesLiteral" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/discord-mention-red/bin/ -v minimal`
+  - Result: failed `1/3` as expected.
+  - `DiscordPayload_NormalizesTypedMentionShorthand` failed because Discord still received the literal `user:... role:... channel:...` text.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.DiscordPayload_NormalizesTypedMentionShorthand|FullyQualifiedName~NotificationServiceTests.DiscordPayload_PreservesLiteralMentionMarkup|FullyQualifiedName~NotificationServiceTests.DiscordPayload_LeavesBareIdsAndDisplayNamesLiteral" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/discord-mention-green/bin/ -v minimal`
+  - Result: passed `3/3`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~NotifyCommandTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/discord-mention-regression/bin/ -v minimal`
+  - Result: passed `33/33` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Build verification:
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/discord-mention-build/bin/ -v minimal`
+  - Result: build succeeded with the existing `MSB3277` warning.
+
+## 244. Document Teams and Discord mention behavior for notify
+- [x] 244.1 Inspect the Teams and Discord webhook payload builders to confirm current mention behavior.
+- [x] 244.2 Update `SCRIPTING.md` so channel-specific mention behavior is explicit for Teams and Discord.
+
+### 244 Review
+- Verified current runtime behavior in `Services/Notifications/WebhookDispatcher.cs`:
+  - Slack normalizes safe shorthand and supports member-ID-based mentions.
+  - Teams does not consume the `mention` list at all in the current MessageCard payload builder.
+  - Discord passes `mention` values through literally by joining them into the top-level `content` field.
+- Updated `SCRIPTING.md` to document that:
+  - Teams currently ignores `mention`.
+  - Discord requires valid Discord mention tokens or special mentions to be supplied directly by the script author.
+
+## 243. Normalize safe Slack mention shorthand and document member-ID usage
+- [x] 243.1 Add RED coverage proving Slack notify normalizes safe shorthand (`here`, `channel`, bare user IDs) while leaving unsupported display-name text untouched.
+- [x] 243.2 Implement the minimal Slack-only mention normalization in the notification payload path without adding any display-name lookup behavior.
+- [x] 243.3 Update `SCRIPTING.md` so the notify docs are explicit that Slack user mentions need the member ID form and describe the accepted shorthand.
+- [x] 243.4 Run focused verification and record the outcome below.
+
+### 243 Review
+- Scope decision:
+- Implemented safe Slack-only shorthand normalization for values that can be inferred locally from syntax alone.
+- Did not add any Slack API lookup or display-name resolution. Inputs like `@Thomas Farral` still remain literal text because incoming webhooks do not resolve names to member IDs.
+- Implementation:
+- Updated `Services/Notifications/WebhookDispatcher.cs` so Slack mentions are normalized as follows before payload assembly:
+  - `U12345678` or `@U12345678` -> `<@U12345678>`
+  - `here` or `@here` -> `<!here>`
+  - `channel` or `@channel` -> `<!channel>`
+  - `everyone` or `@everyone` -> `<!everyone>`
+  - Already wrapped Slack markup (for example `<@U12345678>` or `<!here>`) is preserved as-is.
+  - Non-matching text remains literal.
+- Updated `SCRIPTING.md` notify docs to:
+  - state clearly that real Slack user mentions require the member-ID form,
+  - document the accepted shorthand forms,
+  - explicitly note that display names are not resolved,
+  - add a concrete Slack notify example using member-ID shorthand.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.SlackPayload_NormalizesSafeMentionShorthand|FullyQualifiedName~NotificationServiceTests.SlackPayload_LeavesDisplayNameMentionLiteral" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-mention-red/bin/ -v minimal`
+  - Result: failed `1/2` as expected.
+  - `SlackPayload_NormalizesSafeMentionShorthand` failed because Slack still received literal `U12345678 @here channel` text.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.SlackPayload_NormalizesSafeMentionShorthand|FullyQualifiedName~NotificationServiceTests.SlackPayload_LeavesDisplayNameMentionLiteral" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-mention-green/bin/ -v minimal`
+  - Result: passed `2/2`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~NotifyCommandTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-mention-regression/bin/ -v minimal`
+  - Result: passed `30/30` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+  - Note: an initial parallel regression/build attempt produced an `obj\...\SSH_Helper.dll` lock; rerunning the regression serially passed cleanly.
+- Build verification:
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/notify-mention-build/bin/ -v minimal`
+  - Result: build succeeded with the existing `MSB3277` warning.
+
+## 242. Make `notify.channel: toast` work without profile notification setup
+- [x] 242.1 Add RED coverage proving disabled notification settings still wire toast-capable runtime service, while non-toast channels remain disabled.
+- [x] 242.2 Implement the minimal runtime fix so `channel: toast` works without profile setup and non-toast channels still require notification profiles to be enabled.
+- [x] 242.3 Update `SCRIPTING.md` to document the exact setup rules for toast vs. profile-backed notifications.
+- [x] 242.4 Run focused verification and record the outcome below.
+
+### 242 Review
+- Root cause:
+- `Form1.InitializeNotifications()` returned early when `config.Notifications.Enabled` was false, so script execution never received a `NotificationService` instance and `notify` failed immediately with `Notifications are not configured`, even for `channel: toast`.
+- `NotificationService.SendAsync(...)` already supported toast without a profile, but because it ignored the disabled flag for non-toast channels, simply wiring the service all the time would also have unintentionally enabled Slack/Teams/Discord/SMTP when the user had disabled notification profiles.
+- Implementation:
+- Updated `Form1.InitializeNotifications()` to always construct and wire `NotificationService` into the main SSH execution service and job execution service.
+- Updated `Services/Notifications/NotificationService.cs` so `channel: toast` remains allowed when notifications are disabled, while Slack/Teams/Discord/SMTP return a disabled-settings failure unless **Settings → Notifications** is enabled.
+- Updated `SCRIPTING.md` to explicitly state that toast is app-local and profile-free, while profile-backed channels depend on the Notifications settings.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.ToastChannel_WhenNotificationsDisabled_StillDispatches|FullyQualifiedName~NotificationServiceTests.NonToastProfile_WhenNotificationsDisabled_ReturnsDisabledFailure|FullyQualifiedName~Form1NotificationInitializationTests.InitializeNotifications_WhenProfileNotificationsAreDisabled_StillWiresToastCapableService" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-toast-red/bin/ -v minimal`
+  - Result: failed `2/3` as expected.
+  - `NotificationServiceTests.NonToastProfile_WhenNotificationsDisabled_ReturnsDisabledFailure` failed because disabled non-toast delivery still sent successfully.
+  - `Form1NotificationInitializationTests.InitializeNotifications_WhenProfileNotificationsAreDisabled_StillWiresToastCapableService` failed because `_notificationService` was still null.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests.ToastChannel_WhenNotificationsDisabled_StillDispatches|FullyQualifiedName~NotificationServiceTests.NonToastProfile_WhenNotificationsDisabled_ReturnsDisabledFailure|FullyQualifiedName~Form1NotificationInitializationTests.InitializeNotifications_WhenProfileNotificationsAreDisabled_StillWiresToastCapableService" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-toast-green/bin/ -v minimal`
+  - Result: passed `3/3`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~NotifyCommandTests|FullyQualifiedName~Form1NotificationInitializationTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-toast-regression/bin/ -v minimal`
+  - Result: passed `29/29` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Build verification:
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/notify-toast-build/bin/ -v minimal`
+  - Result: build succeeded with the existing `MSB3277` warning and one transient `MSB3026` retry due a locked intermediate DLL.
+
+## 241. Archive completed OpenSpec changes
+- [x] 241.1 Confirm the archive set from `openspec list` and exclude incomplete proposals.
+- [x] 241.2 Archive `add-portable-release-build`, `add-vault-oidc-auth`, and `add-prompt-built-in-variable` with the OpenSpec CLI.
+- [x] 241.3 Validate the resulting OpenSpec state and record the outcome below.
+
+### 241 Review
+- Archive set confirmation:
+- `openspec list` showed these completed active changes at archive time:
+  - `add-portable-release-build`
+  - `add-vault-oidc-auth`
+  - `add-prompt-built-in-variable`
+- Left `add-preconnect-auth-bootstrap` active because it was still `15/16 tasks`.
+- Archive results:
+- `cmd /c openspec archive add-portable-release-build --yes`
+  - Archived as `openspec/changes/archive/2026-04-17-add-portable-release-build/`
+  - Updated `openspec/specs/scripting-runtime/spec.md`
+- `cmd /c openspec archive add-vault-oidc-auth --yes`
+  - Archived as `openspec/changes/archive/2026-04-17-add-vault-oidc-auth/`
+  - Updated `openspec/specs/credentials/spec.md`
+- `cmd /c openspec archive add-prompt-built-in-variable --yes`
+  - Archived as `openspec/changes/archive/2026-04-17-add-prompt-built-in-variable/`
+  - Updated `openspec/specs/script-editor/spec.md`
+  - Updated `openspec/specs/scripting-runtime/spec.md`
+- Validation:
+- `cmd /c openspec validate --strict --no-interactive`
+  - Returned `Nothing to validate` because there were no remaining active completed changes for that mode after archiving.
+- `cmd /c openspec validate --specs --strict --no-interactive`
+  - Passed `21/21` specs.
+- Final OpenSpec state:
+- `openspec list` now shows only `add-preconnect-auth-bootstrap` as the remaining active change.
+
+## 240. Expose `_prompt` as a dynamic built-in script variable
+- [x] 240.1 Confirm the change contract in OpenSpec: `${_prompt}` means the current detected remote SSH shell prompt, not UI/input prompt text.
+- [x] 240.2 Add RED runtime coverage in `SSH_Helper.Tests/Scripting/ScriptContextTests.cs` and targeted executor/command tests proving `_prompt` is available when `context.Session.CurrentPrompt` exists, resolves dynamically as the prompt changes, and falls back safely when no prompt is available.
+- [x] 240.3 Add RED editor/analyzer coverage in `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs` and `SSH_Helper.Tests/Scripting/ScriptDependencyAnalyzerTests.cs` proving `_prompt` is suggested in interpolation completion and never treated as a missing host-column dependency.
+- [x] 240.4 Implement runtime resolution in `Services/Scripting/ScriptContext.cs` so `_prompt` is a dynamic built-in surfaced through `GetVariable(...)`, `HasVariable(...)`, and `GetAllVariables()`.
+- [x] 240.5 Wire the authoring/debug surfaces in `Services/Editor/ScriptAutocompleteProvider.cs`, `Form1.cs`, and related tooltip plumbing so `_prompt` is visible and described during editing.
+- [x] 240.6 Decide snapshot/history behavior and align the supporting code: either persist `_prompt` for debug/history inspection or explicitly filter it out alongside `_timestamp` and `_output` in `Services/SshExecutionService.cs` and any replay paths.
+- [x] 240.7 Update docs and spec artifacts (`SCRIPTING.md`, OpenSpec deltas for `scripting-runtime` and `script-editor`) to define availability, meaning, and no-session behavior.
+- [x] 240.8 Run focused verification plus broader regression/build coverage and record results below.
+
+### 240 Review
+- Implemented behavior:
+- `${_prompt}` now resolves from `SshShellSession.CurrentPrompt` in `Services/Scripting/ScriptContext.cs`.
+- It is dynamic like `${_timestamp}` and returns an empty string when no SSH prompt is available.
+- `_prompt` is exposed in interpolation autocomplete, editor built-in hover preview, and script variable snapshots, but it is explicitly filtered out of `BuildEffectiveHostVariables(...)` so preconnect host-variable propagation does not persist it as a regular host variable.
+- Docs/spec updates:
+- Updated `SCRIPTING.md` built-in variable docs.
+- Added OpenSpec change bundle `openspec/changes/add-prompt-built-in-variable/` with validated deltas for `scripting-runtime` and `script-editor`.
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~ScriptContextTests.PromptVariable_|FullyQualifiedName~SendCommandTests.ExecuteAsync_SubstitutesPromptBuiltInIntoCommandText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetInterpolationSymbols_IncludesBuiltInsAndHostColumns|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_InterpolationPrefix_SuggestsPromptBuiltInWithDescription|FullyQualifiedName~Form1BuiltInEditorVariableTests.ResolveEditorVariableValue_PromptBuiltIn_ReturnsEditorPreviewValue" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/prompt-builtin-red/bin/ -v minimal`
+- Result: failed `6/7` for the expected reasons: `_prompt` was absent from `ScriptContext`, autocomplete, `send` substitution, and `Form1` editor preview.
+- Focused GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~ScriptContextTests.PromptVariable_|FullyQualifiedName~SendCommandTests.ExecuteAsync_SubstitutesPromptBuiltInIntoCommandText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetInterpolationSymbols_IncludesBuiltInsAndHostColumns|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_InterpolationPrefix_SuggestsPromptBuiltInWithDescription|FullyQualifiedName~Form1BuiltInEditorVariableTests.ResolveEditorVariableValue_PromptBuiltIn_ReturnsEditorPreviewValue" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/prompt-builtin-green/bin/ -v minimal`
+- Result: passed `7/7`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --no-restore --filter "FullyQualifiedName~ScriptContextTests|FullyQualifiedName~SendCommandTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~ScriptDependencyAnalyzerTests|FullyQualifiedName~SshExecutionServicePreconnectTests|FullyQualifiedName~Form1BuiltInEditorVariableTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/prompt-builtin-regression/bin/ -v minimal`
+- Result: passed `131/131` with existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+- Build/spec verification:
+- `dotnet build SSH_Helper.csproj --no-restore -p:SkipFlowCanvasBuild=true -p:BaseOutputPath=artifacts/prompt-builtin-build-app/bin/ -v minimal`
+- Result: build succeeded with the existing `MSB3277` warning.
+- `cmd /c openspec validate add-prompt-built-in-variable --strict --no-interactive`
+- Result: change validated successfully; the tool emitted expected PostHog network-flush noise afterward due sandboxed network restrictions.
+
+## 237. Restore sethistorylabel parser/editor wiring
+- [x] 237.1 Add RED coverage proving `sethistorylabel` is recognized as a step command and supports scalar/object option suggestions.
+- [x] 237.2 Run the focused RED tests and capture the failure evidence.
+- [x] 237.3 Wire `ScriptParser` and related command metadata so `sethistorylabel` parses and autocompletes correctly.
+- [x] 237.4 Run focused GREEN verification and record the outcome below.
+
+### 237 Review
+- Root cause:
+- `SetHistoryLabelCommand` and `StepType.SetHistoryLabel` were added to the runtime model/executor, but `ScriptParser` still omitted `sethistorylabel` from `KnownStepKeys`, command option metadata, scalar-preprocess keys, and the `ParseStep(...)` dispatch switch.
+- Because `ScriptAutocompleteProvider` sources its step command and option-key catalogs from `ScriptParser`, the editor never surfaced `sethistorylabel` even though a description string had been added locally.
+- RED verification:
+- Added focused regressions in:
+- `SSH_Helper.Tests/Scripting/ScriptParserTests.cs`
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelScalarStep_ParsesCorrectly|FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelMappingStep_ParsesValueAndReplace|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_SetHistoryLabel_ShowsDetailText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelStepOptionKey_SuggestsValueAndReplace" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: failed `4/4` as expected because `sethistorylabel` still parsed as `StepType.Unknown` and autocomplete fell back to generic step-root keys.
+- GREEN verification:
+- Updated `Services/Scripting/ScriptParser.cs` to:
+- register `sethistorylabel` as a known step command,
+- expose `{ value, replace }` command option metadata for autocomplete,
+- parse scalar and mapping forms into `ScriptStep.SetHistoryLabel`,
+- treat inline scalar `sethistorylabel:` values like other scalar-style commands during YAML preprocess quoting.
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelScalarStep_ParsesCorrectly|FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelMappingStep_ParsesValueAndReplace|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_SetHistoryLabel_ShowsDetailText|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelStepOptionKey_SuggestsValueAndReplace" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: passed `4/4`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests|FullyQualifiedName~ScriptAutocompleteProviderTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: passed `230/230` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+
+## 238. Make history-label aggregation deterministic and clearable across folder runs
+- [x] 238.1 Add RED coverage proving a later preset can explicitly clear an earlier history label in sequential folder execution.
+- [x] 238.2 Add RED coverage proving parallel preset execution resolves history labels by selected preset order, not completion order.
+- [x] 238.3 Propagate explicit history-label touch state through script context/results and use it in folder host-result aggregation.
+- [x] 238.4 Run focused GREEN verification and record the outcome below.
+
+### 238 Review
+- Root cause:
+- `sethistorylabel` supported explicit clear semantics inside one script, but folder aggregation only copied non-empty labels, so a later preset could not clear an earlier label.
+- In folder runs with `RunPresetsInParallel`, the host-level label was being overwritten directly from each completed preset task, so the final label depended on task completion timing rather than the user-selected preset order.
+- RED verification:
+- Added focused regressions in:
+- `SSH_Helper.Tests/Services/SshExecutionServiceHistoryLabelTests.cs`
+- Initial command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceHistoryLabelTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: build blocked by the existing local `SSH_Helper.exe` file lock on `bin\Debug\net8.0-windows\SSH_Helper.dll`.
+- Isolated-output RED command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceHistoryLabelTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-red/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-red/obj/ -v minimal`
+- Result: failed at compile time as expected because `ExecutionResult` did not yet expose `HistoryLabelTouched`, confirming the new touched-state contract was missing.
+- GREEN verification:
+- Updated:
+- `Services/Scripting/ScriptContext.cs` to track `HistoryLabelTouched` in shared execution state,
+- `Models/ExecutionResult.cs` to carry the touched flag out of script execution,
+- `Services/Scripting/Commands/SetHistoryLabelCommand.cs` to mark any invocation, including explicit clears, as a history-label touch,
+- `Services/SshExecutionService.cs` to:
+- apply sequential folder label updates only when a preset explicitly touched the label,
+- collect parallel preset results by selected preset index and merge label state after `Task.WhenAll` in deterministic preset order.
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceHistoryLabelTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-green/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-green/obj/ -v minimal`
+- Result: passed `2/2`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServiceHistoryLabelTests|FullyQualifiedName~SshExecutionServiceProgressTests|FullyQualifiedName~SshExecutionServiceCancellationTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-regression/obj/ -v minimal`
+- Result: passed `12/12` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+
+## 239. Add append/prepend/clear history-label modes
+- [x] 239.1 Add RED coverage for parser/autocomplete support and command runtime semantics for `sethistorylabel.mode` and `separator`.
+- [x] 239.2 Add RED folder-execution coverage proving append/prepend combine deterministically across presets.
+- [x] 239.3 Implement operation-based history-label accumulation for single scripts and folder runs.
+- [x] 239.4 Run focused GREEN verification and record the outcome below.
+
+### 239 Review
+- Root cause:
+- The first history-label fix only propagated a final `HistoryLabel` string plus a touched bit. That was enough for replace/clear behavior, but it discarded the sequence of mutations, so later presets had no way to append/prepend onto earlier preset labels during folder aggregation.
+- Autocomplete also reused the global `mode` enum catalog (`overwrite`, `append`), so even after adding a `mode` field the editor would have suggested the wrong values unless `sethistorylabel` got a command-specific override.
+- RED verification:
+- Added focused regressions in:
+- `SSH_Helper.Tests/Scripting/ScriptParserTests.cs`
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`
+- `SSH_Helper.Tests/Scripting/SetHistoryLabelCommandTests.cs`
+- `SSH_Helper.Tests/Services/SshExecutionServiceHistoryLabelTests.cs`
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelMappingStep_ParsesModeAndSeparator|FullyQualifiedName~ScriptParserTests.Validate_SetHistoryLabelInvalidMode_ReturnsError|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelStepOptionKey_SuggestsValueReplaceModeAndSeparator|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelModeValue_SuggestsKnownModes|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_SetHistoryLabel_ShowsDetailText|FullyQualifiedName~SetHistoryLabelCommandTests|FullyQualifiedName~SshExecutionServiceHistoryLabelTests.ExecuteFolderAsync_SequentialLaterPresetCanAppendEarlierHistoryLabel|FullyQualifiedName~SshExecutionServiceHistoryLabelTests.ExecuteFolderAsync_ParallelPresetsAppendHistoryLabelBySelectedOrder" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-modes-red/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-modes-red/obj/ -v minimal`
+- Result: failed at compile time as expected because `SetHistoryLabelOptions` did not yet expose `Mode`/`Separator`, `ScriptContext` had no history-label operation snapshot, and `Replace` was still modeled as a non-nullable boolean.
+- GREEN verification:
+- Implemented `HistoryLabelOperation` replay semantics and threaded them through:
+- `Services/Scripting/Models/HistoryLabelOperation.cs`
+- `Services/Scripting/Models/ScriptStep.cs`
+- `Services/Scripting/ScriptContext.cs`
+- `Models/ExecutionResult.cs`
+- `Services/Scripting/Commands/SetHistoryLabelCommand.cs`
+- `Services/Scripting/ScriptParser.cs`
+- `Services/Editor/ScriptAutocompleteProvider.cs`
+- `Services/SshExecutionService.cs`
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests.Parse_SetHistoryLabelMappingStep_ParsesModeAndSeparator|FullyQualifiedName~ScriptParserTests.Validate_SetHistoryLabelInvalidMode_ReturnsError|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelStepOptionKey_SuggestsValueReplaceModeAndSeparator|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_SetHistoryLabelModeValue_SuggestsKnownModes|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_StepPrefix_SetHistoryLabel_ShowsDetailText|FullyQualifiedName~SetHistoryLabelCommandTests|FullyQualifiedName~SshExecutionServiceHistoryLabelTests.ExecuteFolderAsync_SequentialLaterPresetCanAppendEarlierHistoryLabel|FullyQualifiedName~SshExecutionServiceHistoryLabelTests.ExecuteFolderAsync_ParallelPresetsAppendHistoryLabelBySelectedOrder" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-modes-green/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-modes-green/obj/ -v minimal`
+- Result: passed `10/10`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptParserTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~SetHistoryLabelCommandTests|FullyQualifiedName~SshExecutionServiceHistoryLabelTests|FullyQualifiedName~SshExecutionServiceProgressTests|FullyQualifiedName~SshExecutionServiceCancellationTests|FullyQualifiedName~SshExecutionServiceInteractivePreflightTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/history-label-modes-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/history-label-modes-regression/obj/ -v minimal`
+- Result: passed `250/250` with the existing `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings unchanged.
+
+## 236. Fix preconnect follow-through and localcmd shell suggestion drift
+- [x] 236.1 Add or correct focused red tests for:
+- [x] preconnect completion progress being emitted in non-debug runs
+- [x] structured preconnect variables surviving into main steps without string-flattening
+- [x] obsolete pooled session release/removal overloads handling non-empty-password leases
+- [x] localcmd shell suggestions/tests matching the intended visual surface (`powershell`, `custom`; raw `cmd` still valid)
+- [x] 236.2 Run the focused red tests and capture the failing evidence.
+- [x] 236.3 Implement the runtime/editor fixes with the minimal coherent design.
+- [x] 236.4 Run focused green verification for the touched areas.
+- [x] 236.5 Run broader regression/build verification and record results below.
+
+### 236 Review
+- Root cause:
+- `ResolveEffectiveScriptAuthContext(...)` emitted preconnect completion progress only inside the debug-gated branch, so non-debug runs never surfaced the completion status.
+- Preconnect rebuilt the main execution `ScriptContext` from `HostConnection.Variables`, and `BuildEffectiveHostVariables(...)` flattened lists into comma-joined strings. Structured values created in preconnect therefore lost collection semantics before `steps:` executed.
+- The obsolete `SshConnectionPool.ReleaseSession(host, username)` and `RemoveAsync(host, username)` overloads still resolved only the empty-password key even though pooled keys now include password/auth material.
+- `localcmd.shell` suggestions still came from the global enum-like value map, so editor autocomplete offered `cmd` even though the intended visual surface had removed it.
+- RED verification:
+- Added/updated focused tests in:
+- `SSH_Helper.Tests/Services/SshExecutionServicePreconnectTests.cs`
+- `SSH_Helper.Tests/Services/SshConnectionPoolCompatibilityTests.cs`
+- `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs`
+- `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs`
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServicePreconnectTests.ExecuteScriptAsync_Preconnect_EmitsProgressMessagesInNonDebugRuns|FullyQualifiedName~SshExecutionServicePreconnectTests.ExecuteScriptAsync_Preconnect_PreservesStructuredVariablesIntoMainSteps|FullyQualifiedName~SshConnectionPoolCompatibilityTests|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_LocalCmdShellValue_SuggestsPowershellAndCustomOnly|FullyQualifiedName~FlowCanvasBridgeTests.Registry_LocalCmdShellOptions_ExcludePwshAndCmd" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: failed `5/6` for the expected reasons:
+- missing non-debug `"Preconnect completed"` progress message
+- structured preconnect list flattened to `"alpha, beta"` and `count=11`
+- obsolete pool overloads left matching leased/pooled entries in place
+- autocomplete still suggested `cmd`
+- GREEN verification:
+- Command:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServicePreconnectTests.ExecuteScriptAsync_Preconnect_EmitsProgressMessagesInNonDebugRuns|FullyQualifiedName~SshExecutionServicePreconnectTests.ExecuteScriptAsync_Preconnect_EmitsStartAndCompletionOutputWhenDebugEnabled|FullyQualifiedName~SshExecutionServicePreconnectTests.ExecuteScriptAsync_Preconnect_PreservesStructuredVariablesIntoMainSteps|FullyQualifiedName~SshConnectionPoolCompatibilityTests|FullyQualifiedName~ScriptAutocompleteProviderTests.GetCompletion_LocalCmdShellValue_SuggestsPowershellAndCustomOnly|FullyQualifiedName~FlowCanvasBridgeTests.Registry_LocalCmdShellOptions_ExcludePwshAndCmd" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: passed `7/7`.
+- Broader regression verification:
+- `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~SshExecutionServicePreconnectTests|FullyQualifiedName~SshConnectionPool|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~FlowCanvasBridgeTests|FullyQualifiedName~LocalCmdParserTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -v minimal`
+- Result: passed `164/164`.
+- `dotnet build SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal`
+- Result: build succeeded with the existing `MSB3277`, `CS8602`, and `xUnit1031` warnings.
+
 ## 235. Stop import-preset tests from blocking on modal dialogs
 - [x] 235.1 Add a RED WinForms regression that installs a test dialog override for `ImportPreset()` and proves import success is reported without opening a blocking modal.
 - [x] 235.2 Add a `Form1` message-dialog override seam and route `ImportPreset()` success messaging through it.
@@ -4315,3 +5035,161 @@
   - `dotnet clean SSH_Helper.sln -p:SkipFlowCanvasBuild=true -v minimal` cleared the stale resource state.
   - `dotnet build SSH_Helper.sln -v minimal` passed; existing warnings remain (`MSB3277`, `CS8602`, `xUnit1031`, Vite chunk-size warning).
   - `rg -n "pwsh" FlowCanvas\\dist -S` returned no matches after the rebuild.
+
+## 258. Export a selected preset folder subtree to a JSON file
+- [x] 258.1 Review the existing preset/folder export-import behavior, relevant OpenSpec requirements, and repo workflow constraints.
+- [x] 258.2 Confirm the expected subtree export semantics with the user.
+- [x] 258.3 Write the design summary and required OpenSpec change for folder-subtree export.
+- [x] 258.4 Add RED coverage for the folder-subtree export path in `PresetManager` and the folder export UI surface in `Form1`.
+- [x] 258.5 Implement the minimal folder-subtree JSON export flow, including the save dialog from the preset tree.
+- [x] 258.6 Run focused verification, capture review notes below, and update the checklist to reflect reality.
+
+### 258 Review
+- Confirmed with the user that folder export should preserve the selected folder itself as the subtree root so import can recreate that same hierarchy.
+- Wrote the approved design note to `docs/superpowers/specs/2026-04-19-preset-folder-subtree-export-design.md`.
+- Created OpenSpec change `add-preset-folder-subtree-export` with proposal/tasks/spec delta under `openspec/changes/add-preset-folder-subtree-export/`.
+- Wrote the execution plan to `docs/superpowers/plans/2026-04-19-preset-folder-subtree-export.md`.
+- Implementation:
+- Added subtree export support to `Services/PresetManager.cs`:
+  - new `ExportFolderSubtreeToFile(...)` entry point,
+  - subtree-only folder/preset filtering,
+  - nested-folder rebasing through `RebaseFolderPathForExport(...)` so the selected folder becomes the bundle root in the exported JSON.
+- Added the folder export UI in `Form1` / `Form1.Designer.cs`:
+  - new `ctxExportFolder` context-menu item,
+  - folder-only visibility on the Presets tree,
+  - `ResolveFolderPathForActions(...)`,
+  - `ExportFolder(...)`,
+  - `_saveFilePathPickerOverrideForTests` + `ShowJsonSaveFileDialog(...)` test seam for save-path selection without a real dialog.
+- Added RED/GREEN coverage in:
+  - `SSH_Helper.Tests/Services/PresetManagerTests.cs`
+  - `SSH_Helper.Tests/UI/Form1FolderExportTests.cs`
+- RED verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportFolderSubtreeToFile" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-folder-export-red/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-folder-export-red/obj/ -v minimal`
+  - Result: failed at compile as expected because `PresetManager.ExportFolderSubtreeToFile(...)` did not exist yet.
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FolderExportTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-folder-export-green1/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-folder-export-green1/obj/ -v minimal`
+  - Result: failed `1/2` after the first UI pass, proving the context-menu visibility path still needed real `SourceControl`-driven coverage.
+- GREEN verification:
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportFolderSubtreeToFile" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-folder-export-green1/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-folder-export-green1/obj/ -v minimal`
+  - Result: passed `3/3`.
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1FolderExportTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-folder-export-green3/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-folder-export-green3/obj/ -v minimal`
+  - Result: passed `2/2`.
+- `dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportFolderSubtreeToFile|FullyQualifiedName~Form1FolderExportTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-folder-export-green/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-folder-export-green/obj/ -v minimal`
+  - Result: passed `5/5`.
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/preset-folder-export-build/bin/ -p:BaseIntermediateOutputPath=artifacts/preset-folder-export-build/obj/ -v minimal`
+  - Result: build succeeded.
+- `cmd /c openspec validate add-preset-folder-subtree-export --strict --no-interactive`
+  - Result: passed after implementation; the trailing PostHog flush errors were sandboxed network failures after validation, not spec validation failures.
+- Notes:
+- Test/build commands used `DOTNET_CLI_HOME=.\.dotnet` so first-use writes stayed inside the workspace.
+- Existing `NU1900` and `MSB3277` warnings remain unchanged.
+
+## 259. Archive `add-preset-folder-subtree-export`
+- [x] 259.1 Confirm `add-preset-folder-subtree-export` is still active and ready to archive via OpenSpec CLI.
+- [x] 259.2 Run the OpenSpec archive command and verify the change moved under `openspec/changes/archive/` with spec updates applied.
+- [x] 259.3 Run strict OpenSpec validation plus post-archive inspection and capture the review notes below.
+
+### 259 Review
+- Validation:
+- `cmd /c openspec list` showed `add-preset-folder-subtree-export` as an active complete change before archival.
+- `cmd /c openspec show add-preset-folder-subtree-export` confirmed the change updates `preset-organization`.
+- Archive result:
+- `cmd /c openspec archive add-preset-folder-subtree-export --yes` succeeded.
+- OpenSpec reported:
+  - `preset-organization: update`
+  - `+ 1 added`
+- The change was archived as `openspec/changes/archive/2026-04-19-add-preset-folder-subtree-export`.
+- Post-archive inspection:
+- `cmd /c openspec list` now reports `No active changes found.`
+- `cmd /c openspec list --specs` now shows `preset-organization requirements 7`, reflecting the archived folder-subtree export requirement.
+- `Get-ChildItem openspec\changes\archive | Where-Object { $_.Name -like '*add-preset-folder-subtree-export' }` confirmed the archived directory exists.
+- Validation:
+- `cmd /c openspec validate --strict --no-interactive` on this OpenSpec CLI returned `Nothing to validate` once no active changes remained.
+- Reran the equivalent post-archive strict spec validation via `cmd /c openspec validate --specs --strict --no-interactive`, which passed `23/23` specs.
+- Notes:
+- The repeated PostHog flush errors after OpenSpec commands were sandboxed network failures after command completion, not archive or validation failures.
+
+## 214. Add `_outputwindow` built-in variable
+- [x] 214.1 Create the OpenSpec change for `${_outputwindow}` and mirror the implementation checklist here.
+- [x] 214.2 Add RED coverage for ScriptContext, relay/runtime, notify substitution, editor metadata, and preconnect propagation rules.
+- [x] 214.3 Expose `_outputwindow` in the scripting runtime and seed/update it from the pane-formatted per-host output relay.
+- [x] 214.4 Update editor/Form1 metadata plus `SCRIPTING.md` docs and examples for the new built-in.
+- [x] 214.5 Run targeted verification, broader regression checks, and OpenSpec validation; document outcomes.
+
+### 214 Review
+- Added OpenSpec change `add-outputwindow-built-in-variable` with `scripting-runtime` and `script-editor` deltas, then mirrored the execution checklist here before implementation.
+- RED coverage landed first across `ScriptContext`, `SshExecutionService`, preconnect propagation, editor metadata, dependency analysis, and notify substitution. The first targeted run failed on missing `ScriptContext.SetOutputWindowText(...)` and `AppendOutputWindowText(...)`, confirming the runtime surface was not implemented yet.
+- `_outputwindow` now resolves as a read-only built-in backed by host-scoped pane transcript state. The runtime seeds it from the existing per-host output buffer so headers are included, appends formatted relay output as the pane receives it, and excludes it from host-variable propagation/preconnect merges alongside `_output`, `_prompt`, and `_timestamp`.
+- Editor/runtime metadata now advertises `_outputwindow` in interpolation autocomplete, built-in descriptions, editor hover placeholders, isolated block-test hydration, and `SCRIPTING.md`, including a `notify` example that summarizes `${_outputwindow}`.
+- Verification:
+  - `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ScriptContextTests|FullyQualifiedName~SshExecutionServiceOutputWindowTests|FullyQualifiedName~SshExecutionServicePreconnectTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~Form1BuiltInEditorVariableTests|FullyQualifiedName~ScriptDependencyAnalyzerTests" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -v minimal` passed with 138 tests.
+  - `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NotifyCommandTests|FullyQualifiedName~ScriptContextTests|FullyQualifiedName~SshExecutionServiceOutputWindowTests|FullyQualifiedName~SshExecutionServicePreconnectTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~Form1BuiltInEditorVariableTests|FullyQualifiedName~ScriptDependencyAnalyzerTests" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -v minimal` passed with 150 tests.
+  - `openspec validate add-outputwindow-built-in-variable --strict --no-interactive` passed.
+  - `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -v minimal` passed after restore access was available; existing `MSB3277` `WindowsBase` warning remains.
+
+## 215. Expose script prompt `font_size` in Flow Canvas
+- [x] 215.1 Add RED coverage for Flow Canvas prompt block metadata, bridge import, and export ordering for `font_size`.
+- [x] 215.2 Wire `font_size` through Flow Canvas registry, properties grouping, and bridge property extraction/order for `input`, `choose`, `multiselect`, and `confirm`.
+- [x] 215.3 Run targeted verification for the new Flow Canvas bridge coverage and document results.
+
+### 215 Review
+- Added RED coverage in `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` for three failure modes:
+  - registry/properties-panel metadata missing `font_size`,
+  - `TextToGraph(...)` not extracting `font_size` into prompt block props,
+  - choose/multiselect export ordering placing `font_size` after `on_error`.
+- Wired Flow Canvas prompt-font support end-to-end:
+  - added `font_size` property definitions to `input`, `choose`, `multiselect`, and `confirm` in `FlowCanvas/src/blockDefs/registry.ts`,
+  - added `font_size` to `ADVANCED_PROPERTY_KEYS` in `FlowCanvas/src/panels/Properties.tsx`,
+  - updated `Services/FlowCanvasBridge.cs` to extract/import `font_size`, treat it as an advanced-panel option, and serialize it in properties-panel order for choose/multiselect exports.
+- Verification:
+  - RED: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~ExportGraphToYaml_ScriptPromptFontSizeOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~Registry_ScriptPromptBlocks_ExposeFontSizeInAdvancedPanel|FullyQualifiedName~TextToGraph_ScriptPromptSteps_ImportFontSizeIntoProps" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseIntermediateOutputPath=obj/isolated/ -p:BaseOutputPath=obj/isolated_bin/ -v minimal` failed `3/3` before implementation on missing registry/import/order wiring.
+  - GREEN: the same targeted command passed `3/3` after the implementation.
+  - Broader bridge coverage: `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName~DriftGuard_RegistryPanelOrder_MatchesBridgePreferredExportOrder_ForAllBlocks|FullyQualifiedName~ExportGraphToYaml_ScriptPromptFontSizeOptions_AreSerializedInPropertiesPanelOrder|FullyQualifiedName~Registry_ScriptPromptBlocks_ExposeFontSizeInAdvancedPanel|FullyQualifiedName~TextToGraph_ScriptPromptSteps_ImportFontSizeIntoProps|FullyQualifiedName~ImportExportRoundTrip_ChooseLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_MultiselectLabelValueOptions_PreservesLabelValuePairs|FullyQualifiedName~ImportExportRoundTrip_ChooseOptionsSourceScalar_PreservesSource" -p:UseAppHost=false -p:SkipFlowCanvasBuild=true -p:BaseIntermediateOutputPath=obj/isolated/ -p:BaseOutputPath=obj/isolated_bin/ -v minimal` passed `7/7`.
+- `npm.cmd run build` in `FlowCanvas/` passed after rerunning outside the sandbox due a Vite `spawn EPERM` sandbox restriction; existing Vite chunk-size warning remains.
+- `dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:BaseIntermediateOutputPath=obj/isolated_build/ -p:BaseOutputPath=obj/isolated_build_bin/ -v minimal` passed; existing warnings remain (`NU1900`, `MSB3277`).
+
+## 260. Keep the busy cursor visible over the editor and output panes during preset execution
+- [x] 260.1 Add RED WinForms coverage proving `SetExecutionMode(...)` applies the busy cursor state to the command editor, its inner Scintilla control, and the output textbox, then clears it when execution ends.
+- [x] 260.2 Update `Form1` execution-mode cursor handling so manual preset runs propagate the wait cursor through nested child controls instead of only the top-level form.
+- [x] 260.3 Run focused verification and capture the results below.
+
+### 260 Review
+- Added `SSH_Helper.Tests/UI/Form1ExecutionCursorTests.cs` with a focused WinForms regression that drives `SetExecutionMode(true/false)` and asserts the busy cursor state reaches `Form1`, `txtCommand`, the inner Scintilla editor, and `txtOutput`, then clears when execution ends.
+- Updated `Form1.SetExecutionMode(...)` to call a new shared cursor helper that recursively sets `UseWaitCursor` across the form's child-control tree before preserving the existing top-level wait/default cursor behavior. That keeps the busy cursor visible over the command editor and output pane while a preset is running instead of falling back to the text-edit `IBeam`.
+- Verification:
+  - RED: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-execution-cursor-red/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-execution-cursor-red/obj/ -v minimal`
+    - Result: failed `1/1` as expected on `form.UseWaitCursor` staying `False`, confirming the busy cursor state was not propagated into execution mode.
+  - GREEN: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-execution-cursor-green/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-execution-cursor-green/obj/ -v minimal`
+    - Result: passed `1/1`.
+  - Regression: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests|FullyQualifiedName~Form1StopButtonStateTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-execution-cursor-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-execution-cursor-regression/obj/ -v minimal`
+    - Result: passed `2/2`.
+  - Build: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-execution-cursor-build/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-execution-cursor-build/obj/ -v minimal`
+    - Result: build succeeded.
+- Notes:
+  - Commands used `DOTNET_CLI_HOME=.\.dotnet` so first-run SDK writes stayed inside the workspace under sandbox restrictions.
+  - Existing `NU1900` and `MSB3277` warnings remain unchanged.
+
+## 261. Keep the busy cursor visible over the Scintilla command editor during execution
+- [x] 261.1 Add RED coverage proving the command editor's inner Scintilla control switches to a wait cursor during execution and restores its text-edit cursor afterward.
+- [x] 261.2 Patch the command editor execution-state cursor behavior without regressing its normal editing cursor.
+- [x] 261.3 Run focused verification and capture the results below.
+
+### 261 Review
+- Root cause: the main-form cursor fix only touched managed WinForms cursor state. The command editor is Scintilla-based, and local package docs plus focused probing showed the editor's effective cursor is controlled by Scintilla's native cursor mode, not by `Control.Cursor` or the wrapper's `UseWaitCursor` alone.
+- Added a follow-up regression in `SSH_Helper.Tests/UI/Form1ExecutionCursorTests.cs` that creates the inner Scintilla handle and asserts `SetExecutionMode(true/false)` flips the editor's native cursor mode using `SCI_GETCURSOR`.
+- Updated `UI/ScintillaScriptEditorControl.cs` so the inner Scintilla instance is an execution-cursor-aware subclass that uses Scintilla direct messages:
+  - `SCI_GETCURSOR` (`2387`) to capture the prior cursor mode,
+  - `SCI_SETCURSOR` (`2386`) with `SC_CURSORWAIT` (`4`) while execution is active,
+  - restore of the prior cursor mode when execution ends.
+- `Form1.ApplyExecutionCursorState(...)` now calls `txtCommand.SetExecutionCursorOverride(executing)` in addition to the existing form-wide wait-cursor propagation.
+- Verification:
+  - Investigation/RED: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests.SetExecutionMode_OverridesInnerCommandEditorDefaultCursorWhileRunning_AndRestoresItAfterward" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-command-default-cursor-red/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-command-default-cursor-red/obj/ -v minimal`
+    - Result: failed `1/1` with the inner editor still reporting `IBeam`, which exposed that the Scintilla-native cursor path was not being changed.
+  - GREEN: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests.SetExecutionMode_OverridesInnerCommandEditorCursorTypeWhileRunning_AndRestoresItAfterward" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-command-cursor-type-green/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-command-cursor-type-green/obj/ -v minimal`
+    - Result: passed `1/1`.
+  - Regression: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Form1ExecutionCursorTests|FullyQualifiedName~Form1StopButtonStateTests|FullyQualifiedName~ScintillaScriptEditorControlTests" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-command-cursor-regression/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-command-cursor-regression/obj/ -v minimal`
+    - Result: passed `45/45`.
+  - Build: `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/form1-command-cursor-build/bin/ -p:BaseIntermediateOutputPath=artifacts/form1-command-cursor-build/obj/ -v minimal`
+    - Result: build succeeded.
+- Notes:
+  - Commands used `DOTNET_CLI_HOME=.\.dotnet` so SDK first-run writes stayed inside the workspace.
+  - Existing `NU1900` and `MSB3277` warnings remain unchanged.

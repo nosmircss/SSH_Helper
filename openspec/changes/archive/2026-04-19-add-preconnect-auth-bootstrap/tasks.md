@@ -20,7 +20,7 @@
 ## 4. Tests and Documentation
 
 - [x] 4.1 Add parser and validation unit tests for `preconnect` syntax and invalid command usage.
-- [ ] 4.2 Add runtime tests for successful cert bootstrap -> SSH login -> send flow.
+- [X] 4.2 Add runtime tests for successful cert bootstrap -> SSH login -> send flow.
 - [x] 4.3 Add runtime tests for failure paths (missing cert output, invalid identity file, canceled preconnect).
 - [x] 4.4 Add pooling parity tests to ensure dynamic auth inputs do not reuse stale sessions.
 - [x] 4.5 Update `SCRIPTING.md` with preconnect examples and override-variable contract.

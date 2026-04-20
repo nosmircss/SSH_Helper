@@ -29,11 +29,36 @@ The scripting runtime SHALL retain suppressed error details for downstream logic
 - **THEN** `_last_error` is cleared
 
 ### Requirement: Dynamic built-in variables
-Built-in timestamp variables SHALL be resolved dynamically at substitution time.
+Built-in runtime variables SHALL be resolved dynamically at substitution time.
+
+- `${_timestamp}` SHALL resolve to the current time at substitution time.
+- `${_prompt}` SHALL resolve to the current detected SSH shell prompt when an SSH shell session is active.
+- `${_prompt}` SHALL resolve to an empty string when no SSH shell prompt is available.
+- `${_outputwindow}` SHALL resolve to the current host's pane-formatted transcript accumulated so far for the active run.
+- `${_outputwindow}` SHALL use the same per-host formatted text that is appended to the operator-facing output pane, including script headers, separators, warnings, debug lines, mirrored interactive output, and command output.
+- `${_outputwindow}` SHALL resolve to an empty string when no live per-host output relay is attached.
 
 #### Scenario: timestamp changes during long script
 - **WHEN** `${_timestamp}` is substituted in two different steps at different times
 - **THEN** the values reflect current execution time at each substitution point
+
+#### Scenario: prompt tracks current SSH shell prompt
+- **WHEN** `${_prompt}` is substituted during SSH-backed execution
+- **AND** the detected shell prompt changes during that session
+- **THEN** the substituted value reflects the current detected prompt at each substitution point
+
+#### Scenario: prompt is unavailable without SSH session
+- **WHEN** `${_prompt}` is substituted before an SSH shell prompt is available
+- **THEN** the substituted value is an empty string
+
+#### Scenario: outputwindow uses per-host pane transcript
+- **WHEN** a script step substitutes `${_outputwindow}` during a multi-host run
+- **THEN** the substituted value contains only the current host's pane-formatted transcript accumulated so far
+- **AND** it excludes output from other hosts in the same run
+
+#### Scenario: outputwindow is unavailable without live relay
+- **WHEN** `${_outputwindow}` is substituted outside a live execution relay
+- **THEN** the substituted value is an empty string
 
 ### Requirement: While iteration controls
 While loops SHALL support per-step iteration caps.
@@ -385,9 +410,19 @@ If a delayed WebView2 session never became visible because callback completion h
 - **THEN** SSH Helper disposes the hidden embedded session instead of leaving it open invisibly
 
 ### Requirement: Persistent embedded browser profile
-The embedded browser mode SHALL use a shared app-owned WebView2 user-data folder under `%LocalAppData%\\SSH_Helper`.
+The embedded browser mode SHALL use a shared app-owned WebView2 user-data folder under the application storage root.
+
+The application storage root SHALL be `%LocalAppData%\\SSH_Helper` for standard builds and the executable directory for portable builds.
 
 The embedded profile SHALL persist across runs until the operator explicitly clears it from Settings.
+
+#### Scenario: Standard build stores embedded browser data under LocalAppData
+- **WHEN** SSH Helper runs as a standard build
+- **THEN** embedded browser profile data is persisted under `%LocalAppData%\\SSH_Helper`
+
+#### Scenario: Portable build stores embedded browser data beside executable
+- **WHEN** SSH Helper runs as a portable build
+- **THEN** embedded browser profile data is persisted under the executable directory
 
 #### Scenario: Embedded browser reuses prior site data
 - **WHEN** an operator runs two `browser_callback_capture` steps with `browser_mode: webview2` across separate app sessions
@@ -533,4 +568,29 @@ Operational errors include invalid path normalization failures and I/O exception
 - **AND** `${into}` is set to `false`
 - **AND** `${into}_meta.error` contains the error summary
 - **AND** `_last_error` is set according to suppressed-error behavior
+
+### Requirement: Two-phase script runtime execution
+The scripting runtime SHALL support two ordered phases per host: `preconnect` then `steps`.
+
+When a script does not define `preconnect`, the runtime SHALL execute only the `steps` phase.
+
+#### Scenario: Ordered phase execution
+- **WHEN** a script defines both `preconnect` and `steps`
+- **THEN** `preconnect` executes fully before `steps`
+- **AND** variables set in `preconnect` are available to `steps` for that host
+
+### Requirement: Preconnect output and cancellation semantics
+Preconnect phase execution SHALL follow existing command result semantics for success, failure, `on_error`, and cancellation.
+
+#### Scenario: Preconnect cancelled by operator
+- **WHEN** execution is cancelled during preconnect
+- **THEN** host execution ends as cancelled
+- **AND** main steps do not start for that host
+
+### Requirement: Sensitive override value handling
+The runtime SHALL treat reserved SSH override variables as sensitive and SHALL avoid emitting their raw values in normal script output or debug traces.
+
+#### Scenario: Override variable is set in preconnect
+- **WHEN** preconnect sets `_ssh_password` or `_ssh_identity_passphrase`
+- **THEN** output/debug streams do not include the raw secret value
 

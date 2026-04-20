@@ -46,9 +46,11 @@ namespace SSH_Helper.Services.Scripting.Commands
                     return CommandResult.Fail(error);
                 }
 
+                var fontSize = step.Choose.FontSize ?? ScriptPromptDialogRunner.DefaultPromptFontSize ?? 9f;
+
                 var selectedValue = await ScriptPromptDialogRunner
                     .ShowAsync<ScriptChooseDialog, string?>(
-                        () => new ScriptChooseDialog(prompt, resolvedOptions, defaultValue, title),
+                        () => new ScriptChooseDialog(prompt, resolvedOptions, defaultValue, title, fontSize),
                         dialog => dialog.DialogResult == DialogResult.OK ? dialog.SelectedValue : null,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -92,16 +94,27 @@ namespace SSH_Helper.Services.Scripting.Commands
             ? _options[_listBox.SelectedIndex].Value
             : null;
 
-        public ScriptChooseDialog(string prompt, List<ChoiceOption> options, string? defaultValue, string? title = null)
+        public ScriptChooseDialog(string prompt, List<ChoiceOption> options, string? defaultValue, string? title = null, float fontSize = 9f)
         {
             _options = options;
 
+            var clampedFontSize = Math.Clamp(fontSize, 7f, 36f);
+            var scale = Math.Max(1f, clampedFontSize / 9f);
+            int S(int v) => (int)Math.Round(v * scale);
+
+            var ambientForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
+            var baseFontFamily = ambientForm?.Font.FontFamily.Name ?? "Segoe UI";
+            var scriptFont = new Font(baseFontFamily, clampedFontSize);
+            int rowHeight;
+            try { rowHeight = scriptFont.Height + 2; }
+            catch (ArgumentException) { rowHeight = (int)Math.Ceiling(clampedFontSize * 2.2f); }
+
             var visibleItems = Math.Min(options.Count, 10);
-            var listHeight = Math.Max(visibleItems * 20, 40);
-            var formHeight = 130 + listHeight;
+            var listHeight = Math.Max(visibleItems * rowHeight, S(40));
+            var formHeight = S(130) + listHeight;
 
             Text = string.IsNullOrWhiteSpace(title) ? "Script Choice" : title.Trim();
-            Size = new Size(400, formHeight);
+            Size = new Size(S(400), formHeight);
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
@@ -109,20 +122,23 @@ namespace SSH_Helper.Services.Scripting.Commands
             MinimizeBox = false;
             ShowInTaskbar = false;
 
+            DialogTheme.SetDialogFont(this, scriptFont);
+
             var lblPrompt = new Label
             {
                 Text = prompt,
-                Location = new Point(15, 15),
-                Size = new Size(355, 40),
+                Location = new Point(S(15), S(15)),
+                Size = new Size(S(355), S(40)),
                 AutoSize = false
             };
 
             _listBox = new ListBox
             {
-                Location = new Point(15, 58),
-                Size = new Size(355, listHeight),
+                Location = new Point(S(15), S(58)),
+                Size = new Size(S(355), listHeight),
                 SelectionMode = SelectionMode.One,
-                IntegralHeight = false
+                IntegralHeight = false,
+                ItemHeight = rowHeight
             };
 
             foreach (var opt in options)
@@ -146,8 +162,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             var btnOk = new Button
             {
                 Text = "OK",
-                Size = new Size(80, 28),
-                Location = new Point(205, formHeight - 70),
+                Size = new Size(S(80), S(28)),
+                Location = new Point(S(205), formHeight - S(70)),
                 Enabled = _listBox.SelectedIndex >= 0
             };
             btnOk.Click += (_, _) =>
@@ -159,8 +175,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             var btnCancel = new Button
             {
                 Text = "Cancel",
-                Size = new Size(80, 28),
-                Location = new Point(290, formHeight - 70),
+                Size = new Size(S(80), S(28)),
+                Location = new Point(S(290), formHeight - S(70)),
                 DialogResult = DialogResult.Cancel
             };
 

@@ -8,6 +8,7 @@ using SSH_Helper.Models;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
+using SSH_Helper.Services.Notifications;
 using SSH_Helper.Services.Vault;
 using SSH_Helper.UI;
 using SSH_Helper.Utilities;
@@ -73,6 +74,7 @@ namespace SSH_Helper.Services
     public class SshExecutionService : IDisposable
     {
         private const int MaxParallelHosts = 100;
+        private const int BannerSidePadding = 10;
 
         private const string SingleHostOnlyMessageSuffix =
             " not supported in folder or multi-host runs. Run the script against a single current host instead.";
@@ -150,6 +152,13 @@ namespace SSH_Helper.Services
             public HostConnection Host { get; init; } = new();
             public string Username { get; init; } = string.Empty;
             public string Password { get; init; } = string.Empty;
+            public ScriptContext? Context { get; init; }
+            public ScriptOutputRelayState? OutputRelayState { get; init; }
+        }
+
+        private sealed class ScriptOutputRelayState
+        {
+            public bool PreviousOutputEndedWithLineTerminator { get; set; }
         }
 
         public bool IsRunning => _isRunning;
@@ -204,6 +213,11 @@ namespace SSH_Helper.Services
         /// Optional VaultService for resolving vault:// variable references during script execution.
         /// </summary>
         public VaultService? VaultService { get; set; }
+
+        /// <summary>
+        /// Optional NotificationService for dispatching notify-command notifications during script execution.
+        /// </summary>
+        public NotificationService? NotificationService { get; set; }
 
         /// <summary>
         /// Optional environment-specific Vault profile override.
@@ -699,7 +713,8 @@ namespace SSH_Helper.Services
                         if (runPresetsInParallel)
                         {
                             // Parallel preset execution
-                            var presetTasks = presetNames.Select(async presetName =>
+                            var presetResultsByOrder = new ExecutionResult?[presetNames.Count];
+                            var presetTasks = presetNames.Select(async (presetName, presetIndex) =>
                             {
                                 if (cancellationToken.IsCancellationRequested || (options.StopOnFirstError && errorTracker.HasError))
                                     return;
@@ -724,6 +739,7 @@ namespace SSH_Helper.Services
                                     cancellationToken,
                                     showHeader: false,
                                     allowFileSelectionDialogs: allowFileSelectionDialogs);
+                                presetResultsByOrder[presetIndex] = presetResult;
 
                                 lock (outputBuilder) { outputBuilder.Append(presetResult.Output); }
 
@@ -771,6 +787,10 @@ namespace SSH_Helper.Services
                             });
 
                             await Task.WhenAll(presetTasks);
+                            lock (hostResultLock)
+                            {
+                                ApplyHistoryLabelResults(hostResult, presetResultsByOrder);
+                            }
                         }
                         else
                         {
@@ -809,6 +829,8 @@ namespace SSH_Helper.Services
                                 {
                                     hostCancellationObserved = 1;
                                 }
+
+                                ApplyHistoryLabelResults(hostResult, new[] { presetResult });
 
                                 if (!presetResult.Success)
                                 {
@@ -1277,6 +1299,7 @@ namespace SSH_Helper.Services
             var baseUsername = !string.IsNullOrWhiteSpace(host.Username) ? host.Username : defaultUsername;
             var basePassword = !string.IsNullOrWhiteSpace(host.Password) ? host.Password : defaultPassword;
             var effectiveDebugMode = DebugMode || script.Debug;
+            ScriptContext? finalContext = null;
 
             try
             {
@@ -1300,8 +1323,11 @@ namespace SSH_Helper.Services
                         effectiveAuth.Password,
                         outputBuilder,
                         cancellationToken,
+                        out finalContext,
                         showHeader,
-                        allowFileSelectionDialogs);
+                        allowFileSelectionDialogs,
+                        effectiveAuth.Context,
+                        effectiveAuth.OutputRelayState);
                 }
                 else if (UseConnectionPooling && _connectionPool != null)
                 {
@@ -1313,8 +1339,11 @@ namespace SSH_Helper.Services
                         timeouts,
                         outputBuilder,
                         cancellationToken,
+                        out finalContext,
                         showHeader,
-                        allowFileSelectionDialogs);
+                        allowFileSelectionDialogs,
+                        effectiveAuth.Context,
+                        effectiveAuth.OutputRelayState);
                 }
                 else
                 {
@@ -1326,8 +1355,11 @@ namespace SSH_Helper.Services
                         timeouts,
                         outputBuilder,
                         cancellationToken,
+                        out finalContext,
                         showHeader,
-                        allowFileSelectionDialogs);
+                        allowFileSelectionDialogs,
+                        effectiveAuth.Context,
+                        effectiveAuth.OutputRelayState);
                 }
 
                 result.Success = true;
@@ -1418,7 +1450,48 @@ namespace SSH_Helper.Services
 
             result.Output = outputBuilder.ToString();
             result.InteractiveSessions = interactiveSessions;
+            if (finalContext != null)
+            {
+                result.HistoryLabel = finalContext.HistoryLabel;
+                result.HistoryLabelReplacesAddress = finalContext.HistoryLabelReplacesAddress;
+                result.HistoryLabelTouched = finalContext.HistoryLabelTouched;
+                result.HistoryLabelOperations = finalContext
+                    .GetHistoryLabelOperationsSnapshot()
+                    .Select(operation => operation.Clone())
+                    .ToList();
+            }
             return result;
+        }
+
+        private static void ApplyHistoryLabelResults(
+            ExecutionResult aggregateResult,
+            IReadOnlyList<ExecutionResult?> presetResultsByOrder)
+        {
+            foreach (var presetResult in presetResultsByOrder)
+            {
+                if (presetResult == null || !presetResult.HistoryLabelTouched)
+                    continue;
+
+                aggregateResult.HistoryLabelTouched = true;
+                if (presetResult.HistoryLabelOperations.Count == 0)
+                {
+                    aggregateResult.HistoryLabel = presetResult.HistoryLabel;
+                    aggregateResult.HistoryLabelReplacesAddress = presetResult.HistoryLabelReplacesAddress;
+                    continue;
+                }
+
+                foreach (var operation in presetResult.HistoryLabelOperations)
+                {
+                    var operationCopy = operation.Clone();
+                    aggregateResult.HistoryLabelOperations.Add(operationCopy);
+
+                    var historyLabel = aggregateResult.HistoryLabel;
+                    var replacesAddress = aggregateResult.HistoryLabelReplacesAddress;
+                    operationCopy.ApplyTo(ref historyLabel, ref replacesAddress);
+                    aggregateResult.HistoryLabel = historyLabel;
+                    aggregateResult.HistoryLabelReplacesAddress = replacesAddress;
+                }
+            }
         }
 
         /// <summary>
@@ -1433,9 +1506,13 @@ namespace SSH_Helper.Services
             SshTimeoutOptions timeouts,
             StringBuilder outputBuilder,
             CancellationToken cancellationToken,
+            out ScriptContext? executedContext,
             bool showHeader = true,
-            bool allowFileSelectionDialogs = true)
+            bool allowFileSelectionDialogs = true,
+            ScriptContext? initialContext = null,
+            ScriptOutputRelayState? outputRelayState = null)
         {
+            executedContext = null;
             var effectiveDebugMode = DebugMode || script.Debug;
             var (client, session) = _connectionPool!.CreateSessionAsync(host, username, password, timeouts, cancellationToken)
                 .GetAwaiter().GetResult();
@@ -1451,7 +1528,7 @@ namespace SSH_Helper.Services
                 {
                     var prompt = session.CurrentPrompt;
                     var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
-                    string header = $"{new string('#', 20)} {host} {prompt} SCRIPT: {scriptName} {new string('#', 20)}";
+                    string header = $"{new string('#', BannerSidePadding)} {host} {prompt} SCRIPT: {scriptName} {new string('#', BannerSidePadding)}";
                     string separator = new string('#', header.Length);
 
                     outputBuilder.AppendLine(separator);
@@ -1459,47 +1536,23 @@ namespace SSH_Helper.Services
                     outputBuilder.AppendLine(separator);
 
                     OnOutputReceived(host, outputBuilder.ToString());
+                    SyncOutputRelayState(outputRelayState, outputBuilder);
                 }
 
-                // Create script context with host variables
-                var context = new ScriptContext(host.Variables);
+                var context = initialContext ?? new ScriptContext(host.Variables);
+                executedContext = context;
                 context.Session = session;
-                context.DebugMode = effectiveDebugMode;
-                context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
-                context.VaultService = VaultService;
-                context.EnvironmentVaultProfile = EnvironmentVaultProfile;
-                _activeScriptContext = context;
-                ApplyConfiguredFlowCanvasDebugState(context);
-                SeedConnectionVariables(context, host, username, password, timeouts);
-                var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
+                ConfigureScriptExecutionContext(
+                    context,
+                    host,
+                    username,
+                    password,
+                    timeouts,
+                    effectiveDebugMode,
+                    allowFileSelectionDialogs);
 
-                // Wire up context output to our events
-                context.OutputReceived += (s, e) =>
-                {
-                    var output = FormatScriptOutput(e.Message, e.Type);
-                    var boundaryAdjusted = NormalizeScriptOutputBoundary(
-                        output,
-                        e.Type,
-                        previousOutputEndedWithLineTerminator);
-                    output = boundaryAdjusted.Output;
-                    previousOutputEndedWithLineTerminator = boundaryAdjusted.EndsWithLineTerminator;
-                    if (string.IsNullOrEmpty(output))
-                        return;
-
-                    outputBuilder.Append(output);
-                    OnOutputReceived(host, output);
-                };
-
-                // Wire up column update requests
-                context.ColumnUpdateRequested += (s, e) =>
-                {
-                    OnColumnUpdateRequested(host, e.ColumnName, e.Value);
-                };
-
-                context.EnvironmentUpdateRequested += (s, e) =>
-                {
-                    OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
-                };
+                outputRelayState ??= AttachScriptExecutionEventHandlers(context, host, outputBuilder);
+                context.SetOutputWindowText(outputBuilder.ToString());
 
                 // Execute the script
                 var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
@@ -1530,9 +1583,13 @@ namespace SSH_Helper.Services
             SshTimeoutOptions timeouts,
             StringBuilder outputBuilder,
             CancellationToken cancellationToken,
+            out ScriptContext? executedContext,
             bool showHeader = true,
-            bool allowFileSelectionDialogs = true)
+            bool allowFileSelectionDialogs = true,
+            ScriptContext? initialContext = null,
+            ScriptOutputRelayState? outputRelayState = null)
         {
+            executedContext = null;
             var effectiveDebugMode = DebugMode || script.Debug;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             SshDebugLog(host, "SCRIPT", $"ExecuteScriptWithoutPool entered for {host.IpAddress}:{host.Port}", debugEnabledOverride: effectiveDebugMode);
@@ -1574,12 +1631,15 @@ namespace SSH_Helper.Services
             using var session = new SshShellSession(client, scripting, timeouts, terminal);
             session.DebugMode = effectiveDebugMode;
             session.CommandCompleted += (s, e) => OnCommandCompleted(host, e.Command);
+            ScriptContext? outputWindowContext = null;
 
             // Subscribe to session debug output so we can see banner detection, prompt detection, etc.
             session.DebugOutput += (s, e) =>
             {
                 outputBuilder.Append(e.Output);
+                outputWindowContext?.AppendOutputWindowText(e.Output);
                 OnOutputReceived(host, e.Output);
+                SyncOutputRelayState(outputRelayState, outputBuilder);
             };
 
             // Initialize session (detect prompt)
@@ -1602,7 +1662,7 @@ namespace SSH_Helper.Services
             {
                 var prompt = session.CurrentPrompt;
                 var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : "";
-                string header = $"{new string('#', 20)} SCRIPT: {host} {prompt}{scriptName} {new string('#', 20)}";
+                string header = $"{new string('#', BannerSidePadding)} SCRIPT: {host} {prompt}{scriptName} {new string('#', BannerSidePadding)}";
                 string separator = new string('#', header.Length);
 
                 outputBuilder.AppendLine(separator);
@@ -1610,49 +1670,26 @@ namespace SSH_Helper.Services
                 outputBuilder.AppendLine(separator);
 
                 OnOutputReceived(host, outputBuilder.ToString());
+                SyncOutputRelayState(outputRelayState, outputBuilder);
             }
 
-            // Create script context with host variables
-            var context = new ScriptContext(host.Variables);
+            var context = initialContext ?? new ScriptContext(host.Variables);
+            executedContext = context;
             context.Session = session;
-            context.DebugMode = effectiveDebugMode;
-            context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
-            context.VaultService = VaultService;
-            context.EnvironmentVaultProfile = EnvironmentVaultProfile;
-            _activeScriptContext = context;
-            ApplyConfiguredFlowCanvasDebugState(context);
-            SeedConnectionVariables(context, host, username, password, timeouts);
-            var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
+                ConfigureScriptExecutionContext(
+                    context,
+                    host,
+                    username,
+                password,
+                timeouts,
+                    effectiveDebugMode,
+                    allowFileSelectionDialogs);
 
-            // Wire up context output to our events
-            context.OutputReceived += (s, e) =>
-            {
-                var output = FormatScriptOutput(e.Message, e.Type);
-                var boundaryAdjusted = NormalizeScriptOutputBoundary(
-                    output,
-                    e.Type,
-                    previousOutputEndedWithLineTerminator);
-                output = boundaryAdjusted.Output;
-                previousOutputEndedWithLineTerminator = boundaryAdjusted.EndsWithLineTerminator;
-                if (string.IsNullOrEmpty(output))
-                    return;
+                outputRelayState ??= AttachScriptExecutionEventHandlers(context, host, outputBuilder);
+                context.SetOutputWindowText(outputBuilder.ToString());
+                outputWindowContext = context;
 
-                outputBuilder.Append(output);
-                OnOutputReceived(host, output);
-            };
-
-            // Wire up column update requests
-            context.ColumnUpdateRequested += (s, e) =>
-            {
-                OnColumnUpdateRequested(host, e.ColumnName, e.Value);
-            };
-
-            context.EnvironmentUpdateRequested += (s, e) =>
-            {
-                OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
-            };
-
-            // Execute the script
+                // Execute the script
             var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
             executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
             executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
@@ -1672,16 +1709,20 @@ namespace SSH_Helper.Services
             string password,
             StringBuilder outputBuilder,
             CancellationToken cancellationToken,
+            out ScriptContext? executedContext,
             bool showHeader = true,
-            bool allowFileSelectionDialogs = true)
+            bool allowFileSelectionDialogs = true,
+            ScriptContext? initialContext = null,
+            ScriptOutputRelayState? outputRelayState = null)
         {
+            executedContext = null;
             var effectiveDebugMode = DebugMode || script.Debug;
             OnProgressChanged(host, $"Running locally for {host} (no SSH required)", false, false);
 
             if (showHeader && !script.NoBanner)
             {
                 var scriptName = !string.IsNullOrEmpty(script.Name) ? $" {script.Name}" : string.Empty;
-                string header = $"{new string('#', 20)} LOCAL SCRIPT: {host}{scriptName} {new string('#', 20)}";
+                string header = $"{new string('#', BannerSidePadding)} LOCAL SCRIPT: {host}{scriptName} {new string('#', BannerSidePadding)}";
                 string separator = new string('#', header.Length);
 
                 outputBuilder.AppendLine(separator);
@@ -1689,18 +1730,62 @@ namespace SSH_Helper.Services
                 outputBuilder.AppendLine(separator);
 
                 OnOutputReceived(host, outputBuilder.ToString());
+                SyncOutputRelayState(outputRelayState, outputBuilder);
             }
 
-            var context = new ScriptContext(host.Variables);
+            var context = initialContext ?? new ScriptContext(host.Variables);
+            executedContext = context;
             context.Session = null;
+            ConfigureScriptExecutionContext(
+                context,
+                host,
+                username,
+                password,
+                SshTimeoutOptions.Default,
+                effectiveDebugMode,
+                allowFileSelectionDialogs);
+
+            outputRelayState ??= AttachScriptExecutionEventHandlers(context, host, outputBuilder);
+            context.SetOutputWindowText(outputBuilder.ToString());
+
+            var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
+            executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
+            executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
+            executor.DebugPauseStateChanged += (s, e) => DebugPauseStateChanged?.Invoke(this, e);
+            var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
+                .GetAwaiter().GetResult();
+            EnsureScriptSucceeded(scriptResult, cancellationToken);
+            return context.GetInteractiveSessionsSnapshot();
+        }
+
+        private void ConfigureScriptExecutionContext(
+            ScriptContext context,
+            HostConnection host,
+            string username,
+            string password,
+            SshTimeoutOptions? timeouts,
+            bool effectiveDebugMode,
+            bool allowFileSelectionDialogs)
+        {
             context.DebugMode = effectiveDebugMode;
             context.AllowFileSelectionDialogs = allowFileSelectionDialogs;
             context.VaultService = VaultService;
+            context.NotificationService = NotificationService;
             context.EnvironmentVaultProfile = EnvironmentVaultProfile;
             _activeScriptContext = context;
             ApplyConfiguredFlowCanvasDebugState(context);
-            SeedConnectionVariables(context, host, username, password, SshTimeoutOptions.Default);
-            var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
+            SeedConnectionVariables(context, host, username, password, timeouts);
+        }
+
+        private ScriptOutputRelayState AttachScriptExecutionEventHandlers(
+            ScriptContext context,
+            HostConnection host,
+            StringBuilder outputBuilder)
+        {
+            var relayState = new ScriptOutputRelayState
+            {
+                PreviousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder)
+            };
 
             context.OutputReceived += (s, e) =>
             {
@@ -1708,13 +1793,14 @@ namespace SSH_Helper.Services
                 var boundaryAdjusted = NormalizeScriptOutputBoundary(
                     output,
                     e.Type,
-                    previousOutputEndedWithLineTerminator);
+                    relayState.PreviousOutputEndedWithLineTerminator);
                 output = boundaryAdjusted.Output;
-                previousOutputEndedWithLineTerminator = boundaryAdjusted.EndsWithLineTerminator;
+                relayState.PreviousOutputEndedWithLineTerminator = boundaryAdjusted.EndsWithLineTerminator;
                 if (string.IsNullOrEmpty(output))
                     return;
 
                 outputBuilder.Append(output);
+                context.AppendOutputWindowText(output);
                 OnOutputReceived(host, output);
             };
 
@@ -1728,14 +1814,15 @@ namespace SSH_Helper.Services
                 OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
             };
 
-            var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
-            executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
-            executor.StepCompleted += (s, e) => StepCompleted?.Invoke(this, e);
-            executor.DebugPauseStateChanged += (s, e) => DebugPauseStateChanged?.Invoke(this, e);
-            var scriptResult = executor.ExecuteAsync(script, context, cancellationToken)
-                .GetAwaiter().GetResult();
-            EnsureScriptSucceeded(scriptResult, cancellationToken);
-            return context.GetInteractiveSessionsSnapshot();
+            return relayState;
+        }
+
+        private static void SyncOutputRelayState(ScriptOutputRelayState? relayState, StringBuilder outputBuilder)
+        {
+            if (relayState == null)
+                return;
+
+            relayState.PreviousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
         }
 
         private static void EnsureScriptSucceeded(ScriptResult scriptResult, CancellationToken cancellationToken)
@@ -1778,7 +1865,9 @@ namespace SSH_Helper.Services
                 {
                     Host = host,
                     Username = baseUsername,
-                    Password = basePassword
+                    Password = basePassword,
+                    Context = null,
+                    OutputRelayState = null
                 };
             }
 
@@ -1791,10 +1880,6 @@ namespace SSH_Helper.Services
             var context = new ScriptContext(host.Variables)
             {
                 Session = null,
-                DebugMode = effectiveDebugMode,
-                AllowFileSelectionDialogs = allowFileSelectionDialogs,
-                VaultService = VaultService,
-                EnvironmentVaultProfile = EnvironmentVaultProfile
             };
 
             context.ActiveScript = script;
@@ -1802,37 +1887,17 @@ namespace SSH_Helper.Services
             if (script.Vars.Count > 0)
                 context.ImportScriptVars(script.Vars);
 
-            _activeScriptContext = context;
-            ApplyConfiguredFlowCanvasDebugState(context);
-            SeedConnectionVariables(context, host, baseUsername, basePassword, timeouts);
+            ConfigureScriptExecutionContext(
+                context,
+                host,
+                baseUsername,
+                basePassword,
+                timeouts,
+                effectiveDebugMode,
+                allowFileSelectionDialogs);
 
-            var previousOutputEndedWithLineTerminator = EndsWithLineTerminator(outputBuilder);
-
-            context.OutputReceived += (s, e) =>
-            {
-                var output = FormatScriptOutput(e.Message, e.Type);
-                var boundaryAdjusted = NormalizeScriptOutputBoundary(
-                    output,
-                    e.Type,
-                    previousOutputEndedWithLineTerminator);
-                output = boundaryAdjusted.Output;
-                previousOutputEndedWithLineTerminator = boundaryAdjusted.EndsWithLineTerminator;
-                if (string.IsNullOrEmpty(output))
-                    return;
-
-                outputBuilder.Append(output);
-                OnOutputReceived(host, output);
-            };
-
-            context.ColumnUpdateRequested += (s, e) =>
-            {
-                OnColumnUpdateRequested(host, e.ColumnName, e.Value);
-            };
-
-            context.EnvironmentUpdateRequested += (s, e) =>
-            {
-                OnEnvironmentVariableUpdateRequested(host, e.Variable, e.Value);
-            };
+            var outputRelayState = AttachScriptExecutionEventHandlers(context, host, outputBuilder);
+            context.SetOutputWindowText(outputBuilder.ToString());
 
             var executor = new ScriptExecutor(_browserCallbackUiHost, _localCmdConfirmation);
             executor.StepStarting += (s, e) => StepStarting?.Invoke(this, e);
@@ -1854,9 +1919,9 @@ namespace SSH_Helper.Services
                         : preconnectResult.Message);
             }
 
+            OnProgressChanged(host, $"Preconnect completed for {host}", false, false);
             if (effectiveDebugMode)
             {
-                OnProgressChanged(host, $"Preconnect completed for {host}", false, false);
                 OnOutputReceived(host, FormatScriptOutput($"Preconnect completed for {host}", ScriptOutputType.Info));
             }
 
@@ -1908,7 +1973,9 @@ namespace SSH_Helper.Services
             {
                 Host = effectiveHost,
                 Username = effectiveUsername,
-                Password = effectivePassword
+                Password = effectivePassword,
+                Context = context,
+                OutputRelayState = outputRelayState
             };
         }
 
@@ -1920,7 +1987,9 @@ namespace SSH_Helper.Services
             foreach (var variable in context.GetAllVariables())
             {
                 if (string.Equals(variable.Key, "_timestamp", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(variable.Key, "_output", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(variable.Key, "_output", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(variable.Key, "_outputwindow", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(variable.Key, "_prompt", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 string value = variable.Value switch
@@ -2062,7 +2131,7 @@ namespace SSH_Helper.Services
                 if (showHeader)
                 {
                     var prompt = session.CurrentPrompt;
-                    string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
+                    string header = $"{new string('#', BannerSidePadding)} CONNECTED TO {host} {prompt} {new string('#', BannerSidePadding)}";
                     string separator = new string('#', header.Length);
 
                     outputBuilder.AppendLine("\r\n" + separator);
@@ -2204,7 +2273,7 @@ namespace SSH_Helper.Services
             if (showHeader)
             {
                 var prompt = session.CurrentPrompt;
-                string header = $"{new string('#', 20)} CONNECTED TO {host} {prompt} {new string('#', 20)}";
+                string header = $"{new string('#', BannerSidePadding)} CONNECTED TO {host} {prompt} {new string('#', BannerSidePadding)}";
                 string separator = new string('#', header.Length);
 
                 outputBuilder.AppendLine("\r\n" + separator);
@@ -2498,7 +2567,7 @@ namespace SSH_Helper.Services
             }
 
             var sb = new StringBuilder();
-            string title = $"{new string('#', 20)} {errorType}: {host} {new string('#', 20)}";
+            string title = $"{new string('#', BannerSidePadding)} {errorType}: {host} {new string('#', BannerSidePadding)}";
             string separator = new string('#', title.Length);
 
             sb.AppendLine(separator);

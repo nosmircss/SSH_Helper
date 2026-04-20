@@ -185,6 +185,7 @@ namespace SSH_Helper.Services
             "required_fields",
             "sections",
             "success_codes",
+            "mention",
         };
 
         private static readonly HashSet<string> DictionaryOptionKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -242,6 +243,7 @@ namespace SSH_Helper.Services
                 ["log"] = ["message"],
                 ["localcmd"] = ["command"],
                 ["vault"] = ["path"],
+                ["notify"] = ["message"],
             };
 
         private static readonly IReadOnlyDictionary<string, string[]> PreferredOptionOrderOverridesByCommand =
@@ -250,8 +252,8 @@ namespace SSH_Helper.Services
                 // Properties panel order differs from parser option-key catalog for these blocks.
                 ["send"] = ["command", "capture", "suppress", "expect", "timeout", "retry", "retry_delay", "fail_on_nonzero", "on_error"],
                 ["extract"] = ["pattern", "into", "from", "match", "required"],
-                ["choose"] = ["title", "prompt", "options", "into", "default", "on_error"],
-                ["multiselect"] = ["title", "prompt", "options", "into", "min", "max", "on_error"],
+                ["choose"] = ["title", "prompt", "options", "into", "default", "font_size", "on_error"],
+                ["multiselect"] = ["title", "prompt", "options", "into", "min", "max", "font_size", "on_error"],
                 ["playsound"] = ["path", "max_seconds", "into", "wait", "volume", "on_error"],
                 ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "success_codes", "max_output_bytes", "confirm", "quiet", "into", "fail_on_nonzero", "suppress", "title", "timeout", "on_error"],
                 ["vault"] = ["profile", "path", "key", "keys", "into", "version", "write", "patch", "on_error"],
@@ -262,6 +264,7 @@ namespace SSH_Helper.Services
             "default",
             "validate",
             "validation_error",
+            "font_size",
             "min",
             "max",
             "timeout",
@@ -2446,6 +2449,7 @@ namespace SSH_Helper.Services
                         SetIfBoolTrue(props, "password", step.Input.Password);
                         SetIfNotNull(props, "validate", step.Input.Validate);
                         SetIfNotNull(props, "validation_error", step.Input.ValidationError);
+                        SetIfDouble(props, "font_size", step.Input.FontSize);
                     }
                     break;
 
@@ -2456,6 +2460,7 @@ namespace SSH_Helper.Services
                         SetIfNotNull(props, "prompt", step.Choose.Prompt);
                         SetIfNotNull(props, "into", step.Choose.Into);
                         SetIfNotNull(props, "default", step.Choose.Default);
+                        SetIfDouble(props, "font_size", step.Choose.FontSize);
                         if (!string.IsNullOrWhiteSpace(step.Choose.OptionsFrom))
                         {
                             props["options"] = step.Choose.OptionsFrom;
@@ -2475,6 +2480,7 @@ namespace SSH_Helper.Services
                         SetIfNotNull(props, "into", step.Multiselect.Into);
                         SetIfNumber(props, "min", step.Multiselect.Min);
                         SetIfNumber(props, "max", step.Multiselect.Max);
+                        SetIfDouble(props, "font_size", step.Multiselect.FontSize);
                         if (!string.IsNullOrWhiteSpace(step.Multiselect.OptionsFrom))
                         {
                             props["options"] = step.Multiselect.OptionsFrom;
@@ -2493,6 +2499,7 @@ namespace SSH_Helper.Services
                         SetIfNotNull(props, "prompt", step.Confirm.Prompt);
                         SetIfNotNull(props, "into", step.Confirm.Into);
                         if (step.Confirm.Default) props["default"] = true;
+                        SetIfDouble(props, "font_size", step.Confirm.FontSize);
                     }
                     break;
 
@@ -2558,6 +2565,21 @@ namespace SSH_Helper.Services
                         SetIfNotNull(props, "into", step.Webhook.Into);
                         if (step.Webhook.Headers?.Count > 0) props["headers"] = JObject.FromObject(step.Webhook.Headers);
                         if (step.Webhook.Timeout != 30) props["timeout"] = step.Webhook.Timeout;
+                    }
+                    break;
+
+                case StepType.Notify:
+                    if (step.Notify != null)
+                    {
+                        SetIfNotNull(props, "profile", step.Notify.Profile);
+                        SetIfNotNull(props, "channel", step.Notify.Channel);
+                        SetIfNotNull(props, "title", step.Notify.Title);
+                        SetIfNotNull(props, "message", step.Notify.Message);
+                        if (!string.Equals(step.Notify.Level, "info", StringComparison.OrdinalIgnoreCase))
+                            props["level"] = step.Notify.Level;
+                        if (step.Notify.Mention != null && step.Notify.Mention.Count > 0)
+                            props["mention"] = JArray.FromObject(step.Notify.Mention);
+                        SetIfNotNull(props, "into", step.Notify.Into);
                     }
                     break;
 
@@ -2705,6 +2727,23 @@ namespace SSH_Helper.Services
                         if (step.Vault.Patch?.Count > 0)
                             props["patch"] = JObject.FromObject(step.Vault.Patch);
                         SetIfNotNull(props, "on_error", step.Vault.OnError);
+                    }
+                    break;
+
+                case StepType.SetHistoryLabel:
+                    switch (step.SetHistoryLabel)
+                    {
+                        case string label:
+                            SetIfNotNull(props, "value", label);
+                            break;
+                        case SetHistoryLabelOptions options:
+                            SetIfNotNull(props, "value", options.Value);
+                            if (options.Replace.HasValue)
+                                props["replace"] = options.Replace.Value ? "true" : "false";
+                            if (!string.Equals(options.Mode, HistoryLabelOperation.ReplaceMode, StringComparison.OrdinalIgnoreCase))
+                                props["mode"] = HistoryLabelOperation.NormalizeMode(options.Mode);
+                            SetIfNotNull(props, "separator", options.Separator);
+                            break;
                     }
                     break;
 
@@ -3557,6 +3596,9 @@ namespace SSH_Helper.Services
                 case "log":
                     options["message"] = commandValue;
                     return true;
+                case "sethistorylabel":
+                    options["value"] = commandValue;
+                    return true;
                 case "exit":
                 {
                     if (TrySplitExitStatusAndMessage(commandValue.ToString(), out var status, out var message))
@@ -3995,6 +4037,16 @@ namespace SSH_Helper.Services
             };
         }
 
+        private static string? GetSetHistoryLabelPreview(object? setHistoryLabelValue)
+        {
+            return setHistoryLabelValue switch
+            {
+                SetHistoryLabelOptions options => options.Value,
+                string value => value,
+                _ => setHistoryLabelValue?.ToString(),
+            };
+        }
+
         private static (string blockType, string? preview) GetStepPreview(ScriptStep step, StepType stepType)
         {
             return stepType switch
@@ -4039,6 +4091,8 @@ namespace SSH_Helper.Services
                 StepType.UpdateEnvironment => ("updateenvironment", step.UpdateEnvironment?.Variable),
                 StepType.LocalCmd => ("localcmd", step.LocalCmd?.Command),
                 StepType.Vault => ("vault", step.Vault?.Path),
+                StepType.SetHistoryLabel => ("sethistorylabel", GetSetHistoryLabelPreview(step.SetHistoryLabel)),
+                StepType.Notify => ("notify", step.Notify?.Title ?? step.Notify?.Message),
                 _ => ("unknown", null),
             };
         }

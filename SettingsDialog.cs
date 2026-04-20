@@ -76,6 +76,7 @@ namespace SSH_Helper
         private NumericUpDown _numMenuFontSize = null!;
         private NumericUpDown _numStatusBarFontSize = null!;
         private NumericUpDown _numDialogFontSize = null!;
+        private NumericUpDown _numScriptPromptFontSize = null!;
 
         // Appearance tab controls - Global Scale
         private TrackBar _trkGlobalScale = null!;
@@ -139,6 +140,31 @@ namespace SSH_Helper
         private bool _suppressVaultDefaultToggle;
         private int _activeVaultProfileIndex = -1;
         private string? _vaultDefaultProfileName;
+
+        // Notifications tab controls
+        private CheckBox _chkNotificationsEnabled = null!;
+        private ListBox _lstNotificationProfiles = null!;
+        private Button _btnNotificationAdd = null!;
+        private Button _btnNotificationRemove = null!;
+        private TextBox _txtNotificationProfileName = null!;
+        private ComboBox _cmbNotificationKind = null!;
+        private TextBox _txtNotificationDefaultTitle = null!;
+        private Panel _pnlNotificationWebhook = null!;
+        private TextBox _txtNotificationWebhookUrl = null!;
+        private Panel _pnlNotificationSmtp = null!;
+        private TextBox _txtNotificationSmtpHost = null!;
+        private NumericUpDown _numNotificationSmtpPort = null!;
+        private TextBox _txtNotificationSmtpFrom = null!;
+        private TextBox _txtNotificationSmtpTo = null!;
+        private TextBox _txtNotificationSmtpUsername = null!;
+        private TextBox _txtNotificationSmtpPassword = null!;
+        private CheckBox _chkNotificationSmtpUseStartTls = null!;
+        private CheckBox _chkNotificationDefault = null!;
+        private readonly List<NotificationProfile> _notificationProfiles = new();
+        private bool _suppressNotificationProfileSelection;
+        private bool _suppressNotificationDefaultToggle;
+        private int _activeNotificationProfileIndex = -1;
+        private string? _notificationDefaultProfileName;
 
         // Reset buttons
         private Button _btnResetDefaults = null!;
@@ -216,6 +242,10 @@ namespace SSH_Helper
             // === Vault Tab ===
             var tabVault = CreateVaultTab();
             _tabControl.TabPages.Add(tabVault);
+
+            // === Notifications Tab ===
+            var tabNotifications = CreateNotificationsTab();
+            _tabControl.TabPages.Add(tabNotifications);
 
             // Buttons
             _btnSave = new Button
@@ -300,6 +330,8 @@ namespace SSH_Helper
             DialogTheme.StyleButton(_btnVaultRemove, darkMode);
             DialogTheme.StyleButton(_btnVaultBrowseCaCert, darkMode);
             DialogTheme.StyleButton(_btnVaultTestConnection, darkMode);
+            DialogTheme.StyleButton(_btnNotificationAdd, darkMode);
+            DialogTheme.StyleButton(_btnNotificationRemove, darkMode);
             DialogTheme.SetDarkTitleBar(this, darkMode);
             DialogTheme.StyleTabControl(_tabControl, darkMode);
 
@@ -1145,6 +1177,521 @@ namespace SSH_Helper
             config.Vault.DefaultProfileName = resolvedDefaultProfile ?? "";
         }
 
+        private TabPage CreateNotificationsTab()
+        {
+            var tab = new TabPage("Notifications");
+            var mainSplit = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Vertical,
+                SplitterDistance = 160,
+                FixedPanel = FixedPanel.Panel1
+            };
+
+            // Left panel: enable + profile list + add/remove
+            var leftPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8) };
+            _chkNotificationsEnabled = new CheckBox
+            {
+                Name = "chkNotificationsEnabled",
+                Text = "Enable Notifications",
+                AutoSize = true,
+                Dock = DockStyle.Top
+            };
+            _chkNotificationsEnabled.CheckedChanged += (_, _) => UpdateNotificationControlStates();
+
+            _lstNotificationProfiles = new ListBox
+            {
+                Dock = DockStyle.Fill,
+                IntegralHeight = false,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            _lstNotificationProfiles.SelectedIndexChanged += LstNotificationProfiles_SelectedIndexChanged;
+
+            var profileButtonPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                Padding = new Padding(0, 4, 0, 0)
+            };
+            _btnNotificationAdd = new Button { Text = "Add", Width = 70, Height = 26 };
+            _btnNotificationAdd.Click += BtnNotificationAdd_Click;
+            _btnNotificationRemove = new Button { Text = "Remove", Width = 70, Height = 26 };
+            _btnNotificationRemove.Click += BtnNotificationRemove_Click;
+            profileButtonPanel.Controls.Add(_btnNotificationAdd);
+            profileButtonPanel.Controls.Add(_btnNotificationRemove);
+
+            leftPanel.Controls.Add(_lstNotificationProfiles);
+            leftPanel.Controls.Add(profileButtonPanel);
+            leftPanel.Controls.Add(_chkNotificationsEnabled);
+
+            // Right panel: detail fields
+            var rightFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(8, 8, 8, 8)
+            };
+            _scrollableFlowPanels.Add(rightFlow);
+
+            var sectionFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            const int labelColumnWidth = 120;
+            const int inputMinWidth = 205;
+
+            TableLayoutPanel LabeledTextBox(string labelText, out TextBox textBox, bool isPassword = false)
+            {
+                var row = new TableLayoutPanel
+                {
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    ColumnCount = 2,
+                    RowCount = 1,
+                    Margin = new Padding(0, 2, 0, 2),
+                    Width = 430
+                };
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, labelColumnWidth));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                row.Controls.Add(new Label { Text = labelText, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
+                textBox = new TextBox
+                {
+                    Dock = DockStyle.Fill,
+                    MinimumSize = new Size(inputMinWidth, 0),
+                    UseSystemPasswordChar = isPassword
+                };
+                row.Controls.Add(textBox, 1, 0);
+                return row;
+            }
+
+            // Profile header
+            rightFlow.Controls.Add(new Label { Text = "Profile", Font = sectionFont, AutoSize = true, Margin = new Padding(0, 0, 0, 4) });
+            rightFlow.Controls.Add(LabeledTextBox("Profile Name:", out _txtNotificationProfileName));
+
+            // Kind combo
+            var kindRow = new TableLayoutPanel
+            {
+                AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 2, 0, 2), Width = 430
+            };
+            kindRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, labelColumnWidth));
+            kindRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            kindRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            kindRow.Controls.Add(new Label { Text = "Channel:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
+            _cmbNotificationKind = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, MinimumSize = new Size(inputMinWidth, 0) };
+            _cmbNotificationKind.Items.AddRange(new object[] { "Slack", "Teams", "Discord", "SMTP Email" });
+            _cmbNotificationKind.SelectedIndex = 0;
+            _cmbNotificationKind.SelectedIndexChanged += (_, _) => UpdateNotificationKindVisibility();
+            kindRow.Controls.Add(_cmbNotificationKind, 1, 0);
+            rightFlow.Controls.Add(kindRow);
+
+            rightFlow.Controls.Add(LabeledTextBox("Default Title:", out _txtNotificationDefaultTitle));
+
+            // Webhook section (Slack/Teams/Discord)
+            _pnlNotificationWebhook = new Panel { AutoSize = true, Width = 430 };
+            var webhookLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+            webhookLayout.Controls.Add(new Label { Text = "Webhook", Font = sectionFont, AutoSize = true, Margin = new Padding(0, 10, 0, 4) });
+            webhookLayout.Controls.Add(LabeledTextBox("Webhook URL:", out _txtNotificationWebhookUrl, isPassword: true));
+            _pnlNotificationWebhook.Controls.Add(webhookLayout);
+            rightFlow.Controls.Add(_pnlNotificationWebhook);
+
+            // SMTP section
+            _pnlNotificationSmtp = new Panel { AutoSize = true, Width = 430, Visible = false };
+            var smtpLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+            smtpLayout.Controls.Add(new Label { Text = "SMTP Server", Font = sectionFont, AutoSize = true, Margin = new Padding(0, 10, 0, 4) });
+            smtpLayout.Controls.Add(LabeledTextBox("Host:", out _txtNotificationSmtpHost));
+
+            var smtpPortRow = new TableLayoutPanel
+            {
+                AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 2, 0, 2), Width = 430
+            };
+            smtpPortRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, labelColumnWidth));
+            smtpPortRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            smtpPortRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            smtpPortRow.Controls.Add(new Label { Text = "Port:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 4, 0) }, 0, 0);
+            _numNotificationSmtpPort = new NumericUpDown { Minimum = 1, Maximum = 65535, Value = 587, Width = 100, TextAlign = HorizontalAlignment.Right };
+            smtpPortRow.Controls.Add(_numNotificationSmtpPort, 1, 0);
+            smtpLayout.Controls.Add(smtpPortRow);
+
+            smtpLayout.Controls.Add(LabeledTextBox("From Address:", out _txtNotificationSmtpFrom));
+            smtpLayout.Controls.Add(LabeledTextBox("To Addresses:", out _txtNotificationSmtpTo));
+            _txtNotificationSmtpTo.Multiline = true;
+            _txtNotificationSmtpTo.Height = 44;
+            _txtNotificationSmtpTo.ScrollBars = ScrollBars.Vertical;
+            smtpLayout.Controls.Add(new Label { Text = "(One per line, or comma/semicolon-separated)", AutoSize = true, ForeColor = Color.Gray, Font = new Font("Segoe UI", 8f), Margin = new Padding(labelColumnWidth, 0, 0, 4) });
+            smtpLayout.Controls.Add(LabeledTextBox("Username:", out _txtNotificationSmtpUsername));
+            smtpLayout.Controls.Add(LabeledTextBox("Password:", out _txtNotificationSmtpPassword, isPassword: true));
+            _chkNotificationSmtpUseStartTls = new CheckBox { Text = "Use STARTTLS / SSL", AutoSize = true, Margin = new Padding(labelColumnWidth, 4, 0, 2), Checked = true };
+            smtpLayout.Controls.Add(_chkNotificationSmtpUseStartTls);
+            _pnlNotificationSmtp.Controls.Add(smtpLayout);
+            rightFlow.Controls.Add(_pnlNotificationSmtp);
+
+            _chkNotificationDefault = new CheckBox { Text = "Set as default profile", AutoSize = true, Margin = new Padding(0, 10, 0, 2) };
+            _chkNotificationDefault.CheckedChanged += ChkNotificationDefault_CheckedChanged;
+            rightFlow.Controls.Add(_chkNotificationDefault);
+
+            mainSplit.Panel1.Controls.Add(leftPanel);
+            mainSplit.Panel2.Controls.Add(rightFlow);
+            tab.Controls.Add(mainSplit);
+
+            return tab;
+        }
+
+        private void UpdateNotificationControlStates()
+        {
+            bool enabled = _chkNotificationsEnabled.Checked;
+            _lstNotificationProfiles.Enabled = enabled;
+            _btnNotificationAdd.Enabled = enabled;
+            _btnNotificationRemove.Enabled = enabled && _lstNotificationProfiles.SelectedIndex >= 0;
+            SetNotificationDetailFieldsEnabled(enabled && _lstNotificationProfiles.SelectedIndex >= 0);
+        }
+
+        private void SetNotificationDetailFieldsEnabled(bool enabled)
+        {
+            _txtNotificationProfileName.Enabled = enabled;
+            _cmbNotificationKind.Enabled = enabled;
+            _txtNotificationDefaultTitle.Enabled = enabled;
+            _txtNotificationWebhookUrl.Enabled = enabled;
+            _txtNotificationSmtpHost.Enabled = enabled;
+            _numNotificationSmtpPort.Enabled = enabled;
+            _txtNotificationSmtpFrom.Enabled = enabled;
+            _txtNotificationSmtpTo.Enabled = enabled;
+            _txtNotificationSmtpUsername.Enabled = enabled;
+            _txtNotificationSmtpPassword.Enabled = enabled;
+            _chkNotificationSmtpUseStartTls.Enabled = enabled;
+            _chkNotificationDefault.Enabled = enabled;
+        }
+
+        private void UpdateNotificationKindVisibility()
+        {
+            var kind = GetSelectedNotificationKind();
+            _pnlNotificationWebhook.Visible = kind != NotificationChannelKind.Smtp;
+            _pnlNotificationSmtp.Visible = kind == NotificationChannelKind.Smtp;
+        }
+
+        private NotificationChannelKind GetSelectedNotificationKind()
+        {
+            return _cmbNotificationKind.SelectedIndex switch
+            {
+                1 => NotificationChannelKind.Teams,
+                2 => NotificationChannelKind.Discord,
+                3 => NotificationChannelKind.Smtp,
+                _ => NotificationChannelKind.Slack
+            };
+        }
+
+        private void SetSelectedNotificationKind(NotificationChannelKind kind)
+        {
+            _cmbNotificationKind.SelectedIndex = kind switch
+            {
+                NotificationChannelKind.Teams => 1,
+                NotificationChannelKind.Discord => 2,
+                NotificationChannelKind.Smtp => 3,
+                _ => 0
+            };
+        }
+
+        private void LstNotificationProfiles_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            if (_suppressNotificationProfileSelection)
+                return;
+
+            PersistNotificationProfileByIndex(_activeNotificationProfileIndex);
+            _activeNotificationProfileIndex = _lstNotificationProfiles.SelectedIndex;
+
+            if (_lstNotificationProfiles.SelectedIndex >= 0 && _lstNotificationProfiles.SelectedIndex < _notificationProfiles.Count)
+                LoadNotificationProfileDetails(_notificationProfiles[_lstNotificationProfiles.SelectedIndex]);
+            else
+                ClearNotificationProfileDetails();
+
+            UpdateNotificationControlStates();
+        }
+
+        private void ChkNotificationDefault_CheckedChanged(object? sender, EventArgs e)
+        {
+            if (_suppressNotificationDefaultToggle) return;
+            var index = _activeNotificationProfileIndex;
+            if (index < 0 || index >= _notificationProfiles.Count)
+                return;
+            if (_chkNotificationDefault.Checked)
+                _notificationDefaultProfileName = _notificationProfiles[index].Name;
+            else if (string.Equals(_notificationDefaultProfileName, _notificationProfiles[index].Name, StringComparison.OrdinalIgnoreCase))
+                _notificationDefaultProfileName = null;
+        }
+
+        private void BtnNotificationAdd_Click(object? sender, EventArgs e)
+        {
+            var name = $"profile-{_notificationProfiles.Count + 1}";
+            var profile = new NotificationProfile { Name = name, Kind = NotificationChannelKind.Slack };
+            _notificationProfiles.Add(profile);
+            _suppressNotificationProfileSelection = true;
+            _lstNotificationProfiles.Items.Add(name);
+            _lstNotificationProfiles.SelectedIndex = _lstNotificationProfiles.Items.Count - 1;
+            _suppressNotificationProfileSelection = false;
+            _activeNotificationProfileIndex = _lstNotificationProfiles.SelectedIndex;
+            LoadNotificationProfileDetails(profile);
+
+            if (string.IsNullOrWhiteSpace(_notificationDefaultProfileName) && _notificationProfiles.Count == 1)
+                _notificationDefaultProfileName = profile.Name;
+
+            UpdateNotificationControlStates();
+        }
+
+        private void BtnNotificationRemove_Click(object? sender, EventArgs e)
+        {
+            var index = _lstNotificationProfiles.SelectedIndex;
+            if (index < 0 || index >= _notificationProfiles.Count)
+                return;
+
+            var profileName = _notificationProfiles[index].Name;
+
+            // Purge stored secrets
+            if (_credentialProvider != null && !string.IsNullOrEmpty(profileName))
+            {
+                _credentialProvider.DeletePassword(CredentialTargets.NotifyWebhookTarget(profileName));
+                _credentialProvider.DeletePassword(CredentialTargets.NotifySmtpPasswordTarget(profileName));
+            }
+
+            _notificationProfiles.RemoveAt(index);
+            _suppressNotificationProfileSelection = true;
+            _lstNotificationProfiles.Items.RemoveAt(index);
+
+            if (_lstNotificationProfiles.Items.Count > 0)
+            {
+                _lstNotificationProfiles.SelectedIndex = Math.Min(index, _lstNotificationProfiles.Items.Count - 1);
+                _suppressNotificationProfileSelection = false;
+                _activeNotificationProfileIndex = _lstNotificationProfiles.SelectedIndex;
+                LoadNotificationProfileDetails(_notificationProfiles[_lstNotificationProfiles.SelectedIndex]);
+            }
+            else
+            {
+                _suppressNotificationProfileSelection = false;
+                _activeNotificationProfileIndex = -1;
+                ClearNotificationProfileDetails();
+            }
+
+            if (string.Equals(_notificationDefaultProfileName, profileName, StringComparison.OrdinalIgnoreCase))
+            {
+                _notificationDefaultProfileName = _activeNotificationProfileIndex >= 0
+                    ? _notificationProfiles[_activeNotificationProfileIndex].Name
+                    : null;
+            }
+
+            UpdateNotificationControlStates();
+        }
+
+        private void LoadNotificationProfileDetails(NotificationProfile profile)
+        {
+            _txtNotificationProfileName.Text = profile.Name;
+            SetSelectedNotificationKind(profile.Kind);
+            _txtNotificationDefaultTitle.Text = profile.DefaultTitle;
+            _txtNotificationSmtpHost.Text = profile.SmtpHost;
+            _numNotificationSmtpPort.Value = Math.Clamp(profile.SmtpPort, 1, 65535);
+            _txtNotificationSmtpFrom.Text = profile.SmtpFromAddress;
+            _txtNotificationSmtpTo.Text = string.Join(Environment.NewLine, profile.SmtpToAddresses ?? new List<string>());
+            _txtNotificationSmtpUsername.Text = profile.SmtpUsername;
+            _chkNotificationSmtpUseStartTls.Checked = profile.UseStartTls;
+
+            _txtNotificationWebhookUrl.Text = "";
+            _txtNotificationSmtpPassword.Text = "";
+            if (_credentialProvider != null && !string.IsNullOrEmpty(profile.Name))
+            {
+                if (_credentialProvider.TryGetPassword(CredentialTargets.NotifyWebhookTarget(profile.Name), out _, out var url))
+                    _txtNotificationWebhookUrl.Text = url ?? "";
+                if (_credentialProvider.TryGetPassword(CredentialTargets.NotifySmtpPasswordTarget(profile.Name), out _, out var pw))
+                    _txtNotificationSmtpPassword.Text = pw ?? "";
+            }
+
+            _suppressNotificationDefaultToggle = true;
+            _chkNotificationDefault.Checked = !string.IsNullOrEmpty(_notificationDefaultProfileName)
+                && string.Equals(_notificationDefaultProfileName, profile.Name, StringComparison.OrdinalIgnoreCase);
+            _suppressNotificationDefaultToggle = false;
+
+            UpdateNotificationKindVisibility();
+        }
+
+        private void ClearNotificationProfileDetails()
+        {
+            _txtNotificationProfileName.Text = "";
+            _cmbNotificationKind.SelectedIndex = 0;
+            _txtNotificationDefaultTitle.Text = "";
+            _txtNotificationWebhookUrl.Text = "";
+            _txtNotificationSmtpHost.Text = "";
+            _numNotificationSmtpPort.Value = 587;
+            _txtNotificationSmtpFrom.Text = "";
+            _txtNotificationSmtpTo.Text = "";
+            _txtNotificationSmtpUsername.Text = "";
+            _txtNotificationSmtpPassword.Text = "";
+            _chkNotificationSmtpUseStartTls.Checked = true;
+            _suppressNotificationDefaultToggle = true;
+            _chkNotificationDefault.Checked = false;
+            _suppressNotificationDefaultToggle = false;
+            UpdateNotificationKindVisibility();
+        }
+
+        private void PersistCurrentNotificationProfile()
+        {
+            PersistNotificationProfileByIndex(_activeNotificationProfileIndex);
+        }
+
+        private void PersistNotificationProfileByIndex(int index)
+        {
+            if (index < 0 || index >= _notificationProfiles.Count)
+                return;
+
+            var profile = _notificationProfiles[index];
+            var oldName = profile.Name;
+            var newName = (_txtNotificationProfileName.Text ?? "").Trim();
+
+            profile.Kind = GetSelectedNotificationKind();
+            profile.DefaultTitle = (_txtNotificationDefaultTitle.Text ?? "").Trim();
+            profile.SmtpHost = (_txtNotificationSmtpHost.Text ?? "").Trim();
+            profile.SmtpPort = (int)_numNotificationSmtpPort.Value;
+            profile.SmtpFromAddress = (_txtNotificationSmtpFrom.Text ?? "").Trim();
+            profile.SmtpToAddresses = SplitSmtpRecipients(_txtNotificationSmtpTo.Text);
+            profile.SmtpUsername = (_txtNotificationSmtpUsername.Text ?? "").Trim();
+            profile.UseStartTls = _chkNotificationSmtpUseStartTls.Checked;
+
+            if (!string.IsNullOrEmpty(newName) && !string.Equals(newName, oldName, StringComparison.Ordinal))
+            {
+                // Rename: migrate credentials from old target to new
+                if (_credentialProvider != null && !string.IsNullOrEmpty(oldName))
+                {
+                    MigrateNotificationCredential(oldName, newName, CredentialTargets.NotifyWebhookTarget);
+                    MigrateNotificationCredential(oldName, newName, CredentialTargets.NotifySmtpPasswordTarget);
+                }
+                profile.Name = newName;
+                _suppressNotificationProfileSelection = true;
+                _lstNotificationProfiles.Items[index] = profile.Name;
+                _suppressNotificationProfileSelection = false;
+
+                if (string.Equals(_notificationDefaultProfileName, oldName, StringComparison.OrdinalIgnoreCase))
+                    _notificationDefaultProfileName = profile.Name;
+            }
+
+            if (_chkNotificationDefault.Checked)
+                _notificationDefaultProfileName = profile.Name;
+
+            if (_credentialProvider != null && !string.IsNullOrEmpty(profile.Name))
+            {
+                SaveNotificationSecret(CredentialTargets.NotifyWebhookTarget(profile.Name), _txtNotificationWebhookUrl.Text);
+                SaveNotificationSecret(CredentialTargets.NotifySmtpPasswordTarget(profile.Name), _txtNotificationSmtpPassword.Text);
+            }
+        }
+
+        private void MigrateNotificationCredential(string oldName, string newName, Func<string, string> targetBuilder)
+        {
+            if (_credentialProvider == null) return;
+            var oldTarget = targetBuilder(oldName);
+            if (_credentialProvider.TryGetPassword(oldTarget, out _, out var value) && !string.IsNullOrEmpty(value))
+            {
+                _credentialProvider.SavePassword(targetBuilder(newName), string.Empty, value);
+                _credentialProvider.DeletePassword(oldTarget);
+            }
+        }
+
+        private void SaveNotificationSecret(string target, string value)
+        {
+            if (_credentialProvider == null) return;
+            if (string.IsNullOrEmpty(value))
+                _credentialProvider.DeletePassword(target);
+            else
+                _credentialProvider.SavePassword(target, string.Empty, value);
+        }
+
+        private static List<string> SplitSmtpRecipients(string? raw)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrWhiteSpace(raw))
+                return result;
+            foreach (var token in raw.Split(new[] { '\r', '\n', ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = token.Trim();
+                if (trimmed.Length > 0)
+                    result.Add(trimmed);
+            }
+            return result;
+        }
+
+        private void LoadNotificationSettings()
+        {
+            var config = _configService.GetCurrent();
+            _notificationDefaultProfileName = string.IsNullOrWhiteSpace(config.Notifications.DefaultProfileName)
+                ? null
+                : config.Notifications.DefaultProfileName.Trim();
+            _chkNotificationsEnabled.Checked = config.Notifications.Enabled;
+            _notificationProfiles.Clear();
+
+            _suppressNotificationProfileSelection = true;
+            _lstNotificationProfiles.Items.Clear();
+
+            foreach (var p in config.Notifications.Profiles)
+            {
+                var clone = new NotificationProfile
+                {
+                    Name = p.Name,
+                    Kind = p.Kind,
+                    DefaultTitle = p.DefaultTitle,
+                    SmtpHost = p.SmtpHost,
+                    SmtpPort = p.SmtpPort,
+                    SmtpFromAddress = p.SmtpFromAddress,
+                    SmtpToAddresses = new List<string>(p.SmtpToAddresses ?? new List<string>()),
+                    SmtpUsername = p.SmtpUsername,
+                    UseStartTls = p.UseStartTls
+                };
+                _notificationProfiles.Add(clone);
+                _lstNotificationProfiles.Items.Add(clone.Name);
+            }
+
+            if (_lstNotificationProfiles.Items.Count > 0)
+            {
+                var initialIndex = _notificationProfiles.FindIndex(p =>
+                    string.Equals(p.Name, _notificationDefaultProfileName, StringComparison.OrdinalIgnoreCase));
+                if (initialIndex < 0) initialIndex = 0;
+                _lstNotificationProfiles.SelectedIndex = initialIndex;
+                _suppressNotificationProfileSelection = false;
+                _activeNotificationProfileIndex = initialIndex;
+                LoadNotificationProfileDetails(_notificationProfiles[initialIndex]);
+            }
+            else
+            {
+                _suppressNotificationProfileSelection = false;
+                _activeNotificationProfileIndex = -1;
+                ClearNotificationProfileDetails();
+            }
+
+            UpdateNotificationControlStates();
+        }
+
+        private void SaveNotificationSettings(AppConfiguration config)
+        {
+            PersistCurrentNotificationProfile();
+            config.Notifications.Enabled = _chkNotificationsEnabled.Checked;
+            config.Notifications.Profiles = _notificationProfiles.Select(p => new NotificationProfile
+            {
+                Name = p.Name,
+                Kind = p.Kind,
+                DefaultTitle = p.DefaultTitle,
+                SmtpHost = p.SmtpHost,
+                SmtpPort = p.SmtpPort,
+                SmtpFromAddress = p.SmtpFromAddress,
+                SmtpToAddresses = new List<string>(p.SmtpToAddresses ?? new List<string>()),
+                SmtpUsername = p.SmtpUsername,
+                UseStartTls = p.UseStartTls
+            }).ToList();
+
+            var resolvedDefault = _notificationProfiles
+                .FirstOrDefault(p => string.Equals(p.Name, _notificationDefaultProfileName, StringComparison.OrdinalIgnoreCase))
+                ?.Name;
+            if (string.IsNullOrWhiteSpace(resolvedDefault) && config.Notifications.Profiles.Count > 0)
+                resolvedDefault = config.Notifications.Profiles[0].Name;
+
+            _notificationDefaultProfileName = resolvedDefault;
+            config.Notifications.DefaultProfileName = resolvedDefault ?? "";
+        }
+
         private TabPage CreateUpdatesTab()
         {
             var tabUpdates = new TabPage("Updates");
@@ -1494,7 +2041,7 @@ namespace SSH_Helper
             scrollPanel.Controls.Add(lblSizesSection);
             y += 25;
 
-            var fontSizesTable = CreateLabelSpinnerTable(6, scrollPanel.ClientSize.Width - 30);
+            var fontSizesTable = CreateLabelSpinnerTable(7, scrollPanel.ClientSize.Width - 30);
             fontSizesTable.Location = new Point(15, y);
             AddTableRow(fontSizesTable, 0, "Section titles:", out _numSectionTitleSize, 9.5m, "Tree views:", out _numTreeViewSize, 9.5m);
             AddTableRow(fontSizesTable, 1, "Empty labels:", out _numEmptyLabelSize, 9.5m, "Execute buttons:", out _numExecuteButtonSize, 9.5m);
@@ -1502,6 +2049,14 @@ namespace SSH_Helper
             AddTableRow(fontSizesTable, 3, "Tab headers:", out _numTabFontSize, 9m, "Buttons:", out _numButtonFontSize, 9m);
             AddTableRow(fontSizesTable, 4, "Host list:", out _numHostListFontSize, 9m, "Menus:", out _numMenuFontSize, 9m);
             AddTableRow(fontSizesTable, 5, "Status bar:", out _numStatusBarFontSize, 9m, "Dialogs:", out _numDialogFontSize, 9m);
+
+            // Script prompt font size (left column only; right column empty)
+            var lblScriptPrompt = new Label { Text = "Script prompts:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 0, 0) };
+            _numScriptPromptFontSize = CreateNumericUpDown(0, 0, 9m, 7, 24, 0.5m, 1);
+            _numScriptPromptFontSize.ValueChanged += (s, e) => UpdatePreview();
+            fontSizesTable.Controls.Add(lblScriptPrompt, 0, 6);
+            fontSizesTable.Controls.Add(_numScriptPromptFontSize, 1, 6);
+
             scrollPanel.Controls.Add(fontSizesTable);
             y += fontSizesTable.PreferredSize.Height + 10;
 
@@ -1963,6 +2518,7 @@ namespace SSH_Helper
             _numMenuFontSize.Value = (decimal)settings.MenuFontSize;
             _numStatusBarFontSize.Value = (decimal)settings.StatusBarFontSize;
             _numDialogFontSize.Value = (decimal)settings.DialogFontSize;
+            _numScriptPromptFontSize.Value = (decimal)Math.Clamp(settings.ScriptPromptFontSize, 7f, 24f);
 
             _trkGlobalScale.Value = (int)(settings.GlobalScaleFactor * 100);
             _lblGlobalScaleValue.Text = $"{_trkGlobalScale.Value}%";
@@ -2033,6 +2589,9 @@ namespace SSH_Helper
 
             // Vault
             LoadVaultSettings();
+
+            // Notifications
+            LoadNotificationSettings();
         }
 
         private void PopulateFontComboBox(ComboBox comboBox, bool monospacedOnly)
@@ -2171,6 +2730,7 @@ namespace SSH_Helper
                 config.FontSettings.MenuFontSize = (float)_numMenuFontSize.Value;
                 config.FontSettings.StatusBarFontSize = (float)_numStatusBarFontSize.Value;
                 config.FontSettings.DialogFontSize = (float)_numDialogFontSize.Value;
+                config.FontSettings.ScriptPromptFontSize = (float)_numScriptPromptFontSize.Value;
 
                 // Appearance - Global Scale
                 config.FontSettings.GlobalScaleFactor = _trkGlobalScale.Value / 100f;
@@ -2188,6 +2748,9 @@ namespace SSH_Helper
 
                 // Vault
                 SaveVaultSettings(config);
+
+                // Notifications
+                SaveNotificationSettings(config);
             });
         }
 

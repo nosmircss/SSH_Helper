@@ -137,6 +137,8 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.Table, new TableCommand() },
                 { StepType.LocalCmd, new LocalCmdCommand(localCmdConfirmation) },
                 { StepType.Vault, new VaultCommand() },
+                { StepType.SetHistoryLabel, new SetHistoryLabelCommand() },
+                { StepType.Notify, new NotifyCommand() },
             };
         }
 

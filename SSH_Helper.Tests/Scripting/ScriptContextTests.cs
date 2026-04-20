@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using SSH_Helper.Models;
+using SSH_Helper.Services;
 using SSH_Helper.Services.Scripting;
 using Xunit;
 
@@ -89,6 +92,75 @@ public class ScriptContextTests
     }
 
     [Fact]
+    public void PromptVariable_IsAvailableThroughHasVariable()
+    {
+        var context = new ScriptContext();
+
+        context.HasVariable("_prompt").Should().BeTrue();
+    }
+
+    [Fact]
+    public void PromptVariable_ResolvesDynamicallyFromCurrentSession()
+    {
+        var session = CreateSessionWithPrompt("router#");
+        var context = new ScriptContext
+        {
+            Session = session
+        };
+
+        var first = context.SubstituteVariables("${_prompt}");
+        SetPrompt(session, "switch>");
+        var second = context.SubstituteVariables("${_prompt}");
+        var snapshot = context.GetAllVariables();
+
+        first.Should().Be("router#");
+        second.Should().Be("switch>");
+        snapshot.Should().ContainKey("_prompt");
+        snapshot["_prompt"].Should().Be("switch>");
+    }
+
+    [Fact]
+    public void PromptVariable_WithoutSession_ResolvesToEmptyString()
+    {
+        var context = new ScriptContext();
+
+        context.GetVariableString("_prompt").Should().BeEmpty();
+        context.SubstituteVariables("prompt=${_prompt}").Should().Be("prompt=");
+    }
+
+    [Fact]
+    public void OutputWindowVariable_IsAvailableThroughHasVariable()
+    {
+        var context = new ScriptContext();
+
+        context.HasVariable("_outputwindow").Should().BeTrue();
+    }
+
+    [Fact]
+    public void OutputWindowVariable_WithoutRelay_ResolvesToEmptyString()
+    {
+        var context = new ScriptContext();
+
+        context.GetVariableString("_outputwindow").Should().BeEmpty();
+        context.SubstituteVariables("window=${_outputwindow}").Should().Be("window=");
+    }
+
+    [Fact]
+    public void OutputWindowVariable_SetAndAppend_UpdatesSnapshotAndInterpolation()
+    {
+        var context = new ScriptContext();
+
+        context.SetOutputWindowText("header");
+        context.AppendOutputWindowText("\r\nline-1");
+        var snapshot = context.GetAllVariables();
+
+        context.GetVariableString("_outputwindow").Should().Be("header\r\nline-1");
+        snapshot.Should().ContainKey("_outputwindow");
+        snapshot["_outputwindow"].Should().Be("header\r\nline-1");
+        context.SubstituteVariables("snapshot=${_outputwindow}").Should().Be("snapshot=header\r\nline-1");
+    }
+
+    [Fact]
     public void InteractiveSessions_AddAndSnapshot_PreservesOrderAndNumbering()
     {
         var context = new ScriptContext();
@@ -157,5 +229,19 @@ public class ScriptContextTests
             allowHandlerFinish.Set();
             await emitTask;
         }
+    }
+
+    private static SshShellSession CreateSessionWithPrompt(string prompt)
+    {
+        var session = (SshShellSession)RuntimeHelpers.GetUninitializedObject(typeof(SshShellSession));
+        SetPrompt(session, prompt);
+        return session;
+    }
+
+    private static void SetPrompt(SshShellSession session, string prompt)
+    {
+        var field = typeof(SshShellSession).GetField("_currentPrompt", BindingFlags.Instance | BindingFlags.NonPublic);
+        field.Should().NotBeNull();
+        field!.SetValue(session, prompt);
     }
 }

@@ -105,6 +105,7 @@ namespace SSH_Helper.Services.Scripting
         {
             public object StateLock { get; } = new();
             public StringBuilder Output { get; } = new();
+            public StringBuilder OutputWindow { get; } = new();
             public List<InteractiveTerminalSessionDetails> InteractiveSessions { get; } = new();
             public object InteractiveSessionsLock { get; } = new();
             public string LastCommandOutput { get; set; } = string.Empty;
@@ -112,6 +113,10 @@ namespace SSH_Helper.Services.Scripting
             public HostConnection? CurrentHost { get; set; }
             public string? ResolvedUsername { get; set; }
             public string? ResolvedPassword { get; set; }
+            public string? HistoryLabel { get; set; }
+            public bool HistoryLabelReplacesAddress { get; set; }
+            public bool HistoryLabelTouched { get; set; }
+            public List<HistoryLabelOperation> HistoryLabelOperations { get; } = new();
             public SshTimeoutOptions? Timeouts { get; set; }
             public DebugState DebugState { get; } = new();
             public bool AllowFileSelectionDialogs { get; set; } = true;
@@ -158,6 +163,61 @@ namespace SSH_Helper.Services.Scripting
         {
             get => _sharedState.ResolvedPassword;
             set => _sharedState.ResolvedPassword = value;
+        }
+
+        /// <summary>
+        /// Optional label attached to this host's history entry via the sethistorylabel command.
+        /// Null means no label was set.
+        /// </summary>
+        public string? HistoryLabel
+        {
+            get => _sharedState.HistoryLabel;
+            set => _sharedState.HistoryLabel = value;
+        }
+
+        /// <summary>
+        /// When true, the history entry for this host displays only HistoryLabel (IP hidden).
+        /// When false, it displays "IP - HistoryLabel" (or plain IP if HistoryLabel is null).
+        /// </summary>
+        public bool HistoryLabelReplacesAddress
+        {
+            get => _sharedState.HistoryLabelReplacesAddress;
+            set => _sharedState.HistoryLabelReplacesAddress = value;
+        }
+
+        /// <summary>
+        /// Tracks whether sethistorylabel executed for this host, including explicit clears.
+        /// </summary>
+        public bool HistoryLabelTouched
+        {
+            get => _sharedState.HistoryLabelTouched;
+            set => _sharedState.HistoryLabelTouched = value;
+        }
+
+        /// <summary>
+        /// Records a sethistorylabel operation for deterministic replay outside the current script context.
+        /// </summary>
+        public void AddHistoryLabelOperation(HistoryLabelOperation operation)
+        {
+            ArgumentNullException.ThrowIfNull(operation);
+
+            lock (_sharedState.StateLock)
+            {
+                _sharedState.HistoryLabelOperations.Add(operation.Clone());
+            }
+        }
+
+        /// <summary>
+        /// Returns a defensive copy of the recorded sethistorylabel operations.
+        /// </summary>
+        public IReadOnlyList<HistoryLabelOperation> GetHistoryLabelOperationsSnapshot()
+        {
+            lock (_sharedState.StateLock)
+            {
+                return _sharedState.HistoryLabelOperations
+                    .Select(operation => operation.Clone())
+                    .ToList();
+            }
         }
 
         /// <summary>
@@ -243,6 +303,11 @@ namespace SSH_Helper.Services.Scripting
         /// Environment-level Vault profile override, if any.
         /// </summary>
         public string? EnvironmentVaultProfile { get; set; }
+
+        /// <summary>
+        /// Notification service for the notify command. Null when notifications are not wired up.
+        /// </summary>
+        public Notifications.NotificationService? NotificationService { get; set; }
 
         /// <summary>
         /// Active root script for this execution context.
@@ -351,6 +416,20 @@ namespace SSH_Helper.Services.Scripting
         }
 
         /// <summary>
+        /// Gets the pane-formatted output transcript accumulated for the current host so far.
+        /// </summary>
+        public string OutputWindowText
+        {
+            get
+            {
+                lock (_sharedState.StateLock)
+                {
+                    return _sharedState.OutputWindow.ToString();
+                }
+            }
+        }
+
+        /// <summary>
         /// Creates a new script context with optional initial variables.
         /// </summary>
         /// <param name="initialVariables">Variables from CSV columns or other sources.</param>
@@ -396,6 +475,10 @@ namespace SSH_Helper.Services.Scripting
                 return DateTime.Now.ToString(TimestampFormat);
             if (string.Equals(name, "_output", StringComparison.OrdinalIgnoreCase))
                 return LastCommandOutput;
+            if (string.Equals(name, "_outputwindow", StringComparison.OrdinalIgnoreCase))
+                return OutputWindowText;
+            if (string.Equals(name, "_prompt", StringComparison.OrdinalIgnoreCase))
+                return Session?.CurrentPrompt ?? string.Empty;
 
             lock (_sharedState.StateLock)
             {
@@ -428,7 +511,9 @@ namespace SSH_Helper.Services.Scripting
         public bool HasVariable(string name)
         {
             if (string.Equals(name, "_timestamp", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(name, "_output", StringComparison.OrdinalIgnoreCase))
+                string.Equals(name, "_output", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "_outputwindow", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "_prompt", StringComparison.OrdinalIgnoreCase))
                 return true;
 
             lock (_sharedState.StateLock)
@@ -461,6 +546,8 @@ namespace SSH_Helper.Services.Scripting
 
             snapshot["_timestamp"] = DateTime.Now.ToString(TimestampFormat);
             snapshot["_output"] = LastCommandOutput;
+            snapshot["_outputwindow"] = OutputWindowText;
+            snapshot["_prompt"] = Session?.CurrentPrompt ?? string.Empty;
             return snapshot;
         }
 
@@ -474,13 +561,16 @@ namespace SSH_Helper.Services.Scripting
                 return input;
 
             string lastOutput;
+            string outputWindowText;
             lock (_sharedState.StateLock)
             {
                 lastOutput = _sharedState.LastCommandOutput;
+                outputWindowText = _sharedState.OutputWindow.ToString();
             }
 
             // Handle special _output variable
             var result = input.Replace("${_output}", lastOutput);
+            result = result.Replace("${_outputwindow}", outputWindowText);
 
             // Replace ${variable} and {{variable}} patterns with support for nested ${...} expressions.
             return SubstituteVariableTokens(result);
@@ -725,6 +815,36 @@ namespace SSH_Helper.Services.Scripting
             lock (_sharedState.StateLock)
             {
                 _sharedState.Output.Clear();
+                _sharedState.OutputWindow.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Replaces the current pane-formatted host transcript for this execution context.
+        /// </summary>
+        internal void SetOutputWindowText(string? output)
+        {
+            lock (_sharedState.StateLock)
+            {
+                _sharedState.OutputWindow.Clear();
+                if (!string.IsNullOrEmpty(output))
+                {
+                    _sharedState.OutputWindow.Append(output);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Appends pane-formatted host output to the current execution transcript.
+        /// </summary>
+        internal void AppendOutputWindowText(string? output)
+        {
+            if (string.IsNullOrEmpty(output))
+                return;
+
+            lock (_sharedState.StateLock)
+            {
+                _sharedState.OutputWindow.Append(output);
             }
         }
 

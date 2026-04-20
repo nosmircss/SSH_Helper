@@ -18,6 +18,13 @@ namespace SSH_Helper.Services.Scripting.Commands
         /// </summary>
         internal static Form? AnchorFormOverride { get; set; }
 
+        /// <summary>
+        /// Ambient default font size (points) for script prompt dialogs. Set by Form1.ApplyFontSettings
+        /// from FontSettings.ScriptPromptFontSize. A per-step YAML font_size: overrides this at the
+        /// command-handler layer. Null means use the hardcoded fallback (9pt) inside each dialog.
+        /// </summary>
+        internal static float? DefaultPromptFontSize { get; set; }
+
         internal static Action<Form>? RestoreMainFormActivationOverrideForTests { get; set; }
 
         public static Task<TResult> ShowAsync<TDialog, TResult>(

@@ -111,6 +111,11 @@ namespace SSH_Helper.Models
         /// </summary>
         public VaultSettings Vault { get; set; } = new();
 
+        /// <summary>
+        /// Notification profiles and defaults for the notify scripting command.
+        /// </summary>
+        public NotificationSettings Notifications { get; set; } = new();
+
         // Recent files
         /// <summary>
         /// Most recently opened CSV file paths, newest first.
@@ -283,6 +288,13 @@ namespace SSH_Helper.Models
         /// </summary>
         public float DialogFontSize { get; set; } = 9f;
 
+        /// <summary>
+        /// Font size for script prompt dialogs (input, choose, multiselect, confirm).
+        /// Independent of DialogFontSize so script prompts can be enlarged without
+        /// resizing every other app dialog. Can be overridden per-step in YAML via font_size:.
+        /// </summary>
+        public float ScriptPromptFontSize { get; set; } = 9f;
+
         // === Global Scaling ===
 
         /// <summary>
@@ -420,6 +432,8 @@ namespace SSH_Helper.Models
         public bool Success { get; set; } = true;
         public bool WasCancelled { get; set; }
         public DateTime Timestamp { get; set; }
+        public string? Label { get; set; }
+        public bool LabelReplacesAddress { get; set; }
     }
 
     /// <summary>

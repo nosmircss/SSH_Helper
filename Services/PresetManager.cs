@@ -328,6 +328,58 @@ namespace SSH_Helper.Services
         }
 
         /// <summary>
+        /// Exports the selected folder subtree to a JSON file, rebasing the selected folder to the bundle root.
+        /// </summary>
+        public void ExportFolderSubtreeToFile(string folderPath, string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath))
+                throw new ArgumentException("Folder path cannot be empty", nameof(folderPath));
+
+            if (string.IsNullOrWhiteSpace(filePath))
+                throw new ArgumentException("File path cannot be empty", nameof(filePath));
+
+            if (!_folders.ContainsKey(folderPath))
+                throw new ArgumentException($"Folder '{folderPath}' not found", nameof(folderPath));
+
+            var exportRoot = FolderPathUtility.GetFolderName(folderPath);
+            var exportedFolders = _folders
+                .Where(kvp => string.Equals(kvp.Key, folderPath, StringComparison.Ordinal) ||
+                              FolderPathUtility.IsDescendantOf(kvp.Key, folderPath))
+                .ToDictionary(
+                    kvp => RebaseFolderPathForExport(kvp.Key, folderPath, exportRoot),
+                    kvp => kvp.Value.Clone(),
+                    StringComparer.Ordinal);
+
+            var exportedPresets = _presets
+                .Where(kvp => string.Equals(kvp.Value.Folder, folderPath, StringComparison.Ordinal) ||
+                              FolderPathUtility.IsDescendantOf(kvp.Value.Folder, folderPath))
+                .ToDictionary(
+                    kvp => kvp.Key,
+                    kvp =>
+                    {
+                        var preset = kvp.Value.Clone();
+                        if (!string.IsNullOrEmpty(preset.Folder))
+                        {
+                            preset.Folder = RebaseFolderPathForExport(preset.Folder, folderPath, exportRoot);
+                        }
+
+                        return preset;
+                    },
+                    StringComparer.Ordinal);
+
+            var exportData = new Dictionary<string, object>
+            {
+                ["version"] = 2,
+                ["exportDate"] = DateTime.Now.ToString("O"),
+                ["presets"] = exportedPresets,
+                ["folders"] = exportedFolders
+            };
+
+            string json = JsonConvert.SerializeObject(exportData, Formatting.Indented);
+            File.WriteAllText(filePath, json);
+        }
+
+        /// <summary>
         /// Imports all presets from a JSON file.
         /// If a preset exists, appends "_imported" to the name.
         /// </summary>
@@ -944,6 +996,14 @@ namespace SSH_Helper.Services
                 Commands = decompressed,
                 Timeout = defaultTimeout
             };
+        }
+
+        private static string RebaseFolderPathForExport(string originalPath, string sourceRoot, string exportRoot)
+        {
+            if (string.Equals(sourceRoot, exportRoot, StringComparison.Ordinal))
+                return originalPath;
+
+            return FolderPathUtility.RenamePath(originalPath, sourceRoot, exportRoot);
         }
 
         private void PersistToConfig()

@@ -86,6 +86,7 @@ namespace SSH_Helper
             ctxToggleFavorite = new ToolStripMenuItem();
             toolStripSeparator7 = new ToolStripSeparator();
             ctxExportPreset = new ToolStripMenuItem();
+            ctxExportFolder = new ToolStripMenuItem();
             ctxImportPreset = new ToolStripMenuItem();
             ctxToggleSorting = new ToolStripMenuItem();
             toolStripSeparatorFolders = new ToolStripSeparator();
@@ -111,6 +112,8 @@ namespace SSH_Helper
             ctxCopy = new ToolStripMenuItem();
             ctxPaste = new ToolStripMenuItem();
             ctxSelectAll = new ToolStripMenuItem();
+            ctxCommentSelectedLines = new ToolStripMenuItem();
+            ctxUncommentSelectedLines = new ToolStripMenuItem();
             ctxPathBrowser = new ToolStripMenuItem();
             ctxSeparator1 = new ToolStripSeparator();
             ctxValidateScript = new ToolStripMenuItem();
@@ -125,7 +128,7 @@ namespace SSH_Helper
             lblScriptTitle = new Label();
             executePanel = new BufferedPanel();
             btnExecuteSelected = new Button();
-            btnStopAll = new Button();
+            btnStopAll = new SSH_Helper.UI.FlatVisualButton();
             outputPanel = new BufferedPanel();
             outputSplitContainer = new BufferedSplitContainer();
             outputRightPanel = new BufferedPanel();
@@ -597,9 +600,9 @@ namespace SSH_Helper
             // 
             // contextPresetLst
             // 
-            contextPresetLst.Items.AddRange(new ToolStripItem[] { ctxAddPreset, ctxDuplicatePreset, ctxRenamePreset, ctxDeletePreset, toolStripSeparator6, ctxToggleFavorite, ctxMoveToFolder, toolStripSeparator7, ctxExportPreset, ctxImportPreset, toolStripSeparatorFolders, ctxAddFolder, ctxRenameFolder, ctxDeleteFolder });
+            contextPresetLst.Items.AddRange(new ToolStripItem[] { ctxAddPreset, ctxDuplicatePreset, ctxRenamePreset, ctxDeletePreset, toolStripSeparator6, ctxToggleFavorite, ctxMoveToFolder, toolStripSeparator7, ctxExportPreset, ctxExportFolder, ctxImportPreset, toolStripSeparatorFolders, ctxAddFolder, ctxRenameFolder, ctxDeleteFolder });
             contextPresetLst.Name = "contextPresetLst";
-            contextPresetLst.Size = new Size(160, 192);
+            contextPresetLst.Size = new Size(160, 214);
             // 
             // ctxAddPreset
             // 
@@ -652,6 +655,13 @@ namespace SSH_Helper
             ctxExportPreset.Size = new Size(159, 22);
             ctxExportPreset.Text = "&Export Preset";
             ctxExportPreset.Click += ExportPreset_Click;
+            // 
+            // ctxExportFolder
+            // 
+            ctxExportFolder.Name = "ctxExportFolder";
+            ctxExportFolder.Size = new Size(159, 22);
+            ctxExportFolder.Text = "E&xport Folder...";
+            ctxExportFolder.Click += ExportFolder_Click;
             // 
             // ctxImportPreset
             // 
@@ -828,9 +838,9 @@ namespace SSH_Helper
             //
             // contextCommandBox
             //
-            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxPathBrowser, ctxSeparator1, ctxValidateScript });
+            contextCommandBox.Items.AddRange(new ToolStripItem[] { ctxCut, ctxCopy, ctxPaste, ctxSelectAll, ctxCommentSelectedLines, ctxUncommentSelectedLines, ctxPathBrowser, ctxSeparator1, ctxValidateScript });
             contextCommandBox.Name = "contextCommandBox";
-            contextCommandBox.Size = new Size(201, 164);
+            contextCommandBox.Size = new Size(212, 208);
             //
             // ctxCut
             //
@@ -864,22 +874,36 @@ namespace SSH_Helper
             ctxSelectAll.Text = "Select &All";
             ctxSelectAll.Click += (s, e) => txtCommand.SelectAll();
             //
+            // ctxCommentSelectedLines
+            //
+            ctxCommentSelectedLines.Name = "ctxCommentSelectedLines";
+            ctxCommentSelectedLines.Size = new Size(211, 22);
+            ctxCommentSelectedLines.Text = "C&omment Selected Lines";
+            ctxCommentSelectedLines.Click += ctxCommentSelectedLines_Click;
+            //
+            // ctxUncommentSelectedLines
+            //
+            ctxUncommentSelectedLines.Name = "ctxUncommentSelectedLines";
+            ctxUncommentSelectedLines.Size = new Size(211, 22);
+            ctxUncommentSelectedLines.Text = "&Uncomment Selected Lines";
+            ctxUncommentSelectedLines.Click += ctxUncommentSelectedLines_Click;
+            //
             // ctxPathBrowser
             //
             ctxPathBrowser.Name = "ctxPathBrowser";
-            ctxPathBrowser.Size = new Size(200, 22);
+            ctxPathBrowser.Size = new Size(211, 22);
             ctxPathBrowser.Text = "&Path Browser...";
             ctxPathBrowser.Click += ctxPathBrowser_Click;
             //
             // ctxSeparator1
             //
             ctxSeparator1.Name = "ctxSeparator1";
-            ctxSeparator1.Size = new Size(197, 6);
+            ctxSeparator1.Size = new Size(208, 6);
             //
             // ctxValidateScript
             //
             ctxValidateScript.Name = "ctxValidateScript";
-            ctxValidateScript.Size = new Size(200, 22);
+            ctxValidateScript.Size = new Size(211, 22);
             ctxValidateScript.Text = "&Validate Script";
             ctxValidateScript.Click += validateScriptToolStripMenuItem_Click;
             //
@@ -1837,6 +1861,8 @@ namespace SSH_Helper
         private ToolStripMenuItem ctxCopy;
         private ToolStripMenuItem ctxPaste;
         private ToolStripMenuItem ctxSelectAll;
+        private ToolStripMenuItem ctxCommentSelectedLines;
+        private ToolStripMenuItem ctxUncommentSelectedLines;
         private ToolStripMenuItem ctxPathBrowser;
         private ToolStripSeparator ctxSeparator1;
         private ToolStripMenuItem ctxValidateScript;
@@ -1844,7 +1870,7 @@ namespace SSH_Helper
         // Execute panel
         private BufferedPanel executePanel;
         private Button btnExecuteSelected;
-        private Button btnStopAll;
+        private SSH_Helper.UI.FlatVisualButton btnStopAll;
 
         // Output panel
         private BufferedPanel outputPanel;
@@ -1923,6 +1949,7 @@ namespace SSH_Helper
         private ToolStripMenuItem ctxDeletePreset;
         private ToolStripSeparator toolStripSeparator6;
         private ToolStripMenuItem ctxExportPreset;
+        private ToolStripMenuItem ctxExportFolder;
         private ToolStripMenuItem ctxImportPreset;
         private ToolStripSeparator toolStripSeparator7;
         private ToolStripMenuItem ctxToggleFavorite;

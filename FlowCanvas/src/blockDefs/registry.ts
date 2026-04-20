@@ -1,5 +1,5 @@
 /**
- * Block type definitions for all 35 SSH Helper script commands.
+ * Block type definitions for all 36 SSH Helper script commands.
  * Each definition includes category, color, icon, default properties, and property schema.
  */
 
@@ -232,6 +232,26 @@ export const blockDefs: BlockDef[] = [
     properties: [{ key: 'expression', label: 'Expression', type: 'code', required: true, placeholder: 'varname = value' }],
   },
   {
+    type: 'sethistorylabel',
+    label: 'Set History Label',
+    category: 'data',
+    icon: 'set',
+    description: 'Set or compose the execution history label',
+    previewKey: 'value',
+    properties: [
+      { key: 'value', label: 'Value', type: 'text', placeholder: 'Core Router',
+        helpText: 'Label text. Leave blank or use clear mode to remove the label.' },
+      { key: 'replace', label: 'Replace Address', type: 'select',
+        options: ['true', 'false'], defaultValue: '',
+        helpText: 'Blank preserves the current address-vs-label display state for append/prepend.' },
+      { key: 'mode', label: 'Mode', type: 'select',
+        options: ['replace', 'append', 'prepend', 'clear'], defaultValue: 'replace',
+        helpText: 'replace overwrites, append/prepend compose, clear removes the label.' },
+      { key: 'separator', label: 'Separator', type: 'text', placeholder: ' / ',
+        helpText: 'Inserted between labels when using append or prepend.' },
+    ],
+  },
+  {
     type: 'parse',
     label: 'Parse',
     category: 'data',
@@ -433,6 +453,7 @@ export const blockDefs: BlockDef[] = [
       { key: 'password', label: 'Password Mode', type: 'boolean', defaultValue: false },
       { key: 'validate', label: 'Validate Regex', type: 'text' },
       { key: 'validation_error', label: 'Validation Error', type: 'text' },
+      { key: 'font_size', label: 'Font Size (pt)', type: 'number', group: 'advanced' },
       onErrorProp,
     ],
   },
@@ -455,6 +476,7 @@ export const blockDefs: BlockDef[] = [
         helpText: 'Select source mode: use a runtime variable (${var} or var_name), or define static option rows.',
       },
       { key: 'default', label: 'Default Value', type: 'text' },
+      { key: 'font_size', label: 'Font Size (pt)', type: 'number', group: 'advanced' },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
       onErrorProp,
     ],
@@ -479,6 +501,7 @@ export const blockDefs: BlockDef[] = [
       },
       { key: 'min', label: 'Min', type: 'number' },
       { key: 'max', label: 'Max', type: 'number' },
+      { key: 'font_size', label: 'Font Size (pt)', type: 'number', group: 'advanced' },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
       onErrorProp,
     ],
@@ -494,6 +517,7 @@ export const blockDefs: BlockDef[] = [
       { key: 'title', label: 'Title', type: 'text' },
       { key: 'prompt', label: 'Prompt', type: 'text' },
       { key: 'default', label: 'Default Yes', type: 'boolean', defaultValue: false },
+      { key: 'font_size', label: 'Font Size (pt)', type: 'number', group: 'advanced' },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
       onErrorProp,
     ],
@@ -575,6 +599,32 @@ export const blockDefs: BlockDef[] = [
     properties: [
       { key: 'message', label: 'Message', type: 'code', required: true },
       { key: 'level', label: 'Level', type: 'select', options: ['info', 'debug', 'warning', 'error', 'success'], defaultValue: 'info' },
+    ],
+  },
+  {
+    type: 'notify',
+    label: 'Notify',
+    category: 'io',
+    icon: 'notify',
+    description: 'Send a notification via Slack/Teams/Discord webhook, Teams Adaptive Card, Windows toast, or SMTP email',
+    previewKey: 'message',
+    properties: [
+      { key: 'profile', label: 'Profile', type: 'text', placeholder: 'ops-alerts',
+        helpText: 'Named notification profile. Required for webhook and email channels.' },
+      { key: 'channel', label: 'Channel', type: 'select',
+        options: ['', 'slack', 'teams', 'discord', 'toast', 'smtp'], defaultValue: '',
+        helpText: 'Override channel. Required for toast (no profile). Must match profile kind when both set.' },
+      { key: 'title', label: 'Title', type: 'text' },
+      { key: 'message', label: 'Message', type: 'textarea', required: true },
+      { key: 'level', label: 'Level', type: 'select',
+        options: ['info', 'warn', 'error', 'success'], defaultValue: 'info',
+        helpText: 'Maps to channel-native color/icon/subject-prefix.' },
+      { key: 'mention', label: 'Mentions', type: 'textarea',
+        placeholder: '["upn:alice@contoso.com|Alice"]',
+        helpText: 'JSON array of mentions. Slack/Discord accept shorthand; Teams accepts upn:<id>|<display> or entra:<id>|<display>.' },
+      { key: 'into', label: 'Into Variable', type: 'text',
+        helpText: 'Captures {sent, channel, status_code, error}.' },
+      onErrorProp,
     ],
   },
 

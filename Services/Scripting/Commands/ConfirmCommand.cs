@@ -29,9 +29,11 @@ namespace SSH_Helper.Services.Scripting.Commands
                     : context.SubstituteVariables(step.Confirm.Title);
                 var defaultYes = step.Confirm.Default;
 
+                var fontSize = step.Confirm.FontSize ?? ScriptPromptDialogRunner.DefaultPromptFontSize ?? 9f;
+
                 var confirmed = await ScriptPromptDialogRunner
                     .ShowAsync<ScriptConfirmDialog, bool>(
-                        () => new ScriptConfirmDialog(prompt, defaultYes, title),
+                        () => new ScriptConfirmDialog(prompt, defaultYes, title, fontSize),
                         dialog => dialog.DialogResult == DialogResult.Yes,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -61,10 +63,14 @@ namespace SSH_Helper.Services.Scripting.Commands
     /// </summary>
     internal sealed class ScriptConfirmDialog : Form
     {
-        public ScriptConfirmDialog(string prompt, bool defaultYes, string? title = null)
+        public ScriptConfirmDialog(string prompt, bool defaultYes, string? title = null, float fontSize = 9f)
         {
+            var clampedFontSize = Math.Clamp(fontSize, 7f, 36f);
+            var scale = Math.Max(1f, clampedFontSize / 9f);
+            int S(int v) => (int)Math.Round(v * scale);
+
             Text = string.IsNullOrWhiteSpace(title) ? "Script Confirmation" : title.Trim();
-            Size = new Size(400, 150);
+            Size = new Size(S(400), S(150));
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
@@ -72,27 +78,31 @@ namespace SSH_Helper.Services.Scripting.Commands
             MinimizeBox = false;
             ShowInTaskbar = false;
 
+            var ambientForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
+            var baseFontFamily = ambientForm?.Font.FontFamily.Name ?? "Segoe UI";
+            DialogTheme.SetDialogFont(this, new Font(baseFontFamily, clampedFontSize));
+
             var lblPrompt = new Label
             {
                 Text = prompt,
-                Location = new Point(15, 15),
-                Size = new Size(355, 50),
+                Location = new Point(S(15), S(15)),
+                Size = new Size(S(355), S(50)),
                 AutoSize = false
             };
 
             var btnYes = new Button
             {
                 Text = "Yes",
-                Size = new Size(80, 28),
-                Location = new Point(205, 75),
+                Size = new Size(S(80), S(28)),
+                Location = new Point(S(205), S(75)),
                 DialogResult = DialogResult.Yes
             };
 
             var btnNo = new Button
             {
                 Text = "No",
-                Size = new Size(80, 28),
-                Location = new Point(290, 75),
+                Size = new Size(S(80), S(28)),
+                Location = new Point(S(290), S(75)),
                 DialogResult = DialogResult.No
             };
 

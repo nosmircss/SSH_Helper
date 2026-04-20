@@ -60,7 +60,9 @@ namespace SSH_Helper.Services.Scripting
             "return",
             "table",
             "localcmd",
-            "vault"
+            "vault",
+            "sethistorylabel",
+            "notify"
         };
         private static readonly string[] KnownTopLevelKeys =
         {
@@ -115,7 +117,7 @@ namespace SSH_Helper.Services.Scripting
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
                 ["exists"] = ["path", "into", "type", "on_error"],
                 ["playsound"] = ["path", "wait", "volume", "max_seconds", "into", "on_error"],
-                ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error", "on_error"],
+                ["input"] = ["title", "prompt", "into", "default", "password", "validate", "validation_error", "font_size", "on_error"],
                 ["updatecolumn"] = ["column", "value"],
                 ["updateenvironment"] = ["variable", "value"],
                 ["log"] = ["message", "level"],
@@ -127,9 +129,9 @@ namespace SSH_Helper.Services.Scripting
                 ["sftp"] = ["action", "local_path", "remote_path", "host", "port", "username", "password", "overwrite", "timeout", "into", "on_error"],
                 ["webhook"] = ["url", "method", "body", "headers", "into", "timeout", "on_error"],
                 ["parse"] = ["format", "from", "into", "sections"],
-                ["choose"] = ["title", "prompt", "into", "options", "default", "on_error"],
-                ["multiselect"] = ["title", "prompt", "into", "options", "min", "max", "on_error"],
-                ["confirm"] = ["title", "prompt", "into", "default", "on_error"],
+                ["choose"] = ["title", "prompt", "into", "options", "default", "font_size", "on_error"],
+                ["multiselect"] = ["title", "prompt", "into", "options", "min", "max", "font_size", "on_error"],
+                ["confirm"] = ["title", "prompt", "into", "default", "font_size", "on_error"],
                 ["interactive"] = ["session", "title", "command", "capture", "max_seconds", "max_lines", "width", "height", "mirror_output", "show_window", "on_error"],
                 ["assert"] = ["condition", "message", "severity"],
                 ["switch"] = ["value", "cases", "default"],
@@ -137,7 +139,9 @@ namespace SSH_Helper.Services.Scripting
                 ["call"] = ["subroutine", "args", "out", "on_error"],
                 ["table"] = ["data", "columns", "into", "align", "show_header"],
                 ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "fail_on_nonzero", "success_codes", "max_output_bytes", "confirm", "quiet", "suppress", "title", "into", "timeout", "on_error"],
-                ["vault"] = ["path", "key", "keys", "into", "write", "patch", "profile", "version", "on_error"]
+                ["vault"] = ["path", "key", "keys", "into", "write", "patch", "profile", "version", "on_error"],
+                ["sethistorylabel"] = ["value", "replace", "mode", "separator"],
+                ["notify"] = ["profile", "channel", "title", "message", "level", "mention", "into", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -181,7 +185,9 @@ namespace SSH_Helper.Services.Scripting
                 ["return"] = [],
                 ["table"] = [],
                 ["localcmd"] = [],
-                ["vault"] = []
+                ["vault"] = [],
+                ["sethistorylabel"] = [],
+                ["notify"] = []
             };
         private static readonly HashSet<string> CanonicalMapCommands = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -218,7 +224,8 @@ namespace SSH_Helper.Services.Scripting
             StepType.Confirm,
             StepType.Interactive,
             StepType.Call,
-            StepType.Assert
+            StepType.Assert,
+            StepType.Notify
         ];
         private static readonly HashSet<string> ExitStatusTokens = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -264,13 +271,6 @@ namespace SSH_Helper.Services.Scripting
                 ["mirror_output"] = ["true", "false"],
                 ["show_window"] = ["true", "false"],
                 ["wait"] = ["true", "false"],
-                ["shell"] = ["powershell", "cmd", "custom"],
-                ["interactive"] = ["true", "false"],
-                ["keep_open"] = ["true", "false"],
-                ["run_mode"] = ["foreground", "background"],
-                ["lifetime"] = ["detached", "script", "app"],
-                ["kill_on_cancel"] = ["true", "false"],
-                ["confirm"] = ["always", "once", "never"],
                 ["debug"] = ["true", "false"],
                 ["nobanner"] = ["true", "false"],
                 ["compact_errors"] = ["true", "false"],
@@ -299,6 +299,25 @@ namespace SSH_Helper.Services.Scripting
                 ["confirm"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["default"] = ["true", "false"]
+                },
+                ["localcmd"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["shell"] = ["powershell", "custom"],
+                    ["interactive"] = ["true", "false"],
+                    ["keep_open"] = ["true", "false"],
+                    ["run_mode"] = ["foreground", "background"],
+                    ["lifetime"] = ["detached", "script", "app"],
+                    ["kill_on_cancel"] = ["true", "false"],
+                    ["confirm"] = ["always", "once", "never"]
+                },
+                ["sethistorylabel"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["mode"] = HistoryLabelOperation.KnownModes
+                },
+                ["notify"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["channel"] = ["slack", "teams", "discord", "toast", "smtp"],
+                    ["level"] = ["info", "warn", "error", "success"]
                 }
             };
 
@@ -557,7 +576,7 @@ namespace SSH_Helper.Services.Scripting
         {
             // Step keys that accept inline expression/string scalars
             "set", "print", "send", "exit", "if", "while", "when", "assert",
-            "call", "return", "foreach",
+            "call", "return", "foreach", "sethistorylabel",
             // Expanded-form sub-keys that accept expression scalars
             "expression", "condition", "message", "command", "expect",
             "format", "value", "source", "pattern", "url", "body", "path"
@@ -1036,6 +1055,10 @@ namespace SSH_Helper.Services.Scripting
                         step.DeclaredStepType = StepType.Webhook;
                         step.Webhook = ParseWebhookOptions(parser, step);
                         break;
+                    case "notify":
+                        step.DeclaredStepType = StepType.Notify;
+                        step.Notify = ParseNotifyOptions(parser, step);
+                        break;
                     case "parse":
                         step.DeclaredStepType = StepType.Parse;
                         step.Parse = ParseParseOptions(parser);
@@ -1087,6 +1110,10 @@ namespace SSH_Helper.Services.Scripting
                     case "vault":
                         step.DeclaredStepType = StepType.Vault;
                         step.Vault = ParseVaultOptions(parser, step);
+                        break;
+                    case "sethistorylabel":
+                        step.DeclaredStepType = StepType.SetHistoryLabel;
+                        step.SetHistoryLabel = ParseSetHistoryLabelValue(parser);
                         break;
                     case "cases":
                         step.Cases = ParseSwitchCases(parser);
@@ -2216,6 +2243,11 @@ namespace SSH_Helper.Services.Scripting
                         case "validationerror":
                             options.ValidationError = parser.Consume<Scalar>().Value;
                             break;
+                        case "font_size":
+                        case "fontsize":
+                            if (float.TryParse(parser.Consume<Scalar>().Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var inputFont))
+                                options.FontSize = inputFont;
+                            break;
                         case "on_error":
                         case "onerror":
                             ApplyNestedOnErrorAlias(step, parser);
@@ -2266,6 +2298,11 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         case "default":
                             options.Default = parser.Consume<Scalar>().Value;
+                            break;
+                        case "font_size":
+                        case "fontsize":
+                            if (float.TryParse(parser.Consume<Scalar>().Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var chooseFont))
+                                options.FontSize = chooseFont;
                             break;
                         case "on_error":
                         case "onerror":
@@ -2323,6 +2360,11 @@ namespace SSH_Helper.Services.Scripting
                             if (int.TryParse(parser.Consume<Scalar>().Value, out var max))
                                 options.Max = max;
                             break;
+                        case "font_size":
+                        case "fontsize":
+                            if (float.TryParse(parser.Consume<Scalar>().Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var multiFont))
+                                options.FontSize = multiFont;
+                            break;
                         case "on_error":
                         case "onerror":
                             ApplyNestedOnErrorAlias(step, parser);
@@ -2371,6 +2413,11 @@ namespace SSH_Helper.Services.Scripting
                         case "default":
                             var defVal = parser.Consume<Scalar>().Value.ToLowerInvariant();
                             options.Default = defVal == "true" || defVal == "yes" || defVal == "1";
+                            break;
+                        case "font_size":
+                        case "fontsize":
+                            if (float.TryParse(parser.Consume<Scalar>().Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var confirmFont))
+                                options.FontSize = confirmFont;
                             break;
                         case "on_error":
                         case "onerror":
@@ -2697,6 +2744,80 @@ namespace SSH_Helper.Services.Scripting
                 SkipValue(parser);
                 return null;
             }
+        }
+
+        private object? ParseSetHistoryLabelValue(IParser parser)
+        {
+            if (parser.Accept<Scalar>(out _))
+            {
+                return parser.Consume<Scalar>().Value;
+            }
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var options = new SetHistoryLabelOptions();
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "value":
+                            if (parser.Accept<Scalar>(out _))
+                            {
+                                options.Value = parser.Consume<Scalar>().Value;
+                            }
+                            else
+                            {
+                                SkipValue(parser);
+                            }
+                            break;
+                        case "replace":
+                            if (TryParseBooleanStrict(parser, out var replace))
+                            {
+                                options.Replace = replace;
+                            }
+                            else
+                            {
+                                options.Replace = null;
+                            }
+                            break;
+                        case "mode":
+                            if (parser.Accept<Scalar>(out _))
+                            {
+                                options.Mode = parser.Consume<Scalar>().Value;
+                            }
+                            else
+                            {
+                                SkipValue(parser);
+                            }
+                            break;
+                        case "separator":
+                            if (parser.Accept<Scalar>(out _))
+                            {
+                                options.Separator = parser.Consume<Scalar>().Value;
+                            }
+                            else
+                            {
+                                SkipValue(parser);
+                            }
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown sethistorylabel key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                return options;
+            }
+
+            SkipValue(parser);
+            return null;
         }
 
         private HttpOptions ParseHttpOptions(IParser parser, ScriptStep step)
@@ -3161,6 +3282,63 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         default:
                             AddUnknownKeyWarning($"Unknown webhook key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+            }
+            else
+            {
+                SkipValue(parser);
+            }
+
+            return options;
+        }
+
+        private NotifyOptions ParseNotifyOptions(IParser parser, ScriptStep step)
+        {
+            var options = new NotifyOptions();
+
+            if (parser.Accept<MappingStart>(out _))
+            {
+                parser.Consume<MappingStart>();
+
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+
+                    switch (key)
+                    {
+                        case "profile":
+                            options.Profile = parser.Consume<Scalar>().Value;
+                            break;
+                        case "channel":
+                            options.Channel = parser.Consume<Scalar>().Value;
+                            break;
+                        case "title":
+                            options.Title = parser.Consume<Scalar>().Value;
+                            break;
+                        case "message":
+                            options.Message = parser.Consume<Scalar>().Value;
+                            break;
+                        case "level":
+                            options.Level = parser.Consume<Scalar>().Value;
+                            break;
+                        case "mention":
+                            options.Mention = ParseStringList(parser);
+                            break;
+                        case "into":
+                            options.Into = parser.Consume<Scalar>().Value;
+                            break;
+                        case "on_error":
+                        case "onerror":
+                            ApplyNestedOnErrorAlias(step, parser);
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown notify key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
                             SkipValue(parser);
                             break;
                     }
@@ -4625,6 +4803,16 @@ namespace SSH_Helper.Services.Scripting
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Parse requires 'into' variable{lineContent}");
+                        }
+                        break;
+
+                    case StepType.SetHistoryLabel:
+                        if (step.SetHistoryLabel is SetHistoryLabelOptions setHistoryLabelOptions &&
+                            !IsDynamicValue(setHistoryLabelOptions.Mode) &&
+                            !HistoryLabelOperation.IsValidMode(setHistoryLabelOptions.Mode))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: sethistorylabel 'mode' must be one of replace, append, prepend, clear{lineContent}");
                         }
                         break;
 

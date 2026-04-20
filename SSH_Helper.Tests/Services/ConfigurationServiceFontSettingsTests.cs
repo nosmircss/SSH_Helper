@@ -83,6 +83,8 @@ public class ConfigurationServiceFontSettingsTests : IDisposable
         fs.HostListFontSize = 11f;
         fs.MenuFontSize = 10f;
         fs.StatusBarFontSize = 8.5f;
+        fs.DialogFontSize = 10.5f;
+        fs.ScriptPromptFontSize = 14.5f;
         fs.GlobalScaleFactor = 1.3f;
         fs.CodeEditorWordWrap = true;
         fs.OutputAreaWordWrap = true;
@@ -106,6 +108,8 @@ public class ConfigurationServiceFontSettingsTests : IDisposable
         reloaded.FontSettings.HostListFontSize.Should().Be(11f);
         reloaded.FontSettings.MenuFontSize.Should().Be(10f);
         reloaded.FontSettings.StatusBarFontSize.Should().Be(8.5f);
+        reloaded.FontSettings.DialogFontSize.Should().Be(10.5f);
+        reloaded.FontSettings.ScriptPromptFontSize.Should().Be(14.5f);
         reloaded.FontSettings.GlobalScaleFactor.Should().Be(1.3f);
         reloaded.FontSettings.CodeEditorWordWrap.Should().BeTrue();
         reloaded.FontSettings.OutputAreaWordWrap.Should().BeTrue();

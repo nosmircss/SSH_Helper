@@ -10,6 +10,35 @@ namespace SSH_Helper.Tests.UI;
 public sealed class Form1ScriptContextMenuTests
 {
     [WinFormsFact]
+    public void CommentAndUncommentMenuClick_MultiLineSelection_TogglesIndentAwareHashPrefixes()
+    {
+        using var form = new SSH_Helper.Form1();
+        _ = form.Handle;
+        form.PerformLayout();
+
+        var editor = GetField<ScintillaScriptEditorControl>(form, "txtCommand");
+        var commentMenuItem = GetField<ToolStripMenuItem>(form, "ctxCommentSelectedLines");
+        var uncommentMenuItem = GetField<ToolStripMenuItem>(form, "ctxUncommentSelectedLines");
+
+        editor.Text = "steps:\n  - send:\n      command: hi\nprint: done";
+        var selectionStart = editor.Text.IndexOf("- send:", StringComparison.Ordinal);
+        var selectionEnd = editor.Text.Length;
+        editor.SelectionStart = selectionStart;
+        editor.SelectionLength = selectionEnd - selectionStart;
+
+        commentMenuItem.PerformClick();
+
+        editor.Text.Should().Be("steps:\n  #- send:\n      #command: hi\n#print: done");
+
+        editor.SelectionStart = selectionStart;
+        editor.SelectionLength = editor.Text.Length - selectionStart;
+
+        uncommentMenuItem.PerformClick();
+
+        editor.Text.Should().Be("steps:\n  - send:\n      command: hi\nprint: done");
+    }
+
+    [WinFormsFact]
     public void PathBrowserMenuClick_InsideDoubleQuotes_ConvertsToSingleQuotedYamlPath()
     {
         using var form = new SSH_Helper.Form1();

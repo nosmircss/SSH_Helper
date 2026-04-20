@@ -1,3 +1,5 @@
+using SSH_Helper.Services.Scripting.Models;
+
 namespace SSH_Helper.Models
 {
     /// <summary>
@@ -13,5 +15,9 @@ namespace SSH_Helper.Models
         public Exception? Exception { get; set; }
         public DateTime Timestamp { get; set; } = DateTime.Now;
         public List<InteractiveTerminalSessionDetails> InteractiveSessions { get; set; } = new();
+        public string? HistoryLabel { get; set; }
+        public bool HistoryLabelReplacesAddress { get; set; }
+        public bool HistoryLabelTouched { get; set; }
+        public List<HistoryLabelOperation> HistoryLabelOperations { get; set; } = new();
     }
 }

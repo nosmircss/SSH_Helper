@@ -892,6 +892,7 @@ const ADVANCED_PROPERTY_KEYS = new Set([
   'default',
   'validate',
   'validation_error',
+  'font_size',
   'min',
   'max',
   'timeout',

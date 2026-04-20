@@ -1,3 +1,4 @@
+using System.Drawing;
 using FluentAssertions;
 using SSH_Helper.Services.Editor;
 using Xunit;
@@ -70,6 +71,66 @@ public class YamlSshSyntaxHighlighterTests
         spans.Should().Contain(span => span.Start == keyStart && span.Length == "field".Length);
     }
 
+    [Fact]
+    public void BuildLineHighlights_FullyCommentedLine_WithQuotedText_UsesOnlyCommentColor()
+    {
+        var highlighter = new YamlSshSyntaxHighlighter();
+        var line = "  #prompt: \"Select interfaces to configure:\"";
+        var commentStart = line.IndexOf('#');
+
+        var spans = highlighter.BuildLineHighlights(line, lineStartIndex: 0, darkMode: true);
+
+        spans.Should().ContainSingle();
+        spans[0].Start.Should().Be(commentStart);
+        spans[0].Length.Should().Be(line.Length - commentStart);
+        spans[0].Color.Should().Be(GetDarkCommentColor());
+    }
+
+    [Fact]
+    public void BuildLineHighlights_QuotedHashDoesNotStartComment_ButLaterUnquotedHashDoes()
+    {
+        var highlighter = new YamlSshSyntaxHighlighter();
+        var line = "prompt: \"Select #interfaces\" # \"comment text\"";
+        var stringStart = line.IndexOf('"');
+        var stringEnd = line.IndexOf("\" #", StringComparison.Ordinal);
+        var stringLength = stringEnd - stringStart + 1;
+        var commentStart = line.LastIndexOf('#');
+
+        var spans = highlighter.BuildLineHighlights(line, lineStartIndex: 0, darkMode: true);
+
+        spans.Should().Contain(span =>
+            span.Start == stringStart &&
+            span.Length == stringLength &&
+            span.Color == GetDarkStringLiteralColor());
+
+        spans.Should().Contain(span =>
+            span.Start == commentStart &&
+            span.Length == line.Length - commentStart &&
+            span.Color == GetDarkCommentColor());
+
+        spans.Should().NotContain(span =>
+            span.Color == GetDarkStringLiteralColor() &&
+            span.Start >= commentStart);
+    }
+
+    [Fact]
+    public void BuildLineHighlights_QuotedHashWithoutUnquotedHash_DoesNotCreateCommentSpan()
+    {
+        var highlighter = new YamlSshSyntaxHighlighter();
+        var line = "prompt: \"Select #interfaces\"";
+        var stringStart = line.IndexOf('"');
+        var stringLength = line.Length - stringStart;
+
+        var spans = highlighter.BuildLineHighlights(line, lineStartIndex: 0, darkMode: true);
+
+        spans.Should().Contain(span =>
+            span.Start == stringStart &&
+            span.Length == stringLength &&
+            span.Color == GetDarkStringLiteralColor());
+
+        spans.Should().NotContain(span => span.Color == GetDarkCommentColor());
+    }
+
     private static int GetLineStart(string text, int lineIndex)
     {
         var currentLine = 0;
@@ -94,5 +155,15 @@ public class YamlSshSyntaxHighlighterTests
                 return i;
         }
         return text.Length;
+    }
+
+    private static Color GetDarkCommentColor()
+    {
+        return Color.FromArgb(106, 153, 85);
+    }
+
+    private static Color GetDarkStringLiteralColor()
+    {
+        return Color.FromArgb(206, 145, 120);
     }
 }

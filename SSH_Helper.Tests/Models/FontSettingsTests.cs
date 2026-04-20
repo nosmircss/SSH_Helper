@@ -34,6 +34,8 @@ public class FontSettingsTests
     [InlineData(nameof(FontSettings.HostListFontSize), 9f)]
     [InlineData(nameof(FontSettings.MenuFontSize), 9f)]
     [InlineData(nameof(FontSettings.StatusBarFontSize), 9f)]
+    [InlineData(nameof(FontSettings.DialogFontSize), 9f)]
+    [InlineData(nameof(FontSettings.ScriptPromptFontSize), 9f)]
     public void Default_FontSizes_HaveExpectedValues(string propertyName, float expected)
     {
         var settings = new FontSettings();

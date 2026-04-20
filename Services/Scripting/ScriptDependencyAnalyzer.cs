@@ -56,7 +56,7 @@ namespace SSH_Helper.Services.Scripting
 
         private static readonly HashSet<string> BuiltInVariables = new(StringComparer.OrdinalIgnoreCase)
         {
-            "_output", "_timestamp", "_iteration", "_last_error", "_writefile"
+            "_output", "_outputwindow", "_timestamp", "_iteration", "_last_error", "_writefile"
         };
 
         private static readonly HashSet<string> ExpressionKeywords = new(StringComparer.OrdinalIgnoreCase)

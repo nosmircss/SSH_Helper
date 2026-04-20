@@ -48,9 +48,11 @@ namespace SSH_Helper.Services.Scripting.Commands
 
                 var validationError = step.Input.ValidationError ?? "Input does not match required format.";
 
+                var fontSize = step.Input.FontSize ?? ScriptPromptDialogRunner.DefaultPromptFontSize ?? 9f;
+
                 var userInput = await ScriptPromptDialogRunner
                     .ShowAsync<ScriptInputDialog, string?>(
-                        () => new ScriptInputDialog(prompt, defaultValue, step.Input.Password, validationRegex, validationError, title),
+                        () => new ScriptInputDialog(prompt, defaultValue, step.Input.Password, validationRegex, validationError, title, fontSize),
                         dialog => dialog.DialogResult == DialogResult.OK ? dialog.InputValue : null,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -100,13 +102,18 @@ namespace SSH_Helper.Services.Scripting.Commands
             bool password,
             Regex? validationRegex = null,
             string validationError = "Invalid input.",
-            string? title = null)
+            string? title = null,
+            float fontSize = 9f)
         {
             _validationRegex = validationRegex;
             _validationError = validationError;
 
+            var clampedFontSize = Math.Clamp(fontSize, 7f, 36f);
+            var scale = Math.Max(1f, clampedFontSize / 9f);
+            int S(int v) => (int)Math.Round(v * scale);
+
             Text = string.IsNullOrWhiteSpace(title) ? "Script Input" : title.Trim();
-            Size = new System.Drawing.Size(400, 185);
+            Size = new System.Drawing.Size(S(400), S(185));
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
@@ -114,27 +121,31 @@ namespace SSH_Helper.Services.Scripting.Commands
             MinimizeBox = false;
             ShowInTaskbar = false;
 
+            var ambientForm = Application.OpenForms.Count > 0 ? Application.OpenForms[0] : null;
+            var baseFontFamily = ambientForm?.Font.FontFamily.Name ?? "Segoe UI";
+            DialogTheme.SetDialogFont(this, new Font(baseFontFamily, clampedFontSize));
+
             var lblPrompt = new Label
             {
                 Text = prompt,
-                Location = new System.Drawing.Point(15, 15),
-                Size = new System.Drawing.Size(355, 40),
+                Location = new System.Drawing.Point(S(15), S(15)),
+                Size = new System.Drawing.Size(S(355), S(40)),
                 AutoSize = false
             };
 
             _txtInput = new TextBox
             {
                 Text = defaultValue,
-                Location = new System.Drawing.Point(15, 58),
-                Size = new System.Drawing.Size(355, 23),
+                Location = new System.Drawing.Point(S(15), S(58)),
+                Size = new System.Drawing.Size(S(355), S(23)),
                 UseSystemPasswordChar = password
             };
 
             _lblError = new Label
             {
                 Text = string.Empty,
-                Location = new System.Drawing.Point(15, 84),
-                Size = new System.Drawing.Size(355, 20),
+                Location = new System.Drawing.Point(S(15), S(84)),
+                Size = new System.Drawing.Size(S(355), S(20)),
                 ForeColor = System.Drawing.Color.Red,
                 Visible = false
             };
@@ -142,16 +153,16 @@ namespace SSH_Helper.Services.Scripting.Commands
             var btnOk = new Button
             {
                 Text = "OK",
-                Size = new System.Drawing.Size(80, 28),
-                Location = new System.Drawing.Point(205, 110),
+                Size = new System.Drawing.Size(S(80), S(28)),
+                Location = new System.Drawing.Point(S(205), S(110)),
             };
             btnOk.Click += BtnOk_Click;
 
             var btnCancel = new Button
             {
                 Text = "Cancel",
-                Size = new System.Drawing.Size(80, 28),
-                Location = new System.Drawing.Point(290, 110),
+                Size = new System.Drawing.Size(S(80), S(28)),
+                Location = new System.Drawing.Point(S(290), S(110)),
                 DialogResult = DialogResult.Cancel
             };
 

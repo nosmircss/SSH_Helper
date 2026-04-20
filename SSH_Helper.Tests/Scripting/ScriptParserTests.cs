@@ -362,6 +362,63 @@ steps:
     }
 
     [Fact]
+    public void Parse_SetHistoryLabelScalarStep_ParsesCorrectly()
+    {
+        var yaml = @"---
+steps:
+  - sethistorylabel: Core Router";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.SetHistoryLabel);
+        script.Steps[0].SetHistoryLabel.Should().Be("Core Router");
+    }
+
+    [Fact]
+    public void Parse_SetHistoryLabelMappingStep_ParsesValueAndReplace()
+    {
+        var yaml = @"---
+steps:
+  - sethistorylabel:
+      value: Distribution Switch
+      replace: true";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.SetHistoryLabel);
+        script.Steps[0].SetHistoryLabel.Should().BeEquivalentTo(new SetHistoryLabelOptions
+        {
+            Value = "Distribution Switch",
+            Replace = true
+        });
+    }
+
+    [Fact]
+    public void Parse_SetHistoryLabelMappingStep_ParsesModeAndSeparator()
+    {
+        var yaml = @"---
+steps:
+  - sethistorylabel:
+      value: Router
+      mode: append
+      separator: ' / '";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.SetHistoryLabel);
+        script.Steps[0].SetHistoryLabel.Should().BeEquivalentTo(new SetHistoryLabelOptions
+        {
+            Value = "Router",
+            Mode = "append",
+            Separator = " / ",
+            Replace = null
+        });
+    }
+
+    [Fact]
     public void Parse_ExitStep_ParsesCorrectly()
     {
         var yaml = @"---
@@ -1192,6 +1249,23 @@ steps:
         errors.Should().NotContain(error => error.Contains("playsound.max_seconds"));
     }
 
+    [Fact]
+    public void Validate_SetHistoryLabelInvalidMode_ReturnsError()
+    {
+        var yaml = """
+            ---
+            steps:
+              - sethistorylabel:
+                  value: Router
+                  mode: sideways
+            """;
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().Contain(error => error.Contains("sethistorylabel 'mode' must be one of replace, append, prepend, clear"));
+    }
+
     #endregion
 
     #region Complex Script Tests
@@ -1386,6 +1460,82 @@ steps:
         step.Input!.Title.Should().Be("Credential Prompt");
         step.Input.Prompt.Should().Be("Enter username:");
         step.Input.Into.Should().Be("username");
+    }
+
+    [Fact]
+    public void Parse_InputStep_FontSize_ParsesAsFloat()
+    {
+        var yaml = @"---
+steps:
+  - input:
+      prompt: ""Enter value:""
+      into: v
+      font_size: 14";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Input!.FontSize.Should().Be(14f);
+    }
+
+    [Fact]
+    public void Parse_InputStep_FontSizeOmitted_IsNull()
+    {
+        var yaml = @"---
+steps:
+  - input:
+      prompt: ""Enter value:""
+      into: v";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Input!.FontSize.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_ChooseStep_FontSize_ParsesAsFloat()
+    {
+        var yaml = @"---
+steps:
+  - choose:
+      prompt: ""Pick:""
+      into: pick
+      options: [a, b]
+      font_size: 16.5";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Choose!.FontSize.Should().Be(16.5f);
+    }
+
+    [Fact]
+    public void Parse_MultiselectStep_FontSize_ParsesAsFloat()
+    {
+        var yaml = @"---
+steps:
+  - multiselect:
+      prompt: ""Pick many:""
+      into: picks
+      options: [a, b, c]
+      font_size: 12";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Multiselect!.FontSize.Should().Be(12f);
+    }
+
+    [Fact]
+    public void Parse_ConfirmStep_FontSize_ParsesAsFloat()
+    {
+        var yaml = @"---
+steps:
+  - confirm:
+      prompt: ""Are you sure?""
+      into: answer
+      font_size: 18";
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps[0].Confirm!.FontSize.Should().Be(18f);
     }
 
     [Fact]

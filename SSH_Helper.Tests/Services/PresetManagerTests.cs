@@ -1,3 +1,4 @@
+using Newtonsoft.Json.Linq;
 using FluentAssertions;
 using SSH_Helper.Models;
 using SSH_Helper.Services;
@@ -665,6 +666,112 @@ public class PresetManagerTests
     }
 
     [Fact]
+    public void ExportFolderSubtreeToFile_ExportsOnlySelectedFolderAndDescendants()
+    {
+        var testDirectory = Path.Combine(Path.GetTempPath(), $"PresetManagerFolderExport_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testDirectory);
+
+        try
+        {
+            var manager = CreateIsolatedPresetManager(testDirectory);
+            manager.CreateFolder("Ops");
+            manager.CreateFolder("Ops/Core");
+            manager.CreateFolder("Lab");
+            manager.Save("Alpha", new PresetInfo { Commands = "echo alpha", Folder = "Ops" });
+            manager.Save("Beta", new PresetInfo { Commands = "echo beta", Folder = "Ops/Core" });
+            manager.Save("Gamma", new PresetInfo { Commands = "echo gamma", Folder = "Lab" });
+
+            var exportPath = Path.Combine(testDirectory, "ops-subtree.json");
+
+            manager.ExportFolderSubtreeToFile("Ops", exportPath);
+
+            var exportData = JObject.Parse(File.ReadAllText(exportPath));
+            var exportedFolders = exportData["folders"]!.ToObject<Dictionary<string, FolderInfo>>();
+            var exportedPresets = exportData["presets"]!.ToObject<Dictionary<string, PresetInfo>>();
+
+            exportedFolders.Should().NotBeNull();
+            exportedPresets.Should().NotBeNull();
+            exportedFolders!.Keys.Should().BeEquivalentTo("Ops", "Ops/Core");
+            exportedPresets!.Keys.Should().BeEquivalentTo("Alpha", "Beta");
+            exportedPresets.Should().NotContainKey("Gamma");
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ExportFolderSubtreeToFile_RebasesNestedFolderToBundleRoot()
+    {
+        var testDirectory = Path.Combine(Path.GetTempPath(), $"PresetManagerFolderExport_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testDirectory);
+
+        try
+        {
+            var manager = CreateIsolatedPresetManager(testDirectory);
+            manager.CreateFolder("Network/Prod");
+            manager.CreateFolder("Network/Prod/Core");
+            manager.CreateFolder("Network/Lab");
+            manager.Save("Edge", new PresetInfo { Commands = "echo edge", Folder = "Network/Prod" });
+            manager.Save("Core", new PresetInfo { Commands = "echo core", Folder = "Network/Prod/Core" });
+            manager.Save("Lab", new PresetInfo { Commands = "echo lab", Folder = "Network/Lab" });
+
+            var exportPath = Path.Combine(testDirectory, "prod-subtree.json");
+
+            manager.ExportFolderSubtreeToFile("Network/Prod", exportPath);
+
+            var exportData = JObject.Parse(File.ReadAllText(exportPath));
+            var exportedFolders = exportData["folders"]!.ToObject<Dictionary<string, FolderInfo>>();
+            var exportedPresets = exportData["presets"]!.ToObject<Dictionary<string, PresetInfo>>();
+
+            exportedFolders.Should().NotBeNull();
+            exportedPresets.Should().NotBeNull();
+            exportedFolders!.Keys.Should().BeEquivalentTo("Prod", "Prod/Core");
+            exportedPresets!["Edge"].Folder.Should().Be("Prod");
+            exportedPresets["Core"].Folder.Should().Be("Prod/Core");
+            exportedPresets.Should().NotContainKey("Lab");
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ExportFolderSubtreeToFile_OutputRemainsCompatibleWithImportAllIntoDestinationFolder()
+    {
+        var testDirectory = Path.Combine(Path.GetTempPath(), $"PresetManagerFolderExport_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testDirectory);
+
+        try
+        {
+            var sourceManager = CreateIsolatedPresetManager(Path.Combine(testDirectory, "source"));
+            sourceManager.CreateFolder("Network/Prod");
+            sourceManager.CreateFolder("Network/Prod/Core");
+            sourceManager.Save("Edge", new PresetInfo { Commands = "echo edge", Folder = "Network/Prod" });
+            sourceManager.Save("Core", new PresetInfo { Commands = "echo core", Folder = "Network/Prod/Core" });
+
+            var exportPath = Path.Combine(testDirectory, "prod-subtree.json");
+            sourceManager.ExportFolderSubtreeToFile("Network/Prod", exportPath);
+
+            var importManager = CreateIsolatedPresetManager(Path.Combine(testDirectory, "import"));
+            var importedCount = importManager.ImportAllFromFile(exportPath, "Archive");
+
+            importedCount.Should().Be(2);
+            importManager.Folders.Should().ContainKey("Archive");
+            importManager.Folders.Should().ContainKey("Archive/Prod");
+            importManager.Folders.Should().ContainKey("Archive/Prod/Core");
+            importManager.Get("Edge")!.Folder.Should().Be("Archive/Prod");
+            importManager.Get("Core")!.Folder.Should().Be("Archive/Prod/Core");
+        }
+        finally
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SetFolderExpanded_PersistsState()
     {
         _presetManager.Load();
@@ -912,6 +1019,15 @@ public class PresetManagerTests
             _presetManager.Delete(rootPreset);
             _presetManager.DeleteFolder(folderName, deletePresets: true);
         }
+    }
+
+    private static PresetManager CreateIsolatedPresetManager(string testDirectory)
+    {
+        Directory.CreateDirectory(testDirectory);
+        var configPath = Path.Combine(testDirectory, "config.json");
+        var manager = new PresetManager(new ConfigurationService(configPath));
+        manager.Load(new AppConfiguration());
+        return manager;
     }
 
     #endregion

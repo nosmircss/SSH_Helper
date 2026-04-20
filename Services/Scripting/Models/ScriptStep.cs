@@ -130,6 +130,13 @@ namespace SSH_Helper.Services.Scripting.Models
         public object? Log { get; set; }
 
         /// <summary>
+        /// SetHistoryLabel command - attaches a label to this host's history entry.
+        /// Simple form: "sethistorylabel: text"
+        /// Options form: sethistorylabel: { value: "text", replace: true, mode: append, separator: " " }
+        /// </summary>
+        public object? SetHistoryLabel { get; set; }
+
+        /// <summary>
         /// Http command - makes HTTP requests with auth, headers, and response capture.
         /// </summary>
         public HttpOptions? Http { get; set; }
@@ -163,6 +170,11 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Webhook command - makes an HTTP request to a URL.
         /// </summary>
         public WebhookOptions? Webhook { get; set; }
+
+        /// <summary>
+        /// Notify command - sends a notification via Slack/Teams/Discord webhook, Windows toast, or SMTP email.
+        /// </summary>
+        public NotifyOptions? Notify { get; set; }
 
         /// <summary>
         /// Parse command - parses device configuration text into structured JSON data.
@@ -370,6 +382,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (UpdateColumn != null) return StepType.UpdateColumn;
             if (UpdateEnvironment != null) return StepType.UpdateEnvironment;
             if (Log != null) return StepType.Log;
+            if (SetHistoryLabel != null) return StepType.SetHistoryLabel;
             if (Http != null) return StepType.Http;
             if (BrowserCallbackCapture != null) return StepType.BrowserCallbackCapture;
             if (Ping != null) return StepType.Ping;
@@ -377,6 +390,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (Portcheck != null) return StepType.Portcheck;
             if (Sftp != null) return StepType.Sftp;
             if (Webhook != null) return StepType.Webhook;
+            if (Notify != null) return StepType.Notify;
             if (Parse != null) return StepType.Parse;
             if (Choose != null) return StepType.Choose;
             if (Multiselect != null) return StepType.Multiselect;
@@ -631,6 +645,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Error message to show when validation fails.
         /// </summary>
         public string? ValidationError { get; set; }
+
+        /// <summary>
+        /// Optional per-prompt font size override (in points).
+        /// Falls back to FontSettings.ScriptPromptFontSize when unset.
+        /// </summary>
+        public float? FontSize { get; set; }
     }
 
     /// <summary>
@@ -685,6 +705,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Default selection (matched against option values).
         /// </summary>
         public string? Default { get; set; }
+
+        /// <summary>
+        /// Optional per-prompt font size override (in points).
+        /// Falls back to FontSettings.ScriptPromptFontSize when unset.
+        /// </summary>
+        public float? FontSize { get; set; }
     }
 
     /// <summary>
@@ -727,6 +753,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Maximum number of selections allowed.
         /// </summary>
         public int? Max { get; set; }
+
+        /// <summary>
+        /// Optional per-prompt font size override (in points).
+        /// Falls back to FontSettings.ScriptPromptFontSize when unset.
+        /// </summary>
+        public float? FontSize { get; set; }
     }
 
     /// <summary>
@@ -753,6 +785,12 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Default button: true = Yes focused, false = No focused.
         /// </summary>
         public bool Default { get; set; }
+
+        /// <summary>
+        /// Optional per-prompt font size override (in points).
+        /// Falls back to FontSettings.ScriptPromptFontSize when unset.
+        /// </summary>
+        public float? FontSize { get; set; }
     }
 
     /// <summary>
@@ -884,6 +922,36 @@ namespace SSH_Helper.Services.Scripting.Models
         /// Log level: "info" (default), "debug", "warning", "error", "success".
         /// </summary>
         public string Level { get; set; } = "info";
+    }
+
+    /// <summary>
+    /// Options for the sethistorylabel command.
+    /// </summary>
+    public class SetHistoryLabelOptions
+    {
+        /// <summary>
+        /// The label text to attach. Supports {{variable}} substitution.
+        /// Empty or whitespace clears the label.
+        /// </summary>
+        public string Value { get; set; } = string.Empty;
+
+        /// <summary>
+        /// How the label change is applied.
+        /// Supported values: replace, append, prepend, clear.
+        /// </summary>
+        public string Mode { get; set; } = HistoryLabelOperation.ReplaceMode;
+
+        /// <summary>
+        /// Separator inserted between labels when using append or prepend.
+        /// </summary>
+        public string Separator { get; set; } = string.Empty;
+
+        /// <summary>
+        /// When true, the history entry shows only the label (IP hidden).
+        /// When false, it shows "IP - Label".
+        /// When omitted for append/prepend, the current replace-address state is preserved.
+        /// </summary>
+        public bool? Replace { get; set; }
     }
 
     /// <summary>
@@ -1215,6 +1283,57 @@ namespace SSH_Helper.Services.Scripting.Models
     }
 
     /// <summary>
+    /// Options for the notify command. Channel is inferred from the referenced profile's Kind
+    /// unless an explicit <see cref="Channel"/> override is set.
+    /// </summary>
+    public class NotifyOptions
+    {
+        /// <summary>
+        /// Named notification profile (e.g. "ops-alerts"). Required for webhook and SMTP channels.
+        /// </summary>
+        public string? Profile { get; set; }
+
+        /// <summary>
+        /// Explicit channel override: "slack", "teams", "discord", "toast", "smtp".
+        /// Must match the profile's kind when both are set. Required for "toast" (no profile exists).
+        /// </summary>
+        public string? Channel { get; set; }
+
+        /// <summary>
+        /// Notification title. Optional — toast/email render it prominently; webhook channels fold it in.
+        /// </summary>
+        public string? Title { get; set; }
+
+        /// <summary>
+        /// Notification message body. Required.
+        /// </summary>
+        public string Message { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Severity level: "info" (default), "warn", "error", "success".
+        /// Maps to channel-native color/icon/subject-prefix.
+        /// </summary>
+        public string Level { get; set; } = "info";
+
+        /// <summary>
+        /// Optional mentions for webhook channels. Slack and Discord accept channel-specific shorthand;
+        /// Teams accepts typed forms such as "upn:user@contoso.com|User" and "entra:<guid>|User".
+        /// Ignored for toast/smtp.
+        /// </summary>
+        public List<string>? Mention { get; set; }
+
+        /// <summary>
+        /// Variable name to capture the notification result ({sent, channel, status_code, error}).
+        /// </summary>
+        public string? Into { get; set; }
+
+        /// <summary>
+        /// Error handling: "stop" (default) aborts the script on failure; "continue" logs and proceeds.
+        /// </summary>
+        public string? OnError { get; set; }
+    }
+
+    /// <summary>
     /// Options for the parse command.
     /// </summary>
     public class ParseOptions
@@ -1286,7 +1405,9 @@ namespace SSH_Helper.Services.Scripting.Models
         Return,
         Table,
         LocalCmd,
-        Vault
+        Vault,
+        SetHistoryLabel,
+        Notify
     }
 
     /// <summary>

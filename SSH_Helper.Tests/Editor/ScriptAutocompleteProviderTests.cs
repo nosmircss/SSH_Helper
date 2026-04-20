@@ -257,6 +257,82 @@ public class ScriptAutocompleteProviderTests
     }
 
     [Fact]
+    public void GetCompletion_StepPrefix_SetHistoryLabel_ShowsDetailText()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - seth";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Should().Contain(item =>
+            item.Label == "sethistorylabel" &&
+            item.Detail == "Label history entry. Scalar 'sethistorylabel: name' or object form { value, replace, mode, separator }");
+    }
+
+    [Fact]
+    public void GetCompletion_SetHistoryLabelStepOptionKey_SuggestsValueReplaceModeAndSeparator()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - sethistorylabel:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["value", "replace", "mode", "separator"]);
+    }
+
+    [Fact]
+    public void GetCompletion_SetHistoryLabelModeValue_SuggestsKnownModes()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - sethistorylabel:\n      mode: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["replace", "append", "prepend", "clear"]);
+    }
+
+    [Fact]
+    public void GetCompletion_StepPrefix_Notify_ShowsDetailText()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - not";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepCommand);
+        completion.Items.Should().Contain(item =>
+            item.Label == "notify" &&
+            item.Detail == "Send a notification via Slack/Teams/Discord webhook, Teams Adaptive Card, Windows toast, or SMTP email");
+    }
+
+    [Fact]
+    public void GetCompletion_NotifyStepOptionKey_SuggestsNotifyFields()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - notify:\n      ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
+        completion.Items.Select(item => item.Label).Should().Contain(["profile", "channel", "title", "message", "level", "mention", "into", "on_error"]);
+    }
+
+    [Fact]
+    public void GetCompletion_NotifyLevelValue_SuggestsKnownLevels()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - notify:\n      level: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["info", "warn", "error", "success"]);
+    }
+
+    [Fact]
     public void GetCompletion_LogBlockOptionKey_SuggestsOnlyLogOptions()
     {
         var provider = new ScriptAutocompleteProvider();
@@ -328,6 +404,19 @@ public class ScriptAutocompleteProviderTests
 
         completion.Context.Should().Be(CompletionContextKind.OptionValue);
         completion.Items.Select(item => item.Label).Should().Contain(["always", "once", "never"]);
+    }
+
+    [Fact]
+    public void GetCompletion_LocalCmdShellValue_SuggestsPowershellAndCustomOnly()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - localcmd:\n      shell: ";
+
+        var completion = provider.GetCompletion(text, text.Length);
+
+        completion.Context.Should().Be(CompletionContextKind.OptionValue);
+        completion.Items.Select(item => item.Label).Should().Contain(["powershell", "custom"]);
+        completion.Items.Select(item => item.Label).Should().NotContain("cmd");
     }
 
     [Fact]
@@ -616,10 +705,36 @@ public class ScriptAutocompleteProviderTests
 
         var symbols = provider.GetInterpolationSymbols("steps:\n  - print: test");
 
+        symbols.Should().Contain("_prompt");
         symbols.Should().Contain("_timestamp");
         symbols.Should().Contain("_output");
+        symbols.Should().Contain("_outputwindow");
         symbols.Should().Contain("hostname");
         symbols.Should().Contain("port");
+    }
+
+    [Fact]
+    public void GetCompletion_InterpolationPrefix_SuggestsPromptBuiltInWithDescription()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - print:\n      message: \"${_pr\"";
+
+        var completion = provider.GetCompletion(text, text.Length - 1);
+
+        completion.Context.Should().Be(CompletionContextKind.Interpolation);
+        completion.Items.Should().Contain(item => item.Label == "_prompt" && item.Detail == "Current SSH prompt");
+    }
+
+    [Fact]
+    public void GetCompletion_InterpolationPrefix_SuggestsOutputWindowBuiltInWithDescription()
+    {
+        var provider = new ScriptAutocompleteProvider();
+        var text = "steps:\n  - print:\n      message: \"${_outputw\"";
+
+        var completion = provider.GetCompletion(text, text.Length - 1);
+
+        completion.Context.Should().Be(CompletionContextKind.Interpolation);
+        completion.Items.Should().Contain(item => item.Label == "_outputwindow" && item.Detail == "Output window transcript");
     }
 
     public static IEnumerable<object[]> GetRequiredOptionTagCases()
