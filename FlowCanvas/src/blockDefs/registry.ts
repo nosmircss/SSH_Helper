@@ -617,7 +617,7 @@ export const blockDefs: BlockDef[] = [
       { key: 'title', label: 'Title', type: 'text' },
       { key: 'message', label: 'Message', type: 'textarea', required: true },
       { key: 'level', label: 'Level', type: 'select',
-        options: ['info', 'warn', 'error', 'success'], defaultValue: 'info',
+        options: ['info', 'warn', 'error', 'success'],
         helpText: 'Maps to channel-native color/icon/subject-prefix.' },
       { key: 'mention', label: 'Mentions', type: 'textarea',
         placeholder: '["upn:alice@contoso.com|Alice"]',

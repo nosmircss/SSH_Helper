@@ -1310,10 +1310,10 @@ namespace SSH_Helper.Services.Scripting.Models
         public string Message { get; set; } = string.Empty;
 
         /// <summary>
-        /// Severity level: "info" (default), "warn", "error", "success".
-        /// Maps to channel-native color/icon/subject-prefix.
+        /// Optional severity level: "info", "warn", "error", "success".
+        /// If omitted, non-toast channels default to "info". Toast only shows level attribution when provided.
         /// </summary>
-        public string Level { get; set; } = "info";
+        public string? Level { get; set; }
 
         /// <summary>
         /// Optional mentions for webhook channels. Slack and Discord accept channel-specific shorthand;

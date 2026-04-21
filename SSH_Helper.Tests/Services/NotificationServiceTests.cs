@@ -20,7 +20,7 @@ public class NotificationServiceTests
         public int CallCount { get; private set; }
 
         public override Task<NotificationResult> SendAsync(
-            string? title, string message, NotificationLevel level, CancellationToken cancellationToken)
+            string? title, string message, NotificationLevel level, CancellationToken cancellationToken, bool includeLevelAttribution = true)
         {
             CallCount++;
             LastTitle = title;

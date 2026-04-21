@@ -87,7 +87,8 @@ namespace SSH_Helper.Services.Notifications
             string message,
             NotificationLevel level,
             IEnumerable<string>? mentions,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool includeToastLevelAttribution = true)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(NotificationService));
             if (message == null) throw new ArgumentNullException(nameof(message));
@@ -141,7 +142,12 @@ namespace SSH_Helper.Services.Notifications
             }
 
             if (kind == NotificationChannelKind.Toast)
-                return await _toastDispatcher.SendAsync(title, message, level, cancellationToken).ConfigureAwait(false);
+                return await _toastDispatcher.SendAsync(
+                    title,
+                    message,
+                    level,
+                    cancellationToken,
+                    includeToastLevelAttribution).ConfigureAwait(false);
 
             if (profile == null)
                 return NotificationResult.Failure(kind.ToString().ToLowerInvariant(), $"Channel '{kind}' requires a profile.");

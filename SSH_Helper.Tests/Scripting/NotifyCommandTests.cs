@@ -21,16 +21,18 @@ public class NotifyCommandTests
         public string? LastTitle { get; private set; }
         public string? LastMessage { get; private set; }
         public NotificationLevel LastLevel { get; private set; }
+        public bool LastIncludeLevelAttribution { get; private set; }
         public int CallCount { get; private set; }
         public bool ShouldSucceed { get; set; } = true;
 
         public override Task<NotificationResult> SendAsync(
-            string? title, string message, NotificationLevel level, CancellationToken cancellationToken)
+            string? title, string message, NotificationLevel level, CancellationToken cancellationToken, bool includeLevelAttribution = true)
         {
             CallCount++;
             LastTitle = title;
             LastMessage = message;
             LastLevel = level;
+            LastIncludeLevelAttribution = includeLevelAttribution;
             return Task.FromResult(ShouldSucceed
                 ? NotificationResult.Success("toast")
                 : NotificationResult.Failure("toast", "toast failed"));
@@ -161,6 +163,27 @@ public class NotifyCommandTests
         rig.Toast.LastTitle.Should().Be("Done");
         rig.Toast.LastMessage.Should().Be("yes");
         rig.Toast.LastLevel.Should().Be(NotificationLevel.Success);
+        rig.Toast.LastIncludeLevelAttribution.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ToastChannel_WithoutLevel_DoesNotRequestAttribution()
+    {
+        var settings = new NotificationSettings { Enabled = true };
+        var (service, rig) = CreateService(settings);
+        using var _ = service;
+
+        var step = new ScriptStep
+        {
+            Notify = new NotifyOptions { Channel = "toast", Title = "Done", Message = "yes" }
+        };
+        var context = new ScriptContext { NotificationService = service };
+        var result = await new NotifyCommand().ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        rig.Toast.CallCount.Should().Be(1);
+        rig.Toast.LastLevel.Should().Be(NotificationLevel.Info);
+        rig.Toast.LastIncludeLevelAttribution.Should().BeFalse();
     }
 
     [Fact]

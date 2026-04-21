@@ -150,7 +150,8 @@ public class SshExecutionServiceOutputWindowTests
             string? title,
             string message,
             NotificationLevel level,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool includeLevelAttribution = true)
         {
             LastMessage = message;
             return Task.FromResult(NotificationResult.Success("toast"));
