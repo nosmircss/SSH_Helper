@@ -244,8 +244,7 @@ jobService.JobCompleted += (s, e) => RecordJobHistory(e.Result);
 
 The DataGridView supports these predefined columns:
 - `Host_IP` (required, cannot be deleted)
-- `port`, `delay`, `timeout`
-- `transport`, `username`, `password`, `personality`
+- `port`, `username`, `password`, `vault_path`
 
 Custom columns can be added and used as variables in commands/scripts via `{{column_name}}` syntax.
 

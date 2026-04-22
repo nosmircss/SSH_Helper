@@ -4268,18 +4268,14 @@ These are accessible via nested paths:
 
 ### Special Grid Columns
 
-The host grid recognizes several columns with built-in meaning in addition to `Host_IP` and `port`:
+The host grid recognizes these columns with built-in meaning:
 
 | Column | Description |
 |--------|-------------|
 | `Host_IP` | Required. The host address used for SSH connections. Cannot be deleted. |
 | `port` | SSH port override for this host. Defaults to `22`. |
-| `delay` | Per-host delay (seconds) between command sends. Overrides the global setting. |
-| `timeout` | Per-host command timeout (seconds). Overrides the global setting. |
-| `transport` | Connection transport protocol (e.g., `ssh`). |
 | `username` | Per-host SSH username. Overrides global credentials. |
 | `password` | Per-host SSH password. Overrides global credentials. |
-| `personality` | Device personality hint (e.g., `fortigate`, `cisco`). |
 | `vault_path` | Optional. Vault path for per-host credential resolution. Format: `[profile@]path[#usernameKey,passwordKey]`. Defaults to `username` and `password` as the key names. Examples: `ssh/switches`, `network@ssh/switches`, `ssh/switches#admin_user,admin_pass`. Supported in both manual runs and scheduler jobs. In scheduler jobs, when the path omits `profile@`, the default profile precedence is: job Vault profile override -> active environment Vault profile -> app default Vault profile. If lookup fails, execution falls back to row/global credentials. |
 
 All other column names become script variables accessible via `${column_name}`.

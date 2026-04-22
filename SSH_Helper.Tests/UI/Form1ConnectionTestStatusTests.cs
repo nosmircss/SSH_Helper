@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using FluentAssertions;
 using Xunit;
@@ -179,6 +180,51 @@ public sealed class Form1ConnectionTestStatusTests
             "theme changes should regenerate Host_IP colors from the logical connection-test state");
     }
 
+    [WinFormsFact]
+    public void GetHostConnections_WhenHostIpHasNoExplicitPort_UsesPortColumn()
+    {
+        using var form = CreateForm();
+        var hostGrid = GetField<DataGridView>(form, "dgv_variables");
+        EnsurePortColumn(hostGrid);
+
+        var row = AddCheckedHostRow(hostGrid, "127.0.0.1");
+        row.Cells["port"].Value = "2222";
+
+        var host = ResolveSingleHost(form, row);
+
+        host.Port.Should().Be(2222);
+    }
+
+    [WinFormsFact]
+    public void GetHostConnections_WhenHostIpHasExplicitPort_OverridesPortColumn()
+    {
+        using var form = CreateForm();
+        var hostGrid = GetField<DataGridView>(form, "dgv_variables");
+        EnsurePortColumn(hostGrid);
+
+        var row = AddCheckedHostRow(hostGrid, "127.0.0.1:2022");
+        row.Cells["port"].Value = "2222";
+
+        var host = ResolveSingleHost(form, row);
+
+        host.Port.Should().Be(2022);
+    }
+
+    [WinFormsFact]
+    public void GetHostConnections_WhenPortColumnInvalid_FallsBackToDefaultPort()
+    {
+        using var form = CreateForm();
+        var hostGrid = GetField<DataGridView>(form, "dgv_variables");
+        EnsurePortColumn(hostGrid);
+
+        var row = AddCheckedHostRow(hostGrid, "127.0.0.1");
+        row.Cells["port"].Value = "abc";
+
+        var host = ResolveSingleHost(form, row);
+
+        host.Port.Should().Be(22);
+    }
+
     private static async Task AcceptSingleClientAsync(TcpListener listener)
     {
         using var client = await listener.AcceptTcpClientAsync();
@@ -218,6 +264,30 @@ public sealed class Form1ConnectionTestStatusTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
+    private static void EnsurePortColumn(DataGridView hostGrid)
+    {
+        if (hostGrid.Columns.Contains("port"))
+        {
+            return;
+        }
+
+        hostGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "port",
+            HeaderText = "port"
+        });
+    }
+
+    private static SSH_Helper.Models.HostConnection ResolveSingleHost(SSH_Helper.Form1 form, DataGridViewRow row)
+    {
+        var result = InvokePrivateMethod(form, "GetHostConnections", (IEnumerable<DataGridViewRow>)new[] { row });
+        result.Should().NotBeNull();
+
+        var hosts = ((IEnumerable<SSH_Helper.Models.HostConnection>)result!).ToList();
+        hosts.Should().ContainSingle();
+        return hosts.Single();
     }
 
     private static T GetField<T>(object instance, string fieldName) where T : class

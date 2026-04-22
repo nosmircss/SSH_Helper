@@ -131,6 +131,14 @@ namespace SSH_Helper
         private static readonly TimeSpan AutomaticHistoryCompactionCooldown = TimeSpan.FromSeconds(2);
         private static readonly string FolderSummarySeparator = new string('=', 60);
         private static readonly string FolderSummarySubSeparator = new string('=', 9);
+        private static readonly Dictionary<string, string> SpecialHostGridColumnTooltips = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [CsvManager.HostColumnName] = "Host IP/DNS/custom",
+            ["port"] = "Optional per-host SSH port. Host_IP with explicit :port overrides this value.",
+            ["username"] = "Optional per-host SSH username override.",
+            ["password"] = "Optional per-host SSH password override.",
+            ["vault_path"] = "Optional Vault credential path for per-host username/password resolution."
+        };
 
         #endregion
 
@@ -637,6 +645,9 @@ namespace SSH_Helper
 
             dgv_variables.ColumnHeadersVisible = true;
             dgv_variables.RowHeadersVisible = true;
+            dgv_variables.ShowCellToolTips = true;
+
+            ApplySpecialHostGridColumnDecorations();
 
             // Set up custom scrollbars for dark mode support
             SetupDataGridViewScrollbars();
@@ -4177,6 +4188,46 @@ namespace SSH_Helper
                 return;
             }
 
+            if (e.RowIndex == -1 && e.ColumnIndex >= 0)
+            {
+                var headerColumn = dgv_variables.Columns[e.ColumnIndex];
+                if (IsSpecialHostGridColumn(headerColumn.Name))
+                {
+                    e.Paint(e.CellBounds, DataGridViewPaintParts.All);
+
+                    var headerForeColor = dgv_variables.ColumnHeadersDefaultCellStyle.ForeColor;
+                    if (headerForeColor.IsEmpty)
+                    {
+                        headerForeColor = dgv_variables.ForeColor;
+                    }
+                    var markerColor = headerForeColor;
+                    var headerText = headerColumn.HeaderText ?? string.Empty;
+                    var headerFont = dgv_variables.ColumnHeadersDefaultCellStyle.Font;
+                    var textWidth = TextRenderer.MeasureText(
+                        e.Graphics,
+                        headerText,
+                        headerFont,
+                        new Size(int.MaxValue, e.CellBounds.Height),
+                        TextFormatFlags.NoPadding).Width;
+
+                    var headerPadding = dgv_variables.ColumnHeadersDefaultCellStyle.Padding;
+                    const int markerTextGap = 4;
+                    var markerX = e.CellBounds.X + Math.Max(2, headerPadding.Left) + textWidth + markerTextGap;
+                    markerX = Math.Min(markerX, e.CellBounds.Right - 14);
+                    var markerBounds = new Rectangle(markerX, e.CellBounds.Y + 1, 12, e.CellBounds.Height - 2);
+                    TextRenderer.DrawText(
+                        e.Graphics,
+                        "*",
+                        headerFont,
+                        markerBounds,
+                        markerColor,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+                    e.Handled = true;
+                    return;
+                }
+            }
+
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
 
             var cell = dgv_variables.Rows[e.RowIndex].Cells[e.ColumnIndex];
@@ -4277,6 +4328,7 @@ namespace SSH_Helper
         private void Dgv_Variables_ColumnAdded(object? sender, DataGridViewColumnEventArgs e)
         {
             e.Column.SortMode = DataGridViewColumnSortMode.NotSortable;
+            ApplySpecialHostGridColumnDecoration(e.Column);
         }
 
         private void Dgv_Variables_CellLeave(object? sender, DataGridViewCellEventArgs e)
@@ -9280,8 +9332,41 @@ namespace SSH_Helper
 
             column.HeaderText = newName;
             column.Name = newName;
+            ApplySpecialHostGridColumnDecoration(column);
             _csvDirty = true;
             UpdateHostsFileIndicator();
+        }
+
+        private static bool IsSpecialHostGridColumn(string? columnName)
+        {
+            return !string.IsNullOrWhiteSpace(columnName) &&
+                   SpecialHostGridColumnTooltips.ContainsKey(columnName);
+        }
+
+        private void ApplySpecialHostGridColumnDecorations()
+        {
+            foreach (DataGridViewColumn column in dgv_variables.Columns)
+            {
+                ApplySpecialHostGridColumnDecoration(column);
+            }
+        }
+
+        private static void ApplySpecialHostGridColumnDecoration(DataGridViewColumn? column)
+        {
+            if (column == null)
+            {
+                return;
+            }
+
+            if (IsSpecialHostGridColumn(column.Name) &&
+                SpecialHostGridColumnTooltips.TryGetValue(column.Name, out var tooltip))
+            {
+                column.HeaderCell.ToolTipText = $"{tooltip}";
+            }
+            else
+            {
+                column.HeaderCell.ToolTipText = string.Empty;
+            }
         }
 
         private void DeleteColumn(int columnIndex)
@@ -12963,6 +13048,15 @@ namespace SSH_Helper
                     continue;
 
                 var host = HostConnection.Parse(hostIp);
+                if (!TryGetExplicitPortFromHostValue(hostIp, out _))
+                {
+                    var rowPort = GetCellValue(row, "port");
+                    if (int.TryParse(rowPort, out var parsedPort) && InputValidator.IsValidPort(parsedPort))
+                    {
+                        host.Port = parsedPort;
+                    }
+                }
+
                 host.Username = GetCellValue(row, "username");
                 var passwordValue = GetCellValue(row, "password");
                 var vaultPathValue = GetCellValue(row, "vault_path");
@@ -13035,6 +13129,31 @@ namespace SSH_Helper
             if (!dgv_variables.Columns.Contains(columnName))
                 return "";
             return row.Cells[columnName].Value?.ToString() ?? "";
+        }
+
+        private static bool TryGetExplicitPortFromHostValue(string hostValue, out int port)
+        {
+            port = 0;
+            if (string.IsNullOrWhiteSpace(hostValue))
+            {
+                return false;
+            }
+
+            var trimmed = hostValue.Trim();
+            var colonIndex = trimmed.LastIndexOf(':');
+            if (colonIndex <= 0 || colonIndex >= trimmed.Length - 1)
+            {
+                return false;
+            }
+
+            var portPart = trimmed[(colonIndex + 1)..];
+            if (!int.TryParse(portPart, out var parsedPort) || !InputValidator.IsValidPort(parsedPort))
+            {
+                return false;
+            }
+
+            port = parsedPort;
+            return true;
         }
 
         /// <summary>
