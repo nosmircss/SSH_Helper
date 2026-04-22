@@ -317,7 +317,7 @@ public class ScriptAutocompleteProviderTests
         var completion = provider.GetCompletion(text, text.Length);
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
-        completion.Items.Select(item => item.Label).Should().Contain(["profile", "channel", "title", "message", "level", "mention", "into", "on_error"]);
+        completion.Items.Select(item => item.Label).Should().Contain(["profile", "channel", "title", "message", "level", "mention", "attachments", "into", "on_error"]);
     }
 
     [Fact]

@@ -2948,6 +2948,7 @@ Sends a notification via Slack, Microsoft Teams, or Discord webhook, a Windows d
     message: <message>           # Required.
     level: <level>               # Optional. info (default) | warn | error | success
     mention: [<mention>, ...]    # Optional. Webhook channels only; Slack/Discord accept shorthand, Teams accepts typed upn:/entra: forms.
+    attachments: [<path>, ...]   # Optional. SMTP/email only; other channels ignore it.
     into: <variable>             # Optional. Captures {sent, channel, status_code, error}.
     on_error: <mode>             # Optional. stop (default) | continue
 ```
@@ -2965,6 +2966,8 @@ Sends a notification via Slack, Microsoft Teams, or Discord webhook, a Windows d
 **Setup rules:**
 - Slack, Teams, Discord, and SMTP require **Settings → Notifications** to be enabled because they depend on saved profiles/secrets.
 - `channel: toast` works without a notification profile and does not require the Notifications settings to be enabled.
+- `attachments:` is only used for SMTP/email delivery. Slack, Teams, Discord, and toast ignore it.
+- If an SMTP attachment file is missing or unreadable, the `notify` step fails and follows normal `on_error` handling.
 
 **Slack mention rules:**
 - For a real Slack user mention, use the member ID form, for example `<@U12345678>`.
@@ -3074,12 +3077,15 @@ Sends a notification via Slack, Microsoft Teams, or Discord webhook, a Windows d
     message: "See the output panel for details"
     level: success
 
-# SMTP email with mentions ignored, into capture, continue on failure
+# SMTP email with attachments, mentions ignored, into capture, continue on failure
 - notify:
     profile: ops-mail
     title: "Compliance scan"
     message: "Found {{ violations }} violations on {{ now() }}"
     level: error
+    attachments:
+      - "C:\\reports\\{{ Host_IP }}-compliance.txt"
+      - "C:\\reports\\summary.csv"
     into: mail_result
     on_error: continue
 

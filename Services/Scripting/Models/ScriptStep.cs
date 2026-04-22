@@ -1323,6 +1323,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public List<string>? Mention { get; set; }
 
         /// <summary>
+        /// Optional file attachments for SMTP/email notifications. Ignored for non-email channels.
+        /// </summary>
+        public List<string>? Attachments { get; set; }
+
+        /// <summary>
         /// Variable name to capture the notification result ({sent, channel, status_code, error}).
         /// </summary>
         public string? Into { get; set; }

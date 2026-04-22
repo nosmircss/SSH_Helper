@@ -90,12 +90,39 @@ namespace SSH_Helper.Services.Notifications
             CancellationToken cancellationToken,
             bool includeToastLevelAttribution = true)
         {
+            return await SendAsync(
+                profileName,
+                channelOverride,
+                title,
+                message,
+                level,
+                mentions,
+                attachments: null,
+                cancellationToken,
+                includeToastLevelAttribution).ConfigureAwait(false);
+        }
+
+        public async Task<NotificationResult> SendAsync(
+            string? profileName,
+            string? channelOverride,
+            string? title,
+            string message,
+            NotificationLevel level,
+            IEnumerable<string>? mentions,
+            IEnumerable<string>? attachments,
+            CancellationToken cancellationToken,
+            bool includeToastLevelAttribution = true)
+        {
             if (_disposed) throw new ObjectDisposedException(nameof(NotificationService));
             if (message == null) throw new ArgumentNullException(nameof(message));
 
             var mentionList = (mentions ?? Array.Empty<string>())
                 .Where(m => !string.IsNullOrWhiteSpace(m))
                 .Select(m => m.Trim())
+                .ToList();
+            var attachmentList = (attachments ?? Array.Empty<string>())
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(path => path.Trim())
                 .ToList();
 
             NotificationProfile? profile = null;
@@ -164,7 +191,7 @@ namespace SSH_Helper.Services.Notifications
                 case NotificationChannelKind.Smtp:
                 {
                     var password = _smtpPasswordProvider?.Invoke(profile.Name);
-                    return await _smtpDispatcher.SendAsync(profile, password, title, message, level, cancellationToken).ConfigureAwait(false);
+                    return await _smtpDispatcher.SendAsync(profile, password, title, message, level, attachmentList, cancellationToken).ConfigureAwait(false);
                 }
                 default:
                     return NotificationResult.Failure(kind.ToString().ToLowerInvariant(), $"Unsupported channel kind: {kind}");

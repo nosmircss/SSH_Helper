@@ -186,6 +186,7 @@ namespace SSH_Helper.Services
             "sections",
             "success_codes",
             "mention",
+            "attachments",
         };
 
         private static readonly HashSet<string> DictionaryOptionKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -2579,6 +2580,8 @@ namespace SSH_Helper.Services
                             props["level"] = step.Notify.Level;
                         if (step.Notify.Mention != null && step.Notify.Mention.Count > 0)
                             props["mention"] = JArray.FromObject(step.Notify.Mention);
+                        if (step.Notify.Attachments != null && step.Notify.Attachments.Count > 0)
+                            props["attachments"] = JArray.FromObject(step.Notify.Attachments);
                         SetIfNotNull(props, "into", step.Notify.Into);
                     }
                     break;

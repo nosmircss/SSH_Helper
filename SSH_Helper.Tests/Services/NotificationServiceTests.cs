@@ -30,6 +30,36 @@ public class NotificationServiceTests
         }
     }
 
+    private sealed class CapturingSmtpDispatcher : SmtpDispatcher
+    {
+        public NotificationProfile? LastProfile { get; private set; }
+        public string? LastPassword { get; private set; }
+        public string? LastTitle { get; private set; }
+        public string? LastMessage { get; private set; }
+        public IReadOnlyList<string> LastAttachments { get; private set; } = Array.Empty<string>();
+        public NotificationLevel LastLevel { get; private set; }
+        public int CallCount { get; private set; }
+
+        public override Task<NotificationResult> SendAsync(
+            NotificationProfile profile,
+            string? password,
+            string? title,
+            string message,
+            NotificationLevel level,
+            IEnumerable<string>? attachments,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastProfile = profile;
+            LastPassword = password;
+            LastTitle = title;
+            LastMessage = message;
+            LastLevel = level;
+            LastAttachments = (attachments ?? Array.Empty<string>()).ToArray();
+            return Task.FromResult(NotificationResult.Success("smtp"));
+        }
+    }
+
     private sealed class CapturingHandler : DelegatingHandler
     {
         public string? LastBody { get; private set; }
@@ -446,6 +476,87 @@ public class NotificationServiceTests
         result.Sent.Should().BeFalse();
         result.Channel.Should().Be("slack");
         result.ErrorMessage.Should().Contain("disabled");
+    }
+
+    [Fact]
+    public async Task SmtpChannel_ForwardsAttachmentsToDispatcher()
+    {
+        var settings = new NotificationSettings
+        {
+            Enabled = true,
+            DefaultProfileName = "mail",
+            Profiles =
+            [
+                new NotificationProfile
+                {
+                    Name = "mail",
+                    Kind = NotificationChannelKind.Smtp,
+                    SmtpHost = "smtp.test",
+                    SmtpFromAddress = "from@test",
+                    SmtpToAddresses = ["to@test"]
+                }
+            ]
+        };
+        var smtp = new CapturingSmtpDispatcher();
+        using var service = new NotificationService(
+            settings,
+            smtpPasswordProvider: _ => "smtp-pw",
+            smtpDispatcher: smtp);
+
+        var result = await service.SendAsync(
+            profileName: "mail",
+            channelOverride: null,
+            title: "Report",
+            message: "Body",
+            level: NotificationLevel.Info,
+            mentions: null,
+            attachments: [@"C:\reports\host-01.txt", @"C:\reports\summary.csv"],
+            cancellationToken: CancellationToken.None);
+
+        result.Sent.Should().BeTrue();
+        smtp.CallCount.Should().Be(1);
+        smtp.LastAttachments.Should().Equal(
+            @"C:\reports\host-01.txt",
+            @"C:\reports\summary.csv");
+    }
+
+    [Fact]
+    public async Task SmtpChannel_MissingAttachment_ReturnsFailureBeforeSend()
+    {
+        var settings = new NotificationSettings
+        {
+            Enabled = true,
+            DefaultProfileName = "mail",
+            Profiles =
+            [
+                new NotificationProfile
+                {
+                    Name = "mail",
+                    Kind = NotificationChannelKind.Smtp,
+                    SmtpHost = "smtp.test",
+                    SmtpFromAddress = "from@test",
+                    SmtpToAddresses = ["to@test"]
+                }
+            ]
+        };
+        using var service = new NotificationService(
+            settings,
+            smtpPasswordProvider: _ => "smtp-pw");
+        var missingPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+
+        var result = await service.SendAsync(
+            profileName: "mail",
+            channelOverride: null,
+            title: "Report",
+            message: "Body",
+            level: NotificationLevel.Info,
+            mentions: null,
+            attachments: [missingPath],
+            cancellationToken: CancellationToken.None);
+
+        result.Sent.Should().BeFalse();
+        result.Channel.Should().Be("smtp");
+        result.ErrorMessage.Should().Contain(missingPath);
     }
 
     private sealed class StaticHandler : DelegatingHandler

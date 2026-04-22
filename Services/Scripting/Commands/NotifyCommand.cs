@@ -43,6 +43,17 @@ namespace SSH_Helper.Services.Scripting.Commands
                 }
             }
 
+            var attachments = new List<string>();
+            if (options.Attachments != null)
+            {
+                foreach (var raw in options.Attachments)
+                {
+                    var sub = context.SubstituteVariables(raw ?? "");
+                    if (!string.IsNullOrWhiteSpace(sub))
+                        attachments.Add(sub);
+                }
+            }
+
             if (ResolveEffectiveChannelKind(context.NotificationService, profile, channel) == NotificationChannelKind.Teams)
             {
                 foreach (var warning in TeamsAdaptiveCardPayloadBuilder.CollectWarnings(mentions))
@@ -53,7 +64,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             try
             {
                 result = await context.NotificationService.SendAsync(
-                    profile, channel, title, message, level, mentions, cancellationToken, includeToastLevelAttribution).ConfigureAwait(false);
+                    profile, channel, title, message, level, mentions, attachments, cancellationToken, includeToastLevelAttribution).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

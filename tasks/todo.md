@@ -1,5 +1,40 @@
 # TODO
 
+## 263. Add per-notify email attachments
+- [x] 263.1 Confirm the attachment failure behavior and final scope for email-only `notify` attachments.
+- [x] 263.2 Draft the OpenSpec change for notify email attachments and mirror the approved implementation checklist here.
+- [x] 263.3 Add RED coverage for parser/runtime/Flow Canvas and SMTP dispatch attachment behavior.
+- [x] 263.4 Implement `notify` attachment-list support, including email-only dispatch and ignore behavior for non-email channels.
+- [x] 263.5 Update docs/spec artifacts, run focused verification, and capture the review notes below.
+
+### 263 Review
+- Scope:
+- Add `notify.attachments` as a per-step string list for SMTP/email delivery while keeping non-email channels unchanged and keeping YAML, autocomplete, Flow Canvas, docs, and OpenSpec aligned.
+- Root cause:
+- The existing `notify` surface only carried title/message/level/mention data. SMTP email had no per-step attachment contract, so scripts could not send generated files with completion emails.
+- Implementation:
+- Added `NotifyOptions.Attachments`, parser support, and runtime resolution in `NotifyCommand`.
+- Added attachment-aware overloads on `NotificationService` and `SmtpDispatcher`; SMTP now attaches resolved files, while Slack/Teams/Discord/toast ignore the list.
+- Added notify attachment coverage and authoring parity in `ScriptParserTests`, `ScriptAutocompleteProviderTests`, `FlowCanvasBridgeTests`, `NotifyCommandTests`, `NotificationServiceTests`, `Services/FlowCanvasBridge.cs`, and `FlowCanvas/src/blockDefs/registry.ts`.
+- Updated `SCRIPTING.md`, the design note, implementation plan, and OpenSpec change `add-notify-email-attachments`.
+- RED verification:
+- `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Parse_NotifyStep_Attachments_ParsesCorrectly|FullyQualifiedName~GetCompletion_NotifyStepOptionKey_SuggestsNotifyFields|FullyQualifiedName~TextToGraph_NotifyStep_ImportsAsNotifyBlock_WithExtractedProps|FullyQualifiedName~Registry_SetHistoryLabelAndNotifyBlocks_ExposeExpectedPropertySurface|FullyQualifiedName~ToastChannel_WithAttachments_IgnoresAttachmentList|FullyQualifiedName~SmtpProfile_AttachmentsAreResolvedAndForwarded|FullyQualifiedName~SmtpChannel_ForwardsAttachmentsToDispatcher|FullyQualifiedName~SmtpChannel_MissingAttachment_ReturnsFailureBeforeSend" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-attachments-red/bin/ -p:BaseIntermediateOutputPath=artifacts/notify-attachments-red/obj/ -v minimal`
+  - Result: failed at compile as expected before implementation because the new attachment-aware `NotifyOptions` and SMTP dispatcher/service signatures did not exist yet.
+- GREEN verification:
+- `cmd /c openspec validate add-notify-email-attachments --strict --no-interactive`
+  - Result: passed.
+- `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~Parse_NotifyStep_Attachments_ParsesCorrectly|FullyQualifiedName~GetCompletion_NotifyStepOptionKey_SuggestsNotifyFields|FullyQualifiedName~TextToGraph_NotifyStep_ImportsAsNotifyBlock_WithExtractedProps|FullyQualifiedName~Registry_SetHistoryLabelAndNotifyBlocks_ExposeExpectedPropertySurface|FullyQualifiedName~ToastChannel_WithAttachments_IgnoresAttachmentList|FullyQualifiedName~SmtpProfile_AttachmentsAreResolvedAndForwarded|FullyQualifiedName~SmtpChannel_ForwardsAttachmentsToDispatcher|FullyQualifiedName~SmtpChannel_MissingAttachment_ReturnsFailureBeforeSend" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-attachments-green1/bin/ -p:BaseIntermediateOutputPath=artifacts/notify-attachments-green1/obj/ -v minimal`
+  - Result: passed `8/8`.
+- `npm.cmd run build` (from `FlowCanvas/`)
+  - Result: passed.
+- `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet test SSH_Helper.Tests\SSH_Helper.Tests.csproj --filter "FullyQualifiedName~NotifyCommandTests|FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~ScriptAutocompleteProviderTests|FullyQualifiedName~Parse_NotifyStep_Attachments_ParsesCorrectly|FullyQualifiedName~GetCompletion_NotifyStepOptionKey_SuggestsNotifyFields|FullyQualifiedName~TextToGraph_NotifyStep_ImportsAsNotifyBlock_WithExtractedProps|FullyQualifiedName~Registry_SetHistoryLabelAndNotifyBlocks_ExposeExpectedPropertySurface" -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-attachments-regression2/bin/ -p:BaseIntermediateOutputPath=artifacts/notify-attachments-regression2/obj/ -v minimal`
+  - Result: passed `120/120`.
+- `$env:DOTNET_CLI_HOME=(Resolve-Path .\.dotnet).Path; dotnet build SSH_Helper.csproj -p:SkipFlowCanvasBuild=true -p:UseAppHost=false -p:BaseOutputPath=artifacts/notify-attachments-build/bin/ -p:BaseIntermediateOutputPath=artifacts/notify-attachments-build/obj/ -v minimal`
+  - Result: build succeeded.
+- Notes:
+- A broader exploratory run against the entire `FlowCanvasBridgeTests` class hit one unrelated existing failure in `ExportGraphToYaml_StartAdvancedSectionsFromEditors_AreSerializedInPreamble` (`Access denied: Cannot read from other user`). The notify-specific Flow Canvas tests added for this change passed and were included in the `120/120` targeted regression run above.
+- Existing `NU1900`, `MSB3277`, `CS8602`, `CS0618`, and `xUnit1031` warnings remain unchanged.
+
 ## 262. Align `NotificationService` handler ownership with disposal
 - [x] 262.1 Add RED coverage proving a supplied `HttpMessageHandler` is disposed when `NotificationService` is disposed.
 - [x] 262.2 Update `NotificationService` so the handler ownership semantics match the service-owned `HttpClient`.
