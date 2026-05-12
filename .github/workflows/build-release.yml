@@ -54,7 +54,7 @@ jobs:
 
   build:
     needs: flowcanvas-browser-tests
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     env:
       REBEX_LICENSE_KEY: ${{ secrets.REBEX_LICENSE_KEY }}
