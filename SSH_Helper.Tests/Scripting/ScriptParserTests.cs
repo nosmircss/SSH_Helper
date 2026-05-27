@@ -419,6 +419,31 @@ steps:
     }
 
     [Fact]
+    public void Parse_NotifyStep_Attachments_ParsesCorrectly()
+    {
+        var yaml = """
+            ---
+            steps:
+              - notify:
+                  profile: ops-mail
+                  title: Report
+                  message: Completed
+                  attachments:
+                    - C:\reports\host-01.txt
+                    - C:\reports\summary.csv
+            """;
+
+        var script = _parser.Parse(yaml);
+
+        script.Steps.Should().HaveCount(1);
+        script.Steps[0].GetStepType().Should().Be(StepType.Notify);
+        script.Steps[0].Notify.Should().NotBeNull();
+        script.Steps[0].Notify!.Attachments.Should().Equal(
+            @"C:\reports\host-01.txt",
+            @"C:\reports\summary.csv");
+    }
+
+    [Fact]
     public void Parse_ExitStep_ParsesCorrectly()
     {
         var yaml = @"---

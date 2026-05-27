@@ -141,7 +141,7 @@ namespace SSH_Helper.Services.Scripting
                 ["localcmd"] = ["command", "shell", "shell_path", "args", "env", "working_dir", "interactive", "keep_open", "run_mode", "lifetime", "kill_on_cancel", "fail_on_nonzero", "success_codes", "max_output_bytes", "confirm", "quiet", "suppress", "title", "into", "timeout", "on_error"],
                 ["vault"] = ["path", "key", "keys", "into", "write", "patch", "profile", "version", "on_error"],
                 ["sethistorylabel"] = ["value", "replace", "mode", "separator"],
-                ["notify"] = ["profile", "channel", "title", "message", "level", "mention", "into", "on_error"]
+                ["notify"] = ["profile", "channel", "title", "message", "level", "mention", "attachments", "into", "on_error"]
             };
         private static readonly IReadOnlyDictionary<string, string[]> StepRootOptionKeysByCommand =
             new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -3329,6 +3329,9 @@ namespace SSH_Helper.Services.Scripting
                             break;
                         case "mention":
                             options.Mention = ParseStringList(parser);
+                            break;
+                        case "attachments":
+                            options.Attachments = ParseStringList(parser);
                             break;
                         case "into":
                             options.Into = parser.Consume<Scalar>().Value;

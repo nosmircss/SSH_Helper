@@ -14,7 +14,8 @@ namespace SSH_Helper.Services.Notifications
             string? title,
             string message,
             NotificationLevel level,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool includeLevelAttribution = true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -25,14 +26,17 @@ namespace SSH_Helper.Services.Notifications
                     builder.AddText(title);
                 builder.AddText(message);
 
-                var attribution = level switch
+                if (includeLevelAttribution)
                 {
-                    NotificationLevel.Warn => "Warning",
-                    NotificationLevel.Error => "Error",
-                    NotificationLevel.Success => "Success",
-                    _ => "Info"
-                };
-                builder.AddAttributionText(attribution);
+                    var attribution = level switch
+                    {
+                        NotificationLevel.Warn => "Warning",
+                        NotificationLevel.Error => "Error",
+                        NotificationLevel.Success => "Success",
+                        _ => "Info"
+                    };
+                    builder.AddAttributionText(attribution);
+                }
 
                 builder.Show();
                 return Task.FromResult(NotificationResult.Success("toast"));

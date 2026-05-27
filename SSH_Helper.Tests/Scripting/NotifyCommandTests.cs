@@ -21,16 +21,18 @@ public class NotifyCommandTests
         public string? LastTitle { get; private set; }
         public string? LastMessage { get; private set; }
         public NotificationLevel LastLevel { get; private set; }
+        public bool LastIncludeLevelAttribution { get; private set; }
         public int CallCount { get; private set; }
         public bool ShouldSucceed { get; set; } = true;
 
         public override Task<NotificationResult> SendAsync(
-            string? title, string message, NotificationLevel level, CancellationToken cancellationToken)
+            string? title, string message, NotificationLevel level, CancellationToken cancellationToken, bool includeLevelAttribution = true)
         {
             CallCount++;
             LastTitle = title;
             LastMessage = message;
             LastLevel = level;
+            LastIncludeLevelAttribution = includeLevelAttribution;
             return Task.FromResult(ShouldSucceed
                 ? NotificationResult.Success("toast")
                 : NotificationResult.Failure("toast", "toast failed"));
@@ -43,18 +45,20 @@ public class NotifyCommandTests
         public string? LastPassword { get; private set; }
         public string? LastTitle { get; private set; }
         public string? LastMessage { get; private set; }
+        public IReadOnlyList<string> LastAttachments { get; private set; } = Array.Empty<string>();
         public NotificationLevel LastLevel { get; private set; }
         public int CallCount { get; private set; }
 
         public override Task<NotificationResult> SendAsync(
             NotificationProfile profile, string? password, string? title, string message,
-            NotificationLevel level, CancellationToken cancellationToken)
+            NotificationLevel level, IEnumerable<string>? attachments, CancellationToken cancellationToken)
         {
             CallCount++;
             LastProfile = profile;
             LastPassword = password;
             LastTitle = title;
             LastMessage = message;
+            LastAttachments = (attachments ?? Array.Empty<string>()).ToArray();
             LastLevel = level;
             return Task.FromResult(NotificationResult.Success("smtp"));
         }
@@ -89,6 +93,26 @@ public class NotifyCommandTests
                 {
                     Name = profileName,
                     Kind = NotificationChannelKind.Teams
+                }
+            ]
+        };
+    }
+
+    private static NotificationSettings SmtpSettings(string profileName = "mail")
+    {
+        return new NotificationSettings
+        {
+            Enabled = true,
+            DefaultProfileName = profileName,
+            Profiles =
+            [
+                new NotificationProfile
+                {
+                    Name = profileName,
+                    Kind = NotificationChannelKind.Smtp,
+                    SmtpHost = "smtp.test",
+                    SmtpFromAddress = "from@test",
+                    SmtpToAddresses = ["to@test"]
                 }
             ]
         };
@@ -161,6 +185,52 @@ public class NotifyCommandTests
         rig.Toast.LastTitle.Should().Be("Done");
         rig.Toast.LastMessage.Should().Be("yes");
         rig.Toast.LastLevel.Should().Be(NotificationLevel.Success);
+        rig.Toast.LastIncludeLevelAttribution.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ToastChannel_WithoutLevel_DoesNotRequestAttribution()
+    {
+        var settings = new NotificationSettings { Enabled = true };
+        var (service, rig) = CreateService(settings);
+        using var _ = service;
+
+        var step = new ScriptStep
+        {
+            Notify = new NotifyOptions { Channel = "toast", Title = "Done", Message = "yes" }
+        };
+        var context = new ScriptContext { NotificationService = service };
+        var result = await new NotifyCommand().ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        rig.Toast.CallCount.Should().Be(1);
+        rig.Toast.LastLevel.Should().Be(NotificationLevel.Info);
+        rig.Toast.LastIncludeLevelAttribution.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ToastChannel_WithAttachments_IgnoresAttachmentList()
+    {
+        var settings = new NotificationSettings { Enabled = true };
+        var (service, rig) = CreateService(settings);
+        using var _ = service;
+
+        var step = new ScriptStep
+        {
+            Notify = new NotifyOptions
+            {
+                Channel = "toast",
+                Title = "Done",
+                Message = "yes",
+                Attachments = new List<string> { @"C:\definitely-missing\report.txt" }
+            }
+        };
+        var context = new ScriptContext { NotificationService = service };
+        var result = await new NotifyCommand().ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        rig.Toast.CallCount.Should().Be(1);
+        rig.Smtp.CallCount.Should().Be(0);
     }
 
     [Fact]
@@ -337,6 +407,36 @@ public class NotifyCommandTests
     }
 
     [Fact]
+    public async Task SmtpProfile_AttachmentsAreResolvedAndForwarded()
+    {
+        var settings = SmtpSettings();
+        var (service, rig) = CreateService(settings);
+        using var _ = service;
+
+        var step = new ScriptStep
+        {
+            Notify = new NotifyOptions
+            {
+                Profile = "mail",
+                Title = "Job done",
+                Message = "all ok",
+                Attachments = new List<string> { "{{attachment_one}}", "{{attachment_two}}" }
+            }
+        };
+        var context = new ScriptContext { NotificationService = service };
+        context.SetVariable("attachment_one", @"C:\reports\web-01.txt");
+        context.SetVariable("attachment_two", @"C:\reports\summary.csv");
+
+        var result = await new NotifyCommand().ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        rig.Smtp.CallCount.Should().Be(1);
+        rig.Smtp.LastAttachments.Should().Equal(
+            @"C:\reports\web-01.txt",
+            @"C:\reports\summary.csv");
+    }
+
+    [Fact]
     public async Task WebhookFailure_WithOnErrorContinue_Suppresses()
     {
         var settings = SlackSettings();
@@ -399,21 +499,7 @@ public class NotifyCommandTests
     [Fact]
     public async Task SmtpProfile_DispatchesToSmtp()
     {
-        var settings = new NotificationSettings
-        {
-            Enabled = true,
-            Profiles =
-            [
-                new NotificationProfile
-                {
-                    Name = "mail",
-                    Kind = NotificationChannelKind.Smtp,
-                    SmtpHost = "smtp.test",
-                    SmtpFromAddress = "from@test",
-                    SmtpToAddresses = ["to@test"]
-                }
-            ]
-        };
+        var settings = SmtpSettings();
         var (service, rig) = CreateService(settings);
         using var _ = service;
 
@@ -429,6 +515,7 @@ public class NotifyCommandTests
         rig.Smtp.LastProfile!.Name.Should().Be("mail");
         rig.Smtp.LastPassword.Should().Be("smtp-pw");
         rig.Smtp.LastLevel.Should().Be(NotificationLevel.Success);
+        rig.Smtp.LastAttachments.Should().BeEmpty();
     }
 }
 

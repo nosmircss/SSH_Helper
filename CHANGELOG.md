@@ -1,5 +1,151 @@
 # Changelog
 
+## Changes Since `7f349e7` (0.51.18)
+
+### `notify` SMTP Email Attachments
+
+The `notify` command gains an optional `attachments:` field for SMTP/email channels. Each entry is a file path that goes through normal variable substitution and is attached to the outgoing message.
+
+```yaml
+- notify:
+    profile: ops-mail
+    title: "Compliance scan"
+    message: "Found {{ violations }} violations on {{ now() }}"
+    level: error
+    attachments:
+      - "C:\\reports\\{{ Host_IP }}-compliance.txt"
+      - "C:\\reports\\summary.csv"
+    into: mail_result
+    on_error: continue
+```
+
+**Channel scope** — Attachments are only honored when the resolved channel is SMTP. Slack, Teams, Discord, and toast accept the field for round-trip safety but discard the list. A test that points `channel: toast` at a deliberately missing file still succeeds, confirming attachments are never opened for non-SMTP channels.
+
+**Path resolution** — `NotifyCommand` calls `context.SubstituteVariables(raw)` on every entry and skips empty/whitespace-only entries after substitution. The substituted list is forwarded into a new `NotificationService.SendAsync` overload (the existing seven-argument overload now delegates to it with `attachments: null`).
+
+**`SmtpDispatcher.SendAsync(profile, password, title, message, level, attachments, cancellationToken)`** — New attachment-aware overload (`Services/Notifications/SmtpDispatcher.cs`):
+
+- Trims each path; empty entries are silently skipped.
+- Missing file (`File.Exists == false`) → returns `NotificationResult.Failure("smtp", "SMTP attachment not found: <path>")` before any SMTP connection is opened.
+- I/O error opening the stream → returns `NotificationResult.Failure("smtp", "SMTP attachment '<path>' could not be read: <ex.Message>")`.
+- On success each file is added as an `Attachment` over a `FileStream(FileMode.Open, FileAccess.Read, FileShare.Read)` and `Path.GetFileName(path)` becomes the displayed filename. The legacy six-argument overload is preserved and forwards to the new one with `attachments: null`.
+
+Attachment failures follow normal `on_error` handling — `stop` (default) aborts the script and `continue` lets the run proceed after recording the error into the `<into>.error` slot.
+
+**Parser** — `ScriptParser` registers `attachments` in the `notify` option key list and parses it via `ParseStringList(parser)`. `NotifyOptions.Attachments` is added as a nullable `List<string>` on `ScriptStep` (`Services/Scripting/Models/ScriptStep.cs`).
+
+**Flow Canvas** — `FlowCanvas/src/blockDefs/registry.ts` adds an `attachments` `textarea` field to the `notify` block (placeholder `["C:\\reports\\summary.csv"]`, helpText calls out SMTP-only behavior). `FlowCanvasBridge` lists `attachments` in `ArrayOptionKeys` and exports it as a `JArray` when non-empty so import/export round-trips preserve the list.
+
+**Autocomplete** — `ScriptAutocompleteProvider` includes `attachments` in the suggested option keys under `notify:`.
+
+### Toast Channel Level Attribution Becomes Opt-In
+
+Toast notifications no longer append a level attribution line ("Info" / "Warning" / "Error" / "Success") unless the script explicitly sets `level:`. Other channels are unaffected — webhook colors, Teams title styling, and SMTP subject prefixes still default to `info` when `level:` is omitted.
+
+**`NotifyOptions.Level`** (`Services/Scripting/Models/ScriptStep.cs`) is now `string?` with a `null` default instead of `string = "info"`. `NotifyCommand.ExecuteAsync` distinguishes the two cases:
+
+```csharp
+var resolvedLevel = options.Level == null ? null : context.SubstituteVariables(options.Level);
+var levelRaw = string.IsNullOrWhiteSpace(resolvedLevel) ? "info" : resolvedLevel;
+var includeToastLevelAttribution = !string.IsNullOrWhiteSpace(resolvedLevel);
+```
+
+The level enum still parses through `TryParseLevel(levelRaw, out var level)`, so non-toast channels see `NotificationLevel.Info` and their level-mapped styling is unchanged.
+
+**`NotificationService.SendAsync`** gains an `includeToastLevelAttribution` parameter (defaults to `true` for backward compatibility) that is forwarded into `ToastDispatcher.SendAsync`. `ToastDispatcher` wraps the existing `builder.AddAttributionText(...)` block in an `if (includeLevelAttribution)` guard. The attribution-text mapping itself is unchanged.
+
+**Flow Canvas** — `FlowCanvas/src/blockDefs/registry.ts` drops `defaultValue: 'info'` from the `level` select on the `notify` block so the dropdown can be left empty and that state round-trips to YAML without injecting an unwanted `level: info`.
+
+### Host Grid Special Column Indicators
+
+Columns in the host grid that drive built-in SSH connection behavior now render a `*` marker after the header text and expose a hover tooltip explaining what the column does. Renaming a column away from a special name (or to one) updates the marker and tooltip on the fly.
+
+**Recognized columns and tooltips** (`Form1.SpecialHostGridColumnTooltips`):
+
+| Column | Tooltip |
+|--------|---------|
+| `Host_IP` | Host IP/DNS/custom |
+| `port` | Optional per-host SSH port. Host_IP with explicit :port overrides this value. |
+| `username` | Optional per-host SSH username override. |
+| `password` | Optional per-host SSH password override. |
+| `vault_path` | Optional Vault credential path for per-host username/password resolution. |
+
+`ApplySpecialHostGridColumnDecoration` runs in three places: once at startup over every column, in `Dgv_Variables_ColumnAdded` for new columns, and at the end of column rename. Non-special columns get their tooltip cleared so renaming a special column back to a generic name removes both the marker and the tooltip.
+
+**Marker rendering** — Implemented in `Dgv_Variables_CellPainting` for header cells (`e.RowIndex == -1 && e.ColumnIndex >= 0`). The handler calls `e.Paint(e.CellBounds, DataGridViewPaintParts.All)` for the standard header, measures the header text with `TextRenderer.MeasureText`, then draws `*` in a 12-wide bounds positioned `markerTextGap = 4` pixels to the right of the text. The marker color tracks the column header's `ForeColor` (falling back to the grid `ForeColor`) so it follows the active dark/light theme.
+
+`dgv_variables.ShowCellToolTips = true` is enabled at startup so the header tooltip surfaces on hover.
+
+### Host Grid Port Column Now Honored in Manual Runs
+
+`Form1.GetHostConnections` now reads the `port` column when building `HostConnection` for manual runs. Previously the manual-run path used only the port parsed from `Host_IP`; the column was ignored. Scheduler runs (`JobExecutionService.BuildHostConnections`) already consumed the column but did not gate it on the presence of an explicit `:port` in `Host_IP`.
+
+**Unified precedence** — Both code paths now route through a `TryGetExplicitPortFromHostValue(hostValue, out int port)` helper. If `Host_IP` ends with `:<port>` and the digits parse to a valid port (1-65535), that port wins and the `port` column is skipped. Otherwise the row's `port` column is consulted; invalid values fall back to the default port (`22`).
+
+| `Host_IP` | `port` column | Effective port |
+|-----------|----------------|----------------|
+| `192.0.2.10` | `2222` | `2222` |
+| `192.0.2.10:2022` | `2222` | `2022` |
+| `192.0.2.10` | `abc` | `22` |
+| `192.0.2.10` | (empty) | `22` |
+
+### Host Grid Insert Row Context Menu
+
+The host grid right-click menu gains an **Insert Row** item that inserts a blank row directly above the right-clicked row.
+
+**`Form1.InsertRow(int rowIndex)`** validates the index, calls `dgv_variables.Rows.Insert(rowIndex, 1)`, selects the inserted row, sets `CurrentCell` to the first cell, marks `_csvDirty = true`, and refreshes the host count via `UpdateHostCount()`. The new menu item (`insertRowToolStripMenuItem`) is hidden when the right-click hits a column header and shown otherwise; the separator/visibility logic in `UpdateHostGridContextMenuSeparators` treats Insert Row alongside Delete Row when deciding whether the row-action separator should appear.
+
+### Host Grid Row Header Widens Past 1000 Rows
+
+The row header has a fixed designer width of 50px, but the row number is custom-drawn via `Dgv_Variables_RowPostPaint`. Once row count crossed 1000 the 4-digit number no longer fit and the default `StringFormat` wrapped it onto a second line.
+
+**`Form1.EnsureRowHeaderWidthFitsRowCount`** is called after every bulk row insert. It measures `new string('9', digitCount)` against the row-header font with `TextRenderer.MeasureText`, computes `HostGridRowHeaderGlyphReservationWidth + textWidth + 12`, and only ever grows the width (never shrinks) so flipping between large and small datasets does not make the header jitter. The handler also flips `RowHeadersWidthSizeMode` from `AutoSizeToAllHeaders` to `EnableResizing` because the auto-size mode only measures literal header text content and would otherwise immediately reset the manual width. The custom paint handler now also passes `StringFormatFlags.NoWrap` so the row number never wraps even if the column happens to be narrower than the digits.
+
+### Host Grid Paste Performance for Large Datasets
+
+`PasteFromClipboard` is rewritten to scale to multi-thousand-row pastes. The previous loop grew the grid one row at a time and paid for per-cell `DataGridView` bookkeeping on every assignment; a 2000-row paste turned into O(rows²) autosize work.
+
+**Pre-parse and pre-allocate** — The clipboard text is parsed into a `string[][] parsed` and `maxCols` is computed before any grid mutation. Missing columns are added in a single up-front loop. Per-column `ReadOnly` flags are cached into a `bool[]` so the inner cell loop avoids the `Columns[]` indexer and the `ReadOnly` property read.
+
+**Off-grid row build** — Rows that extend past the current row count are built off-grid (`(DataGridViewRow)dgv_variables.RowTemplate.Clone()`, `CreateCells(dgv_variables)`, `Cells[idx].Value = …`) and then added in a single `dgv_variables.Rows.AddRange(newRows)` call. Setting `Value` on an off-grid cell skips all the per-cell `DataGridView` bookkeeping that an attached cell triggers — this is the dominant speedup for large pastes.
+
+**Suppress paint and side effects during the paste:**
+
+- `NativeMethods.SendMessage(gridHandle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero)` halts repaints; restored with `new IntPtr(1)` and a final `Invalidate()` in `finally`.
+- `AutoSizeColumnsMode` is parked at `None` for the duration; the original mode is restored at the end so a single resize pass happens after the paste settles.
+- `CellValueChanged` is unhooked so the per-cell handler does not dirty state, request refreshes, and re-style Host_IP rows once per cell. The handler is reattached in `finally`.
+- The grid cursor is forced to `Cursors.WaitCursor` for visual feedback and restored after the paste completes.
+
+**Connection-test visual state cleanup** — Side effects that the detached handler would have applied are now applied once after the paste. The overwrite range (existing rows that received new values) is walked, and any row that had a `_connectionTestRowStates` entry has its Host_IP visual state cleared via `ClearConnectionTestVisualState`. Newly-added rows are skipped — they cannot have had a prior connection-test state.
+
+### Build Environment Pinned to `windows-2022`
+
+`.github/workflows/build-release.yml` pins the `build` job from `windows-latest` to `windows-2022` so the release pipeline stays on the runner image that the project has been validated against. The `flowcanvas-browser-tests` job is unchanged.
+
+### Test Coverage
+
+| Test class | Coverage |
+|------------|----------|
+| `SSH_Helper.Tests/Scripting/NotifyCommandTests.cs` | Extended for: `attachments` resolved through `context.SubstituteVariables` and forwarded to the SMTP dispatcher in declaration order; toast channel ignores `attachments` and never opens missing files; SMTP path with no `attachments:` forwards an empty list. Plus new `ToastChannel_WithoutLevel_DoesNotRequestAttribution` asserting `includeLevelAttribution = false` when `level:` is omitted. |
+| `SSH_Helper.Tests/Scripting/ScriptParserTests.cs` | `Parse_NotifyStep_Attachments_ParsesCorrectly` — `attachments:` parses as an ordered string list. |
+| `SSH_Helper.Tests/Services/NotificationServiceTests.cs` | `SmtpChannel_ForwardsAttachmentsToDispatcher` — list passes through `NotificationService.SendAsync` to the dispatcher; `SmtpChannel_MissingAttachment_ReturnsFailureBeforeSend` — missing file returns `Failure("smtp", …)` that contains the offending path before any SMTP connection is opened. |
+| `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs` | `notify` option-key completion now contains `attachments`. |
+| `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` | `notify` round-trip exports `attachments` as a JSON array with preserved order; registry block exposes the `attachments` field in its property set. |
+| `SSH_Helper.Tests/Services/SshExecutionServiceOutputWindowTests.cs` | Test toast dispatcher signature updated to match the new `includeLevelAttribution` parameter on `ToastDispatcher.SendAsync`. |
+| `SSH_Helper.Tests/Services/JobExecutionServiceTests.cs` | `BuildHostConnections_UsesPortColumnWhenHostIpHasNoExplicitPort` and `BuildHostConnections_WhenHostIpHasExplicitPort_OverridesPortColumn` cover the new precedence ordering between `Host_IP:port` and the `port` column. |
+| `SSH_Helper.Tests/UI/Form1ConnectionTestStatusTests.cs` | `GetHostConnections_WhenHostIpHasNoExplicitPort_UsesPortColumn`, `GetHostConnections_WhenHostIpHasExplicitPort_OverridesPortColumn`, `GetHostConnections_WhenPortColumnInvalid_FallsBackToDefaultPort` — manual-run port resolution mirrors the scheduler path. |
+
+### Documentation
+
+`SCRIPTING.md` updated with:
+
+- `notify` reference adds `attachments: [<path>, …]` to the YAML skeleton, a setup-rules bullet noting that the field is SMTP-only and that missing/unreadable files fail the step under normal `on_error` handling, and an updated SMTP example that demonstrates `{{ Host_IP }}` substitution inside an attachment path.
+- **Special Grid Columns** table cleaned up. The legacy `delay`, `timeout`, `transport`, and `personality` columns are removed; the table now lists only the columns with implemented connection semantics (`Host_IP`, `port`, `username`, `password`, `vault_path`).
+
+`CLAUDE.md` and `.planning/codebase/INTEGRATIONS.md` synced to the same column list so onboarding docs match SCRIPTING.md.
+
+---
+
 ## Changes Since `2fc99ed` (0.51.17)
 
 ### `notify` Scripting Command

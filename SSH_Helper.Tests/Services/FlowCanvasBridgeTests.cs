@@ -92,6 +92,9 @@ public class FlowCanvasBridgeTests
                   mention:
                     - here
                     - user:123456789
+                  attachments:
+                    - C:\reports\host-01.txt
+                    - C:\reports\summary.csv
                   into: notify_result
             """;
 
@@ -115,6 +118,9 @@ public class FlowCanvasBridgeTests
         Assert.Equal("success", props["level"]?.ToString());
         Assert.Equal("notify_result", props["into"]?.ToString());
         Assert.Equal(JTokenType.Array, props["mention"]?.Type);
+        Assert.Equal(JTokenType.Array, props["attachments"]?.Type);
+        Assert.Equal(@"C:\reports\host-01.txt", props["attachments"]?[0]?.ToString());
+        Assert.Equal(@"C:\reports\summary.csv", props["attachments"]?[1]?.ToString());
     }
 
     [Fact]
@@ -2027,7 +2033,7 @@ public class FlowCanvasBridgeTests
             new[] { "value", "replace", "mode", "separator" },
             registryBlocks["sethistorylabel"]);
         Assert.Equal(
-            new[] { "profile", "channel", "title", "message", "level", "mention", "into", "on_error" },
+            new[] { "profile", "channel", "title", "message", "level", "mention", "attachments", "into", "on_error" },
             registryBlocks["notify"]);
     }
 

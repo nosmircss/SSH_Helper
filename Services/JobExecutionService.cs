@@ -497,7 +497,8 @@ namespace SSH_Helper.Services
                 var host = HostConnection.Parse(hostIp);
 
                 // Apply per-row overrides from columns
-                if (TryGetRowValue(row, "port", out var portStr)
+                if (!TryGetExplicitPortFromHostValue(hostIp, out _) &&
+                    TryGetRowValue(row, "port", out var portStr)
                     && int.TryParse(portStr, out var port)
                     && port > 0 && port <= 65535)
                 {
@@ -558,6 +559,31 @@ namespace SSH_Helper.Services
 
             value = string.Empty;
             return false;
+        }
+
+        private static bool TryGetExplicitPortFromHostValue(string hostValue, out int port)
+        {
+            port = 0;
+            if (string.IsNullOrWhiteSpace(hostValue))
+            {
+                return false;
+            }
+
+            var trimmed = hostValue.Trim();
+            var colonIndex = trimmed.LastIndexOf(':');
+            if (colonIndex <= 0 || colonIndex >= trimmed.Length - 1)
+            {
+                return false;
+            }
+
+            var portPart = trimmed[(colonIndex + 1)..];
+            if (!int.TryParse(portPart, out var parsedPort) || parsedPort <= 0 || parsedPort > 65535)
+            {
+                return false;
+            }
+
+            port = parsedPort;
+            return true;
         }
 
         /// <summary>

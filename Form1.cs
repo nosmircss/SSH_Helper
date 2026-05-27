@@ -112,7 +112,7 @@ namespace SSH_Helper
 
         #region Constants
 
-        private const string ApplicationVersion = "0.51.17";
+        private const string ApplicationVersion = "0.51.18";
         private const string ApplicationName = "SSH Helper";
         private const string SelectColumnName = "";
         private const int UiOutputThrottleMs = 50;
@@ -131,6 +131,14 @@ namespace SSH_Helper
         private static readonly TimeSpan AutomaticHistoryCompactionCooldown = TimeSpan.FromSeconds(2);
         private static readonly string FolderSummarySeparator = new string('=', 60);
         private static readonly string FolderSummarySubSeparator = new string('=', 9);
+        private static readonly Dictionary<string, string> SpecialHostGridColumnTooltips = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [CsvManager.HostColumnName] = "Host IP/DNS/custom",
+            ["port"] = "Optional per-host SSH port. Host_IP with explicit :port overrides this value.",
+            ["username"] = "Optional per-host SSH username override.",
+            ["password"] = "Optional per-host SSH password override.",
+            ["vault_path"] = "Optional Vault credential path for per-host username/password resolution."
+        };
 
         #endregion
 
@@ -187,6 +195,7 @@ namespace SSH_Helper
         private bool _suppressEnvironmentSelectionChange;
         private bool _suppressExpandCollapseEvents;
         private bool _pendingColumnAutoSize;
+        private int _rowHeaderDigitWidthCache = -1;
         private int _rightClickedColumnIndex = -1;
         private int _rightClickedRowIndex = -1;
         private readonly BindingList<HistoryListItem> _outputHistory = new();
@@ -637,6 +646,9 @@ namespace SSH_Helper
 
             dgv_variables.ColumnHeadersVisible = true;
             dgv_variables.RowHeadersVisible = true;
+            dgv_variables.ShowCellToolTips = true;
+
+            ApplySpecialHostGridColumnDecorations();
 
             // Set up custom scrollbars for dark mode support
             SetupDataGridViewScrollbars();
@@ -4013,6 +4025,7 @@ namespace SSH_Helper
 
                 // Hide row operations when clicking on column header
                 bool isColumnHeader = hit.Type == DataGridViewHitTestType.ColumnHeader;
+                insertRowToolStripMenuItem.Visible = !isColumnHeader;
                 deleteRowToolStripMenuItem.Visible = !isColumnHeader;
 
                 // Enable/disable delete/rename based on Host_IP protection
@@ -4040,6 +4053,7 @@ namespace SSH_Helper
                 deleteColumnToolStripMenuItem.Enabled = true;
                 renameColumnToolStripMenuItem.Visible = true;
                 renameColumnToolStripMenuItem.Enabled = true;
+                insertRowToolStripMenuItem.Visible = true;
                 deleteRowToolStripMenuItem.Visible = true;
                 UpdateHostGridContextMenuSeparators();
             }
@@ -4050,7 +4064,7 @@ namespace SSH_Helper
             bool hasColumnActions = addColumnToolStripMenuItem.Available ||
                                     renameColumnToolStripMenuItem.Available ||
                                     deleteColumnToolStripMenuItem.Available;
-            bool hasRowAction = deleteRowToolStripMenuItem.Available;
+            bool hasRowAction = insertRowToolStripMenuItem.Available || deleteRowToolStripMenuItem.Available;
             bool hasSelectionActions = selectAllHostsToolStripMenuItem.Available ||
                                        deselectAllHostsToolStripMenuItem.Available ||
                                        invertSelectionToolStripMenuItem.Available;
@@ -4082,7 +4096,8 @@ namespace SSH_Helper
             using var centerFormat = new StringFormat
             {
                 Alignment = StringAlignment.Center,
-                LineAlignment = StringAlignment.Center
+                LineAlignment = StringAlignment.Center,
+                FormatFlags = StringFormatFlags.NoWrap
             };
             var headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
             var textBounds = Rectangle.Inflate(headerBounds, -2, 0);
@@ -4175,6 +4190,46 @@ namespace SSH_Helper
 
                 e.Handled = true;
                 return;
+            }
+
+            if (e.RowIndex == -1 && e.ColumnIndex >= 0)
+            {
+                var headerColumn = dgv_variables.Columns[e.ColumnIndex];
+                if (IsSpecialHostGridColumn(headerColumn.Name))
+                {
+                    e.Paint(e.CellBounds, DataGridViewPaintParts.All);
+
+                    var headerForeColor = dgv_variables.ColumnHeadersDefaultCellStyle.ForeColor;
+                    if (headerForeColor.IsEmpty)
+                    {
+                        headerForeColor = dgv_variables.ForeColor;
+                    }
+                    var markerColor = headerForeColor;
+                    var headerText = headerColumn.HeaderText ?? string.Empty;
+                    var headerFont = dgv_variables.ColumnHeadersDefaultCellStyle.Font;
+                    var textWidth = TextRenderer.MeasureText(
+                        e.Graphics,
+                        headerText,
+                        headerFont,
+                        new Size(int.MaxValue, e.CellBounds.Height),
+                        TextFormatFlags.NoPadding).Width;
+
+                    var headerPadding = dgv_variables.ColumnHeadersDefaultCellStyle.Padding;
+                    const int markerTextGap = 4;
+                    var markerX = e.CellBounds.X + Math.Max(2, headerPadding.Left) + textWidth + markerTextGap;
+                    markerX = Math.Min(markerX, e.CellBounds.Right - 14);
+                    var markerBounds = new Rectangle(markerX, e.CellBounds.Y + 1, 12, e.CellBounds.Height - 2);
+                    TextRenderer.DrawText(
+                        e.Graphics,
+                        "*",
+                        headerFont,
+                        markerBounds,
+                        markerColor,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+                    e.Handled = true;
+                    return;
+                }
             }
 
             if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
@@ -4277,6 +4332,7 @@ namespace SSH_Helper
         private void Dgv_Variables_ColumnAdded(object? sender, DataGridViewColumnEventArgs e)
         {
             e.Column.SortMode = DataGridViewColumnSortMode.NotSortable;
+            ApplySpecialHostGridColumnDecoration(e.Column);
         }
 
         private void Dgv_Variables_CellLeave(object? sender, DataGridViewCellEventArgs e)
@@ -4330,8 +4386,39 @@ namespace SSH_Helper
                 dgv_variables.Rows[e.RowIndex + i].Height = 28;
             }
 
+            EnsureRowHeaderWidthFitsRowCount();
             RequestHostGridDirtyMark();
             RequestHostGridHostCountRefresh();
+        }
+
+        // The row header width is fixed at design-time (50px), but the row number is
+        // drawn by Dgv_Variables_RowPostPaint into that header. Once row count crosses
+        // 1000 the 4-digit number doesn't fit, and the default StringFormat wraps it.
+        // Grow the header width to fit; never shrink so flipping between datasets
+        // doesn't make the header jitter.
+        private void EnsureRowHeaderWidthFitsRowCount()
+        {
+            int rowCount = dgv_variables.Rows.Count;
+            if (rowCount <= 0) return;
+            int digitCount = rowCount.ToString().Length;
+            if (digitCount <= _rowHeaderDigitWidthCache) return;
+            _rowHeaderDigitWidthCache = digitCount;
+
+            string sample = new string('9', digitCount);
+            var headerFont = dgv_variables.RowHeadersDefaultCellStyle.Font ?? dgv_variables.Font;
+            int textWidth = TextRenderer.MeasureText(sample, headerFont, Size.Empty, TextFormatFlags.NoPadding).Width;
+            int requiredWidth = HostGridRowHeaderGlyphReservationWidth + textWidth + 12;
+
+            if (dgv_variables.RowHeadersWidth >= requiredWidth) return;
+
+            // AutoSizeToAllHeaders is the designer default but it only measures the
+            // header text content, not our custom-drawn row numbers — so it never
+            // grows. Switch to EnableResizing so the manual width sticks.
+            if (dgv_variables.RowHeadersWidthSizeMode != DataGridViewRowHeadersWidthSizeMode.EnableResizing)
+            {
+                dgv_variables.RowHeadersWidthSizeMode = DataGridViewRowHeadersWidthSizeMode.EnableResizing;
+            }
+            dgv_variables.RowHeadersWidth = requiredWidth;
         }
 
         private void Dgv_Variables_RowsRemoved(object? sender, DataGridViewRowsRemovedEventArgs e)
@@ -6449,6 +6536,11 @@ namespace SSH_Helper
         private void deleteColumnToolStripMenuItem_Click(object sender, EventArgs e)
         {
             DeleteColumn(_rightClickedColumnIndex);
+        }
+
+        private void insertRowToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            InsertRow(_rightClickedRowIndex);
         }
 
         private void deleteRowToolStripMenuItem_Click(object sender, EventArgs e)
@@ -9280,8 +9372,41 @@ namespace SSH_Helper
 
             column.HeaderText = newName;
             column.Name = newName;
+            ApplySpecialHostGridColumnDecoration(column);
             _csvDirty = true;
             UpdateHostsFileIndicator();
+        }
+
+        private static bool IsSpecialHostGridColumn(string? columnName)
+        {
+            return !string.IsNullOrWhiteSpace(columnName) &&
+                   SpecialHostGridColumnTooltips.ContainsKey(columnName);
+        }
+
+        private void ApplySpecialHostGridColumnDecorations()
+        {
+            foreach (DataGridViewColumn column in dgv_variables.Columns)
+            {
+                ApplySpecialHostGridColumnDecoration(column);
+            }
+        }
+
+        private static void ApplySpecialHostGridColumnDecoration(DataGridViewColumn? column)
+        {
+            if (column == null)
+            {
+                return;
+            }
+
+            if (IsSpecialHostGridColumn(column.Name) &&
+                SpecialHostGridColumnTooltips.TryGetValue(column.Name, out var tooltip))
+            {
+                column.HeaderCell.ToolTipText = $"{tooltip}";
+            }
+            else
+            {
+                column.HeaderCell.ToolTipText = string.Empty;
+            }
         }
 
         private void DeleteColumn(int columnIndex)
@@ -9297,6 +9422,29 @@ namespace SSH_Helper
             dgv_variables.Columns.RemoveAt(columnIndex);
             _csvDirty = true;
             UpdateHostsFileIndicator();
+        }
+
+        private void InsertRow(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= dgv_variables.Rows.Count)
+            {
+                DialogTheme.Show(this, "No valid row selected.", Application.ProductName ?? "Message", MessageBoxButtons.OK, MessageBoxIcon.None);
+                return;
+            }
+
+            if (dgv_variables.Columns.Count == 0)
+            {
+                return;
+            }
+
+            dgv_variables.Rows.Insert(rowIndex, 1);
+
+            var inserted = dgv_variables.Rows[rowIndex];
+            inserted.Selected = true;
+            dgv_variables.CurrentCell = inserted.Cells[0];
+
+            _csvDirty = true;
+            UpdateHostCount();
         }
 
         private void DeleteRow(int rowIndex)
@@ -9399,37 +9547,149 @@ namespace SSH_Helper
             int startRow = startCell?.RowIndex ?? 0;
 
             string[] rows = Clipboard.GetText().Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+            if (rows.Length == 0) return;
+
+            // Pre-parse so we know the final shape and can pre-allocate columns/rows
+            // in single bulk operations rather than growing the grid one row at a time.
+            var parsed = new string[rows.Length][];
+            int maxCols = 0;
+            for (int i = 0; i < rows.Length; i++)
+            {
+                var cells = rows[i].Split('\t');
+                parsed[i] = cells;
+                if (cells.Length > maxCols) maxCols = cells.Length;
+            }
+
+            var previousCursor = dgv_variables.Cursor;
+            dgv_variables.Cursor = Cursors.WaitCursor;
 
             using (BeginHostGridMutationScope())
             {
-                dgv_variables.AllowUserToAddRows = false;
-
-                for (int i = 0; i < rows.Length; i++)
+                // Stop the grid from repainting until we're done. Without this the grid
+                // services thousands of paint messages while values are being assigned.
+                IntPtr gridHandle = dgv_variables.IsHandleCreated ? dgv_variables.Handle : IntPtr.Zero;
+                if (gridHandle != IntPtr.Zero)
                 {
-                    string[] columns = rows[i].Split('\t');
-                    for (int j = 0; j < columns.Length; j++)
-                    {
-                        int rowIndex = startRow + i;
-                        while (rowIndex >= dgv_variables.Rows.Count)
-                        {
-                            dgv_variables.Rows.Add(new DataGridViewRow());
-                        }
-
-                        int columnIndex = startCol + j;
-                        while (columnIndex >= dgv_variables.Columns.Count)
-                        {
-                            int nextNum = dgv_variables.Columns.Count + 1;
-                            dgv_variables.Columns.Add($"Column{nextNum}", $"Column{nextNum}");
-                        }
-
-                        if (!dgv_variables.Columns[columnIndex].ReadOnly)
-                        {
-                            dgv_variables.Rows[rowIndex].Cells[columnIndex].Value = columns[j];
-                        }
-                    }
+                    NativeMethods.SendMessage(gridHandle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
                 }
 
-                dgv_variables.AllowUserToAddRows = true;
+                // Auto-size in AllCells mode re-measures every cell in a column on every
+                // value change. For a 2000-row paste that turns into O(rows^2) work. Park
+                // it at None for the duration and restore the original mode at the end so
+                // it does a single resize pass.
+                var previousAutoSizeMode = dgv_variables.AutoSizeColumnsMode;
+                bool restoreAutoSize = previousAutoSizeMode != DataGridViewAutoSizeColumnsMode.None;
+                if (restoreAutoSize)
+                {
+                    dgv_variables.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+                }
+
+                // Detach the per-cell change handler. Otherwise every assignment dirties
+                // state, requests refreshes, and re-styles + invalidates Host_IP rows. We
+                // apply those side effects in bulk after the paste completes.
+                dgv_variables.CellValueChanged -= Dgv_Variables_CellValueChanged;
+
+                bool prevAllowAdd = dgv_variables.AllowUserToAddRows;
+                dgv_variables.AllowUserToAddRows = false;
+
+                int hostIpColumnIndex = -1;
+                bool anyHostIpEdited = false;
+                int updateCount = 0;
+
+                try
+                {
+                    // Add missing columns up front instead of inside the inner cell loop.
+                    int colsNeeded = startCol + maxCols;
+                    while (dgv_variables.Columns.Count < colsNeeded)
+                    {
+                        int nextNum = dgv_variables.Columns.Count + 1;
+                        dgv_variables.Columns.Add($"Column{nextNum}", $"Column{nextNum}");
+                    }
+
+                    int gridColumnCount = dgv_variables.Columns.Count;
+                    hostIpColumnIndex = dgv_variables.Columns.Contains(CsvManager.HostColumnName)
+                        ? dgv_variables.Columns[CsvManager.HostColumnName].Index
+                        : -1;
+
+                    // Cache column read-only flags so the inner loop doesn't pay for a
+                    // Columns[] indexer + property read on every one of 10k+ cells.
+                    bool[] columnReadOnly = new bool[gridColumnCount];
+                    for (int c = 0; c < gridColumnCount; c++)
+                    {
+                        columnReadOnly[c] = dgv_variables.Columns[c].ReadOnly;
+                    }
+
+                    // Split the paste into two regions: rows that overwrite existing data,
+                    // and brand-new rows. New rows are built off-grid with their cell values
+                    // pre-set, then bulk-added via AddRange. Setting Value on an off-grid
+                    // cell skips all the per-cell DataGridView bookkeeping that an attached
+                    // cell triggers — this is the big speedup for large pastes.
+                    int existingRowCount = dgv_variables.Rows.Count;
+                    int updateEnd = Math.Min(startRow + parsed.Length, existingRowCount);
+                    updateCount = Math.Max(0, updateEnd - startRow);
+                    int newRowCount = parsed.Length - updateCount;
+
+                    for (int i = 0; i < updateCount; i++)
+                    {
+                        int rowIndex = startRow + i;
+                        var row = dgv_variables.Rows[rowIndex];
+                        var cells = parsed[i];
+                        int cellCount = cells.Length;
+                        for (int j = 0; j < cellCount; j++)
+                        {
+                            int columnIndex = startCol + j;
+                            if (columnIndex >= gridColumnCount) break;
+                            if (columnReadOnly[columnIndex]) continue;
+
+                            row.Cells[columnIndex].Value = cells[j];
+
+                            if (columnIndex == hostIpColumnIndex)
+                            {
+                                anyHostIpEdited = true;
+                            }
+                        }
+                    }
+
+                    if (newRowCount > 0 && gridColumnCount > 0)
+                    {
+                        var newRows = new DataGridViewRow[newRowCount];
+                        for (int i = 0; i < newRowCount; i++)
+                        {
+                            var row = (DataGridViewRow)dgv_variables.RowTemplate.Clone();
+                            row.CreateCells(dgv_variables);
+                            row.Height = 28;
+                            var cells = parsed[updateCount + i];
+                            int cellCount = cells.Length;
+                            for (int j = 0; j < cellCount; j++)
+                            {
+                                int columnIndex = startCol + j;
+                                if (columnIndex >= gridColumnCount) break;
+                                if (columnReadOnly[columnIndex]) continue;
+
+                                row.Cells[columnIndex].Value = cells[j];
+                            }
+                            newRows[i] = row;
+                        }
+                        dgv_variables.Rows.AddRange(newRows);
+                        // Newly-added rows can't have a pre-existing connection-test
+                        // visual state, so we don't need to track Host_IP edits on them.
+                    }
+                }
+                finally
+                {
+                    dgv_variables.AllowUserToAddRows = prevAllowAdd;
+                    dgv_variables.CellValueChanged += Dgv_Variables_CellValueChanged;
+                    if (restoreAutoSize)
+                    {
+                        dgv_variables.AutoSizeColumnsMode = previousAutoSizeMode;
+                    }
+                    if (gridHandle != IntPtr.Zero)
+                    {
+                        NativeMethods.SendMessage(gridHandle, NativeMethods.WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
+                        dgv_variables.Invalidate();
+                    }
+                    dgv_variables.Cursor = previousCursor;
+                }
 
                 // Select the new empty row so user can continue pasting
                 dgv_variables.ClearSelection();
@@ -9439,11 +9699,27 @@ namespace SSH_Helper
                     dgv_variables.CurrentCell = dgv_variables.Rows[newRowIndex].Cells[startCol];
                 }
 
+                // Apply the side effects that the detached per-cell handler would have
+                // applied — once, in bulk. Only the overwrite range can have had a prior
+                // connection-test visual state; newly-added rows can't.
                 _csvDirty = true;
+                if (anyHostIpEdited && hostIpColumnIndex >= 0 && updateCount > 0)
+                {
+                    for (int i = 0; i < updateCount; i++)
+                    {
+                        int rowIndex = startRow + i;
+                        if (rowIndex >= dgv_variables.Rows.Count) break;
+                        var row = dgv_variables.Rows[rowIndex];
+                        if (_connectionTestRowStates.TryGetValue(row, out _))
+                        {
+                            ClearConnectionTestVisualState(row, hostIpColumnIndex);
+                        }
+                    }
+                }
+
                 RequestHostGridHostCountRefresh();
                 RequestHostGridScrollbarRefresh();
             }
-
         }
 
         private void DeleteSelectedCells()
@@ -12963,6 +13239,15 @@ namespace SSH_Helper
                     continue;
 
                 var host = HostConnection.Parse(hostIp);
+                if (!TryGetExplicitPortFromHostValue(hostIp, out _))
+                {
+                    var rowPort = GetCellValue(row, "port");
+                    if (int.TryParse(rowPort, out var parsedPort) && InputValidator.IsValidPort(parsedPort))
+                    {
+                        host.Port = parsedPort;
+                    }
+                }
+
                 host.Username = GetCellValue(row, "username");
                 var passwordValue = GetCellValue(row, "password");
                 var vaultPathValue = GetCellValue(row, "vault_path");
@@ -13035,6 +13320,31 @@ namespace SSH_Helper
             if (!dgv_variables.Columns.Contains(columnName))
                 return "";
             return row.Cells[columnName].Value?.ToString() ?? "";
+        }
+
+        private static bool TryGetExplicitPortFromHostValue(string hostValue, out int port)
+        {
+            port = 0;
+            if (string.IsNullOrWhiteSpace(hostValue))
+            {
+                return false;
+            }
+
+            var trimmed = hostValue.Trim();
+            var colonIndex = trimmed.LastIndexOf(':');
+            if (colonIndex <= 0 || colonIndex >= trimmed.Length - 1)
+            {
+                return false;
+            }
+
+            var portPart = trimmed[(colonIndex + 1)..];
+            if (!int.TryParse(portPart, out var parsedPort) || !InputValidator.IsValidPort(parsedPort))
+            {
+                return false;
+            }
+
+            port = parsedPort;
+            return true;
         }
 
         /// <summary>

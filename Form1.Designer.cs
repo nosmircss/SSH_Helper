@@ -59,6 +59,7 @@ namespace SSH_Helper
             renameColumnToolStripMenuItem = new ToolStripMenuItem();
             deleteColumnToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparator5 = new ToolStripSeparator();
+            insertRowToolStripMenuItem = new ToolStripMenuItem();
             deleteRowToolStripMenuItem = new ToolStripMenuItem();
             toolStripSeparatorSelection = new ToolStripSeparator();
             selectAllHostsToolStripMenuItem = new ToolStripMenuItem();
@@ -331,7 +332,7 @@ namespace SSH_Helper
             // 
             // contextMenuStrip1
             // 
-            contextMenuStrip1.Items.AddRange(new ToolStripItem[] { addColumnToolStripMenuItem, renameColumnToolStripMenuItem, deleteColumnToolStripMenuItem, toolStripSeparator5, deleteRowToolStripMenuItem, toolStripSeparatorSelection, selectAllHostsToolStripMenuItem, deselectAllHostsToolStripMenuItem, invertSelectionToolStripMenuItem });
+            contextMenuStrip1.Items.AddRange(new ToolStripItem[] { addColumnToolStripMenuItem, renameColumnToolStripMenuItem, deleteColumnToolStripMenuItem, toolStripSeparator5, insertRowToolStripMenuItem, deleteRowToolStripMenuItem, toolStripSeparatorSelection, selectAllHostsToolStripMenuItem, deselectAllHostsToolStripMenuItem, invertSelectionToolStripMenuItem });
             contextMenuStrip1.Name = "contextMenuStrip1";
             contextMenuStrip1.Size = new Size(164, 98);
             // 
@@ -360,6 +361,13 @@ namespace SSH_Helper
             // 
             toolStripSeparator5.Name = "toolStripSeparator5";
             toolStripSeparator5.Size = new Size(160, 6);
+            //
+            // insertRowToolStripMenuItem
+            //
+            insertRowToolStripMenuItem.Name = "insertRowToolStripMenuItem";
+            insertRowToolStripMenuItem.Size = new Size(163, 22);
+            insertRowToolStripMenuItem.Text = "&Insert Row";
+            insertRowToolStripMenuItem.Click += insertRowToolStripMenuItem_Click;
             //
             // deleteRowToolStripMenuItem
             //
@@ -1936,6 +1944,7 @@ namespace SSH_Helper
         private ToolStripMenuItem renameColumnToolStripMenuItem;
         private ToolStripMenuItem deleteColumnToolStripMenuItem;
         private ToolStripSeparator toolStripSeparator5;
+        private ToolStripMenuItem insertRowToolStripMenuItem;
         private ToolStripMenuItem deleteRowToolStripMenuItem;
         private ToolStripSeparator toolStripSeparatorSelection;
         private ToolStripMenuItem selectAllHostsToolStripMenuItem;

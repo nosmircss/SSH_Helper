@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Mail;
+using System.IO;
 using SSH_Helper.Models;
 
 namespace SSH_Helper.Services.Notifications
@@ -10,12 +11,24 @@ namespace SSH_Helper.Services.Notifications
     /// </summary>
     public class SmtpDispatcher
     {
+        public virtual Task<NotificationResult> SendAsync(
+            NotificationProfile profile,
+            string? password,
+            string? title,
+            string message,
+            NotificationLevel level,
+            CancellationToken cancellationToken)
+        {
+            return SendAsync(profile, password, title, message, level, attachments: null, cancellationToken);
+        }
+
         public virtual async Task<NotificationResult> SendAsync(
             NotificationProfile profile,
             string? password,
             string? title,
             string message,
             NotificationLevel level,
+            IEnumerable<string>? attachments,
             CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(profile.SmtpHost))
@@ -49,6 +62,26 @@ namespace SSH_Helper.Services.Notifications
             }
             if (mail.To.Count == 0)
                 return NotificationResult.Failure("smtp", "SMTP to addresses list is empty after trimming.");
+
+            foreach (var attachmentPath in attachments ?? Array.Empty<string>())
+            {
+                var normalizedPath = (attachmentPath ?? string.Empty).Trim();
+                if (normalizedPath.Length == 0)
+                    continue;
+
+                if (!File.Exists(normalizedPath))
+                    return NotificationResult.Failure("smtp", $"SMTP attachment not found: {normalizedPath}");
+
+                try
+                {
+                    var stream = new FileStream(normalizedPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    mail.Attachments.Add(new Attachment(stream, Path.GetFileName(normalizedPath)));
+                }
+                catch (Exception ex)
+                {
+                    return NotificationResult.Failure("smtp", $"SMTP attachment '{normalizedPath}' could not be read: {ex.Message}");
+                }
+            }
 
             using var client = new SmtpClient(profile.SmtpHost, profile.SmtpPort)
             {

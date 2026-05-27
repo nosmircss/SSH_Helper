@@ -103,7 +103,7 @@
 - Service: `Services/CsvManager.cs`
 - Format: Standard CSV with proper quoting/escaping
 - Required column: `Host_IP`
-- Optional columns: `port`, `delay`, `timeout`, `transport`, `username`, `password`, `personality`
+- Optional columns with implemented connection semantics: `port`, `username`, `password`, `vault_path`
 - Custom columns usable as `{{column_name}}` variables in scripts
 - Freshness tracking: `Models/CsvFileFingerprint.cs`, `Utilities/CsvFileSyncEvaluator.cs`
 

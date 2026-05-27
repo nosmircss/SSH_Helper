@@ -25,7 +25,9 @@ namespace SSH_Helper.Services.Scripting.Commands
             var profile = string.IsNullOrWhiteSpace(options.Profile) ? null : context.SubstituteVariables(options.Profile);
             var channel = string.IsNullOrWhiteSpace(options.Channel) ? null : context.SubstituteVariables(options.Channel);
             var title = string.IsNullOrWhiteSpace(options.Title) ? null : context.SubstituteVariables(options.Title);
-            var levelRaw = context.SubstituteVariables(options.Level ?? "info");
+            var resolvedLevel = options.Level == null ? null : context.SubstituteVariables(options.Level);
+            var levelRaw = string.IsNullOrWhiteSpace(resolvedLevel) ? "info" : resolvedLevel;
+            var includeToastLevelAttribution = !string.IsNullOrWhiteSpace(resolvedLevel);
 
             if (!TryParseLevel(levelRaw, out var level))
                 return ApplyOnError(step, $"Invalid notify level '{levelRaw}'. Expected: info, warn, error, success.");
@@ -41,6 +43,17 @@ namespace SSH_Helper.Services.Scripting.Commands
                 }
             }
 
+            var attachments = new List<string>();
+            if (options.Attachments != null)
+            {
+                foreach (var raw in options.Attachments)
+                {
+                    var sub = context.SubstituteVariables(raw ?? "");
+                    if (!string.IsNullOrWhiteSpace(sub))
+                        attachments.Add(sub);
+                }
+            }
+
             if (ResolveEffectiveChannelKind(context.NotificationService, profile, channel) == NotificationChannelKind.Teams)
             {
                 foreach (var warning in TeamsAdaptiveCardPayloadBuilder.CollectWarnings(mentions))
@@ -51,7 +64,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             try
             {
                 result = await context.NotificationService.SendAsync(
-                    profile, channel, title, message, level, mentions, cancellationToken).ConfigureAwait(false);
+                    profile, channel, title, message, level, mentions, attachments, cancellationToken, includeToastLevelAttribution).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

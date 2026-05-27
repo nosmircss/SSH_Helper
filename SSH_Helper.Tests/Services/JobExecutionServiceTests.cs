@@ -623,6 +623,44 @@ public class JobExecutionServiceTests : IDisposable
     }
 
     [Fact]
+    public void BuildHostConnections_UsesPortColumnWhenHostIpHasNoExplicitPort()
+    {
+        var job = CreateTestJob(name: "PortColumnJob", schedule: ScheduleType.None);
+        job.Hosts.Clear();
+        job.Hosts.Add(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Host_IP"] = "192.0.2.20",
+            ["port"] = "2222"
+        });
+
+        using var service = CreateService();
+
+        var hosts = InvokePrivate<List<HostConnection>>(service, "BuildHostConnections", job);
+
+        hosts.Should().ContainSingle();
+        hosts[0].Port.Should().Be(2222);
+    }
+
+    [Fact]
+    public void BuildHostConnections_WhenHostIpHasExplicitPort_OverridesPortColumn()
+    {
+        var job = CreateTestJob(name: "PortOverrideJob", schedule: ScheduleType.None);
+        job.Hosts.Clear();
+        job.Hosts.Add(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Host_IP"] = "192.0.2.21:2022",
+            ["port"] = "2222"
+        });
+
+        using var service = CreateService();
+
+        var hosts = InvokePrivate<List<HostConnection>>(service, "BuildHostConnections", job);
+
+        hosts.Should().ContainSingle();
+        hosts[0].Port.Should().Be(2022);
+    }
+
+    [Fact]
     public void ResolvePresetForExecution_CustomPreset_ReturnsTransientPresetInfo()
     {
         var job = CreateTestJob(name: "CustomResolveJob", schedule: ScheduleType.None);
