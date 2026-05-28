@@ -5,6 +5,7 @@ import {
   getOutgoingMessages,
   installHostMessageCapture,
   loadGraphFixture,
+  setGraphViaActions,
   waitForOutgoingMessage,
 } from './support/harness';
 
@@ -83,7 +84,108 @@ test.describe('Flow Canvas Interaction Correctness', () => {
     await expect(nodeById(page, 'node-2')).toHaveCount(0);
     await expect(nodeById(page, 'node-3')).toHaveCount(1);
   });
+
+  test('apply yaml payload omits schema default props', async ({ page }) => {
+    await setGraphViaActions(page, createDefaultStrippingFixture());
+    await clearOutgoingMessages(page);
+
+    await page.getByRole('button', { name: /apply yaml/i }).click();
+    const applyMessage = await waitForOutgoingMessage(page, 'apply-yaml');
+    const nodes = toRecordArray(applyMessage.nodes);
+
+    const sendNode = nodes.find((node) => node.id === 'send-defaults');
+    expect(sendNode).toBeTruthy();
+    expect(getNodeProps(sendNode)).toEqual({
+      command: 'show version',
+    });
+
+    const interactiveNode = nodes.find((node) => node.id === 'interactive-mixed');
+    expect(interactiveNode).toBeTruthy();
+    expect(getNodeProps(interactiveNode)).toEqual({
+      command: 'show interface status',
+      show_window: false,
+    });
+  });
 });
+
+function toRecordArray(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
+}
+
+function getNodeProps(node: Record<string, unknown> | undefined): Record<string, unknown> {
+  const data = node?.data;
+  if (!data || typeof data !== 'object') {
+    return {};
+  }
+
+  const props = (data as Record<string, unknown>).props;
+  return props && typeof props === 'object' ? props as Record<string, unknown> : {};
+}
+
+function createDefaultStrippingFixture(): { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } {
+  return {
+    nodes: [
+      {
+        id: '__start__',
+        type: 'start',
+        position: { x: 80, y: 40 },
+        data: {
+          blockType: '_start',
+          label: 'Untitled Script',
+          props: {},
+        },
+      },
+      {
+        id: 'send-defaults',
+        type: 'block',
+        position: { x: 80, y: 160 },
+        data: {
+          blockType: 'send',
+          label: 'Send',
+          props: {
+            command: 'show version',
+            suppress: false,
+            retry: 0,
+            retry_delay: 1,
+            fail_on_nonzero: false,
+            on_error: 'stop',
+          },
+        },
+      },
+      {
+        id: 'interactive-mixed',
+        type: 'block',
+        position: { x: 80, y: 280 },
+        data: {
+          blockType: 'interactive',
+          label: 'Interactive',
+          props: {
+            session: 'separate',
+            mirror_output: false,
+            show_window: false,
+            on_error: 'stop',
+            command: 'show interface status',
+          },
+        },
+      },
+    ],
+    edges: [
+      {
+        id: 'edge-start-send-defaults',
+        source: '__start__',
+        target: 'send-defaults',
+        style: { stroke: '#666' },
+      },
+      {
+        id: 'edge-send-defaults-interactive-mixed',
+        source: 'send-defaults',
+        target: 'interactive-mixed',
+        style: { stroke: '#666' },
+      },
+    ],
+  };
+}
 
 function nodeById(page: Page, nodeId: string): Locator {
   return page.locator(`.react-flow__node[data-id="${nodeId}"]`);
