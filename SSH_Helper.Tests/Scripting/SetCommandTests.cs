@@ -109,6 +109,22 @@ public class SetCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_PushUniqueWithMissingTarget_DoesNotSeedLiteralIdentifier()
+    {
+        var step = new ScriptStep
+        {
+            Set = "results = push_unique(results, \"example.com\")"
+        };
+
+        var context = new ScriptContext();
+
+        var result = await _command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariable("results").Should().BeEquivalentTo(new List<string> { "example.com" }, options => options.WithStrictOrdering());
+    }
+
+    [Fact]
     public async Task ExecuteAsync_LongJsonValue_DebugOutputIsNotTruncated()
     {
         var longDomain = new string('x', 120) + ".example.com";
