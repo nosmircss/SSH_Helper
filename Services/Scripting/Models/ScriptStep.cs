@@ -489,6 +489,22 @@ namespace SSH_Helper.Services.Scripting.Models
         public string? FileExt { get; set; }
 
         /// <summary>
+        /// Whether the picker dialog should immediately open the file browser.
+        /// Null uses the runtime default behavior for the current readfile mode.
+        /// </summary>
+        public bool? AutoBrowse { get; set; }
+
+        /// <summary>
+        /// Optional variable name to store the resolved absolute path into.
+        /// </summary>
+        public string? PathInto { get; set; }
+
+        /// <summary>
+        /// When true, capture only the resolved path and skip reading file contents.
+        /// </summary>
+        public bool PathOnly { get; set; }
+
+        /// <summary>
         /// Variable name to store the lines into.
         /// </summary>
         public string Into { get; set; } = string.Empty;

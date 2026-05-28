@@ -442,6 +442,9 @@ namespace SSH_Helper.Services.Scripting
                             ExtractVarReferences(step.Readfile.Path, referencedVars);
                             if (!string.IsNullOrEmpty(step.Readfile.Into))
                                 definedVars.Add(step.Readfile.Into);
+                            var readfilePathOutput = ResolveReadfilePathOutputVariable(step.Readfile);
+                            if (!string.IsNullOrWhiteSpace(readfilePathOutput))
+                                definedVars.Add(readfilePathOutput);
                         }
                         break;
 
@@ -1198,6 +1201,17 @@ namespace SSH_Helper.Services.Scripting
             var trimmed = variableName.Trim();
             return trimmed.StartsWith("_", StringComparison.Ordinal)
                 && BareVariableNamePattern.IsMatch(trimmed);
+        }
+
+        private static string? ResolveReadfilePathOutputVariable(ReadfileOptions options)
+        {
+            if (!string.IsNullOrWhiteSpace(options.PathInto))
+                return options.PathInto.Trim();
+
+            if (options.PathOnly || string.IsNullOrWhiteSpace(options.Into))
+                return null;
+
+            return options.Into.Trim() + "_path";
         }
     }
 }

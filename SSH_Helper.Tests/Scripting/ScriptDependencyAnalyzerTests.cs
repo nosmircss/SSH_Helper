@@ -334,6 +334,52 @@ public class ScriptDependencyAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePresets_ReadfilePathOnlyOutput_IsNotReportedAsMissingColumn()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - readfile:
+                      select_file: true
+                      path_only: true
+                      path_into: selected_path
+                  - localcmd:
+                      command: "Get-Content -LiteralPath '${selected_path}'"
+                      into: file_text
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().NotContain("selected_path");
+    }
+
+    [Fact]
+    public void AnalyzePresets_ReadfileImplicitPathOutput_IsNotReportedAsMissingColumn()
+    {
+        var analyzer = new ScriptDependencyAnalyzer();
+        var preset = new PresetInfo
+        {
+            Commands = """
+                ---
+                steps:
+                  - readfile:
+                      select_file: true
+                      into: selected_lines
+                  - print:
+                      message: "${selected_lines_path}"
+                """
+        };
+
+        var result = analyzer.AnalyzePresets(new[] { preset });
+
+        result.ReferencedColumns.Should().NotContain("selected_lines_path");
+    }
+
+    [Fact]
     public void AnalyzeSshRequirements_SendAtRoot_RequiresSshSession()
     {
         var result = AnalyzeSshRequirements("""

@@ -532,8 +532,17 @@ export const blockDefs: BlockDef[] = [
     properties: [
       { key: 'path', label: 'File Path', type: 'text', required: true, browse: 'file' },
       { key: 'select_file', label: 'Pick File At Runtime', type: 'boolean', defaultValue: false },
+      {
+        key: 'autobrowse',
+        label: 'Open Browser Immediately',
+        type: 'boolean',
+        defaultValue: false,
+        helpText: 'Defaults to on when Pick File At Runtime and Path Only are both enabled. Turn it off to keep the custom path-entry form.',
+      },
       { key: 'message', label: 'Picker Message', type: 'text' },
       { key: 'fileext', label: 'Allowed Extensions', type: 'text' },
+      { key: 'path_only', label: 'Path Only', type: 'boolean', defaultValue: false },
+      { key: 'path_into', label: 'Path Variable', type: 'text' },
       { key: 'into', label: 'Into Variable', type: 'text', required: true },
       { key: 'skip_empty_lines', label: 'Skip Empty Lines', type: 'boolean', defaultValue: true },
       { key: 'trim_lines', label: 'Trim Lines', type: 'boolean', defaultValue: true },

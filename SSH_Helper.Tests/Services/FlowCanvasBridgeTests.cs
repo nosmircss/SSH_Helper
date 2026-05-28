@@ -1830,6 +1830,51 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_ReadfilePathOnlyWithPathInto_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("readfile", new JObject
+        {
+            ["select_file"] = true,
+            ["path_only"] = true,
+            ["path_into"] = "picked_path"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+        Assert.Contains("path_only: true", result.Yaml, StringComparison.Ordinal);
+        Assert.Contains("path_into: picked_path", result.Yaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ReadfileAutoBrowse_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("readfile", new JObject
+        {
+            ["select_file"] = true,
+            ["autobrowse"] = true,
+            ["path_only"] = true,
+            ["path_into"] = "picked_path"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+        Assert.Contains("autobrowse: true", result.Yaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_ReadfileAutoBrowseFalse_ExportsSuccessfully()
+    {
+        var result = ExportSingleBlock("readfile", new JObject
+        {
+            ["select_file"] = true,
+            ["autobrowse"] = false,
+            ["path_only"] = true,
+            ["path_into"] = "picked_path"
+        });
+
+        AssertExportSuccessWithCanonicalValidation(result);
+        Assert.Contains("autobrowse: false", result.Yaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ExportGraphToYaml_HttpBasicAuthWithoutUsername_ReturnsRequiredOptionError()
     {
         var result = ExportSingleBlock("http", new JObject
@@ -2083,6 +2128,92 @@ public class FlowCanvasBridgeTests
         var props = localCmdNode["data"]?["props"] as JObject;
         Assert.NotNull(props);
         Assert.Equal("detached", props!["lifetime"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_ReadfilePathOnly_ImportsPathCaptureProps()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - readfile:
+                  select_file: true
+                  path_only: true
+                  path_into: chosen_path
+            """;
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var readfileNode = nodes
+            .OfType<JObject>()
+            .Single(node => string.Equals(
+                node["data"]?["blockType"]?.ToString(),
+                "readfile",
+                StringComparison.OrdinalIgnoreCase));
+
+        var props = readfileNode["data"]?["props"] as JObject;
+        Assert.NotNull(props);
+        Assert.Equal(true, props!["select_file"]?.Value<bool>());
+        Assert.Equal(true, props["path_only"]?.Value<bool>());
+        Assert.Equal("chosen_path", props["path_into"]?.ToString());
+    }
+
+    [Fact]
+    public void TextToGraph_ReadfileAutoBrowse_ImportsAutoBrowseProp()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - readfile:
+                  select_file: true
+                  autobrowse: true
+                  path_only: true
+                  path_into: chosen_path
+            """;
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var readfileNode = nodes
+            .OfType<JObject>()
+            .Single(node => string.Equals(
+                node["data"]?["blockType"]?.ToString(),
+                "readfile",
+                StringComparison.OrdinalIgnoreCase));
+
+        var props = readfileNode["data"]?["props"] as JObject;
+        Assert.NotNull(props);
+        Assert.Equal(true, props!["autobrowse"]?.Value<bool>());
+    }
+
+    [Fact]
+    public void TextToGraph_ReadfileAutoBrowseFalse_ImportsExplicitFalseProp()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - readfile:
+                  select_file: true
+                  autobrowse: false
+                  path_only: true
+                  path_into: chosen_path
+            """;
+
+        var (nodes, _) = bridge.TextToGraph(yaml);
+
+        var readfileNode = nodes
+            .OfType<JObject>()
+            .Single(node => string.Equals(
+                node["data"]?["blockType"]?.ToString(),
+                "readfile",
+                StringComparison.OrdinalIgnoreCase));
+
+        var props = readfileNode["data"]?["props"] as JObject;
+        Assert.NotNull(props);
+        Assert.NotNull(props!["autobrowse"]);
+        Assert.Equal(false, props["autobrowse"]?.Value<bool>());
     }
 
     [Fact]

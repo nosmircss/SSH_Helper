@@ -20,6 +20,8 @@ namespace SSH_Helper.Services.Scripting.Commands
         private const string ManualOnlySelectionMessage = "Readfile file selection is only available during manual main-window runs.";
         private readonly Func<ReadFileOpenPathRequest, CancellationToken, Task<string?>> _openPathPrompt;
 
+        internal static Func<ReadFileOpenPathRequest, IWin32Window?, (DialogResult dialogResult, string? fileName)>? OpenFileDialogOverrideForTests { get; set; }
+
         public ReadFileCommand(Func<ReadFileOpenPathRequest, CancellationToken, Task<string?>>? openPathPrompt = null)
         {
             _openPathPrompt = openPathPrompt ?? PromptForOpenPathAsync;
@@ -30,11 +32,25 @@ namespace SSH_Helper.Services.Scripting.Commands
             if (step.Readfile == null)
                 return CommandResult.Fail("Readfile command has no options");
 
+            var shouldReadContents = ShouldReadContents(step);
+            var readOutputVariable = shouldReadContents ? step.Readfile.Into : null;
+            var pathOutputVariable = ResolvePathOutputVariable(step);
+
             if (!step.Readfile.SelectFile && string.IsNullOrEmpty(step.Readfile.Path))
                 return CommandResult.Fail("Readfile command requires a 'path' property");
 
-            if (string.IsNullOrEmpty(step.Readfile.Into))
+            if (shouldReadContents && string.IsNullOrEmpty(step.Readfile.Into))
                 return CommandResult.Fail("Readfile command requires an 'into' property");
+
+            if (!shouldReadContents && string.IsNullOrWhiteSpace(pathOutputVariable))
+                return CommandResult.Fail("Readfile command requires a 'path_into' property when 'path_only' is true");
+
+            if (shouldReadContents &&
+                !string.IsNullOrWhiteSpace(pathOutputVariable) &&
+                string.Equals(pathOutputVariable, step.Readfile.Into, StringComparison.OrdinalIgnoreCase))
+            {
+                return CommandResult.Fail("Readfile 'path_into' must differ from 'into' unless 'path_only' is true");
+            }
 
             try
             {
@@ -53,10 +69,11 @@ namespace SSH_Helper.Services.Scripting.Commands
                 if (string.IsNullOrWhiteSpace(filePath))
                 {
                     return HandleSelectionCancellation(
-                        step,
                         context,
-                        ScriptOutputType.Warning,
-                        "Readfile file selection cancelled by user");
+                        readOutputVariable,
+                        pathOutputVariable,
+                        "Readfile file selection cancelled by user",
+                        ScriptOutputType.Warning);
                 }
 
                 if (!ReadFileSelectionOptions.IsPathAllowed(filePath, allowedExtensions))
@@ -81,17 +98,28 @@ namespace SSH_Helper.Services.Scripting.Commands
                     return CommandResult.Fail(pathError!);
                 }
 
+                SetPathOutput(context, pathOutputVariable, filePath);
+
                 // Check if file exists
                 if (!File.Exists(filePath))
                 {
-                    // Set variable to empty list and emit warning
-                    context.SetVariable(step.Readfile.Into, new List<string>());
-                    context.EmitOutput($"File not found: {filePath} - variable '{step.Readfile.Into}' set to empty list", ScriptOutputType.Warning);
+                    if (!string.IsNullOrWhiteSpace(readOutputVariable))
+                    {
+                        context.SetVariable(readOutputVariable, new List<string>());
+                    }
+
+                    context.EmitOutput(BuildMissingFileMessage(filePath, readOutputVariable, pathOutputVariable), ScriptOutputType.Warning);
 
                     if (IsContinueOnError(step))
                         return CommandResult.Ok();
 
                     return CommandResult.Fail($"File not found: {filePath}");
+                }
+
+                if (!shouldReadContents)
+                {
+                    context.EmitOutput($"Captured resolved file path '{filePath}' into '{pathOutputVariable}'", ScriptOutputType.Debug);
+                    return CommandResult.Ok();
                 }
 
                 // Get encoding
@@ -127,11 +155,14 @@ namespace SSH_Helper.Services.Scripting.Commands
                 }
 
                 // Store the lines in the variable
-                context.SetVariable(step.Readfile.Into, lines);
+                context.SetVariable(readOutputVariable!, lines);
 
-                var message = $"Read {lines.Count} lines from '{filePath}' into '{step.Readfile.Into}'";
+                var message = $"Read {lines.Count} lines from '{filePath}' into '{readOutputVariable}'";
                 if (truncated)
                     message += $" (truncated at {maxLines} lines)";
+
+                if (!string.IsNullOrWhiteSpace(pathOutputVariable))
+                    message += $"; resolved path stored in '{pathOutputVariable}'";
 
                 context.EmitOutput(message, ScriptOutputType.Debug);
 
@@ -139,7 +170,7 @@ namespace SSH_Helper.Services.Scripting.Commands
             }
             catch (InvalidOperationException ex) when (string.Equals(ex.Message, ManualOnlySelectionMessage, StringComparison.Ordinal))
             {
-                return HandleSelectionFailure(step, context, ScriptOutputType.Error, ex.Message);
+                return HandleSelectionFailure(context, readOutputVariable, pathOutputVariable, ex.Message, ScriptOutputType.Error, IsContinueOnError(step));
             }
             catch (OperationCanceledException)
             {
@@ -196,7 +227,12 @@ namespace SSH_Helper.Services.Scripting.Commands
                 context.SubstituteVariables(step.Readfile!.Path ?? string.Empty));
 
             if (!step.Readfile.SelectFile)
-                return requestedPath;
+            {
+                if (string.IsNullOrWhiteSpace(requestedPath))
+                    return requestedPath;
+
+                return Path.GetFullPath(requestedPath);
+            }
 
             if (!context.AllowFileSelectionDialogs)
                 throw new InvalidOperationException(ManualOnlySelectionMessage);
@@ -204,7 +240,8 @@ namespace SSH_Helper.Services.Scripting.Commands
             var promptRequest = new ReadFileOpenPathRequest(
                 requestedPath,
                 ResolvePromptMessage(step, context),
-                allowedExtensions);
+                allowedExtensions,
+                ResolveAutoBrowse(step.Readfile));
 
             var promptedPath = await _openPathPrompt(promptRequest, cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(promptedPath))
@@ -220,12 +257,72 @@ namespace SSH_Helper.Services.Scripting.Commands
             return ReadFileSelectionOptions.ResolvePromptMessage(rawMessage);
         }
 
+        private static bool ResolveAutoBrowse(ReadfileOptions options)
+        {
+            if (options.AutoBrowse.HasValue)
+                return options.AutoBrowse.Value;
+
+            return options.SelectFile && options.PathOnly;
+        }
+
         private static Task<string?> PromptForOpenPathAsync(ReadFileOpenPathRequest request, CancellationToken cancellationToken)
         {
+            if (request.AutoBrowse)
+            {
+                return ScriptPromptDialogRunner.RunOnUiThreadAsync(
+                    owner => PromptForOpenPathWithNativeDialog(request, owner),
+                    cancellationToken);
+            }
+
             return ScriptPromptDialogRunner.ShowAsync<ScriptReadFileOpenPathDialog, string?>(
                 () => new ScriptReadFileOpenPathDialog(request.SuggestedPath, request.PromptMessage, request.AllowedExtensions),
                 dialog => dialog.DialogResult == DialogResult.OK ? dialog.SelectedPath : null,
                 cancellationToken);
+        }
+
+        private static string? PromptForOpenPathWithNativeDialog(ReadFileOpenPathRequest request, IWin32Window? owner)
+        {
+            var (dialogResult, fileName) = ShowOpenFileDialog(request, owner);
+            if (dialogResult != DialogResult.OK || string.IsNullOrWhiteSpace(fileName))
+                return null;
+
+            return fileName;
+        }
+
+        private static (DialogResult dialogResult, string? fileName) ShowOpenFileDialog(
+            ReadFileOpenPathRequest request,
+            IWin32Window? owner)
+        {
+            var dialogOverride = OpenFileDialogOverrideForTests;
+            if (dialogOverride != null)
+                return dialogOverride(request, owner);
+
+            using var dialog = new OpenFileDialog
+            {
+                Title = request.PromptMessage,
+                CheckFileExists = true,
+                CheckPathExists = true,
+                FileName = ReadFileSelectionOptions.GetSuggestedFileName(request.SuggestedPath),
+                Filter = ReadFileSelectionOptions.BuildDialogFilter(request.AllowedExtensions)
+            };
+
+            var defaultExtension = ReadFileSelectionOptions.GetDefaultExtension(request.AllowedExtensions);
+            if (!string.IsNullOrWhiteSpace(defaultExtension))
+            {
+                dialog.DefaultExt = defaultExtension;
+            }
+
+            var initialDirectory = ReadFileSelectionOptions.ResolveInitialDirectory(request.SuggestedPath);
+            if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
+            {
+                dialog.InitialDirectory = initialDirectory;
+            }
+
+            var result = owner == null
+                ? dialog.ShowDialog()
+                : dialog.ShowDialog(owner);
+
+            return (result, result == DialogResult.OK ? dialog.FileName : null);
         }
 
         private static bool IsContinueOnError(ScriptStep step)
@@ -233,30 +330,109 @@ namespace SSH_Helper.Services.Scripting.Commands
             return string.Equals(step.OnError, "continue", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static CommandResult HandleSelectionCancellation(
-            ScriptStep step,
-            ScriptContext context,
-            ScriptOutputType outputType,
-            string message)
+        private static bool ShouldReadContents(ScriptStep step)
         {
-            context.SetVariable(step.Readfile!.Into, new List<string>());
-            context.EmitOutput($"{message} - variable '{step.Readfile.Into}' set to empty list", outputType);
+            return step.Readfile is not { PathOnly: true };
+        }
+
+        private static string? ResolvePathOutputVariable(ScriptStep step)
+        {
+            if (step.Readfile == null)
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(step.Readfile.PathInto))
+                return step.Readfile.PathInto.Trim();
+
+            if (step.Readfile.PathOnly || string.IsNullOrWhiteSpace(step.Readfile.Into))
+                return null;
+
+            return step.Readfile.Into.Trim() + "_path";
+        }
+
+        private static void SetPathOutput(ScriptContext context, string? pathOutputVariable, string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(pathOutputVariable))
+                return;
+
+            context.SetVariable(pathOutputVariable, filePath);
+        }
+
+        private static CommandResult HandleSelectionCancellation(
+            ScriptContext context,
+            string? readOutputVariable,
+            string? pathOutputVariable,
+            string message,
+            ScriptOutputType outputType)
+        {
+            ResetOutputs(context, readOutputVariable, pathOutputVariable);
+            context.EmitOutput(BuildResetMessage(message, readOutputVariable, pathOutputVariable), outputType);
             return CommandResult.Exit(ScriptExitStatus.Cancelled, message);
         }
 
         private static CommandResult HandleSelectionFailure(
-            ScriptStep step,
             ScriptContext context,
+            string? readOutputVariable,
+            string? pathOutputVariable,
+            string message,
             ScriptOutputType outputType,
-            string message)
+            bool continueOnError)
         {
-            context.SetVariable(step.Readfile!.Into, new List<string>());
-            context.EmitOutput($"{message} - variable '{step.Readfile.Into}' set to empty list", outputType);
+            ResetOutputs(context, readOutputVariable, pathOutputVariable);
+            context.EmitOutput(BuildResetMessage(message, readOutputVariable, pathOutputVariable), outputType);
 
-            if (IsContinueOnError(step))
+            if (continueOnError)
                 return CommandResult.Suppressed(message);
 
             return CommandResult.Fail(message);
+        }
+
+        private static void ResetOutputs(
+            ScriptContext context,
+            string? readOutputVariable,
+            string? pathOutputVariable)
+        {
+            if (!string.IsNullOrWhiteSpace(readOutputVariable))
+                context.SetVariable(readOutputVariable, new List<string>());
+
+            if (!string.IsNullOrWhiteSpace(pathOutputVariable))
+                context.SetVariable(pathOutputVariable, string.Empty);
+        }
+
+        private static string BuildResetMessage(
+            string message,
+            string? readOutputVariable,
+            string? pathOutputVariable)
+        {
+            var resets = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(readOutputVariable))
+                resets.Add($"variable '{readOutputVariable}' set to empty list");
+
+            if (!string.IsNullOrWhiteSpace(pathOutputVariable))
+                resets.Add($"variable '{pathOutputVariable}' set to empty string");
+
+            if (resets.Count == 0)
+                return message;
+
+            return $"{message} - {string.Join(", ", resets)}";
+        }
+
+        private static string BuildMissingFileMessage(
+            string filePath,
+            string? readOutputVariable,
+            string? pathOutputVariable)
+        {
+            var details = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(readOutputVariable))
+                details.Add($"variable '{readOutputVariable}' set to empty list");
+
+            if (!string.IsNullOrWhiteSpace(pathOutputVariable))
+                details.Add($"variable '{pathOutputVariable}' retained resolved path");
+
+            return details.Count == 0
+                ? $"File not found: {filePath}"
+                : $"File not found: {filePath} - {string.Join(", ", details)}";
         }
 
         private static Encoding GetEncoding(string? encodingName)
@@ -275,11 +451,12 @@ namespace SSH_Helper.Services.Scripting.Commands
 
     public sealed class ReadFileOpenPathRequest
     {
-        public ReadFileOpenPathRequest(string suggestedPath, string promptMessage, IReadOnlyList<string> allowedExtensions)
+        public ReadFileOpenPathRequest(string suggestedPath, string promptMessage, IReadOnlyList<string> allowedExtensions, bool autoBrowse = false)
         {
             SuggestedPath = suggestedPath ?? string.Empty;
             PromptMessage = ReadFileSelectionOptions.ResolvePromptMessage(promptMessage);
             AllowedExtensions = allowedExtensions?.ToArray() ?? Array.Empty<string>();
+            AutoBrowse = autoBrowse;
         }
 
         public string SuggestedPath { get; }
@@ -287,6 +464,8 @@ namespace SSH_Helper.Services.Scripting.Commands
         public string PromptMessage { get; }
 
         public IReadOnlyList<string> AllowedExtensions { get; }
+
+        public bool AutoBrowse { get; }
     }
 
     internal static class ReadFileSelectionOptions
@@ -375,6 +554,42 @@ namespace SSH_Helper.Services.Scripting.Commands
         internal static string BuildRestrictionErrorMessage(IReadOnlyList<string> allowedExtensions)
         {
             return $"File type must match one of: {FormatAllowedExtensions(allowedExtensions)}.";
+        }
+
+        internal static string GetSuggestedFileName(string path)
+        {
+            var trimmed = (path ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+                return string.Empty;
+
+            if (Directory.Exists(trimmed))
+                return string.Empty;
+
+            var fileName = Path.GetFileName(trimmed);
+            return string.IsNullOrWhiteSpace(fileName) ? string.Empty : fileName;
+        }
+
+        internal static string ResolveInitialDirectory(string path)
+        {
+            var trimmed = (path ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+                return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+
+            try
+            {
+                if (Directory.Exists(trimmed))
+                    return trimmed;
+
+                var directory = Path.GetDirectoryName(trimmed);
+                if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+                    return directory;
+            }
+            catch
+            {
+                // Fall back to Documents if the suggested path is invalid.
+            }
+
+            return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         }
     }
 
@@ -502,10 +717,10 @@ namespace SSH_Helper.Services.Scripting.Commands
         {
             using var dialog = new OpenFileDialog
             {
-                Title = "Choose File To Read",
+                Title = Text,
                 CheckFileExists = true,
                 CheckPathExists = true,
-                FileName = GetSuggestedFileName(_txtPath.Text),
+                FileName = ReadFileSelectionOptions.GetSuggestedFileName(_txtPath.Text),
                 Filter = ReadFileSelectionOptions.BuildDialogFilter(_allowedExtensions)
             };
 
@@ -515,7 +730,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 dialog.DefaultExt = defaultExtension;
             }
 
-            var initialDirectory = ResolveInitialDirectory(_txtPath.Text);
+            var initialDirectory = ReadFileSelectionOptions.ResolveInitialDirectory(_txtPath.Text);
             if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
             {
                 dialog.InitialDirectory = initialDirectory;
@@ -529,12 +744,21 @@ namespace SSH_Helper.Services.Scripting.Commands
 
         private void BtnOk_Click(object? sender, EventArgs e)
         {
+            if (!TryAcceptSelectedPath())
+                return;
+
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+
+        private bool TryAcceptSelectedPath()
+        {
             var selectedPath = _txtPath.Text.Trim();
             if (string.IsNullOrWhiteSpace(selectedPath))
             {
                 _lblError.Text = "A file path is required.";
                 _lblError.Visible = true;
-                return;
+                return false;
             }
 
             try
@@ -544,7 +768,7 @@ namespace SSH_Helper.Services.Scripting.Commands
                 {
                     _lblError.Text = ReadFileSelectionOptions.BuildRestrictionErrorMessage(_allowedExtensions);
                     _lblError.Visible = true;
-                    return;
+                    return false;
                 }
 
                 _txtPath.Text = fullPath;
@@ -553,11 +777,10 @@ namespace SSH_Helper.Services.Scripting.Commands
             {
                 _lblError.Text = ex.Message;
                 _lblError.Visible = true;
-                return;
+                return false;
             }
 
-            DialogResult = DialogResult.OK;
-            Close();
+            return true;
         }
 
         private static string BuildDefaultPath(string suggestedPath)
@@ -574,42 +797,6 @@ namespace SSH_Helper.Services.Scripting.Commands
                 TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
 
             return Math.Max(34, measured.Height);
-        }
-
-        private static string GetSuggestedFileName(string path)
-        {
-            var trimmed = (path ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(trimmed))
-                return string.Empty;
-
-            if (Directory.Exists(trimmed))
-                return string.Empty;
-
-            var fileName = Path.GetFileName(trimmed);
-            return string.IsNullOrWhiteSpace(fileName) ? string.Empty : fileName;
-        }
-
-        private static string ResolveInitialDirectory(string path)
-        {
-            var trimmed = (path ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(trimmed))
-                return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-
-            try
-            {
-                if (Directory.Exists(trimmed))
-                    return trimmed;
-
-                var directory = Path.GetDirectoryName(trimmed);
-                if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-                    return directory;
-            }
-            catch
-            {
-                // Fall back to Documents if the suggested path is invalid.
-            }
-
-            return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         }
     }
 }

@@ -536,7 +536,7 @@ public class ScriptAutocompleteProviderTests
         var completion = provider.GetCompletion(text, text.Length);
 
         completion.Context.Should().Be(CompletionContextKind.StepOptionKey);
-        completion.Items.Select(item => item.Label).Should().Contain(["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"]);
+        completion.Items.Select(item => item.Label).Should().Contain(["path", "select_file", "autobrowse", "message", "fileext", "path_into", "path_only", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding"]);
         completion.Items.Should().Contain(item => item.Label == "path" && item.Detail == "required");
         completion.Items.Should().Contain(item => item.Label == "into" && item.Detail == "required");
     }
