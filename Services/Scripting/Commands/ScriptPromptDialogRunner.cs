@@ -127,6 +127,82 @@ namespace SSH_Helper.Services.Scripting.Commands
             return tcs.Task;
         }
 
+        public static Task<TResult> RunOnUiThreadAsync<TResult>(
+            Func<Form?, TResult> operation,
+            CancellationToken cancellationToken)
+        {
+            var mainForm = GetMainForm();
+            if (mainForm == null || mainForm.IsDisposed)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var result = operation(null);
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.FromResult(result);
+            }
+
+            var tcs = new TaskCompletionSource<TResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void RunOperation()
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    tcs.TrySetCanceled(cancellationToken);
+                    return;
+                }
+
+                MainFormPromptLock? promptLock = null;
+
+                try
+                {
+                    promptLock = MainFormPromptLock.TryAcquire(mainForm);
+                    var result = operation(mainForm);
+
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        tcs.TrySetCanceled(cancellationToken);
+                        return;
+                    }
+
+                    tcs.TrySetResult(result);
+                }
+                catch (OperationCanceledException)
+                {
+                    tcs.TrySetCanceled(cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+                finally
+                {
+                    promptLock?.Dispose();
+                    RestoreMainFormActivation(mainForm);
+                }
+            }
+
+            try
+            {
+                if (mainForm.InvokeRequired)
+                {
+                    mainForm.BeginInvoke((Action)RunOperation);
+                }
+                else
+                {
+                    RunOperation();
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                tcs.TrySetCanceled(cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                tcs.TrySetException(ex);
+            }
+
+            return tcs.Task;
+        }
+
         private static Form? GetMainForm()
         {
             if (AnchorFormOverride is { IsDisposed: false })

@@ -1766,14 +1766,19 @@ Ends script execution with a status and message.
 
 Reads a text file line by line into a list variable. Useful for processing IP lists, configuration data, or any line-based input.
 
+`readfile` can also capture the resolved absolute file path for later steps. Use `path_only: true` when you want the chosen path without reading file contents, or let normal read mode expose a companion path variable automatically.
+
 **Syntax:**
 ```yaml
 - readfile:
     path: "C:\\path\\to\\file.txt"
     select_file: false         # Optional (default: false). If true, prompt to choose the file at runtime
+    autobrowse: true           # Optional. Defaults to true when select_file and path_only are both true; otherwise false
     message: "Choose the file to import for this run."  # Optional picker prompt text
     fileext: "txt,json"        # Optional allowed extensions (comma-separated)
-    into: variable_name
+    path_only: false           # Optional (default: false). If true, capture only the path and skip reading contents
+    path_into: variable_name   # Optional path variable. Required when path_only: true
+    into: variable_name        # Required unless path_only: true
     skip_empty_lines: true     # Optional (default: true)
     trim_lines: true           # Optional (default: true)
     max_lines: 10000           # Optional (default: 10000, 0 = unlimited)
@@ -1786,9 +1791,12 @@ Reads a text file line by line into a list variable. Useful for processing IP li
 |-----------|----------|---------|-------------|
 | `path` | Yes, unless `select_file: true` | - | Path to the file (supports variable substitution). When `select_file: true`, this becomes an optional seed for the picker |
 | `select_file` | No | `false` | Prompt the operator to choose the file at runtime. Only supported for manual runs from the main window |
+| `autobrowse` | No | `true` in `select_file + path_only` mode; otherwise `false` | When `select_file: true`, open the native browse dialog immediately, using `message` as the dialog title, and skip the intermediate custom picker form |
 | `message` | No | default picker prompt | Custom prompt text shown in the picker dialog when `select_file: true` |
 | `fileext` | No | all files | Comma-separated allowed extensions such as `txt,json` or `.txt,.json`. In picker mode this filters the browse dialog, and the final resolved path must match one of the allowed extensions |
-| `into` | Yes | - | Variable name to store the lines as a list |
+| `path_only` | No | `false` | Capture only the resolved absolute path and skip reading file contents |
+| `path_into` | No, but required when `path_only: true` | `<into>_path` in normal read mode | Variable name to store the resolved absolute path. In normal read mode, if omitted, the runtime stores the path in a companion variable named `<into>_path` |
+| `into` | Yes, unless `path_only: true` | - | Variable name to store the lines as a list |
 | `skip_empty_lines` | No | `true` | Skip blank lines |
 | `trim_lines` | No | `true` | Remove leading/trailing whitespace from each line |
 | `max_lines` | No | `10000` | Maximum lines to read (0 = unlimited) |
@@ -1810,7 +1818,10 @@ Additional machine/user-specific `%NAME%` variables also work if they exist in t
 
 **Manual-only picker note:**
 - `select_file: true` is available only during manual main-window runs. Scheduled jobs and Job List `Run Now` executions fail cleanly instead of opening a file picker.
-- When the picker is cancelled, `into` is set to an empty list and the script stops immediately. `on_error: continue` does not suppress picker cancellation.
+- `autobrowse` is only meaningful with `select_file: true`. In `path_only` picker mode it defaults to `true`, so the native file browser opens immediately unless you explicitly set `autobrowse: false` to keep the custom path-entry form.
+- When the picker is cancelled, any read-output variable is set to an empty list, any path-output variable is set to an empty string, and the script stops immediately. `on_error: continue` does not suppress picker cancellation.
+- In normal read mode, the resolved absolute path is also exposed for later steps. If `path_into` is omitted, the runtime stores it in `<into>_path`.
+- `path_only: true` requires `path_into` and skips the file read entirely after path validation succeeds.
 - `fileext` accepts comma-separated extensions with or without leading dots or wildcards, for example `txt,json`, `.txt,.json`, or `*.txt;*.json`.
 
 **Security:**
@@ -1854,6 +1865,31 @@ Additional machine/user-specific `%NAME%` variables also work if they exist in t
     message: "Choose the host import file for this site."
     fileext: "txt,json"
     into: selected_hosts
+
+# Read a file and keep its resolved absolute path for later steps
+- readfile:
+    select_file: true
+    fileext: "txt"
+    into: selected_hosts
+    path_into: selected_hosts_file
+
+- print:
+    message: "Loaded ${selected_hosts.length} entries from ${selected_hosts_file}"
+
+# Capture only the selected path, then read it later with a PowerShell-safe localcmd
+- readfile:
+    select_file: true
+    fileext: "txt"
+    message: "Choose the text file to inspect."
+    path_only: true
+    path_into: selected_path
+
+- set:
+    expression: selected_path_ps = replace(selected_path, "'", "''")
+
+- localcmd:
+    command: "Get-Content -LiteralPath '${selected_path_ps}'"
+    into: selected_file
 ```
 
 ---

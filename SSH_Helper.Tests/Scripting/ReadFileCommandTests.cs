@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 using FluentAssertions;
 using SSH_Helper.Services.Scripting;
 using SSH_Helper.Services.Scripting.Commands;
@@ -91,6 +92,176 @@ public class ReadFileCommandTests : IDisposable
         result.Success.Should().BeTrue();
         promptCallCount.Should().Be(1);
         context.GetVariable("selected_entries").Should().BeEquivalentTo(new List<string> { "{\"ok\":true}" });
+        context.GetVariable("selected_entries_path").Should().Be(allowedFilePath);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileTrue_PathOnly_CapturesResolvedPathWithoutReadingContents()
+    {
+        var allowedFilePath = Path.Combine(_testDirectory, "picked.txt");
+        File.WriteAllLines(allowedFilePath, new[] { "line one", "line two" });
+        var promptCallCount = 0;
+        var command = new ReadFileCommand((request, _) =>
+        {
+            promptCallCount++;
+            request.AllowedExtensions.Should().BeEquivalentTo([".txt"]);
+            return Task.FromResult<string?>(allowedFilePath);
+        });
+
+        var step = new ScriptStep
+        {
+            Readfile = new ReadfileOptions
+            {
+                SelectFile = true,
+                FileExt = "txt",
+                PathOnly = true,
+                PathInto = "selected_path"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        promptCallCount.Should().Be(1);
+        context.GetVariable("selected_path").Should().Be(allowedFilePath);
+        context.HasVariable("selected_entries").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileTrue_AutoBrowse_PassesFlagToPrompt()
+    {
+        var allowedFilePath = Path.Combine(_testDirectory, "picked.txt");
+        File.WriteAllLines(allowedFilePath, new[] { "line one" });
+        var command = new ReadFileCommand((request, _) =>
+        {
+            request.AutoBrowse.Should().BeTrue();
+            return Task.FromResult<string?>(allowedFilePath);
+        });
+
+        var step = new ScriptStep
+        {
+            Readfile = new ReadfileOptions
+            {
+                SelectFile = true,
+                AutoBrowse = true,
+                PathOnly = true,
+                PathInto = "selected_path"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariable("selected_path").Should().Be(allowedFilePath);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileTrue_PathOnly_ImpliedAutoBrowse_PassesFlagToPrompt()
+    {
+        var allowedFilePath = Path.Combine(_testDirectory, "picked.txt");
+        File.WriteAllLines(allowedFilePath, new[] { "line one" });
+        var command = new ReadFileCommand((request, _) =>
+        {
+            request.AutoBrowse.Should().BeTrue();
+            return Task.FromResult<string?>(allowedFilePath);
+        });
+
+        var step = new ScriptStep
+        {
+            Readfile = new ReadfileOptions
+            {
+                SelectFile = true,
+                PathOnly = true,
+                PathInto = "selected_path"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariable("selected_path").Should().Be(allowedFilePath);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileTrue_PathOnly_AutoBrowseFalse_PassesFalseFlagToPrompt()
+    {
+        var allowedFilePath = Path.Combine(_testDirectory, "picked.txt");
+        File.WriteAllLines(allowedFilePath, new[] { "line one" });
+        var command = new ReadFileCommand((request, _) =>
+        {
+            request.AutoBrowse.Should().BeFalse();
+            return Task.FromResult<string?>(allowedFilePath);
+        });
+
+        var step = new ScriptStep
+        {
+            Readfile = new ReadfileOptions
+            {
+                SelectFile = true,
+                AutoBrowse = false,
+                PathOnly = true,
+                PathInto = "selected_path"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        context.GetVariable("selected_path").Should().Be(allowedFilePath);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileTrue_PathOnly_UsesNativeFileDialogByDefault()
+    {
+        var allowedFilePath = Path.Combine(_testDirectory, "picked.txt");
+        File.WriteAllLines(allowedFilePath, new[] { "line one" });
+        var priorOverride = ReadFileCommand.OpenFileDialogOverrideForTests;
+        var openDialogCalls = 0;
+
+        try
+        {
+            ReadFileCommand.OpenFileDialogOverrideForTests = (request, owner) =>
+            {
+                openDialogCalls++;
+                request.AutoBrowse.Should().BeTrue();
+                request.PromptMessage.Should().Be("Choose the file now.");
+                request.AllowedExtensions.Should().BeEquivalentTo([".txt"]);
+                owner.Should().BeNull();
+                return (DialogResult.OK, allowedFilePath);
+            };
+
+            var step = new ScriptStep
+            {
+                Readfile = new ReadfileOptions
+                {
+                    SelectFile = true,
+                    Message = "Choose the file now.",
+                    FileExt = "txt",
+                    PathOnly = true,
+                    PathInto = "selected_path"
+                }
+            };
+
+            var context = new ScriptContext();
+
+            var result = await new ReadFileCommand().ExecuteAsync(step, context, CancellationToken.None);
+
+            result.Success.Should().BeTrue();
+            openDialogCalls.Should().Be(1);
+            context.GetVariable("selected_path").Should().Be(allowedFilePath);
+        }
+        finally
+        {
+            ReadFileCommand.OpenFileDialogOverrideForTests = priorOverride;
+        }
     }
 
     [Fact]
@@ -167,6 +338,30 @@ public class ReadFileCommandTests : IDisposable
         result.ExitStatus.Should().Be(ScriptExitStatus.Cancelled);
         result.Message.Should().Contain("cancelled");
         context.GetVariable("entries").Should().BeEquivalentTo(new List<string>());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SelectFileCancelled_PathOnly_ClearsPathVariableAndReturnsCancelledExit()
+    {
+        var command = new ReadFileCommand((_, _) => Task.FromResult<string?>(null));
+        var step = new ScriptStep
+        {
+            Readfile = new ReadfileOptions
+            {
+                SelectFile = true,
+                PathOnly = true,
+                PathInto = "selected_path"
+            }
+        };
+
+        var context = new ScriptContext();
+
+        var result = await command.ExecuteAsync(step, context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ShouldExit.Should().BeTrue();
+        result.ExitStatus.Should().Be(ScriptExitStatus.Cancelled);
+        context.GetVariable("selected_path").Should().Be(string.Empty);
     }
 
     [Fact]

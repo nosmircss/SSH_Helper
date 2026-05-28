@@ -837,6 +837,28 @@ function hasAnyValue(value: unknown): boolean {
   return true;
 }
 
+function hasExplicitProperty(props: Record<string, unknown> | undefined, key: string): boolean {
+  return !!props && Object.prototype.hasOwnProperty.call(props, key);
+}
+
+function resolveDisplayedPropertyValue(
+  blockType: string,
+  propDef: PropertyDef,
+  props: Record<string, unknown> | undefined,
+): unknown {
+  const rawValue = props?.[propDef.key];
+
+  if (blockType === 'readfile' && propDef.key === 'autobrowse' && !hasExplicitProperty(props, 'autobrowse')) {
+    const selectFile = toBoolean(props?.select_file, false);
+    const pathOnly = toBoolean(props?.path_only, false);
+    if (selectFile && pathOnly) {
+      return true;
+    }
+  }
+
+  return rawValue;
+}
+
 function isDynamicRuntimeValue(value: string): boolean {
   return value.includes('${') && value.includes('}');
 }
@@ -851,6 +873,16 @@ function isPropertyRequired(
   if (blockType === 'readfile' && propDef.key === 'path') {
     const selectFile = toBoolean(props?.select_file, false);
     return !selectFile;
+  }
+
+  if (blockType === 'readfile' && propDef.key === 'into') {
+    const pathOnly = toBoolean(props?.path_only, false);
+    return !pathOnly;
+  }
+
+  if (blockType === 'readfile' && propDef.key === 'path_into') {
+    const pathOnly = toBoolean(props?.path_only, false);
+    return pathOnly;
   }
 
   if (blockType === 'http') {
@@ -1611,7 +1643,7 @@ export default function Properties() {
 
   const renderProperty = (propDef: PropertyDef) => {
     const fieldTestId = `properties-field-${propDef.key}-${propDef.type}`;
-    const fieldValue = blockData.props?.[propDef.key];
+    const fieldValue = resolveDisplayedPropertyValue(blockData.blockType, propDef, blockData.props);
     const required = isPropertyRequired(blockData.blockType, propDef, blockData.props);
     const validationMessage = getPropertyValidationMessage(blockData.blockType, propDef, fieldValue, required);
     const invalid = validationMessage !== null;

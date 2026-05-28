@@ -1,4 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
+import { blockDefMap } from '../blockDefs/registry';
 import { useFlowStore } from '../stores/useFlowStore';
 
 export interface CommentData {
@@ -17,6 +18,85 @@ export interface ExecutableGraphPayload {
   edges: Edge[];
   comments: CommentData[];
   disabledBlocks: string[];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function areEquivalentValues(left: unknown, right: unknown): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (typeof left === 'number' && typeof right === 'number') {
+    return Number.isNaN(left) && Number.isNaN(right);
+  }
+
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) {
+      return false;
+    }
+
+    return left.every((item, index) => areEquivalentValues(item, right[index]));
+  }
+
+  if (isPlainObject(left) && isPlainObject(right)) {
+    const leftKeys = Object.keys(left);
+    const rightKeys = Object.keys(right);
+    if (leftKeys.length !== rightKeys.length) {
+      return false;
+    }
+
+    return leftKeys.every((key) =>
+      Object.prototype.hasOwnProperty.call(right, key) && areEquivalentValues(left[key], right[key]),
+    );
+  }
+
+  return false;
+}
+
+function stripDefaultProps(node: Node): Node {
+  const data = isPlainObject(node.data) ? node.data : undefined;
+  const blockType = typeof data?.blockType === 'string' ? data.blockType : '';
+  const props = isPlainObject(data?.props) ? data.props : undefined;
+  const def = blockDefMap.get(blockType);
+
+  if (!def || !props) {
+    return node;
+  }
+
+  let changed = false;
+  const nextProps: Record<string, unknown> = { ...props };
+
+  for (const propDef of def.properties) {
+    if (propDef.defaultValue === undefined) {
+      continue;
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(nextProps, propDef.key)) {
+      continue;
+    }
+
+    if (!areEquivalentValues(nextProps[propDef.key], propDef.defaultValue)) {
+      continue;
+    }
+
+    delete nextProps[propDef.key];
+    changed = true;
+  }
+
+  if (!changed) {
+    return node;
+  }
+
+  return {
+    ...node,
+    data: {
+      ...data,
+      props: nextProps,
+    },
+  };
 }
 
 /**
@@ -48,7 +128,7 @@ export function buildExecutableGraphPayload(
         attachedToNodeId: data?.attachedToNodeId ? String(data.attachedToNodeId) : undefined,
       });
     } else {
-      exportNodes.push(n);
+      exportNodes.push(stripDefaultProps(n));
     }
   }
 

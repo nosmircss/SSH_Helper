@@ -113,7 +113,7 @@ namespace SSH_Helper.Services.Scripting
                 ["foreach"] = ["iterator", "when", "do"],
                 ["while"] = ["condition", "max_iterations", "do"],
                 ["try"] = ["do", "catch", "finally"],
-                ["readfile"] = ["path", "select_file", "message", "fileext", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding", "on_error"],
+                ["readfile"] = ["path", "select_file", "message", "fileext", "autobrowse", "path_into", "path_only", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding", "on_error"],
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
                 ["exists"] = ["path", "into", "type", "on_error"],
                 ["playsound"] = ["path", "wait", "volume", "max_seconds", "into", "on_error"],
@@ -1989,6 +1989,20 @@ namespace SSH_Helper.Services.Scripting
                         case "file_extensions":
                         case "fileextensions":
                             options.FileExt = parser.Consume<Scalar>().Value;
+                            break;
+                        case "autobrowse":
+                        case "auto_browse":
+                            var autoBrowseValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                            options.AutoBrowse = autoBrowseValue == "true" || autoBrowseValue == "yes" || autoBrowseValue == "1";
+                            break;
+                        case "path_into":
+                        case "pathinto":
+                            options.PathInto = parser.Consume<Scalar>().Value;
+                            break;
+                        case "path_only":
+                        case "pathonly":
+                            var pathOnlyValue = parser.Consume<Scalar>().Value.ToLowerInvariant();
+                            options.PathOnly = pathOnlyValue == "true" || pathOnlyValue == "yes" || pathOnlyValue == "1";
                             break;
                         case "skip_empty_lines":
                         case "skipemptylines":
@@ -4470,10 +4484,34 @@ namespace SSH_Helper.Services.Scripting
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Readfile requires 'path'{lineContent}");
                         }
-                        if (step.Readfile == null || string.IsNullOrEmpty(step.Readfile.Into))
+
+                        if (step.Readfile == null)
                         {
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Readfile requires 'into' variable{lineContent}");
+                            break;
+                        }
+
+                        if (step.Readfile.PathOnly)
+                        {
+                            if (string.IsNullOrWhiteSpace(step.Readfile.PathInto))
+                            {
+                                var lineContent = GetLineContent(lines, step.LineNumber);
+                                errors.Add($"{prefix}Line {step.LineNumber}: Readfile requires 'path_into' when 'path_only' is true{lineContent}");
+                            }
+                        }
+                        else if (string.IsNullOrEmpty(step.Readfile.Into))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Readfile requires 'into' variable{lineContent}");
+                        }
+
+                        if (!step.Readfile.PathOnly &&
+                            !string.IsNullOrWhiteSpace(step.Readfile.PathInto) &&
+                            string.Equals(step.Readfile.PathInto, step.Readfile.Into, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Readfile 'path_into' must differ from 'into' unless 'path_only' is true{lineContent}");
                         }
                         break;
 

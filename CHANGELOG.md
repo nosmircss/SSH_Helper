@@ -1,5 +1,105 @@
 # Changelog
 
+## Changes Since `28cbf8c` (0.51.19)
+
+### `readfile` Path Capture Modes
+
+`readfile` now exposes the resolved absolute file path to subsequent steps. Two new modes cover the most common picker-driven workflows:
+
+- **Companion variable (normal read mode)** — After a successful file read, the runtime automatically stores the resolved absolute path in `<into>_path` unless `path_into` is given an explicit name. Scripts can reference the path immediately in the next step with no additional configuration.
+- **Path-only mode** — Setting `path_only: true` validates and resolves the path but skips reading file contents entirely. Useful when a later `localcmd` or `set` step needs the path string rather than the parsed lines.
+
+```yaml
+# Read a file and capture the resolved path alongside contents
+- readfile:
+    select_file: true
+    fileext: "txt"
+    into: selected_hosts
+    path_into: selected_hosts_file   # Optional; defaults to selected_hosts_path
+
+- print:
+    message: "Loaded ${selected_hosts.length} entries from ${selected_hosts_file}"
+
+# Capture only the selected path for a later PowerShell step
+- readfile:
+    select_file: true
+    fileext: "txt"
+    message: "Choose the text file to inspect."
+    path_only: true
+    path_into: selected_path
+
+- set:
+    expression: selected_path_ps = replace(selected_path, "'", "''")
+
+- localcmd:
+    command: "Get-Content -LiteralPath '${selected_path_ps}'"
+    into: file_lines
+```
+
+**New `readfile` properties:**
+
+| Property | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `path_only` | No | `false` | Capture only the resolved absolute path and skip reading file contents |
+| `path_into` | No, but required when `path_only: true` | `<into>_path` in normal read mode | Variable name to store the resolved absolute path |
+| `autobrowse` | No | `true` when `select_file` and `path_only` are both `true`; otherwise `false` | When `select_file: true`, open the native browse dialog immediately and skip the intermediate custom path-entry form |
+
+**Runtime behavior:**
+
+- When `path_into` is omitted in normal read mode, the companion variable is named `<into>_path`. When it is given the same name as `into`, the parser reports an error.
+- In `path_only` picker mode, `autobrowse` defaults to `true` so the native file browser opens immediately. Set `autobrowse: false` explicitly to keep the custom path-entry form.
+- Picker cancellation in `path_only` mode sets the `path_into` variable to an empty string and exits with `Cancelled` status. `on_error: continue` does not suppress picker cancellation.
+- The blocked-path security check applies in both modes — `path_only` still validates that the resolved path is not inside `C:\Windows`, `C:\Program Files`, or other user directories.
+- Scheduled-job and Job List `Run Now` executions reject `readfile` steps with `select_file: true` in `path_only` mode with the same `ManualOnlySelectionMessage` as ordinary `select_file` steps.
+
+**`ScriptDependencyAnalyzer`** — `ResolveReadfilePathOutputVariable` mirrors the runtime logic: `path_into` when set, otherwise `<into>_path` in normal mode, `null` in `path_only` mode. The resolved variable name is added to `definedVars` so no false-positive "undefined variable" warnings appear when downstream steps reference the path variable.
+
+**`ScriptParser`** — `autobrowse`, `path_into`, and `path_only` added to the allowed `readfile` option key list. Validation emits `"Readfile with 'path_only' requires 'path_into'"` when `path_only: true` is set without a `path_into` value.
+
+**Flow Canvas parity:**
+
+- `FlowCanvas/src/blockDefs/registry.ts` adds `autobrowse`, `path_only`, and `path_into` to the `readfile` block. `autobrowse` includes a helpText noting it defaults to `true` in `select_file + path_only` mode.
+- `FlowCanvas/src/panels/Properties.tsx` computes the displayed `autobrowse` value dynamically — when `autobrowse` has no explicit value and both `select_file` and `path_only` are `true`, the Properties panel shows `true` as the effective default. The required-field logic is extended: `into` is no longer required when `path_only: true`; `path_into` becomes required in that same case; `path` is not required when `select_file: true`.
+- `FlowCanvasBridge` exports `path_into` (string), `autobrowse` (nullable bool), and `path_only` (bool, omitted when `false`) into the YAML block and reads all three back on import. The `readfile` canonical key list in `ExportKeyOrder` is updated to include `path_only` and `path_into` in their documented order.
+
+### Flow Canvas Omits Default Property Values on Export
+
+When the canvas sends the executable graph payload to the host (Apply YAML, Run, test-step, debug), property values that exactly match the block definition's `defaultValue` are now stripped from each node's `props`. Only properties with explicitly non-default values, or properties with no declared default, are included.
+
+**`stripDefaultProps(node)`** (`FlowCanvas/src/utils/exportGraph.ts`) — Iterates `def.properties` for the node's `blockType`, and for each `PropertyDef` that has a `defaultValue`, removes the matching key from `props` when the current value equals the default. Deep equality is handled by `areEquivalentValues`, which covers scalars, arrays with element-wise comparison, and plain objects with key-set and value comparison. The function returns the original node reference unchanged when no keys are stripped, and a new node with a shallow-copied `data.props` when at least one key is removed.
+
+`buildExecutableGraphPayload` calls `stripDefaultProps` for every non-comment export node. Comment nodes are extracted to the `comments` list as before and are unaffected.
+
+**Example** — A `send` node configured with only `command: "show version"` (all other fields at their defaults: `suppress: false`, `retry: 0`, `retry_delay: 1`, `fail_on_nonzero: false`, `on_error: "stop"`) now exports:
+
+```json
+{ "command": "show version" }
+```
+
+instead of the full properties object with every default repeated.
+
+### Test Coverage
+
+| Test class | Coverage |
+|------------|----------|
+| `SSH_Helper.Tests/Scripting/ReadFileCommandTests.cs` | `ExecuteAsync_SelectFileTrue_PathOnly_CapturesResolvedPathWithoutReadingContents` — `path_only` mode resolves path, skips file read, and stores the absolute path in `path_into`; `ExecuteAsync_SelectFileTrue_AutoBrowse_PassesFlagToPrompt` — explicit `autobrowse: true` forwards `AutoBrowse = true` to the prompt request; `ExecuteAsync_SelectFileTrue_PathOnly_ImpliedAutoBrowse_PassesFlagToPrompt` — `path_only + select_file` with no explicit `autobrowse` defaults to `true`; `ExecuteAsync_SelectFileTrue_PathOnly_AutoBrowseFalse_PassesFalseFlagToPrompt` — explicit `autobrowse: false` overrides the default; `ExecuteAsync_SelectFileTrue_PathOnly_UsesNativeFileDialogByDefault` — `autobrowse = true` routes through the native `OpenFileDialog` code path; `ExecuteAsync_SelectFileCancelled_PathOnly_ClearsPathVariableAndReturnsCancelledExit` — cancellation in `path_only` mode clears the path variable and returns `Cancelled`. |
+| `SSH_Helper.Tests/Scripting/ScriptParserTests.cs` | `Parse_ReadfilePathOnly_WithPathInto_ParsesAndValidates` — `path_only` and `path_into` round-trip correctly; `Parse_ReadfileAutoBrowse_ParsesAndValidates` — `autobrowse: true` parses to `AutoBrowse = true`; `Parse_ReadfilePathOnlyWithoutAutoBrowse_LeavesAutoBrowseUnset` — omitting `autobrowse` leaves `AutoBrowse` null. |
+| `SSH_Helper.Tests/Scripting/ScriptDependencyAnalyzerTests.cs` | `AnalyzePresets_ReadfilePathOnlyOutput_IsNotReportedAsMissingColumn` — `path_into` in `path_only` mode registers as a defined variable; `AnalyzePresets_ReadfileImplicitPathOutput_IsNotReportedAsMissingColumn` — implicit `<into>_path` companion variable is registered as defined. |
+| `SSH_Helper.Tests/Editor/ScriptAutocompleteProviderTests.cs` | `readfile` option-key completion now contains `autobrowse`, `path_into`, and `path_only`. |
+| `SSH_Helper.Tests/Services/FlowCanvasBridgeTests.cs` | `ExportGraphToYaml_ReadfilePathOnlyWithPathInto_ExportsSuccessfully` — `path_only: true` and `path_into` export to YAML; `ExportGraphToYaml_ReadfileAutoBrowse_ExportsSuccessfully` and `ExportGraphToYaml_ReadfileAutoBrowseFalse_ExportsSuccessfully` — `autobrowse` round-trips for both `true` and `false`; `TextToGraph_ReadfilePathOnly_ImportsPathCaptureProps` — YAML with `path_only` and `path_into` imports into the correct block props. |
+| `SSH_Helper.Tests/Services/JobExecutionServiceTests.cs` | `RunNowAsync_CustomPresetReadfilePathOnlySelectFile_FailsWithoutPrompt` — `path_only + select_file` in a non-interactive run fails with the manual-only message. |
+| `FlowCanvas/e2e/flow-canvas-interactions.spec.ts` | `apply yaml payload omits schema default props` — `send` and `interactive` nodes with default-valued props export only the non-default properties in the Apply YAML message. |
+
+### Documentation
+
+`SCRIPTING.md` updated with:
+
+- `readfile` reference updated with `autobrowse`, `path_only`, and `path_into` in the YAML skeleton, the parameter table, and the notes section.
+- New examples: reading a file and capturing the path into a companion variable; using `path_only` with a `localcmd` to pass the selected path to a PowerShell `Get-Content` command.
+- Notes clarify `autobrowse` default behavior per mode, picker-cancellation variable reset semantics, and `path_only` security validation.
+
+---
+
 ## Changes Since `7f349e7` (0.51.18)
 
 ### `notify` SMTP Email Attachments

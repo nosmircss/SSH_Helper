@@ -80,7 +80,9 @@ test.describe('Flow Canvas Properties Typing', () => {
     await page.getByRole('button', { name: /apply yaml/i }).click();
     const applyMessage = await waitForOutgoingMessage(page, 'apply-yaml');
     const httpProps = getNodePropsFromMessage(applyMessage, 'node-http');
-    expect(httpProps.method).toBe('GET');
+    // 'GET' is the schema defaultValue for method, so stripDefaultProps removes it from the
+    // export payload. The backend treats a missing method as GET (the default).
+    expect(httpProps.method).toBeUndefined();
   });
 
   test('first select change persists immediately in outgoing payload', async ({ page }) => {

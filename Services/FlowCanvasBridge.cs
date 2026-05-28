@@ -150,6 +150,8 @@ namespace SSH_Helper.Services
             "keep_open",
             "pretty",
             "select_file",
+            "autobrowse",
+            "path_only",
             "skip_empty_lines",
             "trim_lines",
             "required",
@@ -253,6 +255,7 @@ namespace SSH_Helper.Services
                 // Properties panel order differs from parser option-key catalog for these blocks.
                 ["send"] = ["command", "capture", "suppress", "expect", "timeout", "retry", "retry_delay", "fail_on_nonzero", "on_error"],
                 ["extract"] = ["pattern", "into", "from", "match", "required"],
+                ["readfile"] = ["path", "select_file", "autobrowse", "message", "fileext", "path_only", "path_into", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding", "on_error"],
                 ["choose"] = ["title", "prompt", "options", "into", "default", "font_size", "on_error"],
                 ["multiselect"] = ["title", "prompt", "options", "into", "min", "max", "font_size", "on_error"],
                 ["playsound"] = ["path", "max_seconds", "into", "wait", "volume", "on_error"],
@@ -2244,6 +2247,12 @@ namespace SSH_Helper.Services
                     target[key] = true;
             }
 
+            static void SetIfNullableBool(JObject target, string key, bool? value)
+            {
+                if (value.HasValue)
+                    target[key] = value.Value;
+            }
+
             static JArray SerializeChoiceOptions(IEnumerable<ChoiceOption> options)
             {
                 var serialized = new JArray();
@@ -2394,8 +2403,11 @@ namespace SSH_Helper.Services
                     if (step.Readfile != null)
                     {
                         SetIfNotNull(props, "path", step.Readfile.Path);
+                        SetIfNotNull(props, "path_into", step.Readfile.PathInto);
                         SetIfNotNull(props, "into", step.Readfile.Into);
                         SetIfBoolTrue(props, "select_file", step.Readfile.SelectFile);
+                        SetIfNullableBool(props, "autobrowse", step.Readfile.AutoBrowse);
+                        SetIfBoolTrue(props, "path_only", step.Readfile.PathOnly);
                         SetIfNotNull(props, "message", step.Readfile.Message);
                         SetIfNotNull(props, "fileext", step.Readfile.FileExt);
                         if (!step.Readfile.SkipEmptyLines) props["skip_empty_lines"] = false;
@@ -3677,11 +3689,26 @@ namespace SSH_Helper.Services
 
             foreach (var key in requiredKeys)
             {
-                if (string.Equals(commandKey, "readfile", StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(key, "path", StringComparison.OrdinalIgnoreCase) &&
+                var readfileSelectFile = string.Equals(commandKey, "readfile", StringComparison.OrdinalIgnoreCase) &&
                     options.TryGetValue("select_file", StringComparison.OrdinalIgnoreCase, out var selectFileToken) &&
                     selectFileToken.Type == JTokenType.Boolean &&
-                    selectFileToken.Value<bool>())
+                    selectFileToken.Value<bool>();
+
+                var readfilePathOnly = string.Equals(commandKey, "readfile", StringComparison.OrdinalIgnoreCase) &&
+                    options.TryGetValue("path_only", StringComparison.OrdinalIgnoreCase, out var pathOnlyToken) &&
+                    pathOnlyToken.Type == JTokenType.Boolean &&
+                    pathOnlyToken.Value<bool>();
+
+                if (string.Equals(commandKey, "readfile", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(key, "path", StringComparison.OrdinalIgnoreCase) &&
+                    readfileSelectFile)
+                {
+                    continue;
+                }
+
+                if (string.Equals(commandKey, "readfile", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(key, "into", StringComparison.OrdinalIgnoreCase) &&
+                    readfilePathOnly)
                 {
                     continue;
                 }
@@ -3690,6 +3717,18 @@ namespace SSH_Helper.Services
                     IsMissingRequiredOptionToken(commandKey, key, token))
                 {
                     missing.Add(key);
+                }
+            }
+
+            if (string.Equals(commandKey, "readfile", StringComparison.OrdinalIgnoreCase))
+            {
+                var readfilePathOnly = options.TryGetValue("path_only", StringComparison.OrdinalIgnoreCase, out var pathOnlyToken) &&
+                    pathOnlyToken.Type == JTokenType.Boolean &&
+                    pathOnlyToken.Value<bool>();
+
+                if (readfilePathOnly && !HasPresentOption("path_into"))
+                {
+                    missing.Add("path_into");
                 }
             }
 

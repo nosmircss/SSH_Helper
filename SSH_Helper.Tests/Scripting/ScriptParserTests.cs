@@ -1195,6 +1195,66 @@ steps:
     }
 
     [Fact]
+    public void Parse_ReadfilePathOnly_WithPathInto_ParsesAndValidates()
+    {
+        var yaml = @"---
+steps:
+  - readfile:
+      select_file: true
+      path_only: true
+      path_into: chosen_path";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+        var readfile = script.Steps[0].Readfile;
+
+        readfile.Should().NotBeNull();
+        readfile!.SelectFile.Should().BeTrue();
+        readfile.PathOnly.Should().BeTrue();
+        readfile.PathInto.Should().Be("chosen_path");
+        errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Parse_ReadfileAutoBrowse_ParsesAndValidates()
+    {
+        var yaml = @"---
+steps:
+  - readfile:
+      select_file: true
+      autobrowse: true
+      path_only: true
+      path_into: chosen_path";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+        var readfile = script.Steps[0].Readfile;
+
+        readfile.Should().NotBeNull();
+        readfile!.AutoBrowse.Should().BeTrue();
+        errors.Should().BeEmpty();
+    }
+
+      [Fact]
+      public void Parse_ReadfilePathOnlyWithoutAutoBrowse_LeavesAutoBrowseUnset()
+      {
+        var yaml = @"---
+    steps:
+      - readfile:
+        select_file: true
+        path_only: true
+        path_into: chosen_path";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+        var readfile = script.Steps[0].Readfile;
+
+        readfile.Should().NotBeNull();
+        readfile!.AutoBrowse.Should().BeNull();
+        errors.Should().BeEmpty();
+      }
+
+    [Fact]
     public void Validate_ReadfileWithoutPathAndWithoutSelectFile_ReturnsError()
     {
         var yaml = @"---
@@ -1220,6 +1280,37 @@ steps:
         var errors = _parser.Validate(script, yaml);
 
         errors.Should().ContainSingle(error => error.Contains("Readfile requires 'into'"));
+    }
+
+    [Fact]
+    public void Validate_ReadfilePathOnlyWithoutPathInto_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - readfile:
+      select_file: true
+      path_only: true";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().ContainSingle(error => error.Contains("Readfile requires 'path_into'"));
+    }
+
+    [Fact]
+    public void Validate_ReadfilePathIntoMatchingInto_ReturnsError()
+    {
+        var yaml = @"---
+steps:
+  - readfile:
+      path: C:\\temp\\hosts.txt
+      into: chosen_lines
+      path_into: chosen_lines";
+
+        var script = _parser.Parse(yaml);
+        var errors = _parser.Validate(script, yaml);
+
+        errors.Should().ContainSingle(error => error.Contains("path_into") && error.Contains("must differ from 'into'"));
     }
 
     [Fact]
