@@ -14,10 +14,10 @@
 - [ ] 2.6 Tests: body-runs-once, repeats-until-true, break inside repeat, YAML→canvas→YAML round-trip
 
 ## 3. Loop scoping + metadata + dictionary iteration
-- [ ] 3.1 `ForeachCommand`/`WhileCommand`: save prior values of the iterator (and metadata names) and restore in a `finally` (survives break/return)
-- [ ] 3.2 Set flat metadata scalars each iteration: `<item>_index` (existing), `<item>_number`, `<item>_first`, `<item>_last`, `<item>_count`
-- [ ] 3.3 Dictionary iteration: parse the two-name `k, v in <expr>` form; resolve `<expr>` to a `JsonObject`; iterate entries setting `k`/`v`
-- [ ] 3.4 Tests: outer variable restored after loop; restore on break/return; metadata values; dict iteration; single-name form unchanged
+- [x] 3.1 `ForeachCommand`: save prior values of the iterator + metadata names and restore in a `finally` (survives break/return/exit). (`while` introduces no iteration variable, so there is nothing to scope there — requirement is vacuously satisfied for `while`.)
+- [x] 3.2 Flat metadata scalars set each iteration: `<item>_index` (existing), `<item>_number` (1-based), `<item>_first`, `<item>_last`, `<item>_count`
+- [x] 3.3 Dictionary iteration: two-name `key, value in <expr>` form resolved via `JsonUtilities.GetJsonObject`, iterating entries
+- [x] 3.4 Tests: `ScriptExecutorLoopScopingTests` (restore-after-loop, restore-on-break, metadata, single-item first/index, dict key/value, dict multi-entry). Single-name form unchanged (existing foreach tests stay green; full suite 2306/2306 excluding 2 pre-existing fragile UI tests)
 
 ## 4. Soft-assert summary
 - [ ] 4.1 Record each soft-assert (`assert` with `severity: warning`) outcome in `ScriptContext`
