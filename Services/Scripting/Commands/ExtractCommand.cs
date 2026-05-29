@@ -121,6 +121,8 @@ namespace SSH_Helper.Services.Scripting.Commands
 
         private void ExtractSingleMatch(Match match, object into, ScriptContext context)
         {
+            ExposeNamedGroups(match, context);
+
             if (into is string varName)
             {
                 // Single variable - capture first group (or full match if no groups)
@@ -187,6 +189,21 @@ namespace SSH_Helper.Services.Scripting.Commands
                     context.SetVariable(kvp.Key, kvp.Value);
                     context.EmitOutput($"Extract: {kvp.Key} = [{kvp.Value.Count} items]", ScriptOutputType.Debug);
                 }
+            }
+        }
+
+        private void ExposeNamedGroups(Match match, ScriptContext context)
+        {
+            foreach (Group group in match.Groups)
+            {
+                // Skip positional (numeric-named) groups so that patterns with no
+                // named groups behave exactly as before this change.
+                if (int.TryParse(group.Name, out _))
+                    continue;
+
+                var value = group.Value.Trim();
+                context.SetVariable(group.Name, value);
+                context.EmitOutput($"Extract: {group.Name} = '{ScriptingHelpers.FormatForDisplay(value)}'", ScriptOutputType.Debug);
             }
         }
 

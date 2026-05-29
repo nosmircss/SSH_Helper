@@ -24,24 +24,29 @@ namespace SSH_Helper.Services.Scripting.Functions
         public void Register(FunctionRegistry registry)
         {
             registry.Register("now", Now);
+            registry.Register("now_local", NowLocal);
+            registry.Register("now_utc", NowUtc);
             registry.Register("epoch", Epoch);
             registry.Register("epoch_to_date", EpochToDate);
             registry.Register("date_add", DateAdd);
             registry.Register("date_diff", DateDiff);
             registry.Register("date_format", DateFormat);
+            registry.Register("parse_date", ParseDate);
         }
 
         private static object? Now(string argsString, ScriptContext context)
         {
-            var format = "yyyy-MM-dd HH:mm:ss";
-            if (!string.IsNullOrWhiteSpace(argsString))
-            {
-                var resolved = JsonUtilities.ResolveJsonValue(argsString.Trim(), context)?.ToString();
-                if (!string.IsNullOrEmpty(resolved))
-                    format = resolved;
-            }
+            return DateTime.Now.ToString(ResolveFormat(argsString, context), CultureInfo.InvariantCulture);
+        }
 
-            return DateTime.Now.ToString(format, CultureInfo.InvariantCulture);
+        private static object? NowLocal(string argsString, ScriptContext context)
+        {
+            return DateTime.Now.ToString(ResolveFormat(argsString, context), CultureInfo.InvariantCulture);
+        }
+
+        private static object? NowUtc(string argsString, ScriptContext context)
+        {
+            return DateTime.UtcNow.ToString(ResolveFormat(argsString, context), CultureInfo.InvariantCulture);
         }
 
         private static object? Epoch(string argsString, ScriptContext context)
@@ -91,6 +96,9 @@ namespace SSH_Helper.Services.Scripting.Functions
                 "minutes" or "minute" or "m" => dt.AddMinutes(amount),
                 "hours" or "hour" or "h" => dt.AddHours(amount),
                 "days" or "day" or "d" => dt.AddDays(amount),
+                "weeks" or "week" or "w" => dt.AddDays(amount * 7),
+                "months" or "month" or "mo" => dt.AddMonths((int)amount),
+                "years" or "year" or "y" => dt.AddYears((int)amount),
                 _ => dt
             };
 
@@ -117,6 +125,7 @@ namespace SSH_Helper.Services.Scripting.Functions
                 "minutes" or "minute" or "m" => diff.TotalMinutes,
                 "hours" or "hour" or "h" => diff.TotalHours,
                 "days" or "day" or "d" => diff.TotalDays,
+                "weeks" or "week" or "w" => diff.TotalDays / 7.0,
                 _ => diff.TotalSeconds
             };
 
@@ -134,6 +143,43 @@ namespace SSH_Helper.Services.Scripting.Functions
 
             var format = JsonUtilities.ResolveJsonValue(args[1], context)?.ToString() ?? "yyyy-MM-dd HH:mm:ss";
             return dt.ToString(format, CultureInfo.InvariantCulture);
+        }
+
+        private static object? ParseDate(string argsString, ScriptContext context)
+        {
+            var args = JsonUtilities.SplitTopLevelCommas(argsString);
+            if (args.Count < 2) return null;
+
+            var input = JsonUtilities.ResolveJsonValue(args[0], context)?.ToString() ?? string.Empty;
+            var format = JsonUtilities.ResolveJsonValue(args[1], context)?.ToString() ?? string.Empty;
+
+            if (string.IsNullOrEmpty(format) ||
+                !DateTime.TryParseExact(input, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+            {
+                return null;
+            }
+
+            var outFormat = "yyyy-MM-dd HH:mm:ss";
+            if (args.Count >= 3)
+            {
+                var resolved = JsonUtilities.ResolveJsonValue(args[2], context)?.ToString();
+                if (!string.IsNullOrEmpty(resolved))
+                    outFormat = resolved;
+            }
+
+            return dt.ToString(outFormat, CultureInfo.InvariantCulture);
+        }
+
+        private static string ResolveFormat(string argsString, ScriptContext context)
+        {
+            var format = "yyyy-MM-dd HH:mm:ss";
+            if (!string.IsNullOrWhiteSpace(argsString))
+            {
+                var resolved = JsonUtilities.ResolveJsonValue(argsString.Trim(), context)?.ToString();
+                if (!string.IsNullOrEmpty(resolved))
+                    format = resolved;
+            }
+            return format;
         }
 
         private static bool TryParseDateTime(string input, out DateTime result)

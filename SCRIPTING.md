@@ -421,6 +421,9 @@ Sets or modifies variable values with expression support.
 | uuid() | `val = uuid()` | Generate RFC 4122 UUID (GUID) string |
 | reverse() | `val = reverse(text)` | Reverse string or list order |
 | regex_replace() | `val = regex_replace(s, '/\d+/', "X")` | Replace regex matches |
+| regex_match() | `ip = regex_match(s, '/inet (\d+\.\d+\.\d+\.\d+)/', 1)` | First match; optional capture-group index (default: whole match), empty if no match |
+| regex_match_all() | `nums = regex_match_all(s, '/\d+/')` | List of all matches |
+| regex_groups() | `parts = regex_groups(s, '/(\d+)-(\d+)/')` | Capture groups of the first match |
 | format() | `val = format("{0} of {1}", a, b)` | C#-style string formatting |
 | char_at() | `val = char_at(text, 0)` | Character at zero-based index |
 | index_of() | `idx = index_of(text, "sub")` | Index of substring (-1 if not found) |
@@ -450,9 +453,12 @@ Sets or modifies variable values with expression support.
 | now() | `ts = now("yyyy-MM-dd")` | Current local datetime (custom format) |
 | epoch() | `ts = epoch()` | Current UTC Unix timestamp (seconds) |
 | epoch_to_date() | `dt = epoch_to_date(ts, "yyyy-MM-dd")` | Unix timestamp to local datetime |
-| date_add() | `dt = date_add(ts, 1, "hours")` | Add time to datetime |
-| date_diff() | `val = date_diff(a, b, "minutes")` | Difference between datetimes |
+| now_local() | `ts = now_local("yyyy-MM-dd")` | Current datetime, explicit local base |
+| now_utc() | `ts = now_utc("yyyy-MM-dd HH:mm:ss")` | Current datetime, explicit UTC base |
+| date_add() | `dt = date_add(ts, 3, "months")` | Add time (units: seconds, minutes, hours, days, weeks, months, years) |
+| date_diff() | `val = date_diff(a, b, "weeks")` | Difference (units: seconds, minutes, hours, days, weeks) |
 | date_format() | `val = date_format(ts, "MM/dd/yyyy")` | Reformat datetime string |
+| parse_date() | `dt = parse_date("15-01-2026", "dd-MM-yyyy")` | Parse a string using an explicit input format |
 | **Encoding/Hashing** | | |
 | base64_encode() | `val = base64_encode(text)` | Base64 encode UTF-8 string |
 | base64_decode() | `val = base64_decode(encoded)` | Decode Base64 to UTF-8 |
@@ -461,6 +467,12 @@ Sets or modifies variable values with expression support.
 | hash() | `val = hash(text, "SHA256")` | Hash digest (MD5, SHA1, SHA256, SHA384, SHA512) |
 | hex_encode() | `val = hex_encode(text)` | Encode to lowercase hex |
 | hex_decode() | `val = hex_decode(hex)` | Decode hex to UTF-8 |
+| **Networking** | | |
+| is_valid_ip() | `bool = is_valid_ip(Host_IP)` | True if a valid IPv4/IPv6 address |
+| ip_version() | `v = ip_version(Host_IP)` | `4` or `6` (empty if invalid) |
+| ip_in_cidr() | `bool = ip_in_cidr(Host_IP, "10.0.0.0/8")` | True if the address falls within the CIDR range |
+| url_host() | `h = url_host(url)` | Host component of a URL (empty if unparseable) |
+| url_port() | `p = url_port(url)` | Port component of a URL (empty if unparseable) |
 | Nested assignment | `obj.key.subkey = value` | Assign to nested path |
 
 **Basic Examples:**
