@@ -300,6 +300,26 @@ namespace SSH_Helper.Services.Scripting
                         continue;
                     }
 
+                    // Universal `when:` guard: skip non-foreach steps whose guard evaluates false.
+                    // (foreach evaluates `when:` per item inside ForeachCommand.)
+                    if (stepType != StepType.Foreach && !string.IsNullOrEmpty(step.When))
+                    {
+                        var guard = new ExpressionEvaluator(context);
+                        if (!guard.Evaluate(context.SubstituteVariables(step.When)))
+                        {
+                            StepCompleted?.Invoke(this, new StepExecutionEventArgs
+                            {
+                                StepIndex = stepIndex,
+                                StepPath = stepPath,
+                                StepType = stepType,
+                                LineNumber = step.LineNumber,
+                                Success = true,
+                                Skipped = true
+                            });
+                            continue;
+                        }
+                    }
+
                     // Fire step-starting event
                     StepStarting?.Invoke(this, new StepExecutionEventArgs
                     {

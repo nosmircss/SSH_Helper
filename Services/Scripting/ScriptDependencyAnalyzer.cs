@@ -356,6 +356,9 @@ namespace SSH_Helper.Services.Scripting
             {
                 var stepType = step.GetStepType();
 
+                // `when:` guards may appear on any step type; account for their references.
+                ExtractVarReferences(step.When, referencedVars);
+
                 switch (stepType)
                 {
                     case StepType.Send:
@@ -416,7 +419,6 @@ namespace SSH_Helper.Services.Scripting
 
                     case StepType.Foreach:
                         AnalyzeForeachCommand(step.Foreach, definedVars, referencedVars);
-                        ExtractVarReferences(step.When, referencedVars);
                         AnalyzeSteps(step.Do, definedVars, referencedVars);
                         break;
 
