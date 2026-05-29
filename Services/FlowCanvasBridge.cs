@@ -221,6 +221,7 @@ namespace SSH_Helper.Services
                 ["if"] = ["condition"],
                 ["foreach"] = ["iterator"],
                 ["while"] = ["condition"],
+                ["repeat"] = ["until"],
                 ["switch"] = ["value", "cases"],
                 ["call"] = ["subroutine"],
                 ["assert"] = ["condition"],
@@ -748,6 +749,11 @@ namespace SSH_Helper.Services
                         branches.Add(new BranchInfo("loop", "do", ColorLoop, null, step.Do));
                     break;
 
+                case StepType.Repeat:
+                    if (step.Do != null && step.Do.Count > 0)
+                        branches.Add(new BranchInfo("loop", "do", ColorLoop, null, step.Do));
+                    break;
+
                 case StepType.Try:
                     if (step.Try != null && step.Try.Count > 0)
                         branches.Add(new BranchInfo("try", "try", ColorTry, null, step.Try));
@@ -794,6 +800,7 @@ namespace SSH_Helper.Services
             return stepType == StepType.If
                 || stepType == StepType.Foreach
                 || stepType == StepType.While
+                || stepType == StepType.Repeat
                 || stepType == StepType.Try
                 || stepType == StepType.Switch
                 || stepType == StepType.Parallel;
@@ -1685,7 +1692,8 @@ namespace SSH_Helper.Services
                 }
             }
             else if (string.Equals(blockType, "foreach", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(blockType, "while", StringComparison.OrdinalIgnoreCase))
+                     string.Equals(blockType, "while", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(blockType, "repeat", StringComparison.OrdinalIgnoreCase))
             {
                 var doEdge = nodeEdges.FirstOrDefault(edge =>
                     string.Equals(edge.BranchPath, "do", StringComparison.OrdinalIgnoreCase))
@@ -2143,6 +2151,17 @@ namespace SSH_Helper.Services
                     return false;
                 }
             }
+            else if (string.Equals(blockType, "repeat", StringComparison.OrdinalIgnoreCase))
+            {
+                SetScalarOptionIfPresent("until", "until");
+                if (props?["max_iterations"] != null)
+                    options["max_iterations"] = props["max_iterations"]!.DeepClone();
+                if (options["until"] == null)
+                {
+                    error = "Repeat block is missing required until condition.";
+                    return false;
+                }
+            }
             else if (string.Equals(blockType, "switch", StringComparison.OrdinalIgnoreCase))
             {
                 SetScalarOptionIfPresent("value", "value");
@@ -2363,6 +2382,11 @@ namespace SSH_Helper.Services
 
                 case StepType.While:
                     SetIfNotNull(props, "condition", step.While);
+                    SetIfNumber(props, "max_iterations", step.MaxIterations);
+                    break;
+
+                case StepType.Repeat:
+                    SetIfNotNull(props, "until", step.Until);
                     SetIfNumber(props, "max_iterations", step.MaxIterations);
                     break;
 
@@ -3590,6 +3614,9 @@ namespace SSH_Helper.Services
                 case "while":
                     options["condition"] = commandValue;
                     return true;
+                case "repeat":
+                    options["until"] = commandValue;
+                    return true;
                 case "switch":
                     options["value"] = commandValue;
                     return true;
@@ -3998,6 +4025,7 @@ namespace SSH_Helper.Services
             return blockType == "if"
                 || blockType == "foreach"
                 || blockType == "while"
+                || blockType == "repeat"
                 || blockType == "switch"
                 || blockType == "parallel"
                 || blockType == "try";
@@ -4102,6 +4130,7 @@ namespace SSH_Helper.Services
                 StepType.If => ("if", step.If),
                 StepType.Foreach => ("foreach", step.Foreach),
                 StepType.While => ("while", step.While),
+                StepType.Repeat => ("repeat", step.Until),
                 StepType.Switch => ("switch", step.Switch),
                 StepType.Try => ("try", null),
                 StepType.Break => ("break", null),
@@ -4629,6 +4658,7 @@ namespace SSH_Helper.Services
                 "if" => "condition",
                 "foreach" => "iterator",
                 "while" => "condition",
+                "repeat" => "until",
                 "set" => "expression",
                 "wait" => "seconds",
                 "vault" => "path",

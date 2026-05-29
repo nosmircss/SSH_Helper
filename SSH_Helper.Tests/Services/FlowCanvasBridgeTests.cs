@@ -174,6 +174,48 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_RepeatUntilContainer_RoundTripsToRepeatStep()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            name: Repeat RoundTrip
+            version: 1
+            steps:
+              - set: "i = 0"
+              - repeat:
+                  until: "i >= 3"
+                  max_iterations: 10
+                  do:
+                    - set:
+                        expression: "i = i + 1"
+            """;
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        var graph = new JObject
+        {
+            ["nodes"] = nodes,
+            ["edges"] = edges
+        };
+
+        var export = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+
+        var parser = new ScriptParser();
+        var script = parser.Parse(export.Yaml);
+        var validationErrors = parser.Validate(script, export.Yaml, enforceCanonicalSyntax: true);
+
+        Assert.Empty(validationErrors);
+        Assert.Equal(2, script.Steps.Count);
+        var repeatStep = script.Steps[1];
+        Assert.Equal(StepType.Repeat, repeatStep.GetStepType());
+        Assert.Equal("i >= 3", repeatStep.Until);
+        Assert.NotNull(repeatStep.Do);
+        Assert.Single(repeatStep.Do!);
+    }
+
+    [Fact]
     public void ExportGraphToYaml_UnsupportedBlockType_ReturnsErrorDiagnostic()
     {
         var bridge = new FlowCanvasBridge();

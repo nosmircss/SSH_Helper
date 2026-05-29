@@ -10,8 +10,8 @@
 - [x] 2.2 Parser: `case "repeat"` + `ParseRepeatStep` (nested `until`/`do`/`max_iterations` or scalar shorthand); added to all command/canonical-key/scalar-value tables
 - [x] 2.3 Validation: requires `until` + `do`; `max_iterations` > 0 check
 - [x] 2.4 Autocomplete: `repeat` command + `until`/`do` required keys; `ScriptDependencyAnalyzer` Repeat case
-- [ ] 2.5 `FlowCanvasBridge` C# + React block registry: add the repeat node type — PENDING (Flow Canvas layer)
-- [x] 2.6 Runtime + parse tests: `ScriptRepeatLoopTests` (body-runs-once, repeats-until-true, break, max-iterations, parse, validate-missing-until). YAML→canvas→YAML round-trip test pending with 2.5
+- [x] 2.5 `FlowCanvasBridge` C# (10 sites: block-keys, branch export, container checks, props, reverse map, preview key, do-edge import, option building, scalar shorthand) + React `registry.ts` repeat block
+- [x] 2.6 Runtime + parse tests: `ScriptRepeatLoopTests` (6) + YAML→canvas→YAML round-trip `FlowCanvasBridgeTests.ExportGraphToYaml_RepeatUntilContainer_RoundTripsToRepeatStep`
 
 ## 3. Loop scoping + metadata + dictionary iteration
 - [x] 3.1 `ForeachCommand`: save prior values of the iterator + metadata names and restore in a `finally` (survives break/return/exit). (`while` introduces no iteration variable, so there is nothing to scope there — requirement is vacuously satisfied for `while`.)

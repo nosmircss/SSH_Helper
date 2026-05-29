@@ -170,6 +170,19 @@ export const blockDefs: BlockDef[] = [
     ],
   },
   {
+    type: 'repeat',
+    label: 'Repeat',
+    category: 'control-flow',
+    icon: 'while',
+    description: 'Loop the body until a condition becomes true (runs at least once)',
+    previewKey: 'until',
+    isContainer: true,
+    properties: [
+      { key: 'until', label: 'Until', type: 'code', required: true },
+      { key: 'max_iterations', label: 'Max Iterations', type: 'number', defaultValue: 100 },
+    ],
+  },
+  {
     type: 'switch',
     label: 'Switch',
     category: 'control-flow',
