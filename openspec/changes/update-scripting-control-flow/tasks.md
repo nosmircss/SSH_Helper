@@ -25,7 +25,7 @@
 - [x] 4.3 Tests: `ScriptExecutorSoftAssertTests` (fail doesn't terminate + counted, pass counted, hard-assert excluded, summary emitted, no-summary-when-none)
 
 ## 5. Verification
-- [ ] 5.1 `dotnet build SSH_Helper.sln`
-- [ ] 5.2 `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj`
-- [ ] 5.3 `openspec validate update-scripting-control-flow --strict --no-interactive`
-- [ ] 5.4 Add a release-note entry for the BREAKING iterator-persistence change
+- [x] 5.1 `dotnet build` — succeeds (incl. FlowCanvas npm/TS)
+- [x] 5.2 `dotnet test` — all new tests pass; non-UI suite 1933/1933 (UI/native-dialog tests are pre-existing scheduling-fragile, see memory)
+- [x] 5.3 `openspec validate update-scripting-control-flow --strict --no-interactive` — valid
+- [ ] 5.4 Release-note entry for the BREAKING iterator-persistence change — pending (batch CHANGELOG update with Proposal C's breaking strict-keys change)
