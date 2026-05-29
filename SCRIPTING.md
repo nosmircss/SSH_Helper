@@ -1455,9 +1455,28 @@ Iterates over items in a collection.
 
 `iterator:` can use collection expressions, not just variable names. Common examples include `item in split(csv, ",")`, `item in compact(list_values)`, and `entry in json.items(data, "path")`.
 
-**Special Variables in Loop:**
-- `${item}`: Current item value (or your chosen variable name)
-- `${item_index}`: Zero-based index of current item (uses your iterator name, e.g., `${line_index}` if you use `foreach: line in ...`)
+**Special Variables in Loop** (each prefixed with your iterator name — e.g. `host_number` when you write `foreach: host in ...`):
+- `${item}`: Current item value
+- `${item_index}`: Zero-based index
+- `${item_number}`: One-based position (`index + 1`)
+- `${item_first}` / `${item_last}`: `true` on the first / last iteration
+- `${item_count}`: Total number of items
+
+> **Loop scoping:** the iterator and its metadata are scoped to the loop — any prior value of a same-named variable is restored (or the variable removed) when the loop ends, so a loop no longer silently overwrites an outer variable.
+
+**Dictionary iteration** — iterate an object/map's entries with a two-name `key, value` header:
+```yaml
+- foreach: key, value in {{my_map}}
+  do:
+    - print:
+        message: "${key} = ${value}"
+```
+
+> **`when:` works on every step.** Shown here on `foreach` (where it filters each item), a `when:` guard can be added to *any* step — the step is skipped when the condition is false:
+> ```yaml
+> - send: { command: systemctl restart nginx }
+>   when: nginx_state != "active"
+> ```
 
 **Examples:**
 ```yaml
@@ -1603,9 +1622,53 @@ Repeatedly executes a block while a condition is true.
 
 ---
 
+### repeat - Loop Until Condition
+
+Runs the body **at least once**, then repeats until the `until` condition becomes true (a do-while loop). Ideal for "do the thing, then poll until healthy" patterns where `while` would awkwardly require running the body before the first check.
+
+**Syntax:**
+```yaml
+- repeat:
+    until: condition
+    max_iterations: 30      # optional safety cap (default 10,000)
+    do:
+      - step1
+      - step2
+```
+
+**Shorthand Header:**
+```yaml
+- repeat: condition
+  do:
+    - step1
+```
+
+**Features:**
+- Body always executes once before `until` is evaluated (bottom-tested)
+- Loop exits as soon as `until` becomes true
+- `${_iteration}` tracks iteration count (0-based); `break`/`continue` supported
+
+**Example:**
+```yaml
+# Start a service, then poll until it reports active
+- send:
+    command: systemctl start app
+- repeat:
+    until: state == "active"
+    max_iterations: 30
+    do:
+      - send:
+          command: systemctl is-active app
+          capture: state
+      - wait:
+          seconds: 2
+```
+
+---
+
 ### break - Exit Current Loop
 
-Exits the current `foreach` or `while` loop immediately.
+Exits the current `foreach`, `while`, or `repeat` loop immediately.
 
 **Syntax:**
 ```yaml
@@ -3748,6 +3811,8 @@ Validates that a condition is true. Useful for adding guardrails and sanity chec
 | `condition` | string | (required) | Expression to evaluate (same syntax as `if` conditions) |
 | `message` | string | `"Assertion failed: {condition}"` | Custom failure message. Supports `${variable}` substitution. |
 | `severity` | string | `error` | `error` stops script execution; `warning` logs a warning and continues |
+
+> **Soft-assert summary:** every `assert` with `severity: warning` is tallied across the run. At completion the script reports `Soft assertions: N passed, M failed`, so warning-level checks act as a lightweight test report without halting execution.
 
 **Examples:**
 ```yaml
