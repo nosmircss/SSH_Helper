@@ -1241,16 +1241,19 @@ steps:
         var yaml = @"---
     steps:
       - readfile:
-        select_file: true
-        path_only: true
-        path_into: chosen_path";
+          select_file: true
+          path_only: true
+          path_into: chosen_path";
 
         var script = _parser.Parse(yaml);
         var errors = _parser.Validate(script, yaml);
         var readfile = script.Steps[0].Readfile;
 
         readfile.Should().NotBeNull();
-        readfile!.AutoBrowse.Should().BeNull();
+        readfile!.SelectFile.Should().BeTrue();
+        readfile.PathOnly.Should().BeTrue();
+        readfile.PathInto.Should().Be("chosen_path");
+        readfile.AutoBrowse.Should().BeNull();
         errors.Should().BeEmpty();
       }
 
