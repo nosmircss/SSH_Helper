@@ -1148,6 +1148,7 @@ namespace SSH_Helper.Services.Scripting
                         step.Finally = ParseSteps(parser);
                         break;
                     default:
+                        step.HasUnknownStepKey = true;
                         AddUnknownKeyWarning($"Unknown step key '{key.Value}'", (int)key.Start.Line);
                         SkipValue(parser);
                         break;
@@ -2617,7 +2618,7 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case "columns":
-                        AddUnknownKeyWarning("interactive.columns is deprecated; use interactive.width/interactive.height (pixels)", (int)keyScalar.Start.Line);
+                        AddDeprecationWarning("interactive.columns is deprecated; use interactive.width/interactive.height (pixels)", (int)keyScalar.Start.Line);
                         if (int.TryParse(parser.Consume<Scalar>().Value, out var legacyColumns))
                         {
                             options.Columns = legacyColumns;
@@ -2629,7 +2630,7 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case "rows":
-                        AddUnknownKeyWarning("interactive.rows is deprecated; use interactive.width/interactive.height (pixels)", (int)keyScalar.Start.Line);
+                        AddDeprecationWarning("interactive.rows is deprecated; use interactive.width/interactive.height (pixels)", (int)keyScalar.Start.Line);
                         if (int.TryParse(parser.Consume<Scalar>().Value, out var legacyRows))
                         {
                             options.Rows = legacyRows;
@@ -2649,7 +2650,7 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case "emulation":
-                        AddUnknownKeyWarning("interactive.emulation is deprecated and ignored", (int)keyScalar.Start.Line);
+                        AddDeprecationWarning("interactive.emulation is deprecated and ignored", (int)keyScalar.Start.Line);
                         SkipValue(parser);
                         break;
 
@@ -4359,7 +4360,9 @@ namespace SSH_Helper.Services.Scripting
 
                 if (stepType == StepType.Unknown)
                 {
-                    if (!enforceCanonicalSyntax || step.ParseErrors.Count == 0)
+                    // A misspelled command is already reported (with a did-you-mean suggestion) as this
+                    // step's own "Unknown step key" error, so the generic fallback would be redundant noise.
+                    if (!step.HasUnknownStepKey && (!enforceCanonicalSyntax || step.ParseErrors.Count == 0))
                     {
                         var lineContent = GetLineContent(lines, step.LineNumber);
                         errors.Add($"{prefix}Line {step.LineNumber}: Step has no recognized command{lineContent}");
@@ -5303,15 +5306,18 @@ namespace SSH_Helper.Services.Scripting
 
         private void AddUnknownKeyWarning(string message, int lineNumber)
         {
-            // Recognized deprecation notices remain non-fatal warnings.
-            if (message.Contains("deprecated", StringComparison.OrdinalIgnoreCase))
-            {
-                _warnings.Add($"Line {lineNumber}: {message}");
-                return;
-            }
-
-            // Typo-class unknown keys are blocking errors, enriched with a did-you-mean suggestion.
+            // Unrecognized (typo-class) keys are always blocking errors, enriched with a did-you-mean
+            // suggestion. Deprecation notices use AddDeprecationWarning instead, so a user-supplied key
+            // name that happens to contain "deprecated" is never silently downgraded to a warning.
             _unknownKeyErrors.Add($"Line {lineNumber}: {AppendDidYouMean(message)}");
+        }
+
+        /// <summary>
+        /// Records a recognized deprecation notice as a non-fatal warning (never a blocking error).
+        /// </summary>
+        private void AddDeprecationWarning(string message, int lineNumber)
+        {
+            _warnings.Add($"Line {lineNumber}: {message}");
         }
 
         private static readonly Regex UnknownKeyMessagePattern =
@@ -5334,6 +5340,12 @@ namespace SSH_Helper.Services.Scripting
                 candidates.AddRange(commandKeys);
             if (StepRootOptionKeysByCommand.TryGetValue(command, out var rootKeys))
                 candidates.AddRange(rootKeys);
+
+            // At step root ("Unknown step key '...'"), an unrecognized key may be a misspelled
+            // command name, so command names are also valid suggestion candidates.
+            if (string.Equals(command, "step", StringComparison.OrdinalIgnoreCase))
+                candidates.AddRange(KnownStepKeys);
+
             return candidates;
         }
 

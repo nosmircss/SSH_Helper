@@ -35,6 +35,13 @@ namespace SSH_Helper.Services.Scripting.Models
         /// </summary>
         public List<string> ParseErrors { get; } = new();
 
+        /// <summary>
+        /// Set when this step's mapping contained an unrecognized step-root key (reported as an
+        /// "Unknown step key" error). For a step with no recognized command, this means a misspelled
+        /// command was already flagged, so the generic "no recognized command" error is redundant.
+        /// </summary>
+        public bool HasUnknownStepKey { get; set; }
+
         // ===== Command Types =====
         // Only one of these should be set per step
 
