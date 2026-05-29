@@ -6,12 +6,12 @@
 - [x] 1.5 Tests: `ScriptExecutorWhenGuardTests` (false→skip + Skipped event, true→runs, foreach per-item filter) + `ScriptDependencyAnalyzerTests` reference test
 
 ## 2. `repeat`/`until` loop
-- [ ] 2.1 Add `StepType.Repeat`; add `RepeatCommand` cloning `WhileCommand` with the condition checked at the bottom; reuse `Do`/`MaxIterations`; increment `LoopDepth`
-- [ ] 2.2 Parser: add `repeat`/`until` to the canonical key tables and step-dispatch path
-- [ ] 2.3 Validation: required `until` + `do`; `max_iterations` integer check
-- [ ] 2.4 Autocomplete entries for `repeat`/`until`
-- [ ] 2.5 `FlowCanvasBridge` C# + React block registry: add the repeat node type
-- [ ] 2.6 Tests: body-runs-once, repeats-until-true, break inside repeat, YAML→canvas→YAML round-trip
+- [x] 2.1 `StepType.Repeat` + `Until` property; `RepeatCommand` (bottom-tested do-while), reuses `Do`/`MaxIterations`/`LoopDepth`; registered in executor
+- [x] 2.2 Parser: `case "repeat"` + `ParseRepeatStep` (nested `until`/`do`/`max_iterations` or scalar shorthand); added to all command/canonical-key/scalar-value tables
+- [x] 2.3 Validation: requires `until` + `do`; `max_iterations` > 0 check
+- [x] 2.4 Autocomplete: `repeat` command + `until`/`do` required keys; `ScriptDependencyAnalyzer` Repeat case
+- [ ] 2.5 `FlowCanvasBridge` C# + React block registry: add the repeat node type — PENDING (Flow Canvas layer)
+- [x] 2.6 Runtime + parse tests: `ScriptRepeatLoopTests` (body-runs-once, repeats-until-true, break, max-iterations, parse, validate-missing-until). YAML→canvas→YAML round-trip test pending with 2.5
 
 ## 3. Loop scoping + metadata + dictionary iteration
 - [x] 3.1 `ForeachCommand`: save prior values of the iterator + metadata names and restore in a `finally` (survives break/return/exit). (`while` introduces no iteration variable, so there is nothing to scope there — requirement is vacuously satisfied for `while`.)

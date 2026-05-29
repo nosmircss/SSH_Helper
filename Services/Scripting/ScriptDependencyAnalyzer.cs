@@ -427,6 +427,11 @@ namespace SSH_Helper.Services.Scripting
                         AnalyzeSteps(step.Do, definedVars, referencedVars);
                         break;
 
+                    case StepType.Repeat:
+                        ExtractVarReferences(step.Until, referencedVars);
+                        AnalyzeSteps(step.Do, definedVars, referencedVars);
+                        break;
+
                     case StepType.Try:
                         AnalyzeSteps(step.Try, definedVars, referencedVars);
                         AnalyzeSteps(step.Catch, definedVars, referencedVars);

@@ -88,6 +88,11 @@ namespace SSH_Helper.Services.Scripting.Models
         public string? While { get; set; }
 
         /// <summary>
+        /// Repeat-until loop exit condition. The body runs at least once; the loop exits when this becomes true.
+        /// </summary>
+        public string? Until { get; set; }
+
+        /// <summary>
         /// Readfile command - reads a text file into a variable.
         /// </summary>
         public ReadfileOptions? Readfile { get; set; }
@@ -371,6 +376,7 @@ namespace SSH_Helper.Services.Scripting.Models
             if (!string.IsNullOrEmpty(If)) return StepType.If;
             if (!string.IsNullOrEmpty(Foreach)) return StepType.Foreach;
             if (!string.IsNullOrEmpty(While)) return StepType.While;
+            if (!string.IsNullOrEmpty(Until)) return StepType.Repeat;
             if (Try != null || Catch != null || Finally != null) return StepType.Try;
             if (BreakLoop) return StepType.Break;
             if (ContinueLoop) return StepType.Continue;
@@ -1396,6 +1402,7 @@ namespace SSH_Helper.Services.Scripting.Models
         If,
         Foreach,
         While,
+        Repeat,
         Try,
         Break,
         Continue,

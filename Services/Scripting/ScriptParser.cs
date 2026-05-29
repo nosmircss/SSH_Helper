@@ -30,6 +30,7 @@ namespace SSH_Helper.Services.Scripting
             "if",
             "foreach",
             "while",
+            "repeat",
             "updatecolumn",
             "updateenvironment",
             "readfile",
@@ -112,6 +113,7 @@ namespace SSH_Helper.Services.Scripting
                 ["if"] = ["condition", "then", "elif", "else"],
                 ["foreach"] = ["iterator", "when", "do"],
                 ["while"] = ["condition", "max_iterations", "do"],
+                ["repeat"] = ["until", "max_iterations", "do"],
                 ["try"] = ["do", "catch", "finally"],
                 ["readfile"] = ["path", "select_file", "message", "fileext", "autobrowse", "path_into", "path_only", "into", "skip_empty_lines", "trim_lines", "max_lines", "encoding", "on_error"],
                 ["writefile"] = ["path", "content", "mode", "format", "pretty", "headers", "on_error"],
@@ -155,6 +157,7 @@ namespace SSH_Helper.Services.Scripting
                 ["if"] = [],
                 ["foreach"] = [],
                 ["while"] = [],
+                ["repeat"] = [],
                 ["updatecolumn"] = [],
                 ["updateenvironment"] = [],
                 ["readfile"] = [],
@@ -199,6 +202,7 @@ namespace SSH_Helper.Services.Scripting
             "if",
             "foreach",
             "while",
+            "repeat",
             "try",
             "call",
             "switch",
@@ -575,7 +579,7 @@ namespace SSH_Helper.Services.Scripting
         private static readonly HashSet<string> ScalarValueKeys = new(StringComparer.OrdinalIgnoreCase)
         {
             // Step keys that accept inline expression/string scalars
-            "set", "print", "send", "exit", "if", "while", "when", "assert",
+            "set", "print", "send", "exit", "if", "while", "repeat", "until", "when", "assert",
             "call", "return", "foreach", "sethistorylabel",
             // Expanded-form sub-keys that accept expression scalars
             "expression", "condition", "message", "command", "expect",
@@ -942,6 +946,10 @@ namespace SSH_Helper.Services.Scripting
                     case "while":
                         step.DeclaredStepType = StepType.While;
                         ParseWhileStep(parser, step);
+                        break;
+                    case "repeat":
+                        step.DeclaredStepType = StepType.Repeat;
+                        ParseRepeatStep(parser, step);
                         break;
                     case "break":
                         step.DeclaredStepType = StepType.Break;
@@ -1618,6 +1626,59 @@ namespace SSH_Helper.Services.Scripting
 
             SkipValue(parser);
             AddStepParseError(step, "while must be a mapping with required key 'condition'");
+        }
+
+        private void ParseRepeatStep(IParser parser, ScriptStep step)
+        {
+            if (parser.Accept<MappingStart>(out _))
+            {
+                var hasUntil = false;
+                parser.Consume<MappingStart>();
+                while (!parser.Accept<MappingEnd>(out _))
+                {
+                    var keyScalar = parser.Consume<Scalar>();
+                    var key = keyScalar.Value.ToLowerInvariant();
+                    switch (key)
+                    {
+                        case "until":
+                            step.Until = parser.Consume<Scalar>().Value;
+                            hasUntil = !string.IsNullOrWhiteSpace(step.Until);
+                            break;
+                        case "do":
+                            step.Do = ParseSteps(parser);
+                            break;
+                        case "max_iterations":
+                        case "maxiterations":
+                            if (int.TryParse(parser.Consume<Scalar>().Value, out var maxIterations))
+                                step.MaxIterations = maxIterations;
+                            break;
+                        default:
+                            AddUnknownKeyWarning($"Unknown repeat key '{keyScalar.Value}'", (int)keyScalar.Start.Line);
+                            SkipValue(parser);
+                            break;
+                    }
+                }
+
+                parser.Consume<MappingEnd>();
+                if (!hasUntil)
+                {
+                    AddStepParseError(step, "repeat.until is required");
+                }
+                return;
+            }
+
+            if (parser.Accept<Scalar>(out _))
+            {
+                step.Until = parser.Consume<Scalar>().Value;
+                if (string.IsNullOrWhiteSpace(step.Until))
+                {
+                    AddStepParseError(step, "repeat.until is required");
+                }
+                return;
+            }
+
+            SkipValue(parser);
+            AddStepParseError(step, "repeat must be a mapping with required key 'until'");
         }
 
         private void ParseTryStep(IParser parser, ScriptStep step)
@@ -4383,6 +4444,24 @@ namespace SSH_Helper.Services.Scripting
                         }
                         if (step.Do != null)
                             ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
+                        break;
+
+                    case StepType.Repeat:
+                        if (string.IsNullOrWhiteSpace(step.Until))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Repeat requires 'until' condition{lineContent}");
+                        }
+                        if (step.Do == null || step.Do.Count == 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Repeat requires 'do' block{lineContent}");
+                        }
+                        if (step.MaxIterations.HasValue && step.MaxIterations.Value <= 0)
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: max_iterations must be greater than 0{lineContent}");
+                        }
                         break;
 
                     case StepType.While:

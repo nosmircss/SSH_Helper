@@ -106,6 +106,7 @@ namespace SSH_Helper.Services.Scripting
                 { StepType.If, new IfCommand(this) },
                 { StepType.Foreach, new ForeachCommand(this) },
                 { StepType.While, new WhileCommand(this) },
+                { StepType.Repeat, new RepeatCommand(this) },
                 { StepType.Try, new TryCommand(this) },
                 { StepType.Break, new BreakCommand() },
                 { StepType.Continue, new ContinueCommand() },
