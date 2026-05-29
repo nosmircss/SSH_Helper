@@ -240,6 +240,13 @@ namespace SSH_Helper.Services.Scripting
             }
             finally
             {
+                if (context.SoftAssertPassed + context.SoftAssertFailed > 0)
+                {
+                    context.EmitOutput(
+                        $"Soft assertions: {context.SoftAssertPassed} passed, {context.SoftAssertFailed} failed",
+                        context.SoftAssertFailed > 0 ? ScriptOutputType.Warning : ScriptOutputType.Success);
+                }
+
                 LocalCmdCommand.CleanupTrackedBackgroundProcesses(context, wasCancelled);
             }
         }

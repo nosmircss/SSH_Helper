@@ -124,9 +124,35 @@ namespace SSH_Helper.Services.Scripting
             public bool LocalCmdRunAllApproved { get; set; }
             public string? LocalCmdApprovedHost { get; set; }
             public HashSet<string> LocalCmdApprovedCommands { get; } = new();
+            public int SoftAssertPassed { get; set; }
+            public int SoftAssertFailed { get; set; }
             public EventHandler<ScriptOutputEventArgs>? OutputReceived { get; set; }
             public EventHandler<ColumnUpdateEventArgs>? ColumnUpdateRequested { get; set; }
             public EventHandler<EnvironmentUpdateEventArgs>? EnvironmentUpdateRequested { get; set; }
+        }
+
+        /// <summary>
+        /// Number of soft assertions (assert with severity: warning) that passed during this run.
+        /// </summary>
+        public int SoftAssertPassed => _sharedState.SoftAssertPassed;
+
+        /// <summary>
+        /// Number of soft assertions (assert with severity: warning) that failed during this run.
+        /// </summary>
+        public int SoftAssertFailed => _sharedState.SoftAssertFailed;
+
+        /// <summary>
+        /// Records the outcome of a soft assertion for the end-of-run summary. Thread-safe.
+        /// </summary>
+        public void RecordSoftAssert(bool passed)
+        {
+            lock (_sharedState.StateLock)
+            {
+                if (passed)
+                    _sharedState.SoftAssertPassed++;
+                else
+                    _sharedState.SoftAssertFailed++;
+            }
         }
 
         /// <summary>

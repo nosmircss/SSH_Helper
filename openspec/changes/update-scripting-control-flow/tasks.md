@@ -20,9 +20,9 @@
 - [x] 3.4 Tests: `ScriptExecutorLoopScopingTests` (restore-after-loop, restore-on-break, metadata, single-item first/index, dict key/value, dict multi-entry). Single-name form unchanged (existing foreach tests stay green; full suite 2306/2306 excluding 2 pre-existing fragile UI tests)
 
 ## 4. Soft-assert summary
-- [ ] 4.1 Record each soft-assert (`assert` with `severity: warning`) outcome in `ScriptContext`
-- [ ] 4.2 Emit an aggregate pass/fail summary at run completion (reuse existing output events)
-- [ ] 4.3 Tests: passed/failed counts; failures do not terminate the script
+- [x] 4.1 `ScriptContext.RecordSoftAssert` (lock-guarded, shared-state counters); `AssertCommand` records pass/fail for `severity: warning` asserts
+- [x] 4.2 `ScriptExecutor.ExecuteAsync` finally emits "Soft assertions: N passed, M failed" at completion when any soft asserts ran (Warning if any failed, else Success)
+- [x] 4.3 Tests: `ScriptExecutorSoftAssertTests` (fail doesn't terminate + counted, pass counted, hard-assert excluded, summary emitted, no-summary-when-none)
 
 ## 5. Verification
 - [ ] 5.1 `dotnet build SSH_Helper.sln`
