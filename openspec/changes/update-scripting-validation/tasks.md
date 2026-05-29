@@ -1,4 +1,4 @@
-# Status: Part 1 (commit 1d3646e) + sub-feature 3 implemented. RESUME AT section 4 (RISKY — reconfirm before doing).
+# Status: Sections 1–4 implemented. Only 5.4 (release notes) remains before archive.
 
 ## 1. Strict typo-class keys (BREAKING) — DONE (except 1.3)
 - [x] 1.1 Typo-class unknown keys now block: `AddUnknownKeyWarning` (ScriptParser.cs) routes deprecation messages to `_warnings` and typo-class messages to a new `_unknownKeyErrors` list; `Validate()` merges `_unknownKeyErrors` into its returned errors. (Cleaner than editing ~45 call sites.)
@@ -22,16 +22,16 @@
 - [x] 3.5 Bug found by adversarial review + FIXED: `ValidateSteps` `case StepType.Repeat` never recursed into `step.Do`, so ALL type-specific validation (incl. the new grammar checks, plus pre-existing foreach-do/break-depth/etc.) was skipped for steps nested in a `repeat`/`until` body — deferring those failures to runtime. Added the missing `ValidateSteps(step.Do, ... loopDepth + 1 ...)` recursion (mirrors While/Foreach). Pre-existing structural omission from Proposal B's repeat/until; zero shipped-sample exposure (`repeat:` unused in ScriptSamples/qa_presets).
 - NOTE: pre-implementation risk audit (79 files) + adversarial multi-lens review both clean apart from the repeat-recursion bug above; no sample/preset migration needed.
 
-## 4. Unified interpolation scanner — RISKY, reconfirm before doing
-- [ ] 4.1 Replace the two ad-hoc `{{ }}`/`${ }` scanners with one balanced-brace scanner in `ScriptContext`/`ValueResolver`
-- [ ] 4.2 Keep `{{ }}` canonical, `${ }` as alias; identical nesting/escaping
-- [ ] 4.3 Tests: nested/adjacent interpolation; `{{ }}` and `${ }` equivalence; existing substitution tests stay green
-- WARNING: high blast radius (core substitution path), lowest roadmap value (4). Confirm worth doing before starting.
+## 4. Unified interpolation scanner — DONE
+- [x] 4.1 The two scanner branches in `ScriptContext.SubstituteVariableTokens` (balanced `${ }` via `TryExtractDollarExpression`; naive first-`}}` `{{ }}` via `IndexOf`) are replaced by one generic `TryExtractBalanced(input, start, open, close, ...)` (+ `MatchesAt` helper) used for both `${`/`}` and `{{`/`}}`. `TryExtractDollarExpression` deleted. `ValueResolver` already only delegates to `SubstituteVariables` — no second scanner existed.
+- [x] 4.2 `{{ }}` canonical, `${ }` alias. `${ }` behavior is byte-identical (the generic extractor reproduces the old balanced algorithm — verified by construction + existing `ScriptContextTests` + adversarial review). `{{ }}` is upgraded from first-match to balanced/nested so it matches `${ }`. No escape syntax in either form (backslashes literal) — "identical escaping rules" holds trivially; spec scenario clarified.
+- [x] 4.3 Tests: `Scripting/ScriptInterpolationScannerTests.cs` (7 tests) — nested-brace `{{a[{{i}}]}}` resolves via balanced scan, `{{ }}`≡`${ }` for nested + simple, adjacency, dollar-in-brace, unclosed-left-literal, no-escape backslash passthrough. Existing `ScriptContextTests` substitution tests stay green.
+- NOTE: was flagged RISKY (core substitution path). De-risked via: full characterization that the only observable change is `{{ }}`→balanced (differs from old only when a nested `{{` precedes the first `}}`, an unused pattern); full non-UI suite 1960/1960; 3-lens adversarial review found zero divergence from the old `${ }` scanner.
 
 ## 5. Verification
-- [x] 5.1/5.2 build + non-UI suite green — **1953/1953** after sections 1+3 (was 1936 at part 1; +17 grammar/coverage tests). Re-run full after section 4.
-- [x] 5.3 `openspec validate update-scripting-validation --strict --no-interactive` → valid (after section 3 spec deltas)
-- [ ] 5.4 CHANGELOG/release-note for BOTH breaking changes (this strict-keys + Proposal B loop-iterator scoping); use the `release-notes` skill — defer until section 4 decided / change finalized
+- [x] 5.1/5.2 build + non-UI suite green — **1960/1960** after sections 1+3+4 (was 1936 at part 1; +24 grammar/coverage/interpolation tests).
+- [x] 5.3 `openspec validate update-scripting-validation --strict --no-interactive` → valid (after sections 3+4 spec deltas)
+- [ ] 5.4 CHANGELOG/release-note for BOTH breaking changes (strict typo-keys + Proposal B loop-iterator scoping); use the `release-notes` skill — change is now feature-complete, ready for this finalization step
 
 ## How to verify cleanly (UI tests are pre-existing scheduling-fragile — see project memory)
 `dotnet test SSH_Helper.Tests/SSH_Helper.Tests.csproj --filter "FullyQualifiedName!~SSH_Helper.Tests.UI.&FullyQualifiedName!~ReadFileCommandTests" --blame-hang-timeout 120s`
