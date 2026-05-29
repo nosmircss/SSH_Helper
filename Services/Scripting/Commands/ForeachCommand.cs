@@ -25,6 +25,20 @@ namespace SSH_Helper.Services.Scripting.Commands
             _executor = executor;
         }
 
+        /// <summary>
+        /// True when the iterator expression matches a supported foreach grammar:
+        /// "item in collection" or "key, value in map". Shared with parse-time validation
+        /// so malformed iterators are rejected before execution rather than at runtime.
+        /// </summary>
+        public static bool IsValidIteratorSyntax(string? iterator)
+        {
+            if (string.IsNullOrWhiteSpace(iterator))
+                return false;
+
+            var expr = iterator.Trim();
+            return DictPattern.IsMatch(expr) || ForeachPattern.IsMatch(expr);
+        }
+
         public async Task<CommandResult> ExecuteAsync(ScriptStep step, ScriptContext context, CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(step.Foreach))

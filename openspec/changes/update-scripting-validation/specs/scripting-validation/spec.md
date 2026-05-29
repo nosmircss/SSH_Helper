@@ -36,16 +36,28 @@ Parser and validation diagnostics SHALL append a closest-match suggestion to unk
 - **THEN** no suggestion is appended
 
 ### Requirement: Parse-time grammar validation for shorthand forms
-Validation SHALL reject malformed `set`, `foreach`, and `exit` shorthand forms at parse time rather than deferring failure to runtime.
+Validation SHALL reject malformed `set` and `foreach` shorthand forms at parse time rather than deferring failure to runtime. A form is malformed only when the runtime would fail it; validation MUST NOT reject forms the runtime accepts.
 
 #### Scenario: Malformed foreach shorthand rejected at parse time
-- **WHEN** a script authors a `foreach` shorthand that does not match the `item in collection` grammar
+- **WHEN** a script authors a `foreach` shorthand that does not match the `item in collection` or `key, value in map` grammar
 - **THEN** validation reports a grammar error with line context before execution
 
 #### Scenario: Malformed set shorthand rejected at parse time
-- **WHEN** a script authors a `set` shorthand that omits a target name or expression
+- **WHEN** a script authors a `set` shorthand that omits the `=` assignment operator, or omits the target name before `=`
 - **THEN** validation reports a grammar error before execution
+
+#### Scenario: Empty set value initializes to empty and is accepted
+- **WHEN** a script authors a `set` shorthand with a target name but an empty value after `=` (for example `x =`)
+- **THEN** validation accepts it as a deliberate initialize-to-empty assignment, matching runtime semantics
+
+#### Scenario: Exit shorthand is free-text and not grammar-checked
+- **WHEN** a script authors an `exit` shorthand with any non-empty status token and/or message
+- **THEN** validation accepts it, because every non-empty exit scalar is a valid status and/or message at runtime
 
 #### Scenario: Well-formed shorthand still accepted
 - **WHEN** a script authors a well-formed `set`, `foreach`, or `exit` shorthand
 - **THEN** validation accepts it with unchanged runtime semantics
+
+#### Scenario: Malformed shorthand is flagged regardless of nesting
+- **WHEN** a malformed `set` or `foreach` shorthand appears inside any block-bearing command, including a `repeat`/`until` loop body
+- **THEN** validation reports the grammar error at parse time, the same as at top level

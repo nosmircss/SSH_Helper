@@ -8,6 +8,7 @@ using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
+using SSH_Helper.Services.Scripting.Commands;
 using SSH_Helper.Services.Scripting.Models;
 
 namespace SSH_Helper.Services.Scripting
@@ -4450,6 +4451,11 @@ namespace SSH_Helper.Services.Scripting
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Foreach requires 'do' block{lineContent}");
                         }
+                        if (!string.IsNullOrWhiteSpace(step.Foreach) && !ForeachCommand.IsValidIteratorSyntax(step.Foreach))
+                        {
+                            var lineContent = GetLineContent(lines, step.LineNumber);
+                            errors.Add($"{prefix}Line {step.LineNumber}: Invalid foreach syntax: '{step.Foreach}'. Expected 'item in collection' or 'key, value in map'{lineContent}");
+                        }
                         if (step.Do != null)
                             ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         break;
@@ -4470,6 +4476,8 @@ namespace SSH_Helper.Services.Scripting
                             var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: max_iterations must be greater than 0{lineContent}");
                         }
+                        if (step.Do != null)
+                            ValidateSteps(step.Do, errors, prefix + "  ", lines, loopDepth + 1, enforceCanonicalSyntax, insideSubroutine, insidePreconnect);
                         break;
 
                     case StepType.While:
@@ -4526,12 +4534,22 @@ namespace SSH_Helper.Services.Scripting
                         break;
 
                     case StepType.Set:
+                    {
+                        var lineContent = GetLineContent(lines, step.LineNumber);
                         if (string.IsNullOrEmpty(step.Set) || !step.Set.Contains('='))
                         {
-                            var lineContent = GetLineContent(lines, step.LineNumber);
                             errors.Add($"{prefix}Line {step.LineNumber}: Set requires 'variable = value' format{lineContent}");
                         }
+                        else
+                        {
+                            // An empty value after '=' is a valid initialize-to-empty assignment
+                            // (e.g. "x = " resets x to ""), so only a missing name is rejected.
+                            var name = step.Set.Substring(0, step.Set.IndexOf('=')).Trim();
+                            if (name.Length == 0)
+                                errors.Add($"{prefix}Line {step.LineNumber}: Set requires a variable name before '='{lineContent}");
+                        }
                         break;
+                    }
 
                     case StepType.UpdateColumn:
                         if (step.UpdateColumn != null)
