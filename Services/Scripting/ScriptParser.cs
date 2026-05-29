@@ -19,6 +19,7 @@ namespace SSH_Helper.Services.Scripting
     {
         private readonly IDeserializer _deserializer;
         private readonly List<string> _warnings = new();
+        private readonly List<string> _unknownKeyErrors = new();
         private static readonly string[] KnownStepKeys =
         {
             "send",
@@ -466,6 +467,7 @@ namespace SSH_Helper.Services.Scripting
             try
             {
                 _warnings.Clear();
+                _unknownKeyErrors.Clear();
 
                 yamlText = PreprocessYaml(yamlText);
 
@@ -4189,6 +4191,12 @@ namespace SSH_Helper.Services.Scripting
                 errors.Add(parseError);
             }
 
+            // Typo-class unknown keys are blocking errors (deprecation notices remain warnings).
+            foreach (var keyError in _unknownKeyErrors)
+            {
+                errors.Add(keyError);
+            }
+
             if (script.Library)
             {
                 ValidateLibraryTopLevel(script, errors);
@@ -5277,7 +5285,78 @@ namespace SSH_Helper.Services.Scripting
 
         private void AddUnknownKeyWarning(string message, int lineNumber)
         {
-            _warnings.Add($"Line {lineNumber}: {message}");
+            // Recognized deprecation notices remain non-fatal warnings.
+            if (message.Contains("deprecated", StringComparison.OrdinalIgnoreCase))
+            {
+                _warnings.Add($"Line {lineNumber}: {message}");
+                return;
+            }
+
+            // Typo-class unknown keys are blocking errors, enriched with a did-you-mean suggestion.
+            _unknownKeyErrors.Add($"Line {lineNumber}: {AppendDidYouMean(message)}");
+        }
+
+        private static readonly Regex UnknownKeyMessagePattern =
+            new(@"^Unknown (\w+) key '([^']+)'$", RegexOptions.Compiled);
+
+        private static string AppendDidYouMean(string message)
+        {
+            var match = UnknownKeyMessagePattern.Match(message);
+            if (!match.Success)
+                return message;
+
+            var suggestion = SuggestClosest(match.Groups[2].Value, GetCandidateKeys(match.Groups[1].Value));
+            return suggestion == null ? message : $"{message}. Did you mean '{suggestion}'?";
+        }
+
+        private static IEnumerable<string> GetCandidateKeys(string command)
+        {
+            var candidates = new List<string>(CommonStepOptionKeys);
+            if (CommandOptionKeys.TryGetValue(command, out var commandKeys))
+                candidates.AddRange(commandKeys);
+            if (StepRootOptionKeysByCommand.TryGetValue(command, out var rootKeys))
+                candidates.AddRange(rootKeys);
+            return candidates;
+        }
+
+        private static string? SuggestClosest(string input, IEnumerable<string> candidates)
+        {
+            // Skip short/ambiguous tokens to avoid noisy suggestions.
+            if (string.IsNullOrEmpty(input) || input.Length <= 2)
+                return null;
+
+            string? best = null;
+            int bestDistance = int.MaxValue;
+            foreach (var candidate in candidates)
+            {
+                if (string.IsNullOrEmpty(candidate))
+                    continue;
+                var distance = LevenshteinDistance(input, candidate);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = candidate;
+                }
+            }
+
+            var threshold = Math.Max(2, input.Length / 3);
+            return bestDistance <= threshold ? best : null;
+        }
+
+        private static int LevenshteinDistance(string a, string b)
+        {
+            var d = new int[a.Length + 1, b.Length + 1];
+            for (int i = 0; i <= a.Length; i++) d[i, 0] = i;
+            for (int j = 0; j <= b.Length; j++) d[0, j] = j;
+            for (int i = 1; i <= a.Length; i++)
+            {
+                for (int j = 1; j <= b.Length; j++)
+                {
+                    var cost = char.ToLowerInvariant(a[i - 1]) == char.ToLowerInvariant(b[j - 1]) ? 0 : 1;
+                    d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + cost);
+                }
+            }
+            return d[a.Length, b.Length];
         }
     }
 
