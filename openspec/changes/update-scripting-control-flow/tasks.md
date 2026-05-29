@@ -2,7 +2,7 @@
 - [x] 1.1 In `ScriptExecutor.ExecuteStepsAsync` (the step loop, where `Skipped` events are emitted), evaluate `step.When` for all non-`foreach` steps; emit `StepCompleted{Skipped=true}` and continue when false
 - [x] 1.2 `foreach` retains `when:` as its per-item filter (regression test added)
 - [x] 1.3 Hoisted `ExtractVarReferences(step.When, …)` in `ScriptDependencyAnalyzer` to apply to every step (removed the foreach-only duplicate)
-- [ ] 1.4 `FlowCanvasBridge` + React block round-trip for `when:` — DEFERRED (Flow Canvas UI layer; tracked as a follow-up, not required for runtime behavior)
+- [x] 1.4 `FlowCanvasBridge` `when:` round-trip for every block: exported as a common node prop and re-emitted as a step-root option (sibling of the command, not nested in the command map). Tests: `FlowCanvasBridgeTests.ExportGraphToYaml_WhenGuardOn{GeneratedStep,ContainerStep}_RoundTrips`
 - [x] 1.5 Tests: `ScriptExecutorWhenGuardTests` (false→skip + Skipped event, true→runs, foreach per-item filter) + `ScriptDependencyAnalyzerTests` reference test
 
 ## 2. `repeat`/`until` loop

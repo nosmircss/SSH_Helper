@@ -216,6 +216,54 @@ public class FlowCanvasBridgeTests
     }
 
     [Fact]
+    public void ExportGraphToYaml_WhenGuardOnGeneratedStep_RoundTrips()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - send:
+                  command: systemctl restart nginx
+                when: nginx_state != "active"
+            """;
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        var graph = new JObject { ["nodes"] = nodes, ["edges"] = edges };
+        var export = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        var script = new ScriptParser().Parse(export.Yaml);
+        Assert.Single(script.Steps);
+        Assert.Equal("nginx_state != \"active\"", script.Steps[0].When);
+    }
+
+    [Fact]
+    public void ExportGraphToYaml_WhenGuardOnContainerStep_RoundTrips()
+    {
+        var bridge = new FlowCanvasBridge();
+        var yaml = """
+            ---
+            steps:
+              - while:
+                  condition: "1 == 1"
+                  max_iterations: 3
+                  do:
+                    - print:
+                        message: hi
+                when: enabled == "yes"
+            """;
+
+        var (nodes, edges) = bridge.TextToGraph(yaml);
+        var graph = new JObject { ["nodes"] = nodes, ["edges"] = edges };
+        var export = bridge.ExportGraphToYaml(graph);
+
+        Assert.True(export.Success, string.Join(" | ", export.Errors));
+        var script = new ScriptParser().Parse(export.Yaml);
+        Assert.Single(script.Steps);
+        Assert.Equal("enabled == \"yes\"", script.Steps[0].When);
+    }
+
+    [Fact]
     public void ExportGraphToYaml_UnsupportedBlockType_ReturnsErrorDiagnostic()
     {
         var bridge = new FlowCanvasBridge();

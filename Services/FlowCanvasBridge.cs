@@ -2309,6 +2309,7 @@ namespace SSH_Helper.Services
             // Common options shared across multiple commands.
             SetIfNumber(props, "timeout", step.Timeout);
             SetIfNotNull(props, "on_error", step.OnError);
+            SetIfNotNull(props, "when", step.When);
             SetIfNotNull(props, "capture", step.Capture);
             SetIfNotNull(props, "expect", step.Expect);
             SetIfBoolTrue(props, "suppress", step.Suppress);
@@ -2832,12 +2833,24 @@ namespace SSH_Helper.Services
                 return false;
 
             var unsupportedProps = new List<string>();
+            var stepRootOptions = new JObject();
             if (props != null)
             {
                 foreach (var property in props.Properties())
                 {
                     if (IsMetadataProperty(property.Name))
                         continue;
+
+                    // `when:` is a step-level guard (a sibling of the command), not a command-map option.
+                    if (string.Equals(property.Name, "when", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var whenText = property.Value.Type == JTokenType.String
+                            ? property.Value.ToString()
+                            : property.Value.ToString(Newtonsoft.Json.Formatting.None);
+                        if (!string.IsNullOrWhiteSpace(whenText))
+                            stepRootOptions["when"] = new JValue(whenText);
+                        continue;
+                    }
 
                     if (TryHandleSpecialLegacyProp(commandKey, blockType, property.Name, property.Value, options, out var specialError))
                     {
@@ -2879,7 +2892,7 @@ namespace SSH_Helper.Services
 
             var orderedOptions = ReorderOptionsForSerialization(commandKey, options);
             var commandValue = BuildCommandValueToken(commandKey, orderedOptions);
-            return TrySerializeStepYaml(commandKey, commandValue, out yaml, out error);
+            return TrySerializeStepYaml(commandKey, commandValue, stepRootOptions, out yaml, out error);
         }
 
         private static bool TryResolveCommandKey(string blockType, out string commandKey)
@@ -3941,26 +3954,37 @@ namespace SSH_Helper.Services
         }
 
         private static bool TrySerializeStepYaml(string commandKey, JToken commandValue, out string yaml, out string? error)
+            => TrySerializeStepYaml(commandKey, commandValue, null, out yaml, out error);
+
+        private static bool TrySerializeStepYaml(string commandKey, JToken commandValue, JObject? rootOptions, out string yaml, out string? error)
         {
             error = null;
             yaml = string.Empty;
 
+            var hasRoot = rootOptions != null && rootOptions.Count > 0;
+            var isNullCommand = commandValue.Type == JTokenType.Null || commandValue.Type == JTokenType.Undefined;
+
             try
             {
-                if (commandValue.Type == JTokenType.Null || commandValue.Type == JTokenType.Undefined)
+                if (isNullCommand && !hasRoot)
                 {
                     yaml = $"- {commandKey}:";
                     return true;
                 }
 
-                var serializer = new SerializerBuilder().Build();
-                var yamlObject = new List<object?>
+                var stepMap = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    new Dictionary<string, object?>(StringComparer.Ordinal)
-                    {
-                        [commandKey] = ConvertJTokenToYamlValue(commandValue),
-                    },
+                    [commandKey] = isNullCommand ? null : ConvertJTokenToYamlValue(commandValue),
                 };
+
+                if (hasRoot)
+                {
+                    foreach (var rootProp in rootOptions!.Properties())
+                        stepMap[rootProp.Name] = ConvertJTokenToYamlValue(rootProp.Value);
+                }
+
+                var serializer = new SerializerBuilder().Build();
+                var yamlObject = new List<object?> { stepMap };
                 yaml = serializer.Serialize(yamlObject).TrimEnd('\r', '\n');
                 return true;
             }
