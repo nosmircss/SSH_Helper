@@ -81,6 +81,26 @@
   --fc-cat-timing-badge-text: var(--fc-on-accent);
   --fc-cat-timing-text: oklch(78% 0.02 275);
 
+  /* ── Wave 2a: premium node card (accent rail, neutral body) ──────────────── */
+  /* Neutral node body — ~surface-1 with a hint of category-neutral chroma. Replaces colors.bg as
+     the idle fill so every node body reads neutral and the rail carries the category color. */
+  --fc-node-surface: oklch(22% 0.02 275);
+  /* Neutral 1px outline now that the category color lives on the rail (softer than the old 2px). */
+  --fc-node-border: oklch(34% 0.03 275);
+  /* Single source for the accent-rail width AND the header/preview left-padding calc. 4px is a
+     one-line bump if the 3px rail sub-pixel-thins at low zoom. */
+  --fc-rail-w: 3px;
+
+  /* Per-category ICON tint = the category border/rail hue (full chroma), so the header glyph matches
+     the rail rather than the softer body text. currentColor on <BlockIcon> inherits this. */
+  --fc-cat-ssh-icon: var(--fc-cat-ssh-border);
+  --fc-cat-control-flow-icon: var(--fc-cat-control-flow-border);
+  --fc-cat-data-icon: var(--fc-cat-data-border);
+  --fc-cat-network-icon: var(--fc-cat-network-border);
+  --fc-cat-io-icon: var(--fc-cat-io-border);
+  --fc-cat-grid-icon: var(--fc-cat-grid-border);
+  --fc-cat-timing-icon: var(--fc-cat-timing-border);
+
   /* Glow / shadow scale */
   --fc-glow-running: oklch(68% 0.16 255 / 0.4);
   --fc-glow-running-min: oklch(68% 0.16 255 / 0.3);

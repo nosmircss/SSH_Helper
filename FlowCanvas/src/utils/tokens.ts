@@ -11,6 +11,7 @@ export interface CategoryVarSet {
   badge: string;
   badgeText: string;
   text: string;
+  icon: string;
 }
 
 /** Category colors as CSS var() strings. CSS custom properties resolve inside React inline styles
@@ -32,6 +33,7 @@ function catVars(c: string): CategoryVarSet {
     badge: `var(--fc-cat-${c}-badge)`,
     badgeText: `var(--fc-cat-${c}-badge-text)`,
     text: `var(--fc-cat-${c}-text)`,
+    icon: `var(--fc-cat-${c}-icon)`,
   };
 }
 
