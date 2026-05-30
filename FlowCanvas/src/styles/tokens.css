@@ -161,6 +161,8 @@
   --fc-start-chip-border: oklch(72% 0.17 150 / 0.25);
   --fc-start-chip-text: oklch(80% 0.1 150);
   --fc-edge-idle: oklch(48% 0.01 275);
+  /* ── Wave 2b: live-wire data packet (bright core for the traveling dot) ── */
+  --fc-edge-packet: oklch(95% 0.03 200);
   --fc-grid-dot: oklch(34% 0.04 275);
   --fc-search-outline: oklch(82% 0.15 90);
   --fc-comment-ink: oklch(20% 0 0);
