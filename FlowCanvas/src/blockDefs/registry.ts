@@ -2,6 +2,7 @@
  * Block type definitions for all 36 SSH Helper script commands.
  * Each definition includes category, color, icon, default properties, and property schema.
  */
+import { CATEGORY_VARS } from '../utils/tokens';
 
 export type BlockCategory =
   | 'ssh'
@@ -41,15 +42,7 @@ export interface BlockDef {
   properties: PropertyDef[];
 }
 
-export const categoryColors: Record<BlockCategory, { border: string; bg: string; badge: string; badgeText: string; text: string }> = {
-  ssh: { border: '#4a9eff', bg: '#1a2744', badge: '#4a9eff', badgeText: '#000', text: '#8aafdb' },
-  'control-flow': { border: '#f0c040', bg: '#2a2a1a', badge: '#f0c040', badgeText: '#000', text: '#e0d080' },
-  data: { border: '#9b59b6', bg: '#1a1a2a', badge: '#9b59b6', badgeText: '#fff', text: '#c9a0dc' },
-  network: { border: '#1abc9c', bg: '#1a2a2a', badge: '#1abc9c', badgeText: '#000', text: '#80d4c0' },
-  io: { border: '#e67e22', bg: '#201a2a', badge: '#e67e22', badgeText: '#fff', text: '#e8a860' },
-  grid: { border: '#3498db', bg: '#1a2a3a', badge: '#3498db', badgeText: '#fff', text: '#7ab8e0' },
-  timing: { border: '#95a5a6', bg: '#1a1a1a', badge: '#95a5a6', badgeText: '#000', text: '#bdc3c7' },
-};
+export const categoryColors = CATEGORY_VARS;
 
 const onErrorProp: PropertyDef = {
   key: 'on_error',
