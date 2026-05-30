@@ -3,12 +3,14 @@ import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
 import { mix } from '../utils/tokens';
 import { markerIdForStroke } from './EdgeMarkers';
 import { useFlowStore } from '../stores/useFlowStore';
+import './animatededge.css';
 
 function AnimatedEdge(props: EdgeProps) {
   const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, source, style } = props;
 
   const isRunning = useFlowStore((s) => s.isRunning);
   const blockStates = useFlowStore((s) => s.blockStates);
+  const reducedMotion = useFlowStore((s) => s.reducedMotion);
 
   const [edgePath] = getSmoothStepPath({
     sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 8,
@@ -40,6 +42,17 @@ function AnimatedEdge(props: EdgeProps) {
         markerEnd={`url(#${markerId})`}
         style={{ ...style, stroke: `url(#${gradientId})`, strokeWidth }}
       />
+      {active && !reducedMotion && (
+        <circle
+          className="fc-edge-packet"
+          r={4}
+          cx={0}
+          cy={0}
+          fill="var(--fc-edge-packet)"
+          filter="url(#fc-packet-glow)"
+          style={{ offsetPath: `path('${edgePath}')` }}
+        />
+      )}
     </>
   );
 }

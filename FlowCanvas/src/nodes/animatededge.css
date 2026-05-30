@@ -1,0 +1,20 @@
+/* FlowCanvas/src/nodes/animatededge.css
+ * Live-wire data packet (Wave 2b). One shared keyframe set drives every active edge's dot;
+ * offset-path is set per-edge inline (each edge's path). The global reducedMotion.css blanket
+ * also disables these, but AnimatedEdge additionally does not render the packet under reduced
+ * motion (so there is no frozen dot at the source). No color literals here — gate-safe. */
+@keyframes fc-packet-travel {
+  from { offset-distance: 0%; }
+  to   { offset-distance: 100%; }
+}
+@keyframes fc-packet-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.4); }
+}
+.fc-edge-packet {
+  offset-rotate: 0deg;
+  offset-anchor: center;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fc-packet-travel 1.6s linear infinite, fc-packet-pulse 0.8s ease-in-out infinite;
+}
