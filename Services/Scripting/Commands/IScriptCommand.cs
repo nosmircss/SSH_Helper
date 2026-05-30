@@ -67,6 +67,19 @@ namespace SSH_Helper.Services.Scripting.Commands
         public bool SuppressedError { get; set; }
 
         /// <summary>
+        /// For loop commands (foreach/while/repeat): the number of times the loop body executed.
+        /// Null for non-loop commands. Read by the executor onto StepExecutionEventArgs.
+        /// </summary>
+        public int? IterationCount { get; set; }
+
+        /// <summary>
+        /// For branch commands (if/switch): the scope-path key of the branch taken
+        /// (then | else | elif/{i}/then | cases/{i}/do | default), matching the canvas
+        /// edge.data.branchPath vocabulary. Null when no branch ran or for non-branch commands.
+        /// </summary>
+        public string? BranchTaken { get; set; }
+
+        /// <summary>
         /// Creates a success result.
         /// </summary>
         public static CommandResult Ok(string? message = null) => new() { Success = true, Message = message };

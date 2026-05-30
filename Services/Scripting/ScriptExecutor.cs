@@ -38,6 +38,12 @@ namespace SSH_Helper.Services.Scripting
 
         /// <summary>Whether the step was skipped (e.g., disabled node).</summary>
         public bool Skipped { get; init; }
+
+        /// <summary>Loop body execution count (only set on StepCompleted for foreach/while/repeat).</summary>
+        public int? IterationCount { get; init; }
+
+        /// <summary>Scope-path key of the branch taken (only set on StepCompleted for if/switch).</summary>
+        public string? BranchTaken { get; init; }
     }
 
     /// <summary>
@@ -352,7 +358,9 @@ namespace SSH_Helper.Services.Scripting
                         StepName = null,
                         Success = result.Success,
                         Output = context.LastCommandOutput,
-                        DurationMs = sw.ElapsedMilliseconds
+                        DurationMs = sw.ElapsedMilliseconds,
+                        IterationCount = result.IterationCount,
+                        BranchTaken = result.BranchTaken
                     });
 
                     if (result.SuppressedError)
