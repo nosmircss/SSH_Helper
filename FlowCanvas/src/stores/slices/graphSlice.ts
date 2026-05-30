@@ -4,6 +4,7 @@ import { applyNodeChanges, applyEdgeChanges, addEdge } from '@xyflow/react';
 import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
 import { isConnectionAllowed } from '../../utils/connectionRules';
+import { branchColorVar } from '../../utils/branchBands';
 
 export const START_NODE_ID = '__start__';
 
@@ -136,85 +137,43 @@ function getBranchVisual(
   const branchPath = metadata.branchPath;
   if (!branchPath) return defaultVisual;
 
-  const dashed = { strokeDasharray: '5,5' };
+  // getBranchVisual stays the blockType-aware KEY resolver; branchColorVar is the single
+  // branch→token map (shared with the Wave 2a bands + Properties chip). No more dashes —
+  // color now carries branch meaning (Wave 2b Live Wires).
+  const visual = (key: string, label: string) => ({
+    label,
+    style: { stroke: branchColorVar(key) },
+    labelStyle: { fill: branchColorVar(key), fontSize: 11, fontWeight: 600 },
+  });
 
   if (blockType === 'if') {
-    if (branchPath === 'else') {
-      return {
-        label: 'else',
-        style: { stroke: 'var(--fc-state-error)', ...dashed },
-        labelStyle: { fill: 'var(--fc-state-error)', fontSize: 11, fontWeight: 600 },
-      };
-    }
+    if (branchPath === 'else') return visual('else', 'else');
     if (branchPath.startsWith('elif/')) {
       const condition = (metadata.condition ?? '').trim();
-      return {
-        label: condition ? `elif: ${condition}` : 'elif',
-        style: { stroke: 'var(--fc-state-warning)', ...dashed },
-        labelStyle: { fill: 'var(--fc-state-warning)', fontSize: 11, fontWeight: 600 },
-      };
+      return visual('elif', condition ? `elif: ${condition}` : 'elif');
     }
-    return {
-      label: 'then',
-      style: { stroke: 'var(--fc-state-success)', ...dashed },
-      labelStyle: { fill: 'var(--fc-state-success)', fontSize: 11, fontWeight: 600 },
-    };
+    return visual('then', 'then');
   }
 
   if (blockType === 'foreach' || blockType === 'while') {
-    return {
-      label: 'do',
-      style: { stroke: 'var(--fc-state-warning)', ...dashed },
-      labelStyle: { fill: 'var(--fc-state-warning)', fontSize: 11, fontWeight: 600 },
-    };
+    return visual('do', 'do');
   }
 
   if (blockType === 'try') {
-    if (branchPath === 'catch') {
-      return {
-        label: 'catch',
-        style: { stroke: 'var(--fc-state-error)', ...dashed },
-        labelStyle: { fill: 'var(--fc-state-error)', fontSize: 11, fontWeight: 600 },
-      };
-    }
-    if (branchPath === 'finally') {
-      return {
-        label: 'finally',
-        style: { stroke: 'var(--fc-accent)', ...dashed },
-        labelStyle: { fill: 'var(--fc-accent)', fontSize: 11, fontWeight: 600 },
-      };
-    }
-    return {
-      label: 'do',
-      style: { stroke: 'var(--fc-state-success)', ...dashed },
-      labelStyle: { fill: 'var(--fc-state-success)', fontSize: 11, fontWeight: 600 },
-    };
+    if (branchPath === 'catch') return visual('catch', 'catch');
+    if (branchPath === 'finally') return visual('finally', 'finally');
+    return visual('try', 'do');
   }
 
   if (blockType === 'switch') {
-    if (branchPath === 'default' || branchPath === 'else') {
-      return {
-        label: 'default',
-        style: { stroke: 'var(--fc-state-error)', ...dashed },
-        labelStyle: { fill: 'var(--fc-state-error)', fontSize: 11, fontWeight: 600 },
-      };
-    }
+    if (branchPath === 'default' || branchPath === 'else') return visual('default', 'default');
     const caseValue = (metadata.caseValue ?? '').trim();
-    return {
-      label: caseValue ? `case: ${caseValue}` : 'case',
-      style: { stroke: 'var(--fc-state-warning)', ...dashed },
-      labelStyle: { fill: 'var(--fc-state-warning)', fontSize: 11, fontWeight: 600 },
-    };
+    return visual('case', caseValue ? `case: ${caseValue}` : 'case');
   }
 
   if (blockType === 'parallel') {
     const index = parseIndexedBranch(branchPath, 'parallel');
-    const branchLabel = index === null ? 'branch' : `branch ${index + 1}`;
-    return {
-      label: branchLabel,
-      style: { stroke: 'var(--fc-cat-network-border)', ...dashed },
-      labelStyle: { fill: 'var(--fc-cat-network-border)', fontSize: 11, fontWeight: 600 },
-    };
+    return visual('parallel', index === null ? 'branch' : `branch ${index + 1}`);
   }
 
   return defaultVisual;
