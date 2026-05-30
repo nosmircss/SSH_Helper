@@ -45,7 +45,23 @@ test.describe('Flow Canvas Token Sweep', () => {
     expect(accent).toContain('oklch');
   });
 
-  test('ssh block border resolves to its category token', async ({ page }) => {
+  // Resolves a CSS custom property the same way the block consumes it (via a probe div), so the
+  // assertion compares like-for-like computed color values regardless of OKLCH normalization.
+  const resolveVar = (page: import('@playwright/test').Page, name: string) =>
+    page.evaluate((n) => {
+      const probe = document.createElement('div');
+      probe.style.color = `var(${n})`;
+      document.body.appendChild(probe);
+      const value = getComputedStyle(probe).color;
+      probe.remove();
+      return value;
+    }, name);
+
+  // Wave 2a redesign: the category color moved OFF the body border (now neutral --fc-node-border)
+  // and ONTO the absolutely-positioned accent rail (--fc-cat-ssh-border). This gate still proves
+  // the category token is correctly wired and applied — just on the rail, where the design now
+  // carries category identity — while the body border reads the neutral surface-border token.
+  test('ssh block body border is neutral and the accent rail carries the category token', async ({ page }) => {
     await loadGraphFixture(page, createSshBlockFixture());
 
     const block = page.locator('.react-flow__node[data-id="node-ssh"]');
@@ -57,18 +73,15 @@ test.describe('Flow Canvas Token Sweep', () => {
     const renderedBorder = await container.evaluate(
       (el) => getComputedStyle(el as HTMLElement).borderTopColor,
     );
-    const tokenBorder = await page.evaluate(() => {
-      // Resolve the var by reading the same computed property the block consumes.
-      const probe = document.createElement('div');
-      probe.style.color = 'var(--fc-cat-ssh-border)';
-      document.body.appendChild(probe);
-      const value = getComputedStyle(probe).color;
-      probe.remove();
-      return value;
-    });
-
     expect(renderedBorder).not.toBe('');
-    expect(renderedBorder).toBe(tokenBorder);
+    expect(renderedBorder).toBe(await resolveVar(page, '--fc-node-border'));
+
+    // The accent rail child span now carries the category color.
+    const railBg = await block
+      .locator('[data-testid="node-rail"]')
+      .evaluate((el) => getComputedStyle(el as HTMLElement).backgroundColor);
+    expect(railBg).not.toBe('');
+    expect(railBg).toBe(await resolveVar(page, '--fc-cat-ssh-border'));
   });
 
   // The panel sweep is complete (Task 5); this CI gate enforces Decision #4 — no raw hex in any

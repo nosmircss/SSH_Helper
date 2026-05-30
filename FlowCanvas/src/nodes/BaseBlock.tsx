@@ -3,6 +3,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { blockDefMap, categoryColors, type BlockCategory } from '../blockDefs/registry';
 import { useFlowStore } from '../stores/useFlowStore';
 import { mix } from '../utils/tokens';
+import { BlockIcon } from './BlockIcon';
 import './baseblock.css';
 
 export interface BlockNodeData {
@@ -97,8 +98,8 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       : 'none';
 
   const containerStyle: CSSProperties = {
-    background: isDisabled ? 'var(--fc-surface-disabled)' : colors.bg,
-    border: `2px solid ${selected ? 'var(--fc-border-selected)' : isDisabled ? 'var(--fc-border-muted)' : colors.border}`,
+    background: isDisabled ? 'var(--fc-surface-disabled)' : 'var(--fc-node-surface)',
+    border: `1px solid ${selected ? 'var(--fc-border-selected)' : isDisabled ? 'var(--fc-border-muted)' : 'var(--fc-node-border)'}`,
     borderRadius: 8,
     minWidth: isChild ? 160 : 180,
     maxWidth: isChild ? 260 : 280,
@@ -114,22 +115,52 @@ function BaseBlock({ data, selected, id }: NodeProps) {
     containerStyle.animation = 'exec-pulse 1.5s ease-in-out infinite';
   }
 
+  // Accent rail: an absolutely-positioned child (NOT a CSS border) so it never participates in the
+  // exec/heat boxShadow stack and survives crisp at low zoom. Category identity lives here + the icon.
+  const railStyle: CSSProperties = {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 'var(--fc-rail-w)',
+    background: isDisabled ? 'var(--fc-border-muted)' : colors.border,
+    borderTopLeftRadius: 8,
+    borderBottomLeftRadius: 8,
+    pointerEvents: 'none',
+  };
+
+  // Category-tinted icon chip. color tints the stroke (currentColor); a faint category wash sits
+  // behind it. mix() is the gate-safe color-mix helper — no new per-category token needed.
+  const iconChipStyle: CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 18,
+    height: 18,
+    flexShrink: 0,
+    borderRadius: 4,
+    color: isDisabled ? 'var(--fc-text-faint)' : colors.icon,
+    background: isDisabled ? 'transparent' : mix(colors.border, def.isContainer ? 20 : 14),
+  };
+
   const headerStyle: CSSProperties = {
     padding: '4px 8px',
+    paddingLeft: 'calc(8px + var(--fc-rail-w))',
     borderBottom: `1px solid ${mix(colors.border, 20)}`,
     display: 'flex',
     alignItems: 'center',
     gap: 6,
-    fontSize: 13,
+    fontSize: 'var(--fc-fs-header)',
   };
 
   const badgeStyle: CSSProperties = {
-    background: isDisabled ? 'var(--fc-border-subtle)' : colors.badge,
-    color: isDisabled ? 'var(--fc-text-secondary)' : colors.badgeText,
+    background: 'transparent',
+    color: isDisabled ? 'var(--fc-text-secondary)' : colors.text,
     fontSize: 10,
     fontWeight: 700,
     padding: '2px 6px',
     borderRadius: 3,
+    border: `1px solid ${mix(colors.border, 40)}`,
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
     flexShrink: 0,
@@ -174,6 +205,9 @@ function BaseBlock({ data, selected, id }: NodeProps) {
 
   return (
     <div style={containerStyle}>
+      {/* Accent rail (category identity; absolutely positioned, out of the boxShadow stack) */}
+      <span style={railStyle} data-testid="node-rail" />
+
       {/* Input handle (top) */}
       <Handle
         type="target"
@@ -200,6 +234,11 @@ function BaseBlock({ data, selected, id }: NodeProps) {
           />
         )}
 
+        {/* Category-tinted icon chip */}
+        <span style={iconChipStyle}>
+          <BlockIcon name={def.icon} />
+        </span>
+
         <span style={badgeStyle}>{def.type}</span>
         <span style={{
           color: isDisabled ? 'var(--fc-text-faint)' : 'var(--fc-text)',
@@ -218,6 +257,7 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       {previewText && (
         <div style={{
           padding: '4px 8px',
+          paddingLeft: 'calc(8px + var(--fc-rail-w))',
           fontFamily: 'monospace',
           fontSize: 11,
           color: isDisabled ? 'var(--fc-text-disabled)' : colors.text,
