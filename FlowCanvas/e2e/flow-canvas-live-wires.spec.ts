@@ -1,0 +1,72 @@
+import { expect, test, type Page } from '@playwright/test';
+import type { GraphFixture } from './fixtures/graphs';
+import {
+  clearOutgoingMessages, installHostMessageCapture, loadGraphFixture, postHostMessage, waitForOutgoingMessage,
+} from './support/harness';
+
+function edgeFixture(stroke: string): GraphFixture {
+  return {
+    nodes: [
+      { id: 'src', type: 'block', position: { x: 80, y: 120 }, data: { blockType: 'send', label: 'Send', props: {} } },
+      { id: 'dst', type: 'block', position: { x: 420, y: 120 }, data: { blockType: 'print', label: 'Print', props: {} } },
+    ],
+    edges: [{ id: 'e1', source: 'src', target: 'dst', style: { stroke } }],
+  };
+}
+
+async function resolveVar(page: Page, name: string): Promise<string> {
+  return page.evaluate((n) => {
+    const probe = document.createElement('div');
+    probe.style.color = `var(${n})`;
+    document.body.appendChild(probe);
+    const v = getComputedStyle(probe).color;
+    probe.remove();
+    return v;
+  }, name);
+}
+
+const edgePath = (page: Page) => page.locator('path#e1');
+const lastStop = (page: Page) => page.locator('#fc-grad-e1 stop').last();
+
+test.describe('Flow Canvas Live Wires', () => {
+  test.beforeEach(async ({ page }) => {
+    await installHostMessageCapture(page);
+    await page.goto('/');
+    await waitForOutgoingMessage(page, 'ready');
+    await clearOutgoingMessages(page);
+  });
+
+  test('every edge renders a tokenized arrowhead marker', async ({ page }) => {
+    await loadGraphFixture(page, edgeFixture('var(--fc-edge-idle)'));
+    await expect(edgePath(page)).toBeVisible();
+    expect(await edgePath(page).getAttribute('marker-end')).toBe('url(#fc-arrow-idle)');
+    await expect(page.locator('#fc-arrow-idle')).toHaveCount(1);
+  });
+
+  test('branch edge resolves to its branch token (then) on marker + gradient end', async ({ page }) => {
+    await loadGraphFixture(page, edgeFixture('var(--fc-branch-then)'));
+    expect(await edgePath(page).getAttribute('marker-end')).toBe('url(#fc-arrow-then)');
+    const stopColor = await lastStop(page).evaluate((el) => getComputedStyle(el as Element).stopColor);
+    expect(stopColor).toBe(await resolveVar(page, '--fc-branch-then'));
+  });
+
+  test('plain edge gradient end resolves to --fc-edge-idle', async ({ page }) => {
+    await loadGraphFixture(page, edgeFixture('var(--fc-edge-idle)'));
+    const stopColor = await lastStop(page).evaluate((el) => getComputedStyle(el as Element).stopColor);
+    expect(stopColor).toBe(await resolveVar(page, '--fc-edge-idle'));
+  });
+
+  test('packet travels only while running, and never under reduced-motion', async ({ page }) => {
+    await loadGraphFixture(page, edgeFixture('var(--fc-branch-then)'));
+    const packet = page.locator('.fc-edge-packet');
+    await expect(packet).toHaveCount(0); // at rest
+
+    await postHostMessage(page, { type: 'execution-started' });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'src', state: 'success' });
+    await expect(packet).toHaveCount(1);
+    expect(await packet.evaluate((el) => getComputedStyle(el as Element).animationName)).toContain('fc-packet-travel');
+
+    await page.getByRole('button', { name: '▶ Motion' }).click(); // enable reduced motion
+    await expect(packet).toHaveCount(0);
+  });
+});

@@ -24,8 +24,25 @@ function createSshBlockFixture(): GraphFixture {
           props: { command: 'echo hello' },
         },
       },
+      {
+        id: 'node-ssh-2',
+        type: 'block',
+        position: { x: 460, y: 120 },
+        data: {
+          blockType: 'print',
+          label: 'Print',
+          props: {},
+        },
+      },
     ],
-    edges: [],
+    edges: [
+      {
+        id: 'sweep-edge',
+        source: 'node-ssh',
+        target: 'node-ssh-2',
+        style: { stroke: 'var(--fc-branch-then)' },
+      },
+    ],
   };
 }
 
