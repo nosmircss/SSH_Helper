@@ -179,7 +179,14 @@ function BaseBlock({ data, selected, id }: NodeProps) {
       fontWeight: 600,
     }}>
       {execState === 'running' ? 'RUNNING'
-        : execState === 'success' ? '✓ DONE'
+        : execState === 'success' ? (
+          <>
+            <svg className="fc-check" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">
+              <path d="M5 13l4 4L19 7" pathLength={1} />
+            </svg>
+            DONE
+          </>
+        )
         : execState === 'skipped' ? '— SKIP'
         : '✗ ERROR'}
       {durationText && (
