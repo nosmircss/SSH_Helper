@@ -195,8 +195,8 @@ test.describe('Flow Canvas Token Sweep', () => {
 
     await postHostMessage(page, { type: 'execution-update', stepId: 'exec-run', state: 'running' });
     await postHostMessage(page, { type: 'execution-update', stepId: 'exec-ok', state: 'running' });
-    await postHostMessage(page, { type: 'execution-update', stepId: 'exec-ok', state: 'success', duration: 300 });
-    await postHostMessage(page, { type: 'execution-update', stepId: 'exec-err', state: 'error' });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'exec-ok', state: 'success', duration: 300, iterationCount: 4 });
+    await postHostMessage(page, { type: 'execution-update', stepId: 'exec-err', state: 'error', branchTaken: 'else' });
 
     // The comet halo + checkmark are mounted before scanning their styles.
     await expect(page.locator('.react-flow__node[data-id="exec-run"] .fc-run-halo')).toHaveCount(1);
