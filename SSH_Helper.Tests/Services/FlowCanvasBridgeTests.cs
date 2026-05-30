@@ -311,6 +311,11 @@ public class FlowCanvasBridgeTests
 
         Assert.False(result.Success);
         Assert.Contains(result.Errors, e => e.Contains("Unsupported block type", System.StringComparison.OrdinalIgnoreCase));
+
+        var errorDiagnostic = Assert.Single(result.Diagnostics, d =>
+            d.Severity == FlowCanvasBridge.ExportDiagnosticSeverity.Error &&
+            d.Message.Contains("Unsupported block type", System.StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("node-1", errorDiagnostic.NodeId);
     }
 
     [Fact]
