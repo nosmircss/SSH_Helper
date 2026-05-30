@@ -1,5 +1,4 @@
 import { messageBus } from '../MessageBus';
-import { useReactFlow } from '@xyflow/react';
 import { useFlowStore } from '../stores/useFlowStore';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { CANVAS_HOST_MESSAGES } from '../communication-message-types';
@@ -7,7 +6,6 @@ import { buildExecutableGraphPayload } from '../utils/exportGraph';
 import { mix } from '../utils/tokens';
 
 export default function Toolbar() {
-  const { getNodes, getEdges } = useReactFlow();
   const selectedNodeIds = useFlowStore((s) => s.selectedNodeIds);
   const variablesVisible = useFlowStore((s) => s.panelsVisible.variables);
   const timelineVisible = useFlowStore((s) => s.panelsVisible.timeline);
@@ -43,7 +41,10 @@ export default function Toolbar() {
   const isDirty = useFlowStore((s) => s.isDirty);
 
   const getExportData = () => {
-    return buildExecutableGraphPayload(getNodes(), getEdges());
+    // Read raw store nodes/edges (symmetric with the keyboard path in useKeyboardShortcuts)
+    // so render-only fields like the AnimatedEdge `type` never leak into the execute-canvas payload.
+    const store = useFlowStore.getState();
+    return buildExecutableGraphPayload(store.nodes, store.edges);
   };
 
   const handleApplyYaml = () => {
