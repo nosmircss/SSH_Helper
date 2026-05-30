@@ -18,6 +18,8 @@ interface FlowCanvasTestHooks {
   clearGraphViaActions?: () => void;
   getGraphSnapshot?: () => { nodes: unknown[]; edges: unknown[] };
   isConnectionAllowed?: (conn: Connection, nodes: Node[], edges: Edge[]) => ConnectionVerdict;
+  connectViaActions?: (conn: Connection) => void;
+  getConnectionNotice?: () => { message: string; nonce: number } | null;
 }
 
 function cloneForTest<T>(value: T): T {
@@ -103,6 +105,14 @@ function installFlowCanvasTestHooks(store: typeof useFlowStore): void {
   };
 
   hooks.isConnectionAllowed = (conn, nodes, edges) => isConnectionAllowed(conn, nodes, edges);
+
+  // Drives the real store onConnect path (same code real drags hit) so tests can assert
+  // the guard lets valid connections through and produces identical edge metadata.
+  hooks.connectViaActions = (conn) => store.getState().onConnect(conn);
+
+  // Exposes the live connectionNotice slice so gesture tests can assert a VALID drag never
+  // flashes a notice (regression guard: v12 adds the edge before onConnectEnd runs).
+  hooks.getConnectionNotice = () => store.getState().connectionNotice;
 
   globalWindow.__FLOWCANVAS_TEST_HOOKS__ = hooks;
 }

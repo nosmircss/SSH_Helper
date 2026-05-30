@@ -8,6 +8,8 @@ import {
   BackgroundVariant,
   type Node,
   type Edge,
+  type Connection,
+  type FinalConnectionState,
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -28,6 +30,7 @@ import VariableInspector from './panels/VariableInspector';
 import OutputPreview from './panels/OutputPreview';
 import DebugPanel from './panels/DebugPanel';
 import ProblemsPanel from './panels/ProblemsPanel';
+import ConnectionNotice from './panels/ConnectionNotice';
 import SearchOverlay from './panels/SearchOverlay';
 import { sendLayoutAutosave } from './utils/layoutAutosave';
 import TimelinePanel from './panels/TimelinePanel';
@@ -35,6 +38,7 @@ import BlockContextMenu from './panels/BlockContextMenu';
 import EdgeContextMenu from './panels/EdgeContextMenu';
 import { blockDefMap, categoryColors } from './blockDefs/registry';
 import { resolveCssVar } from './utils/tokens';
+import { isConnectionAllowed } from './utils/connectionRules';
 
 // Register custom node types
 const nodeTypes = {
@@ -114,6 +118,41 @@ function FlowCanvasInner() {
   useEffect(() => {
     document.body.classList.toggle('fc-reduced-motion', reducedMotion);
   }, [reducedMotion]);
+
+  // Reject illegal drop targets while dragging a connection. Reads getState() so it always
+  // sees current nodes/edges without re-subscribing (returning false aborts the drop in v12).
+  const isValidConnection = useCallback(
+    (conn: Connection | Edge) =>
+      isConnectionAllowed(conn as Connection, useFlowStore.getState().nodes, useFlowStore.getState().edges).ok,
+    [],
+  );
+
+  // When isValidConnection blocks a drop, ReactFlow never calls onConnect — so surface the
+  // specific rejection reason here. v12 fires onConnect (which ADDS the edge) BEFORE
+  // onConnectEnd, so we MUST NOT recompute the verdict for accepted drops: the just-added edge
+  // would trip the duplicate/fan-in checks and flash a false notice. Gate on state.isValid:
+  // it carries isValidConnection's last result, so `=== false` means the drop was rejected and
+  // onConnect never ran (the edge is absent, the recomputed reason is the real one).
+  const onConnectEnd = useCallback((_event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+    if (state.isValid !== false) return; // accepted, or dropped on empty canvas — nothing to explain
+    const { fromHandle, toHandle } = state;
+    if (!fromHandle || !toHandle) return; // no concrete handle pair to describe
+
+    const source = fromHandle.type === 'source' ? fromHandle : toHandle;
+    const target = fromHandle.type === 'source' ? toHandle : fromHandle;
+    const connection: Connection = {
+      source: source.nodeId,
+      target: target.nodeId,
+      sourceHandle: source.id ?? null,
+      targetHandle: target.id ?? null,
+    };
+
+    const store = useFlowStore.getState();
+    const verdict = isConnectionAllowed(connection, store.nodes, store.edges);
+    if (!verdict.ok) {
+      store.showConnectionNotice(verdict.reason ?? 'Connection not allowed.');
+    }
+  }, []);
 
   // Capture one undo snapshot at drag start (pre-move state).
   const onNodeDragStart = useCallback(() => {
@@ -334,6 +373,8 @@ function FlowCanvasInner() {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              isValidConnection={isValidConnection}
+              onConnectEnd={onConnectEnd}
               onDragOver={onDragOver}
               onDrop={onDrop}
               onInit={(instance) => { reactFlowInstance.current = instance; }}
@@ -371,6 +412,7 @@ function FlowCanvasInner() {
               <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={dotColor} />
             </ReactFlow>
             <SearchOverlay />
+            <ConnectionNotice />
             <BlockContextMenu />
             <EdgeContextMenu />
           </div>

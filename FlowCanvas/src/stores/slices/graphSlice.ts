@@ -3,6 +3,7 @@ import type { Node, Edge, OnNodesChange, OnEdgesChange, Connection } from '@xyfl
 import { applyNodeChanges, applyEdgeChanges, addEdge } from '@xyflow/react';
 import type { FlowStore } from '../useFlowStore';
 import { blockDefMap } from '../../blockDefs/registry';
+import { isConnectionAllowed } from '../../utils/connectionRules';
 
 export const START_NODE_ID = '__start__';
 
@@ -294,6 +295,14 @@ export const createGraphSlice: StateCreator<FlowStore, [], [], GraphSlice> = (se
   },
 
   onConnect: (connection) => {
+    // Reject shapes the YAML exporter cannot faithfully serialize (self-loop, fan-in,
+    // duplicate, extra plain successor, cycle, edge-into-start). Valid drags fall through
+    // unchanged so exported output is identical to before the guard.
+    const verdict = isConnectionAllowed(connection, get().nodes, get().edges);
+    if (!verdict.ok) {
+      get().showConnectionNotice(verdict.reason ?? 'Connection not allowed.');
+      return;
+    }
     // Push undo snapshot before connecting
     get().pushSnapshot('Connect edge');
     set((state) => {

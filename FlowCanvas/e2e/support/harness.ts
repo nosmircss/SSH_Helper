@@ -6,11 +6,19 @@ export interface OutgoingHostMessage {
   [key: string]: unknown;
 }
 
+interface RuleConnection {
+  source: string | null;
+  target: string | null;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+}
+
 interface FlowCanvasTestHooks {
   onOutgoingMessage?: (msg: unknown) => void;
   setGraphViaActions?: (graph: GraphFixture) => void;
   clearGraphViaActions?: () => void;
   getGraphSnapshot?: () => GraphFixture;
+  connectViaActions?: (conn: RuleConnection) => void;
 }
 
 export async function installHostMessageCapture(page: Page): Promise<void> {
@@ -103,6 +111,21 @@ export async function clearGraphViaActions(page: Page): Promise<void> {
 
     clearGraph();
   });
+}
+
+export async function connectViaActions(
+  page: Page,
+  connection: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null },
+): Promise<void> {
+  await page.evaluate((conn) => {
+    const globalWindow = window as Window & { __FLOWCANVAS_TEST_HOOKS__?: FlowCanvasTestHooks };
+    const connect = globalWindow.__FLOWCANVAS_TEST_HOOKS__?.connectViaActions;
+    if (typeof connect !== 'function') {
+      throw new Error('Missing test hook connectViaActions. Ensure Flow Canvas test hooks are installed.');
+    }
+
+    connect(conn);
+  }, connection);
 }
 
 export async function getGraphSnapshot(page: Page): Promise<GraphFixture> {

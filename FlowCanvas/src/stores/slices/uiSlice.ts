@@ -46,6 +46,7 @@ export interface UISlice {
     warnings: string[];
   };
   diagnostics: NodeDiagnostic[];
+  connectionNotice: { message: string; nonce: number } | null;
 
   setTheme: (theme: 'dark' | 'light') => void;
   toggleTheme: () => void;
@@ -70,6 +71,8 @@ export interface UISlice {
   setExportStatus: (status: UISlice['exportStatus']) => void;
   clearExportStatus: () => void;
   setDiagnostics: (d: NodeDiagnostic[]) => void;
+  showConnectionNotice: (message: string) => void;
+  clearConnectionNotice: () => void;
 }
 
 export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get) => ({
@@ -98,6 +101,7 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
     warnings: [],
   },
   diagnostics: [],
+  connectionNotice: null,
 
   setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
@@ -214,4 +218,8 @@ export const createUISlice: StateCreator<FlowStore, [], [], UISlice> = (set, get
   },
 
   setDiagnostics: (d) => set({ diagnostics: d }),
+
+  showConnectionNotice: (message) =>
+    set((s) => ({ connectionNotice: { message, nonce: (s.connectionNotice?.nonce ?? 0) + 1 } })),
+  clearConnectionNotice: () => set({ connectionNotice: null }),
 });
