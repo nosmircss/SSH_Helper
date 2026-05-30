@@ -91,7 +91,6 @@ function FlowCanvasInner() {
   const gridSize = useFlowStore((s) => s.gridSize);
   const searchResults = useFlowStore((s) => s.searchResults);
   const searchIndex = useFlowStore((s) => s.searchIndex);
-  const isRunning = useFlowStore((s) => s.isRunning);
   const panelsVisible = useFlowStore((s) => s.panelsVisible);
   const variables = useFlowStore((s) => s.variables);
   const paused = useFlowStore((s) => s.paused);
